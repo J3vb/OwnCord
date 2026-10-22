@@ -22,6 +22,10 @@ import {
   recoverEvictedImage,
   resolveServerUrl,
 } from "@components/message-list/attachments";
+import { cropImage } from "@lib/imageCrop";
+import { profileBannersEnabled } from "@lib/serverCapabilities";
+import { isBannerColor, paintBanner } from "../../features/profiles/banner";
+import { bannerImages } from "../bannerImages";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
 import { outcomeEl, showOutcome } from "./helpers";
@@ -34,12 +38,23 @@ import {
   type StatusKind,
 } from "../../features/settings/status";
 import { accountText as t } from "../../i18n/account";
+import { connectText } from "../../i18n/connect";
+import {
+  attachLimitHint,
+  checkNewUsername,
+  collapseSpaces,
+  lineHintText,
+  runeCount,
+  usernameHintText,
+  usernameProblemText,
+  MAX_DISPLAY_NAME_LEN,
+  MAX_USERNAME_LEN,
+} from "@lib/nameLimits";
 
 const log = createLogger("AccountTab");
 
-/** Mirrors the server's caps so the form can bound itself instead of learning
- *  about the limits from a rejected request. */
-const MAX_DISPLAY_NAME_LEN = 32;
+/** Mirrors the server's cap so the form can bound itself instead of learning
+ *  about the limit from a rejected request (the name limits are in nameLimits). */
 const MAX_ABOUT_LEN = 300;
 /** Mirrors maxAvatarFileBytes / maxAvatarDimension on the server. */
 const MAX_AVATAR_BYTES = 1024 * 1024;
@@ -52,6 +67,8 @@ const ACCEPTED_AVATAR_TYPES = "image/png,image/jpeg,image/webp";
 
 interface ProfileCardResult {
   readonly card: HTMLDivElement;
+  /** The coloured strip behind the avatar; `paintBanner` fills it. */
+  readonly banner: HTMLDivElement;
   readonly headerName: HTMLDivElement;
   readonly headerHandle: HTMLDivElement;
   readonly usernameValue: HTMLDivElement;
@@ -132,7 +149,16 @@ function buildProfileCard(
 
   appendChildren(card, banner, avatarWrap, accountHeader, editor);
 
-  return { card, headerName, headerHandle, usernameValue, editUsernameBtn, avatarLarge, editor };
+  return {
+    card,
+    banner,
+    headerName,
+    headerHandle,
+    usernameValue,
+    editUsernameBtn,
+    avatarLarge,
+    editor,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -236,9 +262,51 @@ function buildAvatarUploader(
     { class: "ac-btn secondary", "data-testid": "avatar-upload-btn" },
     t("profile.changeAvatar"),
   );
+  const removeBtn = createElement(
+    "button",
+    { class: "ac-btn secondary", "data-testid": "avatar-remove-btn" },
+    t("profile.removeAvatar"),
+  );
   const errorEl = outcomeEl("error", "avatar-error");
 
+  // Shown only while there is an avatar to remove; follows the auth store so
+  // an upload (or a user_update from another device) toggles it.
+  const syncRemoveBtn = (): void => {
+    removeBtn.hidden = !isRenderableAvatar(authStore.getState().user?.avatar);
+  };
+  syncRemoveBtn();
+  const unsubAvatar = authStore.subscribeSelector((st) => st.user?.avatar, syncRemoveBtn);
+  signal.addEventListener("abort", () => unsubAvatar?.(), { once: true });
+
   uploadBtn.addEventListener("click", () => input.click(), { signal });
+  removeBtn.addEventListener(
+    "click",
+    () => {
+      setText(errorEl, "");
+      removeBtn.disabled = true;
+      void (async () => {
+        try {
+          await options.onRemoveAvatar();
+          const user = authStore.getState().user;
+          paintAvatar(
+            avatarLarge,
+            null,
+            user?.username ?? "avatar",
+            avatarInitial({
+              username: user?.username ?? "?",
+              displayName: user?.display_name ?? null,
+            }),
+          );
+        } catch (err) {
+          // The old avatar stays; the handler has already toasted.
+          setText(errorEl, errorText(err, t("toast.avatarRemoveFailed")));
+        } finally {
+          removeBtn.disabled = false;
+        }
+      })();
+    },
+    { signal },
+  );
 
   input.addEventListener(
     "change",
@@ -280,8 +348,201 @@ function buildAvatarUploader(
     { signal },
   );
 
-  appendChildren(wrapper, input, uploadBtn, errorEl);
+  appendChildren(wrapper, input, uploadBtn, removeBtn, errorEl);
   return wrapper;
+}
+
+// ---------------------------------------------------------------------------
+// Banner (WP 6.11d)
+// ---------------------------------------------------------------------------
+
+/** A banner is shown 5:2; 1200 px wide keeps it sharp and under the server's 1920x960 cap. */
+const BANNER_ASPECT = 2.5;
+const BANNER_MAX_WIDTH = 1200;
+/** What the colour picker shows while no colour is set (it cannot be empty). */
+const BANNER_PICKER_DEFAULT = "#5865f2";
+
+/** The banner colour editor's state, read by Save Profile. */
+interface BannerEditor {
+  readonly el: HTMLDivElement;
+  /** The colour as edited, or null when none is set. */
+  readonly current: () => string | null;
+  /** The colour to PATCH: undefined when unchanged, "" to clear. */
+  readonly pending: () => string | undefined;
+  /** Save Profile succeeded: what is shown is now what the server has. */
+  readonly commit: () => void;
+}
+
+const storedBannerColor = (): string | null => {
+  const colour = authStore.getState().user?.banner_color;
+  return isBannerColor(colour) ? colour.toLowerCase() : null;
+};
+
+/** Colour picker, upload and remove for the signed-in user's banner. */
+function buildBannerEditor(
+  options: SettingsOverlayOptions,
+  onChange: () => void,
+  signal: AbortSignal,
+): BannerEditor {
+  const el = createElement("div", { class: "account-banner-edit", "data-testid": "banner-editor" });
+  const colourLabel = createElement(
+    "div",
+    { class: "account-field-label" },
+    t("profile.bannerColor"),
+  );
+  const colourInput = createElement("input", {
+    type: "color",
+    "aria-label": t("profile.bannerColor"),
+    "data-testid": "banner-color-input",
+  });
+  const clearBtn = createElement(
+    "button",
+    { class: "ac-btn secondary", type: "button", "data-testid": "banner-color-clear" },
+    t("profile.bannerColorClear"),
+  );
+  const uploadBtn = createElement(
+    "button",
+    { class: "ac-btn secondary", type: "button", "data-testid": "banner-upload-btn" },
+    t("profile.bannerUpload"),
+  );
+  const removeBtn = createElement(
+    "button",
+    { class: "ac-btn secondary", type: "button", "data-testid": "banner-remove-btn" },
+    t("profile.bannerRemove"),
+  );
+  const fileInput = createElement("input", {
+    type: "file",
+    accept: ACCEPTED_AVATAR_TYPES,
+    style: "display:none",
+    "data-testid": "banner-file-input",
+  });
+  const errorEl = outcomeEl("error", "banner-error");
+
+  let saved = storedBannerColor();
+  let current = saved;
+  const showColour = (): void => {
+    colourInput.value = current ?? BANNER_PICKER_DEFAULT;
+    clearBtn.hidden = current === null;
+  };
+  showColour();
+
+  colourInput.addEventListener(
+    "input",
+    () => {
+      current = colourInput.value.toLowerCase();
+      clearBtn.hidden = false;
+      onChange();
+    },
+    { signal },
+  );
+  clearBtn.addEventListener(
+    "click",
+    () => {
+      current = null;
+      showColour();
+      onChange();
+    },
+    { signal },
+  );
+
+  // Another device changed the colour: follow it, as the avatar does.
+  const unsubColour = authStore.subscribeSelector(
+    (st) => st.user?.banner_color ?? null,
+    () => {
+      saved = storedBannerColor();
+      current = saved;
+      showColour();
+    },
+  );
+  // The remove button exists only while there is an image to remove.
+  const syncRemove = (): void => {
+    const banner = authStore.getState().user?.banner;
+    removeBtn.hidden = typeof banner !== "string" || banner === "";
+  };
+  syncRemove();
+  const unsubImage = authStore.subscribeSelector((st) => st.user?.banner ?? null, syncRemove);
+  signal.addEventListener(
+    "abort",
+    () => {
+      unsubColour?.();
+      unsubImage?.();
+    },
+    { once: true },
+  );
+
+  const upload = options.onUploadBanner;
+  const remove = options.onRemoveBanner;
+  uploadBtn.hidden = upload === undefined;
+  if (remove === undefined) removeBtn.hidden = true;
+
+  uploadBtn.addEventListener("click", () => fileInput.click(), { signal });
+  fileInput.addEventListener(
+    "change",
+    () => {
+      const file = fileInput.files?.[0];
+      if (file === undefined || upload === undefined) return;
+      setText(errorEl, "");
+      uploadBtn.disabled = true;
+      setText(uploadBtn, t("profile.uploading"));
+      void (async () => {
+        try {
+          const cropped = await cropImage(file, {
+            aspect: BANNER_ASPECT,
+            maxWidth: BANNER_MAX_WIDTH,
+            fileBase: "banner",
+          });
+          if (!cropped.ok) {
+            setText(errorEl, cropped.error);
+            return;
+          }
+          await upload(cropped.file);
+        } catch (err) {
+          // 404: the server advertises banners with attachment storage off, so
+          // the upload route is not mounted.
+          setText(
+            errorEl,
+            err instanceof ApiClientError && err.status === 404
+              ? t("profile.bannerStorageOff")
+              : errorText(err, t("profile.bannerUploadFailed")),
+          );
+        } finally {
+          fileInput.value = "";
+          uploadBtn.disabled = false;
+          setText(uploadBtn, t("profile.bannerUpload"));
+        }
+      })();
+    },
+    { signal },
+  );
+  removeBtn.addEventListener(
+    "click",
+    () => {
+      if (remove === undefined) return;
+      setText(errorEl, "");
+      removeBtn.disabled = true;
+      void remove()
+        .catch((err: unknown) => setText(errorEl, errorText(err, t("toast.bannerRemoveFailed"))))
+        .finally(() => {
+          removeBtn.disabled = false;
+        });
+    },
+    { signal },
+  );
+
+  const colourRow = createElement("div", { class: "account-avatar-upload" });
+  appendChildren(colourRow, colourInput, clearBtn);
+  const imageRow = createElement("div", { class: "account-avatar-upload" });
+  appendChildren(imageRow, fileInput, uploadBtn, removeBtn);
+  appendChildren(el, colourLabel, colourRow, imageRow, errorEl);
+
+  return {
+    el,
+    current: () => current,
+    pending: () => (current === saved ? undefined : (current ?? "")),
+    commit: () => {
+      saved = current;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +553,7 @@ function buildProfileFields(
   options: SettingsOverlayOptions,
   onSaved: (displayName: string) => void,
   signal: AbortSignal,
+  bannerEditor: BannerEditor | null = null,
 ): HTMLDivElement {
   const wrapper = createElement("div", {});
   const separator = createElement("div", { class: "settings-separator" });
@@ -312,11 +574,17 @@ function buildProfileFields(
     class: "form-input",
     type: "text",
     placeholder: t("profile.displayNamePlaceholder"),
-    maxlength: String(MAX_DISPLAY_NAME_LEN),
-    style: "margin-bottom:12px",
     "data-testid": "display-name-input",
   });
   nameInput.value = user?.display_name ?? "";
+  const nameHint = attachLimitHint(nameInput, {
+    max: MAX_DISPLAY_NAME_LEN,
+    hint: lineHintText(MAX_DISPLAY_NAME_LEN),
+    countCharacters: true,
+    id: "display-name-hint",
+    signal,
+  });
+  nameHint.el.style.marginBottom = "12px";
 
   const aboutLabel = createElement("div", { class: "account-field-label" }, t("profile.about"));
   const aboutInput = createElement("textarea", {
@@ -340,23 +608,48 @@ function buildProfileFields(
   saveBtn.addEventListener(
     "click",
     () => {
-      const displayName = nameInput.value.trim();
+      // Collapsed like the server stores it: what is checked is what is sent.
+      const displayName = collapseSpaces(nameInput.value);
       const about = aboutInput.value.trim();
+      // A pasted or scripted value can exceed maxlength; never send one the
+      // server would refuse. The typed text stays in the field.
+      if (runeCount(displayName) > MAX_DISPLAY_NAME_LEN) {
+        const message = connectText("limits.displayNameTooLong", { max: MAX_DISPLAY_NAME_LEN });
+        nameHint.showError(message);
+        showOutcome(statusEl, "error", connectText("limits.checkField"));
+        return;
+      }
       // Both are sent unconditionally, empty string included: "" is how the
       // API says "clear it", and omitting a field means "leave it alone".
       showOutcome(statusEl, "error", "");
       saveBtn.disabled = true;
       setText(saveBtn, t("profile.saving"));
+      // Sent only when the colour was edited, so an unrelated save never
+      // writes it (and an older server never sees the key).
+      const bannerColor = bannerEditor?.pending();
       void options
-        .onUpdateProfile({ display_name: displayName, about })
+        .onUpdateProfile({
+          display_name: displayName,
+          about,
+          ...(bannerColor === undefined ? {} : { banner_color: bannerColor }),
+        })
         .then(() => {
+          bannerEditor?.commit();
           showOutcome(statusEl, "success", t("profile.saved"));
           onSaved(
             displayName.length > 0 ? displayName : (authStore.getState().user?.username ?? ""),
           );
         })
         .catch((err: unknown) => {
-          showOutcome(statusEl, "error", errorText(err, t("profile.saveFailed")));
+          const message = errorText(err, t("profile.saveFailed"));
+          // The server's refusal (a character it does not allow) goes under
+          // the field too, and what was typed stays put.
+          if (err instanceof ApiClientError && /^display_name\b/i.test(err.message)) {
+            nameHint.showError(message);
+            showOutcome(statusEl, "error", connectText("limits.checkField"));
+            return;
+          }
+          showOutcome(statusEl, "error", message);
         })
         .finally(() => {
           saveBtn.disabled = false;
@@ -373,6 +666,7 @@ function buildProfileFields(
     header,
     nameLabel,
     nameInput,
+    nameHint.el,
     aboutLabel,
     aboutInput,
     statusEl,
@@ -1318,8 +1612,6 @@ function buildSecurityCard(options: SettingsOverlayOptions, signal: AbortSignal)
 // Main tab builder
 // ---------------------------------------------------------------------------
 
-const MAX_USERNAME_LEN = 32;
-
 export function buildAccountTab(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
@@ -1333,9 +1625,40 @@ export function buildAccountTab(
   });
 
   // Profile card
-  const { card, headerName, headerHandle, usernameValue, editUsernameBtn, avatarLarge, editor } =
-    buildProfileCard(displayName, username, signal);
+  const {
+    card,
+    banner,
+    headerName,
+    headerHandle,
+    usernameValue,
+    editUsernameBtn,
+    avatarLarge,
+    editor,
+  } = buildProfileCard(displayName, username, signal);
   section.appendChild(card);
+
+  // The strip follows the stored banner, and the colour being edited while the
+  // editor is open (an unsaved choice previews, as the avatar does).
+  let bannerEditor: BannerEditor | null = null;
+  const paintStrip = (): void => {
+    const u = authStore.getState().user;
+    paintBanner(
+      banner,
+      {
+        banner: u?.banner ?? null,
+        banner_color: bannerEditor === null ? (u?.banner_color ?? null) : bannerEditor.current(),
+      },
+      card,
+      bannerImages,
+    );
+  };
+  if (profileBannersEnabled()) bannerEditor = buildBannerEditor(options, paintStrip, signal);
+  paintStrip();
+  const unsubStrip = authStore.subscribeSelector(
+    (st) => `${st.user?.banner ?? ""}|${st.user?.banner_color ?? ""}`,
+    paintStrip,
+  );
+  signal.addEventListener("abort", () => unsubStrip?.(), { once: true });
 
   // Existing avatar, if any — the letter is only a fallback now.
   if (isRenderableAvatar(user?.avatar)) {
@@ -1349,12 +1672,14 @@ export function buildAccountTab(
   // Avatar, display name and about lead the editor; the username row follows.
   editor.prepend(
     buildAvatarUploader(options, avatarLarge, signal),
+    ...(bannerEditor === null ? [] : [bannerEditor.el]),
     buildProfileFields(
       options,
       (name) => {
         setText(headerName, name);
       },
       signal,
+      bannerEditor,
     ),
   );
 
@@ -1371,6 +1696,12 @@ export function buildAccountTab(
     "aria-label": t("profile.newUsername"),
     "aria-describedby": "username-edit-error",
   });
+  const usernameHint = attachLimitHint(editInput, {
+    max: MAX_USERNAME_LEN,
+    hint: usernameHintText(),
+    id: "username-edit-hint",
+    signal,
+  });
   const saveBtn = createElement("button", { class: "ac-btn secondary" }, t("common.save"));
   const cancelBtn = createElement("button", { class: "ac-btn secondary" }, t("recovery.cancel"));
   appendChildren(editForm, editInput, saveBtn, cancelBtn);
@@ -1378,11 +1709,15 @@ export function buildAccountTab(
   const usernameError = outcomeEl("error");
   usernameError.id = "username-edit-error";
   usernameError.style.marginTop = "4px";
-  editForm.appendChild(usernameError);
+  editForm.style.flexWrap = "wrap";
+  usernameError.style.width = "100%";
+  usernameHint.el.style.width = "100%";
+  editForm.append(usernameError, usernameHint.el);
 
   const openEditForm = () => {
     editForm.style.display = "flex";
     editInput.value = authStore.getState().user?.username ?? "";
+    usernameHint.reset();
     editInput.focus();
   };
   const closeEditForm = () => {
@@ -1399,10 +1734,17 @@ export function buildAccountTab(
     "click",
     () => {
       const newName = editInput.value.trim();
-      if (newName.length < 2 || newName.length > MAX_USERNAME_LEN) {
-        setText(usernameError, t("profile.usernameInvalid", { max: MAX_USERNAME_LEN }));
+      // Resending the name the account already has is checked by the server's
+      // loose rule (an older account may not meet the new one); a different
+      // name is a rename and must pass the new-name rules.
+      const problem =
+        newName === authStore.getState().user?.username ? null : checkNewUsername(newName);
+      if (problem !== null) {
+        editInput.setAttribute("aria-invalid", "true");
+        setText(usernameError, usernameProblemText(problem));
         return;
       }
+      editInput.removeAttribute("aria-invalid");
       setText(usernameError, "");
       void options
         .onUpdateProfile({ username: newName })
@@ -1424,6 +1766,8 @@ export function buildAccountTab(
           closeEditForm();
         })
         .catch((err: unknown) => {
+          // The server's own refusal text, under the field; the typed name stays.
+          editInput.setAttribute("aria-invalid", "true");
           setText(usernameError, errorText(err, t("profile.usernameSaveFailed")));
         });
     },

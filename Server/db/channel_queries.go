@@ -10,45 +10,65 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// channelFields carries the 14 columns shared by GetChannelRow and
-// ListChannelsRow; both generated row types are structurally identical, so a
-// single mapper narrows either to the domain Channel model.
+// channelFields carries the 20 columns shared by GetChannelRow,
+// ListChannelsRow and GetAFKChannelRow; the generated row types are
+// structurally identical, so a single mapper narrows any of them to the
+// domain Channel model.
 type channelFields struct {
-	ID              int64
-	Name            string
-	Type            string
-	Category        string
-	Topic           string
-	Position        int64
-	SlowMode        int64
-	Archived        int64
-	CreatedAt       string
-	VoiceMaxUsers   int64
-	VoiceQuality    *string
-	MixingThreshold *int64
-	VoiceMaxVideo   int64
+	ID               int64
+	Name             string
+	Type             string
+	Category         string
+	CategoryID       int64
+	CategoryPosition int64
+	Topic            string
+	Position         int64
+	SlowMode         int64
+	Archived         int64
+	CreatedAt        string
+	VoiceMaxUsers    int64
+	VoiceQuality     *string
+	MixingThreshold  *int64
+	VoiceMaxVideo    int64
 	// Nsfw keeps sqlc's spelling, not the domain model's NSFW: the two
 	// generated row types are narrowed by a direct struct conversion, which
 	// requires identical field names.
-	Nsfw int64
+	Nsfw            int64
+	Afk             int64
+	ParentChannelID int64
+	ThreadArchived  int64
+	ThreadLocked    int64
+	// ForumRequireTag and ForumDefaultAutoArchiveMinutes are the forum
+	// settings columns (migration 075), meaningful on a type 'forum' row.
+	ForumRequireTag                int64
+	ForumDefaultAutoArchiveMinutes int64
 }
 
 func channelFromFields(f channelFields) Channel {
 	return Channel{
-		ID:              f.ID,
-		Name:            f.Name,
-		Type:            f.Type,
-		Category:        f.Category,
-		Topic:           f.Topic,
-		Position:        int(f.Position),
-		SlowMode:        int(f.SlowMode),
-		Archived:        f.Archived != 0,
-		CreatedAt:       f.CreatedAt,
-		VoiceMaxUsers:   int(f.VoiceMaxUsers),
-		VoiceQuality:    f.VoiceQuality,
-		MixingThreshold: ptrI64toI(f.MixingThreshold),
-		VoiceMaxVideo:   int(f.VoiceMaxVideo),
-		NSFW:            f.Nsfw != 0,
+		ID:               f.ID,
+		Name:             f.Name,
+		Type:             f.Type,
+		Category:         f.Category,
+		CategoryID:       f.CategoryID,
+		CategoryPosition: int(f.CategoryPosition),
+		Topic:            f.Topic,
+		Position:         int(f.Position),
+		SlowMode:         int(f.SlowMode),
+		Archived:         f.Archived != 0,
+		CreatedAt:        f.CreatedAt,
+		VoiceMaxUsers:    int(f.VoiceMaxUsers),
+		VoiceQuality:     f.VoiceQuality,
+		MixingThreshold:  ptrI64toI(f.MixingThreshold),
+		VoiceMaxVideo:    int(f.VoiceMaxVideo),
+		NSFW:             f.Nsfw != 0,
+		AFK:              f.Afk != 0,
+		Thread: ChannelThread{
+			ParentID: f.ParentChannelID,
+			Archived: f.ThreadArchived != 0,
+			Locked:   f.ThreadLocked != 0,
+		},
+		Forum: forumFromFields(f),
 	}
 }
 
@@ -61,6 +81,9 @@ func (d *DB) ListChannels(ctx context.Context) ([]Channel, error) {
 	channels := make([]Channel, 0, len(rows))
 	for i := range rows {
 		channels = append(channels, channelFromFields(channelFields(rows[i])))
+	}
+	if err := d.attachForumTags(ctx, channels); err != nil {
+		return nil, err
 	}
 	return channels, nil
 }
@@ -75,22 +98,27 @@ func (d *DB) GetChannel(ctx context.Context, id int64) (*Channel, error) {
 		return nil, fmt.Errorf("GetChannel: %w", err)
 	}
 	ch := channelFromFields(channelFields(r))
+	if ch.Forum != nil {
+		one := []Channel{ch}
+		if err := d.attachForumTags(ctx, one); err != nil {
+			return nil, err
+		}
+		ch = one[0]
+	}
 	return &ch, nil
 }
 
-// CreateChannel inserts a new channel and returns the assigned ID.
+// CreateChannel inserts a new channel and returns the assigned ID. A
+// non-empty category is resolved by name ignoring case and created when
+// missing, in the same transaction as the insert (see CreateChannelIn).
 func (d *DB) CreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error) {
-	res, err := d.q.CreateChannel(ctx, dbgen.CreateChannelParams{
-		Name:     name,
-		Type:     chanType,
-		Category: strToNullPtr(category),
-		Topic:    strToNullPtr(topic),
-		Position: int64(position),
+	return d.CreateChannelIn(ctx, NewChannel{
+		Name:         name,
+		Type:         chanType,
+		CategoryName: category,
+		Topic:        topic,
+		Position:     position,
 	})
-	if err != nil {
-		return 0, fmt.Errorf("CreateChannel: %w", err)
-	}
-	return res.LastInsertId()
 }
 
 // UpdateChannel modifies name, topic, and slow_mode for the given channel.
@@ -179,29 +207,35 @@ func (d *DB) GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) 
 }
 
 // UpsertChannelOverride inserts or updates the allow/deny permission override
-// for a role on a channel.
+// for a role on a channel. A direct edit takes the channel out of sync with its
+// category (permissions_synced = 0) in the same transaction.
 func (d *DB) UpsertChannelOverride(ctx context.Context, channelID, roleID, allow, deny int64) error {
-	if err := d.q.UpsertChannelPermission(ctx, dbgen.UpsertChannelPermissionParams{
-		ChannelID: channelID,
-		RoleID:    roleID,
-		Allow:     allow,
-		Deny:      deny,
-	}); err != nil {
-		return fmt.Errorf("UpsertChannelOverride: %w", err)
-	}
-	return nil
+	return d.inWriteTx(ctx, "UpsertChannelOverride", func(q *dbgen.Queries) error {
+		if err := q.UpsertChannelPermission(ctx, dbgen.UpsertChannelPermissionParams{
+			ChannelID: channelID,
+			RoleID:    roleID,
+			Allow:     allow,
+			Deny:      deny,
+		}); err != nil {
+			return err
+		}
+		return q.UnsyncChannelPermissions(ctx, channelID)
+	})
 }
 
 // DeleteChannelOverride removes the permission override for a role on a
-// channel. Deleting a non-existent override is a no-op.
+// channel. Deleting a non-existent override is a no-op for the rows, but it is
+// still a direct edit, so the channel stops being synced to its category.
 func (d *DB) DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error {
-	if err := d.q.DeleteChannelPermission(ctx, dbgen.DeleteChannelPermissionParams{
-		ChannelID: channelID,
-		RoleID:    roleID,
-	}); err != nil {
-		return fmt.Errorf("DeleteChannelOverride: %w", err)
-	}
-	return nil
+	return d.inWriteTx(ctx, "DeleteChannelOverride", func(q *dbgen.Queries) error {
+		if err := q.DeleteChannelPermission(ctx, dbgen.DeleteChannelPermissionParams{
+			ChannelID: channelID,
+			RoleID:    roleID,
+		}); err != nil {
+			return err
+		}
+		return q.UnsyncChannelPermissions(ctx, channelID)
+	})
 }
 
 // GetUserChannelPermissions returns the per-user allow/deny override bits for a
@@ -236,52 +270,36 @@ func (d *DB) GetAllChannelPermissionsForUser(ctx context.Context, userID int64) 
 	return result, nil
 }
 
-// GetChannelOverridesFor returns the merged role + user override layers for one
-// member, keyed by channel ID: two batch queries, never per channel. It is the
-// single fetch every "what can this member do here" site uses, so the role and
-// user layers can never be loaded by one site and forgotten by another.
-func (d *DB) GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]ChannelOverride, error) {
-	merged, err := d.GetAllChannelPermissionsForRole(ctx, roleID)
-	if err != nil {
-		return nil, err
-	}
-	userOv, err := d.GetAllChannelPermissionsForUser(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	for chID, o := range userOv {
-		existing := merged[chID]
-		existing.UserAllow = o.UserAllow
-		existing.UserDeny = o.UserDeny
-		merged[chID] = existing
-	}
-	return merged, nil
-}
-
 // UpsertChannelUserOverride inserts or updates the allow/deny permission
-// override for a single user on a channel.
+// override for a single user on a channel. Like UpsertChannelOverride it
+// unsyncs the channel in the same transaction.
 func (d *DB) UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error {
-	if err := d.q.UpsertChannelUserPermission(ctx, dbgen.UpsertChannelUserPermissionParams{
-		ChannelID: channelID,
-		UserID:    userID,
-		Allow:     allow,
-		Deny:      deny,
-	}); err != nil {
-		return fmt.Errorf("UpsertChannelUserOverride: %w", err)
-	}
-	return nil
+	return d.inWriteTx(ctx, "UpsertChannelUserOverride", func(q *dbgen.Queries) error {
+		if err := q.UpsertChannelUserPermission(ctx, dbgen.UpsertChannelUserPermissionParams{
+			ChannelID: channelID,
+			UserID:    userID,
+			Allow:     allow,
+			Deny:      deny,
+		}); err != nil {
+			return err
+		}
+		return q.UnsyncChannelPermissions(ctx, channelID)
+	})
 }
 
 // DeleteChannelUserOverride removes a user's permission override on a channel.
-// Deleting a non-existent override is a no-op.
+// Deleting a non-existent override is a no-op for the rows, but it is still a
+// direct edit, so the channel stops being synced to its category.
 func (d *DB) DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error {
-	if err := d.q.DeleteChannelUserPermission(ctx, dbgen.DeleteChannelUserPermissionParams{
-		ChannelID: channelID,
-		UserID:    userID,
-	}); err != nil {
-		return fmt.Errorf("DeleteChannelUserOverride: %w", err)
-	}
-	return nil
+	return d.inWriteTx(ctx, "DeleteChannelUserOverride", func(q *dbgen.Queries) error {
+		if err := q.DeleteChannelUserPermission(ctx, dbgen.DeleteChannelUserPermissionParams{
+			ChannelID: channelID,
+			UserID:    userID,
+		}); err != nil {
+			return err
+		}
+		return q.UnsyncChannelPermissions(ctx, channelID)
+	})
 }
 
 // GetChannelUserOverrides returns every per-user override on a channel, keyed

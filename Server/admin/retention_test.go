@@ -189,7 +189,7 @@ func TestAdminRetentionPreviewPermissionsAndConflicts(t *testing.T) {
 	}
 	// Same session token, freshly resolved permissions after preview.
 	preview = getPreview()
-	if _, err := database.ExecContext(ctx, `UPDATE users SET role_id = 4 WHERE id = ?`, owner); err != nil {
+	if err := database.UpdateUserRole(ctx, owner, 4); err != nil {
 		t.Fatal(err)
 	}
 	if w := requestAdminRetentionApply(t, handler, token, change, preview); w.Code != 403 {

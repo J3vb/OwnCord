@@ -6,7 +6,7 @@
  */
 
 import { createLogger } from "@lib/logger";
-import { onAuthCleared } from "@stores/auth.store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { DispatchApi } from "../connection/dispatchContext";
 import { mapRequest } from "./api";
 import { applySnapshot, beginSnapshot, failSnapshot } from "./store";
@@ -14,9 +14,14 @@ import { applySnapshot, beginSnapshot, failSnapshot } from "./store";
 const log = createLogger("message-requests");
 
 let source: DispatchApi | undefined;
-onAuthCleared(() => {
-  source = undefined;
-});
+// App-lifetime reset hook, registered at module load.
+void registerSessionReset(
+  "message-requests:source",
+  () => {
+    source = undefined;
+  },
+  { phase: "session" },
+);
 
 /** The client the inbox decides requests with; undefined before the first ready. */
 export function requestsApi(): DispatchApi | undefined {
@@ -24,11 +29,11 @@ export function requestsApi(): DispatchApi | undefined {
 }
 
 /** Fetch the pending inbox with `api`, and keep it for the inbox's own refetches. */
-export function loadRequests(api: DispatchApi | undefined): void {
-  if (api?.listDmRequests === undefined) return;
+export function loadRequests(api: DispatchApi | undefined): Promise<void> {
+  if (api?.listDmRequests === undefined) return Promise.resolve();
   source = api;
   const token = beginSnapshot();
-  api.listDmRequests().then(
+  return api.listDmRequests().then(
     (r) => applySnapshot(r.requests.map(mapRequest), token),
     (err: unknown) => {
       // A sign-out or profile switch cancelled it; the next session fetches its own.

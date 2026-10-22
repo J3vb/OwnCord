@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // readyFields is everything one viewer's ready carries, every read done.
@@ -16,6 +17,9 @@ type readyFields struct {
 	tail     readyTail
 	roster   *memberRoster
 	viewerID int64
+	// timeoutsFull: the ready carries every active timeout (a moderator's
+	// view), not just the viewer's own; becomes Client.timeouts.full.
+	timeoutsFull bool
 }
 
 // readyPayload is one viewer's ready frame: the fields either side of members
@@ -26,23 +30,48 @@ type readyPayload struct {
 	head, tail []byte
 	roster     *memberRoster
 	viewerID   int64
+	// timeoutsFull: see readyFields.
+	timeoutsFull bool
 }
 
 // readyHead and readyTail are the payload fields before and after members,
 // declared in sorted key order: ready used to be json.Marshal of a map, which
 // sorts its keys, and the bytes must not change.
 type readyHead struct {
-	Capabilities map[string]any     `json:"capabilities"`
-	Channels     []map[string]any   `json:"channels"`
-	DMChannels   []db.DMChannelInfo `json:"dm_channels"`
+	Capabilities map[string]any `json:"capabilities"`
+	// Categories (WP 6.5a) is the full category list, present only for a
+	// MANAGE_CHANNELS/Administrator holder (a pointer so an empty list still
+	// encodes as [] for them while everyone else omits the key). "categories"
+	// sorts between "capabilities" and "channels", so key order holds.
+	Categories *[]channelCategoryPayload `json:"categories,omitempty"`
+	Channels   []map[string]any          `json:"channels"`
+	DMChannels []db.DMChannelInfo        `json:"dm_channels"`
+	// MemberTimeouts is the viewer's member_timeouts view (WP 3C-7c); "member_timeouts"
+	// sorts before "members", so it is the last head field and key order holds.
+	MemberTimeouts []memberTimeoutEntry `json:"member_timeouts"`
 }
 
 type readyTail struct {
-	MOTD        string               `json:"motd"`
-	Notices     []readyNoticePayload `json:"notices"`
-	Roles       []*db.Role           `json:"roles"`
-	ServerName  string               `json:"server_name"`
-	VoiceStates []db.VoiceState      `json:"voice_states"`
+	MOTD       string               `json:"motd"`
+	Notices    []readyNoticePayload `json:"notices"`
+	Roles      []*db.Role           `json:"roles"`
+	ServerName string               `json:"server_name"`
+	// Threads (WP 6.9c) is the viewer's followed open threads, present
+	// whenever the server has the thread service (a pointer so an empty list
+	// still encodes as [] there while a server without it omits the key).
+	// "threads" sorts between "server_name" and "voice_states".
+	Threads     *[]readyThreadPayload `json:"threads,omitempty"`
+	VoiceStates []db.VoiceState       `json:"voice_states"`
+}
+
+// readyThreadPayload is one followed thread of ready.threads: the thread, the
+// last message in it, and the viewer's read position and counts.
+type readyThreadPayload struct {
+	Thread            *service.ThreadInfo `json:"thread"`
+	LastMessageID     int64               `json:"last_message_id"`
+	LastReadMessageID int64               `json:"last_read_message_id"`
+	UnreadCount       int64               `json:"unread_count"`
+	MentionCount      int64               `json:"mention_count"`
 }
 
 // writeReady writes the ready frame to w and returns its length.
@@ -68,8 +97,8 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 }
 
 // buildReady reads and encodes the ready server→client message.
-func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) (*readyPayload, error) {
-	f, err := h.readReady(ctx, database, userID, role)
+func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, feat clientFeatures) (*readyPayload, error) {
+	f, err := h.readReady(ctx, database, userID, role, feat)
 	if err != nil {
 		return nil, err
 	}
@@ -83,10 +112,11 @@ func (h *Hub) buildReady(ctx context.Context, database ReadySnapshotReader, user
 	}
 	// {"payload":{<head fields>,"members":[…],<tail fields>},"type":"ready"}
 	return &readyPayload{
-		head:     append(append([]byte(`{"payload":`), head[:len(head)-1]...), `,"members":`...),
-		tail:     append(append([]byte{','}, tail[1:len(tail)-1]...), `},"type":"`+MsgTypeReady+`"}`...),
-		roster:   f.roster,
-		viewerID: f.viewerID,
+		head:         append(append([]byte(`{"payload":`), head[:len(head)-1]...), `,"members":`...),
+		tail:         append(append([]byte{','}, tail[1:len(tail)-1]...), `},"type":"`+MsgTypeReady+`"}`...),
+		roster:       f.roster,
+		viewerID:     f.viewerID,
+		timeoutsFull: f.timeoutsFull,
 	}, nil
 }
 
@@ -119,4 +149,17 @@ func (h *Hub) writeReadyMembers(w *bufio.Writer, roster *memberRoster, viewerID 
 		_ = w.WriteByte('}')
 	}
 	_ = w.WriteByte(']')
+}
+
+// buildFreshReady is handleFreshConnect's buildReady, called after
+// registerNow: it reads timeoutView.gen before the build resolves the
+// viewer's Subject and then records which member_timeouts list the ready
+// carries (commitReadyTimeouts).
+func (h *Hub) buildFreshReady(ctx context.Context, database ReadySnapshotReader, c *Client, role *db.Role) (*readyPayload, error) {
+	gen := h.timeoutViewGenNow()
+	ready, err := h.buildReady(ctx, database, c.userID, role, c.features)
+	if ready != nil {
+		h.commitReadyTimeouts(c, gen, ready.timeoutsFull)
+	}
+	return ready, err
 }

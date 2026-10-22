@@ -14,22 +14,68 @@ export interface MountableComponent {
 }
 
 /**
- * Safely mount a component, catching any errors during rendering.
- * On failure, displays a fallback UI instead of crashing the app.
+ * The two ways out of a failed page. The app shell supplies both so this
+ * module stays self-contained: it imports nothing heavy, and still works when
+ * most of the app failed to load.
  */
-export function safeMount(component: MountableComponent, container: Element): void {
+export interface RenderRecovery {
+  /** Leave any call, then reload the page. */
+  readonly reload: () => void | Promise<void>;
+  /** End the session and return to the connect page. */
+  readonly signOut: () => void;
+}
+
+/**
+ * Safely mount a component, catching any errors during rendering.
+ * On failure, displays a fallback UI instead of crashing the app. With
+ * `recovery`, the fallback offers Reload and Sign out.
+ */
+export function safeMount(
+  component: MountableComponent,
+  container: Element,
+  recovery?: RenderRecovery,
+): void {
   try {
     component.mount(container);
   } catch (err) {
     log.error("Component mount failed", err);
-    renderFallback(container, err);
+    renderFallback(container, err, recovery);
   }
 }
 
+function recoveryButton(
+  label: string,
+  testId: string,
+  action: () => void | Promise<void>,
+): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.style.cssText =
+    "padding:6px 14px;border:0;border-radius:4px;background:#4e5058;color:#f2f3f5;font-size:13px;cursor:pointer;";
+  button.dataset.testid = testId;
+  button.textContent = label;
+  button.addEventListener("click", () => {
+    try {
+      const done = action();
+      if (done instanceof Promise) {
+        done.catch((err: unknown) => log.error("Recovery action failed", err));
+      }
+    } catch (err) {
+      log.error("Recovery action failed", err);
+    }
+  });
+  return button;
+}
+
 /**
- * Render a minimal fallback UI when a component fails.
+ * Render a minimal fallback UI when a page or component fails. Exported so the
+ * shell can show it when a page chunk fails to load, before anything mounts.
  */
-function renderFallback(container: Element, error: unknown): void {
+export function renderFallback(
+  container: Element,
+  error: unknown,
+  recovery?: RenderRecovery,
+): void {
   container.textContent = "";
   const fallback = document.createElement("div");
   fallback.style.cssText =
@@ -44,6 +90,18 @@ function renderFallback(container: Element, error: unknown): void {
       "color:#949ba4;font-size:11px;margin-top:8px;white-space:pre-wrap;word-break:break-all;";
     detail.textContent = error.message;
     fallback.appendChild(detail);
+  }
+
+  if (recovery !== undefined) {
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;gap:8px;margin-top:12px;";
+    actions.appendChild(
+      recoveryButton(connectText("app.reload"), "render-fallback-reload", recovery.reload),
+    );
+    actions.appendChild(
+      recoveryButton(connectText("app.signOut"), "render-fallback-sign-out", recovery.signOut),
+    );
+    fallback.appendChild(actions);
   }
 }
 

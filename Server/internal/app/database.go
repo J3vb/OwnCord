@@ -12,6 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // openDatabase validates the configured backend and opens the database.
@@ -37,20 +38,13 @@ func openDatabase(cfg *config.Config) (*db.DB, error) {
 // migrations and clears state left over from a previous run. Extracted from
 // run.
 func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *RestartCoordinator) error {
-	// The admin "Restore backup" handler needs the real database file path:
-	// without this, it falls back to a hardcoded "data/chatserver.db" and
-	// silently no-ops on any server with a configured database.path.
-	admin.SetDatabasePath(cfg.Database.Path)
-	// Backup handlers and the scheduled-backup maintenance write to the
-	// configured backup directory (defaults to data/backups).
-	admin.SetBackupDir(cfg.Backup.Dir)
 	// Admin restart requests (update apply, backup restore, setup wizard)
 	// land in the coordinator, which drains this process and lets main()
 	// perform the handoff. Wired before the listener starts serving, so no
 	// admin request can ever hit the unwired default hook.
 	admin.SetRestartHandoff(rc.Request)
 
-	backup, err := backupBeforePendingMigrations(log, database, cfg.Database.Path)
+	backup, err := backupBeforePendingMigrations(log, database, cfg.Database.Path, admin.ResolveBackupDir(cfg.Backup.Dir))
 	if err != nil {
 		return err
 	}
@@ -91,12 +85,12 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 // moves unbacked-up. A read-only file, a full disk or a bad path is the
 // operator's to fix; booting anyway would silently trade the safety net away.
 //
-// It runs after admin.SetBackupDir so the copy lands beside the operator's
+// It writes into backupDir (backup.dir) so the copy lands beside the operator's
 // manual backups, before db.Migrate so the copy predates the schema move, and
 // before any goroutine serves — there is no context to inherit.
 //
 // It returns the backup's file name, or "" when nothing was pending.
-func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath string) (string, error) {
+func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath, backupDir string) (string, error) {
 	// In-memory databases (tests, tooling) have no file to copy, and a fresh
 	// database has no pending migrations — PendingMigrations returns nil for
 	// both, which is the only thing keeping BackupToSafe off those paths.
@@ -108,7 +102,6 @@ func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath str
 		return "", nil
 	}
 
-	backupDir := admin.BackupDir()
 	if err := os.MkdirAll(backupDir, 0o750); err != nil {
 		return "", fmt.Errorf("pre-migration backup: creating %s: %w", backupDir, err)
 	}
@@ -150,6 +143,16 @@ func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath str
 
 	log.Warn("pre-migration backup written before applying migrations",
 		"path", filepath.Base(path), "migrations", len(pending))
+
+	// The new copy is verified: trim older safety copies, never this one. A
+	// prune failure must not refuse the boot. The prune covers both prefixes
+	// and protects only the new pre_migrate_ copy, which already holds the
+	// live database.
+	if removed, pruneErr := admin.PruneSafetyCopies(backupDir, admin.SafetyCopiesKept, path); pruneErr != nil {
+		log.Warn("could not prune old safety copies", "dir", backupDir, "error", pruneErr)
+	} else if len(removed) > 0 {
+		log.Info("pruned old safety copies", "count", len(removed), "names", removed)
+	}
 	return filepath.Base(path), nil
 }
 
@@ -163,4 +166,42 @@ func changedSince(dbPath string, t time.Time) bool {
 	}
 	wal, err := os.Stat(dbPath + "-wal")
 	return err == nil && wal.Size() > 0 && wal.ModTime().After(t)
+}
+
+// recordRestoreResult reports the staged backup restore the boot-time apply
+// (db.ApplyStagedRestore, run by db.Open) handled: it reads the result file,
+// writes one audit row into the now-open database, removes the file and
+// returns the outcome for the attention panel. With no restore pending it
+// returns the zero outcome. The file is removed only after the audit row, so
+// a crash between the two repeats the row rather than losing the report.
+func recordRestoreResult(log *slog.Logger, dbPath string, database *db.DB) service.RestoreOutcome {
+	res, found, err := db.ReadRestoreResult(dbPath)
+	if err != nil {
+		log.Error("staged restore result is unreadable", "error", err)
+		if clearErr := db.ClearRestoreResult(dbPath); clearErr != nil {
+			log.Warn("staged restore result could not be removed", "error", clearErr)
+		}
+		return service.RestoreOutcome{}
+	}
+	if !found {
+		return service.RestoreOutcome{}
+	}
+	action, detail := "backup_restore_applied", "restored backup "+res.Backup
+	switch res.Status {
+	case db.RestoreStatusApplied:
+		log.Warn("staged restore applied", "backup", res.Backup)
+	case db.RestoreStatusRolledBack:
+		action, detail = "backup_restore_rolled_back", "restore of "+res.Backup+" failed, previous database kept: "+res.Error
+		log.Error("staged restore rolled back", "backup", res.Backup, "reason", res.Error)
+	default:
+		action, detail = "backup_restore_refused", "restore of "+res.Backup+" refused, previous database kept: "+res.Error
+		log.Error("staged restore refused", "backup", res.Backup, "reason", res.Error)
+	}
+	if err := database.LogAudit(context.Background(), res.ActorID, action, "server", 0, detail); err != nil {
+		// The result file is kept so the next boot retries the audit row.
+		log.Error("staged restore audit write failed", "action", action, "error", err)
+	} else if err := db.ClearRestoreResult(dbPath); err != nil {
+		log.Warn("staged restore result could not be removed", "error", err)
+	}
+	return service.RestoreOutcome{Recorded: true, Status: res.Status, Backup: res.Backup, At: res.AppliedAt, Reason: res.Error}
 }

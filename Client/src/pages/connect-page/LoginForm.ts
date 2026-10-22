@@ -8,6 +8,16 @@ import { normaliseInviteCode } from "@lib/deep-link";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";
+import { portalText } from "../../i18n/portal";
+import {
+  attachLimitHint,
+  checkNewUsername,
+  toggleDescribedBy,
+  usernameHintText,
+  usernameProblemText,
+  MAX_USERNAME_LEN,
+  type LimitHint,
+} from "@lib/nameLimits";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -100,6 +110,14 @@ export interface LoginFormOptions {
   /** The host box settled (debounced) in register mode, or register mode was
    *  entered with a host typed; lets the owner fetch that host's mode. */
   readonly onHostSettled?: (host: string) => void;
+  /** The host box was edited; the owner may apply a matching saved profile's settings. */
+  readonly onHostInput?: (host: string) => void;
+  /**
+   * The one host this page signs in to (the web portal, WP 6.13e). Read only
+   * in `__OWNCORD_WEB__` builds: the host box is filled and hidden, a host
+   * given later is ignored, and the form offers "Stay signed in" only.
+   */
+  readonly fixedHost?: string;
 }
 
 export interface LoginFormApi {
@@ -130,8 +148,10 @@ export interface LoginFormApi {
   getRememberPassword(): boolean;
   /** Whether the auto-connect checkbox is ticked. */
   getAutoConnect(): boolean;
-  /** Set the auto-connect checkbox (also forces remember-password on). */
+  /** Set the auto-connect (stay signed in) checkbox. Independent of remember-password. */
   setAutoConnect(enabled: boolean): void;
+  /** Set the remember-password checkbox. */
+  setRememberPassword(enabled: boolean): void;
   getPassword(): string;
   /** Set the host input value (called when ServerPanel clicks a server). */
   setHost(host: string): void;
@@ -191,7 +211,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     getRegistrationMode,
     getRetentionNotice,
     onHostSettled,
+    onHostInput,
   } = opts;
+  // Written literally at every use so the desktop build drops each branch.
+  const fixedHost = __OWNCORD_WEB__ ? opts.fixedHost : undefined;
 
   // Debounce token: only the latest scheduled host-settled call fires.
   let hostSettledSeq = 0;
@@ -239,6 +262,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   let formTitle: HTMLHeadingElement;
   let hostInput: HTMLInputElement;
   let usernameInput: HTMLInputElement;
+  // The new-username rules, shown under the field in Register only (an
+  // existing account may predate them, so Login keeps the field unbounded).
+  let usernameHint: LimitHint;
   let passwordInput: HTMLInputElement;
   let inviteGroup: HTMLDivElement;
   let inviteInput: HTMLInputElement;
@@ -375,6 +401,10 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       "localhost:8443",
     );
     hostInput = qs("input", hostGroup)!;
+    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
+      hostInput.value = fixedHost;
+      hostGroup.classList.add("form-group--hidden");
+    }
     // Registration policy is per host, so a manually edited address re-derives
     // the mode (and the invite requirement) as the user types.
     hostInput.addEventListener(
@@ -382,6 +412,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       () => {
         updateRegistrationUi();
         scheduleHostSettled();
+        onHostInput?.(hostInput.value.trim());
       },
       { signal },
     );
@@ -394,6 +425,17 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       "",
     );
     usernameInput = qs("input", usernameGroup)!;
+    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
+      usernameInput.setAttribute("autocomplete", "username");
+    }
+    usernameHint = attachLimitHint(usernameInput, {
+      max: MAX_USERNAME_LEN,
+      hint: usernameHintText(),
+      id: "username-hint",
+      signal,
+    });
+    usernameGroup.appendChild(usernameHint.el);
+    applyUsernameRules();
 
     // Password
     const passwordGroup = buildFormGroup(
@@ -419,17 +461,25 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       connectText("login.rememberPassword"),
     );
     appendChildren(rememberGroup, rememberPasswordCheckbox, rememberLabel);
+    // The portal keeps no password: the token alone is kept, by Stay signed in.
+    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
+      rememberGroup.classList.add("form-group--hidden");
+    }
 
     // Auto connect checkbox
     const autoConnectGroup = createElement("div", { class: "form-group remember-password-group" });
     autoConnectCheckbox = createElement("input", { type: "checkbox", id: "auto-connect" });
+    // Stay signed in by default; a saved profile overrides it.
+    autoConnectCheckbox.checked = true;
     const autoConnectLabel = createElement(
       "label",
       {
         for: "auto-connect",
         class: "remember-password-label",
       },
-      connectText("login.autoConnect"),
+      __OWNCORD_WEB__ && fixedHost !== undefined
+        ? portalText("login.stayLoggedIn")
+        : connectText("login.autoConnect"),
     );
     appendChildren(autoConnectGroup, autoConnectCheckbox, autoConnectLabel);
 
@@ -445,17 +495,6 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // swallow a typed character.
     passwordInput.addEventListener("beforeinput", clearSavedPasswordPlaceholder, { signal });
     passwordInput.addEventListener("input", clearSavedPasswordPlaceholder, { signal });
-
-    autoConnectCheckbox.addEventListener(
-      "change",
-      () => {
-        // Auto-connect replays the saved token, which only exists when the
-        // password is remembered — so the pairing is enforced, not suggested.
-        if (autoConnectCheckbox.checked) rememberPasswordCheckbox.checked = true;
-        rememberPasswordCheckbox.disabled = autoConnectCheckbox.checked;
-      },
-      { signal },
-    );
 
     // Invite code (register only, hidden by default)
     inviteGroup = buildFormGroup("invite", connectText("login.inviteLabel"), "text", "");
@@ -853,16 +892,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
     for (const input of allFieldInputs()) {
       input.removeAttribute("aria-invalid");
-      if (input.getAttribute("aria-describedby") === errorBanner.id) {
-        input.removeAttribute("aria-describedby");
-      }
+      toggleDescribedBy(input, errorBanner.id, false);
     }
     if (formState === "error" && errorMessage) {
       setText(errorBanner, errorMessage);
       errorBanner.classList.add("visible");
       if (target !== null) {
         target.setAttribute("aria-invalid", "true");
-        target.setAttribute("aria-describedby", errorBanner.id);
+        toggleDescribedBy(target, errorBanner.id, true);
         target.focus();
       }
       // The shakeX animation plays automatically via CSS on .error-banner
@@ -1020,9 +1057,21 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     );
   }
 
+  /** Register holds the username to the new-name rules; Login does not. */
+  function applyUsernameRules(): void {
+    const registering = formMode === "register";
+    usernameHint.el.hidden = !registering;
+    usernameHint.reset();
+    // Login lifts the cap and the hint: nothing may describe the field by it.
+    toggleDescribedBy(usernameInput, usernameHint.el.id, registering);
+    if (registering) usernameInput.maxLength = MAX_USERNAME_LEN;
+    else usernameInput.removeAttribute("maxlength");
+  }
+
   function handleToggleMode(): void {
     cancelAuthBusyRetry?.();
     formMode = formMode === "login" ? "register" : "login";
+    applyUsernameRules();
 
     // A remembered password belongs to an EXISTING account. Carrying the
     // placeholder into Register would submit a fixed, publicly known constant
@@ -1047,7 +1096,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
   }
 
-  function validateForm(): { message: string; field: FieldId | null } | null {
+  function validateForm(): {
+    message: string;
+    field: FieldId | null;
+    /** The message is shown under the field (its hint); the banner points there. */
+    inline?: boolean;
+  } | null {
     const host = hostInput.value.trim();
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
@@ -1057,6 +1111,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
     if (!username) {
       return { message: connectText("validation.usernameRequired"), field: "username" };
+    }
+    // A new name is checked against the server's rules; Login sends whatever
+    // the account was created with.
+    if (formMode === "register") {
+      const problem = checkNewUsername(username);
+      if (problem !== null) {
+        return { message: usernameProblemText(problem), field: "username", inline: true };
+      }
     }
     // A saved password is already known-good; it is never re-validated here
     // because its plaintext is not available to this process. The bypass is
@@ -1165,6 +1227,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     const validationError = validateForm();
     if (validationError !== null) {
+      if (validationError.inline === true) {
+        // Said once, under the field; the banner points at it.
+        usernameHint.showError(validationError.message);
+        transitionTo("error", connectText("limits.checkField"), validationError.field);
+        return;
+      }
       transitionTo("error", validationError.message, validationError.field);
       return;
     }
@@ -1208,6 +1276,19 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // Cap length to prevent phishing via server-controlled error messages
       if (message.length > 200) {
         message = message.slice(0, 200) + "...";
+      }
+      // The server refused the name itself (a reserved name, a character the
+      // client check does not mirror): say so under the field and keep what
+      // was typed, so it can be edited rather than retyped.
+      if (
+        formMode === "register" &&
+        err instanceof ApiClientError &&
+        err.code === "INVALID_INPUT" &&
+        /^username\b/i.test(err.message)
+      ) {
+        usernameHint.showError(message);
+        transitionTo("error", connectText("limits.checkField"), "username");
+        return;
       }
       transitionTo("error", message);
     }
@@ -1365,8 +1446,11 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     setAutoConnect(enabled: boolean): void {
       autoConnectCheckbox.checked = enabled;
-      if (enabled) rememberPasswordCheckbox.checked = true;
-      rememberPasswordCheckbox.disabled = enabled;
+    },
+
+    setRememberPassword(enabled: boolean): void {
+      if (__OWNCORD_WEB__ && fixedHost !== undefined) return;
+      rememberPasswordCheckbox.checked = enabled;
     },
 
     getPassword(): string {
@@ -1378,6 +1462,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setHost(host: string): void {
+      if (__OWNCORD_WEB__ && fixedHost !== undefined) return;
       writeHost(host);
       // The host's registration mode may differ from the previous one.
       updateRegistrationUi();
@@ -1420,12 +1505,13 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
      * which case the user still needs to enter the server address.
      */
     applyInviteLink(code: string, host?: string): void {
-      if (host) writeHost(host);
+      const hostFixed = __OWNCORD_WEB__ && fixedHost !== undefined;
+      if (host && !hostFixed) writeHost(host);
       if (formMode !== "register") handleToggleMode();
       inviteInput.value = code;
       updateRegistrationUi();
       // Focus the first field the user still has to fill in.
-      if (host) usernameInput.focus();
+      if (host || hostFixed) usernameInput.focus();
       else hostInput.focus();
     },
 
@@ -1434,7 +1520,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     focusHost(): void {
-      hostInput.focus();
+      if (__OWNCORD_WEB__ && fixedHost !== undefined) usernameInput.focus();
+      else hostInput.focus();
     },
 
     destroy(): void {

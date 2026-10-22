@@ -1,0 +1,104 @@
+{
+  "journey": "channel-activity",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "channel_id": 1,
+            "content": "hello unfocused"
+          },
+          "type": "chat_send"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "message_id": "<id:number>",
+            "timestamp": "<ts:string>"
+          },
+          "type": "chat_send_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 5,
+          "payload": {
+            "attachments": [],
+            "channel_id": 1,
+            "content": "hello unfocused",
+            "id": "<id:number>",
+            "mention_roles": [],
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "reactions": [],
+            "referenced_message": null,
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "role": "member",
+              "username": "alice"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "channels": [
+              {
+                "author_id": "<id:number>",
+                "channel_id": 1,
+                "mentions_everyone": false,
+                "mentions_you": false,
+                "message_id": "<id:number>"
+              }
+            ]
+          },
+          "type": "channel_activity"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

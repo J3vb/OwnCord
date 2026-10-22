@@ -11,7 +11,7 @@ export const safetyText = defineCatalog("safety", {
   "notice.acknowledge": "Acknowledge",
   "notice.acknowledging": "Acknowledging…",
   "notice.ackFailed": "Your acknowledgement wasn't recorded. Try again.",
-  "notice.viewSafety": "View in Safety settings",
+  "notice.viewSafety": "View in Privacy & Safety settings",
   "toast.warning": "You received a warning from the moderators: {reason}",
   "toast.timeout": "You're timed out until {time}.",
   "toast.acknowledged": "Warning acknowledged.",
@@ -47,6 +47,20 @@ export const safetyText = defineCatalog("safety", {
   "appeal.upheld": "upheld",
   "appeal.overturned": "overturned",
   "appeal.withdrawn": "withdrawn",
+  "dmPrivacy.title": "Direct messages",
+  "dmPrivacy.desc":
+    "Choose who can start a direct message with you. People you've already accepted or messaged first can still reach you.",
+  "dmPrivacy.loading": "Loading your direct message settings…",
+  "dmPrivacy.loadFailed": "Couldn't load your direct message settings.",
+  "dmPrivacy.retry": "Retry",
+  "dmPrivacy.saveFailed": "Couldn't save that change. Your settings are unchanged.",
+  "dmPrivacy.allow.label": "Allow direct messages from server members",
+  "dmPrivacy.allow.desc":
+    "When this is off, members you haven't accepted or messaged first can't start a direct message with you.",
+  "dmPrivacy.requests.label": "Message requests",
+  "dmPrivacy.requests.desc":
+    "When this is off, a first message from someone you haven't accepted goes straight to your direct messages instead of Requests. A request you already ignored stays ignored.",
+  "dmPrivacy.requests.disabledHint": "Turn on direct messages from server members to change this.",
   "appeals.unavailable":
     "Kicks can't be appealed. While a ban is in effect you can't sign in to appeal here: contact the server's operator directly. Once a ban ends, it appears in your history and can be appealed.",
 });

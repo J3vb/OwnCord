@@ -8,8 +8,8 @@ import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
-import { createVideoGrid } from "@components/VideoGrid";
-import type { VideoGridComponent } from "@components/VideoGrid";
+import { createLazyVideoGrid } from "./lazyVideoGrid";
+import type { LazyVideoGrid } from "./lazyVideoGrid";
 import { buildChatHeader } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
@@ -19,7 +19,7 @@ import { createMessageJumper } from "./MessageJump";
 import { setMessageJumpHandler } from "@lib/message-navigation";
 import { navigateToChannel } from "@lib/channel-navigation";
 import { channelsStore } from "@stores/channels.store";
-import { canManageMessages } from "@lib/permissions";
+import { channelBitOrRole } from "@lib/permissions";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 
 // ---------------------------------------------------------------------------
@@ -32,8 +32,15 @@ export interface ChatAreaOptions {
   readonly getToast: () => ToastContainer | null;
   readonly getChannelCtrl: () => ChannelController | null;
   readonly onToggleDmProfile?: () => void;
+  /** Show or hide the group DM member panel. */
+  readonly onToggleMemberList?: () => void;
+  readonly onToggleGuildMemberList?: () => void;
   /** Start a call in the current DM (join its voice channel + ring). */
   readonly onStartCall?: () => void;
+  /** Start a call in the current DM with the camera on. */
+  readonly onStartVideoCall?: () => void;
+  /** Rename the open group DM (the header's group name click). */
+  readonly onRenameGroup?: () => void;
 }
 
 export interface ChatAreaResult {
@@ -49,7 +56,7 @@ export interface ChatAreaResult {
   /** Holds the DM call panel, between the header and the messages. */
   readonly callPanelSlot: HTMLDivElement;
   /** The VideoGrid component instance. */
-  readonly videoGrid: VideoGridComponent;
+  readonly videoGrid: LazyVideoGrid;
   /** The chat header channel-name element (updated reactively). */
   readonly chatHeaderName: HTMLSpanElement | null;
   /** Full chat header refs (hash, name, topic) for DM mode updates. */
@@ -60,6 +67,10 @@ export interface ChatAreaResult {
   readonly searchCtrl: SearchOverlayController;
   /** Close the pinned-messages panel if it is open. */
   readonly closePinnedPanel: () => void;
+  /** Open the pinned-messages panel; a no-op when it is already open. */
+  readonly openPinnedPanel: () => Promise<void>;
+  /** Where a thread's side panel mounts, beside the chat area (WP 6.9c). */
+  readonly threadSlot: HTMLDivElement;
   /** Slot for the DM profile sidebar (right panel, sibling of chat area). */
   readonly dmProfileSlot: HTMLDivElement;
   /** All child MountableComponents for cleanup. */
@@ -96,12 +107,12 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     api,
     getRoot,
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
-    // A DM participant may pin; a channel needs MANAGE_MESSAGES — mirroring
-    // the server's SetMessagePinned gate so the panel is read-only rather than
+    // A DM participant may pin; a channel follows the server's per-channel
+    // can_pin (MANAGE_MESSAGES on an older server) — mirroring the server's gate so the panel is read-only rather than
     // offering an unpin the server refuses (F1).
     canPin: (channelId: number) => {
       const channel = channelsStore.getState().channels.get(channelId);
-      return channel?.type === "dm" || canManageMessages();
+      return channel?.type === "dm" || channelBitOrRole(channel?.canPin);
     },
     // The panel forwards the channel it was opened for (captured at open
     // time), not whatever is active now — the active channel can change
@@ -153,11 +164,16 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     onTogglePins: () => {
       void pinnedCtrl.toggle();
     },
+    onToggleThreads: (anchor) => getChannelCtrl()?.toggleThreadList(anchor),
     onSearchFocus: () => {
       searchCtrl.open();
     },
     onToggleDmProfile: opts.onToggleDmProfile,
+    onToggleMemberList: opts.onToggleMemberList,
+    onToggleGuildMemberList: opts.onToggleGuildMemberList,
     onStartCall: opts.onStartCall,
+    onStartVideoCall: opts.onStartVideoCall,
+    onRenameGroup: opts.onRenameGroup,
   });
   const chatHeaderName = chatHeader.refs.nameEl;
 
@@ -193,11 +209,18 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   });
 
   // --- Video grid ---
-  const videoGrid = createVideoGrid();
+  // The grid's code loads on first use (O-6c); the proxy answers until then.
+  const videoGrid = createLazyVideoGrid();
   videoGrid.mount(videoGridSlot);
   children.push(videoGrid);
 
   appendChildren(chatArea, callPanelSlot, messagesSlot, typingSlot, inputSlot, videoGridSlot);
+
+  // --- Thread panel slot (sibling of chatArea; hidden until a thread is open) ---
+  const threadSlot = createElement("div", {
+    class: "thread-panel-slot",
+    "data-testid": "thread-panel-slot",
+  });
 
   // --- DM profile sidebar slot (sits beside chatArea in the .app flex row) ---
   const dmProfileSlot = createElement("div", {
@@ -215,6 +238,8 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     sidebarToggle: chatHeader.refs.sidebarToggle,
     searchCtrl,
     closePinnedPanel: pinnedCtrl.cleanup,
+    openPinnedPanel: pinnedCtrl.open,
+    threadSlot,
     dmProfileSlot,
     children,
     unsubscribers,

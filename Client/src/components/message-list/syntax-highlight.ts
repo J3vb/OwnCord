@@ -9,12 +9,17 @@
  * Pure and DOM-free; the renderer turns tokens into spans.
  */
 
-export type TokenClass = "keyword" | "string" | "comment" | "number";
+export type TokenClass = "keyword" | "string" | "comment" | "number" | "inserted" | "deleted";
 
 export interface CodeToken {
   readonly text: string;
-  /** null renders as plain text. */
+  /** null renders as plain text (or as `ansi` classes when that is set). */
   readonly cls: TokenClass | null;
+  /**
+   * Space-separated CSS class names of an ansi run (`ansi-31 ansi-b`). Set only
+   * by the ansi highlighter, on tokens whose `cls` is null.
+   */
+  readonly ansi?: string;
 }
 
 interface Pattern {
@@ -27,6 +32,8 @@ interface LangSpec {
   readonly patterns: readonly Pattern[];
   readonly keywords: ReadonlySet<string>;
   readonly ident?: RegExp;
+  /** Keywords are stored lowercase and matched case-insensitively (SQL). */
+  readonly ignoreCase?: boolean;
 }
 
 const kw = (words: string): ReadonlySet<string> => new Set(words.split(" "));
@@ -51,6 +58,29 @@ const JS_LIKE: readonly Pattern[] = [
   SQ_STRING,
   BACKTICK_STRING,
   NUMBER,
+];
+
+const JS_LIKE_NO_BT: readonly Pattern[] = [
+  SLASH_LINE_COMMENT,
+  C_BLOCK_COMMENT,
+  DQ_STRING,
+  SQ_STRING,
+  NUMBER,
+];
+
+/** C/C++ preprocessor directive (`#include`, `#define`). */
+const C_PREPROC: Pattern = { re: /#[ \t]*[a-z]+/y, cls: "keyword" };
+
+/**
+ * Unified diff. Every pattern is anchored with ^ and the m flag: with the
+ * sticky flag ^ matches only when lastIndex sits at a line start, so a "-" or
+ * "+" in the middle of a line is never coloured. File and hunk headers come
+ * first so "+++ b/x" and "--- a/x" are not read as an insertion and a deletion.
+ */
+const DIFF_PATTERNS: readonly Pattern[] = [
+  { re: /^(?:diff --git |index |@@|(?:\+\+\+|---)(?=[ \t]|$))[^\n]*/my, cls: "keyword" },
+  { re: /^\+[^\n]*/my, cls: "inserted" },
+  { re: /^-[^\n]*/my, cls: "deleted" },
 ];
 
 const LANGS: Readonly<Record<string, LangSpec>> = {
@@ -154,6 +184,68 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
     ],
     keywords: kw(""),
   },
+  c: {
+    patterns: [C_PREPROC, ...JS_LIKE_NO_BT],
+    keywords: kw(
+      "if else for while do switch case default break continue return goto sizeof typedef struct union enum static const extern volatile register inline void char short int long float double signed unsigned NULL true false bool size_t",
+    ),
+  },
+  cpp: {
+    patterns: [C_PREPROC, ...JS_LIKE_NO_BT],
+    keywords: kw(
+      "if else for while do switch case default break continue return goto sizeof typedef struct union enum static const extern volatile register inline void char short int long float double signed unsigned NULL true false bool size_t class public private protected virtual override namespace using template typename new delete this nullptr try catch throw auto constexpr operator explicit friend std",
+    ),
+  },
+  java: {
+    patterns: [{ re: /"""[\s\S]*?(?:"""|$)/y, cls: "string" }, ...JS_LIKE_NO_BT],
+    keywords: kw(
+      "class interface enum extends implements package import public private protected static final " +
+        "abstract void int long short byte char float double boolean new this super return if else for " +
+        "while do switch case default break continue try catch finally throw throws instanceof null " +
+        "true false var synchronized String",
+    ),
+  },
+  csharp: {
+    patterns: [{ re: /@"(?:[^"]|"")*"?/y, cls: "string" }, ...JS_LIKE_NO_BT],
+    keywords: kw(
+      "namespace using class struct interface enum record public private protected internal static " +
+        "readonly const abstract virtual override sealed void int long short byte char float double " +
+        "decimal bool string var new this base return if else for foreach while do switch case default " +
+        "break continue try catch finally throw null true false async await in is as get set",
+    ),
+  },
+  sql: {
+    ignoreCase: true,
+    patterns: [
+      { re: /--[^\n]*/y, cls: "comment" },
+      C_BLOCK_COMMENT,
+      // Standard SQL has no backslash escape; '' is two adjacent strings.
+      { re: /'[^'\n]*'?/y, cls: "string" },
+      DQ_STRING,
+      NUMBER,
+    ],
+    keywords: kw(
+      "select from where and or not in is null like between join inner left right full outer cross on " +
+        "group by order having limit offset as distinct union all insert into values update set delete " +
+        "create alter drop table index view database primary key foreign references default unique " +
+        "check constraint case when then else end exists asc desc with returning begin commit rollback " +
+        "int integer bigint text varchar char boolean date timestamp true false",
+    ),
+  },
+  yaml: {
+    patterns: [
+      // A comment needs whitespace before "#"; a quote opens a string only
+      // where a value starts, so "don't" stays plain text; a key starts only
+      // at the start of a run, which keeps hostile runs linear.
+      { re: /(?<!\S)#[^\n]*/y, cls: "comment" },
+      DQ_STRING,
+      { re: /'(?<=(?:^|[:[{,-])[ \t]*')(?:[^'\n]|'')*'?/my, cls: "string" },
+      { re: /(?<![\w./-])[\w./-]+(?=[ \t]*:(?:[ \t]|$))/my, cls: "keyword" },
+      NUMBER,
+    ],
+    keywords: kw("true false null"),
+  },
+  diff: { patterns: DIFF_PATTERNS, keywords: new Set() },
 };
 
 /** Aliases accepted after the opening fence. */
@@ -186,6 +278,26 @@ const ALIASES: Readonly<Record<string, string>> = {
   html: "html",
   xml: "html",
   svg: "html",
+  c: "c",
+  h: "c",
+  cpp: "cpp",
+  "c++": "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  hpp: "cpp",
+  java: "java",
+  cs: "csharp",
+  csharp: "csharp",
+  "c#": "csharp",
+  sql: "sql",
+  sqlite: "sql",
+  postgres: "sql",
+  mysql: "sql",
+  yaml: "yaml",
+  yml: "yaml",
+  diff: "diff",
+  patch: "diff",
+  ansi: "ansi",
 };
 
 const DEFAULT_IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/y;
@@ -203,12 +315,112 @@ export function resolveLanguage(tag: string | null): string | null {
   return canonical === undefined ? null : canonical;
 }
 
+// -- ansi ---------------------------------------------------------------------
+
+interface AnsiState {
+  fg: number;
+  bg: number;
+  bold: boolean;
+  underline: boolean;
+}
+
+/** Class names for a style, or null for the default style. */
+function ansiClasses(st: AnsiState): string | null {
+  const names: string[] = [];
+  if (st.fg > 0) names.push(`ansi-${st.fg}`);
+  if (st.bg > 0) names.push(`ansi-${st.bg}`);
+  if (st.bold) names.push("ansi-b");
+  if (st.underline) names.push("ansi-u");
+  return names.length > 0 ? names.join(" ") : null;
+}
+
+/** Apply one SGR parameter list. Codes outside the supported set are ignored. */
+function applySgr(st: AnsiState, body: string): void {
+  const parts = body.split(";");
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
+    const n = part === "" ? 0 : Number(part);
+    if (n === 38 || n === 48) {
+      // Extended colour: skip its arguments (5;n or 2;r;g;b), no colour set.
+      i += parts[i + 1] === "5" ? 2 : parts[i + 1] === "2" ? 4 : 0;
+    } else if (n === 0) {
+      st.fg = 0;
+      st.bg = 0;
+      st.bold = false;
+      st.underline = false;
+    } else if (n === 1) st.bold = true;
+    else if (n === 4) st.underline = true;
+    else if (n >= 30 && n <= 37) st.fg = n;
+    else if (n >= 40 && n <= 47) st.bg = n;
+    else if (n === 39) st.fg = 0;
+    else if (n === 49) st.bg = 0;
+    else if (n === 22) st.bold = false;
+    else if (n === 24) st.underline = false;
+  }
+}
+
+/**
+ * Tokenize Discord-style ```ansi text: `ESC [ params m` sequences set the
+ * style of the text after them and are dropped from the output. Other CSI
+ * sequences are dropped without effect; an ESC that does not start a complete
+ * CSI sequence stays as text. Linear: a scan for a sequence stops at the next
+ * character that cannot belong to one, which includes the next ESC.
+ */
+function highlightAnsi(code: string): CodeToken[] {
+  const tokens: CodeToken[] = [];
+  const st: AnsiState = { fg: 0, bg: 0, bold: false, underline: false };
+  let classes: string | null = null;
+  const push = (text: string): void => {
+    if (text.length === 0) return;
+    const last = tokens[tokens.length - 1];
+    if (last !== undefined && (last.ansi ?? null) === classes) {
+      tokens[tokens.length - 1] =
+        classes === null
+          ? { text: last.text + text, cls: null }
+          : { text: last.text + text, cls: null, ansi: classes };
+      return;
+    }
+    tokens.push(classes === null ? { text, cls: null } : { text, cls: null, ansi: classes });
+  };
+
+  let start = 0;
+  let i = code.indexOf("\u001b");
+  while (i !== -1) {
+    let end = -1;
+    if (code.charCodeAt(i + 1) === 0x5b) {
+      let j = i + 2;
+      for (; j < code.length; j++) {
+        const c = code.charCodeAt(j);
+        if (!((c >= 0x30 && c <= 0x39) || c === 0x3b)) break;
+      }
+      const fin = code.charCodeAt(j);
+      if (j < code.length && fin >= 0x40 && fin <= 0x7e) {
+        push(code.slice(start, i));
+        if (fin === 0x6d) {
+          applySgr(st, code.slice(i + 2, j));
+          classes = ansiClasses(st);
+        }
+        end = j + 1;
+      }
+    }
+    if (end === -1) {
+      i = code.indexOf("\u001b", i + 1);
+      continue;
+    }
+    start = end;
+    i = code.indexOf("\u001b", start);
+  }
+  push(code.slice(start));
+  return tokens;
+}
+
 /**
  * Tokenize `code` for `lang` (a canonical id from {@link resolveLanguage}).
  * Unknown languages return a single plain token, so the caller never has to
  * branch on support.
  */
 export function highlightCode(code: string, lang: string | null): CodeToken[] {
+  if (lang === "ansi") return highlightAnsi(code);
   const spec = lang === null ? undefined : LANGS[lang];
   if (spec === undefined) return code.length > 0 ? [{ text: code, cls: null }] : [];
 
@@ -238,7 +450,7 @@ export function highlightCode(code: string, lang: string | null): CodeToken[] {
     ident.lastIndex = i;
     const word = ident.exec(code);
     if (word !== null && word[0].length > 0) {
-      if (spec.keywords.has(word[0])) {
+      if (spec.keywords.has(spec.ignoreCase === true ? word[0].toLowerCase() : word[0])) {
         flush();
         tokens.push({ text: word[0], cls: "keyword" });
       } else {

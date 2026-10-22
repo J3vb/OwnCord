@@ -9,6 +9,7 @@ import type { MessageResponse } from "../../lib/types";
 import { MAX_MESSAGES_PER_CHANNEL, messageResponseToMessage } from "./messageModel";
 import type { Message, MessagesState } from "./messageModel";
 import { isUnreconciledEcho } from "./echoReconcile";
+import { mergeMessagePoll } from "../../lib/pollState";
 
 /** Fields only a live chat_message row carries (the user's role and nickname,
  *  the echoed client_message_id); history never sends them, so their absence
@@ -42,6 +43,21 @@ export function reduceSetChannelLoading(prev: MessagesState, channelId: number):
   const updatedWatermark = new Map(prev.loadWatermark ?? []);
   updatedWatermark.set(channelId, currentMaxId);
   return { ...prev, historyLoadState: updated, loadWatermark: updatedWatermark };
+}
+
+/** setOlderLoadFailed's reducer. Returns `prev` itself when nothing changes, so
+ *  clearing an unset flag wakes no subscriber. */
+export function reduceSetOlderLoadFailed(
+  prev: MessagesState,
+  channelId: number,
+  failed: boolean,
+): MessagesState {
+  const current = prev.olderLoadFailed ?? new Set<number>();
+  if (current.has(channelId) === failed) return prev;
+  const next = new Set(current);
+  if (failed) next.add(channelId);
+  else next.delete(channelId);
+  return { ...prev, olderLoadFailed: next };
 }
 
 /** setChannelLoadError's reducer. Rows the failed fetch did not reconcile may
@@ -100,8 +116,10 @@ export function reduceSetMessages(
   // A row nothing changed keeps its object, so the list can keep its DOM row
   // and the whole array can be returned as-is when nothing changed at all.
   const cachedById = new Map(previous.filter((m) => m.status === "sent").map((m) => [m.id, m]));
-  const snapshot = trimmed.map((m) => {
-    const cached = cachedById.get(m.id);
+  // A page fetched before a newer poll update must not roll that poll back.
+  const snapshot = trimmed.map((fetched) => {
+    const cached = cachedById.get(fetched.id);
+    const m = mergeMessagePoll(cached, fetched);
     return cached !== undefined && sameValue(cached, m) ? cached : m;
   });
   // A resync splice keeps the loaded rows older than the page when the page
@@ -182,7 +200,15 @@ export function reduceSetAroundMessages(
   hasMoreAfter: boolean,
   splice = false,
 ): MessagesState {
-  const converted = messages.map(messageResponseToMessage);
+  // A window fetched before a newer poll update must not roll that poll back.
+  const loaded = new Map(
+    (prev.messagesByChannel.get(channelId) ?? [])
+      .filter((m) => m.poll !== undefined)
+      .map((m) => [m.id, m]),
+  );
+  const converted = messages
+    .map(messageResponseToMessage)
+    .map((m) => mergeMessagePoll(loaded.get(m.id), m));
   // Defensive: the server caps a window at 100, so this never fires today.
   // If it ever does, keep the older head — dropping the newest end is what the
   // detached flag below already describes, whereas dropping the head would

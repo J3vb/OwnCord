@@ -73,10 +73,10 @@ func TestChannelUserOverride_UpsertGetDelete(t *testing.T) {
 	}
 }
 
-// GetChannelOverridesFor is the single merged fetch every visibility site uses.
+// GetMemberGrants is the single merged fetch every visibility site uses.
 // It must carry BOTH layers, and a channel with only one layer set must keep
 // the other at zero.
-func TestGetChannelOverridesFor_MergesBothLayers(t *testing.T) {
+func TestGetMemberGrants_MergesBothLayers(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -110,9 +110,13 @@ func TestGetChannelOverridesFor_MergesBothLayers(t *testing.T) {
 		t.Fatalf("UpsertChannelUserOverride both: %v", err)
 	}
 
-	merged, err := database.GetChannelOverridesFor(ctx, permissions.MemberRoleID, uid)
+	grants, err := database.GetMemberGrants(ctx, uid)
 	if err != nil {
-		t.Fatalf("GetChannelOverridesFor: %v", err)
+		t.Fatalf("GetMemberGrants: %v", err)
+	}
+	merged := grants.Overrides
+	if grants.Layers != nil {
+		t.Errorf("a one-role member carries no per-role layers, got %+v", grants.Layers)
 	}
 	if got := merged[roleOnly]; got.Deny != permissions.ReadMessages || got.UserDeny != 0 {
 		t.Errorf("role-only channel = %+v", got)
@@ -129,10 +133,11 @@ func TestGetChannelOverridesFor_MergesBothLayers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateUser carol: %v", err)
 	}
-	otherMerged, err := database.GetChannelOverridesFor(ctx, permissions.MemberRoleID, other)
+	otherGrants, err := database.GetMemberGrants(ctx, other)
 	if err != nil {
-		t.Fatalf("GetChannelOverridesFor carol: %v", err)
+		t.Fatalf("GetMemberGrants carol: %v", err)
 	}
+	otherMerged := otherGrants.Overrides
 	if got := otherMerged[userOnly]; got.UserAllow != 0 {
 		t.Errorf("carol picked up bob's user override: %+v", got)
 	}

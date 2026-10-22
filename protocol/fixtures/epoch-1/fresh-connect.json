@@ -26,10 +26,16 @@
             "user": {
               "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "banner": null,
+              "banner_color": null,
               "custom_status": "fixture custom status",
+              "custom_status_expires_at": "<ts:null>",
               "display_name": "Alice Fixture",
               "id": "<id:number>",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "status": "online",
               "username": "alice"
             }
@@ -42,22 +48,40 @@
         "frame": {
           "payload": {
             "capabilities": {
+              "dm_privacy": true,
+              "forums": true,
+              "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
-              "message_retry_window_seconds": 86400
+              "message_retry_window_seconds": 86400,
+              "multi_role": true,
+              "polls": true,
+              "profile_banners": true,
+              "read_pointer": true,
+              "thread_follows": true,
+              "threads": true,
+              "user_notes": true
             },
             "channels": [
               {
+                "afk": false,
+                "can_delete_others": false,
                 "can_moderate_voice": false,
+                "can_pin": false,
+                "can_react": true,
                 "can_send": true,
                 "category": "",
+                "category_id": "<id:number>",
+                "category_position": 0,
                 "id": "<id:number>",
                 "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
                 "mention_count": 0,
                 "name": "general",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
                 "position": 0,
+                "private": false,
                 "slow_mode": 0,
                 "topic": "",
                 "type": "text",
@@ -66,39 +90,61 @@
                 "voice_max_video": 25
               },
               {
+                "afk": false,
+                "can_delete_others": false,
                 "can_moderate_voice": false,
+                "can_pin": false,
+                "can_react": true,
                 "can_send": true,
                 "category": "",
+                "category_id": "<id:number>",
+                "category_position": 0,
                 "id": "<id:number>",
+                "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
+                "mention_count": 0,
                 "name": "Voice",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
                 "position": 1,
+                "private": false,
                 "slow_mode": 0,
                 "topic": "",
                 "type": "voice",
+                "unread_count": 0,
                 "voice_max_users": 0,
                 "voice_max_video": 25
               }
             ],
             "dm_channels": [],
+            "member_timeouts": [],
             "members": [
               {
+                "about": "fixture profile text",
                 "avatar": "https://fixtures.invalid/alice-avatar.png",
+                "created_at": "<ts:string>",
                 "custom_status": "fixture custom status",
                 "display_name": "Alice Fixture",
                 "id": "<id:number>",
                 "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
                 "role": "member",
+                "role_ids": [
+                  4
+                ],
                 "status": "online",
                 "username": "alice"
               },
               {
+                "about": null,
                 "avatar": null,
+                "created_at": "<ts:string>",
                 "custom_status": null,
                 "display_name": null,
                 "id": "<id:number>",
                 "role": "member",
+                "role_ids": [
+                  4
+                ],
                 "status": "offline",
                 "username": "bob"
               }
@@ -108,38 +154,47 @@
             "roles": [
               {
                 "color": "#E74C3C",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Owner",
                 "permissions": 2147483647,
                 "position": 100
               },
               {
                 "color": "#F39C12",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Admin",
                 "permissions": 1073741823,
                 "position": 80
               },
               {
                 "color": "#3498DB",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Moderator",
-                "permissions": 7340031,
+                "permissions": 15728639,
                 "position": 60
               },
               {
                 "color": null,
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": true,
+                "mentionable": false,
                 "name": "Member",
                 "permissions": 7779,
                 "position": 40
               }
             ],
             "server_name": "OwnCord Server",
+            "threads": [],
             "voice_states": []
           },
           "type": "ready"
@@ -148,14 +203,20 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 1,
           "payload": {
             "status": "online",
             "user": {
+              "about": "fixture profile text",
               "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "created_at": "<ts:string>",
               "display_name": "Alice Fixture",
               "id": "<id:number>",
               "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "username": "alice"
             }
           },
@@ -166,6 +227,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 2,
           "payload": {
             "updates": [
               {
@@ -182,12 +244,18 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 3,
           "payload": {
             "status": "online",
             "user": {
+              "about": null,
               "avatar": null,
+              "created_at": "<ts:string>",
               "id": "<id:number>",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "username": "bob"
             }
           },
@@ -198,6 +266,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 4,
           "payload": {
             "updates": [
               {
@@ -250,10 +319,16 @@
             "user": {
               "about": null,
               "avatar": null,
+              "banner": null,
+              "banner_color": null,
               "custom_status": null,
+              "custom_status_expires_at": "<ts:null>",
               "display_name": null,
               "id": "<id:number>",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "status": "online",
               "username": "bob"
             }
@@ -266,22 +341,40 @@
         "frame": {
           "payload": {
             "capabilities": {
+              "dm_privacy": true,
+              "forums": true,
+              "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
-              "message_retry_window_seconds": 86400
+              "message_retry_window_seconds": 86400,
+              "multi_role": true,
+              "polls": true,
+              "profile_banners": true,
+              "read_pointer": true,
+              "thread_follows": true,
+              "threads": true,
+              "user_notes": true
             },
             "channels": [
               {
+                "afk": false,
+                "can_delete_others": false,
                 "can_moderate_voice": false,
+                "can_pin": false,
+                "can_react": true,
                 "can_send": true,
                 "category": "",
+                "category_id": "<id:number>",
+                "category_position": 0,
                 "id": "<id:number>",
                 "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
                 "mention_count": 0,
                 "name": "general",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
                 "position": 0,
+                "private": false,
                 "slow_mode": 0,
                 "topic": "",
                 "type": "text",
@@ -290,39 +383,61 @@
                 "voice_max_video": 25
               },
               {
+                "afk": false,
+                "can_delete_others": false,
                 "can_moderate_voice": false,
+                "can_pin": false,
+                "can_react": true,
                 "can_send": true,
                 "category": "",
+                "category_id": "<id:number>",
+                "category_position": 0,
                 "id": "<id:number>",
+                "last_message_id": "<id:number>",
+                "last_read_message_id": "<id:number>",
+                "mention_count": 0,
                 "name": "Voice",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
                 "position": 1,
+                "private": false,
                 "slow_mode": 0,
                 "topic": "",
                 "type": "voice",
+                "unread_count": 0,
                 "voice_max_users": 0,
                 "voice_max_video": 25
               }
             ],
             "dm_channels": [],
+            "member_timeouts": [],
             "members": [
               {
+                "about": "fixture profile text",
                 "avatar": "https://fixtures.invalid/alice-avatar.png",
+                "created_at": "<ts:string>",
                 "custom_status": "fixture custom status",
                 "display_name": "Alice Fixture",
                 "id": "<id:number>",
                 "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
                 "role": "member",
+                "role_ids": [
+                  4
+                ],
                 "status": "online",
                 "username": "alice"
               },
               {
+                "about": null,
                 "avatar": null,
+                "created_at": "<ts:string>",
                 "custom_status": null,
                 "display_name": null,
                 "id": "<id:number>",
                 "role": "member",
+                "role_ids": [
+                  4
+                ],
                 "status": "online",
                 "username": "bob"
               }
@@ -332,38 +447,47 @@
             "roles": [
               {
                 "color": "#E74C3C",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Owner",
                 "permissions": 2147483647,
                 "position": 100
               },
               {
                 "color": "#F39C12",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Admin",
                 "permissions": 1073741823,
                 "position": 80
               },
               {
                 "color": "#3498DB",
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": false,
+                "mentionable": false,
                 "name": "Moderator",
-                "permissions": 7340031,
+                "permissions": 15728639,
                 "position": 60
               },
               {
                 "color": null,
+                "hoist": true,
                 "id": "<id:number>",
                 "is_default": true,
+                "mentionable": false,
                 "name": "Member",
                 "permissions": 7779,
                 "position": 40
               }
             ],
             "server_name": "OwnCord Server",
+            "threads": [],
             "voice_states": []
           },
           "type": "ready"
@@ -372,12 +496,18 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 1,
           "payload": {
             "status": "online",
             "user": {
+              "about": null,
               "avatar": null,
+              "created_at": "<ts:string>",
               "id": "<id:number>",
               "role": "member",
+              "role_ids": [
+                4
+              ],
               "username": "bob"
             }
           },
@@ -388,6 +518,7 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 2,
           "payload": {
             "updates": [
               {

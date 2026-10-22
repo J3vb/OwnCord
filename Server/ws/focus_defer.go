@@ -31,10 +31,11 @@ func (h *Hub) applyFocusResult(c *Client, msgType string, chID int64) {
 
 // deferChannelFocus records chID as c's latest focus intent (the budget was
 // spent) and makes sure a drain goroutine is running to apply it.
-func (h *Hub) deferChannelFocus(c *Client, chID int64, reqID string) {
+func (h *Hub) deferChannelFocus(c *Client, chID int64, reqID string, read bool) {
 	c.mu.Lock()
 	c.focusSeq++
 	c.pendingFocusChID = chID
+	c.pendingFocusRead = read
 	c.pendingFocusReqID = reqID
 	c.pendingFocusSeq = c.focusSeq
 	start := !c.focusDrainActive
@@ -81,6 +82,7 @@ func (h *Hub) drainFocusOnce(ctx context.Context, c *Client) bool {
 
 	c.mu.Lock()
 	chID, reqID, seq := c.pendingFocusChID, c.pendingFocusReqID, c.pendingFocusSeq
+	read := c.pendingFocusRead
 	if chID == 0 {
 		// Cleared under the same c.mu hold as the check, so a concurrent
 		// deferral either already set pending (seen above) or sees the flag
@@ -103,7 +105,14 @@ func (h *Hub) drainFocusOnce(ctx context.Context, c *Client) bool {
 		return true
 	}
 
-	_, err := d.ChannelSvc.HandleChannelFocus(ctx, c.userID, chID)
+	// A deferred read:false focus must stay read:false: it admits and
+	// subscribes without marking the channel read.
+	var err error
+	if read {
+		_, err = d.ChannelSvc.HandleChannelFocus(ctx, c.userID, chID)
+	} else {
+		_, err = d.ChannelSvc.AdmitChannelFocus(ctx, c.userID, chID)
+	}
 	if err != nil {
 		// Forbidden or any other error: drop like the handler, but only if no
 		// newer intent replaced this one meanwhile; a replaced intent gets no

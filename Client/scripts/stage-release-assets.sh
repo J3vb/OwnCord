@@ -51,9 +51,39 @@ case "$os" in
       fi
       cp "$f" "$out/$base"
     done
-    for f in "$bundle"/deb/*.deb; do
+    # The .deb is signed by release.yml ("Sign the .deb updater artifact");
+    # the nightly build is unsigned, so *.deb.sig is copied only when present.
+    # Server/updater/assets.go matches the package on _amd64.deb / _arm64.deb
+    # (Tauri's own Debian-architecture names) and its signature on .sig.
+    debs=("$bundle"/deb/*.deb)
+    if [ "${#debs[@]}" -ne 1 ]; then
+      echo "::error::expected one .deb in $bundle/deb, found ${#debs[@]}"
+      exit 1
+    fi
+    for f in "${debs[0]}" "$bundle"/deb/*.deb.sig; do
       cp "$f" "$out/"
     done
+    # The in-app update installs through a root helper and a polkit action
+    # that ship inside this package (Client/src-tauri/packaging/linux). Prove
+    # the bundler kept them, and the helper's mode and owner, before they ship:
+    # a helper that is not root-owned and non-writable would make the client
+    # decline to use it, and an update that silently never works is invisible.
+    # Tauri's bundler writes data.tar entries as uid/gid 0 with no owner names
+    # and no leading ./, so dpkg-deb lists them as "0/0 ... usr/lib/...".
+    # Both spellings of root and of the path are accepted.
+    listing="$(dpkg-deb -c "${debs[0]}")"
+    helper_line="$(grep -E ' (\./)?usr/lib/owncord-client/owncord-deb-update$' <<<"$listing" || true)"
+    if ! grep -qE '^-rwxr-xr-x (root/root|0/0) ' <<<"$helper_line"; then
+      echo "::error::${debs[0]} must carry usr/lib/owncord-client/owncord-deb-update as -rwxr-xr-x root/root, found: ${helper_line:-nothing}"
+      exit 1
+    fi
+    if ! grep -qE '^-rw-r--r-- (root/root|0/0) .* (\./)?usr/share/polkit-1/actions/com\.owncord\.client\.update\.policy$' <<<"$listing"; then
+      echo "::error::${debs[0]} must carry usr/share/polkit-1/actions/com.owncord.client.update.policy as -rw-r--r-- root/root"
+      exit 1
+    fi
+    # Logged so the Version, Depends and Recommends of every build are on record
+    # (the helper installs with --no-install-recommends and --allow-downgrades).
+    dpkg-deb -f "${debs[0]}" Package Version Depends Recommends
     ;;
   *)
     echo "::error::unknown os '$os'"

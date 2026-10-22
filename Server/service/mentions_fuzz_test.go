@@ -55,7 +55,8 @@ func FuzzParseMentionTokens(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, content string) {
-		tokens, everyone, here := parseMentionTokens(content)
+		parsed := parseMentionTokens(content)
+		tokens, everyone, here := parsed.Tokens, parsed.Everyone, parsed.Here
 
 		if len(tokens) > maxMentionCandidates {
 			t.Fatalf("token count %d exceeds cap %d", len(tokens), maxMentionCandidates)

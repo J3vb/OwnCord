@@ -21,6 +21,10 @@ import {
   setGlobalNotificationLevel,
   setServerNotificationLevel,
   clearServerNotificationLevel,
+  channelNotificationLevel,
+  getChannelNotificationLevel,
+  listChannelNotificationOverrides,
+  setChannelNotificationLevel,
   settleNotificationLevelDefault,
   shouldNotifyForLevel,
 } from "../../src/lib/notificationLevel";
@@ -121,5 +125,74 @@ describe("shouldNotifyForLevel", () => {
 
   it("treats a direct message as addressed to you at Mentions only", () => {
     expect(shouldNotifyForLevel("mentions", { mentioned: false, isDm: true })).toBe(true);
+  });
+});
+
+describe("per-channel notification level", () => {
+  beforeEach(() => {
+    testPrefs.clear();
+    localStorage.clear();
+    setChannelMutesHost("a.example");
+  });
+
+  it("a channel override beats the server level both ways", () => {
+    setServerNotificationLevel("nothing");
+    setChannelNotificationLevel(7, "all");
+    expect(channelNotificationLevel(7)).toBe("all");
+
+    setServerNotificationLevel("all");
+    setChannelNotificationLevel(7, "nothing");
+    expect(channelNotificationLevel(7)).toBe("nothing");
+  });
+
+  it("an absent override inherits the effective level", () => {
+    setGlobalNotificationLevel("all");
+    expect(channelNotificationLevel(7)).toBe("all");
+    setServerNotificationLevel("nothing");
+    expect(channelNotificationLevel(7)).toBe("nothing");
+    expect(getChannelNotificationLevel(7)).toBeNull();
+  });
+
+  it("clearing an override with null returns the channel to the server default", () => {
+    setChannelNotificationLevel(7, "nothing");
+    setChannelNotificationLevel(8, "all");
+    setChannelNotificationLevel(7, null);
+    expect(getChannelNotificationLevel(7)).toBeNull();
+    expect(getChannelNotificationLevel(8)).toBe("all");
+  });
+
+  it("is scoped to the host", () => {
+    setChannelNotificationLevel(7, "nothing");
+    setChannelMutesHost("b.example");
+    expect(getChannelNotificationLevel(7)).toBeNull();
+    setChannelMutesHost("a.example");
+    expect(getChannelNotificationLevel(7)).toBe("nothing");
+  });
+
+  it("no host: reads null, writes nothing", () => {
+    setChannelMutesHost(null);
+    setChannelNotificationLevel(7, "nothing");
+    expect(getChannelNotificationLevel(7)).toBeNull();
+    expect([...testPrefs.keys()].some((k) => k.startsWith("channelNotificationLevels"))).toBe(
+      false,
+    );
+  });
+
+  it("ignores a corrupt map entry and keeps the rest", () => {
+    testPrefs.set("channelNotificationLevels:a.example", {
+      "3": "nothing",
+      "4": "loud",
+      x: "all",
+      "-5": "all",
+      "6": 1,
+    });
+    expect([...listChannelNotificationOverrides()]).toEqual([[3, "nothing"]]);
+  });
+
+  it("reads a non-object value as no overrides", () => {
+    testPrefs.set("channelNotificationLevels:a.example", [1, 2]);
+    expect(listChannelNotificationOverrides().size).toBe(0);
+    testPrefs.set("channelNotificationLevels:a.example", "nothing");
+    expect(listChannelNotificationOverrides().size).toBe(0);
   });
 });

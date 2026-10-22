@@ -121,7 +121,7 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 		UploaderID:  r.UploaderID,
 		ChannelID:   r.ChannelID,
 		ChannelType: derefString(r.Type),
-		ChannelNSFW: r.Nsfw != nil && *r.Nsfw != 0,
+		ChannelNSFW: (r.Nsfw != nil && *r.Nsfw != 0) || (r.ParentNsfw != nil && *r.ParentNsfw != 0),
 	}, nil
 }
 
@@ -138,16 +138,18 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 // from what users.avatar still names. This single UPDATE is the
 // atomic attachment-IDOR guard for message sends: ownership is enforced in
 // the same statement that links, so there is no check-then-link race.
-// Returns the number of rows updated.
-func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+// Returns the ids it linked (UPDATE ... RETURNING id, so the answer is atomic
+// with the link), in no guaranteed order; callers diff against the request to
+// learn which ids were skipped.
+func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) ([]string, error) {
 	return linkAttachmentsToMessage(ctx, d.writer, messageID, uploaderID, attachmentIDs)
 }
 
 // linkAttachmentsToMessage is shared by legacy sends and retry-safe sends'
 // writer transaction, so both enforce the same atomic ownership predicate.
-func linkAttachmentsToMessage(ctx context.Context, exec mentionExecer, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+func linkAttachmentsToMessage(ctx context.Context, exec attachmentLinker, messageID, uploaderID int64, attachmentIDs []string) ([]string, error) {
 	if len(attachmentIDs) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 
 	placeholders := make([]string, len(attachmentIDs))
@@ -163,14 +165,35 @@ func linkAttachmentsToMessage(ctx context.Context, exec mentionExecer, messageID
 		`UPDATE attachments SET message_id = ?
 		 WHERE id IN (%s) AND message_id IS NULL
 		   AND (uploader_id = ? OR uploader_id IS NULL)
-		   AND NOT EXISTS (SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id)`,
+		   AND NOT EXISTS (SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id)
+		   AND NOT EXISTS (SELECT 1 FROM channels c WHERE c.dm_icon = attachments.id)
+		   AND NOT EXISTS (SELECT 1 FROM users u WHERE u.banner_id = attachments.id)
+		 RETURNING id`,
 		strings.Join(placeholders, ","),
 	)
-	res, err := exec.ExecContext(ctx, query, args...)
+	rows, err := exec.QueryContext(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("LinkAttachmentsToMessage: %w", err)
+		return nil, fmt.Errorf("LinkAttachmentsToMessage: %w", err)
 	}
-	return res.RowsAffected()
+	defer rows.Close() //nolint:errcheck
+	var linked []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("LinkAttachmentsToMessage scan: %w", err)
+		}
+		linked = append(linked, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("LinkAttachmentsToMessage rows: %w", err)
+	}
+	return linked, nil
+}
+
+// attachmentLinker is the query surface linkAttachmentsToMessage needs; both
+// *sql.DB (the writer) and *sql.Tx satisfy it.
+type attachmentLinker interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 // GetAttachmentsByMessageIDs returns attachments grouped by message ID.

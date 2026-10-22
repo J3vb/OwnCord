@@ -40,3 +40,26 @@ func TestRemoveOldBinary_PreservesReplacement(t *testing.T) {
 		t.Fatalf("replacement after cleanup = %q, %v; want new version", contents, err)
 	}
 }
+
+// A crash between creating and removing the updater's writability probe
+// leaves chatserver.old-probe-*; the ".old-" prefix lets the boot cleanup
+// remove it like any other previous binary.
+func TestRemoveOldBinary_RemovesLeftoverProbe(t *testing.T) {
+	exePath := filepath.Join(t.TempDir(), "chatserver")
+	if err := os.WriteFile(exePath, []byte("current"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	probe := exePath + ".old-probe-123456"
+	if err := os.WriteFile(probe, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	removeOldBinaryAt(exePath, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if _, err := os.Stat(probe); !os.IsNotExist(err) {
+		t.Errorf("leftover probe still present after cleanup: %v", err)
+	}
+	if _, err := os.Stat(exePath); err != nil {
+		t.Errorf("cleanup removed the current binary: %v", err)
+	}
+}

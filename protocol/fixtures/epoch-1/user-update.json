@@ -1,0 +1,105 @@
+{
+  "journey": "user-update",
+  "connections": {
+    "a": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 5,
+          "payload": {
+            "about": "edited fixture profile text",
+            "avatar": "https://fixtures.invalid/alice-avatar.png",
+            "banner": null,
+            "banner_color": "#112233",
+            "display_name": "Alice Fixture",
+            "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
+            "user_id": "<id:number>",
+            "username": "alice"
+          },
+          "seq": "<seq:number>",
+          "type": "user_update"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 6,
+          "payload": {
+            "about": null,
+            "avatar": null,
+            "banner": null,
+            "banner_color": null,
+            "display_name": "Bob Fixture",
+            "user_id": "<id:number>",
+            "username": "bob"
+          },
+          "seq": "<seq:number>",
+          "type": "user_update"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 3,
+          "payload": {
+            "about": "edited fixture profile text",
+            "avatar": "https://fixtures.invalid/alice-avatar.png",
+            "banner": null,
+            "banner_color": "#112233",
+            "display_name": "Alice Fixture",
+            "identity_public_key": "YWxpY2UtaWRlbnRpdHktcHVibGljLWtleS1maXh0dXJl",
+            "user_id": "<id:number>",
+            "username": "alice"
+          },
+          "seq": "<seq:number>",
+          "type": "user_update"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 4,
+          "payload": {
+            "about": null,
+            "avatar": null,
+            "banner": null,
+            "banner_color": null,
+            "display_name": "Bob Fixture",
+            "user_id": "<id:number>",
+            "username": "bob"
+          },
+          "seq": "<seq:number>",
+          "type": "user_update"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

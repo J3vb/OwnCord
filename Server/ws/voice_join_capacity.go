@@ -31,14 +31,14 @@ func voiceJoinCapacity(sub permissions.Subject, maxUsers int) int {
 // for the race; this is advisory, exactly as in the move path. On refusal it
 // has already sent the error frame and returns false.
 func (h *Hub) voiceJoinSwitchCapacityOK(ctx context.Context, c *Client, channelID int64, maxUsers int, reqID string) bool {
-	cur := c.getVoiceChID()
+	cur := c.voice.channel()
 	if cur <= 0 || cur == channelID || maxUsers <= 0 {
 		return true
 	}
 	count, err := h.voice.CountInChannel(ctx, channelID)
 	if err != nil {
 		slog.Error("ws voice_join: capacity pre-check failed", "err", err, "channel_id", channelID)
-		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "failed to check channel capacity", reqID))
+		voiceJoinFail(ctx, c, reqID, err, ErrCodeInternal, "failed to check channel capacity")
 		return false
 	}
 	if count >= maxUsers {

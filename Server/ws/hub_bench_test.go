@@ -8,7 +8,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -163,6 +165,51 @@ func BenchmarkBroadcastFanout(b *testing.B) {
 		for _, s := range sends {
 			if msg := <-s; len(msg) == 0 {
 				b.Fatal("a client's send queue was closed: the fan-out overflowed it")
+			}
+		}
+	}
+}
+
+// BenchmarkChannelActivityFlush is one channel_activity flush at the capacity
+// ceiling's shape (docs/capacity.md): 500 connected readers, none focused, 11
+// busy channels. One op notes a message in each channel and flushes the window,
+// so every reader gets one frame listing all 11 channels. The audience is
+// resolved once per channel through the cached permission service, not once per
+// reader per channel; each iteration drains the queues so the sends never hit
+// the full-queue drop path.
+func BenchmarkChannelActivityFlush(b *testing.B) {
+	quietLogs(b)
+	database := openTestDB(b)
+	limiter := auth.NewRateLimiter()
+	hub := newTestHubDeps(b, database, limiter, service.New(database, limiter))
+	const (
+		clients  = 500
+		channels = 11
+	)
+	chIDs := make([]int64, channels)
+	for i := range channels {
+		chIDs[i] = seedTestChannel(b, database, fmt.Sprintf("busy-%d", i))
+	}
+	author := seedOwnerUser(b, database, "activity-author")
+	sends := make([]chan []byte, clients)
+	for i := range clients {
+		user := seedOwnerUser(b, database, fmt.Sprintf("activity-%d", i))
+		sends[i] = make(chan []byte, 4)
+		hub.RegisterNowForTest(ws.NewTestClientWithUser(hub, user, 0, sends[i]))
+	}
+	hub.RegisterNowForTest(ws.NewTestClientWithUser(hub, author, 0, make(chan []byte, 4)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	var msgID int64
+	for range b.N {
+		for _, ch := range chIDs {
+			msgID++
+			hub.NoteChannelActivityForTest(ch, msgID, author.ID)
+		}
+		hub.FlushChannelActivityNowForTest()
+		for _, s := range sends {
+			if msg := <-s; len(msg) == 0 {
+				b.Fatal("a client's send queue was closed: the flush overflowed it")
 			}
 		}
 	}

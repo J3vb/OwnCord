@@ -1,12 +1,20 @@
 # OwnCord server — systemd unit template.
 #
 # Install:
-#   1. Create a service user and install directory:
-#        sudo useradd --system --home /opt/owncord --shell /usr/sbin/nologin owncord
-#        sudo mkdir -p /opt/owncord && sudo chown owncord:owncord /opt/owncord
-#   2. Place the chatserver binary (from GitHub Releases) in /opt/owncord/.
+#   1. Create a service user. Its home is the state directory, which systemd
+#      creates and owns (StateDirectory=owncord, /var/lib/owncord):
+#        sudo useradd --system --home /var/lib/owncord --shell /usr/sbin/nologin owncord
+#   2. Install the chatserver binary (from GitHub Releases), owned by root:
+#        sudo install -d -o root -g root -m 0755 /opt/owncord
+#        sudo install -o root -g root -m 0755 ./chatserver /opt/owncord/chatserver
 #   3. sudo cp deploy/owncord.service /etc/systemd/system/owncord.service
 #   4. sudo systemctl daemon-reload && sudo systemctl enable --now owncord
+#
+# Config, database, uploads and certificates live in /var/lib/owncord
+# (config.yaml, data/); the program in /opt/owncord is read-only to the service.
+#
+# Upgrading from the old layout (state under /opt/owncord)? Read "Migrating
+# from the /opt/owncord data layout" in docs/deployment.md first.
 #
 # Logs: journalctl -u owncord -f
 
@@ -14,12 +22,21 @@
 Description=OwnCord chat server
 After=network-online.target
 Wants=network-online.target
+# Refuse to start while the old layout's data still sits under /opt/owncord, so
+# a server never boots into an empty state directory. Move it first: see
+# "Migrating from the /opt/owncord data layout" in docs/deployment.md.
+AssertPathExists=!/opt/owncord/data
 
 [Service]
 Type=simple
 User=owncord
 Group=owncord
-WorkingDirectory=/opt/owncord
+WorkingDirectory=/var/lib/owncord
+# systemd creates /var/lib/owncord owned by User=, and keeps it writable under
+# ProtectSystem=strict. Config, database, uploads and certificates live here.
+# Do not add NoExecPaths= for it: the bundled LiveKit runs from data/livekit/.
+StateDirectory=owncord
+StateDirectoryMode=0750
 ExecStart=/opt/owncord/chatserver
 # always, not on-failure: the server exits 0 ON PURPOSE after an admin-panel
 # self-update, backup restore, or setup-wizard change, expecting systemd to
@@ -55,22 +72,25 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-# The install directory must stay WRITABLE: the admin panel's self-update
-# renames the new binary into place (chatserver -> chatserver.old-* swap), and
-# the data dir (SQLite, uploads, certs, backups) lives beneath it by default.
-# If you disable self-update and move data_dir elsewhere, narrow this.
+# The program in /opt/owncord is root-owned and read-only to the service; only
+# the state directory (StateDirectory= above) is writable.
 #
 # ProtectSystem=strict makes the REST of the filesystem read-only, so any
-# directory the server writes to outside /opt/owncord must be listed here too
+# directory the server writes to outside /var/lib/owncord must be listed here
 # or that write fails with EROFS — including the documented off-disk
 # backup.dir and upload.storage_dir. Add a line like the example below for
 # each extra path you configure:
 #   ReadWritePaths=/mnt/backup-disk/owncord
-ReadWritePaths=/opt/owncord
+#
+# Admin-panel self-update is opt-in. To enable it, add a drop-in
+# (systemctl edit owncord) containing "[Service]" and
+# "ReadWritePaths=/opt/owncord", and chown the folder to owncord. See "Opt in
+# to admin-panel updates" in docs/deployment.md.
 
-# Only needed for tls.mode: acme (binds :80 for HTTP-01 challenges) as a
-# non-root user. Harmless otherwise; remove if you prefer.
-AmbientCapabilities=CAP_NET_BIND_SERVICE
+# Only needed for tls.mode: acme, which binds :80 for HTTP-01 challenges
+# (Server/internal/app/http.go, startACMEServer) as a non-root user. Uncomment
+# it if you use tls.mode: acme.
+#AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target

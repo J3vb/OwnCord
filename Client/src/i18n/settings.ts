@@ -7,7 +7,7 @@ import { defineCatalog } from "./format";
  * loaded settings overlay, so none of it is in the startup chunk.
  */
 export const settingsText = defineCatalog("settings", {
-  "tabs.safety": "Safety",
+  "tabs.safety": "Privacy & Safety",
   "tabs.account": "Account",
   "tabs.appearance": "Appearance",
   "tabs.notifications": "Notifications",
@@ -30,7 +30,15 @@ export const settingsText = defineCatalog("settings", {
   "shell.appSettings": "App Settings",
   "shell.editProfile": "Edit Profile",
   "shell.logOut": "Log Out",
+  "shell.version": "Version {version}",
+  "logout.confirm.title": "Log Out",
+  "logout.confirm.body": "Are you sure you want to log out?",
+  "logout.confirm.button": "Log Out",
   "shell.esc": "ESC",
+  "search.label": "Search settings",
+  "search.placeholder": "Search",
+  "search.clear": "Clear search",
+  "search.noResults": "No results",
 
   "accessibility.reducedMotion.label": "Reduce Motion",
   "accessibility.reducedMotion.desc": "Disable animations and transitions",
@@ -46,6 +54,14 @@ export const settingsText = defineCatalog("settings", {
   "accessibility.group.motion": "Motion",
   "accessibility.group.readability": "Readability",
   "accessibility.group.chat": "Chat",
+  "accessibility.underlineLinks.label": "Always underline links",
+  "accessibility.underlineLinks.desc":
+    "Underline links in messages even when you are not pointing at them",
+  "accessibility.group.colors": "Colors",
+  "accessibility.saturation.label": "Saturation",
+  "accessibility.saturation.desc":
+    "Make colored names and primary buttons more or less vivid. Images and video are not changed",
+  "accessibility.saturation.value": "{percent}%",
   "accessibility.textSize.label": "Text size",
   "accessibility.textSize.desc": "Set in Appearance",
   "accessibility.largeFont.label": "Large Font",
@@ -54,11 +70,20 @@ export const settingsText = defineCatalog("settings", {
   "appearance.theme": "Theme",
   "appearance.fontSize": "Font Size",
   "appearance.fontSize.value": "{size}px",
+  "appearance.theme.system": "Sync with computer",
   "appearance.compactMode": "Compact Mode",
+  "appearance.zoom": "Zoom Level",
+  "appearance.zoom.value": "{percent}%",
+  "appearance.zoom.reset": "Reset",
+  "appearance.zoom.resetAria": "Reset zoom to 100%",
   "appearance.timeFormat": "Time Format",
   "appearance.timeFormat.desc": "Choose 12-hour or 24-hour clocks for timestamps",
   "appearance.timeFormat.12h": "12-hour",
   "appearance.timeFormat.24h": "24-hour",
+  "appearance.memberLayout": "Member list position",
+  "appearance.memberLayout.desc": "Show the member list beside the chat or under the channels",
+  "appearance.memberLayout.right": "Right side",
+  "appearance.memberLayout.left": "Under channels",
   "appearance.accentColor": "Accent Color",
   "appearance.accentAria": "Custom accent color (hex)",
   "appearance.accentNote":
@@ -81,6 +106,8 @@ export const settingsText = defineCatalog("settings", {
   "notifications.flash.desc": "Flash taskbar on new messages",
   "notifications.suppress.label": "Suppress @everyone",
   "notifications.suppress.desc": "Mute @everyone and @here — messages that name you still notify",
+  "notifications.unreadBadge.label": "Unread message badge",
+  "notifications.unreadBadge.desc": "Show the unread count on the taskbar or tray icon",
   "notifications.sounds.label": "Notification Sounds",
   "notifications.sounds.desc": "Play sounds for notifications",
   "notifications.callSound.label": "Incoming Call Sound",
@@ -88,10 +115,29 @@ export const settingsText = defineCatalog("settings", {
   "notifications.voiceSounds.label": "Voice Sounds",
   "notifications.voiceSounds.desc":
     "Play a sound when someone joins or leaves your call, and when you mute or deafen",
+  "notifications.volume.label": "App sounds volume",
+  "notifications.volume.desc":
+    "How loud OwnCord's own sounds are. 100% is the normal level, 0% is silent.",
+  "notifications.volume.value": "{percent}%",
+  "notifications.sound.message.label": "Message sound",
+  "notifications.sound.message.desc": "The chime for a new message",
+  "notifications.sound.mention.label": "Mention sound",
+  "notifications.sound.mention.desc": "The chime when a message names you",
+  "notifications.sound.ring.label": "Ring sound",
+  "notifications.sound.ring.desc": "The chime that repeats while someone calls you",
+  "notifications.sound.ringback.label": "Ringback sound",
+  "notifications.sound.ringback.desc": "The soft tone you hear while your call rings",
+  "notifications.sound.joinLeave.label": "Join and leave sounds",
+  "notifications.sound.joinLeave.desc":
+    "When you or someone in your call joins, leaves or is moved",
+  "notifications.sound.muteDeafen.label": "Mute and deafen sounds",
+  "notifications.sound.muteDeafen.desc": "When you mute, unmute, deafen or undeafen",
+  "notifications.sound.stream.label": "Stream sounds",
+  "notifications.sound.stream.desc": "When a screen share starts or ends in your call",
   "notifications.level.label": "Notification Level",
   "notifications.level.desc": "Default for every server. A server can override it below.",
-  "notifications.level.all": "All",
-  "notifications.level.mentions": "Mentions only",
+  "notifications.level.all": "All Messages",
+  "notifications.level.mentions": "Only @mentions",
   "notifications.level.nothing": "Nothing",
   "notifications.serverLevel.label": "This server",
   "notifications.serverLevel.desc": "Override the level for the server you are connected to",
@@ -101,6 +147,15 @@ export const settingsText = defineCatalog("settings", {
     "Muted channels never notify you, but messages that mention you still do.",
   "notifications.muted.empty": "Nothing is muted.",
   "notifications.muted.unmute": "Unmute",
+  "notifications.muted.unmuteLabel": "Unmute {name}",
+  "notifications.muted.until": "Until {time}",
+  "notifications.muted.untilDate": "Until {date}, {time}",
+  "notifications.channelLevels.title": "Channel Notification Overrides",
+  "notifications.channelLevels.desc":
+    "Channels with their own notification level. They ignore the server level in both directions.",
+  "notifications.channelLevels.empty": "No channel has its own level.",
+  "notifications.channelLevels.reset": "Reset",
+  "notifications.channelLevels.resetLabel": "Reset {name}",
   "notifications.channelFallback": "Channel {id}",
 
   "images.linkPreview.label": "Link Preview",
@@ -112,6 +167,10 @@ export const settingsText = defineCatalog("settings", {
   "images.animateGifs.label": "Animate GIFs",
   "images.animateGifs.desc":
     "Play GIF animations automatically. When disabled, GIFs show as static images",
+
+  "images.animateEmoji.label": "Animate emoji",
+  "images.animateEmoji.desc":
+    "Play animated custom emoji. When disabled, they show their first frame",
 
   "keybinds.pushToTalk": "Push to Talk",
   "keybinds.clickToSet": "Click to set keybind",
@@ -126,31 +185,73 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.pttReleaseDelay": "Push to Talk release delay",
   "keybinds.pttReleaseDelay.value": "{ms} ms",
   "keybinds.pttUnsupported":
-    "Push to Talk needs global key observation, which this desktop does not support (macOS or a Wayland session). The key can be captured but never gates your microphone; use the mic button or Tray instead.",
+    "Push to Talk needs a global key service, which this desktop does not have (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop). The key can be captured but never gates your microphone; use the mic button or Tray instead.",
+  "keybinds.pttPortalHint":
+    "On Wayland your desktop reserves this key for OwnCord in every app. Pick a function key; you can choose another in the system dialog. Clear turns Push to Talk off in OwnCord, but your desktop keeps the key until you change it in system settings.",
+  "keybinds.portalClickToSet": "Click, then press a function key",
+  "keybinds.pressFunctionKey": "Press a function key (F1-F24)...",
+  "keybinds.portalWaiting": "Waiting for your desktop...",
+  "keybinds.portalSetUp": "Set up global shortcuts",
+  "keybinds.portalChange": "Change in system settings",
+  "keybinds.portalWhereToChange":
+    "To change these keys, open your desktop's shortcut settings: GNOME Settings > Keyboard > Shortcuts, or KDE System Settings > Shortcuts.",
+  "keybinds.portalHint":
+    "Your desktop manages these shortcuts. They work while OwnCord is unfocused, but your desktop keeps the keys for OwnCord in every app, so choose keys you do not need elsewhere.",
+  "keybinds.portalCancelled": "Setup was cancelled. No global shortcuts were changed.",
+  "keybinds.portalFailed": "Your desktop could not set up global shortcuts. Try again.",
   "keybinds.navigation": "Navigation",
   "keybinds.communication": "Communication",
   "keybinds.messages": "Messages",
   "keybinds.voiceHint":
-    "Mute and Deafen work anywhere; the camera shortcut applies while you are connected to a voice channel.",
+    "Mute and Deafen work anywhere. Camera, screen share and disconnect apply while you are connected to a voice channel.",
   "keybinds.globalHint":
     "Mute and Deafen also work while OwnCord is unfocused — via the global shortcuts you set below (Ctrl + Shift + M / Ctrl + Shift + D by default), or the tray menu. On Linux (X11) the global keys use the key positions of a US layout.",
   "keybinds.globalHintUnsupported":
-    "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop does not support global mute/deafen shortcuts.",
+    "Mute and Deafen work while OwnCord is unfocused through the tray menu. This desktop has no global shortcut service (macOS, or Linux on GNOME 47 or older, Sway or another wlroots desktop), so global mute/deafen shortcuts are not available.",
   "keybinds.globalSection": "Global Shortcuts",
   "keybinds.globalConflict": "That combination is already used by another shortcut.",
   "keybinds.globalKey": "Ctrl + Shift + {key}",
-  "keybinds.globalAria": "Global mute keybind — click to rebind",
-  "keybinds.globalDeafenAria": "Global deafen keybind — click to rebind",
+  "keybinds.globalAria": "Global mute keybind",
+  "keybinds.globalDeafenAria": "Global deafen keybind",
+  "keybinds.rebindAria": "{action}: {combo}",
+  "keybinds.resetOne": "Reset",
+  "keybinds.resetAria": "Reset {action} keybind to its default",
+  "keybinds.removeAria": "Remove {action} keybind",
+  "keybinds.resetAll": "Reset all keybinds",
+  "keybinds.mod.ctrl": "Ctrl",
+  "keybinds.mod.shift": "Shift",
+  "keybinds.mod.alt": "Alt",
+  "keybinds.conflictWith": "Already used by {action}.",
+  "keybinds.conflictReserved": "Your system or text editing keeps that combination.",
+  "keybinds.conflictNeedsModifier":
+    "Hold Ctrl or Alt with the key, or use a function key on its own.",
+  "keybinds.conflictFixed": "That combination is a fixed shortcut in OwnCord.",
+  "keybinds.conflictPtt": "That key is used by Push to Talk.",
+  "keybinds.pttKeyInUse": "That key is already used by the {action} keybind.",
+  "keybinds.layoutNote":
+    "On some keyboard layouts these keys can share a physical key with Mute or Deafen, and Mute and Deafen then win.",
+  "keybinds.portalPriority": "Your desktop's own shortcuts take priority over these keys.",
   "keybinds.formatHint":
-    "Formatting shortcuts wrap the selected text while the message box has focus; Ctrl + U uploads a file everywhere else.",
+    "Formatting shortcuts wrap the selected text while the message box has focus. Typing anywhere else in the chat starts a message.",
+  "shortcuts.title": "Keyboard Shortcuts",
+  "shortcuts.close": "Close",
   "keybinds.action.quickSwitcher": "Quick Switcher",
   "keybinds.action.searchMessages": "Search Messages",
+  "keybinds.action.openSettings": "Open Settings",
+  "keybinds.action.showShortcuts": "Show Keyboard Shortcuts",
   "keybinds.action.closeOverlay": "Close Overlay / Cancel",
+  "keybinds.action.markChannelRead": "Mark Channel as Read",
+  "keybinds.action.markServerRead": "Mark Server as Read",
+  "keybinds.action.scrollChat": "Scroll Chat",
+  "keybinds.action.emojiPicker": "Emoji Picker",
+  "keybinds.action.gifPicker": "GIF Picker",
   "keybinds.action.nextChannel": "Previous / Next Channel",
   "keybinds.action.nextUnreadChannel": "Previous / Next Unread Channel",
   "keybinds.action.toggleMute": "Toggle Mute",
   "keybinds.action.toggleDeafen": "Toggle Deafen",
   "keybinds.action.toggleCamera": "Toggle Camera",
+  "keybinds.action.toggleScreenshare": "Toggle Screen Share",
+  "keybinds.action.disconnect": "Disconnect from Voice",
   "keybinds.action.uploadFile": "Upload File",
   "keybinds.action.editLastMessage": "Edit Last Message",
   "keybinds.action.bold": "Bold",
@@ -158,17 +259,25 @@ export const settingsText = defineCatalog("settings", {
   "keybinds.action.underline": "Underline",
   "keybinds.key.ctrlK": "Ctrl + K",
   "keybinds.key.ctrlF": "Ctrl + F",
+  "keybinds.key.ctrlComma": "Ctrl + ,",
+  "keybinds.key.ctrlSlash": "Ctrl + /",
   "keybinds.key.escape": "Escape",
   "keybinds.key.altArrow": "Alt + ↑ / ↓",
   "keybinds.key.altShiftArrow": "Alt + Shift + ↑ / ↓",
   "keybinds.key.ctrlShiftV": "Ctrl + Shift + V",
   "keybinds.key.ctrlU": "Ctrl + U",
+  "keybinds.key.ctrlShiftU": "Ctrl + Shift + U",
+  "keybinds.key.ctrlE": "Ctrl + E",
+  "keybinds.key.ctrlG": "Ctrl + G",
+  "keybinds.key.shiftEscape": "Shift + Escape",
+  "keybinds.key.pageUpDown": "Page Up / Page Down",
   "keybinds.key.arrowUp": "Arrow Up",
   "keybinds.key.ctrlB": "Ctrl + B",
   "keybinds.key.ctrlI": "Ctrl + I",
 
   "advanced.developerMode.label": "Developer Mode",
-  "advanced.developerMode.desc": "Show message IDs, user IDs, and channel IDs on context menus",
+  "advanced.developerMode.desc":
+    "Add Copy Message ID, Copy User ID and Copy Channel ID to right-click menus",
   "advanced.debug": "Debug",
   "advanced.devtools.label": "Open DevTools",
   "advanced.devtools.desc": "Open the browser developer tools for debugging",
@@ -190,6 +299,12 @@ export const settingsText = defineCatalog("settings", {
   "advanced.button.confirmAgain": "Are you sure? Click again",
   "advanced.launchOnLogin.label": "Launch on Login",
   "advanced.launchOnLogin.desc": "Start OwnCord automatically when you sign in to your computer",
+  "advanced.minimizeToTray.label": "Close to Tray",
+  "advanced.minimizeToTray.desc":
+    "Closing the window keeps OwnCord running in the tray, if your desktop shows one. Quit from the tray menu.",
+  "advanced.startMinimized.label": "Start Minimized",
+  "advanced.startMinimized.desc":
+    "When OwnCord starts at login, keep the window hidden in the tray",
 
   "diagnostics.title": "Connection test",
   "diagnostics.description":
@@ -250,6 +365,8 @@ export const settingsText = defineCatalog("settings", {
   "logs.bundleNote":
     "Saves a zip of your logs, diagnostics and settings on this computer. Nothing is uploaded. Log lines are not redacted, so read them before sharing.",
   "logs.bundleSaved": "Support bundle saved.",
+  "logs.openFolder": "Open Log Folder",
+  "logs.openFolderFailed": "Could not open the log folder: {error}",
   "logs.exportFailed": "Export failed: {error}",
   "logs.bundleReadme":
     "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nSettings are copied from a fixed allowlist and the OS keychain is not read, so\nno password, session token, recovery kit, recovery code or 2FA secret is taken\nfrom them. The log files are NOT redacted: they are exported exactly as written\nand can contain anything the app logged. Read them before sharing this bundle,\nand share it only with someone you trust.\n",
@@ -290,6 +407,14 @@ export const settingsText = defineCatalog("settings", {
     "The microphone prompt did not finish. Dismiss any pending prompt, then retry. Any late capture will be stopped.",
   "diagnostics.detail.micFailed":
     "The selected microphone could not open. Check Voice & Video settings and reconnect your device.",
+  "diagnostics.detail.micSilent":
+    "The microphone opened but no audio arrived. Check that it is not muted at the system level, or pick another microphone in Voice & Video settings.",
+  "diagnostics.detail.micNativePresent":
+    "Your microphone opened and reported audio. The test capture has stopped; nothing was recorded or sent.",
+  "diagnostics.detail.micNativeDefault":
+    "Your saved microphone is not connected, so calls will use the system default. The default opened and reported audio; nothing was recorded or sent.",
+  "diagnostics.detail.micNativeInCall":
+    "You are in a call, so its capture already holds your microphone and it was not opened again. The level bar in Voice & Video settings shows it live.",
   "diagnostics.detail.micSkipped": "Microphone check was not selected.",
   "diagnostics.detail.joinVoice": "Join a voice channel yourself, then run this test again.",
   "diagnostics.detail.joinCall":
@@ -311,6 +436,8 @@ export const settingsText = defineCatalog("settings", {
   "diagnostics.detail.kinds.audioAndVideo": "audio and video",
   "diagnostics.detail.mediaMissing":
     "No advancing decoded media was observed. Ask someone to speak or share video and retry. If they are already sending, check voice permissions, encryption warnings and the media network path.",
+  "diagnostics.detail.mediaNative":
+    "Incoming media cannot be checked on Linux: the web view has no WebRTC, so this test has no receiver to inspect. Hearing or seeing another participant in your call is the check.",
   "diagnostics.detail.mediaFailed":
     "Incoming media could not be inspected. Rejoin the call and retry.",
   "diagnostics.detail.connectionTimeout":
@@ -334,7 +461,8 @@ export const settingsText = defineCatalog("settings", {
     "Hear yourself the way others will, through your output device. Use headphones to avoid echo.",
   "voiceAudio.micTest.start": "Let's Check",
   "voiceAudio.micTest.stop": "Stop Testing",
-  "voiceAudio.micTest.linux": "The mic test is not available on Linux yet.",
+  "voiceAudio.micTest.inCall": "Leave the voice channel to test your mic.",
+  "voiceAudio.micTest.failed": "The mic test could not start.",
   "voiceAudio.previewOff": "Camera off",
   "voiceAudio.noCamera": "No camera found",
   "voiceAudio.gstreamerMissing":
@@ -368,14 +496,23 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.screenFps": "Screen Share FPS",
   "voiceAudio.screenFpsDesc":
     "Higher frame rates use more bandwidth and depend on what the capture source and display can deliver. Takes effect the next time you start sharing.",
+  "voiceAudio.screenFpsWaylandNote": "On a Wayland desktop, screen sharing is limited to 60 FPS.",
   "voiceAudio.fps.30": "30 FPS (default)",
   "voiceAudio.fps.60": "60 FPS",
   "voiceAudio.fps.120": "120 FPS",
   "voiceAudio.videoCodec": "Video Codec",
   "voiceAudio.videoCodecDesc":
-    "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. Takes effect the next time you turn on your camera or start sharing.",
+    "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. A 120 fps screen share uses H.264 when your graphics card can encode it, whatever you choose here. H.264 falls back to VP8 when your graphics card can't encode it. Takes effect the next time you turn on your camera or start sharing.",
   "voiceAudio.videoCodec.vp8": "VP8 (default, most compatible)",
+  "voiceAudio.videoCodec.vp9": "VP9 (sharper text)",
+  "voiceAudio.videoCodec.h265": "H.265 (hardware only)",
   "voiceAudio.videoCodec.h264": "H.264 (uses your graphics card when it can)",
+  "voiceAudio.videoCodec.h264Linux": "H.264 (software)",
+  "voiceAudio.videoCodec.autoLinux": "Auto (VP8)",
+  "voiceAudio.videoCodec.h264Unavailable": "H.264 (not available in this build)",
+  "voiceAudio.videoCodecDescLinux":
+    "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. Takes effect the next time you turn on your camera or start sharing.",
+  "voiceAudio.videoCodecLinux": "Linux encodes video in software; VP8 uses the least CPU.",
   "voiceAudio.videoCodecIntel":
     "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
   "voiceAudio.videoCodec.auto": "Auto (H.264 when your graphics card can encode it, otherwise VP8)",
@@ -395,7 +532,6 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.enhanced.label": "Enhanced Noise Suppression",
   "voiceAudio.enhanced.desc":
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
-  "voiceAudio.applyNextJoin": "{desc}. Applies when you next join a voice channel.",
   "voiceAudio.nativeNote":
-    "On Linux, audio runs in the app's native engine. Your microphone level is handled by the engine's automatic gain control, so the input volume control is not available here and the level bar stays empty. Use your system mixer to adjust your microphone level.",
+    "On Linux, the mic test cannot run during a call; the level bar then shows your call's microphone.",
 });

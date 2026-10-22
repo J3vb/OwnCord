@@ -1,9 +1,16 @@
 import { test, expect } from "./fixtures";
 import {
+  buildTauriMockScript,
   mockTauriFullSession,
   mockTauriFullSessionWithMessages,
   navigateToMainPage,
   emitWsMessage,
+  openSettings,
+  switchSettingsTab,
+  waitForWsReady,
+  MOCK_LOGIN_RESPONSE,
+  MOCK_MESSAGES,
+  MOCK_PINNED_MESSAGES,
 } from "./helpers";
 
 test.describe("Member List", () => {
@@ -89,6 +96,57 @@ test.describe("Member List", () => {
 
     // Should now have offline class
     await expect(otherUserItem).toHaveClass(/offline/, { timeout: 5_000 });
+
+    // ...and sit under the OFFLINE header.
+    const offlineHeader = page.locator("[data-testid='member-group-offline']");
+    await expect(offlineHeader).toHaveText("OFFLINE — 1");
+    await expect(
+      offlineHeader.locator("xpath=following-sibling::*[1]").locator(".mi-name"),
+    ).toHaveText("otheruser");
+  });
+
+  test("the search box filters the rows and Escape restores the list", async ({ page }) => {
+    const search = page.locator("[data-testid='member-search']");
+    await expect(search).toBeVisible({ timeout: 5_000 });
+    const names = page.locator(".member-item .mi-name");
+    await expect(names.first()).toBeVisible();
+    const all = await names.allTextContents();
+    expect(all).toContain("otheruser");
+
+    await search.fill("@OTHERUS");
+    await expect(names).toHaveText(["otheruser"]);
+    await expect(page.locator(".member-role-group")).toHaveText([/— 1$/]);
+
+    await search.fill("zzz-no-match");
+    await expect(page.locator(".member-item")).toHaveCount(0);
+    await expect(page.locator(".member-list-empty-text")).toHaveText(
+      "No members match your search",
+    );
+
+    await search.press("Escape");
+    await expect(search).toHaveValue("");
+    await expect(search).toBeFocused();
+    await expect(names).toHaveText(all);
+  });
+
+  test("member list is visible in the right column by default", async ({ page }) => {
+    // No stored layout: the default is the right-hand column (3C-6c).
+    const column = page.locator("[data-testid='member-column']");
+    await expect(column).toBeVisible({ timeout: 3_000 });
+    await expect(column.locator("[data-testid='member-list']")).toBeVisible();
+    await expect(page.locator("[data-testid='sidebar-members']")).toHaveCount(0);
+  });
+});
+
+test.describe("Member List — under the channels", () => {
+  test.beforeEach(async ({ page }) => {
+    // The default moved to the right column in 3C-6c; this is the left layout.
+    await page.addInitScript(() => {
+      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
+    });
+    await mockTauriFullSession(page);
+    await page.goto("/");
+    await navigateToMainPage(page);
   });
 
   test("member list is always visible in sidebar", async ({ page }) => {
@@ -110,12 +168,121 @@ test.describe("Member List — Multi-role", () => {
     const members = page.locator(".member-item");
     expect(await members.count()).toBeGreaterThanOrEqual(3);
 
-    // Multiple role groups should be present
-    const roleGroups = page.locator(".member-role-group");
-    expect(await roleGroups.count()).toBeGreaterThanOrEqual(2);
+    // Each role counts only its online members; offline people share the
+    // last group.
+    await expect(page.locator(".member-role-group")).toHaveText([
+      "ADMIN — 1",
+      "MODERATOR — 1",
+      "MEMBER — 2",
+      "OFFLINE — 1",
+    ]);
 
     // Offline members should have the offline class
     const offlineMembers = page.locator(".member-item.offline");
     await expect(offlineMembers.first()).toBeAttached({ timeout: 5000 });
+  });
+});
+
+// 3C-6b: the right-hand column, its header toggle and the Appearance setting.
+test.describe("Member List — right column (3C-6b)", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(
+      buildTauriMockScript({
+        httpRoutes: [
+          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+          { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
+        ],
+        simulateWsFlow: true,
+        readyOverrides: {
+          dm_channels: [
+            {
+              channel_id: 100,
+              recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
+              last_message_id: 500,
+              last_message: "Hey there!",
+              last_message_at: "2026-03-15T12:00:00Z",
+              unread_count: 0,
+            },
+          ],
+        },
+      }),
+    );
+    await page.addInitScript(() => {
+      // Only on the first load: a reload must keep what the test changed.
+      if (sessionStorage.getItem("e2e-seeded") !== null) return;
+      sessionStorage.setItem("e2e-seeded", "1");
+      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("right"));
+    });
+    await page.goto("/");
+    await navigateToMainPage(page);
+    await waitForWsReady(page);
+  });
+
+  test("shows the seeded members in the column; the toggle hides it and the choice survives a reload", async ({
+    page,
+  }) => {
+    const column = page.locator("[data-testid='member-column']");
+    const toggle = page.locator("[data-testid='member-list-toggle']");
+    await expect(column).toBeVisible();
+    await expect(column.locator("[data-testid='member-1']")).toBeVisible();
+    await expect(column.locator(".mi-name", { hasText: "otheruser" })).toBeVisible();
+    await expect(page.locator("[data-testid='sidebar-members']")).toHaveCount(0);
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(1);
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toHaveAttribute("aria-controls", "member-column");
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(column).toBeHidden();
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+
+    await page.reload();
+    await navigateToMainPage(page);
+    await waitForWsReady(page);
+    await expect(toggle).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(column).toBeHidden();
+
+    await toggle.click();
+    await expect(column).toBeVisible();
+    await expect(column.locator("[data-testid='member-1']")).toBeVisible();
+  });
+
+  test("in a DM the toggle and the column are gone", async ({ page }) => {
+    const column = page.locator("[data-testid='member-column']");
+    const toggle = page.locator("[data-testid='member-list-toggle']");
+    await expect(column).toBeVisible();
+
+    await page.locator("[data-testid='dm-entry']").first().click();
+    await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
+    await expect(toggle).toBeHidden();
+    await expect(column).toBeHidden();
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(0);
+  });
+
+  test("Appearance > Member list position moves the list under the channels, with one list throughout", async ({
+    page,
+  }) => {
+    await openSettings(page);
+    await switchSettingsTab(page, "Appearance");
+    const group = page.locator("[data-testid='member-layout']");
+    await expect(group.locator("[aria-checked='true']")).toHaveAttribute("data-value", "right");
+
+    await page.locator("[data-testid='member-layout-left']").click();
+    await expect(page.locator("[data-testid='sidebar-members']")).toBeAttached();
+    await expect(page.locator("[data-testid='member-column']")).toBeHidden();
+    await expect(page.locator("[data-testid='member-list-toggle']")).toBeHidden();
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(1);
+
+    await page.locator("[data-testid='member-layout-right']").click();
+    await expect(page.locator("[data-testid='sidebar-members']")).toHaveCount(0);
+    await expect(
+      page.locator("[data-testid='member-column'] [data-testid='member-list']"),
+    ).toHaveCount(1);
+    await expect(page.locator("[data-testid='member-list']")).toHaveCount(1);
   });
 });

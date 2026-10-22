@@ -117,7 +117,7 @@ func TestChannelFocusBurst_NewestDeferredWins(t *testing.T) {
 // the drain finds nothing to apply and a stale channel cannot overwrite it.
 func TestChannelFocusBurst_AppliedFocusClearsPending(t *testing.T) {
 	hub, c, chans, _ := newFocusHub(t, 7)
-	hub.deferChannelFocus(c, chans[5], "req-defer")
+	hub.deferChannelFocus(c, chans[5], "req-defer", true)
 	hub.applyFocusResult(c, MsgTypeChannelFocus, chans[6])
 	c.mu.Lock()
 	pending := c.pendingFocusChID
@@ -155,10 +155,37 @@ func TestChannelFocusBurst_DisconnectStopsDrain(t *testing.T) {
 // to a channel they only passed through.
 func TestChannelFocusBurst_FailedFocusSupersedesPending(t *testing.T) {
 	hub, c, chans, _ := newFocusHub(t, 1)
-	hub.deferChannelFocus(c, chans[0], "req-defer")
+	hub.deferChannelFocus(c, chans[0], "req-defer", true)
 	hub.HandleMessageForTest(c, focusFrame(999_999))
 	waitFor(t, "drain goroutine to exit", func() bool { return !drainActive(c) })
 	if subscribed(hub, c, chans[0]) || c.getChannelID() == chans[0] {
 		t.Error("deferred focus must not land after a newer focus frame")
+	}
+}
+
+// A deferred read:false focus must stay read:false when the drain applies it:
+// it subscribes without marking the channel read, while a deferred default
+// focus does mark it.
+func TestDeferredFocus_KeepsReadFlag(t *testing.T) {
+	hub, c, chans, _ := newFocusHub(t, 2)
+	ctx := context.Background()
+	if _, err := hub.db.CreateMessage(ctx, chans[0], c.userID, "unread", nil); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := hub.db.CreateMessage(ctx, chans[1], c.userID, "unread", nil); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	hub.deferChannelFocus(c, chans[0], "req-noread", false)
+	waitFor(t, "read:false focus to land", func() bool { return c.getChannelID() == chans[0] })
+	waitFor(t, "drain goroutine to exit", func() bool { return !drainActive(c) })
+	if _, _, found, err := hub.db.GetReadState(ctx, c.userID, chans[0]); err != nil || found {
+		t.Errorf("deferred read:false focus wrote a read state (found=%v err=%v)", found, err)
+	}
+
+	hub.deferChannelFocus(c, chans[1], "req-read", true)
+	waitFor(t, "default focus to land", func() bool { return c.getChannelID() == chans[1] })
+	waitFor(t, "drain goroutine to exit", func() bool { return !drainActive(c) })
+	if _, _, found, err := hub.db.GetReadState(ctx, c.userID, chans[1]); err != nil || !found {
+		t.Errorf("deferred default focus left no read state (found=%v err=%v)", found, err)
 	}
 }

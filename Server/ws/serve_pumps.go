@@ -98,7 +98,7 @@ func (d *writeDeadline) stop() {
 // connection: it may have left a message half-sent, and readPump's teardown
 // must run rather than leave a peer that never hears another event.
 func writePumpWrite(wd *writeDeadline, conn *websocket.Conn, c *Client, msg []byte) bool {
-	if err := wd.write(conn, msg); err != nil {
+	if err := wd.write(conn, c.stampCseq(msg)); err != nil {
 		slog.Warn("ws writePump error", "user_id", c.userID, "err", err)
 		_ = conn.CloseNow()
 		return false
@@ -257,10 +257,10 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		cleanupCtx := context.WithoutCancel(ctx)
 		// Snapshot voice state BEFORE unregister to avoid TOCTOU with
 		// replacement connections. The voice lock spans snapshot to park, so
-		// a reconnect's transfer (inheritParkedVoice) runs wholly before or
+		// a reconnect's transfer (voiceTxn.inherit) runs wholly before or
 		// after this teardown (WP 1D-10).
-		unlockVoice := hub.voiceLock(c.userID)
-		voiceChID := c.getVoiceChID()
+		txn := hub.begin(c.userID)
+		voiceChID := c.voice.channel()
 		replaced := hub.unregisterNow(c)
 		// Clean up voice state only when this was the user's final
 		// connection. A replacement connection owns the (transferred)
@@ -271,12 +271,12 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		//
 		// RT-8: a completed membership is parked in the grace window
 		// (voice_grace.go) instead of torn down at once, so a resuming
-		// socket can inherit the call. leaveVoiceOnDisconnect runs the
+		// socket can inherit the call. disconnectVoice runs the
 		// immediate teardown for an incomplete join or a disabled window.
 		if c.user != nil && voiceChID != 0 && !replaced {
-			hub.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonDisconnect)
+			hub.disconnectVoice(cleanupCtx, txn, c, voiceLeaveReasonDisconnect)
 		}
-		unlockVoice()
+		txn.end()
 		if c.user != nil {
 			c.mu.Lock()
 			received := c.msgsReceived
@@ -340,6 +340,6 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			return
 		}
 		c.touch()
-		hub.handleMessage(c, msg)
+		hub.handleMessage(c, msg) //nolint:contextcheck // handleMessage derives its per-frame deadline from c.ctx, the same connection context readPump runs on.
 	}
 }

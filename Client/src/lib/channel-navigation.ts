@@ -12,6 +12,9 @@ import {
 } from "@stores/channels.store";
 import { addDmToChannelsStore, clearDmUnread, dmStore, dmDisplayName } from "@stores/dm.store";
 import { isCategoryCollapsed, setActiveDmUser, uiStore } from "@stores/ui.store";
+import { isChannelMuted } from "./channel-mutes";
+import { visibleCategories } from "./permissions";
+import { hiddenByMute } from "./hide-muted-channels";
 import { hasUnread } from "./read-state";
 
 const reselectListeners = new Set<(channelId: number) => void>();
@@ -101,17 +104,32 @@ export function findChannelByName(name: string): { id: number; name: string } | 
  * step never leaves the DMs for a server channel. Otherwise it is
  * the grouped channel list (categories as headers, rows by position), with
  * collapsed categories' hidden rows skipped. Voice channels are skipped too:
- * opening one means joining the call, which a keyboard step must never do,
- * and a bare setActiveChannel would mount its chat unjoined (F8).
+ * a pick on a voice row joins the call, which a keyboard step must never do.
+ * (The call view reaches a voice channel's chat through navigateToChannel,
+ * which has no such guard.) Muted
+ * channels the sidebar hides (Hide Muted Channels) are skipped as well; the
+ * Quick Switcher still lists them.
+ *
+ * The unread step (`unreadOnly`) looks inside collapsed categories, since an
+ * unread channel there is exactly what it is for, and passes over a muted
+ * channel that has no mention (its row looks read); a muted channel with a
+ * mention still counts.
  */
-function navigableChannelIds(): number[] {
+function navigableChannelIds(unreadOnly: boolean): number[] {
   if (uiStore.getState().sidebarMode === "dms") {
     return dmStore.getState().channels.map((c) => c.channelId);
   }
   const ids: number[] = [];
-  for (const [category, channels] of getChannelsByCategory()) {
-    if (category !== null && isCategoryCollapsed(category)) continue;
-    for (const ch of channels) if (ch.type !== "voice") ids.push(ch.id);
+  // The active channel always stays in, so a step starts from where you are.
+  const active = channelsStore.getState().activeChannelId;
+  for (const [category, channels] of getChannelsByCategory(visibleCategories())) {
+    if (!unreadOnly && category !== null && isCategoryCollapsed(category)) continue;
+    for (const ch of channels) {
+      if (ch.type === "voice" || hiddenByMute(ch, active)) continue;
+      const quiet = isChannelMuted(ch.id) && ch.mentionCount === 0;
+      if (unreadOnly && quiet && ch.id !== active) continue;
+      ids.push(ch.id);
+    }
   }
   return ids;
 }
@@ -122,11 +140,12 @@ function navigableChannelIds(): number[] {
  * (up/previous); the steps wrap at the ends, matching Discord.
  *
  * Unread is what a badge counts (`hasUnread`): an unread or mention count in
- * either store. No-op when nothing matches — an up step with the active
+ * either store, except that the unread step also reaches into collapsed
+ * categories and skips muted channels without a mention. No-op when nothing matches — an up step with the active
  * channel already at the top, or an unread step when nothing is unread.
  */
 export function stepChannel(direction: 1 | -1, unreadOnly = false): void {
-  const ids = navigableChannelIds();
+  const ids = navigableChannelIds(unreadOnly);
   if (ids.length === 0) return;
   const current = channelsStore.getState().activeChannelId;
   const from = current === null ? (direction === 1 ? -1 : 0) : ids.indexOf(current);
@@ -137,7 +156,7 @@ export function stepChannel(direction: 1 | -1, unreadOnly = false): void {
   for (let step = 1; step <= ids.length; step++) {
     const idx = (((start + direction * step) % ids.length) + ids.length) % ids.length;
     const id = ids[idx]!;
-    if (!unreadOnly || hasUnread(id)) {
+    if (!unreadOnly || (hasUnread(id) && id !== current)) {
       navigateToChannel(id);
       const dm = dmStore.getState().channels.find((c) => c.channelId === id);
       if (dm !== undefined) setActiveDmUser(dm.isGroup ? null : dm.recipient.id);

@@ -489,10 +489,7 @@ func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHas
 		ExpiresAt: expiresAt,
 		Unseen:    unseenFlag,
 	})
-	if err != nil {
-		return 0, fmt.Errorf("CreateSession: %w", err)
-	}
-	return res.LastInsertId()
+	return sessionRowID(res, err, userID)
 }
 
 // GetSessionByTokenHash retrieves a session by its hashed token, or nil if
@@ -731,64 +728,21 @@ func (d *DB) RevokeInvite(ctx context.Context, code string) error {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// MemberSummary is a lightweight user shape for the ready payload.
-type MemberSummary struct {
-	ID       int64   `json:"id"`
-	Username string  `json:"username"`
-	Avatar   *string `json:"avatar"`
-	Status   string  `json:"status"`
-	Role     string  `json:"role"`
-	// IdentityPublicKey is the user's long-term E2EE identity public key
-	// (base64), pinned by peers on first sight (F3 TOFU). Omitted when the
-	// user has not published one.
-	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
-	// DisplayName is the nickname to render instead of Username. Null when
-	// unset; clients fall back to Username.
-	DisplayName *string `json:"display_name"`
-	// CustomStatus is the free-text status line shown under the name. Null
-	// when unset.
-	CustomStatus *string `json:"custom_status"`
-}
+// MemberCreatedAtLayout is the wire layout of a member's created_at: the same
+// shape ListMembers renders with strftime('%Y-%m-%dT%H:%M:%SZ', ...).
+const MemberCreatedAtLayout = "2006-01-02T15:04:05Z"
 
-// ForViewer returns a copy of the summary as viewerID may see it: an invisible
-// member is offline to everyone but themselves. Ready payloads go through this
-// so "who is invisible" is decided in exactly one place.
-func (m MemberSummary) ForViewer(viewerID int64) MemberSummary {
-	m.Status = StatusForViewer(m.Status, m.ID, viewerID)
-	// A connected-but-invisible member collapses to "offline" above, but their
-	// custom_status is a separate column BroadcastStatus never touches. Left
-	// alone, a viewer sees {status:"offline", custom_status:"<text>"} for that
-	// member while every genuinely disconnected member is
-	// {status:"offline", custom_status:null} — the surviving text is a tell
-	// that the member is actually online. Blank it at the same choke point
-	// that collapses the status so no other caller has to remember to.
-	if m.ID != viewerID && m.Status == StatusOffline {
-		m.CustomStatus = nil
+// FormatMemberCreatedAt renders a users.created_at value (SQLite's
+// datetime('now') text, "2006-01-02 15:04:05", or an RFC 3339 instant) in the
+// member wire layout, so member_join and ready.members[] agree. A value it
+// cannot parse is returned unchanged.
+func FormatMemberCreatedAt(raw string) string {
+	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339Nano} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.UTC().Format(MemberCreatedAtLayout)
+		}
 	}
-	return m
-}
-
-// ListMembers returns non-banned users as lightweight summaries.
-// M-12: Limited to 1000 rows to prevent unbounded result sets on large servers.
-func (d *DB) ListMembers(ctx context.Context) ([]MemberSummary, error) {
-	rows, err := d.q.ListMembers(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ListMembers: %w", err)
-	}
-	members := make([]MemberSummary, 0, len(rows))
-	for _, r := range rows {
-		members = append(members, MemberSummary{
-			ID:                r.ID,
-			Username:          r.Username,
-			Avatar:            r.Avatar,
-			Status:            r.Status,
-			Role:              r.Lower,
-			IdentityPublicKey: r.IdentityPublicKey,
-			DisplayName:       r.DisplayName,
-			CustomStatus:      r.CustomStatus,
-		})
-	}
-	return members, nil
+	return raw
 }
 
 // MemberGeneration returns the member generation: a counter SQLite triggers

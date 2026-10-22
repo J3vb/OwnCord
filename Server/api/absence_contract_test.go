@@ -43,6 +43,13 @@ func fullRouter(t *testing.T) http.Handler {
 // (auth_posture_test.go, dead_session_test.go).
 func fullRouterWithDB(t *testing.T) (http.Handler, *db.DB) {
 	t.Helper()
+	return fullRouterWithConfig(t, nil)
+}
+
+// fullRouterWithConfig is fullRouterWithDB with a hook that adjusts the config
+// before the runtime and router are built; nil leaves it as is.
+func fullRouterWithConfig(t *testing.T, mutate func(*config.Config)) (http.Handler, *db.DB) {
+	t.Helper()
 
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -65,7 +72,11 @@ func fullRouterWithDB(t *testing.T) (http.Handler, *db.DB) {
 		GIF: config.GIFConfig{APIKey: "absence-test"},
 	}
 
-	rt, rtErr := app.StartRuntime(cfg, database, nil)
+	if mutate != nil {
+		mutate(cfg)
+	}
+
+	rt, rtErr := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if rtErr != nil {
 		t.Fatalf("app.StartRuntime: %v", rtErr)
 	}

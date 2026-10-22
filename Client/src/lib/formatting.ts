@@ -10,10 +10,11 @@ import { loadPref } from "@lib/preferences";
 import { getTimeFormat, refreshTimeFormat } from "@lib/timeFormat";
 import { setOwnedTimeout } from "@lib/dom";
 import { messageStatusText } from "../i18n/messageStatus";
+import { isServerRowKind } from "./messageKind";
 
 // -- Constants ----------------------------------------------------------------
 
-export const GROUP_THRESHOLD_MS = 5 * 60 * 1000;
+export const GROUP_THRESHOLD_MS = 7 * 60 * 1000;
 
 // -- Timestamp helpers --------------------------------------------------------
 
@@ -84,6 +85,12 @@ export function formatTime(iso: string): string {
 
 export function formatFullDate(iso: string): string {
   return FULL_DATE_FORMAT.format(parseTimestamp(iso));
+}
+
+/** The clock time alone ("2:34 PM", or "14:34" in 24-hour mode), as the
+ *  message header writes it. */
+export function formatClockTime(iso: string): string {
+  return clockTimeFormat().format(parseTimestamp(iso));
 }
 
 /** Discord-style relative timestamp: "Today at 2:34 PM", "Yesterday at 2:34 PM",
@@ -172,6 +179,8 @@ export function isSameDay(a: string, b: string): boolean {
 }
 
 export function shouldGroup(prev: Message, curr: Message): boolean {
+  // A server row (call log, group event) is its own block: it never joins a run, and nothing joins it.
+  if (isServerRowKind(prev.kind) || isServerRowKind(curr.kind)) return false;
   if (prev.user.id !== curr.user.id) return false;
   if (prev.deleted || curr.deleted) return false;
   // A reply carries its quoted-parent header, so it starts a new block.
@@ -194,6 +203,28 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
 
 export function getUserRole(userId: number): string {
   return membersStore.getState().members.get(userId)?.role ?? "member";
+}
+
+/**
+ * Name colour for a member: the highest-position held role that has a colour
+ * (WP 6.3d), the same rule as the member list, so chat and list agree. Without
+ * `roleIds` (an older server), or when none of them carries a colour, it is
+ * `roleColorVar` of the single role name, as before.
+ */
+export function userRoleColorVar(userId: number): string {
+  const member = membersStore.getState().members.get(userId);
+  const role = member?.role ?? "member";
+  const ids = member?.roleIds;
+  if (roleColorsEnabled && ids !== undefined && ids.length > 1) {
+    let best: { position: number; color: string } | undefined;
+    for (const r of channelsStore.getState().roles) {
+      if (!ids.includes(r.id) || r.color == null || r.color === "") continue;
+      const position = r.position ?? 0;
+      if (best === undefined || position > best.position) best = { position, color: r.color };
+    }
+    if (best !== undefined) return best.color;
+  }
+  return roleColorVar(role);
 }
 
 /**

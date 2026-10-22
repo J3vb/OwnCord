@@ -10,12 +10,16 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
+import { adoptStarterThreads } from "./threadsLoader";
 import type {
   ChatMessagePayload,
   ChatEditedPayload,
   ChatDeletedPayload,
   ChatBulkDeletedPayload,
   ReactionUpdatePayload,
+  PollUpdatePayload,
+  PollVoteOkPayload,
   MessageUser,
   Attachment,
   MessageResponse,
@@ -34,6 +38,7 @@ import {
 import {
   reduceSetChannelLoading,
   reduceSetChannelLoadError,
+  reduceSetOlderLoadFailed,
   reduceSetMessages,
   reduceSetAroundMessages,
   reduceInvalidateLoadedMessageWindows,
@@ -55,6 +60,7 @@ import {
   reduceRollbackReaction,
   reduceUpdateReaction,
 } from "../features/messaging/reactionState";
+import { reducePollUpdate, reducePollVoteOk } from "@lib/pollState";
 
 export type { Message, PendingReaction, MessagesState } from "../features/messaging/messageModel";
 /**
@@ -108,6 +114,8 @@ export function addOptimisticMessage(params: {
   replyTo: number | null;
   attachments?: readonly Attachment[];
   timestamp: string;
+  /** "uploading" for a send queued behind its files; absent means "pending". */
+  status?: "uploading";
 }): void {
   const optimistic: Message = {
     id: 0,
@@ -121,7 +129,7 @@ export function addOptimisticMessage(params: {
     editedAt: null,
     deleted: false,
     timestamp: params.timestamp,
-    status: "pending",
+    status: params.status ?? "pending",
     correlationId: params.correlationId,
     clientMessageId: params.clientMessageId,
     errorCode: null,
@@ -197,8 +205,13 @@ export function setMessages(
   splice = false,
   anchorId: number | null = null,
 ): void {
+  adoptStarterThreads(messages);
   messagesStore.setState((prev) =>
-    reduceSetMessages(prev, channelId, messages, hasMore, splice, anchorId),
+    reduceSetOlderLoadFailed(
+      reduceSetMessages(prev, channelId, messages, hasMore, splice, anchorId),
+      channelId,
+      false,
+    ),
   );
 }
 
@@ -231,8 +244,13 @@ export function setAroundMessages(
   hasMoreAfter: boolean,
   splice = false,
 ): void {
+  adoptStarterThreads(messages);
   messagesStore.setState((prev) =>
-    reduceSetAroundMessages(prev, channelId, messages, hasMoreBefore, hasMoreAfter, splice),
+    reduceSetOlderLoadFailed(
+      reduceSetAroundMessages(prev, channelId, messages, hasMoreBefore, hasMoreAfter, splice),
+      channelId,
+      false,
+    ),
   );
 }
 
@@ -282,7 +300,9 @@ export function invalidateChannelMessageWindow(channelId: number): void {
  * user's own unsent text, like every other window-replacing writer.
  */
 export function clearChannelContent(channelId: number): void {
-  messagesStore.setState((prev) => reduceClearChannelContent(prev, channelId));
+  messagesStore.setState((prev) =>
+    reduceSetOlderLoadFailed(reduceClearChannelContent(prev, channelId), channelId, false),
+  );
 }
 
 /**
@@ -308,7 +328,25 @@ export function prependMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
-  messagesStore.setState((prev) => reducePrependMessages(prev, channelId, messages, hasMore));
+  adoptStarterThreads(messages);
+  messagesStore.setState((prev) =>
+    reduceSetOlderLoadFailed(
+      reducePrependMessages(prev, channelId, messages, hasMore),
+      channelId,
+      false,
+    ),
+  );
+}
+
+/** Record that a channel's older-page fetch failed (the list offers Retry at
+ *  its top), or clear the mark. Clearing an unset mark changes nothing. */
+export function setOlderLoadFailed(channelId: number, failed: boolean): void {
+  messagesStore.setState((prev) => reduceSetOlderLoadFailed(prev, channelId, failed));
+}
+
+/** Whether the channel's last older-page fetch failed. */
+export function hasOlderLoadFailed(channelId: number): boolean {
+  return messagesStore.select((s) => s.olderLoadFailed?.has(channelId) ?? false);
 }
 
 /** Append the next newer page below a detached window. The server returns an
@@ -320,12 +358,14 @@ export function appendNewerMessages(
   messages: readonly MessageResponse[],
   hasMore: boolean,
 ): void {
+  adoptStarterThreads(messages);
   messagesStore.setState((prev) => reduceAppendNewerMessages(prev, channelId, messages, hasMore));
 }
 
 /** Union an oldest-first page into an attached window (the follow-up after a
  *  re-attach, which recovers a live message refused while detached). */
 export function mergeTailMessages(channelId: number, messages: readonly MessageResponse[]): void {
+  adoptStarterThreads(messages);
   messagesStore.setState((prev) => reduceMergeTailMessages(prev, channelId, messages));
 }
 
@@ -401,6 +441,7 @@ export function channelIdForSend(
  * safe to hand it a single row out of a wider history window.
  */
 export function applyServerMessage(response: MessageResponse): void {
+  adoptStarterThreads([response]);
   messagesStore.setState((prev) => reduceApplyServerMessage(prev, response));
 }
 
@@ -436,10 +477,21 @@ export function updateReaction(payload: ReactionUpdatePayload, currentUserId: nu
   messagesStore.setState((prev) => reduceUpdateReaction(prev, payload, currentUserId));
 }
 
+/** Apply a poll_update (WP 6.9b): counts in version order, the viewer's own selection by its own watermark. */
+export function updatePoll(payload: PollUpdatePayload, currentUserId: number): void {
+  messagesStore.setState((prev) => reducePollUpdate(prev, payload, currentUserId));
+}
+
+/** Apply the sender's poll_vote_ok: their stored selection, ahead of the poll_update that carries the counts. */
+export function applyPollVoteOk(payload: PollVoteOkPayload): void {
+  messagesStore.setState((prev) => reducePollVoteOk(prev, payload));
+}
+
 /** Reset the entire store to its initial (empty) state — e.g. on logout. */
 export function resetMessagesStore(): void {
   messagesStore.setState(() => INITIAL_STATE);
 }
+void registerSessionReset("messages:store", resetMessagesStore); // app-lifetime
 
 // -----------------------------------------------------------------------------
 // Selectors

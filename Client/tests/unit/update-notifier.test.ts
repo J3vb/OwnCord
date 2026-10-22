@@ -196,6 +196,43 @@ describe("createUpdateNotifier download progress", () => {
     notifier.destroy?.();
   });
 
+  it("renders the installing text once", async () => {
+    const notifier = await mountWithAvailableUpdate();
+    const live = host.querySelector("[data-testid='update-announce']") as HTMLElement;
+
+    onInstallState({ status: "installing" });
+    expect(bannerText()).toBe("Installing update… Enter your password to continue.");
+    expect(live.textContent).toBe("Installing update… Enter your password to continue.");
+    // No progress bar, nothing to retry or dismiss while the prompt is open.
+    expect(host.querySelector(".update-banner-progress")).toBeNull();
+    expect(host.querySelector(".update-banner-install")).toBeNull();
+    expect(host.querySelectorAll(".update-banner")).toHaveLength(1);
+
+    onInstallState({ status: "installing" });
+    expect(live.textContent).toBe("Installing update… Enter your password to continue.");
+    notifier.destroy?.();
+  });
+
+  it("cancelled shows Retry and the cancelled text", async () => {
+    const notifier = await mountWithAvailableUpdate();
+    onInstallState({ status: "failed", restartRequired: false, reason: "cancelled" });
+
+    expect(bannerText()).toBe("Update cancelled.");
+    expect(host.querySelector(".update-banner-install")?.textContent).toBe("Retry");
+    notifier.destroy?.();
+  });
+
+  it("not authorized shows Retry and the by-hand text", async () => {
+    const notifier = await mountWithAvailableUpdate();
+    onInstallState({ status: "failed", restartRequired: false, reason: "not-authorized" });
+
+    expect(bannerText()).toBe(
+      "OwnCord could not get permission to install the update. Install the new .deb by hand.",
+    );
+    expect(host.querySelector(".update-banner-install")?.textContent).toBe("Retry");
+    notifier.destroy?.();
+  });
+
   it("announces an available update when the banner first appears", async () => {
     const notifier = await mountWithAvailableUpdate();
     const live = host.querySelector("[data-testid='update-announce']") as HTMLElement;
@@ -399,6 +436,43 @@ describe("createUpdateNotifier connected-path silence", () => {
 
     expect(host.querySelector(".update-banner")).toBeNull();
     expect(host.querySelector(".incompatible-notice")).toBeNull();
+    notifier.destroy?.();
+  });
+});
+
+describe("createUpdateNotifier on a .deb install the server gave no offer", () => {
+  let host: HTMLElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    host = document.createElement("div");
+    document.body.appendChild(host);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    host.remove();
+  });
+
+  it("says the server offered nothing instead of claiming the install cannot update itself", async () => {
+    mockCheckForUpdate.mockResolvedValue({
+      available: false,
+      version: null,
+      body: null,
+      manual_upgrade: true,
+      unconfirmed: true,
+    });
+    const notifier = createUpdateNotifier({ serverUrl: "https://s.example" });
+    notifier.mount(host);
+    await vi.advanceTimersByTimeAsync(3000);
+
+    const text = host.querySelector(".update-banner-text")?.textContent;
+    expect(text).toBe(
+      "The server offered no update for this install. If one exists, ask your server administrator.",
+    );
+    expect(text).not.toContain("cannot update itself");
+    expect(host.querySelector(".update-banner-install")).toBeNull();
     notifier.destroy?.();
   });
 });

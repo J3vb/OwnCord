@@ -26,11 +26,26 @@ test("a documentation-only change runs no application job", () => {
   }
 });
 
-test("a CHANGELOG.md edit runs the server and client jobs, which both ship it", () => {
+test("a CHANGELOG.md edit runs the client jobs and the server's changelog gate, not the race legs", () => {
   const sel = picked("M\tCHANGELOG.md");
-  assert.equal(sel.server, true);
+  assert.equal(sel.changelog, true);
   assert.equal(sel.client, true);
+  assert.equal(sel.server, false);
+  assert.equal(sel.integration, false);
   assert.equal(sel.rust, false);
+});
+
+test("a client change with a changelog line does not select the server legs", () => {
+  const sel = picked(["M\tClient/src/lib/ws.ts", "M\tCHANGELOG.md"].join("\n"));
+  assert.equal(sel.server, false);
+  assert.equal(sel.changelog, true);
+});
+
+test("a changelog-only diff is still a server gate under --all", () => {
+  // Every event that is not a pull request into dev selects --all, so the new
+  // capability must be part of it or the release run would skip the gate.
+  assert.equal(CAPABILITIES.includes("changelog"), true);
+  assert.equal(classify([]).changelog, true);
 });
 
 test("a prose change still leaves the two always-on jobs alone", () => {
@@ -172,6 +187,17 @@ test("tauri.conf.json runs the server job, because a Go test reads it", () => {
   assert.equal(sel.native, true);
 });
 
+test("client files carrying the LiveKit pin run the server job", () => {
+  // Server/docker_image_test.go fails when either pin drifts from
+  // ws.DefaultLiveKitVersion, so a client-only bump must run it.
+  for (const path of [
+    "Client/tests/e2e/scripts/install-livekit.mjs",
+    "Client/voice-join-budget.json",
+  ]) {
+    assert.equal(picked(`M\t${path}`).server, true, path);
+  }
+});
+
 test("the shared classifier corpus runs the Rust suite as well as the server", () => {
   // Server/safefetch/classify_test.go and Client/src-tauri/src/external_content.rs
   // both read it; a server-only PR that adds a vector must not merge with the
@@ -193,6 +219,31 @@ test("the Linux native-voice build scripts run the Rust suite", () => {
   ]) {
     const sel = picked(`M\t${p}`);
     assert.equal(sel.rust, true, `${p} must run rust-tests, which executes it`);
+  }
+});
+
+test("the web portal suite runs for the bundle, the portal and its harness only", () => {
+  // client-web builds the browser bundle and drives it against a real server,
+  // so it follows the client source, the web build, the suite and the portal
+  // handler. A unit-test-only or Rust-only change must not spend it.
+  for (const p of [
+    "Client/src/pages/MainPage.ts",
+    "Client/vite.config.web.ts",
+    "Client/tests/e2e/web/portal.spec.ts",
+    "Client/tests/e2e/support/server.ts",
+    "Client/tests/e2e/scripts/build-server.mjs",
+    "Server/webclient/webclient.go",
+    "Server/api/portal.go",
+  ]) {
+    assert.equal(runs(`M\t${p}`, "webclient"), true, `${p} must run the web portal suite`);
+  }
+  for (const p of [
+    "Client/tests/unit/web-build.test.ts",
+    "Client/src-tauri/src/lib.rs",
+    "Server/db/queries/sqlite/users.sql",
+    "docs/architecture/README.md",
+  ]) {
+    assert.equal(runs(`M\t${p}`, "webclient"), false, `${p} must not run the web portal suite`);
   }
 });
 
@@ -297,11 +348,9 @@ test("the root lockfile selects every capability", () => {
 test("the client lockfile selects the components that consume the client npm tree, and no others", () => {
   // Deliberately not "everything": the Rust crate and the Go server do not
   // resolve through Client/package-lock.json, so spending their jobs on it
-  // would be cost without coverage. It IS a harness change — a vite or
-  // Playwright bump moves the ground under the smoke run — which is why the
-  // development browser run widens to full.
+  // would be cost without coverage.
   const sel = picked("M\tClient/package-lock.json");
-  for (const cap of ["client", "browser", "integration", "native", "harness"]) {
+  for (const cap of ["client", "browser", "integration", "native"]) {
     assert.equal(sel[cap], true, `${cap} after the client lockfile`);
   }
   for (const cap of ["server", "rust"]) {
@@ -427,18 +476,14 @@ test("--all with no --paths-file still succeeds, because a selection is never a 
   assert.match(text, /^native=true$/m);
 });
 
-// ─── The smoke/full split for the development browser run.
+// ─── Spec and fixture edits reach the parity job, which runs the full suite.
 
-test("editing the e2e specs widens the development browser run to full", () => {
-  assert.equal(runs("M\tClient/tests/e2e/connect-page.spec.ts", "harness"), true);
+test("editing an e2e spec selects the browser jobs", () => {
+  assert.equal(runs("M\tClient/tests/e2e/connect-page.spec.ts", "browser"), true);
 });
 
-test("editing a spec fixture widens it too", () => {
-  assert.equal(runs("A\tClient/tests/e2e/support/helpers.ts", "harness"), true);
-});
-
-test("an ordinary application change does not widen it", () => {
-  assert.equal(runs("M\tClient/src/pages/MainPage.ts", "harness"), false);
+test("editing a spec fixture selects the browser jobs", () => {
+  assert.equal(runs("A\tClient/tests/e2e/support/helpers.ts", "browser"), true);
 });
 
 test("a Rust change reaches rust-tests and the native job, not the browser jobs", () => {

@@ -36,8 +36,10 @@ func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 			SeqMuMaxHoldMs:      func() float64 { return 210 },
 			LiveKitHealth:       func(_ context.Context) (bool, error) { return true, nil },
 			ReconnectTiers:      func() (uint64, uint64, uint64) { return 7, 3, 1 },
+			ReconnectRingMisses: func() uint64 { return 4 },
 			Backpressure:        func() (uint64, uint64, uint64) { return 4, 9, 11 },
 			PresenceDrops:       func() uint64 { return 5 },
+			LossMarks:           func() uint64 { return 6 },
 			PersisterStats:      func() (uint64, uint64, uint64, uint64, bool) { return 100, 2, 10, 1, true },
 			DBStats:             func() sql.DBStats { return sql.DBStats{WaitCount: 6, WaitDuration: 1500 * time.Millisecond} },
 			DBReaderStats:       func() sql.DBStats { return sql.DBStats{WaitCount: 3, WaitDuration: 700 * time.Millisecond} },
@@ -69,8 +71,8 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 		"connected_users", "voice_sessions", "broadcast_drops", "topic_sheds_total",
 		"ws_broadcast_ms", "ws_dispatch_lag_ms", "chat_send_ack_ms", "voice_join_ms",
 		"hub_broadcast_queue_depth", "hub_seqmu_max_hold_ms", "livekit_healthy",
-		"reconnect_tier_buffer", "reconnect_tier_db", "reconnect_tier_full",
-		"backpressure_queue_disconnects", "backpressure_high_fallbacks", "backpressure_low_drops", "backpressure_presence_drops",
+		"reconnect_tier_buffer", "reconnect_tier_db", "reconnect_tier_full", "reconnect_ring_misses",
+		"backpressure_queue_disconnects", "backpressure_high_fallbacks", "backpressure_low_drops", "backpressure_presence_drops", "delivery_loss_marks",
 		"db_writer_wait_count", "db_writer_wait_seconds",
 		"db_reader_wait_count", "db_reader_wait_seconds",
 		"perm_cache_hits", "perm_cache_misses",
@@ -126,11 +128,17 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 	if int(resp["reconnect_tier_buffer"].(float64)) != 7 {
 		t.Errorf("reconnect_tier_buffer = %v, want 7", resp["reconnect_tier_buffer"])
 	}
+	if int(resp["reconnect_ring_misses"].(float64)) != 4 {
+		t.Errorf("reconnect_ring_misses = %v, want 4", resp["reconnect_ring_misses"])
+	}
 	if int(resp["backpressure_low_drops"].(float64)) != 11 {
 		t.Errorf("backpressure_low_drops = %v, want 11", resp["backpressure_low_drops"])
 	}
 	if int(resp["backpressure_presence_drops"].(float64)) != 5 {
 		t.Errorf("backpressure_presence_drops = %v, want 5", resp["backpressure_presence_drops"])
+	}
+	if int(resp["delivery_loss_marks"].(float64)) != 6 {
+		t.Errorf("delivery_loss_marks = %v, want 6", resp["delivery_loss_marks"])
 	}
 	if got := resp["db_writer_wait_seconds"].(float64); got != 1.5 {
 		t.Errorf("db_writer_wait_seconds = %v, want 1.5", got)

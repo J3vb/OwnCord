@@ -43,8 +43,11 @@ export type IconName =
   | "download"
   | "chevron-down"
   | "chevron-up"
+  | "chevron-left"
   | "chevron-right"
   | "x"
+  | "message-square"
+  | "messages-square"
   | "eye"
   | "eye-off"
   | "layout-grid"
@@ -65,6 +68,7 @@ export type IconName =
   | "triangle-alert"
   | "user"
   | "user-plus"
+  | "users"
   | "palette"
   | "bell"
   | "keyboard"
@@ -74,8 +78,12 @@ export type IconName =
   | "shield"
   | "shield-check"
   | "shield-alert"
+  | "lock"
+  | "moon"
   | "shield-question"
   | "flag"
+  | "ban"
+  | "ellipsis"
   | "zap";
 
 // ---------------------------------------------------------------------------
@@ -161,10 +169,14 @@ const ICON_PATHS: Record<IconName, string> = {
   // Right chevron
   "chevron-up": `<path d="m18 15-6-6-6 6"/>`,
 
+  "chevron-left": `<path d="m15 18-6-6 6-6"/>`,
+
   "chevron-right": `<path d="m9 18 6-6-6-6"/>`,
 
   // X / close
   x: `<path d="M18 6 6 18"/><path d="m6 6 12 12"/>`,
+  "message-square": `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>`,
+  "messages-square": `<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>`,
 
   // Eye open
   eye: `<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>`,
@@ -213,6 +225,9 @@ const ICON_PATHS: Record<IconName, string> = {
   user: `<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>`,
   "user-plus": `<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/>`,
 
+  // Two people / users
+  users: `<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`,
+
   // Artist palette
   palette: `<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>`,
 
@@ -238,6 +253,16 @@ const ICON_PATHS: Record<IconName, string> = {
   shield: `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>`,
   "shield-check": `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>`,
   "shield-alert": `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/>`,
+  // Private-channel badge (WP 3D-6).
+  lock: `<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`,
+  // AFK-channel badge (WP 6.10).
+  moon: `<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>`,
+  // More actions (WP 3A-7).
+  ellipsis: `<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>`,
+
+  // Block (WP 3B-2).
+  ban: `<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>`,
+
   // Report (B9-10).
   flag: `<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/>`,
   "shield-question": `<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M9.1 9a3 3 0 0 1 5.82 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>`,
@@ -257,11 +282,25 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * @returns An SVGSVGElement ready to be appended to the DOM.
  */
 export function createIcon(name: IconName, size = 24): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NS, "svg");
-
-  svg.setAttribute("viewBox", "0 0 24 24");
+  let tpl = ICON_TEMPLATES.get(name);
+  if (tpl === undefined) {
+    tpl = buildTemplate(name);
+    ICON_TEMPLATES.set(name, tpl);
+  }
+  const svg = tpl.cloneNode(true) as SVGSVGElement;
   svg.setAttribute("width", String(size));
   svg.setAttribute("height", String(size));
+  return svg;
+}
+
+/** One parsed template per icon name; innerHTML runs once per name per session. */
+const ICON_TEMPLATES = new Map<IconName, SVGSVGElement>();
+
+function buildTemplate(name: IconName): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "24");
+  svg.setAttribute("height", "24");
   svg.setAttribute("fill", "none");
   svg.setAttribute("stroke", "currentColor");
   svg.setAttribute("stroke-width", "2");
@@ -275,9 +314,7 @@ export function createIcon(name: IconName, size = 24): SVGSVGElement {
   // They must NEVER contain user data or dynamically-loaded content.
   // This is the only safe use of innerHTML in the codebase — do not copy this pattern.
   const pathData = ICON_PATHS[name];
-  if (pathData === undefined) return svg;
-  svg.innerHTML = pathData;
-
+  if (pathData !== undefined) svg.innerHTML = pathData;
   return svg;
 }
 

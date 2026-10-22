@@ -40,7 +40,7 @@ func TestReconnect_ReplaysOwnVoiceRoomOutsideReadableChannels(t *testing.T) {
 	}
 	// A role with no permissions at all: VisibleChannelIDs returns nothing, so
 	// the voice room the user is live in cannot be in allowedChannelIDs.
-	noPerms, err := database.CreateRole(ctx, "voice-only", nil, 0, 1)
+	noPerms, err := database.CreateRole(ctx, "voice-only", nil, 0, 1, false, false)
 	if err != nil || noPerms == nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestReconnect_ReplaysOwnVoiceRoomOutsideReadableChannels(t *testing.T) {
 	// session across the resume (registerNow transfers it when lastSeq > 0).
 	oldClient := NewTestClient(hub, userID, make(chan []byte, 64))
 	oldClient.user = user
-	oldClient.setVoiceState(vcID, vs.JoinedAt)
+	oldClient.voice.setState(vcID, vs.JoinedAt)
 	hub.mu.Lock()
 	hub.clients[userID] = oldClient
 	hub.mu.Unlock()

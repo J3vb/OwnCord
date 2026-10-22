@@ -10,6 +10,7 @@
 
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
+import { roleIdByName } from "./roleLookup";
 
 /**
  * An @token that stands alone as a word. Group 1 is the preceding character,
@@ -24,6 +25,15 @@ export const MENTION_TOKEN_REGEX = /(^|[^\p{L}\p{N}_@])@([\p{L}\p{N}_.-]{1,64})(
 /** A `#name` channel token. Same word-boundary rule as @tokens. */
 export const CHANNEL_TOKEN_REGEX = /(^|[^\p{L}\p{N}_#])#([\p{L}\p{N}_-]{1,64})/gu;
 
+/**
+ * `<@123>`: a user mention by id (WP 6.3e). Group 1 is the id. Ids stay below
+ * 2^53 so `Number()` is exact; a longer digit run is not a token.
+ */
+export const ID_MENTION_REGEX = /<@(\d{1,15})>/g;
+
+/** `<@&5>`: a role mention by id. Group 1 is the role id. */
+export const ROLE_MENTION_REGEX = /<@&(\d{1,15})>/g;
+
 /** Reserved: a user literally named "everyone" is not reachable via @everyone. */
 export const EVERYONE_TOKEN = "everyone";
 export const HERE_TOKEN = "here";
@@ -34,6 +44,12 @@ export interface MentionInfo {
   readonly mentions?: readonly number[];
   /** Whether an @everyone/@here cleared the sender's MENTION_EVERYONE gate. */
   readonly mentionsEveryone?: boolean;
+  /**
+   * Role IDs the server resolved and let through the sender's gate (WP 6.3f).
+   * Undefined = the server did not send them, so the `<@&id>` tokens in the
+   * content stand in.
+   */
+  readonly mentionRoles?: readonly number[];
 }
 
 /** Whether `token` (without the leading @) is @everyone or @here. */
@@ -90,11 +106,20 @@ export function resolveMentionUserId(token: string, info?: MentionInfo): number 
   return null;
 }
 
-/** IDs of every @token in `content` that resolves to a known user. */
+/**
+ * IDs of every user `content` mentions: each `<@id>` token (by id, so a rename
+ * changes nothing) and each @token that resolves to a known user.
+ */
 export function resolveMentionsFromContent(content: string): number[] {
   const ids: number[] = [];
+  for (const match of content.matchAll(ID_MENTION_REGEX)) {
+    const id = Number(match[1]);
+    if (!ids.includes(id)) ids.push(id);
+  }
   for (const match of content.matchAll(MENTION_TOKEN_REGEX)) {
     if (match[3] === "@") continue;
+    // `<@5>` is an id token (counted above), not the name "5".
+    if (match[1] === "<") continue;
     const token = match[2];
     if (token === undefined || isEveryoneToken(token)) continue;
     const id = resolveMentionUserId(token);
@@ -104,15 +129,47 @@ export function resolveMentionsFromContent(content: string): number[] {
 }
 
 /**
- * Whether this message mentions the signed-in user by name. @everyone/@here is
- * deliberately excluded — callers that treat it as a mention say so explicitly,
- * because the two are suppressed independently.
+ * Role IDs the server says this message mentions. Only its list counts: it has
+ * dropped the roles the sender could not ping, whereas a `<@&id>` typed into a
+ * message is just text until the server honours it. Absent = none.
+ */
+export function mentionedRoleIds(info?: MentionInfo): readonly number[] {
+  return info?.mentionRoles ?? [];
+}
+
+/**
+ * Ids of every role the signed-in user holds: the server's `role_ids` as sent,
+ * else (an older server) the id of the single role name, else none.
+ */
+export function currentUserHeldRoleIds(): readonly number[] {
+  const me = authStore.getState().user;
+  if (me?.role_ids !== undefined) return me.role_ids;
+  const id = me?.role == null ? undefined : roleIdByName(me.role);
+  return id === undefined ? [] : [id];
+}
+
+/** Whether the server lists a role the signed-in user holds. */
+function mentionsHeldRole(info?: MentionInfo): boolean {
+  const mentioned = mentionedRoleIds(info);
+  if (mentioned.length === 0) return false;
+  const held = currentUserHeldRoleIds();
+  return mentioned.some((id) => held.includes(id));
+}
+
+/**
+ * Whether this message mentions the signed-in user: by name or id, or through
+ * a role they hold. @everyone/@here is deliberately excluded — callers that
+ * treat it as a mention say so explicitly, because the two are suppressed
+ * independently.
  */
 export function mentionsCurrentUser(content: string, info?: MentionInfo): boolean {
   const me = authStore.getState().user;
   if (me == null) return false;
-  if (info?.mentions !== undefined) return info.mentions.includes(me.id);
-  return resolveMentionsFromContent(content).includes(me.id);
+  const direct =
+    info?.mentions !== undefined
+      ? info.mentions.includes(me.id)
+      : resolveMentionsFromContent(content).includes(me.id);
+  return direct || mentionsHeldRole(info);
 }
 
 /**

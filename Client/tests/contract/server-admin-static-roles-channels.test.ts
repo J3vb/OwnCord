@@ -68,7 +68,8 @@ const SEEDED = [
 
 async function boot(
   calls: FetchCall[],
-  respond: (p: string) => unknown = () => ({}),
+  respond: (p: string, method: string) => unknown = () => ({}),
+  status: (p: string, method: string) => number = () => 200,
 ): Promise<{ dom: JSDOM; bridge: Bridge; doc: Document }> {
   const dom = new JSDOM(ADMIN_HTML, {
     url: "http://localhost:8080/admin",
@@ -80,8 +81,9 @@ async function boot(
         const p = String(input).replace(/^\/admin\/api/, "");
         const body = typeof opts.body === "string" ? JSON.parse(opts.body) : undefined;
         calls.push({ method, path: p, body });
-        const json = p === "/setup/status" ? { needs_setup: false } : respond(p);
-        return { ok: true, status: 200, json: async () => json ?? {} } as Response;
+        const json = p === "/setup/status" ? { needs_setup: false } : respond(p, method);
+        const code = status(p, method);
+        return { ok: code < 400, status: code, json: async () => json ?? {} } as Response;
       }) as typeof fetch;
     },
   });
@@ -143,8 +145,115 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     expect(calls[0]).toEqual({
       method: "POST",
       path: "/roles",
-      body: { name: "Helper", color: "", permissions: 0, position: 70 },
+      body: {
+        name: "Helper",
+        color: "",
+        permissions: 0,
+        position: 70,
+        hoist: false,
+        mentionable: false,
+      },
     });
+  });
+
+  it("offers hoist and mentionable on the create form and sends both (WP 6.3g)", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    bridge.openRoleModal(null);
+    const hoist = doc.getElementById("roleHoist") as HTMLInputElement;
+    const mention = doc.getElementById("roleMentionable") as HTMLInputElement;
+    expect(hoist.type).toBe("checkbox");
+    expect(mention.type).toBe("checkbox");
+    expect(hoist.checked).toBe(false);
+    expect(mention.checked).toBe(false);
+    expect(doc.querySelector('label[for="roleHoist"]')!.textContent).toContain("separately");
+    expect(doc.querySelector('label[for="roleMentionable"]')!.textContent).toContain("@mention");
+
+    (doc.getElementById("roleName") as HTMLInputElement).value = "Helper";
+    hoist.checked = true;
+    mention.checked = true;
+    await bridge.saveRole(null);
+    expect(calls[0]).toMatchObject({
+      method: "POST",
+      path: "/roles",
+      body: { hoist: true, mentionable: true },
+    });
+  });
+
+  it("loads each flag into the edit form and sends the changed one (WP 6.3g)", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    bridge.state.roleList[2].hoist = true; // Moderator is hoisted, not mentionable
+
+    bridge.openRoleModal(3);
+    const hoist = doc.getElementById("roleHoist") as HTMLInputElement;
+    const mention = doc.getElementById("roleMentionable") as HTMLInputElement;
+    expect(hoist.checked).toBe(true);
+    expect(mention.checked).toBe(false);
+
+    mention.checked = true;
+    await bridge.saveRole(3);
+    expect(calls[0]).toMatchObject({
+      method: "PATCH",
+      path: "/roles/3",
+      body: { hoist: true, mentionable: true },
+    });
+  });
+
+  it("sends the mask it loaded with a role edit (WP 5.1b)", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    bridge.openRoleModal(3); // Moderator, loaded with 0xfffff
+    // The roster moves under the editor: the sent value is the loaded one.
+    bridge.state.roleList[2].permissions = 0x1;
+    (doc.querySelector('input[data-permbit="1"]') as HTMLInputElement).checked = false;
+    await bridge.saveRole(3);
+    expect(calls[0]).toMatchObject({
+      method: "PATCH",
+      path: "/roles/3",
+      body: { expected_permissions: 0xfffff },
+    });
+  });
+
+  it("explains a refused edit and reloads the role instead of overwriting it (WP 5.1b)", async () => {
+    const calls: FetchCall[] = [];
+    const latest = SEEDED.map((r) => (r.id === 3 ? { ...r, permissions: 0x3 } : { ...r }));
+    const booted = await boot(
+      calls,
+      (_p, method) =>
+        method === "GET"
+          ? latest
+          : {
+              error: "ROLE_CONFLICT",
+              message: "conflict: role permissions changed since it was loaded",
+            },
+      (_p, method) => (method === "PATCH" ? 409 : 200),
+    );
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    bridge.openRoleModal(3);
+    await bridge.saveRole(3);
+
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(["PATCH /roles/3", "GET /roles"]);
+    expect(doc.getElementById("toast")!.textContent).toContain(
+      "Someone else changed this role. The latest version is loaded; apply your change again.",
+    );
+    // The editor is open again on the latest mask, not closed on a lost edit.
+    const bit1 = doc.querySelector('input[data-permbit="1"]') as HTMLInputElement;
+    expect(bit1.checked).toBe(true);
+    expect((doc.querySelector('input[data-permbit="131072"]') as HTMLInputElement).checked).toBe(
+      false,
+    );
+    expect(bridge.state.roleEditLoadedPerms).toBe(0x3);
   });
 
   it("refuses a taken or out-of-reach position before sending it", async () => {
@@ -233,7 +342,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
 
     bridge.openRoleModal(null);
     const boxes = [...doc.querySelectorAll<HTMLInputElement>("#modalInner input[data-permbit]")];
-    expect(boxes.length).toBe(20);
+    expect(boxes.length).toBe(21);
     for (const box of boxes) {
       const name = doc.getElementById(box.getAttribute("aria-labelledby")!);
       const desc = doc.getElementById(box.getAttribute("aria-describedby")!);
@@ -270,7 +379,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     expect(items[1]!.textContent).toContain("your role");
     expect(items[0]!.textContent).toContain("above you");
     expect(items[2]!.textContent).toContain("Your rank · 80");
-    expect(items[3]!.textContent).toContain("12 of 20 permissions");
+    expect(items[3]!.textContent).toContain("12 of 21 permissions");
     expect(items[0]!.textContent).toContain("Administrator: every permission");
     const moves = [...items[3]!.querySelectorAll('[data-action="moveRole"]')];
     expect(moves.map((b) => b.getAttribute("aria-label"))).toEqual([

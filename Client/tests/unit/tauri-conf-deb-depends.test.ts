@@ -41,7 +41,9 @@ describe("tauri.conf.json — Linux GStreamer runtime", () => {
       "gstreamer1.0-plugins-bad",
       "gstreamer1.0-pipewire",
     ];
-    expect(recommends).toEqual(wanted);
+    // pkexec | policykit-1 (the in-app update) is pinned in
+    // tauri-conf-deb-update.test.ts; this list is the media packages.
+    expect(recommends?.filter((pkg) => pkg !== "pkexec | policykit-1")).toEqual(wanted);
     for (const pkg of wanted) {
       expect(depends).not.toContain(pkg);
     }

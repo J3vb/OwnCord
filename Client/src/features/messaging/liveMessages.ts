@@ -9,6 +9,7 @@ import type { MessageResponse } from "../../lib/types";
 import { MAX_MESSAGES_PER_CHANNEL, messageResponseToMessage } from "./messageModel";
 import type { Message, MessagesState } from "./messageModel";
 import { isUnreconciledEcho } from "./echoReconcile";
+import { mergeMessagePoll } from "../../lib/pollState";
 
 /** addMessage's reducer: reconcile a live chat_message with its optimistic row, or append it. */
 export function reduceAddMessage(prev: MessagesState, message: Message): MessagesState {
@@ -19,8 +20,10 @@ export function reduceAddMessage(prev: MessagesState, message: Message): Message
   const idIdx = existing.findIndex((m) => m.id !== 0 && m.id === message.id);
   if (idIdx !== -1) {
     const pendingSends = new Map(prev.pendingSends);
+    // A replayed creation frame (a poll at version 0) must not roll the counts back.
+    const incoming = mergeMessagePoll(existing[idIdx], message);
     const replaced = existing.flatMap((m, i) => {
-      if (i === idIdx) return [message];
+      if (i === idIdx) return [incoming];
       // History may have arrived before the live echo, carrying the real
       // id but no private receipt. Consume its exact optimistic twin too.
       if (message.clientMessageId !== undefined && isUnreconciledEcho(m, message)) {
@@ -88,15 +91,22 @@ export function reduceAddMessage(prev: MessagesState, message: Message): Message
   return { ...prev, messagesByChannel: updated, hasMore: updatedHasMore };
 }
 
-/** addOptimisticMessage's reducer: append the pending row and register its correlation id. */
+/** addOptimisticMessage's reducer: add the row. A pending row is registered by correlation id and
+ *  goes before the trailing uploading rows, which stay last until they post (3A-9). */
 export function reduceAddOptimisticMessage(
   prev: MessagesState,
   params: { readonly channelId: number; readonly correlationId: string },
   optimistic: Message,
 ): MessagesState {
   const existing = prev.messagesByChannel.get(params.channelId) ?? [];
+  const uploading = optimistic.status === "uploading";
+  let at = existing.length;
+  if (!uploading) {
+    while (at > 0 && existing[at - 1]!.status === "uploading") at--;
+  }
   const updated = new Map(prev.messagesByChannel);
-  updated.set(params.channelId, [...existing, optimistic]);
+  updated.set(params.channelId, [...existing.slice(0, at), optimistic, ...existing.slice(at)]);
+  if (uploading) return { ...prev, messagesByChannel: updated };
   const updatedPending = new Map(prev.pendingSends);
   updatedPending.set(params.correlationId, params.channelId);
   return { ...prev, messagesByChannel: updated, pendingSends: updatedPending };
@@ -229,9 +239,10 @@ export function reduceApplyServerMessage(
 ): MessagesState {
   const existing = prev.messagesByChannel.get(response.channel_id);
   if (existing === undefined) return prev;
-  const incoming = messageResponseToMessage(response);
-  const index = existing.findIndex((m) => m.id !== 0 && m.id === incoming.id);
+  const converted = messageResponseToMessage(response);
+  const index = existing.findIndex((m) => m.id !== 0 && m.id === converted.id);
   if (index === -1) return prev;
+  const incoming = mergeMessagePoll(existing[index], converted);
   const updatedMessages = new Map(prev.messagesByChannel);
   updatedMessages.set(
     response.channel_id,

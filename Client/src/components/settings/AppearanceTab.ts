@@ -7,8 +7,11 @@ import { loadPref, savePref, createToggle } from "./helpers";
 import {
   THEMES,
   applyAccent,
-  applyTheme,
+  SYSTEM_THEME,
+  applyThemeChoice,
   getActiveThemeName,
+  onSystemThemePainted,
+  resolveSystemTheme,
   restoreTheme,
   type ThemeName,
 } from "@lib/themes";
@@ -20,6 +23,12 @@ import {
   MAX_FONT_SIZE_PX,
 } from "@lib/appearance";
 import { getTimeFormat, saveTimeFormat, type TimeFormat } from "@lib/timeFormat";
+import {
+  loadMemberLayout,
+  MEMBER_LAYOUT_PREF,
+  type MemberLayout,
+} from "../../features/members/memberLayout";
+import { appZoom, ZOOM_LEVELS, zoomIndex } from "../../features/zoom";
 import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
@@ -30,20 +39,31 @@ function getDefaultAccent(themeName: string): string {
   return themeName === "light" ? "#4f5bd5" : FALLBACK_ACCENT;
 }
 
+/** "system" is a choice, not a palette: the accent default follows what it shows. */
+function paletteOf(choice: string): string {
+  return choice === SYSTEM_THEME ? resolveSystemTheme() : choice;
+}
+
 export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   const activeThemeName = getActiveThemeName();
-  const currentTheme = activeThemeName in THEMES ? (activeThemeName as ThemeName) : null;
+  const currentTheme =
+    activeThemeName in THEMES || activeThemeName === SYSTEM_THEME ? activeThemeName : null;
   const currentFontSize = loadPref<number>("fontSize", 16);
   const currentCompact = loadPref<boolean>("compactMode", false);
   let hasStoredAccent = localStorage.getItem("owncord:settings:accentColor") !== null;
-  const defaultAccent = getDefaultAccent(activeThemeName);
+  const defaultAccent = getDefaultAccent(paletteOf(activeThemeName));
 
   // Theme selector
   const themeHeader = createElement("h3", {}, t("appearance.theme"));
   const themeRow = createElement("div", { class: "theme-options", role: "radiogroup" });
-  for (const name of Object.keys(THEMES) as ThemeName[]) {
+  const choices: string[] = [...(Object.keys(THEMES) as ThemeName[]), SYSTEM_THEME];
+  for (const name of choices) {
     const isActive = name === currentTheme;
+    const label =
+      name === SYSTEM_THEME
+        ? t("appearance.theme.system")
+        : name.charAt(0).toUpperCase() + name.slice(1);
     const btn = createElement(
       "button",
       {
@@ -51,13 +71,13 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
         role: "radio",
         tabindex: isActive ? "0" : "-1",
         "aria-checked": isActive ? "true" : "false",
-        "aria-label": name.charAt(0).toUpperCase() + name.slice(1),
+        "aria-label": label,
       },
-      name.charAt(0).toUpperCase() + name.slice(1),
+      label,
     );
 
     const activateTheme = (): void => {
-      applyTheme(name);
+      applyThemeChoice(name);
       for (const child of themeRow.children) {
         child.classList.remove("active");
         child.setAttribute("aria-checked", "false");
@@ -69,9 +89,9 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
         // which includes the accent override applyAccent puts there. Without
         // re-applying it, a theme that sets --accent on its body class
         // (neon-glow) silently reverts the user's accent until restart.
-        applyAccent(loadPref<string>("accentColor", getDefaultAccent(name)));
+        applyAccent(loadPref<string>("accentColor", getDefaultAccent(paletteOf(name))));
       } else {
-        syncDisplayedAccent(getDefaultAccent(name));
+        syncDisplayedAccent(getDefaultAccent(paletteOf(name)));
       }
     };
 
@@ -127,6 +147,51 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   );
   appendChildren(fontRow, fontSlider, fontLabel);
   appendChildren(section, fontHeader, fontRow);
+
+  // Zoom level: the native webview zoom, snapping to Discord's levels. The
+  // slider follows the zoom keys (Ctrl+= / Ctrl+- / Ctrl+0) while it is open.
+  const zoomHeader = createElement("h3", {}, t("appearance.zoom"));
+  const zoomRow = createElement("div", { class: "slider-row" });
+  const zoomSlider = createElement("input", {
+    class: "settings-slider",
+    type: "range",
+    min: "0",
+    max: String(ZOOM_LEVELS.length - 1),
+    step: "1",
+    value: String(zoomIndex(appZoom.current())),
+    "aria-label": t("appearance.zoom"),
+  });
+  const zoomLabel = createElement(
+    "span",
+    { class: "slider-val" },
+    t("appearance.zoom.value", { percent: appZoom.current() }),
+  );
+  const zoomReset = createElement(
+    "button",
+    {
+      class: "btn btn-secondary",
+      type: "button",
+      "aria-label": t("appearance.zoom.resetAria"),
+    },
+    t("appearance.zoom.reset"),
+  );
+  const paintZoom = (level: number): void => {
+    zoomSlider.value = String(zoomIndex(level));
+    zoomSlider.setAttribute("aria-valuetext", t("appearance.zoom.value", { percent: level }));
+    setText(zoomLabel, t("appearance.zoom.value", { percent: level }));
+  };
+  paintZoom(appZoom.current());
+  appZoom.subscribe(paintZoom, signal);
+  zoomSlider.addEventListener(
+    "input",
+    () => {
+      void appZoom.set(ZOOM_LEVELS[Number(zoomSlider.value)] ?? 100);
+    },
+    { signal },
+  );
+  zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
+  appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
+  appendChildren(section, zoomHeader, zoomRow);
 
   // Compact mode toggle
   const compactRow = createElement("div", { class: "setting-row" });
@@ -203,6 +268,64 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   enableRovingNavigation(timeFormatGroup, "[role='radio']", signal);
   appendChildren(timeFormatRow, timeFormatInfo, timeFormatGroup);
   section.appendChild(timeFormatRow);
+
+  // Member list position (right column / under the channels)
+  const memberLayoutRow = createElement("div", { class: "setting-row" });
+  const memberLayoutInfo = createElement("div", {});
+  appendChildren(
+    memberLayoutInfo,
+    createElement("div", { class: "setting-label" }, t("appearance.memberLayout")),
+    createElement("div", { class: "setting-desc" }, t("appearance.memberLayout.desc")),
+  );
+  const memberLayoutGroup = createElement("div", {
+    class: "level-options",
+    role: "radiogroup",
+    "aria-label": t("appearance.memberLayout"),
+    "data-testid": "member-layout",
+  });
+  const memberLayoutButtons = new Map<MemberLayout, HTMLButtonElement>();
+  const memberLayoutLabels: Record<MemberLayout, string> = {
+    right: t("appearance.memberLayout.right"),
+    left: t("appearance.memberLayout.left"),
+  };
+  const paintMemberLayout = (): void => {
+    const current = loadMemberLayout();
+    for (const [value, button] of memberLayoutButtons) {
+      const on = value === current;
+      button.classList.toggle("active", on);
+      button.setAttribute("aria-checked", String(on));
+    }
+  };
+  for (const value of ["right", "left"] as const) {
+    const button = createElement(
+      "button",
+      {
+        class: "level-opt",
+        type: "button",
+        role: "radio",
+        "aria-checked": "false",
+        tabindex: "-1",
+        "data-testid": `member-layout-${value}`,
+        "data-value": value,
+      },
+      memberLayoutLabels[value],
+    );
+    button.addEventListener(
+      "click",
+      () => {
+        savePref(MEMBER_LAYOUT_PREF, value);
+        paintMemberLayout();
+      },
+      { signal },
+    );
+    memberLayoutButtons.set(value, button);
+    memberLayoutGroup.appendChild(button);
+  }
+  paintMemberLayout();
+  setRovingTabindex(memberLayoutGroup, "[role='radio']");
+  enableRovingNavigation(memberLayoutGroup, "[role='radio']", signal);
+  appendChildren(memberLayoutRow, memberLayoutInfo, memberLayoutGroup);
+  section.appendChild(memberLayoutRow);
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [
@@ -312,11 +435,18 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   appendChildren(hexInputRow, hexPrefix, hexInput);
   appendChildren(section, accentHeader, swatchesRow, hexInputRow, accentNote);
 
+  // An OS light/dark flip under "Sync with computer" changes the default
+  // accent; with no stored accent the controls must follow it.
+  onSystemThemePainted(() => {
+    if (hasStoredAccent) return;
+    syncDisplayedAccent(getDefaultAccent(paletteOf(getActiveThemeName())));
+  }, signal);
+
   // Apply stored preferences on render
   if (currentTheme === null) {
     restoreTheme();
   } else {
-    applyTheme(currentTheme);
+    applyThemeChoice(currentTheme);
   }
   applyFontSize();
   document.documentElement.classList.toggle("compact-mode", currentCompact);

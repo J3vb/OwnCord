@@ -113,7 +113,7 @@ func TestResolveGuildChannel_MissingAndDMAreIndistinguishable(t *testing.T) {
 func TestAdminCreateChannel_DefaultsTypeValidatesAndAudits(t *testing.T) {
 	svc, database := newChannelAdminService(t)
 
-	ch, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: " lounge "}, nil)
+	ch, _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: " lounge "}, nil)
 	if err != nil {
 		t.Fatalf("AdminCreateChannel: %v", err)
 	}
@@ -121,8 +121,15 @@ func TestAdminCreateChannel_DefaultsTypeValidatesAndAudits(t *testing.T) {
 		t.Fatalf("created %q/%q, want lounge/text", ch.Name, ch.Type)
 	}
 
-	if _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: "x", Type: "forum"}, nil); !errors.Is(err, ErrBadRequest) {
+	if _, _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: "x", Type: "stage"}, nil); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("bad type: err = %v, want ErrBadRequest", err)
+	}
+	forum, _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: "ideas", Type: "forum"}, nil)
+	if err != nil {
+		t.Fatalf("forum type: err = %v, want accepted", err)
+	}
+	if forum.Type != "forum" || forum.Forum == nil {
+		t.Fatalf("forum created as %q with settings %v, want a forum carrying its settings", forum.Type, forum.Forum)
 	}
 
 	entries, err := database.GetAuditLog(context.Background(), 10, 0)
@@ -145,13 +152,13 @@ func TestAdminUpdateChannel_NumericBoundsAndNSFWAudit(t *testing.T) {
 	seedChannel(t, database, &db.Channel{ID: 40, Name: "general", Type: "text"})
 	existing, _ := svc.ResolveGuildChannel(context.Background(), 40)
 
-	if _, err := svc.AdminUpdateChannel(context.Background(), 7, existing, AdminChannelUpdate{
+	if _, _, err := svc.AdminUpdateChannel(context.Background(), 7, existing, AdminChannelUpdate{
 		Name: "general", SlowMode: maxSlowModeSeconds + 1,
 	}, nil); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("slow_mode over bound: err = %v, want ErrBadRequest", err)
 	}
 
-	updated, err := svc.AdminUpdateChannel(context.Background(), 7, existing, AdminChannelUpdate{
+	updated, _, err := svc.AdminUpdateChannel(context.Background(), 7, existing, AdminChannelUpdate{
 		Name: "general", NSFW: true,
 	}, nil)
 	if err != nil || !updated.NSFW {
@@ -199,28 +206,28 @@ func TestAdminDeleteChannel_ArchivesBeforeEviction(t *testing.T) {
 func TestAdminChannel_DuplicateNameIsConflict(t *testing.T) {
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
-	first, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "Lobby", Type: "text", Category: "Chat"}, nil)
+	first, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "Lobby", Type: "text", Category: "Chat"}, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "LOBBY", Type: "text", Category: "Chat"}, nil); !errors.Is(err, ErrConflict) {
+	if _, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "LOBBY", Type: "text", Category: "Chat"}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate create: err = %v, want ErrConflict", err)
 	}
-	second, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", Type: "voice", Category: "Chat"}, nil)
+	second, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "lobby", Type: "voice", Category: "Chat"}, nil)
 	if err != nil {
 		t.Fatalf("same name, other type: %v", err)
 	}
-	third, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "hall", Type: "text", Category: "Chat"}, nil)
+	third, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "hall", Type: "text", Category: "Chat"}, nil)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := svc.AdminUpdateChannel(ctx, 1, third, AdminChannelUpdate{Name: "lobby", Category: "Chat"}, nil); !errors.Is(err, ErrConflict) {
+	if _, _, err := svc.AdminUpdateChannel(ctx, 1, third, AdminChannelUpdate{Name: "lobby", Category: new("Chat")}, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("rename onto a sibling: err = %v, want ErrConflict", err)
 	}
-	if _, err := svc.AdminUpdateChannel(ctx, 1, first, AdminChannelUpdate{Name: "lobby", Category: "Chat"}, nil); err != nil {
+	if _, _, err := svc.AdminUpdateChannel(ctx, 1, first, AdminChannelUpdate{Name: "lobby", Category: new("Chat")}, nil); err != nil {
 		t.Fatalf("case-only rename of itself: %v", err)
 	}
-	if _, err := svc.AdminUpdateChannel(ctx, 1, second, AdminChannelUpdate{Name: "lobby", Category: "Chat", Topic: "t"}, nil); err != nil {
+	if _, _, err := svc.AdminUpdateChannel(ctx, 1, second, AdminChannelUpdate{Name: "lobby", Category: new("Chat"), Topic: "t"}, nil); err != nil {
 		t.Fatalf("unchanged name on another type: %v", err)
 	}
 }

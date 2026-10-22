@@ -483,7 +483,7 @@ func TestHandleReaction_EmojiTooLong(t *testing.T) {
 		"type": "reaction_add",
 		"payload": map[string]any{
 			"message_id": 1,
-			"emoji":      strings.Repeat("x", 33),
+			"emoji":      strings.Repeat("x", 40),
 		},
 	})
 	hub.HandleMessageForTest(c, raw)

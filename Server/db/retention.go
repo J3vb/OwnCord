@@ -124,7 +124,8 @@ func (d *DB) DeleteChannelRetention(ctx context.Context, channelID int64) (bool,
 }
 
 // RetentionWindows returns the effective policy of every non-DM channel that
-// has one: the channel override where present, else the server window;
+// has one: the channel override where present (a thread's being its
+// parent's, 6.9c), else the server window;
 // channels with an effective 0 are omitted. DMs are never in scope (owner
 // decision 4).
 func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
@@ -134,7 +135,7 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 	}
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT c.id, c.name, cr.days FROM channels c
-		   LEFT JOIN channel_retention cr ON cr.channel_id = c.id
+		   LEFT JOIN channel_retention cr ON cr.channel_id = COALESCE(c.parent_channel_id, c.id)
 		  WHERE c.type <> 'dm' AND c.is_group = 0
 		  ORDER BY c.id`)
 	if err != nil {
@@ -449,11 +450,11 @@ func (d *DB) RecordRetentionRunPurge(ctx context.Context, runID int64, ids []int
 // EventNamesMessagePredicate is the SQL that decides whether a persisted
 // replay event is about one of a set of messages, bound to a JSON array of
 // message ids as ?1: a message-family frame (chat_message, chat_edited,
-// chat_deleted, chat_bulk_deleted, reaction_update — the ones that carry a
+// chat_deleted, chat_bulk_deleted, reaction_update, poll_update — the ones that carry a
 // message's content or name it) whose payload.id, payload.referenced_message.id (a reply's embedded parent
 // snippet), payload.message_id or one of payload.ids is in the set. ws.eventNamesMessage is the same rule over
 // the bytes in the ring buffer; the two must stay in step.
-const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update')
+const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update', 'poll_update')
 	 AND (json_extract(payload, '$.payload.id') IN (SELECT value FROM json_each(?1))
 	   OR json_extract(payload, '$.payload.referenced_message.id') IN (SELECT value FROM json_each(?1))
 	   OR json_extract(payload, '$.payload.message_id') IN (SELECT value FROM json_each(?1))

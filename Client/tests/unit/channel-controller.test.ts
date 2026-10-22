@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -14,12 +14,18 @@ const {
   mockGetChannelMessages,
   mockSetReplyTo,
   mockStartEdit,
+  mockCancelEdit,
+  mockIsEditing,
+  mockInputFocus,
   mockIsIdle,
   mockScrollToMessage,
   mockSetDisabled,
   mockSetSendGate,
+  mockSetSlowModeNote,
   mockGetDraft,
   mockRestoreDraft,
+  mockRestoreUnsent,
+  mockPeekDraft,
 } = vi.hoisted(() => ({
   mockMessageListMount: vi.fn(),
   mockMessageListDestroy: vi.fn(),
@@ -31,7 +37,8 @@ const {
     (): Array<{
       id: number;
       content?: string;
-      user?: { id: number; username: string };
+      user?: { id: number; username: string; display_name?: string | null };
+      attachments?: Array<{ id: string }>;
       deleted?: boolean;
       status?: string;
       correlationId?: string;
@@ -39,11 +46,16 @@ const {
     }> => [],
   ),
   mockSetReplyTo: vi.fn(),
-  mockStartEdit: vi.fn(),
+  // The list owns the inline editor now: startEdit says whether one opened.
+  mockStartEdit: vi.fn((_id: number, _text?: string) => true),
+  mockCancelEdit: vi.fn(),
+  mockIsEditing: vi.fn(() => false),
+  mockInputFocus: vi.fn(),
   mockIsIdle: vi.fn(() => true),
   mockScrollToMessage: vi.fn(() => true),
   mockSetDisabled: vi.fn(),
   mockSetSendGate: vi.fn(),
+  mockSetSlowModeNote: vi.fn(),
   mockGetDraft: vi.fn<
     () => {
       content: string;
@@ -53,6 +65,10 @@ const {
     }
   >(() => ({ content: "", replyTo: null, attachments: [] })),
   mockRestoreDraft: vi.fn(),
+  mockRestoreUnsent: vi.fn(),
+  mockPeekDraft: vi.fn<
+    () => { content: string; replyTo: { messageId: number; username: string } | null }
+  >(() => ({ content: "", replyTo: null })),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -96,6 +112,9 @@ vi.mock("@components/MessageList", () => ({
       destroy: mockMessageListDestroy,
       scrollToMessage: mockScrollToMessage,
       setReplyTo: mockSetReplyTo,
+      startEdit: mockStartEdit,
+      cancelEdit: mockCancelEdit,
+      isEditing: mockIsEditing,
     };
   }),
 }));
@@ -107,14 +126,16 @@ vi.mock("@components/MessageInput", () => ({
       mount: mockMessageInputMount,
       destroy: mockMessageInputDestroy,
       setReplyTo: mockSetReplyTo,
-      startEdit: mockStartEdit,
       clearReply: vi.fn(),
-      cancelEdit: vi.fn(),
+      focus: mockInputFocus,
       isIdle: mockIsIdle,
       setDisabled: mockSetDisabled,
       setSendGate: mockSetSendGate,
+      setSlowModeNote: mockSetSlowModeNote,
       getDraft: mockGetDraft,
       restoreDraft: mockRestoreDraft,
+      restoreUnsent: mockRestoreUnsent,
+      peekDraft: mockPeekDraft,
     };
   }),
 }));
@@ -169,13 +190,24 @@ const { mockSetMessagePinned, mockAddOptimistic, mockMarkSendFailed, mockRemoveO
     mockRemoveOptimistic: vi.fn(),
   }));
 
-const { mockMarkChannelRead } = vi.hoisted(() => ({ mockMarkChannelRead: vi.fn() }));
+const { mockMarkChannelRead, mockLeaveChannel, mockMarkChannelReadSeen } = vi.hoisted(() => ({
+  mockMarkChannelRead: vi.fn(),
+  mockLeaveChannel: vi.fn(),
+  mockMarkChannelReadSeen: vi.fn(),
+}));
 
 vi.mock("@lib/read-state", () => ({
+  // threads.store registers its thread check at load.
+  setKnownThreadCheck: vi.fn(),
+  setThreadReadPointer: vi.fn(),
   markChannelRead: mockMarkChannelRead,
+  leaveChannel: mockLeaveChannel,
+  markChannelReadSeen: mockMarkChannelReadSeen,
 }));
 
 const { mockRole } = vi.hoisted(() => ({ mockRole: { value: "member" } }));
+/** The messages store's per-message pin revisions, which a chat_pinned moves. */
+const { mockPinRevisions } = vi.hoisted(() => ({ mockPinRevisions: new Map<number, number>() }));
 
 const {
   mockReattachToPresent,
@@ -192,6 +224,9 @@ const {
 }));
 
 vi.mock("@stores/messages.store", () => ({
+  messagesStore: {
+    getState: () => ({ messagePinRevision: mockPinRevisions }),
+  },
   getChannelMessages: mockGetChannelMessages,
   setMessagePinned: mockSetMessagePinned,
   addOptimisticMessage: mockAddOptimistic,
@@ -218,7 +253,8 @@ const { mockUpdateChatHeaderForDm } = vi.hoisted(() => ({
   mockUpdateChatHeaderForDm: vi.fn(),
 }));
 
-vi.mock("../../src/pages/main-page/ChatHeader", () => ({
+vi.mock("../../src/pages/main-page/ChatHeader", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/pages/main-page/ChatHeader")>()),
   updateChatHeaderForDm: mockUpdateChatHeaderForDm,
 }));
 
@@ -264,6 +300,12 @@ vi.mock("@stores/dm.store", async () => {
   };
 });
 
+const { fetchImageAsObjectUrl } = vi.hoisted(() => ({ fetchImageAsObjectUrl: vi.fn() }));
+vi.mock("@components/message-list/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@components/message-list/attachments")>()),
+  fetchImageAsObjectUrl,
+}));
+
 vi.mock("@stores/members.store", () => ({
   membersStore: {
     getState: mockMembersStoreGetState,
@@ -308,6 +350,7 @@ import {
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import { loadLastChannel } from "@lib/last-channel";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import { Disposable } from "@lib/disposable";
 import { messagingText } from "../../src/i18n/messaging";
 import { setActiveTimeout } from "../../src/features/safety/store";
@@ -317,9 +360,15 @@ import {
   setActiveChannel,
   setRoles,
   updateChannel,
+  addChannel,
   setNsfwAcknowledged,
 } from "@stores/channels.store";
 import { createMessageList } from "@components/MessageList";
+import { loadSavedDraft, saveDraft } from "@lib/savedDrafts";
+import {
+  NAVIGATION_DESTINATIONS,
+  type ForumViewContext,
+} from "../../src/features/navigation/destinations";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -381,6 +430,8 @@ describe("createChannelController", () => {
     membersStoreSubscribers.length = 0;
     mockDmComposerBlockReason.mockReturnValue(null);
     mockIsIdle.mockReturnValue(true);
+    mockIsEditing.mockReturnValue(false);
+    mockStartEdit.mockReturnValue(true);
     // The controller gates sends on the store-backed connection status
     // (docs/architecture/ux §3), not on ws.getState().
     setConnectionStatus("connected");
@@ -465,6 +516,46 @@ describe("createChannelController", () => {
     ctrl.mountChannel(99, "random");
 
     expect(mockMarkChannelRead).toHaveBeenCalledWith(42);
+  });
+
+  describe("with the server's read pointer (WP 3D-5d)", () => {
+    beforeEach(() => {
+      applyReadyCapabilities({ read_pointer: true });
+      mockLeaveChannel.mockClear();
+      mockMarkChannelReadSeen.mockClear();
+      mockMarkChannelRead.mockClear();
+    });
+    afterEach(() => resetServerCapabilities());
+
+    it("leaving a channel marks only what was seen, never everything", () => {
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+      ctrl.mountChannel(99, "random");
+
+      expect(mockLeaveChannel).toHaveBeenCalledWith(42);
+      expect(mockMarkChannelRead).not.toHaveBeenCalled();
+    });
+
+    it("sending from a detached window marks what was seen, not everything", () => {
+      mockIsWindowDetached.mockReturnValueOnce(true);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("hello", null, [], []);
+
+      expect(mockMarkChannelReadSeen).toHaveBeenCalledWith(42);
+      expect(mockMarkChannelRead).not.toHaveBeenCalled();
+    });
+
+    it("jumping to the present still marks at latest", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      capturedMessageListOpts.onJumpToPresent?.();
+
+      expect(mockMarkChannelRead).toHaveBeenCalledWith(42);
+    });
   });
 
   it("does not mark anything read on the very first mount (no previous channel)", () => {
@@ -692,6 +783,276 @@ describe("createChannelController", () => {
     });
   });
 
+  describe("drafts survive a restart (3A-3)", () => {
+    const withHost = (): ChannelControllerOptions => {
+      const opts = makeOpts();
+      Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
+      return opts;
+    };
+    beforeEach(() => localStorage.clear());
+
+    it("restores a saved draft on a fresh start, with its reply", () => {
+      saveDraft("chat.example", 1, 42, {
+        content: "from yesterday",
+        replyTo: { messageId: 7, username: "alice" },
+      });
+      const ctrl = createChannelController(withHost());
+      ctrl.mountChannel(42, "general");
+      expect(mockRestoreDraft).toHaveBeenCalledWith({
+        content: "from yesterday",
+        replyTo: { messageId: 7, username: "alice" },
+        attachments: [],
+      });
+      ctrl.destroy();
+    });
+
+    it("drops the saved reply when loaded history shows its message deleted", () => {
+      saveDraft("chat.example", 1, 42, {
+        content: "x",
+        replyTo: { messageId: 7, username: "alice" },
+      });
+      mockGetChannelMessages.mockReturnValue([{ id: 7, deleted: true }]);
+      const ctrl = createChannelController(withHost());
+      ctrl.mountChannel(42, "general");
+      expect(mockRestoreDraft).toHaveBeenCalledWith({
+        content: "x",
+        replyTo: null,
+        attachments: [],
+      });
+      ctrl.destroy();
+    });
+
+    it("saves the composer's text when typing pauses, and removes it once empty", () => {
+      vi.useFakeTimers();
+      try {
+        const ctrl = createChannelController(withHost());
+        ctrl.mountChannel(42, "general");
+        mockPeekDraft.mockReturnValue({ content: "typing…", replyTo: null });
+        capturedMessageInputOpts!.onDraftChange();
+        expect(loadSavedDraft("chat.example", 1, 42)).toBeNull();
+        vi.advanceTimersByTime(750);
+        expect(loadSavedDraft("chat.example", 1, 42)?.content).toBe("typing…");
+
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        capturedMessageInputOpts!.onDraftChange();
+        expect(loadSavedDraft("chat.example", 1, 42)).toBeNull();
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+
+    it("saves straight away on a channel switch, to the channel it was typed in", () => {
+      vi.useFakeTimers();
+      try {
+        const ctrl = createChannelController(withHost());
+        ctrl.mountChannel(42, "general");
+        // Once for the change, once for the save on the switch; the new
+        // channel's composer starts empty.
+        mockPeekDraft
+          .mockReturnValueOnce({ content: "unsent", replyTo: null })
+          .mockReturnValueOnce({ content: "unsent", replyTo: null });
+        capturedMessageInputOpts!.onDraftChange();
+        ctrl.mountChannel(99, "random");
+        expect(loadSavedDraft("chat.example", 1, 42)?.content).toBe("unsent");
+        expect(loadSavedDraft("chat.example", 1, 99)).toBeNull();
+        vi.advanceTimersByTime(1000);
+        expect(loadSavedDraft("chat.example", 1, 99)).toBeNull();
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("draft saves stay with their account (3A-3)", () => {
+    beforeEach(() => localStorage.clear());
+
+    it("skips a save once a different account is signed in", () => {
+      vi.useFakeTimers();
+      let userId = 1;
+      try {
+        const opts = makeOpts({ getCurrentUserId: () => userId });
+        Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        mockPeekDraft.mockReturnValue({ content: "mine", replyTo: null });
+        capturedMessageInputOpts!.onDraftChange();
+        userId = 2;
+        vi.advanceTimersByTime(750);
+        expect(loadSavedDraft("chat.example", 1, 42)).toBeNull();
+        expect(loadSavedDraft("chat.example", 2, 42)).toBeNull();
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+
+    it("writes a restored draft back without the reply it dropped", () => {
+      vi.useFakeTimers();
+      try {
+        const opts = makeOpts();
+        Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
+        saveDraft("chat.example", 1, 42, {
+          content: "x",
+          replyTo: { messageId: 7, username: "alice" },
+        });
+        mockGetChannelMessages.mockReturnValue([{ id: 7, deleted: true }]);
+        mockPeekDraft.mockReturnValue({ content: "x", replyTo: null });
+        const ctrl = createChannelController(opts);
+        ctrl.mountChannel(42, "general");
+        vi.advanceTimersByTime(750);
+        expect(loadSavedDraft("chat.example", 1, 42)).toEqual({ content: "x", replyTo: null });
+        ctrl.destroy();
+      } finally {
+        mockPeekDraft.mockReturnValue({ content: "", replyTo: null });
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("delete confirm preview and Shift tip (3A-4)", () => {
+    function previewEl(): HTMLElement | null {
+      return document.querySelector("[data-testid='msg-delete-preview']");
+    }
+
+    it("shows the author and text of the message, plus the Shift tip", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "see you **soon**", user: { id: 2, username: "bob" }, attachments: [] },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+
+      expect(previewEl()?.textContent).toContain("bob");
+      expect(previewEl()?.textContent).toContain("see you soon");
+      expect(document.querySelector("[data-testid='msg-delete-tip']")?.textContent).toBe(
+        "Tip: hold Shift when you click Delete to skip this.",
+      );
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
+    });
+
+    it("truncates a long message and sets markup as text, never HTML", () => {
+      mockGetChannelMessages.mockReturnValue([
+        {
+          id: 5,
+          content: `<img src=x onerror=alert(1)>${"a".repeat(400)}`,
+          user: { id: 2, username: "bob" },
+          attachments: [],
+        },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+
+      expect(previewEl()?.querySelector("img")).toBeNull();
+      const text = previewEl()?.querySelector(".msg-delete-preview-text")?.textContent ?? "";
+      expect(text.startsWith("<img src=x onerror=alert(1)>")).toBe(true);
+      expect(text.endsWith("\u2026")).toBe(true);
+      expect(Array.from(text).length).toBeLessThanOrEqual(201);
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
+    });
+
+    it("labels an attachments-only message instead of leaving the preview blank", () => {
+      mockGetChannelMessages.mockReturnValue([
+        {
+          id: 5,
+          content: "",
+          user: { id: 2, username: "bob" },
+          attachments: [{ id: "a1" }],
+        },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(5, false);
+
+      expect(previewEl()?.querySelector(".msg-delete-preview-text")?.textContent).toBe(
+        "Attachment",
+      );
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
+    });
+
+    it("still opens, with the tip and no preview, when the message is not in the window", () => {
+      mockGetChannelMessages.mockReturnValue([]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onDeleteClick(99, false);
+
+      expect(document.querySelector("[data-testid='msg-delete-modal']")).not.toBeNull();
+      expect(previewEl()).toBeNull();
+      expect(document.querySelector("[data-testid='msg-delete-tip']")).not.toBeNull();
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
+    });
+
+    it("the empty-edit confirm shows the preview too", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "mine", user: { id: 1, username: "me" }, attachments: [] },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onEmptyEdit(5);
+
+      expect(previewEl()?.textContent).toContain("mine");
+      // No click opened this, so the Shift tip does not apply.
+      expect(document.querySelector("[data-testid='msg-delete-tip']")).toBeNull();
+      document.querySelector<HTMLButtonElement>("[data-testid='msg-delete-cancel']")!.click();
+      ctrl.destroyChannel();
+    });
+  });
+
+  describe("empty edit offers delete (3A-3)", () => {
+    it("opens the delete confirm; Delete closes the edit and sends the delete", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "mine", user: { id: 1, username: "me" } },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onEmptyEdit(5);
+      expect(document.querySelector("[data-testid='msg-delete-modal']")).not.toBeNull();
+      expect(mockCancelEdit).not.toHaveBeenCalled();
+
+      mockInputFocus.mockClear();
+      (document.querySelector("[data-testid='msg-delete-confirm']") as HTMLButtonElement).click();
+      expect(mockCancelEdit).toHaveBeenCalledTimes(1);
+      // The modal gave focus back to the editor that just went away.
+      expect(mockInputFocus).toHaveBeenCalledTimes(1);
+      const deletes = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([f]) => (f as { type: string }).type === "chat_delete",
+      );
+      expect(deletes).toHaveLength(1);
+      ctrl.destroyChannel();
+    });
+
+    it("Cancel leaves the edit open and deletes nothing", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      capturedMessageListOpts!.onEmptyEdit(5);
+      (document.querySelector("[data-testid='msg-delete-cancel']") as HTMLButtonElement).click();
+      expect(mockCancelEdit).not.toHaveBeenCalled();
+      expect(
+        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.some(
+          ([f]) => (f as { type: string }).type === "chat_delete",
+        ),
+      ).toBe(false);
+      ctrl.destroyChannel();
+    });
+  });
+
   it("does not invalidate any window on the very first mount, which fetches exactly once", () => {
     const opts = makeOpts();
     const ctrl = createChannelController(opts);
@@ -902,7 +1263,7 @@ describe("createChannelController", () => {
       vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
-      capturedMessageInputOpts.onSend("private text", null, []);
+      capturedMessageInputOpts.onSend("private text", null, [], []);
       await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledOnce());
       const logicalId = mockAddOptimistic.mock.calls[0]![0].clientMessageId;
       const callback = vi
@@ -939,7 +1300,7 @@ describe("createChannelController", () => {
       vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
-      capturedMessageInputOpts.onSend("send once", null, []);
+      capturedMessageInputOpts.onSend("send once", null, [], []);
       await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledOnce());
       const first = vi
         .mocked(opts.ws.send)
@@ -1048,7 +1409,7 @@ describe("createChannelController", () => {
       vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
-      capturedMessageInputOpts.onSend("private text", null, []);
+      capturedMessageInputOpts.onSend("private text", null, [], []);
       await vi.waitFor(() => expect(mockAddOptimistic).toHaveBeenCalledOnce());
       activatePendingMessages(owner, user, false);
       capturedMessageListOpts.onRetry("cid-2");
@@ -1088,10 +1449,10 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
 
       // "A" is plain text and takes the persisted async path.
-      capturedMessageInputOpts.onSend("A", null, []);
+      capturedMessageInputOpts.onSend("A", null, [], []);
       // "B" carries a reply, submitted right after A while A's persist IPC
       // is still in flight — it must not be sent to the socket before A.
-      capturedMessageInputOpts.onSend("B", 7, []);
+      capturedMessageInputOpts.onSend("B", 7, [], []);
 
       await vi.waitFor(() => expect(sentContents).toHaveLength(2));
       expect(sentContents).toEqual(["A", "B"]);
@@ -1105,7 +1466,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       current = false;
-      capturedMessageInputOpts.onSend("belongs to the old server", null, []);
+      capturedMessageInputOpts.onSend("belongs to the old server", null, [], []);
       expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
     });
 
@@ -1128,10 +1489,10 @@ describe("createChannelController", () => {
         const ctrl = createChannelController(opts);
         ctrl.mountChannel(42, "general");
         for (let i = 0; i < 100; i++) {
-          capturedMessageInputOpts.onSend("hello", null, []);
+          capturedMessageInputOpts.onSend("hello", null, [], []);
           const callback = vi
             .mocked(opts.ws.on)
-            .mock.calls.find(([event]) => event === "chat_send_ok")![1];
+            .mock.calls.findLast(([event]) => event === "chat_send_ok")![1];
           (callback as (payload: object, id: string) => void)({}, `cid-${next}`);
         }
         expect(cleanups.size).toBe(0);
@@ -1148,7 +1509,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_send",
@@ -1167,7 +1528,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", 7, []);
+      capturedMessageInputOpts.onSend("hello", 7, [], []);
 
       expect(opts.ws.send).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1183,7 +1544,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", 7, []);
+      capturedMessageInputOpts.onSend("hello", 7, [], []);
 
       expect(opts.ws.send).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1203,7 +1564,7 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
       (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mockClear();
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
       expect(mockReattachToPresent).toHaveBeenCalledWith(42);
       // Reattach clears "loaded", so the live tail is refetched.
@@ -1222,7 +1583,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
       // No socket send is attempted; the row is shown as failed with retry.
       expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
@@ -1252,7 +1613,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("lost text", null, []);
+      capturedMessageInputOpts.onSend("lost text", null, [], []);
 
       expect(mockMarkSendFailed).toHaveBeenCalledWith(expect.any(String), "OFFLINE");
       await vi.waitFor(() =>
@@ -1352,7 +1713,7 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
 
       // cid-1 is channel_focus; the chat_send gets cid-2.
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
       expect(mockAddOptimistic).toHaveBeenCalledWith(
         expect.objectContaining({ correlationId: "cid-2", content: "hello" }),
       );
@@ -1373,7 +1734,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       mockGetChannelMessages.mockReturnValue([]);
-      capturedMessageInputOpts.onSend("hello", 7, []);
+      capturedMessageInputOpts.onSend("hello", 7, [], []);
       mockGetChannelMessages.mockReturnValue([
         { id: -1, correlationId: "cid-2", status: "failed", errorCode: "BAD_REQUEST" },
       ]);
@@ -1395,7 +1756,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       mockGetChannelMessages.mockReturnValue([]);
-      capturedMessageInputOpts.onSend("hello", 7, []);
+      capturedMessageInputOpts.onSend("hello", 7, [], []);
       mockGetChannelMessages.mockReturnValue([
         { id: -1, correlationId: "cid-2", status: "failed", errorCode: "NETWORK" },
       ]);
@@ -1417,7 +1778,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
       const sendCalls = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.length;
 
       capturedMessageListOpts.onDeleteDraft("cid-2");
@@ -1437,7 +1798,7 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
 
       // cid-1 is channel_focus; the chat_send gets cid-2.
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
       expect(mockAddOptimistic).toHaveBeenCalledWith(
         expect.objectContaining({ correlationId: "cid-2", content: "hello" }),
       );
@@ -1464,9 +1825,9 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
-      const ackCall = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls.find(
+      const ackCall = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls.findLast(
         (c: unknown[]) => c[0] === "chat_send_ok",
       );
       const onAck = ackCall![1] as (payload: unknown, id?: string) => void;
@@ -1492,23 +1853,14 @@ describe("createChannelController", () => {
       });
     });
 
-    it("onEditMessage rejects empty content", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
-
-      capturedMessageInputOpts.onEditMessage(5, "   ");
-
-      expect(opts.showToast).toHaveBeenCalledWith("Message cannot be empty", "error");
-    });
-
-    it("onEditMessage skips when content unchanged", () => {
+    it("onEditSave skips the send, and closes the editor, when content unchanged", () => {
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "hello" }]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts!.onEditMessage(5, "hello");
+      // true closes the editor.
+      expect(capturedMessageListOpts!.onEditSave(5, "hello")).toBe(true);
 
       // Should not send edit since content hasn't changed
       const sendMock = opts.ws.send as ReturnType<typeof vi.fn>;
@@ -1591,7 +1943,21 @@ describe("createChannelController", () => {
 
       capturedMessageListOpts!.onReplyClick(5);
 
-      expect(mockSetReplyTo).toHaveBeenCalledWith(5, "alice");
+      expect(mockSetReplyTo).toHaveBeenCalledWith(5, "alice", { self: false });
+    });
+
+    it("onReplyClick shows the display name and marks a reply to yourself (3A-12)", () => {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "hi", user: { id: 2, username: "alice", display_name: "Alice B" } },
+        { id: 6, content: "mine", user: { id: 1, username: "me" } },
+      ]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onReplyClick(5);
+      expect(mockSetReplyTo).toHaveBeenLastCalledWith(5, "Alice B", { self: false });
+      capturedMessageListOpts!.onReplyClick(6);
+      expect(mockSetReplyTo).toHaveBeenLastCalledWith(6, "me", { self: true });
     });
 
     it("onReplyClick uses empty string for unknown message", () => {
@@ -1605,7 +1971,7 @@ describe("createChannelController", () => {
       expect(mockSetReplyTo).toHaveBeenCalledWith(999, "");
     });
 
-    it("onEditClick starts edit with message content", () => {
+    it("onEditClick opens the inline editor on that message", () => {
       mockGetChannelMessages.mockReturnValue([
         { id: 5, content: "hello", user: { id: 1, username: "me" } },
       ]);
@@ -1615,18 +1981,31 @@ describe("createChannelController", () => {
 
       capturedMessageListOpts!.onEditClick(5);
 
-      expect(mockStartEdit).toHaveBeenCalledWith(5, "hello");
+      expect(mockStartEdit).toHaveBeenCalledWith(5);
     });
 
-    it("onEditClick skips startEdit when message id is not found in channel", () => {
+    it("onEditClick hands an unknown id to the list, which refuses it", () => {
       mockGetChannelMessages.mockReturnValue([]);
+      mockStartEdit.mockReturnValue(false);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
       capturedMessageListOpts!.onEditClick(999);
 
-      expect(mockStartEdit).not.toHaveBeenCalled();
+      // The list owns "is it loaded, mine and sent"; nothing else happens.
+      expect(mockStartEdit).toHaveBeenCalledExactlyOnceWith(999);
+      expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_edit" }));
+    });
+
+    it("onEditEnd puts focus back in the composer", () => {
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onEditEnd();
+
+      expect(mockInputFocus).toHaveBeenCalledTimes(1);
+      ctrl.destroyChannel();
     });
 
     it("onPinClick pins a message and shows toast", async () => {
@@ -1639,10 +2018,13 @@ describe("createChannelController", () => {
 
       capturedMessageListOpts!.onPinClick(5, 42, false);
 
+      // Optimistic: the row flips before the request settles.
+      expect(mockSetMessagePinned).toHaveBeenCalledExactlyOnceWith(42, 5, true);
+
       await vi.waitFor(() => {
-        expect(mockSetMessagePinned).toHaveBeenCalledWith(42, 5, true);
         expect(opts.showToast).toHaveBeenCalledWith("Message pinned", "success");
       });
+      expect(mockSetMessagePinned).toHaveBeenCalledOnce();
     });
 
     it("onPinClick unpins a message and shows toast", async () => {
@@ -1655,10 +2037,12 @@ describe("createChannelController", () => {
 
       capturedMessageListOpts!.onPinClick(5, 42, true);
 
+      expect(mockSetMessagePinned).toHaveBeenCalledExactlyOnceWith(42, 5, false);
+
       await vi.waitFor(() => {
-        expect(mockSetMessagePinned).toHaveBeenCalledWith(42, 5, false);
         expect(opts.showToast).toHaveBeenCalledWith("Message unpinned", "success");
       });
+      expect(mockSetMessagePinned).toHaveBeenCalledOnce();
     });
 
     it("onPinClick shows error toast on failure", async () => {
@@ -1674,6 +2058,97 @@ describe("createChannelController", () => {
       await vi.waitFor(() => {
         expect(opts.showToast).toHaveBeenCalledWith("Failed to pin/unpin message", "error");
       });
+      // Flipped first, then reverted to the state it started in.
+      expect(mockSetMessagePinned.mock.calls).toEqual([
+        [42, 5, true],
+        [42, 5, false],
+      ]);
+    });
+
+    it("onPinClick: a chat_pinned before the rejection keeps its truth, no revert", async () => {
+      const opts = makeOpts();
+      let reject: (e: Error) => void = () => {};
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
+        .fn()
+        .mockReturnValue(new Promise<void>((_, r) => (reject = r)));
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockPinRevisions.clear();
+
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+      // The server's broadcast lands while the request is pending.
+      mockPinRevisions.set(5, 1);
+      reject(new Error("late"));
+
+      await vi.waitFor(() => {
+        expect(opts.showToast).toHaveBeenCalledWith("Failed to pin/unpin message", "error");
+      });
+      expect(mockSetMessagePinned.mock.calls).toEqual([[42, 5, true]]);
+      mockPinRevisions.clear();
+    });
+
+    it("onPinClick: a pin of another message in the channel still lets the rejection revert", async () => {
+      const opts = makeOpts();
+      let reject: (e: Error) => void = () => {};
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
+        .fn()
+        .mockReturnValue(new Promise<void>((_, r) => (reject = r)));
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockPinRevisions.clear();
+
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+      mockPinRevisions.set(6, 1);
+      reject(new Error("refused"));
+
+      await vi.waitFor(() => {
+        expect(mockSetMessagePinned.mock.calls).toEqual([
+          [42, 5, true],
+          [42, 5, false],
+        ]);
+      });
+      mockPinRevisions.clear();
+    });
+
+    it("onPinClick: a second click while the first is pending is ignored, then allowed again", async () => {
+      const opts = makeOpts();
+      let resolve: () => void = () => {};
+      const pinMessage = vi.fn().mockReturnValue(new Promise<void>((r) => (resolve = r)));
+      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = pinMessage;
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+      capturedMessageListOpts!.onPinClick(5, 42, true);
+      expect(pinMessage).toHaveBeenCalledOnce();
+      expect(mockSetMessagePinned).toHaveBeenCalledOnce();
+
+      resolve();
+      await vi.waitFor(() => {
+        expect(opts.showToast).toHaveBeenCalledWith("Message pinned", "success");
+      });
+      await Promise.resolve();
+      capturedMessageListOpts!.onPinClick(5, 42, false);
+      expect(pinMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it("onPinClick failure on an unpin restores the pinned state", async () => {
+      const opts = makeOpts();
+      (opts.api as unknown as { unpinMessage: ReturnType<typeof vi.fn> }).unpinMessage = vi
+        .fn()
+        .mockRejectedValue(new Error("network error"));
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageListOpts!.onPinClick(5, 42, true);
+
+      await vi.waitFor(() => {
+        expect(opts.showToast).toHaveBeenCalledWith("Failed to pin/unpin message", "error");
+      });
+      expect(mockSetMessagePinned.mock.calls).toEqual([
+        [42, 5, false],
+        [42, 5, true],
+      ]);
     });
 
     it("onScrollTop does not load when channelAbort is null (after destroy)", () => {
@@ -1696,13 +2171,13 @@ describe("createChannelController", () => {
   });
 
   describe("MessageInput callbacks - additional", () => {
-    it("onEditMessage sends chat_edit when content changed", () => {
+    it("onEditSave sends chat_edit when content changed", () => {
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      expect(capturedMessageListOpts!.onEditSave(5, "new content")).toBe(true);
 
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_edit",
@@ -1713,13 +2188,13 @@ describe("createChannelController", () => {
       expect(opts.showToast).not.toHaveBeenCalledWith(expect.any(String), "success");
     });
 
-    it("onEditMessage sends edit when message not found in store", () => {
+    it("onEditSave sends edit when message not found in store", () => {
       mockGetChannelMessages.mockReturnValue([]);
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts!.onEditMessage(999, "new content");
+      capturedMessageListOpts!.onEditSave(999, "new content");
 
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_edit",
@@ -1732,7 +2207,13 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts.onSend("hello", 10, ["file1.png"]);
+      capturedMessageInputOpts.onSend(
+        "hello",
+        10,
+        ["file1.png"],
+        [{ id: "file1.png", filename: "file1.png" }],
+        true,
+      );
 
       expect(opts.ws.send).toHaveBeenCalledWith({
         type: "chat_send",
@@ -1740,9 +2221,49 @@ describe("createChannelController", () => {
           channel_id: 42,
           content: "hello",
           reply_to: 10,
+          reply_ping: true,
           attachments: ["file1.png"],
         },
       });
+    });
+
+    it("sends reply_ping false with a reply and leaves it out without one (3A-12)", () => {
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+
+      capturedMessageInputOpts.onSend("off", 10, [], [], false);
+      capturedMessageInputOpts.onSend("plain", null, [], [], true);
+
+      const payloads = vi
+        .mocked(opts.ws.send)
+        .mock.calls.filter(([f]) => f.type === "chat_send")
+        .map(([f]) => f.payload as Record<string, unknown>);
+      expect(payloads[0]).toMatchObject({ reply_to: 10, reply_ping: false });
+      expect(payloads[1]).not.toHaveProperty("reply_ping");
+    });
+
+    it("a retry resends the same reply_ping (3A-12)", () => {
+      const opts = makeOpts();
+      let n = 0;
+      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      mockGetChannelMessages.mockReturnValue([]);
+      capturedMessageInputOpts.onSend("hey", 7, [], [], false);
+      mockGetChannelMessages.mockReturnValue([
+        { id: -1, correlationId: "cid-2", status: "failed", errorCode: "NETWORK" },
+      ]);
+
+      capturedMessageListOpts.onRetry("cid-2");
+
+      expect(opts.ws.send).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: "chat_send",
+          payload: expect.objectContaining({ reply_to: 7, reply_ping: false }),
+        }),
+      );
+      mockGetChannelMessages.mockReturnValue([]);
     });
   });
 
@@ -1785,7 +2306,7 @@ describe("createChannelController", () => {
 
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
 
-      expect(mockStartEdit).toHaveBeenCalledWith(4, "my latest");
+      expect(mockStartEdit).toHaveBeenCalledExactlyOnceWith(4);
     });
 
     it("skips deleted messages and finds earlier non-deleted message", () => {
@@ -1812,7 +2333,7 @@ describe("createChannelController", () => {
 
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
 
-      expect(mockStartEdit).toHaveBeenCalledWith(1, "earliest");
+      expect(mockStartEdit).toHaveBeenCalledExactlyOnceWith(1);
     });
 
     it("does nothing when no own messages exist", () => {
@@ -1862,7 +2383,7 @@ describe("createChannelController", () => {
       // The visual Edit affordance only appears on status === "sent" rows
       // (renderers.ts); the keyboard shortcut must honor the same gate rather
       // than editing an optimistic row that has no real message id yet.
-      expect(mockStartEdit).toHaveBeenCalledWith(5, "sent earlier");
+      expect(mockStartEdit).toHaveBeenCalledExactlyOnceWith(5);
     });
 
     it("does nothing when every own message is still pending/failed", () => {
@@ -1912,6 +2433,12 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -1921,10 +2448,10 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "alice", "dm");
 
       // Should use member status ("idle") over DM recipient status ("online")
-      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
-        username: "alice",
-        status: "Idle",
-      });
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({ username: "alice", status: "Idle", isGroup: false }),
+      );
     });
 
     it("uses DM recipient status when member not found in members store", () => {
@@ -1952,6 +2479,12 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -1960,10 +2493,71 @@ describe("createChannelController", () => {
 
       ctrl.mountChannel(42, "bob", "dm");
 
-      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
-        username: "bob",
-        status: "Dnd",
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({ username: "bob", status: "Do Not Disturb" }),
+      );
+    });
+
+    it("hands the header the partner's avatar for a 1:1 and the face stack for a group", () => {
+      const user = (id: number, username: string) => ({
+        id,
+        username,
+        avatar: "",
+        status: "online",
       });
+      const dm = (
+        isGroup: boolean,
+        participants: [ReturnType<typeof user>, ...ReturnType<typeof user>[]],
+      ) => ({
+        channelId: 42,
+        recipient: participants[0],
+        participants,
+        name: isGroup ? "Crew" : "",
+        isGroup,
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+      });
+      mockMembersStoreGetState.mockReturnValue({ members: new Map() });
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
+        sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
+      };
+
+      mockDmStoreGetState.mockReturnValue({ channels: [dm(false, [user(5, "alice")])] });
+      createChannelController(makeOpts({ chatHeaderRefs })).mountChannel(42, "alice", "dm");
+      const one = mockUpdateChatHeaderForDm.mock.calls.at(-1)![1] as {
+        avatar: HTMLElement;
+        isGroup: boolean;
+      };
+      expect(one.isGroup).toBe(false);
+      expect(one.avatar.querySelector(".avatar-initial")?.textContent).toBe("A");
+
+      mockDmStoreGetState.mockReturnValue({
+        channels: [dm(true, [user(5, "alice"), user(6, "bob"), user(7, "cy")])],
+      });
+      createChannelController(makeOpts({ chatHeaderRefs })).mountChannel(42, "Crew", "dm");
+      const group = mockUpdateChatHeaderForDm.mock.calls.at(-1)![1] as {
+        avatar: HTMLElement;
+        isGroup: boolean;
+      };
+      expect(group.isGroup).toBe(true);
+      expect(group.avatar.classList.contains("dm-avatar-stack")).toBe(true);
+      expect(group.avatar.querySelectorAll(".dm-avatar-face")).toHaveLength(2);
+      expect(group.avatar.dataset["testid"]).toBe("ch-avatar-stack");
+      expect(group.avatar.getAttribute("aria-hidden")).toBe("true");
     });
 
     it("falls back to 'Offline' when DM channel not found in dmStore", () => {
@@ -1974,6 +2568,12 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -1982,10 +2582,13 @@ describe("createChannelController", () => {
 
       ctrl.mountChannel(42, "unknown", "dm");
 
-      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(chatHeaderRefs, {
-        username: "unknown",
-        status: "Offline",
-      });
+      expect(mockUpdateChatHeaderForDm).toHaveBeenCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({
+          username: "unknown",
+          status: "Offline",
+        }),
+      );
     });
 
     it("keeps the DM header subtitle live when the partner's presence changes", () => {
@@ -2011,6 +2614,12 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2018,10 +2627,13 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "alice", "dm");
 
-      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(chatHeaderRefs, {
-        username: "alice",
-        status: "Offline",
-      });
+      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({
+          username: "alice",
+          status: "Offline",
+        }),
+      );
 
       // The partner comes online — no re-mount, just a members store update.
       mockMembersStoreGetState.mockReturnValue({
@@ -2029,10 +2641,13 @@ describe("createChannelController", () => {
       });
       for (const cb of membersStoreSubscribers) cb();
 
-      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(chatHeaderRefs, {
-        username: "alice",
-        status: "Online",
-      });
+      expect(mockUpdateChatHeaderForDm).toHaveBeenLastCalledWith(
+        chatHeaderRefs,
+        expect.objectContaining({
+          username: "alice",
+          status: "Online",
+        }),
+      );
     });
 
     it("keeps a group DM header live when the roster changes", () => {
@@ -2054,6 +2669,12 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2086,12 +2707,92 @@ describe("createChannelController", () => {
       );
     });
 
+    it("draws a group's icon in the header and redraws it when the summary's icon changes", async () => {
+      fetchImageAsObjectUrl.mockImplementation(async (url: string) => `blob:${url}`);
+      const user = (id: number, username: string) => ({
+        id,
+        username,
+        avatar: "",
+        status: "online",
+      });
+      const group = (icon: string) =>
+        ({
+          channelId: 42,
+          recipient: user(5, "alice"),
+          participants: [user(5, "alice"), user(6, "bob")],
+          name: "Crew",
+          isGroup: true,
+          ownerId: 1,
+          icon,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+        }) as never;
+      mockMembersStoreGetState.mockReturnValue({ members: new Map() });
+      const chatHeaderRefs = {
+        hashEl: document.createElement("span"),
+        nameEl: document.createElement("span"),
+        topicEl: document.createElement("span"),
+        callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
+        sidebarToggle: document.createElement("button"),
+        nameGroupEl: document.createElement("div"),
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
+      };
+      const headerAvatar = (): HTMLElement =>
+        (mockUpdateChatHeaderForDm.mock.calls.at(-1)![1] as { avatar: HTMLElement }).avatar;
+      const flush = async (): Promise<void> => {
+        await Promise.resolve();
+        await Promise.resolve();
+      };
+
+      mockDmStoreGetState.mockReturnValue({ channels: [group("/api/v1/files/1")] });
+      createChannelController(makeOpts({ chatHeaderRefs })).mountChannel(42, "Crew", "dm");
+      const first = headerAvatar();
+      await flush();
+      expect(first.dataset["testid"]).toBe("ch-avatar-stack");
+      expect(first.querySelector("img.dm-avatar-icon-img")?.getAttribute("src")).toContain(
+        "/api/v1/files/1",
+      );
+      expect(first.querySelectorAll(".dm-avatar-face")).toHaveLength(0);
+
+      // The icon is removed: the key changes, so the faces come back.
+      mockDmStoreGetState.mockReturnValue({ channels: [group("")] });
+      for (const cb of dmStoreSubscribers) cb();
+      const cleared = headerAvatar();
+      await flush();
+      expect(cleared).not.toBe(first);
+      expect(cleared.querySelector("img")).toBeNull();
+      expect(cleared.querySelectorAll(".dm-avatar-face")).toHaveLength(2);
+
+      // A different file is a different picture, not the cached element.
+      mockDmStoreGetState.mockReturnValue({ channels: [group("/api/v1/files/2")] });
+      for (const cb of dmStoreSubscribers) cb();
+      const second = headerAvatar();
+      await flush();
+      expect(second).not.toBe(cleared);
+      expect(second.querySelector("img.dm-avatar-icon-img")?.getAttribute("src")).toContain(
+        "/api/v1/files/2",
+      );
+    });
+
     it("resets header for non-DM channel when chatHeaderRefs is provided", () => {
       const chatHeaderRefs = {
         hashEl: document.createElement("span"),
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2131,6 +2832,12 @@ describe("createChannelController", () => {
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        videoCallBtn: document.createElement("button"),
+        profileBtn: document.createElement("button"),
+        membersBtn: document.createElement("button"),
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
+        avatarEl: document.createElement("span"),
         sidebarToggle: document.createElement("button"),
         nameGroupEl: document.createElement("div"),
       };
@@ -2151,7 +2858,7 @@ describe("createChannelController", () => {
     /** Pull a ws.on handler registered by the controller. */
     function wsHandler(opts: ChannelControllerOptions, event: string): (payload: never) => void {
       const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
-      const entry = calls.find((c) => c[0] === event);
+      const entry = calls.findLast((c) => c[0] === event);
       expect(entry).toBeDefined();
       return entry![1] as (payload: never) => void;
     }
@@ -2287,7 +2994,7 @@ describe("createChannelController", () => {
 
       // cid-1 is channel_focus; the chat_send in A gets cid-2. The ack for it
       // does not arrive before the user switches away.
-      capturedMessageInputOpts.onSend("hello", null, []);
+      capturedMessageInputOpts.onSend("hello", null, [], []);
 
       // Switch to channel B before A's ack arrives.
       setActiveChannel(43);
@@ -2322,6 +3029,98 @@ describe("createChannelController", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe("slow-mode note up front (3A-4)", () => {
+    const base = { type: "text", category: null, position: 0, can_send: true } as const;
+
+    beforeEach(() => {
+      mockRole.value = "member";
+      setRoles([{ id: 4, name: "member", color: null, permissions: 0 }]);
+      setConnectionStatus("connected");
+    });
+
+    function seed(slowMode: number): void {
+      setChannels([
+        { ...base, id: 42, name: "general", slow_mode: slowMode },
+        { ...base, id: 43, name: "other", slow_mode: 0 },
+      ]);
+      setActiveChannel(42);
+    }
+
+    it("shows the note before any send, without gating the send", () => {
+      seed(5);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith("Slow mode is on: one message every 5s");
+      expect(mockSetSendGate).not.toHaveBeenCalledWith(expect.stringContaining("Slow mode"));
+      ctrl.destroyChannel();
+    });
+
+    it("hides the note when slow mode is 0", () => {
+      seed(0);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
+    });
+
+    it("updates the note when the user's role changes", () => {
+      seed(5);
+      const before = membersStoreSubscribers.length;
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith("Slow mode is on: one message every 5s");
+
+      mockRole.value = "moderator";
+      setRoles([{ id: 3, name: "moderator", color: null, permissions: 0x10000 }]);
+      for (const cb of membersStoreSubscribers.slice(before)) cb();
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
+    });
+
+    it("hides the note for a moderator, who bypasses slow mode", () => {
+      seed(5);
+      mockRole.value = "moderator";
+      setRoles([{ id: 3, name: "moderator", color: null, permissions: 0x10000 }]);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
+    });
+
+    it("follows a channel switch", () => {
+      seed(5);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith("Slow mode is on: one message every 5s");
+
+      setActiveChannel(43);
+      ctrl.mountChannel(43, "other");
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
+    });
+
+    it("updates when slow mode changes through channel_create or channel_update", () => {
+      seed(0);
+      const ctrl = createChannelController(makeOpts());
+      ctrl.mountChannel(42, "general");
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+
+      addChannel({ ...base, id: 42, name: "general", slow_mode: 10 });
+      channelsStore.flush();
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(
+        "Slow mode is on: one message every 10s",
+      );
+
+      updateChannel({ id: 42, slow_mode: 0 });
+      channelsStore.flush();
+      expect(mockSetSlowModeNote).toHaveBeenLastCalledWith(null);
+      ctrl.destroyChannel();
     });
   });
 
@@ -2463,7 +3262,7 @@ describe("createChannelController", () => {
         ctrl.mountChannel(42, "general");
         // cid-1 is channel_focus; the send in channel 42 gets cid-2 and is
         // not acknowledged before the user switches away.
-        capturedMessageInputOpts.onSend("hello", null, []);
+        capturedMessageInputOpts.onSend("hello", null, [], []);
         switchTo(ctrl, 43);
 
         (wsHandler(opts, "chat_send_ok") as (payload: unknown, id?: string) => void)({}, "cid-2");
@@ -2487,7 +3286,7 @@ describe("createChannelController", () => {
         (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
         const ctrl = createChannelController(opts);
         ctrl.mountChannel(42, "general");
-        capturedMessageInputOpts.onSend("hello", null, []);
+        capturedMessageInputOpts.onSend("hello", null, [], []);
         switchTo(ctrl, 43);
 
         // The ack only arrives 20 s later (a paused renderer, say).
@@ -3240,7 +4039,7 @@ describe("createChannelController", () => {
       opts: ChannelControllerOptions,
     ): (payload: { code: string; message: string }, id?: string) => void {
       const calls = (opts.ws.on as ReturnType<typeof vi.fn>).mock.calls;
-      const entry = calls.find((c) => c[0] === "error");
+      const entry = calls.findLast((c) => c[0] === "error");
       expect(entry).toBeDefined();
       return entry![1] as (payload: { code: string; message: string }, id?: string) => void;
     }
@@ -3306,7 +4105,7 @@ describe("createChannelController", () => {
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
 
-      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      capturedMessageListOpts!.onEditSave(5, "new content");
 
       const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([frame]) => (frame as { type: string }).type === "chat_edit",
@@ -3316,7 +4115,7 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
-    it("shows one error, sends nothing, and restores the text when editing offline", async () => {
+    it("shows one error, sends nothing, and keeps the editor open when saving offline", () => {
       setConnectionStatus("reconnecting");
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
       const opts = makeOpts();
@@ -3324,18 +4123,16 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
       vi.clearAllMocks();
 
-      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      // false keeps the editor open with the text; nothing was sent.
+      expect(capturedMessageListOpts!.onEditSave(5, "new content")).toBe(false);
 
       const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([frame]) => (frame as { type: string }).type === "chat_edit",
       );
       expect(sends).toHaveLength(0);
-      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
-      await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
-      expect(opts.showToast).toHaveBeenCalledWith(
-        messagingText("toast.editFailedRestored"),
-        "error",
-      );
+      expect(opts.showToast).toHaveBeenCalledTimes(1);
+      expect(opts.showToast).toHaveBeenCalledWith(messagingText("toast.editFailed"), "error");
+      expect(mockStartEdit).not.toHaveBeenCalled();
       ctrl.destroyChannel();
     });
 
@@ -3346,13 +4143,15 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
       const onSendFailure = sendFailureListener(opts);
 
-      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      capturedMessageListOpts!.onEditSave(5, "new content");
       const editId = ids().find((id) => id.endsWith("chat_edit"))!;
       vi.clearAllMocks();
 
       onSendFailure(editId, "NETWORK");
 
-      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: true }),
+      );
       await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
       expect(opts.showToast).toHaveBeenCalledWith(
         messagingText("toast.editFailedRestored"),
@@ -3368,7 +4167,7 @@ describe("createChannelController", () => {
       ctrl.mountChannel(42, "general");
       const onError = errorListener(opts);
 
-      capturedMessageInputOpts!.onEditMessage(5, "too long");
+      capturedMessageListOpts!.onEditSave(5, "too long");
       const editId = ids().find((id) => id.endsWith("chat_edit"))!;
       vi.clearAllMocks();
 
@@ -3377,7 +4176,9 @@ describe("createChannelController", () => {
       // The dispatcher's error chain already shows the one error toast; the
       // controller only restores, so the user never sees two.
       expect(opts.showToast).not.toHaveBeenCalled();
-      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "too long"));
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "too long", { focus: true }),
+      );
       ctrl.destroyChannel();
     });
 
@@ -3407,14 +4208,16 @@ describe("createChannelController", () => {
         state: string,
       ) => void;
 
-      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      capturedMessageListOpts!.onEditSave(5, "new content");
       vi.clearAllMocks();
 
       // A half-open socket accepts the frame into its buffer, then the link
       // drops: the frame can never be echoed.
       onState("reconnecting");
 
-      await vi.waitFor(() => expect(mockStartEdit).toHaveBeenCalledWith(5, "new content"));
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: true }),
+      );
       await vi.waitFor(() => expect(opts.showToast).toHaveBeenCalledTimes(1));
       expect(opts.showToast).toHaveBeenCalledWith(
         messagingText("toast.editFailedRestored"),
@@ -3432,20 +4235,89 @@ describe("createChannelController", () => {
         state: string,
       ) => void;
 
-      capturedMessageInputOpts!.onEditMessage(5, "fix typo");
-      capturedMessageInputOpts!.onEditMessage(5, "fix typo properly");
+      capturedMessageListOpts!.onEditSave(5, "fix typo");
+      capturedMessageListOpts!.onEditSave(5, "fix typo properly");
       vi.clearAllMocks();
 
       onState("reconnecting");
       await new Promise((r) => setTimeout(r, 0));
 
       expect(mockStartEdit).toHaveBeenCalledTimes(1);
-      expect(mockStartEdit).toHaveBeenCalledWith(5, "fix typo properly");
+      expect(mockStartEdit).toHaveBeenCalledWith(5, "fix typo properly", { focus: true });
       expect(opts.showToast).toHaveBeenCalledTimes(1);
       expect(opts.showToast).toHaveBeenCalledWith(
         messagingText("toast.editFailedRestored"),
         "error",
       );
+      ctrl.destroyChannel();
+    });
+
+    it("a failed edit that lands while the composer holds a draft restores quietly, without focus", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts, ids } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onSendFailure = sendFailureListener(opts);
+      capturedMessageListOpts!.onEditSave(5, "new content");
+      const editId = ids().find((id) => id.endsWith("chat_edit"))!;
+      vi.clearAllMocks();
+      // The user has since started typing in the composer.
+      mockIsIdle.mockReturnValue(false);
+
+      onSendFailure(editId, "NETWORK");
+
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: false }),
+      );
+      expect(opts.showToast).toHaveBeenCalledWith(
+        messagingText("toast.editFailedRestored"),
+        "error",
+      );
+      ctrl.destroyChannel();
+    });
+
+    it("a failed edit that lands while another text field has focus restores without focus", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts, ids } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onSendFailure = sendFailureListener(opts);
+      capturedMessageListOpts!.onEditSave(5, "new content");
+      const editId = ids().find((id) => id.endsWith("chat_edit"))!;
+      vi.clearAllMocks();
+      const search = document.createElement("input");
+      document.body.appendChild(search);
+      search.focus();
+
+      onSendFailure(editId, "NETWORK");
+
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: false }),
+      );
+      search.remove();
+      ctrl.destroyChannel();
+    });
+
+    it("a quick refusal reopens the editor with focus when focus is on the idle composer", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
+      const { opts, ids } = optsWithIds();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      const onSendFailure = sendFailureListener(opts);
+      capturedMessageListOpts!.onEditSave(5, "new content");
+      const editId = ids().find((id) => id.endsWith("chat_edit"))!;
+      vi.clearAllMocks();
+      const composer = document.createElement("textarea");
+      composer.className = "msg-textarea";
+      document.body.appendChild(composer);
+      composer.focus();
+
+      onSendFailure(editId, "NETWORK");
+
+      await vi.waitFor(() =>
+        expect(mockStartEdit).toHaveBeenCalledWith(5, "new content", { focus: true }),
+      );
+      composer.remove();
       ctrl.destroyChannel();
     });
 
@@ -3456,7 +4328,7 @@ describe("createChannelController", () => {
         const { opts } = optsWithIds();
         const ctrl = createChannelController(opts);
         ctrl.mountChannel(42, "general");
-        capturedMessageInputOpts!.onEditMessage(5, "new content");
+        capturedMessageListOpts!.onEditSave(5, "new content");
         capturedMessageListOpts!.onDeleteClick(6, true);
 
         // The user moves on; the server unsubscribes channel 42's topic
@@ -3480,7 +4352,7 @@ describe("createChannelController", () => {
       }
     });
 
-    it("keeps a draft the user started when a failed edit comes back late", async () => {
+    it("keeps another edit the user opened when a failed edit comes back late", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
       const { opts } = optsWithIds();
       const ctrl = createChannelController(opts);
@@ -3489,9 +4361,9 @@ describe("createChannelController", () => {
         state: string,
       ) => void;
 
-      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      capturedMessageListOpts!.onEditSave(5, "new content");
       vi.clearAllMocks();
-      mockIsIdle.mockReturnValue(false);
+      mockIsEditing.mockReturnValue(true);
 
       onState("reconnecting");
       await new Promise((r) => setTimeout(r, 0));
@@ -3510,7 +4382,7 @@ describe("createChannelController", () => {
       const onSendFailure = sendFailureListener(opts);
       const onEdited = echoListener(opts, "chat_edited");
 
-      capturedMessageInputOpts!.onEditMessage(5, "new content");
+      capturedMessageListOpts!.onEditSave(5, "new content");
       const editId = ids().find((id) => id.endsWith("chat_edit"))!;
 
       // The frame is echoed back: the tracker must drop it so a later error
@@ -3523,5 +4395,284 @@ describe("createChannelController", () => {
       expect(mockStartEdit).not.toHaveBeenCalled();
       ctrl.destroyChannel();
     });
+  });
+});
+
+describe("unsent attachments (2A-3)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsIdle.mockReturnValue(true);
+    mockGetDraft.mockReturnValue({ content: "", replyTo: null, attachments: [] });
+    setConnectionStatus("connected");
+  });
+
+  /** Deliver a frame to every live ws.on listener for `event`, in order. */
+  function wsHandler(opts: ChannelControllerOptions, event: string) {
+    const on = opts.ws.on as ReturnType<typeof vi.fn>;
+    return (payload: unknown, correlationId?: string): void => {
+      on.mock.calls.forEach((c, i) => {
+        const off = on.mock.results[i]!.value as ReturnType<typeof vi.fn>;
+        if (c[0] === event && off.mock.calls.length === 0) {
+          (c[1] as (p: unknown, id?: string) => void)(payload, correlationId);
+        }
+      });
+    };
+  }
+
+  const report = { id: "u1", filename: "report.pdf" };
+  const scan = { id: "u2", filename: "scan.png" };
+
+  function sendFiles(opts: ChannelControllerOptions, replyTo: number | null = null): void {
+    vi.mocked(opts.ws.send).mockReturnValue("cid-1");
+    capturedMessageInputOpts.onSend("", replyTo, ["u1", "u2"], [report, scan], replyTo !== null);
+  }
+
+  it("puts only the skipped files back into the composer", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+
+    wsHandler(opts, "chat_send_ok")(
+      { message_id: 7, timestamp: "", skipped_attachment_ids: ["u2", "not-mine"] },
+      "cid-1",
+    );
+
+    expect(mockRestoreUnsent).toHaveBeenCalledTimes(1);
+    expect(mockRestoreUnsent).toHaveBeenCalledWith([scan], "skipped", null);
+    expect(mockRemoveOptimistic).not.toHaveBeenCalled();
+    ctrl.destroyChannel();
+  });
+
+  it("puts skipped files back on a deduplicated retry's ack too", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+
+    wsHandler(opts, "chat_send_ok")(
+      { message_id: 7, timestamp: "", deduplicated: true, skipped_attachment_ids: ["u1"] },
+      "cid-1",
+    );
+
+    expect(mockRestoreUnsent).toHaveBeenCalledWith([report], "skipped", null);
+    ctrl.destroyChannel();
+  });
+
+  it("stashes the files when the refusal lands with no channel mounted", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+    ctrl.destroyChannel();
+
+    wsHandler(opts, "error")({ code: "ATTACHMENTS_UNAVAILABLE", message: "" }, "cid-1");
+
+    ctrl.mountChannel(42, "general", "text");
+    expect(mockRestoreDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({ id: "u1", unsent: true }),
+          expect.objectContaining({ id: "u2", unsent: true }),
+        ],
+      }),
+    );
+    ctrl.destroy();
+  });
+
+  it("stops listening once the controller is destroyed", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+    ctrl.destroy();
+
+    wsHandler(opts, "chat_send_ok")(
+      { message_id: 7, timestamp: "", skipped_attachment_ids: ["u1"] },
+      "cid-1",
+    );
+    expect(mockRestoreUnsent).not.toHaveBeenCalled();
+  });
+
+  it("leaves the composer alone when an older server sends no skipped list", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+
+    wsHandler(opts, "chat_send_ok")({ message_id: 7, timestamp: "" }, "cid-1");
+
+    expect(mockRestoreUnsent).not.toHaveBeenCalled();
+    ctrl.destroyChannel();
+  });
+
+  it("stashes skipped files for a channel the user has left", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts);
+    ctrl.mountChannel(43, "random", "text");
+
+    wsHandler(opts, "chat_send_ok")(
+      { message_id: 7, timestamp: "", skipped_attachment_ids: ["u1"] },
+      "cid-1",
+    );
+    expect(mockRestoreUnsent).not.toHaveBeenCalled();
+
+    ctrl.mountChannel(42, "general", "text");
+    expect(mockRestoreDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [expect.objectContaining({ id: "u1", unsent: true })],
+      }),
+    );
+    ctrl.destroyChannel();
+  });
+
+  it("drops the row and returns every file and the reply on ATTACHMENTS_UNAVAILABLE", () => {
+    mockGetChannelMessages.mockReturnValue([{ id: 9, user: { id: 2, username: "ana" } }]);
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(42, "general", "text");
+    sendFiles(opts, 9);
+
+    wsHandler(opts, "error")({ code: "ATTACHMENTS_UNAVAILABLE", message: "" }, "cid-1");
+
+    expect(mockRestoreUnsent).toHaveBeenCalledWith([report, scan], "unavailable", {
+      messageId: 9,
+      username: "ana",
+      self: false,
+      ping: true,
+    });
+    // No Retry with the same ids: the send's draft is gone.
+    vi.mocked(opts.ws.send).mockClear();
+    capturedMessageListOpts.onRetry("cid-1");
+    expect(opts.ws.send).not.toHaveBeenCalled();
+    mockGetChannelMessages.mockReturnValue([]);
+    ctrl.destroyChannel();
+  });
+});
+
+describe("a forum channel (WP 6.9d)", () => {
+  const FORUM = 5151;
+  const TEXT = 5152;
+  const destinations = NAVIGATION_DESTINATIONS as {
+    forum?: { build: (c: ForumViewContext) => HTMLElement };
+  };
+  const realForum = destinations.forum;
+  let built: ForumViewContext[];
+
+  function seed(forumOver: { nsfw?: boolean; nsfw_acknowledged?: boolean } = {}): void {
+    setChannels([
+      {
+        id: FORUM,
+        name: "feedback",
+        type: "forum",
+        category: null,
+        position: 0,
+        can_send: true,
+        ...forumOver,
+      },
+      { id: TEXT, name: "general", type: "text", category: null, position: 1, can_send: true },
+    ]);
+  }
+
+  // The (mocked) lazy gate module resolves after its async factory: load it once.
+  beforeAll(async () => {
+    await import("@components/NsfwGate");
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    built = [];
+    destinations.forum = {
+      build: (ctx) => {
+        built.push(ctx);
+        const el = document.createElement("div");
+        el.className = "forum-view";
+        return el;
+      },
+    };
+    seed();
+  });
+  afterEach(() => {
+    destinations.forum = realForum;
+  });
+
+  it("mounts the forum view in the messages slot, with no message list, typing row or composer", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+
+    expect(ctrl.currentChannelId).toBe(FORUM);
+    expect(built).toHaveLength(1);
+    expect(opts.slots.messagesSlot.querySelector(".forum-view")).not.toBeNull();
+    expect(createMessageList).not.toHaveBeenCalled();
+    expect(mockMessageInputMount).not.toHaveBeenCalled();
+    expect(mockTypingMount).not.toHaveBeenCalled();
+    expect(opts.slots.inputSlot.childElementCount).toBe(0);
+    expect(opts.msgCtrl.loadMessages).not.toHaveBeenCalled();
+    expect(opts.ws.send).toHaveBeenCalledWith({
+      type: "channel_focus",
+      payload: { channel_id: FORUM },
+    });
+    ctrl.destroyChannel();
+  });
+
+  it("hands the view the channel, the api, the socket and the channel's own signal", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+
+    const ctx = built[0]!;
+    expect(ctx.channelId).toBe(FORUM);
+    expect(ctx.api).toBe(opts.api);
+    expect(ctx.ws).toBe(opts.ws);
+    expect(ctx.signal.aborted).toBe(false);
+    ctrl.destroyChannel();
+    expect(ctx.signal.aborted).toBe(true);
+    expect(opts.slots.messagesSlot.querySelector(".forum-view")).toBeNull();
+  });
+
+  it("decides by the stored type when the caller passes none", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback");
+    expect(built).toHaveLength(1);
+    ctrl.destroyChannel();
+  });
+
+  it("mounts a text channel the usual way", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(TEXT, "general", "text");
+    expect(built).toHaveLength(0);
+    expect(createMessageList).toHaveBeenCalled();
+    ctrl.destroyChannel();
+  });
+
+  it("leaves a forum without a mark-read, since it holds no messages", () => {
+    const opts = makeOpts();
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+    ctrl.mountChannel(TEXT, "general", "text");
+    expect(mockMarkChannelRead).not.toHaveBeenCalledWith(FORUM);
+    expect(mockLeaveChannel).not.toHaveBeenCalledWith(FORUM);
+    ctrl.destroyChannel();
+  });
+
+  it("puts a labelled forum behind the consent gate, mounting nothing of the forum", async () => {
+    seed({ nsfw: true, nsfw_acknowledged: false });
+    const opts = makeOpts({
+      api: {
+        acknowledgeNsfw: vi.fn(),
+        revokeNsfw: vi.fn(),
+      } as unknown as ChannelControllerOptions["api"],
+    });
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+    await vi.dynamicImportSettled();
+    expect(mockCreateNsfwGate).toHaveBeenCalled();
+    expect(built).toHaveLength(0);
+    ctrl.destroyChannel();
   });
 });

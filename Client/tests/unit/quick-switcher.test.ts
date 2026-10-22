@@ -8,6 +8,7 @@ import type { ReadyChannel } from "../../src/lib/types";
 
 function resetStore(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],
@@ -292,7 +293,7 @@ describe("QuickSwitcher", () => {
     expect(container.querySelectorAll(".quick-switcher__item").length).toBe(0);
   });
 
-  it("does not list DM rows synthesized into channelsStore (they belong to the DM sidebar section)", () => {
+  it("does not duplicate a synthesized DM mirror row", () => {
     const dm: DmChannel = {
       channelId: 99,
       recipient: { id: 1, username: "bob", avatar: "", status: "online" },
@@ -309,8 +310,9 @@ describe("QuickSwitcher", () => {
 
     switcher.mount(container);
 
-    // Still just the 4 text/voice channels — the synthesized DM row is not
-    // duplicated here, and selecting it here would bypass clearDmUnread.
+    // Still just the 4 text/voice channels. DM conversations are listed from
+    // dmStore (empty here), so the mirror row in channelsStore is not shown
+    // a second time.
     const items = container.querySelectorAll(".quick-switcher__item");
     expect(items.length).toBe(4);
     const names = Array.from(items).map(

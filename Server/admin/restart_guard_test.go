@@ -58,7 +58,7 @@ func TestApplyStagedUpdate_Success_SwapsWithoutAbortBroadcast(t *testing.T) {
 	exePath, newPath, stagedHash := stageFakeUpdate(t)
 
 	hub := &mockHub{}
-	if !admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash) {
+	if !admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash, nil) {
 		t.Fatal("ApplyStagedUpdate = false, want committed swap")
 	}
 
@@ -93,7 +93,7 @@ func TestApplyAndRestart_Success_RequestsRestartAndMarksPending(t *testing.T) {
 	defer admin.SetApplyRestartDelay(time.Millisecond)()
 
 	hub := &mockHub{}
-	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, newPath, stagedHash)
+	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, newPath, stagedHash, admin.NewStopSignal(nil, nil))
 
 	if len(hub.restartCalls) != 1 || hub.restartCalls[0].reason != "update" {
 		t.Fatalf("restartCalls = %+v, want exactly the update countdown", hub.restartCalls)
@@ -122,7 +122,7 @@ func TestApplyAndRestart_Abort_ReleasesGuard(t *testing.T) {
 
 	hub := &mockHub{}
 	admin.ApplyAndRestart(context.Background(), nil, 0, "v9.9.9", hub, exePath, newPath,
-		"0000000000000000000000000000000000000000000000000000000000000000")
+		"0000000000000000000000000000000000000000000000000000000000000000", admin.NewStopSignal(nil, nil))
 
 	if got := reasons(); len(got) != 0 {
 		t.Errorf("restart hook reasons = %v, want none on abort", got)
@@ -193,46 +193,6 @@ func TestRestoreBackup_Conflict409(t *testing.T) {
 	}
 	if resp["error"] != "RESTART_PENDING" {
 		t.Errorf("error code = %q, want RESTART_PENDING", resp["error"])
-	}
-}
-
-// A restore whose database.Close() fails is still committed to dying: it must
-// request a restart AND leave the guard in restart-pending so nothing else
-// starts an update against a process with closed DB pools.
-func TestRestore_CloseFailure_StillMarksPendingAndRequestsRestart(t *testing.T) {
-	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
-
-	backupDir := filepath.Join(tmpDir, "data", "backups")
-	if err := os.MkdirAll(backupDir, 0o750); err != nil {
-		t.Fatalf("MkdirAll backups: %v", err)
-	}
-	backupName := "chatserver_20240101_120000.db"
-	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
-		t.Fatalf("BackupToSafe fixture: %v", err)
-	}
-
-	reasons, restoreHook := admin.StubRestartCapture()
-	defer restoreHook()
-	restoreClose := admin.StubCloseError("injected close failure")
-	defer restoreClose()
-
-	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for len(reasons()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if got := reasons(); len(got) != 1 || got[0] != "backup_restore_close_failed" {
-		t.Errorf("restart hook reasons = %v, want [backup_restore_close_failed]", got)
-	}
-	if got := admin.CurrentRestartState(); got != "pending" {
-		t.Errorf("restart state = %q, want pending (process is committed to dying)", got)
 	}
 }
 

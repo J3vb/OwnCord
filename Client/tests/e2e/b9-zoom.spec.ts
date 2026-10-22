@@ -363,7 +363,9 @@ test.describe("B9 OS 200 % zoom reflow", () => {
         { pattern: "/messages", status: 200, body: REPORT_MESSAGES },
         { pattern: "/api/v1/reports/mine", method: "GET", status: 200, body: MY_REPORTS },
       ]);
-      await page.getByTestId("msg-report-201").focus();
+      await page.getByTestId("msg-more-201").focus();
+      await page.keyboard.press("Enter");
+      await page.getByTestId("msg-menu-report").focus();
       await page.keyboard.press("Enter");
       const dialog = page.getByRole("dialog", { name: "Report message" });
       await dialog.waitFor();
@@ -385,7 +387,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       ]);
       await openDrawer(page);
       await openSettings(page);
-      await openSettingsTab(page, "Safety");
+      await openSettingsTab(page, "Privacy & Safety");
       const section = page.getByRole("region", { name: "My reports" });
       await section.locator(".my-reports-item").first().waitFor();
       const screen: ZoomScreen = {

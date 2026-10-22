@@ -55,6 +55,24 @@
   color: var(--text-muted);
   pointer-events: none;
 }
+/* Older-page failure: a small banner over the top of the history. */
+.messages-older-failed {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
+}
+.messages-older-failed[hidden] {
+  display: none;
+}
 .messages-loading .spinner {
   width: 24px;
   height: 24px;
@@ -120,6 +138,34 @@
   border-radius: var(--radius-sm);
 }
 
+/* A run of blocked users' messages, folded to one line. */
+.msg-blocked-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 2rem;
+  padding: 0 var(--message-content-right) 0 var(--message-content-left);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-blocked-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-link);
+  cursor: pointer;
+}
+.msg-blocked-toggle:hover {
+  text-decoration: underline;
+}
+.msg-blocked-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 .message {
   padding: 2px var(--message-content-right) 2px var(--message-content-left);
   position: relative;
@@ -174,6 +220,7 @@
   font-size: var(--font-size-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   display: none;
 }
 .message.grouped:hover .msg-hover-time {
@@ -190,6 +237,11 @@
 .message .msg-author {
   font-weight: 600;
   font-size: var(--font-size-lg);
+  /* Clip a very wide display name to the header line (WP 3C-9). */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
   text-decoration-color: currentColor;
 }
@@ -202,6 +254,10 @@
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+/* Compact mode only: the short clock time ahead of the author. */
+.message .msg-compact-time {
+  display: none;
+}
 .message .msg-edited {
   font-size: var(--font-size-xxs);
   color: var(--text-muted);
@@ -209,6 +265,58 @@
 .message .msg-text {
   line-height: 1.45;
   word-break: break-word;
+}
+/* Inline editor (WP 3A-8): replaces the body of the row being edited. */
+.message.editing,
+.message.editing:hover {
+  background: var(--bg-modifier-hover);
+}
+.msg-inline-edit {
+  margin-top: 2px;
+}
+.msg-inline-edit-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-input);
+  color: var(--text-normal);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
+  line-height: 1.4;
+  padding: 8px 10px;
+  resize: none;
+  min-height: 2.25rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.msg-inline-edit-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.msg-inline-edit-hint {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-inline-edit-link {
+  color: var(--text-link);
+  font-size: inherit;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.msg-inline-edit-link:hover {
+  text-decoration: underline;
+}
+.msg-inline-edit-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.msg-inline-edit-error {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-danger);
 }
 .message .msg-text code {
   font-family: var(--font-mono);
@@ -285,6 +393,25 @@
   background: var(--yellow);
   color: var(--bg-tertiary);
 }
+/* A role mention (`<@&id>`): tinted with the role's own colour (--role-pill is
+   set only from a validated hex), and not a button: it opens no profile. */
+.mention.mention-role {
+  background: color-mix(in srgb, var(--role-pill, var(--accent)) 25%, transparent);
+  /* The role colour pulled toward the text colour, so a dark role stays legible. */
+  color: color-mix(in srgb, var(--role-pill, var(--text-link)) 65%, var(--text-normal));
+  cursor: default;
+}
+.mention.mention-role:hover {
+  background: color-mix(in srgb, var(--role-pill, var(--accent)) 45%, transparent);
+  color: color-mix(in srgb, var(--role-pill, var(--text-link)) 65%, var(--text-normal));
+}
+.mention.mention-role.mention-self {
+  background: color-mix(in srgb, var(--yellow) 28%, transparent);
+  color: color-mix(in srgb, var(--role-pill, var(--yellow)) 65%, var(--text-normal));
+}
+.mention.mention-role.mention-self:hover {
+  background: color-mix(in srgb, var(--yellow) 45%, transparent);
+}
 /* Whole-row highlight: Discord-style left accent + tinted background. */
 .message.mentioned {
   background: color-mix(in srgb, var(--yellow) 8%, transparent);
@@ -334,6 +461,20 @@
     color var(--transition-fast);
 }
 
+/* An invite for the server already open: informational, not a control. */
+.message-link-chip.invite-chip-here {
+  cursor: default;
+}
+.message-link-chip.invite-chip-here:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.message-link-chip.invite-chip-here:hover .mlc-channel {
+  color: var(--text-link);
+}
+.message-link-chip.invite-chip-here:hover .mlc-action {
+  color: var(--text-muted);
+}
+
 .message-link-chip .mlc-channel {
   color: var(--text-link);
   font-weight: 500;
@@ -360,6 +501,158 @@
 .message-link-chip:hover .mlc-action,
 .message-link-chip:focus-visible .mlc-action {
   color: var(--on-accent);
+}
+
+/* A forwarded message (WP 6.9a): its body in a quoted frame under a "Forwarded" header. */
+.msg-forward {
+  border-left: 3px solid var(--border);
+  padding-left: 8px;
+}
+.msg-forward-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--font-size-xxs);
+  color: var(--text-muted);
+}
+
+/* A poll (WP 6.9b): question, answers (a form until voted, then results), footer. */
+.msg-poll {
+  max-width: 460px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.msg-poll-question {
+  font-weight: 600;
+  color: var(--header-primary);
+  overflow-wrap: anywhere;
+}
+.msg-poll-hint {
+  margin: 2px 0 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-poll-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.msg-poll-hint + .msg-poll-answers {
+  margin-top: 0;
+}
+.msg-poll-answer {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+.msg-poll-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.msg-poll-choice:hover,
+.msg-poll-choice:has(input:checked) {
+  border-color: var(--accent);
+}
+.msg-poll-choice input {
+  accent-color: var(--accent);
+}
+.msg-poll-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.msg-poll-emoji .custom-emoji {
+  width: 18px;
+  height: 18px;
+  vertical-align: middle;
+}
+.msg-poll-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.msg-poll-meta {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.msg-poll-bar {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+.msg-poll-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--text-faint);
+}
+.msg-poll-result.is-mine {
+  border-color: var(--accent);
+}
+.msg-poll-result.is-mine .msg-poll-fill,
+.msg-poll-result.is-winner .msg-poll-fill {
+  background: var(--accent);
+}
+.msg-poll-mine {
+  display: inline-flex;
+  color: var(--accent-text);
+}
+.msg-poll-winner {
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-positive);
+}
+.msg-poll-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+.msg-poll-status {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-poll-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.msg-poll-btn {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--text-normal);
+}
+.msg-poll-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.msg-poll-btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.msg-poll-btn-link {
+  color: var(--text-link);
+}
+.msg-poll-btn-danger {
+  color: var(--text-danger);
+}
+.msg-poll-error {
+  margin-top: 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text-danger);
 }
 
 /* Reply */
@@ -389,6 +682,11 @@
 .msg-reply-ref .rr-author {
   color: var(--text-normal);
   font-weight: 600;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .msg-reply-ref .rr-text {
   overflow: hidden;
@@ -399,10 +697,14 @@
 .msg-reply-ref:hover .rr-text {
   color: var(--text-normal);
 }
+.msg-reply-ref--blocked {
+  font-style: italic;
+}
 .msg-reply-ref--deleted {
   cursor: default;
+  font-style: italic;
 }
-.msg-reply-ref--deleted:hover .rr-text {
+.msg-reply-ref--deleted:hover {
   color: inherit;
 }
 /* The bar is a jump control, so it needs a visible keyboard focus ring. */
@@ -736,6 +1038,88 @@
   color: var(--text-link);
 }
 
+.msg-codeblock .tok-inserted {
+  color: var(--green);
+}
+
+.msg-codeblock .tok-deleted {
+  color: var(--red);
+}
+
+/* ansi blocks: Discord's fixed palette (not theme tokens — the author picked
+   these colours). Light theme darkens the two that vanish on a pale block. */
+.msg-codeblock .ansi-30 {
+  color: #4f545c;
+}
+.msg-codeblock .ansi-31 {
+  color: #dc322f;
+}
+.msg-codeblock .ansi-32 {
+  color: #859900;
+}
+.msg-codeblock .ansi-33 {
+  color: #b58900;
+}
+.msg-codeblock .ansi-34 {
+  color: #268bd2;
+}
+.msg-codeblock .ansi-35 {
+  color: #d33682;
+}
+.msg-codeblock .ansi-36 {
+  color: #2aa198;
+}
+.msg-codeblock .ansi-37 {
+  color: #fff;
+}
+.msg-codeblock .ansi-40 {
+  background: #002b36;
+}
+.msg-codeblock .ansi-41 {
+  background: #cb4b16;
+}
+.msg-codeblock .ansi-42 {
+  background: #586e75;
+}
+.msg-codeblock .ansi-43 {
+  background: #657b83;
+}
+.msg-codeblock .ansi-44 {
+  background: #839496;
+}
+.msg-codeblock .ansi-45 {
+  background: #6c71c4;
+}
+.msg-codeblock .ansi-46 {
+  background: #93a1a1;
+}
+.msg-codeblock .ansi-47 {
+  background: #fdf6e3;
+}
+/* A background with no foreground set gets text that reads on it. */
+.msg-codeblock [class*="ansi-4"]:not([class*="ansi-3"]) {
+  color: #fdf6e3;
+}
+.msg-codeblock .ansi-47:not([class*="ansi-3"]),
+.msg-codeblock .ansi-46:not([class*="ansi-3"]) {
+  color: #002b36;
+}
+.msg-codeblock .ansi-b {
+  font-weight: 700;
+}
+
+.msg-codeblock .ansi-u {
+  text-decoration: underline;
+}
+
+body.theme-light .msg-codeblock .ansi-33 {
+  color: #8a6a00;
+}
+
+body.theme-light .msg-codeblock .ansi-37 {
+  color: #586e75;
+}
+
 /* Markdown blocks */
 /* Paragraph runs keep their newlines; block children handle their own layout. */
 .message .msg-text .md-p {
@@ -784,6 +1168,18 @@
 
 .md-h3 {
   font-size: 1.1em;
+}
+
+.md-subtext {
+  font-size: 0.8125em;
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+
+.md-timestamp {
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-modifier-hover);
 }
 
 .md-quote {
@@ -877,6 +1273,106 @@ ul.md-list-nested {
   object-fit: contain;
   border-radius: var(--radius-md);
 }
+/* Spoiler attachment (6.12): the media is blurred and inert under a cover
+   button until revealed. */
+.msg-spoiler-att:not(.revealed) > :not(.msg-spoiler-cover) {
+  filter: blur(28px);
+  pointer-events: none;
+  user-select: none;
+}
+.msg-spoiler-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  border: none;
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+  cursor: pointer;
+}
+.msg-spoiler-cover-label {
+  padding: 4px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--scrim);
+  color: var(--on-fill);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.msg-spoiler-cover:hover .msg-spoiler-cover-label {
+  background: var(--scrim-strong);
+}
+.msg-spoiler-cover:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+/* Several images in one message: a mosaic of fixed-height tiles (3A-11a). The
+   tiles' inline width/height (layout-shift reservation) give way to the grid. */
+.msg-image-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  grid-auto-rows: 140px;
+  gap: 4px;
+  margin-top: 4px;
+  max-width: 550px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.msg-image-grid > .msg-image {
+  grid-column: span 2;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-width: none;
+  margin-top: 0;
+  border-radius: 0;
+  background: var(--bg-tertiary);
+}
+.msg-image-grid > .msg-image:nth-child(-n + 2) {
+  grid-column: span 3;
+}
+.msg-image-grid .msg-image img {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+  border-radius: 0;
+}
+.msg-image-grid .placeholder-img {
+  height: 100%;
+}
+.msg-image-grid[data-count="2"] {
+  grid-auto-rows: 200px;
+}
+.msg-image-grid[data-count="2"] > .msg-image,
+.msg-image-grid[data-count="3"] > .msg-image,
+.msg-image-grid[data-count="4"] > .msg-image {
+  grid-column: span 3;
+}
+.msg-image-grid[data-count="3"] > .msg-image:first-child {
+  grid-row: span 2;
+}
+.msg-image-grid[data-count="6"] > .msg-image,
+.msg-image-grid[data-count="9"] > .msg-image {
+  grid-column: span 2;
+}
+.msg-image-grid[data-count="7"] > .msg-image:first-child,
+.msg-image-grid[data-count="10"] > .msg-image:first-child {
+  grid-column: span 6;
+}
+.msg-image-grid[data-count="7"] > .msg-image:nth-child(2),
+.msg-image-grid[data-count="10"] > .msg-image:nth-child(2) {
+  grid-column: span 2;
+}
+.msg-image-grid .msg-media-fallback {
+  flex-wrap: wrap;
+  justify-content: center;
+  height: 100%;
+  margin: 0;
+}
 .msg-image .placeholder-img {
   width: 100%;
   height: 200px;
@@ -956,6 +1452,10 @@ ul.md-list-nested {
 .image-lightbox.dragging {
   cursor: grabbing;
 }
+/* An image's right-click menu opens over the lightbox. */
+.context-menu.image-context-menu {
+  z-index: 610;
+}
 .image-lightbox-wrap {
   display: flex;
   align-items: center;
@@ -972,10 +1472,16 @@ ul.md-list-nested {
   cursor: zoom-in;
   user-select: none;
 }
-.image-lightbox-close {
+.image-lightbox-toolbar {
   position: absolute;
   top: 16px;
   right: 16px;
+  display: flex;
+  gap: 8px;
+  z-index: 1;
+}
+.image-lightbox-close,
+.image-lightbox-action {
   width: 36px;
   height: 36px;
   border-radius: var(--radius-circle);
@@ -987,10 +1493,49 @@ ul.md-list-nested {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.image-lightbox-close:hover,
+.image-lightbox-action:hover {
+  background: var(--scrim-hover);
+}
+
+.image-lightbox-prev,
+.image-lightbox-next {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-circle);
+  background: var(--scrim);
+  color: var(--on-fill);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   z-index: 1;
 }
-.image-lightbox-close:hover {
+.image-lightbox-prev {
+  left: 16px;
+}
+.image-lightbox-next {
+  right: 16px;
+}
+.image-lightbox-prev:hover,
+.image-lightbox-next:hover {
   background: var(--scrim-hover);
+}
+.image-lightbox-counter {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  padding: 6px 12px;
+  border-radius: var(--radius-circle);
+  background: var(--scrim);
+  color: var(--on-fill);
+  font-size: 14px;
+  z-index: 1;
 }
 
 /* File attachment */
@@ -1058,16 +1603,22 @@ ul.md-list-nested {
 }
 
 /* Inline video attachment — shares the .msg-image box so a video is capped to
-   the same max width/height as an image and never widens the message column. */
+   the same max width/height as an image and never widens the message column.
+   The box hugs the player, which renderVideoAttachment sizes to the clip's own
+   shape, so a small or portrait video has no black bars beside it. */
 .msg-video {
+  width: fit-content;
+  max-width: min(100%, 550px);
   cursor: default;
-  background: #000; /* letterbox bars: true black in every theme */
+  background: #000; /* behind the player while it loads: true black in every theme */
 }
 .msg-video video {
   display: block;
+  width: 400px; /* placeholder until the real size is known */
   max-width: 100%;
-  max-height: 300px;
-  aspect-ratio: 16 / 9; /* placeholder until loadedmetadata sets the real ratio */
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
   border-radius: var(--radius-md);
 }
 .msg-media-overlay {
@@ -1275,6 +1826,104 @@ ul.md-list-nested {
   margin-left: auto;
 }
 
+/* DM call log row (WP 3B-9c): a one-line record, never grouped */
+.message.call-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.call-row .cr-icon {
+  color: var(--green);
+  display: inline-flex;
+  align-items: center;
+}
+.call-row.call-missed .cr-icon,
+.call-row.call-missed .cr-text {
+  color: var(--red);
+}
+.call-row .cr-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.call-row .cr-join {
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: var(--green);
+  color: var(--bg-primary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.call-row .cr-time {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* Group DM system row (WP 3B-11a): the same one-line record as a call row */
+.message.group-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.group-row .gr-icon {
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+}
+.group-row .gr-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.group-row .gr-time {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* Pinned-a-message row (WP 6.12): the same one-line record as a group row */
+.message.pin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.pin-row .pr-icon {
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+}
+.pin-row .pr-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.pin-row .pr-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-normal);
+  cursor: pointer;
+}
+.pin-row .pr-link:hover {
+  text-decoration: underline;
+}
+.pin-row .pr-time {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
 /* Message hover actions */
 .msg-actions-bar {
   position: absolute;
@@ -1293,7 +1942,8 @@ ul.md-list-nested {
   z-index: 5;
 }
 .message:hover .msg-actions-bar,
-.message:focus-within .msg-actions-bar {
+.message:focus-within .msg-actions-bar,
+.message.msg-touch-active .msg-actions-bar {
   opacity: 1;
   pointer-events: auto;
   animation: actionBarPop 0.1s ease;
@@ -1313,6 +1963,20 @@ ul.md-list-nested {
 .msg-actions-bar button:hover {
   background: var(--bg-hover);
   color: var(--text-normal);
+}
+/* Quick-reaction emoji: the glyph itself, not a monochrome icon. */
+.msg-actions-bar .msg-quick-react {
+  font-size: var(--font-size-md);
+  line-height: 1;
+}
+/* Pin, Delete and (own message) Reply show only while Shift is held
+   (MessageList toggles .shift-held on its root). They also carry
+   tabindex=-1, so Shift+Tab never lands on one that vanishes on keyup. */
+.msg-actions-bar .msg-shift-only {
+  display: none;
+}
+.messages-container.shift-held .msg-actions-bar .msg-shift-only {
+  display: flex;
 }
 
 /* Reply compose bar */
@@ -1339,6 +2003,26 @@ ul.md-list-nested {
 }
 .reply-bar-inner strong {
   color: var(--text-normal);
+}
+.reply-bar .reply-ping {
+  margin-left: auto;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-link);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.reply-bar .reply-ping.off {
+  color: var(--text-muted);
+}
+.reply-bar .reply-ping:hover {
+  background: var(--scrim-hover);
+}
+.reply-bar .reply-ping:not([hidden]) + .reply-close {
+  margin-left: 0;
 }
 .reply-bar .reply-close {
   width: 24px;
@@ -1383,4 +2067,55 @@ ul.md-list-nested {
 }
 .typing-dots span:nth-child(3) {
   animation-delay: 0.4s;
+}
+
+/* A send queued behind its uploads (WP 3A-9): a chip per file, then Cancel. */
+.msg-upload-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-upload-chip {
+  display: grid;
+  gap: 2px;
+  max-width: 200px;
+}
+.msg-upload-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.msg-upload-chip > progress {
+  width: 100%;
+  height: 4px;
+  accent-color: var(--accent);
+}
+.msg-upload-cancel {
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+  border-radius: var(--radius-sm);
+  padding: 1px 8px;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  /* Our long-press menu replaces the iOS callout and text selection on rows. */
+  .message {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+  .message :is(input, textarea, [contenteditable]) {
+    -webkit-touch-callout: default;
+    user-select: text;
+  }
+  .msg-actions-bar button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

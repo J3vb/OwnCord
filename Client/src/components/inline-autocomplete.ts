@@ -46,6 +46,9 @@ export interface InlineAutocompleteConfig<T> {
   readonly primeOnCreate?: boolean;
   /** Called with `valueOf(picked)` when a row is chosen. */
   readonly onSelect: (value: string) => void;
+  /** Called with the chosen row itself just before `onSelect`, for a caller that
+   *  needs more than the inserted text (which row, not only which spelling). */
+  readonly onPick?: (item: T) => void;
   /** Called when the user dismisses the popup (Escape). */
   readonly onClose: () => void;
   /**
@@ -57,6 +60,8 @@ export interface InlineAutocompleteConfig<T> {
    * so typing keeps working, which is why the rows have no tabindex.
    */
   readonly comboboxInput?: HTMLElement;
+  /** Accessible name of the listbox, when it should have one. */
+  readonly ariaLabel?: string;
 }
 
 export interface InlineAutocompleteComponent {
@@ -99,6 +104,7 @@ export function createInlineAutocomplete<T>(
     role: "listbox",
     "data-testid": cfg.rootTestId,
   });
+  if (cfg.ariaLabel !== undefined) root.setAttribute("aria-label", cfg.ariaLabel);
   const list = createElement("div", { class: "ma-list" });
   root.appendChild(list);
 
@@ -115,6 +121,7 @@ export function createInlineAutocomplete<T>(
   function choose(index: number): void {
     const picked = suggestions[index];
     if (picked === undefined) return;
+    cfg.onPick?.(picked);
     cfg.onSelect(cfg.valueOf(picked));
   }
 
@@ -170,6 +177,8 @@ export function createInlineAutocomplete<T>(
 
   function handleKeydown(e: KeyboardEvent): boolean {
     if (suggestions.length === 0) return false;
+    // An IME's commit-Enter (or arrow/Esc while composing) belongs to the IME.
+    if (e.isComposing || e.keyCode === 229) return false;
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();

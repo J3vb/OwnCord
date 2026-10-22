@@ -95,6 +95,8 @@ More detail: [docs/architecture/](docs/architecture/README.md) and
 | Desktop app   | Yes (installer) | Yes (installer) | Yes (AppImage, .deb) | Yes (AppImage, .deb) |
 | Docker server | No              | No              | Yes                  | Yes                  |
 
+Installing the app on Linux: [docs/linux-install.md](docs/linux-install.md).
+
 The Docker image is `ghcr.io/j3vb/owncord-server`. One tag covers both `amd64`
 and `arm64`.
 
@@ -133,11 +135,18 @@ cd Server
 cp .env.example .env
 cp livekit.yaml.example livekit.yaml
 cp config.yaml.example config.yaml
-# Edit .env and livekit.yaml first. They need the same LiveKit key and secret.
+# Edit .env first: set the LiveKit key and secret there, and only there.
+# Never use a ' in either value; letters and digits (for example
+# `openssl rand -hex 32`) are safest.
+# livekit.yaml is required (compose mounts it); editing it is optional, and it
+# holds no key or secret.
 # The compose file already connects the server to LiveKit,
 # so config.yaml needs no voice changes.
 docker compose up -d
 ```
+
+Compose publishes `8443/TCP`, `7881/TCP` and `7882/UDP`. Forward those three on
+your router for remote access.
 
 The full Docker guide is in [docs/deployment.md](docs/deployment.md#docker-linux).
 
@@ -313,12 +322,19 @@ history.
 
 ### Files for AI coding agents
 
-These short files at the repository root give an AI agent, or a new
-contributor, the key context: [AGENTS.md](AGENTS.md), [PRD.md](PRD.md),
-[ARCHITECTURE.md](ARCHITECTURE.md), [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md),
-[CODE_STYLE.md](CODE_STYLE.md), [DATABASE.md](DATABASE.md), [API.md](API.md)
-and [SECURITY.md](SECURITY.md). Each one lists its sources. If they disagree,
+These short files give an AI agent, or a new contributor, the key context:
+[AGENTS.md](AGENTS.md) and [SECURITY.md](SECURITY.md) at the repository root, and
+the overviews in [docs/summaries/](docs/summaries/README.md)
+([product](docs/summaries/product.md),
+[architecture](docs/summaries/architecture.md),
+[design system](docs/summaries/design-system.md),
+[database](docs/summaries/database.md) and [API](docs/summaries/api.md)), plus
+[docs/code-style.md](docs/code-style.md). Each one lists its sources. If they disagree,
 the code wins, then those sources.
+
+Human contributors can ignore the agent tool folders `.claude/`, `.codex/` and
+`.agents/` and the file `.no-mistakes.yaml`. `AGENTS.md` and the `CLAUDE.md`
+files are written for agents, but the rules in them apply to everyone.
 
 ## Update signing (maintainers)
 

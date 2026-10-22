@@ -158,3 +158,34 @@ func TestMessageDelivery_FailedReceiptInsertRollsBackMessageMentionsAndAttachmen
 		t.Fatalf("retry after rollback = %+v, %v", retry, err)
 	}
 }
+
+// TestCreateMessageDelivery_ReportsLinkedAttachmentIDs: the in-tx link reports
+// which requested uploads it attached, and an attachment-only send with none
+// linked is ErrMessageDeliveryEmpty.
+func TestCreateMessageDelivery_ReportsLinkedAttachmentIDs(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	userID := seedUser(t, database, "alice")
+	other := seedUser(t, database, "bob")
+	p := storageDeliveryParams(userID, seedChannel(t, database, "general"))
+	p.AttachmentIDs = []string{"mine", "theirs", "gone"}
+	for id, up := range map[string]int64{"mine": userID, "theirs": other} {
+		if err := database.CreateAttachment(ctx, id, up, "a.txt", id, "text/plain", 1, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := database.CreateMessageDelivery(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.LinkedAttachmentIDs) != 1 || got.LinkedAttachmentIDs[0] != "mine" {
+		t.Fatalf("LinkedAttachmentIDs = %v, want [mine]", got.LinkedAttachmentIDs)
+	}
+
+	empty := storageDeliveryParams(userID, p.ChannelID)
+	empty.ClientMessageID, empty.Content = "second-logical-id", ""
+	empty.AttachmentIDs = []string{"theirs", "gone"}
+	if _, err := database.CreateMessageDelivery(ctx, empty); !errors.Is(err, db.ErrMessageDeliveryEmpty) {
+		t.Fatalf("all-skipped empty send err = %v, want ErrMessageDeliveryEmpty", err)
+	}
+}

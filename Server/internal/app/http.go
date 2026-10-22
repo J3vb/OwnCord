@@ -90,6 +90,7 @@ func shutdownServers(shutdownCtx context.Context, log *slog.Logger, srv, acmeSrv
 
 	srv.RegisterOnShutdown(api.CancelInFlightTransfers(srv))
 	srv.RegisterOnShutdown(admin.EndArchives(srv))
+	srv.RegisterOnShutdown(admin.EndApplies(srv))
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}

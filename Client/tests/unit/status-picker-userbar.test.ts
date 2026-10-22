@@ -369,7 +369,7 @@ describe("StatusPicker wired to UserBar", () => {
     membersStore.flush();
     expect(input.value).toBe("sneaky");
 
-    opts.presenceSender.rollbackTimedOut("frame-1");
+    opts.presenceSender.rollbackRefused("frame-1");
     membersStore.flush();
 
     expect(input.value).toBe("");

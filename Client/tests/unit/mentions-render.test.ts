@@ -18,7 +18,10 @@ vi.mock("@lib/livekitSession", () => ({
 import {
   renderMentionSegment,
   renderMessageContent,
+  resyncMentions,
 } from "../../src/components/message-list/content-parser";
+import { setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { setInviteJoinHandler } from "../../src/lib/invite-navigation";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {
   highlightsCurrentUser,
@@ -27,7 +30,7 @@ import {
 } from "../../src/lib/mentions";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
+import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
 import type { Message } from "../../src/stores/messages.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import type { ReadyChannel } from "../../src/lib/types";
@@ -54,7 +57,12 @@ function seedStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   setChannels(CHANNELS);
 }
 
@@ -285,6 +293,8 @@ describe("row highlight", () => {
     onScrollTop: vi.fn(),
     onReplyClick: vi.fn(),
     onEditClick: vi.fn(),
+    onEditSave: vi.fn(() => true),
+    onEmptyEdit: vi.fn(),
     onDeleteClick: vi.fn(),
     onReactionClick: vi.fn(),
     onPinClick: vi.fn(),
@@ -350,5 +360,342 @@ describe("mention predicates", () => {
   it("is false when nobody is signed in", () => {
     authStore.setState((prev) => ({ ...prev, user: null }));
     expect(mentionsCurrentUser("hey @me")).toBe(false);
+  });
+});
+
+describe("display names in mentions (P20)", () => {
+  function nameAlice(displayName: string): void {
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        ...prev.members,
+        [
+          10,
+          {
+            id: 10,
+            username: "alice",
+            displayName,
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+  }
+
+  it("shows the display name with the typed @username as the title", () => {
+    nameAlice("Alice W");
+    const mention = render("hey @alice").querySelector<HTMLElement>(".mention");
+    expect(mention?.textContent).toBe("@Alice W");
+    expect(mention?.title).toBe("@alice");
+    expect(mention?.dataset["mention"]).toBe("@alice");
+  });
+
+  it("keeps trailing punctuation after the display name", () => {
+    nameAlice("Alice W");
+    expect(render("hi @alice, ok").textContent).toBe("hi @Alice W, ok");
+    expect(render("bye @alice.").textContent).toContain("@Alice W.");
+  });
+
+  it("drops the title on resync when the display name is cleared", () => {
+    nameAlice("Alice W");
+    const wrap = document.createElement("div");
+    wrap.className = "msg-text";
+    wrap.appendChild(renderMentionSegment("hey @alice"));
+    const root = document.createElement("div");
+    root.appendChild(wrap);
+    nameAlice("alice");
+    resyncMentions(root);
+    const mention = wrap.querySelector(".mention");
+    expect(mention?.textContent).toBe("@alice");
+    expect(mention?.hasAttribute("title")).toBe(false);
+  });
+
+  it("keeps an unknown user as typed", () => {
+    nameAlice("Alice W");
+    expect(render("hey @nobody").textContent).toBe("hey @nobody");
+  });
+
+  it("updates the text on resync when the display name changes, keeping the pill", () => {
+    nameAlice("Alice W");
+    const el = render("hey @alice");
+    nameAlice("Ally");
+    const wrap = document.createElement("div");
+    wrap.className = "msg-text";
+    wrap.append(...Array.from(el.childNodes));
+    const root = document.createElement("div");
+    root.appendChild(wrap);
+    resyncMentions(root);
+    const mention = wrap.querySelector(".mention");
+    expect(mention?.textContent).toBe("@Ally");
+    expect(wrap.textContent).toBe("hey @Ally");
+  });
+});
+
+describe("invite link chip (P29)", () => {
+  const joined: Array<[string, string | undefined]> = [];
+  let unregister: () => void;
+
+  beforeEach(() => {
+    joined.length = 0;
+    unregister = setInviteJoinHandler((code, host) => joined.push([code, host]));
+    setChannelMutesHost("here.example:8443");
+    authStore.setState((prev) => ({ ...prev, serverName: "Here" }));
+  });
+
+  afterEach(() => {
+    unregister();
+    setChannelMutesHost(null);
+    // Close through the dialog so its "one at a time" latch resets.
+    document.querySelector<HTMLElement>("[data-testid='invite-join-cancel']")?.click();
+  });
+
+  it("renders a chip with the host and a Join action", () => {
+    const chip = render("see owncord://invite/abc123?host=there.example").querySelector(
+      ".message-link-chip",
+    );
+    expect(chip?.querySelector(".mlc-channel")?.textContent).toBe("there.example");
+    expect(chip?.querySelector(".mlc-action")?.textContent).toBe("Join");
+  });
+
+  it("says this server when the link names no host", () => {
+    const chip = render("owncord://invite/abc123").querySelector(".message-link-chip");
+    expect(chip?.querySelector(".mlc-channel")?.textContent).toBe("this server");
+  });
+
+  it("has no click action for the server already open", () => {
+    const chip = render("owncord://invite/abc?host=HERE.example:8443").querySelector<HTMLElement>(
+      ".message-link-chip",
+    );
+    expect(chip?.querySelector(".mlc-action")?.textContent).toBe("You're already in this server");
+    expect(chip?.getAttribute("role")).toBeNull();
+    chip?.click();
+    expect(document.querySelector("[data-testid='invite-join-dialog']")).toBeNull();
+    expect(joined).toEqual([]);
+  });
+
+  it("treats a default :443 as the same server", () => {
+    const chip = render("owncord://invite/abc?host=here.example:8443");
+    expect(chip.querySelector(".invite-chip-here")).not.toBeNull();
+    setChannelMutesHost("x.example");
+    const el2 = render("owncord://invite/abc?host=x.example:443");
+    expect(el2.querySelectorAll(".invite-chip-here").length).toBe(2);
+  });
+
+  it("opens the confirm on Enter", async () => {
+    const chip = render("owncord://invite/abc?host=there.example").querySelector<HTMLElement>(
+      ".message-link-chip",
+    );
+    chip?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid='invite-join-dialog']")).not.toBeNull(),
+    );
+  });
+
+  it("does not make an interactive chip inside a masked link", () => {
+    const el = document.createElement("div");
+    el.appendChild(
+      renderMessageContent("[owncord://invite/abc?host=there.example](https://e.example)"),
+    );
+    expect(el.querySelector(".message-link-chip")).toBeNull();
+    expect(el.querySelector("a.masked")?.textContent).toContain("owncord://invite/abc");
+  });
+
+  it("asks before leaving, then runs the invite flow with (code, host)", async () => {
+    const chip = render("owncord://invite/abc123?host=there.example").querySelector<HTMLElement>(
+      ".message-link-chip",
+    );
+    chip?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid='invite-join-dialog']")).not.toBeNull(),
+    );
+    const dialog = document.querySelector("[data-testid='invite-join-dialog']");
+    expect(dialog?.textContent).toContain("Leave Here to join there.example?");
+    expect(joined).toEqual([]);
+    document.querySelector<HTMLElement>("[data-testid='invite-join-confirm']")?.click();
+    expect(joined).toEqual([["abc123", "there.example"]]);
+  });
+
+  it("does not join when the prompt is cancelled", async () => {
+    render("owncord://invite/abc123?host=there.example")
+      .querySelector<HTMLElement>(".message-link-chip")
+      ?.click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("[data-testid='invite-join-cancel']")).not.toBeNull(),
+    );
+    document.querySelector<HTMLElement>("[data-testid='invite-join-cancel']")?.click();
+    expect(joined).toEqual([]);
+  });
+
+  it("leaves a malformed invite link as plain text", () => {
+    const el = render("owncord://invite/");
+    expect(el.querySelector(".message-link-chip")).toBeNull();
+    expect(el.textContent).toBe("owncord://invite/");
+  });
+});
+
+describe("id mention rendering (WP 6.3e)", () => {
+  function seedRoles(): void {
+    setRoles([
+      { id: 5, name: "Mods", color: "#ff8800", permissions: 0 },
+      { id: 6, name: "Plain", color: null, permissions: 0 },
+      { id: 7, name: "Odd", color: "red; background:url(x)", permissions: 0 },
+    ]);
+    channelsStore.flush();
+  }
+
+  it("renders <@id> with current display name", () => {
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        ...prev.members,
+        [
+          10,
+          {
+            id: 10,
+            username: "alice",
+            displayName: "Alice Liddell",
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+    const el = render("hi <@10>!");
+    const pill = el.querySelector(".mention");
+    expect(pill?.textContent).toBe("@Alice Liddell");
+    expect(pill?.getAttribute("data-user-id")).toBe("10");
+    expect(pill?.classList.contains("mention-self")).toBe(false);
+    expect(el.textContent).toBe("hi @Alice Liddell!");
+  });
+
+  it("falls back to the username and marks the signed-in user", () => {
+    const el = render("<@12> and <@11>");
+    const pills = el.querySelectorAll(".mention");
+    expect(Array.from(pills).map((p) => p.textContent)).toEqual(["@me", "@Bob"]);
+    expect(pills[0]?.classList.contains("mention-self")).toBe(true);
+    expect(pills[1]?.classList.contains("mention-self")).toBe(false);
+  });
+
+  /** A rendered run inside the region resync scans. */
+  function renderInRow(text: string): HTMLDivElement {
+    const row = document.createElement("div");
+    row.className = "msg-text";
+    row.appendChild(renderMentionSegment(text));
+    container.appendChild(row);
+    return row;
+  }
+
+  it("follows a rename on resync", () => {
+    const el = renderInRow("hi <@10>");
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        ...prev.members,
+        [
+          10,
+          { id: 10, username: "alicia", avatar: null, role: "member", status: "online" as const },
+        ],
+      ]),
+    }));
+    resyncMentions(container);
+    expect(el.querySelector(".mention")?.textContent).toBe("@alicia");
+  });
+
+  it("<@&id> with role colour", () => {
+    seedRoles();
+    const el = render("ping <@&5>");
+    const pill = el.querySelector<HTMLElement>(".mention.mention-role");
+    expect(pill?.textContent).toBe("@Mods");
+    expect(pill?.getAttribute("data-role-id")).toBe("5");
+    expect(pill?.getAttribute("data-role-color")).toBe("#ff8800");
+    expect(pill?.style.getPropertyValue("--role-pill")).toBe("#ff8800");
+    // A role pill opens no profile.
+    expect(pill?.hasAttribute("data-user-id")).toBe(false);
+    expect(pill?.hasAttribute("role")).toBe(false);
+  });
+
+  it("never applies a colour that is not a hex literal", () => {
+    seedRoles();
+    const odd = render("<@&7>").querySelector<HTMLElement>(".mention-role");
+    expect(odd?.textContent).toBe("@Odd");
+    expect(odd?.hasAttribute("data-role-color")).toBe(false);
+    expect(odd?.getAttribute("style") ?? "").toBe("");
+    const none = render("<@&6>").querySelectorAll<HTMLElement>(".mention-role");
+    expect(none[none.length - 1]?.hasAttribute("data-role-color")).toBe(false);
+  });
+
+  it("marks a role pill for a held role with mention-self", () => {
+    seedRoles();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
+    }));
+    const el = render("<@&5> <@&6>", { mentionRoles: [5, 6] });
+    const pills = el.querySelectorAll(".mention-role");
+    expect(pills[0]?.classList.contains("mention-self")).toBe(true);
+    expect(pills[1]?.classList.contains("mention-self")).toBe(false);
+  });
+
+  it("a held role the server did not list is no mention-self pill", () => {
+    seedRoles();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: prev.user === null ? null : { ...prev.user, role_ids: [5] },
+    }));
+    const pill = render("<@&5>").querySelector(".mention-role");
+    expect(pill?.textContent).toBe("@Mods");
+    expect(pill?.classList.contains("mention-self")).toBe(false);
+  });
+
+  it("a self pill the server did not list is not mention-self", () => {
+    expect(render("<@12>", { mentions: [10] }).querySelector(".mention")?.className).toBe(
+      "mention",
+    );
+    expect(render("<@12>", { mentions: [12] }).querySelector(".mention-self")).not.toBeNull();
+  });
+
+  it("unknown ids stay plain", () => {
+    seedRoles();
+    const el = render("<@999> and <@&888>");
+    expect(el.querySelector(".mention")).toBeNull();
+    expect(el.querySelector("[data-user-id]")).toBeNull();
+    expect(el.textContent).toBe("@unknown-user and @deleted-role");
+  });
+
+  it("a role the server did not honour reads as plain text", () => {
+    seedRoles();
+    const el = render("<@&5>", { mentionRoles: [] });
+    expect(el.querySelector(".mention")).toBeNull();
+    expect(el.textContent).toBe("@Mods");
+    const honoured = render("<@&5>", { mentionRoles: [5] });
+    expect(honoured.querySelector(".mention-role")).not.toBeNull();
+  });
+
+  it("a member who left becomes @unknown-user on resync and a pill again on return", () => {
+    const el = renderInRow("hi <@10>");
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([...prev.members].filter(([id]) => id !== 10)),
+    }));
+    resyncMentions(container);
+    expect(el.querySelector(".mention")).toBeNull();
+    expect(el.textContent).toBe("hi @unknown-user");
+    seedStores();
+    resyncMentions(container);
+    expect(el.querySelector(".mention")?.textContent).toBe("@alice");
+  });
+
+  it("leaves a token in code alone and keeps the row accent in step", () => {
+    const code = renderMessageContent("`<@10>`");
+    expect(code.textContent).toBe("<@10>");
+    expect(code.querySelector(".mention")).toBeNull();
+  });
+
+  it("is a legacy-compatible no-op for @name text", () => {
+    const el = render("hey @alice");
+    expect(el.querySelector(".mention")?.textContent).toBe("@alice");
   });
 });

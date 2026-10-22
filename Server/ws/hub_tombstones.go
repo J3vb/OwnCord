@@ -50,7 +50,7 @@ type tombstoneBatch struct {
 // failing until a retry of that purge succeeds. Lock order: mu before
 // seqMu; no path takes mu while holding seqMu.
 type replayPurgeState struct {
-	mu       syncutil.RWMutex
+	mu       syncutil.RankedRW[lockRankSerialiser]
 	waiting  atomic.Int32
 	users    map[int64]uint64
 	messages map[int64]uint64
@@ -207,7 +207,15 @@ type frameRefs struct {
 		UserID     *int64  `json:"user_id"`
 		FromUserID *int64  `json:"from_user_id"`
 		Mentions   []int64 `json:"mentions"`
-		User       *struct {
+		// A call log row lists the users who joined the call.
+		Call *struct {
+			Participants []int64 `json:"participants"`
+		} `json:"call"`
+		// A group add or remove row names the member it concerns.
+		GroupEvent *struct {
+			TargetUserID *int64 `json:"target_user_id"`
+		} `json:"group_event"`
+		User *struct {
 			ID int64 `json:"id"`
 		} `json:"user"`
 		Updates []struct {
@@ -237,7 +245,7 @@ func parseFrameRefs(data []byte) (frameRefs, bool) {
 
 // userIn returns the first user the frame names that is a key of set:
 // payload.user_id, payload.from_user_id, payload.user.id, the replied-to
-// message's author, payload.mentions or payload.updates[].user_id.
+// message's author, payload.mentions, payload.call.participants, payload.group_event.target_user_id or payload.updates[].user_id.
 func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 	pl := &f.Payload
 	var ids []int64
@@ -254,6 +262,12 @@ func userIn[V any](f *frameRefs, set map[int64]V) (int64, bool) {
 		ids = append(ids, pl.Referenced.User.ID)
 	}
 	ids = append(ids, pl.Mentions...)
+	if pl.Call != nil {
+		ids = append(ids, pl.Call.Participants...)
+	}
+	if pl.GroupEvent != nil && pl.GroupEvent.TargetUserID != nil {
+		ids = append(ids, *pl.GroupEvent.TargetUserID)
+	}
 	for _, u := range pl.Updates {
 		ids = append(ids, u.UserID)
 	}
@@ -269,7 +283,7 @@ func (f *frameRefs) userIn(set map[int64]uint64) (int64, bool) { return userIn(f
 
 // messageIn reports whether the frame is a message-family frame about a key
 // of set: payload.id (chat_message), payload.message_id (chat_edited,
-// chat_deleted, reaction_update), one of payload.ids (chat_bulk_deleted), or
+// chat_deleted, reaction_update, poll_update), one of payload.ids (chat_bulk_deleted), or
 // the replied-to message.
 func messageIn[V any](f *frameRefs, set map[int64]V) bool {
 	if _, ok := messageFamily[f.Type]; !ok {

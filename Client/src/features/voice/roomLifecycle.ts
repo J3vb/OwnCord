@@ -343,7 +343,12 @@ export class RoomLifecycle {
     this._deviceManager.setOnToast(this.onErrorCallback);
   }
 
-  leaveVoice(sendWs = true): void {
+  /**
+   * Tear the session down. The returned promise settles once the room's own
+   * disconnect has (for the native Linux room, once the host acknowledged it);
+   * it never rejects. Most callers ignore it.
+   */
+  leaveVoice(sendWs = true): Promise<void> {
     this.pendingMicrophoneRoom = null;
     // Cancel any pending auto-reconnect loop first.
     const ac = this._reconnectAc;
@@ -378,9 +383,12 @@ export class RoomLifecycle {
     this._audioElements.cleanupAllAudioElementsFull();
     this._audioElements.setScreenshareGainListener(null);
     const room = this._room;
+    let disconnected: Promise<void> = Promise.resolve();
     if (room !== null) {
       detachRoom(room);
-      room.disconnect().catch((err) => log.warn("room.disconnect() error (non-fatal)", err));
+      disconnected = room
+        .disconnect()
+        .catch((err: unknown) => log.warn("room.disconnect() error (non-fatal)", err));
     }
     // Clear client-side E2EE state (ECDH keypair, room key, peer keys), and
     // kill the E2EE worker so the last room key does not stay resident in it.
@@ -396,5 +404,6 @@ export class RoomLifecycle {
     setLocalCamera(false);
     setLocalScreenshare(false);
     log.info("Left voice session");
+    return disconnected;
   }
 }

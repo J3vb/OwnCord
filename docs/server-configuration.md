@@ -31,7 +31,14 @@ It also saves the generated `voice.livekit_api_key` and
 `voice.livekit_api_secret`, but only when the file has none. This keeps voice
 tokens working across restarts.
 
-How it writes the file:
+In a Docker container the wizard writes `config-overrides.json` in the data
+volume instead of `config.yaml` (the same file the admin panel saves to), and
+only the keys whose value differs from the running one and that no `OWNCORD_*`
+variable sets. The generated credentials are saved only when neither
+`config.yaml` nor the environment supplies them. It cannot change
+`server.port` there. `config.yaml` is left untouched.
+
+How it writes the file outside a container:
 
 - It edits the file in place. Comments, and values it does not manage, are
   kept.
@@ -62,7 +69,7 @@ start-up output. This also applies after you re-open setup by clearing the
 | `server.data_dir`                      | string   | `"data"`           | Directory for the key files (`totp.key`, `erasure.key`, `push_vapid.key`), the erasure marker store, the managed LiveKit binary, and the volume the free-space probes watch. **It does not move the database, uploads, certificates or backups**: the database path, upload storage directory, backup directory and the TLS cert/key file are separate keys with independent `data/...` defaults that do not follow this one. Set them explicitly if you relocate the install.                                                                                                                                                                                                                         |
 | `server.min_free_disk_mb`              | int      | `256`              | Reserved headroom, in MiB, on the volumes the server writes to — the one definition of "low disk": below it the start-up banner logs an error, `/health` reports `degraded`/`disk`, and uploads (attachments, avatars, emoji) are refused with `507 STORAGE_LOW_DISK`. `0` disables the floor. A negative value falls back to the default with a warning rather than turning the floor off.                                                                                                                                                                                                                                                                                                            |
 | `server.max_ws_connections`            | int      | `0`                | Cap on concurrently connected WebSocket clients, counting sockets still authenticating or waiting for a ready-build permit; further upgrades get 503 until connections free up. `0` = unlimited. Every connection costs goroutines and buffered send queues — set a ceiling that matches the host's memory before opening the server to a large community.                                                                                                                                                                                                                                                                                                                                             |
-| `server.metrics_allowed_cidrs`         | []string | `[]`               | Separate allowlist for `/api/v1/metrics` and the Prometheus `/metrics` exporter, so a central scraper can be admitted without widening `/admin` to its network. Empty = falls back to `admin_allowed_cidrs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `server.metrics_allowed_cidrs`         | []string | `[]`               | Separate allowlist for `/api/v1/metrics`, `/api/v1/metrics/prometheus` and the OpenTelemetry build's Prometheus `/metrics` exporter, so a central scraper can be admitted without widening `/admin` to its network. Empty = falls back to `admin_allowed_cidrs`.                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `server.livekit_webhook_allowed_cidrs` | []string | `[]`               | Separate allowlist for the LiveKit webhook/health endpoints (which also authenticate cryptographically) — an externally-hosted LiveKit's IP goes here, not in the admin allowlist. Empty = falls back to `admin_allowed_cidrs`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `server.pprof_enabled`                 | bool     | `false`            | Expose Go's pprof profiling endpoints on a **separate listener** (never the main router — a profiler exposes heap contents and can burn CPU). Off by default. Enable only while diagnosing a live performance problem, from a host you trust, then turn it back off. It binds `127.0.0.1:6060` only; reach it remotely through an SSH port-forward. In Docker that address is the container's own loopback, not the host's, so reach it from a container sharing its network namespace, e.g. `docker run --rm --network container:<name> curlimages/curl http://127.0.0.1:6060/debug/pprof/`. Enabling it also turns on the block and mutex samplers (see the next two keys).                          |
 | `server.pprof_block_profile_rate`      | int      | `100000`           | Average interval, in nanoseconds, between block samples while `server.pprof_enabled` is true (Go's `runtime.SetBlockProfileRate`). The default samples roughly every 100 µs of blocked time, which is what makes SQLite-writer contention visible — a CPU profile alone cannot see it. `0` disables block sampling. Overridable at runtime with `OWNCORD_SERVER_PPROF_BLOCK_PROFILE_RATE`.                                                                                                                                                                                                                                                                                                             |
@@ -70,7 +77,7 @@ start-up output. This also applies after you re-open setup by clearing the
 | `server.allowed_origins`               | string[] | `[]`               | WebSocket CORS allowed origins for **web/browser** clients; empty list DENIES all cross-origin (set to `["*"]` to allow any origin). The OwnCord desktop client needs no entry here — its webview origins (`http(s)://tauri.localhost`, `tauri://localhost`) are always accepted.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `server.trusted_proxies`               | string[] | `[]`               | CIDRs of trusted reverse proxies (for X-Forwarded-For)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `server.admin_allowed_cidrs`           | string[] | private networks   | CIDRs allowed to access `/admin` routes (the admin panel and its API). Actions the desktop client uses — change role, ban/unban, force logout, member list, and channel create, edit and delete — are also served at `/api/v1/moderation/members` and `/api/v1/moderation/channels` and are not limited by this setting; they need this server's session or API token plus the permission checks (members also need the rank checks, channels need `MANAGE_CHANNELS`). Default: `127.0.0.0/8`, `::1/128`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`                                                                                                                                  |
-| `server.browser_client_enabled`        | bool     | `false`            | Owner opt-in for hosting a browser client from this server. Off by default, and **this build ships no browser assets**, so turning it on hosts nothing yet — it mounts no route and serves no file, and the server logs a warning saying so. The bundle, its route and its own CSP arrive in a later release.                                                                                                                                                                                                                                                                                                                                                                                          |
+| `server.browser_client_enabled`        | bool     | `false`            | Owner opt-in for hosting the browser client from this server. Off by default, and off it mounts no route and serves no file. On, the server answers `GET /` with the browser client embedded in its binary and `GET /assets/*` with its files, under the client's own CSP. A build that does not carry the browser client (every build until it ships) answers `GET /` with a 404 note and logs a warning saying so.                                                                                                                                                                                                                                                                                   |
 | `server.reachability_report_enabled`   | bool     | `false`            | Owner opt-in for the `reachability` block on the admin-only `GET /api/v1/diagnostics/connectivity`: this host's addresses by class, the ports that must be forwarded, and an explicit list of what the server **cannot** determine about its own reachability. Off by default because it enumerates every address on every interface. It performs no network probe — no socket is opened and no name resolved — so it adds no outbound dependency and no latency. Switching it off does not silence the honest reporting: the startup banner names the address class either way, and a non-public voice node address is warned about at boot regardless. See [port-forwarding.md](port-forwarding.md). |
 | `server.waf_enabled`                   | bool     | `false`            | Enable the Coraza WAF middleware (inline rules + OWASP Core Rule Set)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `server.waf_paranoia_level`            | int      | `2`                | OWASP CRS paranoia level 1–4; values outside that range fall back to 2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -273,6 +280,24 @@ deleted after the window.
 | `moderation.report_retention_days` | int  | `180`   | Days after a report closes before its evidence snapshot, internal notes and free-text detail are deleted; the row stays. `0` = never prune content. Open reports (not yet closed) are never touched. A negative value falls back to the default with a warning.                                     |
 | `moderation.action_retention_days` | int  | `90`    | Days after `acknowledged_at` (a warning) or `expires_at`/`lifted_at` (a timeout) before the row retires, unless an appeal references it or it still owns a voice mute. `0` = never retire. Ban, kick and removal rows are never touched. A negative value falls back to the default with a warning. |
 
+### Roles that gain a permission on upgrade
+
+A migration that adds a permission bit grants it only to the default roles
+that are still exactly as they shipped. A role that was renamed or had its
+permissions edited gets nothing, so after upgrading, grant the bit by hand in
+the admin panel's role grid to the roles that should have it:
+
+| Bit                | Granted automatically to                                    | Migration |
+| ------------------ | ----------------------------------------------------------- | --------- |
+| `MODERATE_MEMBERS` | the untouched default Moderator role                        | 048       |
+| `MANAGE_NICKNAMES` | the untouched default Moderator role (Admin already has it) | 078       |
+
+Migration 078 also clears `MANAGE_NICKNAMES` from every role other than the
+Owner, the untouched Admin and the untouched Moderator, so only the intended
+roles hold it until you grant it. A renamed Admin role loses it too, so tick
+it again on that role. "Manage Nicknames" lets a role change the
+nickname of any member it outranks.
+
 ### Admin attention panel (`attention`)
 
 Warning floors for the Dashboard's attention panel. The server samples
@@ -401,33 +426,67 @@ written to the audit log. The full-archive export already ships it beside
 ### If a panel change locks you out
 
 A wrong port, TLS mode, admin allowlist, trusted-proxies list, path or restart
-mode can put the panel out of reach. On the host:
+mode can put the panel out of reach. `chatserver config reset-overrides` drops
+the saved panel settings so `config.yaml` and the environment apply again. Run
+it with the server stopped: it takes the database's process lock and refuses
+while a server is running. It never writes `config.yaml`, and it
+prints the names of the keys it removed, never their values, and the full path
+of the overrides file it checked.
 
-1. Stop the server.
-2. Edit `<data_dir>/config-overrides.json` and delete the offending key, or
-   delete the whole file to drop every panel override. The file is plain JSON
-   keyed by the dotted config key.
-3. Start the server. `config.yaml` values apply again.
+It finds the file the same way the server does, so run it the way you run the
+server. On bare metal, run it from the server's working directory (where
+`config.yaml` is) with the same `OWNCORD_SERVER_DATA_DIR` and
+`OWNCORD_DATABASE_PATH` values, if you set them. For a bare `docker run`, pass
+the same `-e` flags as the server container. If the path it prints is not the
+one you expected, it was looking in the wrong place.
 
-Without editing the file: set the matching `OWNCORD_*` variable (for example
+```bash
+chatserver config reset-overrides                  # the settings that can lock you out
+chatserver config reset-overrides server.port tls.mode   # only the named keys
+chatserver config reset-overrides --all            # every saved panel setting
+```
+
+- With no arguments it removes the saved values of the lockout-capable keys:
+  the ones the panel asks you to confirm by typing the key name (`server.port`,
+  `tls.mode`, `tls.domain`, `server.admin_allowed_cidrs`,
+  `server.trusted_proxies`, `server.restart_mode`, and the path and certificate
+  keys). Tuning values and the write-only secrets stay.
+- With key names it removes only those keys. A name that is not a
+  panel-editable key is refused.
+- `--all` removes the whole file. If the file cannot be parsed, it is renamed
+  to `config-overrides.json.unreadable-<UTC time>` instead of deleted, because
+  it can hold secrets. Without `--all`, the command refuses an unparseable file
+  and says so.
+- Resetting `server.admin_allowed_cidrs` returns to the `config.yaml` value, or
+  to the default private ranges when `config.yaml` has none. It never leaves an
+  empty list that `config.yaml` did not ask for.
+
+In Docker the entrypoint is the server binary, so the image needs no shell.
+Stop the server first, then run the command against the same volume:
+
+```bash
+docker compose stop owncord
+docker compose run --rm --no-deps owncord config reset-overrides
+docker compose start owncord
+```
+
+With a bare `docker run`, stop the server container and pass the same volume
+and image tag:
+
+```bash
+docker run --rm -v owncord-data:/app/data \
+  ghcr.io/j3vb/owncord-server:<same tag> config reset-overrides
+```
+
+Without the command, you can still edit `<data_dir>/config-overrides.json` on
+the host with the server stopped: delete the offending key, or the whole file.
+The file is plain JSON keyed by the dotted config key.
+
+Without touching the file: set the matching `OWNCORD_*` variable (for example
 `OWNCORD_SERVER_PORT=8443` or
 `OWNCORD_SERVER_ADMIN_ALLOWED_CIDRS=127.0.0.0/8`). The environment always wins
 over the panel. Then reach the panel through an SSH tunnel
 (`ssh -L 8443:127.0.0.1:8443 host`) and reset the key there.
-
-In Docker the file is in the `owncord-data` volume. The image is distroless
-(no shell, no `rm`), so `docker compose exec` cannot delete it; use a
-throwaway container on the same volume while the server is stopped:
-
-```bash
-docker compose stop owncord
-docker run --rm --volumes-from "$(docker compose ps -aq owncord)" \
-  busybox:1.37 rm /app/data/config-overrides.json
-docker compose start owncord
-```
-
-With a bare `docker run`, pass the server container's name to
-`--volumes-from` instead.
 
 With `server.restart_mode: supervised` and no supervisor, the server exits at
 the next restart and nothing starts it again. Start it by hand, then fix the

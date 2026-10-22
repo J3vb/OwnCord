@@ -10,7 +10,9 @@
 //! - Linux: over D-Bus (the libdbus `keyring` already links), GNOME's
 //!   `org.gnome.Mutter.IdleMonitor`, then `org.freedesktop.ScreenSaver`'s
 //!   `GetSessionIdleTime` (KDE on X11; Plasma refuses it on Wayland). Both
-//!   answer in milliseconds, on X11 and Wayland alike where they exist.
+//!   answer in milliseconds, on X11 and Wayland alike where they exist. Last,
+//!   the Wayland `ext-idle-notify-v1` protocol (`idle_wayland.rs`), which
+//!   covers KDE Plasma on Wayland and wlroots desktops.
 //! - Anything else: `None`.
 
 /// Milliseconds since the last keyboard or mouse input on the system, or
@@ -55,41 +57,68 @@ fn platform_idle_ms() -> Option<u64> {
 
     // ponytail: a fresh session-bus connection per 30 s poll; cache one if
     // the poll ever gets hotter.
-    let conn = Connection::new_session().ok()?;
+    let conn = Connection::new_session().ok();
     let timeout = Duration::from_millis(500);
     first_idle_ms(
         || {
-            conn.with_proxy(
-                "org.gnome.Mutter.IdleMonitor",
-                "/org/gnome/Mutter/IdleMonitor/Core",
-                timeout,
-            )
-            .method_call("org.gnome.Mutter.IdleMonitor", "GetIdletime", ())
-            .ok()
-            .map(|(ms,): (u64,)| ms)
+            conn.as_ref()?
+                .with_proxy(
+                    "org.gnome.Mutter.IdleMonitor",
+                    "/org/gnome/Mutter/IdleMonitor/Core",
+                    timeout,
+                )
+                .method_call("org.gnome.Mutter.IdleMonitor", "GetIdletime", ())
+                .ok()
+                .map(|(ms,): (u64,)| ms)
         },
         || {
-            conn.with_proxy(
-                "org.freedesktop.ScreenSaver",
-                "/org/freedesktop/ScreenSaver",
-                timeout,
-            )
-            .method_call("org.freedesktop.ScreenSaver", "GetSessionIdleTime", ())
-            .ok()
-            .map(|(ms,): (u32,)| ms)
+            conn.as_ref()?
+                .with_proxy(
+                    "org.freedesktop.ScreenSaver",
+                    "/org/freedesktop/ScreenSaver",
+                    timeout,
+                )
+                .method_call("org.freedesktop.ScreenSaver", "GetSessionIdleTime", ())
+                .ok()
+                .map(|(ms,): (u32,)| ms)
         },
+        wayland_idle_ms,
     )
 }
 
 /// The first Linux source to answer, in preference order: Mutter's 64-bit
-/// count, else the ScreenSaver interface's 32-bit one. The second is not
-/// asked once the first has answered.
+/// count, then the ScreenSaver interface's 32-bit one, then the Wayland
+/// `ext-idle-notify-v1` monitor (KDE Plasma on Wayland, wlroots). A source is
+/// not asked once an earlier one has answered.
 #[cfg(any(target_os = "linux", test))]
 fn first_idle_ms(
     mutter: impl FnOnce() -> Option<u64>,
     screensaver: impl FnOnce() -> Option<u32>,
+    wayland: impl FnOnce() -> Option<u64>,
 ) -> Option<u64> {
-    mutter().or_else(|| screensaver().map(u64::from))
+    mutter()
+        .or_else(|| screensaver().map(u64::from))
+        .or_else(wayland)
+}
+
+/// The Wayland monitor, started on first use and kept for the process. It is
+/// not started off Wayland or where the compositor lacks the protocol, and a
+/// monitor whose connection failed is dropped so the next poll retries.
+#[cfg(target_os = "linux")]
+fn wayland_idle_ms() -> Option<u64> {
+    use crate::idle_wayland::IdleMonitor;
+    use std::sync::Mutex;
+
+    static MONITOR: Mutex<Option<IdleMonitor>> = Mutex::new(None);
+    std::env::var_os("WAYLAND_DISPLAY")?;
+    let mut monitor = MONITOR.lock().unwrap_or_else(|e| e.into_inner());
+    if monitor.as_ref().is_some_and(|m| !m.is_alive()) {
+        *monitor = None;
+    }
+    if monitor.is_none() {
+        *monitor = IdleMonitor::start();
+    }
+    monitor.as_ref().map(IdleMonitor::idle_ms)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -118,21 +147,53 @@ mod tests {
         let got = first_idle_ms(
             || Some(u64::from(u32::MAX) + 1),
             || panic!("the ScreenSaver interface must not be asked"),
+            || panic!("the Wayland monitor must not be asked"),
         );
         assert_eq!(got, Some(u64::from(u32::MAX) + 1));
     }
 
     #[test]
     fn screensaver_answer_is_used_when_mutter_is_absent() {
-        assert_eq!(first_idle_ms(|| None, || Some(600_000)), Some(600_000));
         assert_eq!(
-            first_idle_ms(|| None, || Some(u32::MAX)),
+            first_idle_ms(|| None, || Some(600_000), || panic!("not asked")),
+            Some(600_000)
+        );
+        assert_eq!(
+            first_idle_ms(|| None, || Some(u32::MAX), || None),
             Some(u64::from(u32::MAX))
         );
     }
 
     #[test]
     fn no_source_is_none() {
-        assert_eq!(first_idle_ms(|| None, || None), None);
+        assert_eq!(first_idle_ms(|| None, || None, || None), None);
+    }
+
+    #[test]
+    fn wayland_is_asked_last_and_only_when_both_dbus_sources_fail() {
+        use std::cell::RefCell;
+        let order = RefCell::new(Vec::new());
+        let got = first_idle_ms(
+            || {
+                order.borrow_mut().push("mutter");
+                None
+            },
+            || {
+                order.borrow_mut().push("screensaver");
+                None
+            },
+            || {
+                order.borrow_mut().push("wayland");
+                Some(42_000)
+            },
+        );
+        assert_eq!(got, Some(42_000));
+        assert_eq!(*order.borrow(), ["mutter", "screensaver", "wayland"]);
+    }
+
+    #[test]
+    fn screensaver_answer_skips_wayland() {
+        let got = first_idle_ms(|| None, || Some(7), || panic!("not asked"));
+        assert_eq!(got, Some(7));
     }
 }

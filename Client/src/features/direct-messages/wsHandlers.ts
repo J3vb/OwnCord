@@ -40,7 +40,11 @@ function mapDmPayload(p: DmChannelPayload): DmChannel {
     participants,
     name: p.name ?? "",
     isGroup: p.is_group ?? false,
+    ...(p.owner_id !== undefined && { ownerId: p.owner_id }),
+    // "" is kept, not dropped: addDmChannel's spread must clear an old icon.
+    ...(p.icon !== undefined && { icon: p.icon }),
     lastMessageId: p.last_message_id,
+    lastReadMessageId: p.last_read_message_id,
     lastMessage: p.last_message,
     lastMessageAt: p.last_message_at,
     unreadCount: p.unread_count,
@@ -80,8 +84,17 @@ export function applyReadyDms(payload: Payload<"ready">): void {
         continue;
       }
       const mentionCount = dm.mention_count ?? 0;
-      if (ch.unreadCount !== dm.unread_count || ch.mentionCount !== mentionCount) {
-        nextChannels.set(id, { ...ch, unreadCount: dm.unread_count, mentionCount });
+      if (
+        ch.unreadCount !== dm.unread_count ||
+        ch.mentionCount !== mentionCount ||
+        ch.lastReadMessageId !== dm.last_read_message_id
+      ) {
+        nextChannels.set(id, {
+          ...ch,
+          unreadCount: dm.unread_count,
+          mentionCount,
+          lastReadMessageId: dm.last_read_message_id,
+        });
         changed = true;
       }
     }
@@ -98,7 +111,7 @@ export function applyReadyBlocks(api: DispatchApi | undefined): void {
   if (api !== undefined) {
     // OC-0218: snapshot the revision blocksStore was at right before
     // issuing this fetch. If the user blocks/unblocks someone (via
-    // SidebarMemberSection's onToggleBlock -> setUserBlockedByMe) while
+    // memberPanel's onToggleBlock -> setUserBlockedByMe) while
     // this GET is in flight, that per-user delta bumps the revision;
     // setBlockedByMe then sees the mismatch and skips applying this
     // reply instead of clobbering the fresher local truth with a stale

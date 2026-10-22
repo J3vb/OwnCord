@@ -203,7 +203,7 @@ func TestUpdateProfile_RejectsOverlongFields(t *testing.T) {
 
 	// Exactly at the bound is accepted, and the bound counts runes rather than
 	// bytes — otherwise a name in a non-Latin script would be a third as long.
-	atBound := strings.Repeat("é", MaxDisplayNameLen)
+	atBound := strings.Repeat("\u00e9", MaxDisplayNameLen)
 	if _, err := svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "ada", DisplayName: &atBound}); err != nil {
 		t.Errorf("display_name at bound rejected: %v", err)
 	}
@@ -305,7 +305,8 @@ func TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(t *testing.
 	ctx := context.Background()
 
 	text := "  <b>away</b>  "
-	got, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusInvisible, &text, nil)
+	res, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusInvisible, &text, nil, nil)
+	got := res.CustomStatus
 	if err != nil {
 		t.Fatalf("HandlePresenceUpdate: %v", err)
 	}
@@ -323,7 +324,8 @@ func TestHandlePresenceUpdate_AcceptsInvisibleAndCarriesCustomStatus(t *testing.
 	// A later status flip that carries no custom_status field must leave the
 	// text alone AND still put it on the wire, or the auto-idle timer would
 	// blank everyone else's copy several times an hour.
-	got, err = svc.HandlePresenceUpdate(ctx, 1, db.StatusIdle, nil, nil)
+	res, err = svc.HandlePresenceUpdate(ctx, 1, db.StatusIdle, nil, nil, nil)
+	got = res.CustomStatus
 	if err != nil {
 		t.Fatalf("HandlePresenceUpdate (bare): %v", err)
 	}
@@ -354,7 +356,7 @@ func TestHandlePresenceUpdate_OversizedCustomStatusRejectedBeforeSanitizing(t *t
 	huge := "&" + strings.Repeat("amp;", 4000) + "lt;"
 
 	start := time.Now()
-	_, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &huge, nil)
+	_, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &huge, nil, nil)
 	elapsed := time.Since(start)
 	if !errors.Is(err, ErrBadRequest) {
 		t.Errorf("oversized custom_status err = %v, want ErrBadRequest", err)
@@ -380,16 +382,169 @@ func TestHandlePresenceUpdate_RejectsUnknownStatusAndOverlongText(t *testing.T) 
 	svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
 	ctx := context.Background()
 
-	if _, err := svc.HandlePresenceUpdate(ctx, 1, "afk", nil, nil); !errors.Is(err, ErrBadRequest) {
+	if _, err := svc.HandlePresenceUpdate(ctx, 1, "afk", nil, nil, nil); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("unknown status err = %v, want ErrBadRequest", err)
 	}
 	long := strings.Repeat("x", MaxCustomStatusLen+1)
-	if _, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &long, nil); !errors.Is(err, ErrBadRequest) {
+	if _, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusOnline, &long, nil, nil); !errors.Is(err, ErrBadRequest) {
 		t.Errorf("overlong custom_status err = %v, want ErrBadRequest", err)
 	}
 	// The rejected call must not have committed the status either.
 	u, _ := database.GetUserByID(ctx, 1)
 	if u.Status == db.StatusOnline {
 		t.Error("a rejected presence_update must not commit the status")
+	}
+}
+
+// ─── WP 3C-9: character rules for single-line visible text ──────────────────
+
+// visibleTextCases are the inputs every single-line field treats alike. ok
+// cases must also round-trip to want.
+var visibleTextCases = []struct {
+	name string
+	in   string
+	ok   bool
+	want string
+}{
+	{"newline", "a\nb", false, ""},
+	{"tab", "a\tb", false, ""},
+	{"bidi override", "a\u202eb", false, ""},
+	{"entity bidi override", "a&#x202e;b", false, ""},
+	{"line separator", "a\u2028b", false, ""},
+	{"entity line separator", "a&#x2028;b", false, ""},
+	{"paragraph separator", "a\u2029b", false, ""},
+	{"hangul filler", "a\u3164b", false, ""},
+	{"heart emoji selector", "\u2764\ufe0f", true, "\u2764\ufe0f"},
+	{"heart fire", "\u2764\ufe0f\u200d\U0001F525", true, "\u2764\ufe0f\u200d\U0001F525"},
+	{"zero width space", "a\u200bb", false, ""},
+	{"zalgo three marks", "e\u0301\u0302\u0303", false, ""},
+	{"zwj between letters", "a\u200db", false, ""},
+	{"two marks", "e\u0301\u0302", true, "e\u0301\u0302"},
+	{"emoji family", "\U0001F468\u200d\U0001F469\u200d\U0001F467", true, "\U0001F468\u200d\U0001F469\u200d\U0001F467"},
+	{"nfc e-acute", "caf\u00e9", true, "caf\u00e9"},
+	{"nfd e-acute", "cafe\u0301", true, "cafe\u0301"},
+	{"spaces collapse", "a    b \u00a0 c", true, "a b c"},
+}
+
+func TestSetCustomStatus_CharacterRules(t *testing.T) {
+	for _, tc := range visibleTextCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, database := newUserSvc(t)
+			ctx := context.Background()
+			err := svc.SetCustomStatus(ctx, 1, tc.in)
+			if !tc.ok {
+				if !errors.Is(err, ErrBadRequest) {
+					t.Fatalf("SetCustomStatus(%q) = %v, want ErrBadRequest", tc.in, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SetCustomStatus(%q): %v", tc.in, err)
+			}
+			u, _ := database.GetUserByID(ctx, 1)
+			if u.CustomStatus == nil || *u.CustomStatus != tc.want {
+				t.Fatalf("stored custom_status = %v, want %q", u.CustomStatus, tc.want)
+			}
+		})
+	}
+}
+
+func TestHandlePresenceUpdate_CustomStatusCharacterRules(t *testing.T) {
+	for _, tc := range visibleTextCases {
+		t.Run(tc.name, func(t *testing.T) {
+			database := newTestDB(t)
+			seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
+			svc := NewChannelService(database, NewPermissionService(database, permissions.NewChecker(database)))
+			in := tc.in
+			res, err := svc.HandlePresenceUpdate(context.Background(), 1, db.StatusOnline, &in, nil, nil)
+			if !tc.ok {
+				if !errors.Is(err, ErrBadRequest) {
+					t.Fatalf("HandlePresenceUpdate(%q) = %v, want ErrBadRequest", tc.in, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("HandlePresenceUpdate(%q): %v", tc.in, err)
+			}
+			if res.CustomStatus == nil || *res.CustomStatus != tc.want {
+				t.Fatalf("returned custom status = %v, want %q", res.CustomStatus, tc.want)
+			}
+		})
+	}
+}
+
+func TestUpdateProfile_DisplayNameCharacterRules(t *testing.T) {
+	for _, tc := range visibleTextCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := newUserSvc(t)
+			in := tc.in
+			u, err := svc.UpdateProfile(context.Background(), 1, ProfilePatch{Username: "ada", DisplayName: &in})
+			if !tc.ok {
+				if !errors.Is(err, ErrBadRequest) {
+					t.Fatalf("UpdateProfile(display_name=%q) = %v, want ErrBadRequest", tc.in, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("UpdateProfile(display_name=%q): %v", tc.in, err)
+			}
+			if u.DisplayName == nil || *u.DisplayName != tc.want {
+				t.Fatalf("display_name = %v, want %q", u.DisplayName, tc.want)
+			}
+		})
+	}
+}
+
+// The rune cap counts the collapsed text: a status that is over the cap only
+// because of repeated spaces fits, and one that is over it after collapsing
+// does not.
+func TestVisibleText_CapCountsAfterCollapse(t *testing.T) {
+	svc, database := newUserSvc(t)
+	ctx := context.Background()
+
+	spaced := strings.Repeat("x"+strings.Repeat(" ", 5), MaxCustomStatusLen/2) // far over the cap raw
+	if len([]rune(spaced)) <= MaxCustomStatusLen {
+		t.Fatalf("test input must exceed the cap before collapsing, has %d runes", len([]rune(spaced)))
+	}
+	if err := svc.SetCustomStatus(ctx, 1, spaced); err != nil {
+		t.Fatalf("SetCustomStatus(over the cap only by spaces): %v", err)
+	}
+	u, _ := database.GetUserByID(ctx, 1)
+	if u.CustomStatus == nil || len([]rune(*u.CustomStatus)) > MaxCustomStatusLen {
+		t.Fatalf("stored status = %v, want within the cap", u.CustomStatus)
+	}
+
+	// 32 two-letter words joined by single spaces is 95 runes: over the
+	// 32-rune display-name cap even after collapsing.
+	over := strings.TrimSpace(strings.Repeat("ab  ", MaxDisplayNameLen))
+	name := over
+	if _, err := svc.UpdateProfile(ctx, 1, ProfilePatch{Username: "ada", DisplayName: &name}); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("display_name over the cap after collapsing = %v, want ErrBadRequest", err)
+	}
+}
+
+func TestGroupDMName_CharacterRules(t *testing.T) {
+	database := newTestDB(t)
+	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
+	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
+	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
+	ctx := context.Background()
+
+	if _, err := svc.CreateGroupDM(ctx, 1, []int64{2, 3}, "line one\nline two"); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("CreateGroupDM with a newline in the name = %v, want ErrBadRequest", err)
+	}
+	res, err := svc.CreateGroupDM(ctx, 1, []int64{2, 3}, "book   club")
+	if err != nil {
+		t.Fatalf("CreateGroupDM: %v", err)
+	}
+	if res.Channel.Name != "book club" {
+		t.Fatalf("group name = %q, want collapsed %q", res.Channel.Name, "book club")
+	}
+	if _, err := svc.RenameGroupDM(ctx, 1, res.Channel.ID, "bad\u202ename"); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("RenameGroupDM with a bidi override = %v, want ErrBadRequest", err)
+	}
+	if _, err := svc.RenameGroupDM(ctx, 1, res.Channel.ID, "bad\nname"); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("RenameGroupDM with a newline = %v, want ErrBadRequest", err)
 	}
 }

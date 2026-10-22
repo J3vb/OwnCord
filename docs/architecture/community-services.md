@@ -27,9 +27,122 @@ here. **Amended 2026-10-08:** `058_revoke_trust_for_blocked_pairs.sql` only dele
 existing `trusted_senders` rows for currently blocked pairs, so it adds no data
 class here. **Amended 2026-10-10:** `059_gif_favorites.sql` adds a private,
 per-user list of GIF provider URLs that no other user or service reads and that
-is erased with the account, so it adds no data class here. Other
-historical
+is erased with the account, so it adds no data class here. **Amended 2026-10-15:**
+`060_message_mentions_reply_ping.sql` only adds a `reply_ping` flag to the
+existing `message_mentions` row, so it adds no data class here. **Amended
+2026-10-15 (profiles):** `061_member_generation_about.sql` only re-creates the
+member-generation trigger so it also watches `users.about`, so it adds no data
+class here. **Amended 2026-10-15 (custom status expiry):**
+`062_custom_status_expiry.sql` adds an expiry instant beside the existing
+`users.custom_status` line, which only its owner can set and which clears
+itself, so it adds no data class here. **Amended 2026-10-15 (mention ledger):**
+`063_mention_receipts.sql` adds a private per-recipient record of which messages
+raised each mention badge, which no other user or service reads and which is
+removed with the recipient (erasure) or the message (cascade). It is no
+community service, so it adds nothing here; its lifecycle row is class 11a in
+`data-lifecycle.md`. **Amended 2026-10-16 (call log):** `064_call_log.sql` adds
+`messages.kind`, `message_calls` and `message_call_participants`, the server-written
+record of a call in a DM. It is no community service and nothing a user can write
+(call rows are read-only), so it adds nothing here; its lifecycle row is class 11b
+in `data-lifecycle.md`. **Amended 2026-10-17 (group DM owner):**
+`065_group_dm_owner.sql` adds `channels.dm_owner_id` and `message_group_events`,
+the group DM owner and the server-written rows for membership changes (WP 3B-10).
+They are no community service and nothing a user can write (group rows are
+read-only), so they add nothing here; their lifecycle rows are classes 11c and
+14e in `data-lifecycle.md`. **Amended 2026-10-17 (group DM icon):**
+`066_group_dm_icon.sql` adds `channels.dm_icon`, the attachment id of a group DM's
+icon (WP 3B-10c). It is an uploaded image like an avatar, kept alive and served to
+the group's members only while the column names it, so it adds no data class here;
+its file follows the attachment rows of class 12. **Amended 2026-10-20 (member
+roles):** `067_user_roles.sql` adds `user_roles`, `roles.hoist`, `roles.mentionable`
+and `message_role_mentions` (WP 6.3a). `user_roles` is the member's role
+assignment, which `users.role_id` already carried and which only an administrator
+can change. The role flags are role settings and `message_role_mentions` is the
+server-written record of which roles a message pinged. They add no data class
+here, and a row goes with its user, role or message by cascade.
+**Amended 2026-10-20 (AFK channel):**
+`068_channel_afk.sql` adds `channels.afk`, the flag on the server's one AFK voice
+channel (WP 6.10a). It is a setting an administrator writes, holds no user content
+and is removed with its channel, so it adds no data class here.
+**Amended 2026-10-20 (profile notes and banners):** `069_profile_notes_banners.sql`
+adds `user_notes`, `users.banner_id` and `users.banner_color` (WP 6.11). A note is
+private to the user who wrote it: no other user, administrator or moderator route
+reads it, and it is removed with either user (lifecycle row 16a in
+`data-lifecycle.md`). The banner columns are public profile fields like the
+avatar, unused until the banner endpoints land. They add no community service.
+**Amended 2026-10-21 (DM privacy):** `070_user_privacy.sql` adds `user_privacy`, one
+row per user holding the two direct message settings (WP 6.8b). The row is read and
+written only through the owner's session and is removed with the account (lifecycle
+row 16b in `data-lifecycle.md`). It adds no community service.
+**Amended 2026-10-21 (message forwarding):** `071_message_forwards.sql` adds
+`message_forwards`, the side row that marks a message as a forward (WP 6.9a). It
+stores the source message, channel and time, never an author, and goes with the
+forward by cascade. A forward is an ordinary message of the forwarder, carrying a
+snapshot of text and its own copies of the files (class 12, charged to the
+forwarder's quota), so it adds no data class and follows the message and
+attachment rows. Forwards of an erased user's message stay without any author
+(`data-lifecycle.md`, O1).
+**Amended 2026-10-21 (channel categories):** `072_channel_categories.sql` adds
+`channel_categories` and `channels.category_id` (WP 6.5a). A category is a name and
+a position an administrator writes, holds no user content and no personal data, and
+is shared by every member who can see a channel in it, so it adds no data class. A
+channel outlives its category (`ON DELETE SET NULL`). **Amended 2026-10-21 (role reconcile):** `077_user_roles_reconcile.sql` rewrites
+`user_roles` rows so they match the role `users.role_id` already names (WP 6.3b).
+It moves no personal data and adds no data class here; the rows keep going with
+their user or role by cascade. **Amended 2026-10-22 (nicknames):** `078_manage_nicknames.sql`
+updates `roles.permissions` only, to give the default Moderator the Manage Nicknames bit (WP 6.4a).
+It adds no table or column and no data class: the nickname it governs is the existing
+`users.display_name`. Other historical
 status statements retain their `cbebd37c` baseline.
+**Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
+`poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
+readable fallback of the question and answers, so it follows the message rows. The
+side rows go with the message by cascade. The one new data class is the vote (lifecycle
+row 10a in `data-lifecycle.md`): a voter's rows are public to the community as
+reactions are, and go with the account. Counts are never stored. Voting, ending and
+expiry (WP 6.9b-b) add no data class: a vote is a row of the same table, and ending
+only sets `polls.ended_at` and bumps `polls.version`. The poll expirer keeps no
+state of its own beyond a wake signal and reads the next deadline from the table.
+**Amended 2026-10-21 (threads):** `074_threads.sql` adds the thread columns to
+`channels` (WP 6.9c). A thread is a channel row under a text channel, so its
+messages, attachments, reactions and read state are the existing classes and
+follow their rows. It has no permission, NSFW, archive or retention state of its
+own: every one is its parent's, and the admin override, NSFW acknowledgement and
+retention routes refuse a thread id. `thread_owner_id` goes `NULL` with its user
+and `thread_starter_message_id` with its message; the thread goes with its
+parent by cascade. It adds no data class.
+**Amended 2026-10-21 (forums):** `075_forums.sql` adds the `forum` channel type,
+`forum_tags` and `thread_tags` (WP 6.9d). A forum is a channel row that holds no
+messages, and its posts are threads under it, so every message, attachment,
+reaction and read-state row in a post is the existing class and follows its row.
+A post takes its overrides, NSFW label, archive state and retention from the forum,
+exactly as a thread does from its text channel, so the NSFW acknowledgement and
+retention routes still refuse a post id and answer for the forum. The one new
+data class is the tag: a name and an optional emoji owned by the forum, editable
+only with MANAGE_CHANNELS, carrying no personal data, and deleted with the forum.
+A post's tag links go with the post or the tag. A client that did not declare the
+`forums` feature is sent no forum row, so an NSFW-labelled forum's name and topic
+reach only sockets that can read it and render it. A post is created by `forum_post_create` (WP 6.9d-a2): the title, tags and opening message are the same content classes as a thread name and a message, and a client without the feature is sent no frame about a post. It adds no other data class. The post list (WP 6.9d-a3) is the thread list route with `sort`, repeatable `tag` and a per-sort cursor; it reads the same content under the channel's read gate and adds no data class.
+
+**Amended 2026-10-21 (category permissions):** `076_category_permissions.sql` adds
+`category_overrides`, `category_user_overrides` and `channels.permissions_synced`
+(WP 6.5d), a template of permission overrides that a category's synced channels
+follow. The per-member rows are keyed by user exactly like `channel_user_overrides`,
+so they join the account-erasure inventory (class 18c) and are deleted with the
+account; the per-role rows hold no personal data. No new data class beyond that.
+A new channel in a category copies the template without an actor check: every
+template row was guarded when it was written, and template rows stay in force
+after their writer is demoted.
+
+**Amended 2026-10-22 (thread follows):** `079_thread_members.sql` adds
+`thread_members(thread_id, user_id, joined_at)` (WP 6.9c), the users who follow a
+thread. It is keyed by user, so it joins the account-erasure inventory and is
+deleted with the account (`ON DELETE CASCADE`), and it goes with its thread. A
+follow is never permission: no gate reads the table, and every read that hands a
+follow to a user is joined with what the thread's parent lets them see, so a row
+for a user who lost the parent stays and is ignored until access returns.
+Auto-follow is limited to the author and each direct `@user` mention (never
+`@everyone` or `@here`). No new data class beyond that.
 **Satisfies:** B5 entry-gate item 3 ("abuse cases and data ownership for each
 service are documented"). **Input to:** HP-5, and to the retention and
 erasure obligations every B5 step carries.
@@ -83,7 +196,7 @@ It answers three questions for each of the seven services B5 adds or changes:
    retention sweeps.
 
 It is **not** an implementation plan (that is
-[the B5 plan](../plans/b5-community-content-moderation-2026-09-04.md)), and
+[the B5 plan](../archive/plans/b5-community-content-moderation-2026-09-04.md)), and
 it is **not** a threat report on shipped code. Analysis that would name an
 exploitable weakness in shipped code stays out of this repository
 ([docs/security.md](../security.md), "What stays private") and is counted,
@@ -191,6 +304,30 @@ send-time block gate for one-to-one DMs only
 (`Server/service/message_perms.go`, `requireDMNotBlocked`). A stranger with
 an account can open a DM with anyone who has not blocked them and send into
 it immediately; nothing stages first contact.
+
+**Recipient opt-out of first contact.** A member can turn off direct messages
+from members (`user_privacy.allow_member_dms`, migration `070`). The 1:1 gate
+(`Server/service/message_perms.go`, `RequireDMReachable`, the successor of
+`requireDMNotBlocked`) then refuses every sink in a two-person DM, and
+`DMService.CreateDM` refuses to open one, for a sender the member does not
+trust (any `trusted_senders` row: accepted, `sent_first` or `grandfathered`).
+The refusal is the same error and text as a block, so the sender cannot tell
+the causes apart, and it happens before any message or request is written. A
+failed read of the setting is an internal error, not a refusal. Group DMs are
+not affected by this gate.
+
+**Recipient opt-out of requests.** With `allow_member_dms` on and
+`user_privacy.message_requests` off, `db.CreateMessageRequest` reads the
+setting inside its own transaction and, for a sender the member does not
+trust, inserts the pair's `message_requests` row as `accepted`, writes
+`trusted_senders(recipient, sender, 'accepted')` next to the `sent_first` edge
+and opens the DM for the recipient. The send then delivers as for a trusted
+sender and sends no `dm_request`. Requests already `pending` stay pending, and
+the pair stays trusted if the setting is turned back on. Two concurrent first
+sends from the same sender keep one row (`INSERT OR IGNORE`); the loser finds
+the trust the winner wrote and is delivered too. Opposite directions are two
+pairs with a row each. A block between the pair, read in the same
+transaction, always stages instead.
 
 ### Abuse cases
 

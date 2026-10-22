@@ -24,6 +24,7 @@ import {
   ApiClientError,
   TransportError,
   errorText,
+  serverErrorText,
   type OnUnauthorized,
 } from "../../src/lib/api";
 import { expectConsole } from "../helpers/console";
@@ -106,6 +107,34 @@ describe("API Client", () => {
       mockFetch.mockResolvedValue(jsonResponse({ status: "ok", version: "1.0.0", uptime: 100 }));
       await api.getHealth();
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/health");
+    });
+  });
+
+  describe("moderation endpoints", () => {
+    // (20)
+    it("timeoutMember POSTs the length and reason to /moderation/users/{id}/timeout", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ id: 12, voice: "skipped" }, 201));
+      const res = await api.timeoutMember(7, 300, "");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/users/7/timeout");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({
+        reason: "",
+        duration_seconds: 300,
+      });
+      expect(res).toEqual({ id: 12, voice: "skipped" });
+    });
+
+    it("PUT /moderation/users/{id}/nickname sends the name, and null to clear", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ user_id: 7, display_name: "Dave" }));
+      const res = await api.setMemberNickname(7, "Dave");
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/users/7/nickname");
+      expect(fetchCallOpts().method).toBe("PUT");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ display_name: "Dave" });
+      expect(res).toEqual({ user_id: 7, display_name: "Dave" });
+
+      mockFetch.mockResolvedValue(jsonResponse({ user_id: 7, display_name: null }));
+      await api.setMemberNickname(7, null);
+      expect(JSON.parse(fetchCallOpts(1).body as string)).toEqual({ display_name: null });
     });
   });
 
@@ -939,6 +968,44 @@ describe("API Client", () => {
       expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
+    it("removeAvatar sends DELETE /users/me/avatar and returns the user", async () => {
+      mockFetch.mockResolvedValue(
+        jsonResponse({ id: 1, username: "alice", role: "member", status: "online" }),
+      );
+      const user = await api.removeAvatar("alice");
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/users/me/avatar");
+      expect(fetchCallOpts().method).toBe("DELETE");
+      expect(user.username).toBe("alice");
+    });
+
+    it("removeAvatar falls back to PATCH /users/me on 405 (older server)", async () => {
+      mockFetch
+        .mockResolvedValueOnce(errorResponse(405, "METHOD_NOT_ALLOWED", "no"))
+        .mockResolvedValueOnce(
+          jsonResponse({ id: 1, username: "alice", role: "member", status: "online" }),
+        );
+      const user = await api.removeAvatar("alice");
+      expectConsole("warn", /\[api\] API error/);
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(fetchCallUrl(1)).toBe("https://localhost:8443/api/v1/users/me");
+      expect(fetchCallOpts(1).method).toBe("PATCH");
+      expect(JSON.parse(fetchCallOpts(1).body as string)).toEqual({
+        username: "alice",
+        avatar: "",
+      });
+      expect(user.avatar ?? null).toBeNull();
+    });
+
+    it("removeAvatar rethrows any other failure without the PATCH fallback", async () => {
+      mockFetch.mockResolvedValue(errorResponse(500, "INTERNAL", "boom"));
+      await expect(api.removeAvatar("alice")).rejects.toMatchObject({ status: 500 });
+      expectConsole("warn", /\[api\] API error/);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
     it("uploadFile throws ApiClientError on non-ok", async () => {
       mockFetch.mockResolvedValue(errorResponse(413, "FILE_TOO_LARGE", "File exceeds limit"));
       const file = new File(["x"], "big.bin");
@@ -1123,6 +1190,63 @@ describe("API Client", () => {
       expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11");
       expect(fetchCallOpts().method).toBe("PATCH");
       expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ name: "New" });
+    });
+
+    it("addGroupDmMembers calls POST /dms/{id}/members with user_ids and returns the summary", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, owner_id: 1 }));
+      const result = await api.addGroupDmMembers(11, [4, 5]);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/members");
+      expect(fetchCallOpts().method).toBe("POST");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ user_ids: [4, 5] });
+      expect(result).toEqual({ channel_id: 11, owner_id: 1 });
+    });
+
+    it("addGroupDmMembers and setGroupDmOwner resolve undefined on a 204", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await expect(api.addGroupDmMembers(11, [4])).resolves.toBeUndefined();
+      await expect(api.setGroupDmOwner(11, 4)).resolves.toBeUndefined();
+    });
+
+    it("uploadGroupDmIcon posts multipart `file` to /dms/{id}/icon and returns the summary", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, icon: "/api/v1/files/9" }));
+      const file = new File(["x"], "group-icon.png", { type: "image/png" });
+      const result = await api.uploadGroupDmIcon(11, file);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/icon");
+      expect(fetchCallOpts().method).toBe("POST");
+      const body = fetchCallOpts().body as FormData;
+      expect(body).toBeInstanceOf(FormData);
+      expect((body.get("file") as File).name).toBe("group-icon.png");
+      expect(result).toEqual({ channel_id: 11, icon: "/api/v1/files/9" });
+    });
+
+    it("uploadGroupDmIcon and removeGroupDmIcon resolve undefined on a 204", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await expect(api.uploadGroupDmIcon(11, new File(["x"], "a.png"))).resolves.toBeUndefined();
+      await expect(api.removeGroupDmIcon(11)).resolves.toBeUndefined();
+    });
+
+    it("removeGroupDmIcon calls DELETE /dms/{id}/icon", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, icon: "" }));
+      const result = await api.removeGroupDmIcon(11);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/icon");
+      expect(fetchCallOpts().method).toBe("DELETE");
+      expect(result).toEqual({ channel_id: 11, icon: "" });
+    });
+
+    it("removeGroupDmMember calls DELETE /dms/{id}/members/{userId}", async () => {
+      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
+      await api.removeGroupDmMember(11, 4);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/members/4");
+      expect(fetchCallOpts().method).toBe("DELETE");
+    });
+
+    it("setGroupDmOwner calls PUT /dms/{id}/owner with user_id", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ channel_id: 11, owner_id: 4 }));
+      const result = await api.setGroupDmOwner(11, 4);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/dms/11/owner");
+      expect(fetchCallOpts().method).toBe("PUT");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ user_id: 4 });
+      expect(result).toEqual({ channel_id: 11, owner_id: 4 });
     });
 
     it("closeDm calls DELETE /dms/{channelId}", async () => {
@@ -1316,6 +1440,19 @@ describe("API Client", () => {
       expect(result.name).toBe("renamed");
     });
 
+    it("adminUpdateForumSettings calls PUT /api/v1/moderation/channels/{id}/forum", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ id: 9, name: "feedback", type: "forum" }));
+      const body = {
+        tags: [{ id: 1, name: "Bug", emoji: "🐛" }, { name: "Idea" }],
+        require_tag: true,
+        default_auto_archive_minutes: 1440,
+      } as const;
+      await api.adminUpdateForumSettings(9, body);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/moderation/channels/9/forum");
+      expect(fetchCallOpts().method).toBe("PUT");
+      expect(JSON.parse(fetchCallOpts().body as string)).toEqual(body);
+    });
+
     it("adminDeleteChannel calls DELETE /api/v1/moderation/channels/{id}", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
       await api.adminDeleteChannel(5);
@@ -1346,6 +1483,27 @@ describe("API Client", () => {
       await api.adminBanMember(42);
       const body = JSON.parse(fetchCallOpts().body as string);
       expect(body).toEqual({ banned: true, ban_reason: "" });
+    });
+
+    it("adminBanMember sends delete_message_seconds only above 0 and never a role_id", async () => {
+      mockFetch.mockResolvedValue(jsonResponse({ id: 42, purge: { deleted: 3, complete: true } }));
+      const res = await api.adminBanMember(42, "spam", 24, undefined, 3600);
+      // The response is handed back untouched; the Ban dialog reads `purge`.
+      const body = JSON.parse(fetchCallOpts().body as string);
+      expect(body).toEqual({
+        banned: true,
+        ban_reason: "spam",
+        ban_duration_hours: 24,
+        delete_message_seconds: 3600,
+      });
+      expect(res).toMatchObject({ purge: { deleted: 3, complete: true } });
+
+      mockFetch.mockClear();
+      mockFetch.mockResolvedValue(jsonResponse({ id: 42 }));
+      await api.adminBanMember(42, "spam", 0, undefined, 0);
+      expect(JSON.parse(fetchCallOpts().body as string)).not.toHaveProperty(
+        "delete_message_seconds",
+      );
     });
 
     it("adminUnbanMember calls PATCH /api/v1/moderation/members/{id} with banned:false", async () => {
@@ -1466,6 +1624,12 @@ describe("errorText (B9-20, Q7)", () => {
     const err = new ApiClientError(429, "RATE_LIMITED", "rate limit exceeded");
     expect(errorText(err, "Failed to change password.")).toBe(
       "Too many requests. Try again later.",
+    );
+  });
+
+  it("shows catalog text for a REQUEST_TIMEOUT, not the server's English (WP 4.1b)", () => {
+    expect(serverErrorText("REQUEST_TIMEOUT", "the server is busy, try again", "Fallback")).toBe(
+      "The server is busy — retry in a moment",
     );
   });
 

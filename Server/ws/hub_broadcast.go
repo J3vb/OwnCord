@@ -129,8 +129,8 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 // channel that channel_overrides hides from their role — metadata the ready
 // payload (buildReady/VisibleChannelIDs) deliberately withholds.
 //
-// Each recipient gets its own frame carrying its can_send and
-// can_moderate_voice verdicts for the new channel, the same targeted form
+// Each recipient gets its own frame carrying its channelAffordances
+// verdicts for the new channel, the same targeted form
 // RefreshChannelVisibility sends: a brand-new channel has no earlier verdict
 // for an absent field to leave unchanged. Like RefreshChannelVisibility the
 // sends bypass the sequenced replay path, so begin/endTargetedFanout force a
@@ -143,14 +143,14 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 	h.beginTargetedFanout()
 	defer h.endTargetedFanout()
 	ctx := context.Background()
+	private := h.channelIsPrivate(ctx, ch.ID, ch.Type)
 	for _, uid := range h.channelReadAudience(ctx, ch.ID) {
 		fireBroadcastChannelCreateRaceHook(uid)
 		live := h.GetClient(uid)
-		if live == nil {
+		if live == nil || !live.sendsChannel(ch.Type) {
 			continue
 		}
-		canSend, canModerateVoice := h.refreshChannelVisibilityAffordances(ctx, ch, uid)
-		live.sendMsg(buildChannelCreateFor(ch, canSend, canModerateVoice))
+		live.sendMsg(buildChannelCreateFor(ch, private, h.refreshChannelVisibilityAffordances(ctx, ch, uid)))
 	}
 }
 
@@ -158,7 +158,8 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 // clients whose current role may READ ch. Same disclosure as
 // BroadcastChannelCreate, as one shared sequenced frame.
 func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
-	h.broadcastChannelScoped(context.Background(), ch.ID, buildChannelUpdate(ch), "channel_update")
+	ctx := context.Background()
+	h.broadcastChannelScoped(ctx, ch.ID, buildChannelUpdate(ch, h.channelIsPrivate(ctx, ch.ID, ch.Type)), "channel_update")
 }
 
 // BroadcastChannelDelete sends a channel_delete message to all connected clients.
@@ -212,6 +213,7 @@ func (h *Hub) BroadcastEmojiUpdate(list []*db.Emoji) {
 // reconnect exactly like chat_deleted does.
 func (h *Hub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) {
 	h.BroadcastToChannel(channelID, buildChatBulkDeleted(channelID, messageIDs))
+	h.noteIfThread(channelID)
 }
 
 // BroadcastMemberBan sends a member_ban message to all connected clients
@@ -236,8 +238,9 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 		return
 	}
 	roleName := ""
-	if role, err := h.readers.Members.GetRoleForUser(ctx, userID); err == nil && role != nil {
-		roleName = role.Name
+	var roleIDs []int64
+	if role, err := h.readers.Members.GetMemberRoles(ctx, userID); err == nil && role != nil {
+		roleName, roleIDs = role.Top.Name, role.IDs
 	}
 	// A lapsed temporary ban lets the user reconnect while users.banned is
 	// still 1, so they can be online at unban time. Report the live status
@@ -250,7 +253,7 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 	} else {
 		user.Status = db.StatusOffline
 	}
-	h.BroadcastToAll(buildMemberJoin(user, roleName))
+	h.BroadcastToAll(buildMemberJoin(user, roleName, roleIDs))
 }
 
 // BroadcastUserUpdate sends a user_update message to all connected clients
@@ -263,7 +266,7 @@ func (h *Hub) BroadcastUserUpdate(u UserUpdate) {
 // BroadcastMemberUpdate sends a member_update message to all connected clients
 // and re-evaluates the reassigned user's live channel subscriptions.
 func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
-	h.BroadcastToAll(buildMemberUpdate(userID, roleName))
+	h.BroadcastToAll(buildMemberUpdate(userID, roleName, nil))
 	h.revokeUnreadableChannels(userID)
 }
 
@@ -333,6 +336,8 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 // window would silently lose the overtaken events. The high queue remains for
 // unsequenced targeted messages only.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
+	// The replay copy's JSON work happens before the lock (SV-04).
+	rs := newReplaySplice(msg)
 	h.seqMu.Lock()
 	start := time.Now()
 	defer h.seqMu.Unlock()
@@ -343,7 +348,7 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	}
 	seq := h.nextSeq()
 	wrapped := wrapWithSeq(msg, seq)
-	stored := replayCopy(wrapped)
+	stored := storedCopy(rs, msg, wrapped, seq)
 	h.replayBuf.Push(seq, channelID, stored)
 	h.persistEvent(seq, channelID, stored)
 
@@ -360,10 +365,18 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	contentFilter, labelled, gateUnconfirmed := g.allow, g.labelled, g.unconfirmed
 
+	// The replay copy's JSON work happens before seqMu (SV-04). A presence
+	// window builds its frame under the lock and never carries a reply
+	// snippet, so it has nothing to precompute.
+	var rs *replaySplice
+	if bm.presence == nil {
+		rs = newReplaySplice(bm.msg)
+	}
+
 	// The channel-broadcast debug log is emitted after seqMu is released
 	// (below) so a slow logging sink never extends the critical section that
 	// serializes every broadcast.
-	seq, delivered, channelSend := func() (seq uint64, delivered int, channelSend bool) {
+	seq, delivered, channelSend, pluginMsg := func() (seq uint64, delivered int, channelSend bool, pluginMsg []byte) {
 		h.seqMu.Lock()
 		start := time.Now()
 		defer h.seqMu.Unlock()
@@ -376,7 +389,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		// only max(seq), it could never be requested back. allowTopicFrame
 		// owns the shed handling (count + watermark, SRV-03).
 		if !h.allowTopicFrame(bm) {
-			return 0, 0, false
+			return 0, 0, false, nil
 		}
 
 		// A window's presence_batch names many users: an erased one loses
@@ -385,7 +398,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		if bm.presence != nil {
 			bm.msg, private = h.buildPresenceBatch(bm.presence)
 			if bm.msg == nil {
-				return 0, 0, false
+				return 0, 0, false, nil
 			}
 		}
 
@@ -393,7 +406,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		// its rows before the erasure and reached the hub after the purge,
 		// must not be sequenced: nothing it describes exists any more.
 		if h.dropsForTombstones(bm.msg) {
-			return 0, 0, false
+			return 0, 0, false, nil
 		}
 
 		seq = h.nextSeq()
@@ -401,34 +414,22 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		if gateUnconfirmed {
 			// The deny-all gate withheld this frame from subscribers it may
 			// not have been meant to skip: a resume at or behind it must
-			// take the full-ready path.
+			// take the full-ready path, and a connected one must resync.
 			h.bumpVisibilityWatermark()
+			h.markLoss(lossRoute{channelID: bm.channelID, recipients: bm.recipients})
 		}
 
 		// Store in replay buffer for reconnection recovery.
-		stored := replayCopy(msg)
+		stored := storedCopy(rs, bm.msg, msg, seq)
 		h.replayBuf.Push(seq, bm.channelID, stored)
 		h.persistEvent(seq, bm.channelID, stored)
 
-		// Fan out to plugins subscribed to this event type (Phase C Step 9).
-		// Dispatch is a no-op in the default build; the wazero build calls into
-		// the WASM module. Dispatch is called outside seqMu after we release it
-		// conceptually — but since seqMu is still held here, the call MUST NOT
-		// re-enter the hub. The default build is safe; the wazero build should
-		// dispatch asynchronously once the runtime is real.
-		//
-		// skipPluginSink (B5-7 decision 13) withholds a labelled channel's
-		// content-bearing frame here: a plugin has no acknowledgement, so it
-		// is treated as never acknowledged regardless of who is in
-		// bm.recipients. No production Subscribe call exists yet (see
-		// EventSink.Dispatch's own doc), so this is a proof against the sink's
-		// decision, not yet an observable guest-delivery effect.
-		if sink := h.pluginSink.Load(); sink != nil && !labelled {
-			eventType := extractEventType(msg)
-			if eventType == "" {
-				eventType = "broadcast"
-			}
-			sink.Dispatch(context.Background(), eventType, msg)
+		// Plugin fan-out (Phase C Step 9) is captured here and called after
+		// seqMu is released, on this same dispatch goroutine, so sink order
+		// still equals seq order. skipPluginSink (B5-7 decision 13): a
+		// labelled channel's content-bearing frame never reaches the sink.
+		if h.pluginSink.Load() != nil && !labelled {
+			pluginMsg = msg
 		}
 
 		switch {
@@ -457,8 +458,12 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 			}
 			channelSend = true
 		}
-		return seq, delivered, channelSend
+		return seq, delivered, channelSend, pluginMsg
 	}()
+
+	if pluginMsg != nil {
+		h.dispatchToPlugins(pluginMsg)
+	}
 
 	// Instrumentation runs after seqMu is released: a metrics provider must
 	// never extend the critical section serializing every broadcast. The

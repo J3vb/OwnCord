@@ -12,6 +12,7 @@ import {
   switchVideoDevice,
   setVoiceSensitivity,
   applyInputMode,
+  onNativeInputLevel,
   setInputVolume,
   setOutputVolume,
   reapplyAudioProcessing,
@@ -21,6 +22,7 @@ import {
 import {
   VAD_MAX_THRESHOLD,
   micCaptureOptions,
+  micProcessingOptions,
   isMissingDeviceError,
   startVadDetector,
   vadThreshold,
@@ -31,18 +33,37 @@ import {
   nativeAudioDevices,
   nativeCameraDevices,
   nativeCameraSupport,
+  onNativeDevicesChanged,
 } from "../../features/voice/native/devices";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
-import { getVideoCodecPref } from "../../features/voice/videoCodec";
+import {
+  getVideoCodecPref,
+  h264Offered,
+  h265Offered,
+  vp9Available,
+  vp9Offered,
+} from "../../features/voice/videoCodec";
 import { desktop } from "../../platform/desktop";
+import {
+  NATIVE_MIC_TEST_IN_CALL,
+  type NativeMicTestEnvelope,
+  type NativeMicTestUpdate,
+  type NativeVoiceAudioOptions,
+} from "../../platform/contracts/nativeVoice";
 import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
 import { settingsText as t } from "../../i18n/settings";
 import { setStatusIcon, statusIcon } from "../../features/settings/status";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import { autoInputSensitivity, inputMode, type InputMode } from "@lib/inputMode";
+import { NoiseFloorTracker } from "@lib/noiseFloor";
 import { buildPttControls } from "./pttControls";
 
 const log = createLogger("VoiceAudioTab");
+
+/** A monitor start refused by a call that is still leaving is retried this
+ *  often, this many times, then left until the next trigger. */
+const MONITOR_RETRY_MS = 250;
+const MONITOR_RETRIES = 8;
 
 /** A microphone itself, not the browser's "default"/"communications" alias. */
 function isRealInput(d: MediaDeviceInfo): boolean {
@@ -61,6 +82,17 @@ function applyMicTestSink(el: HTMLAudioElement): void {
  *  the test plays at 100 %. A corrupt pref plays at full. */
 function micTestVolume(percent: number): number {
   return Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) / 100 : 1;
+}
+
+/** The processing the call would use, from the same saved toggles. */
+function nativeTestAudio(): NativeVoiceAudioOptions {
+  const { echoCancellation, noiseSuppression, autoGainControl } = micProcessingOptions();
+  return {
+    echoCancellation,
+    noiseSuppression,
+    autoGainControl,
+    enhancedNoiseSuppression: loadPref<boolean>("enhancedNoiseSuppression", false),
+  };
 }
 
 /** Meter RMS above which the mic status pill counts the mic as picking you up. */
@@ -87,6 +119,8 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   let cameraPreviewStream: MediaStream | null = null;
   let invalidateCameraPreviewRequest: (() => void) | null = null;
   let stopNativePreview: (() => void) | null = null;
+  let stopNativeMicTest: (() => void) | null = null;
+  let stopNativeDevices: (() => void) | null = null;
 
   function stopMic(): void {
     stopMeter?.();
@@ -96,6 +130,9 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
   function cleanupMic(): void {
     stopMic();
     invalidateCameraPreviewRequest?.();
+    // Drop it too: it closes over the whole build, so keeping it would hold
+    // the discarded pane's DOM until the tab is next opened.
+    invalidateCameraPreviewRequest = null;
     // Also stop camera preview
     if (cameraPreviewStream !== null) {
       for (const track of cameraPreviewStream.getTracks()) track.stop();
@@ -104,6 +141,14 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
     // The native (Linux) preview releases the host capture and its socket.
     stopNativePreview?.();
     stopNativePreview = null;
+    // The native mic test ends with the tab, not with a meter restart: it
+    // is stopped here, never in stopMic.
+    stopNativeMicTest?.();
+    stopNativeMicTest = null;
+    // The host's device watch subscription belongs to the build, released on
+    // a rebuild and on the overlay's close like the mic test.
+    stopNativeDevices?.();
+    stopNativeDevices = null;
   }
 
   function build(buildSignal: AbortSignal = signal): HTMLDivElement {
@@ -128,6 +173,12 @@ export function createVoiceAudioTab(signal: AbortSignal): VoiceAudioTabHandle {
       (stop) => {
         stopNativePreview = stop;
       },
+      (stop) => {
+        stopNativeMicTest = stop;
+      },
+      (stop) => {
+        stopNativeDevices = stop;
+      },
     );
   }
 
@@ -145,6 +196,8 @@ type MicRegistrar = (stop: () => void) => void;
 type CameraRegistrar = (stream: MediaStream | null) => void;
 type CameraInvalidationRegistrar = (invalidate: () => void) => void;
 type NativePreviewRegistrar = (stop: () => void) => void;
+type NativeMicTestRegistrar = (stop: () => void) => void;
+type NativeDevicesRegistrar = NativeMicTestRegistrar;
 
 function buildVoiceAudioTabInner(
   signal: AbortSignal,
@@ -153,14 +206,15 @@ function buildVoiceAudioTabInner(
   registerCamera: CameraRegistrar,
   registerCameraInvalidation: CameraInvalidationRegistrar,
   registerNativePreview: NativePreviewRegistrar,
+  registerMicTest: NativeMicTestRegistrar,
+  registerNativeDevices: NativeDevicesRegistrar,
 ): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
   // Linux voice runs in the native audio engine (docs/architecture/voice-e2ee.md):
-  // its capture path exposes no gain or level hook, so the input volume and
-  // sensitivity controls below would be dead there. They are built as usual and
-  // removed at the end, with one note in their place; the prefs keep being
-  // written so another platform's profile is untouched. Output volume works:
-  // the engine's playout mixer applies it with each user's volume.
+  // its capture takes the input volume, sensitivity and automatic sensitivity
+  // like the web processor, and reports its level in a call, in the mic test
+  // and in the capture-only monitor the meter runs outside a call. The
+  // webview's microphone is not the engine's, so the meter opens none there.
   const nativeAudio = isLinuxDesktop();
 
   // Five cards: when you transmit, what you speak into, what you hear, what
@@ -242,6 +296,8 @@ function buildVoiceAudioTabInner(
       inputVolumePercent = val;
       meterProcessor?.setInputGain(val / 100);
       meterResetFloor?.();
+      updateNativeTest({ kind: "inputGain", percent: val });
+      nativeTestFloor?.reset(performance.now());
     },
     { signal },
   );
@@ -257,9 +313,8 @@ function buildVoiceAudioTabInner(
   micCard.appendChild(sensitivityHeader);
 
   // Automatic sensitivity: the gate finds its own threshold above the room's
-  // noise, and the meter shows the level without a handle. The native engine
-  // gates on the saved slider alone, so it keeps the handle and no toggle.
-  let autoSensitivity = !nativeAudio && autoInputSensitivity();
+  // noise, and the meter shows the level without a handle.
+  let autoSensitivity = autoInputSensitivity();
   const autoRow = createElement("div", {
     class: "setting-row",
     "data-testid": "auto-sensitivity",
@@ -273,6 +328,7 @@ function buildVoiceAudioTabInner(
       paintSensitivity();
       meterThresholdSetter?.(nowOn ? "auto" : vadThreshold(currentSensitivity));
       applyInputMode();
+      resetNativeTestGate();
     },
   });
   appendChildren(
@@ -280,7 +336,7 @@ function buildVoiceAudioTabInner(
     createElement("div", { class: "setting-label" }, t("voiceAudio.autoSensitivity")),
     autoToggle,
   );
-  if (!nativeAudio) micCard.appendChild(autoRow);
+  micCard.appendChild(autoRow);
 
   // Real-time mic level bar with embedded draggable threshold handle
   const meterWrap = createElement("div", { class: "mic-meter-wrap" });
@@ -305,30 +361,51 @@ function buildVoiceAudioTabInner(
   });
   meterWrap.append(meterBar, sensitivityValue);
   micCard.appendChild(meterWrap);
+  if (nativeAudio) {
+    // The mic test and a call share one capture, so the test waits for the call.
+    micCard.appendChild(
+      createElement(
+        "p",
+        { class: "setting-desc", "data-testid": "native-audio-note" },
+        t("voiceAudio.nativeNote"),
+      ),
+    );
+  }
 
-  // ── Mic test: plays the meter's processed microphone, after the voice gate,
-  // through the chosen output, so you hear what a call would send. The native
-  // engine's capture never reaches the webview, so there is nothing to play.
+  // The bar on the threshold handle's axis, green while the gate is open, and
+  // the pill saying whether the mic picks anything up, whatever the
+  // sensitivity, held between syllables so it does not flicker.
+  let lastHeardAt = Number.NEGATIVE_INFINITY;
+  function paintMeter(level: number, gateOpen: boolean): void {
+    // Same axis as the handle, whose position is threshold / max.
+    const position = Math.min(level / VAD_MAX_THRESHOLD, 1);
+    meterLevel.style.width = `${Math.round(position * 1000) / 10}%`;
+    meterLevel.style.background = gateOpen ? "var(--green)" : "var(--yellow)";
+    const now = performance.now();
+    if (level >= MIC_NOISE_FLOOR) lastHeardAt = now;
+    showMicState(now - lastHeardAt < MIC_HEARD_HOLD_MS);
+  }
+
+  // ── Mic test: plays the processed microphone, after the voice gate, through
+  // the chosen output, so you hear what a call would send. On the web it plays
+  // the meter's processor; on the native engine the host loops its own capture
+  // back to its own output (native_voice/mic_test.rs).
   const micTestRow = createElement("div", {
     class: "setting-row mic-test-row",
     "data-testid": "mic-test",
   });
   const micTestInfo = createElement("div", {});
+  const micTestDesc = createElement("div", { class: "setting-desc" }, t("voiceAudio.micTest.desc"));
   appendChildren(
     micTestInfo,
     createElement("div", { class: "setting-label" }, t("voiceAudio.micTest.label")),
-    createElement(
-      "div",
-      { class: "setting-desc" },
-      nativeAudio ? t("voiceAudio.micTest.linux") : t("voiceAudio.micTest.desc"),
-    ),
+    micTestDesc,
   );
   const micTestButton = createElement(
     "button",
     { class: "ac-btn", type: "button", "aria-pressed": "false", "data-testid": "mic-test-button" },
     t("voiceAudio.micTest.start"),
   );
-  micTestButton.disabled = nativeAudio;
   appendChildren(micTestRow, micTestInfo, micTestButton);
   micCard.appendChild(micTestRow);
 
@@ -362,6 +439,7 @@ function buildVoiceAudioTabInner(
     paintMode();
     applyInputMode();
     syncMeterGate();
+    resetNativeTestGate();
     const vk = loadPref<number>("pttVk", 0);
     if (mode === "vad") void desktop.pushToTalk.stop();
     else if (vk !== 0)
@@ -439,6 +517,178 @@ function buildVoiceAudioTabInner(
   let micTesting = false;
   let micTestAudio: HTMLAudioElement | null = null;
 
+  // ── The native mic test's state (Linux): the host's id for the running
+  // test, a counter that retires a start a later click or teardown
+  // superseded, the noise-floor tracker automatic sensitivity retunes the
+  // test's gate with, and the event subscription.
+  let nativeTestId: number | null = null;
+  let nativeTestRequest = 0;
+  let nativeTestStarting = false;
+  /** Whether the current (or starting) native test is the meter's
+   *  capture-only monitor rather than the mic test. */
+  let nativeMonitoring = false;
+  /** Whether a call's capture is reporting levels, which the monitor yields to. */
+  let callCapturing = false;
+  let nativeTestEndedEarly: number | null = null;
+  let nativeTestFloor: NoiseFloorTracker | null = null;
+  let unsubscribeTestEvents: (() => void) | null = null;
+
+  /** The test's gate threshold, as the web meter gates its test playback:
+   *  none in Push to Talk, the tab's sensitivity in Voice Activity. */
+  function nativeTestThreshold(): number {
+    if (inputMode() !== "vad") return 0;
+    if (autoSensitivity) return nativeTestFloor?.threshold ?? 0;
+    return vadThreshold(currentSensitivity);
+  }
+
+  function makeNativeTestFloor(): void {
+    nativeTestFloor = inputMode() === "vad" && autoSensitivity ? new NoiseFloorTracker() : null;
+  }
+
+  function updateNativeTest(update: NativeMicTestUpdate): void {
+    if (nativeTestId === null) return;
+    desktop.nativeVoice.updateMicTest(nativeTestId, update).catch((err: unknown) => {
+      log.warn("Mic test setting could not reach the native test", err);
+    });
+  }
+
+  /** The mode or the automatic toggle changed: the gate starts over. */
+  function resetNativeTestGate(): void {
+    if (nativeTestId === null) return;
+    makeNativeTestFloor();
+    updateNativeTest({ kind: "voiceGate", threshold: nativeTestThreshold(), retune: false });
+  }
+
+  function paintTestButton(on: boolean): void {
+    setText(micTestButton, on ? t("voiceAudio.micTest.stop") : t("voiceAudio.micTest.start"));
+    micTestButton.classList.toggle("secondary", on);
+    micTestButton.setAttribute("aria-pressed", String(on));
+  }
+
+  /** Forget the running test: its id, floor, subscription and meter. */
+  function endNativeTest(): void {
+    nativeTestId = null;
+    nativeMonitoring = false;
+    nativeTestFloor = null;
+    unsubscribeTestEvents?.();
+    unsubscribeTestEvents = null;
+    clearMeter();
+  }
+
+  function onTestEvent({ test, event }: NativeMicTestEnvelope): void {
+    if (test !== nativeTestId) {
+      // The host ended a test whose start has not resolved here yet.
+      if (event.type === "ended" && nativeTestStarting) nativeTestEndedEarly = test;
+      return;
+    }
+    if (event.type === "ended") {
+      // A call joined: the host has already stopped the test. The meter
+      // follows the call's own capture from here.
+      const monitor = nativeMonitoring;
+      nativeTestRequest++;
+      endNativeTest();
+      if (monitor) return;
+      micTesting = false;
+      paintTestButton(false);
+      setText(micTestDesc, t("voiceAudio.micTest.inCall"));
+      return;
+    }
+    paintMeter(event.rms, event.open);
+    const next = nativeTestFloor?.push(event.rms, performance.now()) ?? null;
+    if (next !== null) updateNativeTest({ kind: "voiceGate", threshold: next, retune: true });
+  }
+
+  async function startNativeTest(monitor = false, attempt = 0): Promise<void> {
+    const request = ++nativeTestRequest;
+    // A test replaces the monitor in the host, which ends it silently.
+    if (nativeMonitoring && !monitor) nativeTestId = null;
+    nativeMonitoring = monitor;
+    if (!monitor) setText(micTestDesc, t("voiceAudio.micTest.desc"));
+    makeNativeTestFloor();
+    // Before the start, so no early report is missed; a running monitor's
+    // subscription already serves.
+    unsubscribeTestEvents ??= desktop.nativeVoice.onMicTestEvent(onTestEvent);
+    nativeTestStarting = true;
+    nativeTestEndedEarly = null;
+    try {
+      const id = await desktop.nativeVoice.startMicTest({
+        input: loadPref<string>("audioInputDevice", ""),
+        output: monitor ? "" : loadPref<string>("audioOutputDevice", ""),
+        audio: nativeTestAudio(),
+        inputGain: inputVolumePercent,
+        outputGain: monitor ? 0 : micTestVolume(loadPref<number>("outputVolume", 100)),
+        threshold: nativeTestThreshold(),
+        ...(monitor ? { monitor } : {}),
+      });
+      if (signal.aborted || request !== nativeTestRequest) {
+        // Torn down or superseded while starting: stop exactly this test.
+        desktop.nativeVoice.stopMicTest(id).catch((err: unknown) => {
+          log.warn("A superseded mic test could not be stopped", err);
+        });
+        return;
+      }
+      if (nativeTestEndedEarly === id) {
+        endNativeTest();
+        if (monitor) return;
+        micTesting = false;
+        paintTestButton(false);
+        setText(micTestDesc, t("voiceAudio.micTest.inCall"));
+        return;
+      }
+      nativeTestId = id;
+    } catch (err) {
+      if (signal.aborted || request !== nativeTestRequest) return;
+      if (monitor) {
+        // A call holds the capture (its own levels drive the meter) or the
+        // device did not open: the bar stays empty.
+        log.debug("The meter's monitor could not start", err);
+        endNativeTest();
+        // A leaving call stops its levels before the host drops its session,
+        // so the first start can be refused: try a few more times, no more.
+        if (
+          err instanceof Error &&
+          err.message === NATIVE_MIC_TEST_IN_CALL &&
+          attempt < MONITOR_RETRIES
+        ) {
+          setOwnedTimeout(
+            signal,
+            () => {
+              if (request !== nativeTestRequest || micTesting || callCapturing) return;
+              void startNativeTest(true, attempt + 1);
+            },
+            MONITOR_RETRY_MS,
+          );
+        }
+        return;
+      }
+      log.warn("The mic test could not start", err);
+      endNativeTest();
+      micTesting = false;
+      paintTestButton(false);
+      setText(
+        micTestDesc,
+        err instanceof Error && err.message === NATIVE_MIC_TEST_IN_CALL
+          ? t("voiceAudio.micTest.inCall")
+          : t("voiceAudio.micTest.failed"),
+      );
+      startMicMeter();
+    } finally {
+      if (request === nativeTestRequest) nativeTestStarting = false;
+    }
+  }
+
+  /** Button off, or the tab going away. */
+  function stopNativeTest(): void {
+    nativeTestRequest++;
+    const id = nativeTestId;
+    endNativeTest();
+    if (id === null) return;
+    desktop.nativeVoice.stopMicTest(id).catch((err: unknown) => {
+      log.warn("The mic test could not be stopped", err);
+    });
+  }
+  registerMicTest(stopNativeTest);
+
   /** Gate the meter's output as a call would: on the detector in Voice
    *  Activity, open in Push to Talk (there the key decides, not the level). */
   function syncMeterGate(): void {
@@ -473,14 +723,17 @@ function buildVoiceAudioTabInner(
   micTestButton.addEventListener(
     "click",
     () => {
-      if (nativeAudio || signal.aborted) return;
+      if (signal.aborted) return;
       micTesting = !micTesting;
-      setText(
-        micTestButton,
-        micTesting ? t("voiceAudio.micTest.stop") : t("voiceAudio.micTest.start"),
-      );
-      micTestButton.classList.toggle("secondary", micTesting);
-      micTestButton.setAttribute("aria-pressed", String(micTesting));
+      paintTestButton(micTesting);
+      if (nativeAudio) {
+        if (micTesting) void startNativeTest();
+        else {
+          stopNativeTest();
+          startMicMeter();
+        }
+        return;
+      }
       if (!micTesting) stopMicTestPlayback();
       else if (meterProcessor !== null) startMicTestPlayback(meterProcessor);
     },
@@ -491,6 +744,9 @@ function buildVoiceAudioTabInner(
     currentSensitivity = val;
     updateThresholdIndicator(val);
     meterThresholdSetter?.(vadThreshold(val));
+    if (inputMode() === "vad" && !autoSensitivity) {
+      updateNativeTest({ kind: "voiceGate", threshold: vadThreshold(val), retune: true });
+    }
   }
 
   function commitSensitivity(): void {
@@ -606,6 +862,7 @@ function buildVoiceAudioTabInner(
       setText(outputVolumeLabel, `${val}%`);
       setOutputVolume(val);
       if (micTestAudio !== null) micTestAudio.volume = micTestVolume(val);
+      updateNativeTest({ kind: "outputGain", gain: micTestVolume(val) });
     },
     { signal },
   );
@@ -620,6 +877,8 @@ function buildVoiceAudioTabInner(
     pref: string,
     saved: string,
     options: Array<[string, string]>,
+    /** Option values shown but not selectable. */
+    disabled: ReadonlySet<string> = new Set(),
   ): HTMLElement[] {
     const header = createElement("div", { class: "settings-field-label" }, label);
     const description = createElement("p", { class: "setting-desc" }, desc);
@@ -631,6 +890,7 @@ function buildVoiceAudioTabInner(
     for (const [value, text] of options) {
       const opt = createElement("option", { value }, text);
       if (value === saved) opt.setAttribute("selected", "");
+      if (disabled.has(value)) opt.disabled = true;
       select.appendChild(opt);
     }
     select.value = saved;
@@ -703,7 +963,20 @@ function buildVoiceAudioTabInner(
     },
     { signal },
   );
-  const fpsGroup = [fpsHeader, fpsDesc, fpsSelect];
+  // Linux (M-3): the Wayland portal negotiates 60 fps at most; the picker
+  // greys 120 out there, so say it here as well.
+  const fpsGroup = isLinuxDesktop()
+    ? [
+        fpsHeader,
+        fpsDesc,
+        createElement(
+          "p",
+          { class: "setting-desc", "data-testid": "screen-fps-wayland-note" },
+          t("voiceAudio.screenFpsWaylandNote"),
+        ),
+        fpsSelect,
+      ]
+    : [fpsHeader, fpsDesc, fpsSelect];
 
   // Video device selector
   const videoHeader = createElement(
@@ -757,22 +1030,57 @@ function buildVoiceAudioTabInner(
   previewWrap.append(previewVideo, previewLabel);
   cameraCard.appendChild(previewWrap);
   cameraCard.append(...cameraQualityGroup, ...screenQualityGroup, ...fpsGroup);
-  // The Linux native engine always publishes VP8 (lib/videoCodec).
-  if (!isLinuxDesktop()) {
-    cameraCard.append(
+  // The codec choice. Off Linux the webview's own encoders decide what is
+  // offered; on Linux the native engine offers VP8, Auto (VP8), and H.264 and
+  // VP9 only when its probe says it can encode them (WP LP-7c, M-11b).
+  const codecGroup = (h264Available: boolean, vp9Native = false): HTMLElement[] => {
+    const linux = isLinuxDesktop();
+    const offerVp9 = linux ? vp9Native : vp9Offered();
+    const offerH265 = h265Offered();
+    const savedCodec = getVideoCodecPref();
+    // A saved codec that is no longer offered reads as VP8, as the resolver
+    // does; the pref itself is left alone for a build that offers it.
+    const unoffered =
+      (savedCodec === "vp9" && !offerVp9) ||
+      (savedCodec === "h265" && !offerH265) ||
+      (savedCodec === "h264" && !h264Available);
+    return [
       ...qualityGroup(
         t("voiceAudio.videoCodec"),
-        t("voiceAudio.videoCodecDesc"),
+        t(linux ? "voiceAudio.videoCodecDescLinux" : "voiceAudio.videoCodecDesc"),
         "videoCodec",
-        getVideoCodecPref(),
+        unoffered ? "vp8" : savedCodec,
         [
           ["vp8", t("voiceAudio.videoCodec.vp8")],
-          ["h264", t("voiceAudio.videoCodec.h264")],
-          ["auto", t("voiceAudio.videoCodec.auto")],
+          [
+            "h264",
+            h264Available
+              ? t(linux ? "voiceAudio.videoCodec.h264Linux" : "voiceAudio.videoCodec.h264")
+              : t("voiceAudio.videoCodec.h264Unavailable"),
+          ],
+          ...(offerVp9 ? [["vp9", t("voiceAudio.videoCodec.vp9")] as [string, string]] : []),
+          ...(offerH265 ? [["h265", t("voiceAudio.videoCodec.h265")] as [string, string]] : []),
+          ["auto", t(linux ? "voiceAudio.videoCodec.autoLinux" : "voiceAudio.videoCodec.auto")],
         ],
+        h264Available ? new Set() : new Set(["h264"]),
       ),
-      createElement("p", { class: "setting-desc" }, t("voiceAudio.videoCodecIntel")),
-    );
+      createElement(
+        "p",
+        { class: "setting-desc" },
+        t(linux ? "voiceAudio.videoCodecLinux" : "voiceAudio.videoCodecIntel"),
+      ),
+    ];
+  };
+  if (isLinuxDesktop()) {
+    // The probe is asked of the host, so the group fills a slot that holds its
+    // place (a group's height) and the cards below do not jump.
+    const slot = createElement("div", { class: "voice-codec-slot", style: "min-height:104px" });
+    cameraCard.appendChild(slot);
+    void Promise.all([h264Offered(), vp9Available()]).then(([h264, vp9]) => {
+      if (!signal.aborted) slot.append(...codecGroup(h264, vp9));
+    });
+  } else {
+    cameraCard.append(...codecGroup(true));
   }
 
   // Device names seen while this tab is open, to name one that is unplugged.
@@ -874,25 +1182,29 @@ function buildVoiceAudioTabInner(
 
   void populateDevices();
 
+  const onDeviceChange = (): void => {
+    void populateDevices();
+    // The session moves the capture after its own debounce; re-read then.
+    setOwnedTimeout(signal, () => void populateDevices(), DEVICE_MANAGER_SETTLE_MS);
+  };
   // MediaDevices is an EventTarget everywhere this ships, but a webview that
   // exposes enumerateDevices without the event target shouldn't take the tab
   // down with it — it just loses live refresh.
   if (typeof navigator.mediaDevices?.addEventListener === "function") {
-    navigator.mediaDevices.addEventListener(
-      "devicechange",
-      () => {
-        void populateDevices();
-        // The session moves the capture after its own debounce; re-read then.
-        setOwnedTimeout(signal, () => void populateDevices(), DEVICE_MANAGER_SETTLE_MS);
-      },
-      { signal },
-    );
+    navigator.mediaDevices.addEventListener("devicechange", onDeviceChange, { signal });
   }
+  // On Linux the host's hot-plug watch is the trigger (null elsewhere); it
+  // also starts the watch, so the lists stay live outside a call.
+  // Released through cleanupMic (a rebuild or the overlay closing), not an
+  // "abort" listener: build() runs again on every rebuild (OC-0125).
+  const stopNative = onNativeDevicesChanged(onDeviceChange);
+  if (stopNative !== null) registerNativeDevices(stopNative);
 
   inputSelect.addEventListener(
     "change",
     () => {
       savePref("audioInputDevice", inputSelect.value);
+      updateNativeTest({ kind: "inputDevice", deviceId: inputSelect.value });
       const switched = switchInputDevice(inputSelect.value);
       restartMeterAfter(switched);
       void switched.then(populateDevices, populateDevices);
@@ -904,6 +1216,7 @@ function buildVoiceAudioTabInner(
     "change",
     () => {
       savePref("audioOutputDevice", outputSelect.value);
+      updateNativeTest({ kind: "outputDevice", deviceId: outputSelect.value });
       void switchOutputDevice(outputSelect.value);
       if (micTestAudio !== null) applyMicTestSink(micTestAudio);
     },
@@ -1095,12 +1408,16 @@ function buildVoiceAudioTabInner(
   // what the meter shows is what the gate does. Opening the microphone with
   // other settings would also fight the call for the device: the browser can
   // hand the call this stream's processing instead of its own.
-  // The meter previews the webview's microphone; on the native engine the
-  // saved device id is the engine's, so it does not run there.
+  // On the native engine the saved device id is the engine's, so the meter
+  // shows the call capture's own level reports instead (startNativeMeter).
   function startMicMeter(): void {
-    if (nativeAudio || signal.aborted) return;
+    if (signal.aborted) return;
     const thisRequest = ++micRequestId;
     stopMic();
+    if (nativeAudio) {
+      startNativeMeter();
+      return;
+    }
     void (async () => {
       try {
         const captureOptions = micCaptureOptions();
@@ -1141,18 +1458,8 @@ function buildVoiceAudioTabInner(
         let gateOpen = true;
         meterGated = false;
         let level = 0;
-        let lastHeardAt = Number.NEGATIVE_INFINITY;
-        const paint = (): void => {
-          // Same axis as the handle, whose position is threshold / max.
-          const position = Math.min(level / VAD_MAX_THRESHOLD, 1);
-          meterLevel.style.width = `${Math.round(position * 1000) / 10}%`;
-          meterLevel.style.background = gateOpen ? "var(--green)" : "var(--yellow)";
-          // The pill says whether the mic picks anything up, whatever the
-          // sensitivity, and holds between syllables so it does not flicker.
-          const now = performance.now();
-          if (level >= MIC_NOISE_FLOOR) lastHeardAt = now;
-          showMicState(now - lastHeardAt < MIC_HEARD_HOLD_MS);
-        };
+        lastHeardAt = Number.NEGATIVE_INFINITY;
+        const paint = (): void => paintMeter(level, gateOpen);
         const detector = startVadDetector(
           processor.context,
           processor.analyser!,
@@ -1190,6 +1497,37 @@ function buildVoiceAudioTabInner(
         setText(micStatusWord, t("voiceAudio.mic.noAccess"));
       }
     })();
+  }
+  /** The native engine's meter: the capture's level reports, after its
+   *  input volume and with its gate's verdict, so the bar shows what the gate
+   *  does. In a call they are the call's own; outside one the host runs a
+   *  capture-only monitor (a mic test without playout), which a call, the mic
+   *  test or the tab closing ends. */
+  function startNativeMeter(): void {
+    lastHeardAt = Number.NEGATIVE_INFINITY;
+    const stopCallLevels = onNativeInputLevel((level, gateOpen) => {
+      callCapturing = level !== null;
+      if (level !== null) {
+        paintMeter(level, gateOpen);
+        return;
+      }
+      // The call's capture stopped (mute or leave): the empty bar, and the
+      // monitor again once the device is free.
+      clearMeter();
+      if (!micTesting && nativeTestId === null && !nativeTestStarting) void startNativeTest(true);
+    });
+    registerMic(() => {
+      stopCallLevels();
+      if (nativeMonitoring) stopNativeTest();
+    });
+    if (!micTesting) void startNativeTest(true);
+  }
+  /** Back to the empty bar: no level, no status. */
+  function clearMeter(): void {
+    meterLevel.style.width = "0%";
+    lastHeardAt = Number.NEGATIVE_INFINITY;
+    micHeard = null;
+    micStatus.hidden = true;
   }
   startMicMeter();
 
@@ -1243,9 +1581,7 @@ function buildVoiceAudioTabInner(
     const row = createElement("div", { class: "setting-row" });
     const info = createElement("div", {});
     const label = createElement("div", { class: "setting-label" }, item.label);
-    // The native engine reads these at connect, not live.
-    const descText = nativeAudio ? t("voiceAudio.applyNextJoin", { desc: item.desc }) : item.desc;
-    const desc = createElement("div", { class: "setting-desc" }, descText);
+    const desc = createElement("div", { class: "setting-desc" }, item.desc);
     appendChildren(info, label, desc);
 
     const isOn = loadPref<boolean>(item.key, item.fallback);
@@ -1254,6 +1590,7 @@ function buildVoiceAudioTabInner(
       label: item.label,
       onChange: (nowOn) => {
         savePref(item.key, nowOn);
+        updateNativeTest({ kind: "processing", audio: nativeTestAudio() });
         if (item.key === "enhancedNoiseSuppression") {
           // RNNoise sits inside the processors: re-route the call's and the
           // meter's, and leave both captures alone.
@@ -1271,18 +1608,6 @@ function buildVoiceAudioTabInner(
     // Enhanced noise suppression builds on noise suppression: nest it.
     if (item.key === "enhancedNoiseSuppression") row.classList.add("nested");
     processingCard.appendChild(row);
-  }
-
-  if (nativeAudio) {
-    // The sensitivity slider stays: the engine's capture gates on it. Its
-    // bar shows no level, as the meter reads only the webview's microphone.
-    for (const control of [inputVolumeHeader, inputVolumeRow]) control.remove();
-    const note = createElement(
-      "p",
-      { class: "setting-desc", "data-testid": "native-audio-note" },
-      t("voiceAudio.nativeNote"),
-    );
-    inputSelect.after(note);
   }
 
   return section;

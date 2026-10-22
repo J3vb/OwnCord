@@ -6,9 +6,12 @@ import { channelsStore, noteChannelMessage } from "../../stores/channels.store";
 import {
   addMessage,
   updateReaction,
+  updatePoll,
+  applyPollVoteOk,
   rollbackReaction,
   confirmSend,
   markSendFailed,
+  removeOptimistic,
   channelIdForSend,
   applyServerMessage,
   messagesStore,
@@ -31,7 +34,7 @@ import {
   updateDmLastMessage,
   updateDmLastMessagePreview,
 } from "../../stores/dm.store";
-import { setUserBlockedByThem } from "../../stores/blocks.store";
+import { blocksStore, setUserBlockedByThem } from "../../stores/blocks.store";
 import type { ConnectionState } from "../../lib/ws";
 import { invalidateReactionUsers } from "./reactionUsers";
 import { parseTimestamp } from "@lib/formatting";
@@ -40,7 +43,11 @@ import { mentionsCurrentUser } from "../../lib/mentions";
 import { showToast } from "../../lib/toast";
 import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
-import { isChannelAway } from "@lib/read-state";
+import { isForwardRequest } from "./forwardRequests";
+import { isPollRequest } from "./pollRequests";
+import { handleThreadState } from "./threadFrames";
+import { loadedThreadsStore } from "../../stores/threadsLoader";
+import { isChannelAway, noteAwayUnread } from "@lib/read-state";
 import {
   activatePendingMessages,
   acknowledgePendingMessage,
@@ -64,6 +71,15 @@ import { log } from "../connection/dispatchContext";
  */
 const REPLAY_GATE_WINDOW_MS = 5_000;
 
+// Thread frames (WP 6.9c): the dispatcher reaches them through this module.
+export {
+  applyReadyThreads,
+  handleThreadDeleted,
+  handleThreadFollow,
+  handleThreadState,
+} from "./threadFrames";
+export { resumeThreadFocus } from "../../stores/threadsLoader";
+
 export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_message">): void {
   if (payload.user.id === authStore.getState().user?.id) {
     acknowledgePendingMessage(payload.client_message_id);
@@ -78,6 +94,9 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // state), and scoped to this channel + this sender so other typers stay.
   clearTyping(payload.channel_id, payload.user.id);
   addMessage(payload);
+  handleThreadState(payload);
+  // A message that lands in the thread the panel has open is seen as it arrives.
+  loadedThreadsStore()?.noteOpenThreadMessage(payload.channel_id, payload.id);
   const activeId = channelsStore.select((s) => s.activeChannelId);
 
   // Check if this is a DM channel and whether the message is from self.
@@ -122,9 +141,15 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // either. A direct mention, or an @here/@everyone frame delivered live,
   // is unaffected — mentions_here is only ever set alongside
   // mentions_everyone for an @here (never a plain @everyone) token.
+  // A blocked author never raises one: the server leaves blockers out of its
+  // mention counts, so the badge here must agree with the next `ready`.
   const isMention =
-    mentionsCurrentUser(payload.content, { mentions: payload.mentions }) ||
-    (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame));
+    !blocksStore.getState().blockedByMe.has(payload.user.id) &&
+    (mentionsCurrentUser(payload.content, {
+      mentions: payload.mentions,
+      mentionRoles: payload.mention_roles,
+    }) ||
+      (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame)));
   // P4-03: "active" only means "the reader is watching" while the window is
   // focused (isChannelAway, lib/read-state.ts). A minimised or unfocused window
   // shows nothing, so a message landing in the active channel then must count
@@ -142,6 +167,9 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
     // between the server's registerNow and buildReady, then redelivered
     // as a queued chat_message) does not double-count.
     noteChannelMessage(payload.channel_id, payload.id, isMention, isAway);
+    // Counted unread in the channel on screen: the reader was away, so after a
+    // Mark Unread a later live arrival may release the hold (read-state.ts).
+    if (isAway && payload.channel_id === activeId) noteAwayUnread(payload.channel_id);
   }
 
   // Update DM store last message if this message belongs to a DM channel.
@@ -189,7 +217,14 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // skew's damage — see REPLAY_GATE_WINDOW_MS. (isReplayFrame itself is
   // computed above, alongside isMention, which needs it too.)
   if (!isReplayFrame) {
-    notifyIncomingMessage(payload);
+    // A reply in a thread is judged by its parent channel: the parent's mute and
+    // notification level apply, its name labels the popup, and a thread the
+    // reader is watching beside the active channel is not worth a chime.
+    const surface =
+      loadedThreadsStore()?.authorityChannelId(payload.channel_id) ?? payload.channel_id;
+    notifyIncomingMessage(
+      surface === payload.channel_id ? payload : { ...payload, channel_id: surface },
+    );
     // Refresh the skew estimate from this accepted-as-live frame so it
     // stays current for the next reconnect.
     clock.serverClockSkewMs = Date.now() - parseTimestamp(payload.timestamp).getTime();
@@ -270,8 +305,8 @@ function reviseDmPreviewAfterDelete(
 }
 
 /** A message was pinned or unpinned elsewhere — keep this client's row in
- *  sync (F5). An open pinned panel is a fetched snapshot and does not follow
- *  this until it is reopened. */
+ *  sync (F5). The store's per-channel pin revision moves with it, which is what
+ *  an open pinned panel watches to refetch its list. */
 export function handleChatPinned(payload: Payload<"chat_pinned">): void {
   setMessagePinned(payload.channel_id, payload.message_id, payload.pinned);
 }
@@ -333,6 +368,16 @@ export function handleReactionUpdate(payload: Payload<"reaction_update">): void 
   // The who-reacted tooltip caches the reactor list per message+emoji; any
   // add/remove on this message makes those lists stale.
   invalidateReactionUsers(payload.message_id);
+}
+
+/** A poll's counts after a vote or its end (WP 6.9b); the store keeps them in version order. */
+export function handlePollUpdate(payload: Payload<"poll_update">): void {
+  updatePoll(payload, authStore.getState().user?.id ?? 0);
+}
+
+/** The sender's stored selection, so the card shows it before the poll_update that carries the counts. */
+export function handlePollVoteOk(payload: Payload<"poll_vote_ok">): void {
+  applyPollVoteOk(payload);
 }
 
 export function handleTyping(payload: Payload<"typing">): void {
@@ -464,11 +509,30 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
   clock.hasReceivedReadyBefore = true;
 }
 
+function hasSendRow(correlationId: string): boolean {
+  for (const rows of messagesStore.getState().messagesByChannel.values()) {
+    if (rows.some((m) => m.correlationId === correlationId)) return true;
+  }
+  return false;
+}
+
 /**
  * The pending-send and pending-reaction branches of `error`. Returns true when
  * the frame answered one of them and the error chain must stop.
  */
 export function handleMessagingError(payload: Payload<"error">, id: string | undefined): boolean {
+  // A refused Forward is shown on its picker row; no toast on top.
+  if (isForwardRequest(id)) return true;
+  // A refused poll create, vote or end is shown on its dialog or card.
+  if (isPollRequest(id)) return true;
+  // 2A-3: a files-only send none of whose files could be attached stored
+  // nothing, and a Retry with the same ids fails the same way. Its row goes,
+  // even one already failed as unconfirmed; the channel controller puts its
+  // files back into the composer.
+  if (payload.code === "ATTACHMENTS_UNAVAILABLE" && id !== undefined && hasSendRow(id)) {
+    removeOptimistic(id);
+    return true;
+  }
   // If the error carries the request id of a pending optimistic send, mark
   // that specific row failed (with retry) instead of a global toast. This
   // covers SLOW_MODE, FORBIDDEN, RATE_LIMITED, BAD_REQUEST, etc. on send.
@@ -508,6 +572,8 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
   // A failed optimistic reaction toggle: the pill reverting is the
   // feedback the spec asks for (ux/messaging §5) — no toast on top.
   if (id !== undefined && rollbackReaction(id)) {
+    // 3A-12: the cap is not visible from the pill alone, so say why it reverted.
+    if (payload.code === "REACTION_LIMIT") showToast(connectText("app.reactionLimit"), "error");
     return true;
   }
   return false;

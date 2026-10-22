@@ -1974,7 +1974,7 @@ describe("E2EEManager — HP-2 adversarial membership and key-change rules", () 
     await mgr.handleAnnounce(INTRUDER, "aW50cnVkZXI=", "sig-the-server-can-make");
 
     // Today: keyed, pinned, verified — the RED of the desired rule (no offer,
-    // no pin) is recorded in docs/plans/hp-2-scorecard-2026-08-29.md Q4.
+    // no pin) is recorded in docs/archive/plans/hp-2-scorecard-2026-08-29.md Q4.
     const offers = sendsOfType(ws, "voice_e2ee_offer");
     expect(offers).toHaveLength(1);
     expect((offers[0] as any).payload.target_user_id).toBe(INTRUDER);

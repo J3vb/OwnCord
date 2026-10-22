@@ -67,8 +67,8 @@ fn is_allowed_ptt_vk(vk: i32) -> bool {
         0x28 | // Down
         0x2D | // Insert
         0x2E | // Delete
-        0x05 | // Mouse X1
-        0x06 // Mouse X2
+        VK_XBUTTON1 |
+        VK_XBUTTON2
     )
 }
 
@@ -123,9 +123,52 @@ fn layout_vk(vk: i32) -> i32 {
     }
 }
 
+/// F21 (the first of F21-F24, VK 0x84..=0x87), which `device_query` cannot read.
+#[cfg(any(target_os = "linux", test))]
+const VK_F21: i32 = 0x84;
+
+/// Mouse 4 and Mouse 5 (XBUTTON1/XBUTTON2).
+const VK_XBUTTON1: i32 = 0x05;
+const VK_XBUTTON2: i32 = 0x06;
+
 #[cfg(target_os = "linux")]
 fn is_key_down(vk: i32) -> bool {
-    linux::vk_held(vk, &held_keys())
+    match vk {
+        VK_XBUTTON1 | VK_XBUTTON2 => side_button_vks(held_side_buttons()).contains(&vk),
+        VK_F21..=0x87 => f21_f24_vks(held_f21_f24()).contains(&vk),
+        _ => linux::vk_held(vk, &held_keys()),
+    }
+}
+
+/// The F21-F24 VKs held in an (F21, F22, F23, F24) reading.
+#[cfg(any(target_os = "linux", test))]
+fn f21_f24_vks(held: [bool; 4]) -> Vec<i32> {
+    (VK_F21..)
+        .zip(held)
+        .filter_map(|(vk, down)| down.then_some(vk))
+        .collect()
+}
+
+/// (F21, F22, F23, F24) held now; all false with no X display (or no XInput2,
+/// since the reading shares the side-button connection).
+#[cfg(target_os = "linux")]
+fn held_f21_f24() -> [bool; 4] {
+    SIDE_BUTTONS.with(|b| b.as_ref().map_or([false; 4], |b| b.held_f21_f24()))
+}
+
+/// The side-button VKs held in a (Mouse 4, Mouse 5) reading.
+#[cfg(any(target_os = "linux", test))]
+fn side_button_vks((back, forward): (bool, bool)) -> Vec<i32> {
+    [(back, VK_XBUTTON1), (forward, VK_XBUTTON2)]
+        .into_iter()
+        .filter_map(|(held, vk)| held.then_some(vk))
+        .collect()
+}
+
+/// (Mouse 4, Mouse 5) held now; both false with no X display or no XInput2.
+#[cfg(target_os = "linux")]
+fn held_side_buttons() -> (bool, bool) {
+    SIDE_BUTTONS.with(|b| b.as_ref().map_or((false, false), |b| b.held()))
 }
 
 /// One XQueryKeymap snapshot of every held key (empty with no X display).
@@ -150,6 +193,22 @@ thread_local! {
             log::warn!("Global key state unavailable: no X11/XWayland display");
         }
         ds
+    };
+}
+
+// The side buttons need XInput2, which `device_query` does not use; one
+// display connection per polling thread, like DEVICE_STATE.
+#[cfg(target_os = "linux")]
+thread_local! {
+    static SIDE_BUTTONS: Option<crate::mouse_buttons::SideButtons> = {
+        let buttons = crate::mouse_buttons::SideButtons::open();
+        static WARNED: std::sync::Once = std::sync::Once::new();
+        if buttons.is_none() {
+            WARNED.call_once(|| {
+                log::warn!("Mouse side buttons unavailable: no X display with XInput2");
+            });
+        }
+        buttons
     };
 }
 
@@ -306,6 +365,14 @@ mod linux {
         (0x79, Keycode::F10),
         (0x7A, Keycode::F11),
         (0x7B, Keycode::F12),
+        (0x7C, Keycode::F13),
+        (0x7D, Keycode::F14),
+        (0x7E, Keycode::F15),
+        (0x7F, Keycode::F16),
+        (0x80, Keycode::F17),
+        (0x81, Keycode::F18),
+        (0x82, Keycode::F19),
+        (0x83, Keycode::F20),
         // Lock keys
         (0x14, Keycode::CapsLock),
         // Punctuation
@@ -369,19 +436,10 @@ fn ptt_transition(vk: i32, key_down: bool, was_pressed: bool) -> Option<bool> {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Whether this platform can actually observe global key state, i.e. whether
-/// the polling loop can ever emit a `ptt-state` event.
-///
-/// `ptt_start` spawns its thread unconditionally, so a live thread is NOT
-/// evidence that PTT works: on macOS `is_key_down` is a compile-time stub that
-/// always returns false, and on a Wayland session the app's window is a
-/// Wayland one, whose key presses an XWayland display never sees (with no
-/// XWayland at all `DeviceState::checked_new()` returns None). The frontend
-/// gates its join-time PTT mute and the Keybinds tab's binding on this,
-/// because muting at join where no event can ever arrive would close the
-/// microphone for the whole session with no way to reopen it.
-#[tauri::command]
-pub fn ptt_polling_supported() -> bool {
+/// Whether key-state polling can observe keys at all: always on Windows, on
+/// Linux when an X11 or XWayland display is reachable (`DeviceState::checked_new`
+/// is `None` otherwise), never elsewhere (macOS `is_key_down` is a stub).
+pub(crate) fn polling_available() -> bool {
     #[cfg(windows)]
     {
         true
@@ -390,19 +448,40 @@ pub fn ptt_polling_supported() -> bool {
     #[cfg(target_os = "linux")]
     {
         use device_query::DeviceState;
-        // Mirrors the availability check inside `is_key_down`: no reachable
-        // X11/XWayland display means key state is never observable.
-        let wayland = crate::shortcuts::is_wayland_session(
-            std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
-            std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
-        );
-        crate::shortcuts::global_keys_observable(wayland, DeviceState::checked_new().is_some())
+        DeviceState::checked_new().is_some()
     }
 
     #[cfg(not(any(windows, target_os = "linux")))]
     {
         false
     }
+}
+
+/// The PTT virtual key currently set; 0 when unset.
+#[cfg(target_os = "linux")]
+pub(crate) fn ptt_vk() -> i32 {
+    PTT_VKEY.load(Ordering::SeqCst)
+}
+
+/// Whether a `ptt-state` event can ever arrive, i.e. whether a press can lift
+/// the join-time PTT gate.
+///
+/// `ptt_start` arms unconditionally, so a live thread is NOT evidence that PTT
+/// works: on macOS `is_key_down` is a compile-time stub that always returns
+/// false. On a Wayland session the app's window is a Wayland one, whose key
+/// presses an XWayland display never sees, so nothing polls there; presses
+/// arrive from the xdg-desktop-portal GlobalShortcuts interface instead, and
+/// only once the user has bound the shortcut and the portal reported a trigger
+/// (`GlobalKeysStatus::ptt_supported`). The frontend gates its join-time PTT
+/// mute and the Keybinds tab's binding on this, because muting at join where no
+/// event can ever arrive would close the microphone for the whole session with
+/// no way to reopen it. Async: on Wayland the first call waits for the portal's
+/// probe.
+#[tauri::command]
+pub async fn ptt_polling_supported<R: Runtime>(app: AppHandle<R>) -> bool {
+    tokio::task::spawn_blocking(move || crate::shortcuts::ptt_supported_now(&app))
+        .await
+        .unwrap_or(false)
 }
 
 /// Start the PTT polling loop. Emits `ptt-state` (bool) events.
@@ -413,6 +492,15 @@ pub fn ptt_polling_supported() -> bool {
 /// tearing down and a concurrent restart cannot clobber that signal.
 #[tauri::command]
 pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
+    // A Wayland session never polls: arming lets the portal's Activated and
+    // Deactivated edges become `ptt-state`.
+    #[cfg(target_os = "linux")]
+    {
+        if crate::shortcuts::wayland_now() {
+            crate::portal_shortcuts::arm(&app, crate::portal_shortcuts::Flag::Ptt);
+            return;
+        }
+    }
     let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_some() {
         return; // thread already alive — Mutex is the authoritative check
@@ -479,6 +567,8 @@ pub fn ptt_stop() {
 /// process tears down, preventing the `AppHandle` from being used against
 /// a half-torn-down runtime.
 pub fn ptt_stop_internal() {
+    #[cfg(target_os = "linux")]
+    crate::portal_shortcuts::disarm(crate::portal_shortcuts::Flag::Ptt);
     // Take this generation's (flag, handle) out under the lock, then signal and
     // join OUTSIDE the lock — the thread locks PTT_THREAD on exit, so joining
     // while holding it would deadlock. Taking first (slot -> None) also lets a
@@ -567,6 +657,8 @@ fn bindable_keys_down() -> Vec<i32> {
         .filter(|vk| is_allowed_ptt_vk(*vk))
         .collect();
     down.dedup();
+    down.extend(side_button_vks(held_side_buttons()));
+    down.extend(f21_f24_vks(held_f21_f24()));
     down
 }
 
@@ -577,6 +669,27 @@ fn bindable_keys_down() -> Vec<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn side_button_readings_map_to_the_windows_xbutton_vks() {
+        assert_eq!(side_button_vks((false, false)), Vec::<i32>::new());
+        assert_eq!(side_button_vks((true, false)), vec![VK_XBUTTON1]);
+        assert_eq!(side_button_vks((false, true)), vec![VK_XBUTTON2]);
+        assert_eq!(
+            side_button_vks((true, true)),
+            vec![VK_XBUTTON1, VK_XBUTTON2]
+        );
+        assert!(is_allowed_ptt_vk(VK_XBUTTON1) && is_allowed_ptt_vk(VK_XBUTTON2));
+    }
+
+    #[test]
+    fn a_held_side_button_is_captured_like_a_key() {
+        let mut stale = Vec::new();
+        assert_eq!(
+            next_captured(&side_button_vks((true, false)), &mut stale),
+            Some(VK_XBUTTON1)
+        );
+    }
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -695,6 +808,10 @@ mod tests {
     fn allowed_vk_accepts_non_text_keys() {
         assert!(is_allowed_ptt_vk(0x70)); // F1
         assert!(is_allowed_ptt_vk(0x7B)); // F12
+        assert!(is_allowed_ptt_vk(0x7C)); // F13
+        assert!(is_allowed_ptt_vk(0x83)); // F20
+        assert!(is_allowed_ptt_vk(0x87)); // F24
+        assert!(!is_allowed_ptt_vk(0x88));
         assert!(is_allowed_ptt_vk(0x25)); // Left arrow
         assert!(is_allowed_ptt_vk(0x2E)); // Delete
         assert!(is_allowed_ptt_vk(0x05)); // Mouse X1
@@ -778,6 +895,8 @@ mod tests {
             (Keycode::Enter, 0x0D),
             (Keycode::F1, 0x70),
             (Keycode::F12, 0x7B),
+            (Keycode::F13, 0x7C),
+            (Keycode::F20, 0x83),
             (Keycode::CapsLock, 0x14),
             (Keycode::Grave, 0xC0),
         ];
@@ -794,6 +913,13 @@ mod tests {
                 "vk_to_keycode failed for vk={vk:#04x}"
             );
         }
+    }
+
+    #[test]
+    fn f21_to_f24_map_to_their_vks() {
+        assert_eq!(f21_f24_vks([false; 4]), Vec::<i32>::new());
+        assert_eq!(f21_f24_vks([true, false, false, true]), vec![0x84, 0x87]);
+        assert_eq!(f21_f24_vks([false, true, true, false]), vec![0x85, 0x86]);
     }
 
     #[cfg(target_os = "linux")]

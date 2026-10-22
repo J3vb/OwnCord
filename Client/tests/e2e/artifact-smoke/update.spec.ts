@@ -108,8 +108,12 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
       previous = await appVersion(app);
       expect(previous).not.toBe(version);
       // Auto-connect, so the relaunched version proves the profile and the
-      // stored credential survived the update.
-      await app.click("#auto-connect");
+      // stored credential survived the update. This is the previous release,
+      // which may start it unticked, so click only when it is not ticked.
+      const ticked = await app.evaluate<boolean>(
+        `() => document.querySelector("#auto-connect")?.checked === true`,
+      );
+      if (!ticked) await app.click("#auto-connect");
     });
     if (!app) throw new Error("the baseline never launched");
     await artifactLogin(app, host, "alice", TEST_PASSWORD);

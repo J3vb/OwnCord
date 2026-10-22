@@ -12,6 +12,7 @@ import {
 } from "../features/content-consent/nsfw";
 import { setNsfwAcknowledged } from "../stores/channels.store";
 import { connectText } from "../i18n/connect";
+import { messageStatusText } from "../i18n/messageStatus";
 import type {
   AuthResponse,
   AdminUser,
@@ -19,6 +20,7 @@ import type {
   HealthResponse,
   ServerInfoResponse,
   MessagesResponse,
+  ThreadListResponse,
   MessagesAroundResponse,
   ReactionUsersResponse,
   PurgeResponse,
@@ -26,6 +28,8 @@ import type {
   ApiError,
   ChannelType,
   ChannelResponse,
+  ForumSettingsBody,
+  ChannelCategory,
   EmojiResponse,
   InviteResponse,
   UploadResponse,
@@ -232,6 +236,9 @@ export function serverErrorCopy(code: string, message: string): string | null {
       return PERMISSION_REFUSAL.test(message) ? connectText("error.forbidden") : null;
     case "NOT_FOUND":
       return connectText("error.notFound");
+    // The server's per-frame deadline (WP 4.1b); nothing was applied.
+    case "REQUEST_TIMEOUT":
+      return messageStatusText("send.requestTimeout");
     case "BANNED":
       return connectText("error.banned");
     case "SERVICE_UNAVAILABLE":
@@ -245,6 +252,8 @@ export function serverErrorCopy(code: string, message: string): string | null {
       return connectText("error.storageError");
     case "GIF_DISABLED":
       return connectText("error.gifDisabled");
+    case "LAST_ROLE":
+      return connectText("error.lastRole");
     case "PUSH_DISABLED":
       return connectText("error.pushDisabled");
     default:
@@ -273,6 +282,13 @@ export function serverErrorText(code: string, message: string, fallback: string)
   if (copy !== null) return copy;
   if (code === "INTERNAL" || code === "INTERNAL_ERROR") return fallback;
   return message ? capitalise(message) : fallback;
+}
+
+/** The ban response's own part: `purge` is present only when messages were
+ *  asked for and the server handled the field. Its shape is not checked here;
+ *  the Ban dialog reads it defensively. */
+export interface BanMemberResponse {
+  readonly purge?: unknown;
 }
 
 /** A failed request's text: friendly copy for a `TransportError`, `serverErrorText`
@@ -315,6 +331,19 @@ export interface SessionInfo {
    *  acknowledges every row but the caller's own, so this is visible in
    *  exactly one listing per device. */
   readonly unseen: boolean;
+}
+
+/** The caller's direct message privacy settings (WP 6.8b). Both are always sent. */
+export interface DmPrivacy {
+  readonly allow_member_dms: boolean;
+  readonly message_requests: boolean;
+}
+
+/** GET and PUT /users/me/notes/{userId}: the caller's private note about one
+ *  member. `note` is "" when there is none (a PUT of "" deletes it). */
+export interface UserNote {
+  readonly user_id: number;
+  readonly note: string;
 }
 
 /** DELETE /users/me/sessions: every session is revoked, the caller's included. */
@@ -877,6 +906,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         /** Omit to leave unchanged; "" clears the field. */
         display_name?: string;
         about?: string;
+        /** `#rgb` / `#rrggbb`; omit to leave unchanged, "" clears (WP 6.11b). */
+        banner_color?: string;
       },
       signal?: AbortSignal,
     ): Promise<MemberResponse> {
@@ -899,6 +930,47 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<UploadResponse>("POST", "/users/me/avatar", formData, signal, {
         multipart: true,
       });
+    },
+
+    /**
+     * Remove the signed-in user's avatar and return the updated user.
+     * `DELETE /users/me/avatar`; an older server answers 405, so fall back to
+     * `PATCH /users/me` with the current username and `avatar: ""`.
+     */
+    async removeAvatar(currentUsername: string, signal?: AbortSignal): Promise<MemberResponse> {
+      try {
+        return await request<MemberResponse>("DELETE", "/users/me/avatar", undefined, signal);
+      } catch (err) {
+        if (!(err instanceof ApiClientError) || err.status !== 405) throw err;
+        return request<MemberResponse>(
+          "PATCH",
+          "/users/me",
+          { username: currentUsername, avatar: "" },
+          signal,
+        );
+      }
+    },
+
+    /**
+     * Upload a profile banner (PNG/JPEG/WebP, max 1 MiB, max 1920x960).
+     * `POST /users/me/banner`. A server with attachment storage off advertises
+     * `profile_banners` but does not mount this route, so it answers 404; the
+     * caller turns that into its own message. On success the server has already
+     * broadcast a user_update.
+     */
+    uploadBanner(file: File, signal?: AbortSignal): Promise<UploadResponse> {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      return request<UploadResponse>("POST", "/users/me/banner", formData, signal, {
+        multipart: true,
+      });
+    },
+
+    /** Remove the signed-in user's banner image and return the updated user.
+     *  `DELETE /users/me/banner`; the colour is cleared by `updateProfile`. */
+    removeBanner(signal?: AbortSignal): Promise<MemberResponse> {
+      return request<MemberResponse>("DELETE", "/users/me/banner", undefined, signal);
     },
 
     changePassword(
@@ -972,6 +1044,27 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     getRecoveryKitStatus(signal?: AbortSignal): Promise<RecoveryKitStatus> {
       return request<RecoveryKitStatus>("GET", "/users/me/recovery-kit", undefined, signal);
+    },
+
+    /** The caller's private note about `userId` ("" when none). Callers wrap in try/catch. */
+    getUserNote(userId: number, signal?: AbortSignal): Promise<UserNote> {
+      return request<UserNote>("GET", `/users/me/notes/${userId}`, undefined, signal);
+    },
+
+    /** Store (or, when empty after trimming, delete) the caller's note about
+     *  `userId`; resolves to the stored value. Callers wrap in try/catch. */
+    putUserNote(userId: number, note: string, signal?: AbortSignal): Promise<UserNote> {
+      return request<UserNote>("PUT", `/users/me/notes/${userId}`, { note }, signal);
+    },
+
+    /** The caller's DM privacy settings. Callers wrap in try/catch. */
+    getDmPrivacy(signal?: AbortSignal): Promise<DmPrivacy> {
+      return request<DmPrivacy>("GET", "/users/me/privacy", undefined, signal);
+    },
+
+    /** Replace both DM privacy settings; resolves to the stored values. Callers wrap in try/catch. */
+    putDmPrivacy(settings: DmPrivacy, signal?: AbortSignal): Promise<DmPrivacy> {
+      return request<DmPrivacy>("PUT", "/users/me/privacy", settings, signal);
     },
 
     getOwnModeration(signal?: AbortSignal): Promise<OwnModerationAction[]> {
@@ -1052,6 +1145,39 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         "POST",
         `/moderation/queue/${encodeURIComponent(id)}/act`,
         body,
+        signal,
+      );
+    },
+
+    /** Time out a member (MODERATE_MEMBERS, outrank). 60..2419200 s; 403/400 as warn. */
+    timeoutMember(
+      userId: number,
+      durationSeconds: number,
+      reason: string,
+      signal?: AbortSignal,
+    ): Promise<{ readonly id: number; readonly voice: "applied" | "skipped" }> {
+      return request<{ readonly id: number; readonly voice: "applied" | "skipped" }>(
+        "POST",
+        `/moderation/users/${userId}/timeout`,
+        { reason, duration_seconds: durationSeconds },
+        signal,
+      );
+    },
+
+    /**
+     * Set (or, with null, clear) another member's nickname (MANAGE_NICKNAMES,
+     * outrank). Idempotent: the same name twice answers 200 both times. 400
+     * INVALID_INPUT (length, taken by a username), 403, 404, 429 carry a message.
+     */
+    setMemberNickname(
+      userId: number,
+      displayName: string | null,
+      signal?: AbortSignal,
+    ): Promise<{ readonly user_id: number; readonly display_name: string | null }> {
+      return request<{ readonly user_id: number; readonly display_name: string | null }>(
+        "PUT",
+        `/moderation/users/${userId}/nickname`,
+        { display_name: displayName },
         signal,
       );
     },
@@ -1248,6 +1374,25 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
+    /**
+     * A text channel's threads (WP 6.9c): `query` is the list route's query
+     * string (`archived`, `before`, `limit`), which the Threads popover builds.
+     */
+    listThreads(
+      channelId: number,
+      query: string,
+      signal?: AbortSignal,
+    ): Promise<ThreadListResponse> {
+      return channelContent(channelId, () =>
+        request<ThreadListResponse>(
+          "GET",
+          `/channels/${channelId}/threads?${query}`,
+          undefined,
+          signal,
+        ),
+      );
+    },
+
     pinMessage(channelId: number, messageId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("POST", `/channels/${channelId}/pins/${messageId}`, undefined, signal);
     },
@@ -1306,8 +1451,14 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     // ships in this bundle. A 503 GIF_DISABLED means the operator has not
     // configured a key — callers must degrade, not retry.
 
-    gifSearch(query: string, limit: number, signal?: AbortSignal): Promise<GifSearchResponse> {
+    gifSearch(
+      query: string,
+      limit: number,
+      pos?: string,
+      signal?: AbortSignal,
+    ): Promise<GifSearchResponse> {
       const params = new URLSearchParams({ q: query, limit: String(limit) });
+      if (pos) params.set("pos", pos);
       return request<GifSearchResponse>(
         "GET",
         `/gif/search?${params.toString()}`,
@@ -1316,8 +1467,9 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
-    gifTrending(limit: number, signal?: AbortSignal): Promise<GifSearchResponse> {
+    gifTrending(limit: number, pos?: string, signal?: AbortSignal): Promise<GifSearchResponse> {
       const params = new URLSearchParams({ limit: String(limit) });
+      if (pos) params.set("pos", pos);
       return request<GifSearchResponse>(
         "GET",
         `/gif/trending?${params.toString()}`,
@@ -1439,6 +1591,78 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     /** Set or clear a group DM's name. Any participant may; 1:1 DMs refuse. */
     renameGroupDm(channelId: number, name: string, signal?: AbortSignal): Promise<GroupDmResponse> {
       return request<GroupDmResponse>("PATCH", `/dms/${channelId}`, { name }, signal);
+    },
+
+    /**
+     * Add people to a group DM (WP 3B-10). Any member may; the group holds at
+     * most 10. 200 carries the summary; 204 means the summary read failed after
+     * the commit, and the dm_channel_open that follows carries the state.
+     */
+    addGroupDmMembers(
+      channelId: number,
+      userIds: readonly number[],
+      signal?: AbortSignal,
+    ): Promise<GroupDmResponse | undefined> {
+      return request<GroupDmResponse | undefined>(
+        "POST",
+        `/dms/${channelId}/members`,
+        { user_ids: [...userIds] },
+        signal,
+      );
+    },
+
+    /**
+     * Set a group DM's icon (WP 3B-11b): multipart `file`, PNG/JPEG/WebP, max
+     * 1 MB and 1024x1024, any member. 200 carries the summary; 204 means the
+     * summary read failed after the commit and the dm_channel_open that follows
+     * carries the state.
+     */
+    uploadGroupDmIcon(
+      channelId: number,
+      file: File,
+      signal?: AbortSignal,
+    ): Promise<GroupDmResponse | undefined> {
+      const formData = new FormData();
+      formData.append("file", file);
+      return request<GroupDmResponse | undefined>(
+        "POST",
+        `/dms/${channelId}/icon`,
+        formData,
+        signal,
+        { multipart: true },
+      );
+    },
+
+    /** Remove a group DM's icon. Any member; a no-op when none is set. 200 carries the summary, 204 none. */
+    removeGroupDmIcon(
+      channelId: number,
+      signal?: AbortSignal,
+    ): Promise<GroupDmResponse | undefined> {
+      return request<GroupDmResponse | undefined>(
+        "DELETE",
+        `/dms/${channelId}/icon`,
+        undefined,
+        signal,
+      );
+    },
+
+    /** Remove another member from a group DM. Owner only; removing yourself is a leave (closeDm). */
+    removeGroupDmMember(channelId: number, userId: number, signal?: AbortSignal): Promise<void> {
+      return request<void>("DELETE", `/dms/${channelId}/members/${userId}`, undefined, signal);
+    },
+
+    /** Hand a group DM to another member. Owner only. 200 carries the summary, 204 none. */
+    setGroupDmOwner(
+      channelId: number,
+      userId: number,
+      signal?: AbortSignal,
+    ): Promise<GroupDmResponse | undefined> {
+      return request<GroupDmResponse | undefined>(
+        "PUT",
+        `/dms/${channelId}/owner`,
+        { user_id: userId },
+        signal,
+      );
     },
 
     /**
@@ -1578,7 +1802,13 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       data: {
         name: string;
         type: ChannelType;
-        category: string;
+        /**
+         * The category's id, 0 for none (WP 6.5a). It wins over `category`
+         * when both are sent; a server from before 6.5a ignores it.
+         */
+        category_id?: number;
+        /** The category name (legacy): matched ignoring case, created when new, "" = none. */
+        category?: string;
         topic?: string;
         position?: number;
       },
@@ -1592,8 +1822,10 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       data: {
         name?: string;
         topic?: string;
-        // Moving a channel between categories is a rename of free text; an
-        // omitted field keeps the channel's current category server-side.
+        // Moving a channel between categories is an edit; an omitted field
+        // keeps the channel's current category server-side. `category_id` (0 =
+        // none) wins over the legacy `category` name when both are sent.
+        category_id?: number;
         category?: string;
         slow_mode?: number;
         position?: number;
@@ -1617,8 +1849,57 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return channelRequest<ChannelResponse>("PATCH", `/${id}`, data, signal);
     },
 
+    /**
+     * Replace a forum's tags and settings (WP 6.9d): the whole list, tags with
+     * their ids so a rename keeps a tag on its posts. The server answers with
+     * the channel and broadcasts `channel_update`, which is how the app learns.
+     */
+    adminUpdateForumSettings(
+      id: number,
+      data: ForumSettingsBody,
+      signal?: AbortSignal,
+    ): Promise<ChannelResponse> {
+      return channelRequest<ChannelResponse>("PUT", `/${id}/forum`, data, signal);
+    },
+
     adminDeleteChannel(id: number, signal?: AbortSignal): Promise<void> {
       return channelRequest<void>("DELETE", `/${id}`, undefined, signal);
+    },
+
+    // ── Admin: Channel categories (WP 6.5a) ──────────────────
+    // The list itself arrives over the socket (ready.categories and the
+    // channel_categories event), so there is no GET here.
+
+    /** Create a category, appended last. 409 CATEGORY_NAME_TAKEN on a duplicate name. */
+    adminCreateCategory(name: string, signal?: AbortSignal): Promise<ChannelCategory> {
+      return channelRequest<ChannelCategory>("POST", "/categories", { name }, signal);
+    },
+
+    /** Rename a category: every channel in it follows. 409 CATEGORY_NAME_TAKEN, 404 when gone. */
+    adminRenameCategory(id: number, name: string, signal?: AbortSignal): Promise<ChannelCategory> {
+      return channelRequest<ChannelCategory>("PATCH", `/categories/${id}`, { name }, signal);
+    },
+
+    /** Delete a category. Its channels are not deleted: they become uncategorized. */
+    adminDeleteCategory(id: number, signal?: AbortSignal): Promise<void> {
+      return channelRequest<void>("DELETE", `/categories/${id}`, undefined, signal);
+    },
+
+    /**
+     * Put the categories in `ids` order. `ids` must be exactly the server's
+     * current set: anything else is refused with 409 CATEGORY_LIST_STALE and
+     * nothing is written.
+     */
+    adminReorderCategories(
+      ids: readonly number[],
+      signal?: AbortSignal,
+    ): Promise<readonly ChannelCategory[]> {
+      return channelRequest<readonly ChannelCategory[]>(
+        "PUT",
+        "/categories/order",
+        { ids },
+        signal,
+      );
     },
 
     // ── Members (moderation) ────────────────────────────────
@@ -1630,13 +1911,20 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return memberRequest<void>("DELETE", `/${userId}/sessions`, undefined, signal);
     },
 
+    /**
+     * Ban a member. `deleteMessageSeconds` (0-604800) also deletes their recent
+     * messages and is sent only above 0. The result carries `purge` only when a
+     * server that supports the field acted on it; an older server ignores the
+     * field and answers without one. A role change is never combined with it.
+     */
     adminBanMember(
       userId: number,
       reason?: string,
       durationHours?: number,
       signal?: AbortSignal,
-    ): Promise<void> {
-      return memberRequest<void>(
+      deleteMessageSeconds?: number,
+    ): Promise<BanMemberResponse> {
+      return memberRequest<BanMemberResponse>(
         "PATCH",
         `/${userId}`,
         {
@@ -1646,6 +1934,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           ...(durationHours !== undefined && durationHours > 0
             ? { ban_duration_hours: durationHours }
             : {}),
+          ...(deleteMessageSeconds ? { delete_message_seconds: deleteMessageSeconds } : {}),
         },
         signal,
       );
@@ -1660,6 +1949,24 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         },
         signal,
       );
+    },
+
+    /**
+     * Give a member one more role (WP 6.3c, a server that advertises
+     * `multi_role`). Same checks as `adminChangeRole`: MANAGE_ROLES, the actor's
+     * top role outranks the member's, and the role sits below the actor's.
+     * Answers 204; the roster changes on the `member_update` echo.
+     */
+    adminAddMemberRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
+      return memberRequest<void>("PUT", `/${userId}/roles/${roleId}`, undefined, signal);
+    },
+
+    /**
+     * Take one role away. Removing the member's last role is refused with 409
+     * `LAST_ROLE`; otherwise the same checks and echo as `adminAddMemberRole`.
+     */
+    adminRemoveMemberRole(userId: number, roleId: number, signal?: AbortSignal): Promise<void> {
+      return memberRequest<void>("DELETE", `/${userId}/roles/${roleId}`, undefined, signal);
     },
 
     /**

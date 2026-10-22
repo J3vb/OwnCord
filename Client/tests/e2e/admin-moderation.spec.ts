@@ -2,7 +2,7 @@
  * Mocked E2E: Admin member moderation (gap #5 of the Playwright audit).
  *
  * Exercises the member context menu built by `AdminActions.createMemberContextMenu`
- * over the real `MemberList` → `SidebarMemberSection.onBan/onKick/onToggleBlock`
+ * over the real `MemberList` → `memberPanel` onBan/onKick/onToggleBlock
  * wiring:
  *   - Ban: reason + duration collected, PATCH /api/v1/moderation/members/{id} sent with
  *     `banned:true`, `ban_reason` and `ban_duration_hours` (omitted when permanent).
@@ -149,15 +149,18 @@ test.describe("Admin moderation — member context menu", () => {
     await navigateToMainPage(page);
   });
 
-  test("ban collects a reason and duration, and PATCHes the exact ban body", async ({ page }) => {
+  test("ban opens a dialog naming the user, and PATCHes the exact ban body", async ({ page }) => {
     const menu = await openMemberMenu(page, "member-2");
 
     await menu.locator(".context-menu__item", { hasText: /^Ban$/ }).click();
-    const reason = menu.locator("[data-testid='ban-reason-input']");
+    const dialog = page.locator("[data-testid='ban-dialog']");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("heading", { name: /^Ban .+\?$/ })).toBeVisible();
+    const reason = dialog.locator("[data-testid='ban-reason-input']");
     await expect(reason).toBeVisible();
     await reason.fill("spamming #general");
-    await menu.locator("[data-testid='ban-duration-select']").selectOption({ label: "1 day" });
-    await menu.locator("[data-testid='ban-confirm']").click();
+    await dialog.locator("[data-testid='ban-duration-select']").selectOption({ label: "1 day" });
+    await dialog.locator("[data-testid='ban-confirm']").click();
 
     const call = await waitForCall(
       page,
@@ -167,6 +170,7 @@ test.describe("Admin moderation — member context menu", () => {
     expect(body.banned).toBe(true);
     expect(body.ban_reason).toBe("spamming #general");
     expect(body.ban_duration_hours).toBe(24);
+    expect(body).not.toHaveProperty("delete_message_seconds");
 
     await expect(
       page.locator("[data-testid='toast']", { hasText: "Banned otheruser for 24h" }),
@@ -177,7 +181,7 @@ test.describe("Admin moderation — member context menu", () => {
     const menu = await openMemberMenu(page, "member-2");
 
     await menu.locator(".context-menu__item", { hasText: /^Ban$/ }).click();
-    await menu.locator("[data-testid='ban-confirm']").click();
+    await page.locator("[data-testid='ban-dialog'] [data-testid='ban-confirm']").click();
 
     const call = await waitForCall(
       page,
@@ -193,6 +197,34 @@ test.describe("Admin moderation — member context menu", () => {
     ).toBeVisible({
       timeout: 5_000,
     });
+  });
+
+  test("ban with message history sends delete_message_seconds, and Cancel sends nothing", async ({
+    page,
+  }) => {
+    const menu = await openMemberMenu(page, "member-2");
+    await menu.locator(".context-menu__item", { hasText: /^Ban$/ }).click();
+    const dialog = page.locator("[data-testid='ban-dialog']");
+    await expect(dialog).toBeVisible();
+    await dialog.locator("[data-testid='ban-cancel']").click();
+    await expect(dialog).toHaveCount(0);
+
+    const again = await openMemberMenu(page, "member-2");
+    await again.locator(".context-menu__item", { hasText: /^Ban$/ }).click();
+    await expect(dialog).toBeVisible();
+    await dialog
+      .locator("[data-testid='ban-delete-select']")
+      .selectOption({ label: "Previous 24 hours" });
+    await dialog.locator("[data-testid='ban-confirm']").click();
+
+    const call = await waitForCall(
+      page,
+      (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
+    );
+    const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
+    expect(body.banned).toBe(true);
+    expect(body.delete_message_seconds).toBe(86400);
+    expect(body).not.toHaveProperty("role_id");
   });
 
   test("force logout needs two clicks: the first only arms, the second revokes sessions", async ({
@@ -280,6 +312,12 @@ test.describe("Admin moderation — member context menu", () => {
     await expect(menu.locator(".context-menu__item", { hasText: /^Ban$/ })).toHaveCount(0);
     await expect(menu.locator("[data-testid='force-logout']")).toHaveCount(0);
     await expect(menu.locator(".context-menu__item", { hasText: "Change Role" })).toHaveCount(0);
-    expect(await menu.locator(".context-menu__item").allTextContents()).toEqual(["Block"]);
+    expect(await menu.locator(".context-menu__item").allTextContents()).toEqual([
+      "Profile",
+      "Mention",
+      "Message",
+      "Call",
+      "Block",
+    ]);
   });
 });

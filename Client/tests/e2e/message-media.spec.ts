@@ -194,6 +194,22 @@ async function currentTransform(page: Page): Promise<{ scale: number; x: number;
   });
 }
 
+async function openedUrls(page: Page): Promise<unknown[]> {
+  return page.evaluate(() =>
+    (
+      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { url?: unknown } }> }
+    ).__invokeLog
+      .filter((e) => e.cmd === "plugin:opener|open_url")
+      .map((e) => e.args?.url),
+  );
+}
+
+async function invokedCommands(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.map((e) => e.cmd),
+  );
+}
+
 test.describe("Image lightbox", () => {
   test("a direct image URL is fetched through the broker and opens the lightbox on click", async ({
     page,
@@ -235,6 +251,89 @@ test.describe("Image lightbox", () => {
 
     await page.locator(".image-lightbox-close").click();
     await expect(page.locator(".image-lightbox")).toBeHidden();
+  });
+
+  test("the toolbar offers Download and Open original, and Tab reaches them", async ({ page }) => {
+    await bootMedia(page, { image: { [`url:${IMAGE_URL}`]: LIGHTBOX_PNG_BYTES } });
+    const inlineImg = page.locator("[data-testid='message-201'] .msg-image img");
+    await expect(inlineImg).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
+    await inlineImg.click();
+    await expect(page.locator(".image-lightbox")).toBeVisible();
+
+    const download = page.getByRole("button", { name: "Download image" });
+    const openOriginal = page.getByRole("button", { name: "Open original" });
+    await expect(download).toBeVisible();
+    await expect(openOriginal).toBeVisible();
+    await expect(page.locator(".image-lightbox-close")).toBeFocused();
+
+    // Tab order is the visual order: Download, Open original, Close.
+    await page.keyboard.press("Tab");
+    await expect(download).toBeFocused();
+    await page.keyboard.press("Enter");
+    // The native save dialog is the first step of a save (the mock cancels it).
+    await expect.poll(() => invokedCommands(page)).toContain("plugin:dialog|save");
+
+    await page.keyboard.press("Tab");
+    await expect(openOriginal).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => (await openedUrls(page)).length).toBe(1);
+    expect(await openedUrls(page)).toEqual([IMAGE_URL]);
+
+    // Escape still dismisses it.
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".image-lightbox")).toBeHidden();
+  });
+
+  test("arrows step through a message's images, wrapping at the ends", async ({ page }) => {
+    const names = ["one", "two", "three"];
+    const message = {
+      ...mediaMessage(301, "three pictures"),
+      attachments: names.map((n) => ({
+        id: `gal-${n}`,
+        filename: `${n}.png`,
+        size: 100,
+        mime: "image/png",
+        url: `/api/v1/files/gal-${n}`,
+      })),
+    };
+    await page.addInitScript(
+      buildTauriMockScript({
+        httpRoutes: [
+          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+          { pattern: "/messages", status: 200, body: { messages: [message], has_more: false } },
+          { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
+          ...names.map((n) => ({
+            pattern: `/api/v1/files/gal-${n}`,
+            status: 200,
+            body: null,
+            bodyBytes: LIGHTBOX_PNG_BYTES,
+            contentType: "image/png",
+          })),
+        ],
+        simulateWsFlow: true,
+      }),
+    );
+    await page.goto("/");
+    await navigateToMainPage(page);
+    await waitForWsReady(page);
+
+    const second = page.locator("[data-testid='message-301'] .msg-image img").nth(1);
+    await expect(second).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
+    await second.click();
+    const counter = page.locator(".image-lightbox-counter");
+    await expect(counter).toHaveText("2 of 3");
+
+    await page.keyboard.press("ArrowRight");
+    await expect(counter).toHaveText("3 of 3");
+    await page.keyboard.press("ArrowRight");
+    await expect(counter).toHaveText("1 of 3");
+    await page.getByRole("button", { name: "Next image" }).click();
+    await expect(counter).toHaveText("2 of 3");
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".image-lightbox")).toBeHidden();
+    await expect(second).toBeFocused();
   });
 
   test("wheel zoom scales and dragging while zoomed pans the image", async ({ page }) => {

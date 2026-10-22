@@ -29,25 +29,26 @@ func registerVoiceModerationV2(r *HandlerRegistry, deps VoiceDeps) {
 	r.RegisterV2(MsgTypeVoiceModKick, handleVoiceModKickV2, deps)
 }
 
-// voiceModRole loads a role through the permission cache when one is wired and
+// voiceModRole loads the member's effective role (top role identity, OR of every held mask) through the permission cache when one is wired and
 // falls back to the live DB otherwise. Every failure is a denial: an
 // unresolvable role must never authorize a moderation action.
 func voiceModRole(ctx context.Context, d VoiceDeps, userID int64) (*db.Role, bool) {
 	if d.PermSvc != nil {
 		role, err := d.PermSvc.GetRoleForUser(ctx, userID)
 		if err == nil && role != nil {
-			return role, true
+			return role.Effective(), true
 		}
 		return nil, false
 	}
 	if d.Reader == nil {
 		return nil, false
 	}
-	role, err := d.Reader.GetRoleForUser(ctx, userID)
+	role, err := d.Reader.GetMemberRoles(ctx, userID)
 	if err != nil || role == nil {
 		return nil, false
 	}
-	return role, true
+	// Top role identity (rank) with the OR of every held mask.
+	return role.Effective(), true
 }
 
 // voiceModTarget runs the shared gate and returns the target's live voice
@@ -468,27 +469,26 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if d.Mod == nil {
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice moderation unavailable"}}
 	}
-	// Stash the target's server_muted/server_deafened (already loaded by
-	// voiceModTarget above) on their live connection before the disconnect
-	// below deletes the voice_states row those flags live in — see
-	// voicePendingModFlagsSetter. The target's own re-join (handleVoiceJoin,
-	// via voiceJoinLeaveCurrent in voice_join.go) has no row left to read
-	// (currentChID == 0 by then) and takes this stash back out instead.
-	stashPendingModFlags(d.Mod, c.TargetID, state.ServerMuted, state.ServerDeafened, state.ServerMutedBy)
-	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID, state.ChannelID) {
+	// Evict the target and, in the same membership transaction, stash their
+	// server_muted/server_deafened (already loaded by voiceModTarget above) on
+	// their live connection: the disconnect deletes the voice_states row those
+	// flags live in — see voiceMoveEvictor. The target's own re-join
+	// (handleVoiceJoin, via voiceJoinLeaveCurrent in voice_join.go) has no row
+	// left to read (currentChID == 0 by then) and takes this stash back out
+	// instead.
+	if !evictForMove(ctx, d.Mod, c.TargetID, state.ChannelID, state.ServerMuted, state.ServerDeafened, state.ServerMutedBy) {
 		// No live connection on this node — the voice_states row is a ghost the
 		// sweeper owns, and there is nobody to send voice_moved to — or the
 		// target left the checked channel while this handler was deciding, in
-		// which case the move must not follow them. Either way the eviction
-		// that would have justified the stash above never happened, so undo
-		// it (OC-0278): left in place, it has no expiry and no binding to
-		// this move, and the target's next unrelated voice_join would consume
-		// it as if a moderator had just muted them.
-		clearPendingModFlags(d.Mod, c.TargetID)
+		// which case the move must not follow them. Either way nobody was
+		// evicted, and evictForMove has left no stash behind (OC-0278): a
+		// stash with no expiry and no binding to this move would be consumed by
+		// the target's next unrelated voice_join as if a moderator had just
+		// muted them.
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	blockVoiceRejoin(d.Mod, c.TargetID, state.ChannelID)
-	if !d.Mod.SendToUser(c.TargetID, buildVoiceMoved(c.ToChannelID)) {
+	if !d.Mod.SendToUser(c.TargetID, buildVoiceMoved(c.ToChannelID, "")) {
 		clearPendingModFlags(d.Mod, c.TargetID)
 		writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_kick", c.TargetID,
 			fmt.Sprintf("disconnected from channel %d (reconnecting, not moved to channel %d)", state.ChannelID, c.ToChannelID))
@@ -621,44 +621,48 @@ func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, 
 // disconnect and channel-switch paths. Reports false when the user has no
 // connection on this node.
 func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
-	defer h.voiceLock(userID)()
+	txn := h.begin(userID)
+	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
-		return h.leaveParkedVoice(ctx, h.voiceGrace.take(userID), voiceLeaveReasonModerator)
+		return h.leaveParkedVoice(ctx, txn, txn.takeParked(0), voiceLeaveReasonModerator)
 	}
-	h.handleVoiceLeave(ctx, c, voiceLeaveReasonModerator)
+	h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonModerator)
 	return true
 }
 
 // DisconnectFromVoiceInChannel is DisconnectFromVoice conditioned on the
 // channel the caller authorized against, satisfying voiceChannelDisconnector.
 // The comparison and the clear happen together under the client's voiceMu
-// (handleVoiceLeaveIfStillIn -> clearVoiceStateIfMatch), so a channel switch
+// (handleVoiceLeaveIfStillIn -> voiceTxn.clearIfChannel), so a channel switch
 // committed on the target's own goroutine after the moderator's checks either
 // loses the race outright or is left untouched — never evicted in place of the
 // channel that was checked. Reports false in both of those cases, which the
 // callers already treat as "user is not connected". reason is the caller's
 // voiceLeaveReason* / VoiceLeaveReason* constant for the "voice leave" line.
 func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool {
-	defer h.voiceLock(userID)()
+	txn := h.begin(userID)
+	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
-		return h.leaveParkedVoice(ctx, h.voiceGrace.takeJoin(userID, channelID, ""), reason)
+		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), reason)
 	}
-	return h.handleVoiceLeaveIfStillIn(ctx, c, channelID, reason)
+	return h.handleVoiceLeaveIfStillIn(ctx, txn, c, channelID, reason)
 }
 
 // SetPendingVoiceModFlags stashes a moderator-imposed mute/deafen on
-// userID's live connection, satisfying voicePendingModFlagsSetter. Reports
-// false when the user has no connection on this node — the same "nothing to
-// do here" case DisconnectFromVoiceInChannel reports, since without a live
-// *Client there is nowhere to stash the flags and no re-join on this node to
-// consume them.
+// userID's live connection, satisfying voicePendingModFlagsSetter, under the
+// member lock. Reports false when the user has no connection on this node —
+// the same "nothing to do here" case DisconnectFromVoiceInChannel reports,
+// since without a live *Client there is nowhere to stash the flags and no
+// re-join on this node to consume them.
 func (h *Hub) SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
+	txn := h.begin(userID)
+	defer txn.end()
 	c := h.GetClient(userID)
 	if c == nil {
 		return false
 	}
-	c.setPendingModFlags(serverMuted, serverDeafened, serverMutedBy)
+	txn.stashModFlags(c, serverMuted, serverDeafened, serverMutedBy)
 	return true
 }

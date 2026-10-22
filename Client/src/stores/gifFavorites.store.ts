@@ -11,7 +11,7 @@ import { ApiClientError } from "@lib/api";
 import { createStore } from "@lib/store";
 import { showToast } from "@lib/toast";
 import { gifFavoritesText } from "../i18n/gifFavorites";
-import { onAuthCleared } from "./auth.store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { GifFavoritesApi } from "@lib/gifProvider";
 import type { GifFavorite } from "@lib/types";
 
@@ -40,7 +40,7 @@ export function resetGifFavorites(): void {
 
 // Registered at load, not from main.ts, so the store stays out of the startup
 // chunk; a store that never loaded holds nothing to reset.
-onAuthCleared(resetGifFavorites);
+void registerSessionReset("gif:favorites", resetGifFavorites, { phase: "session" }); // app-lifetime: the store lives as long as the app
 
 /** True once an API is bound, i.e. this server session can save favorites. */
 export function gifFavoritesAvailable(): boolean {

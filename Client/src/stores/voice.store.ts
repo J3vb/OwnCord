@@ -13,7 +13,9 @@ import type {
   VoiceSpeakersPayload,
 } from "@lib/types";
 import { membersStore } from "@stores/members.store";
+import { channelsStore, isAfkChannel } from "@stores/channels.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { noteJoinSucceeded } from "../features/voice/joinBackoff";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
 import { loadPref, savePref } from "@lib/preferences";
@@ -87,6 +89,11 @@ export interface VoiceState {
    *  the store; optional for the same fixture reason as peerVerifications. */
   readonly localServerMuted?: boolean;
   readonly localServerDeafened?: boolean;
+  /** True while the current channel is the server's AFK channel, which is
+   *  listen-only: the mic is not published and its control is locked muted.
+   *  Derived from the channel store (see syncInAfkChannel); optional for the
+   *  fixture reason above. */
+  readonly inAfkChannel?: boolean;
   /** The local deafen in effect is the one a moderator's deafen applied, not
    *  the member's own: the moderator's lift releases it, while a deafen the
    *  member chose survives the lift. Follows localDeafened, so it outlives a
@@ -134,6 +141,18 @@ export interface VoiceState {
    *  always sets it; optional only so the many inline VoiceState test fixtures
    *  need not restate it. */
   readonly peerVerifications?: ReadonlyMap<number, PeerVerification>;
+  /** Video codecs each peer reported decoding in its `voice_e2ee_announce`,
+   *  keyed by userId; no entry means the baseline (VP8, H.264). Written only
+   *  from the dispatcher's announce handler, and deliberately not cleared with
+   *  peerVerifications (that runs at key setup, after a list may have arrived).
+   *  Reset at session end. Optional for the same fixture reason. */
+  readonly peerVideoDecode?: ReadonlyMap<number, readonly string[]>;
+  /** Whose screen share each member of the current channel watches, from
+   *  their `voice_watching` frames (sorted user ids). Written only from the
+   *  dispatcher's handler; removeVoiceUser drops a member, leaveVoiceChannel
+   *  and resetVoiceStore clear it. Your own watching is read from the local
+   *  RemoteTracks set, not from here. Optional for the fixture reason above. */
+  readonly peerWatching?: ReadonlyMap<number, readonly number[]>;
   /** Fingerprint of the local user's own ephemeral session key (OC-0003), so
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
@@ -163,6 +182,8 @@ const INITIAL_STATE: VoiceState = {
   voiceStatus: "idle",
   encryptionDegraded: false,
   peerVerifications: new Map(),
+  peerVideoDecode: new Map(),
+  peerWatching: new Map(),
   localGateSpeaking: null,
 };
 
@@ -172,7 +193,23 @@ export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
 // edge (join, leave, channel switch, reconnect roster, logout) without that
 // module importing this store (DP-40). localDeafened itself is mirrored
 // synchronously by setLocalDeafened/resetVoiceStore.
-voiceStore.subscribeSelector((state) => state.currentChannelId !== null, setVoiceInSession);
+// App-lifetime: the store and this listener live as long as the app.
+void voiceStore.subscribeSelector((state) => state.currentChannelId !== null, setVoiceInSession);
+
+/** Keep `inAfkChannel` equal to "the current channel carries the AFK flag".
+ *  The one writer: it runs when the current channel changes and when a channel
+ *  row changes (ready, channel_create, channel_update), so a flag set while
+ *  the user is already inside takes effect too. */
+function syncInAfkChannel(): void {
+  const afk = isAfkChannel(voiceStore.getState().currentChannelId);
+  voiceStore.setState((prev) =>
+    (prev.inAfkChannel ?? false) === afk ? prev : { ...prev, inAfkChannel: afk },
+  );
+}
+// App-lifetime: both stores and these listeners live as long as the app.
+void voiceStore.subscribeSelector((state) => state.currentChannelId, syncInAfkChannel);
+// App-lifetime, as above.
+void channelsStore.subscribeSelector((state) => state.channels, syncInAfkChannel);
 
 /** Incremented by the incremental roster mutators (updateVoiceState,
  *  removeVoiceUser) — never by setVoiceStates, which replaces the whole
@@ -190,6 +227,7 @@ export function getVoiceRosterRevision(): number {
 
 /** Reset voice store to initial state (e.g. on logout). */
 export function resetVoiceStore(): void {
+  watchingResyncAt = Number.NEGATIVE_INFINITY;
   setVoiceDeafened(false);
   setVoiceInSession(false);
   voiceStore.setState(() => ({
@@ -200,6 +238,7 @@ export function resetVoiceStore(): void {
     localDeafened: false,
     localServerMuted: false,
     localServerDeafened: false,
+    inAfkChannel: false,
     moderatorDeafened: false,
     mutedBeforeDeafen: false,
     pttGated: false,
@@ -211,16 +250,21 @@ export function resetVoiceStore(): void {
     voiceStatus: "idle",
     encryptionDegraded: false,
     peerVerifications: new Map(),
+    peerVideoDecode: new Map(),
+    peerWatching: new Map(),
   }));
 }
 
-registerVoiceLogoutTeardown({
-  snapshot: () => voiceStore.getState(),
-  reset: () => {
+registerVoiceLogoutTeardown({ snapshot: () => voiceStore.getState() });
+// App-lifetime: the voice phase runs before any domain reset.
+void registerSessionReset(
+  "voice:store",
+  () => {
     resetVoiceStore();
     noteJoinSucceeded();
   },
-});
+  { phase: "voice" },
+);
 
 /** Bulk set voice states from the ready payload. */
 export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
@@ -365,7 +409,11 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
       nextChannels.set(payload.channel_id, nextUsers);
     }
 
-    return { ...prev, voiceUsers: nextChannels };
+    const watching = prev.peerWatching;
+    if (watching?.has(payload.user_id) !== true) return { ...prev, voiceUsers: nextChannels };
+    const nextWatching = new Map(watching);
+    nextWatching.delete(payload.user_id);
+    return { ...prev, voiceUsers: nextChannels, peerWatching: nextWatching };
   });
 }
 
@@ -395,6 +443,8 @@ export function joinVoiceChannel(channelId: number): void {
     if (prev.currentChannelId === channelId) return prev;
     return {
       ...prev,
+      // A direct switch: the old channel's watch sets are not this one's.
+      peerWatching: new Map<number, readonly number[]>(),
       voiceUsers: withoutRings(prev.voiceUsers, prev.currentChannelId),
       currentChannelId: channelId,
       joinedAt: Date.now(),
@@ -422,6 +472,8 @@ export function leaveVoiceChannel(): void {
       localServerDeafened: false,
       encryptionDegraded: false,
       shareDenied: false,
+      peerVideoDecode: new Map<number, readonly string[]>(),
+      peerWatching: new Map<number, readonly number[]>(),
     };
     const channelId = prev.currentChannelId;
     const voiceUsers = withoutRings(prev.voiceUsers, channelId);
@@ -558,9 +610,10 @@ const pttPollingListeners = new Set<() => void>();
 /** Report whether the PTT key-polling backend can actually observe key state.
  *  Callers MUST reflect REAL backend capability (the `ptt_polling_supported`
  *  Tauri command), not merely whether a key is bound in preferences: on macOS
- *  `is_key_down` is a stub returning false and on pure-Wayland Linux
- *  `DeviceState::checked_new()` returns None, so no `ptt-state` event can ever
- *  arrive to lift a join-time mute. */
+ *  `is_key_down` is a stub returning false and on pure-Wayland Linux key
+ *  polling cannot observe keys, so no `ptt-state` event arrives to lift a
+ *  join-time mute unless the portal backend is live. This flag reflects
+ *  whichever backend is live. */
 export function setPttPollingLive(live: boolean): void {
   if (pttPollingLive === live) return;
   pttPollingLive = live;
@@ -716,6 +769,99 @@ export function setLocalSessionFingerprint(fingerprint: string | null): void {
       ? prev
       : { ...prev, localSessionFingerprint: fingerprint },
   );
+}
+
+/** Record a peer's reported video decode list; `undefined` (an announce
+ *  without the field) deletes the entry. Single writer: the dispatcher's
+ *  voice_e2ee_announce handler. */
+export function setPeerVideoDecode(userId: number, list: readonly string[] | undefined): void {
+  voiceStore.setState((prev) => {
+    const current = prev.peerVideoDecode;
+    if (list === undefined) {
+      if (!current?.has(userId)) return prev;
+      const next = new Map(current);
+      next.delete(userId);
+      return { ...prev, peerVideoDecode: next };
+    }
+    const next = new Map(current);
+    next.set(userId, [...list]);
+    return { ...prev, peerVideoDecode: next };
+  });
+}
+
+/** When the socket last resumed, for `isWatchingResync`. Module state: a
+ *  listener only needs the instant, and no render reads it. */
+let watchingResyncAt = Number.NEGATIVE_INFINITY;
+
+/** The server re-sends every member's `voice_watching` after a resume; note
+ *  the instant so the streamer's viewer sounds skip that re-sync. */
+export function noteWatchingResync(): void {
+  watchingResyncAt = Date.now();
+}
+
+/** Forget every member's watch set, ahead of the server re-sending them (a
+ *  resume or full resync): a member who stopped while we were away sends no
+ *  frame, so the old entry must not outlive the re-sync. */
+export function clearPeerWatching(): void {
+  voiceStore.setState((prev) =>
+    (prev.peerWatching?.size ?? 0) === 0 ? prev : { ...prev, peerWatching: new Map() },
+  );
+}
+
+/** True for a short while after `noteWatchingResync`. */
+export function isWatchingResync(windowMs = 2000): boolean {
+  return Date.now() - watchingResyncAt < windowMs;
+}
+
+/** Record whose screen shares a member of our current channel watches. A
+ *  frame for a user who is not in that channel's roster (one that already
+ *  left, or another channel's) is ignored; an empty list clears the entry.
+ *  Single writer: the dispatcher's voice_watching handler. */
+export function setPeerWatching(userId: number, watching: readonly number[]): void {
+  voiceStore.setState((prev) => {
+    const channelId = prev.currentChannelId;
+    if (channelId === null || prev.voiceUsers.get(channelId)?.has(userId) !== true) return prev;
+    const current = prev.peerWatching;
+    const had = current?.get(userId);
+    if (watching.length === 0) {
+      if (had === undefined) return prev;
+      const next = new Map(current);
+      next.delete(userId);
+      return { ...prev, peerWatching: next };
+    }
+    if (
+      had !== undefined &&
+      had.length === watching.length &&
+      had.every((v, i) => v === watching[i])
+    )
+      return prev;
+    const next = new Map(current);
+    next.set(userId, [...watching]);
+    return { ...prev, peerWatching: next };
+  });
+}
+
+/** Who watches a member's screen share, as user ids: the channel members
+ *  whose set has the sharer, plus you when you watch it locally (the local
+ *  set lives in RemoteTracks, so the caller passes it), never the sharer.
+ *  Empty unless the sharer's voice user has screenshare on. */
+export function streamViewers(
+  sharerId: number,
+  watchingLocally = false,
+  state: VoiceState = voiceStore.getState(),
+): number[] {
+  const channelId = state.currentChannelId;
+  if (channelId === null) return [];
+  const members = state.voiceUsers.get(channelId);
+  if (members?.get(sharerId)?.screenshare !== true) return [];
+  const self = authStore.getState().user?.id ?? 0;
+  const out: number[] = [];
+  for (const id of members.keys()) {
+    if (id === sharerId) continue;
+    if (id === self ? watchingLocally : state.peerWatching?.get(id)?.includes(sharerId) === true)
+      out.push(id);
+  }
+  return out.toSorted((a, b) => a - b);
 }
 
 /** Drop all peer verifications (on voice leave). */

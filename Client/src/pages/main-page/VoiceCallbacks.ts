@@ -79,7 +79,7 @@ export function createVoiceWidgetCallbacks(
     onDisconnect: () => {
       if (voiceStore.getState().currentChannelId === null) return;
       log.info("Leaving voice channel (widget disconnect)");
-      voiceSessionLeave(false);
+      void voiceSessionLeave(false);
       leaveVoiceChannel();
       if (socketLive()) ws.send({ type: "voice_leave", payload: {} });
     },
@@ -233,7 +233,7 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
     },
     onVoiceLeave: () => {
       log.info("Leaving voice channel");
-      voiceSessionLeave(false);
+      void voiceSessionLeave(false);
       leaveVoiceChannel();
       if (socketLive()) ws.send({ type: "voice_leave", payload: {} });
     },

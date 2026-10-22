@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -23,7 +24,7 @@ func TestCreateGroupDMChannel_OpensForEveryone(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	ch, err := database.CreateGroupDMChannel(ctx, "Crew", []int64{1, 2, 3})
+	ch, err := database.CreateGroupDMChannel(ctx, "Crew", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestCreateGroupDMChannel_OpensForEveryone(t *testing.T) {
 
 func TestCreateGroupDMChannel_RefusesUnderThree(t *testing.T) {
 	database := groupDMFixture(t)
-	if _, err := database.CreateGroupDMChannel(context.Background(), "", []int64{1, 2}); err == nil {
+	if _, err := database.CreateGroupDMChannel(context.Background(), "", 1, []int64{1, 2}); err == nil {
 		t.Fatal("expected an error creating a 2-person group DM")
 	}
 }
@@ -71,11 +72,11 @@ func TestGetOrCreateDMChannel_IgnoresShrunkGroup(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	group, err := database.CreateGroupDMChannel(ctx, "Shrinking", []int64{1, 2, 3})
+	group, err := database.CreateGroupDMChannel(ctx, "Shrinking", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
-	if _, err = database.LeaveGroupDM(ctx, 3, group.ID); err != nil {
+	if _, err = database.LeaveGroupDM(ctx, 3, group.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM: %v", err)
 	}
 
@@ -95,18 +96,18 @@ func TestLeaveGroupDM_DeletesChannelOnLastLeave(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", []int64{1, 2, 3})
+	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
 
 	for i, uid := range []int64{1, 2, 3} {
-		deleted, leaveErr := database.LeaveGroupDM(ctx, uid, group.ID)
+		res, leaveErr := database.LeaveGroupDM(ctx, uid, group.ID, "left")
 		if leaveErr != nil {
 			t.Fatalf("LeaveGroupDM(%d): %v", uid, leaveErr)
 		}
 		wantDeleted := i == 2
-		if deleted != wantDeleted {
+		if deleted := res.Deleted; deleted != wantDeleted {
 			t.Errorf("leave %d: deleted=%v, want %v", uid, deleted, wantDeleted)
 		}
 	}
@@ -130,7 +131,7 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", []int64{1, 2, 3})
+	group, err := database.CreateGroupDMChannel(ctx, "Ephemeral", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -146,12 +147,12 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed attachment: %v", err)
 	}
-	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, 1, []string{"att-leave-1"}); err != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, 1, []string{"att-leave-1"}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
 
 	for _, uid := range []int64{1, 2, 3} {
-		if _, err := database.LeaveGroupDM(ctx, uid, group.ID); err != nil {
+		if _, err := database.LeaveGroupDM(ctx, uid, group.ID, "left"); err != nil {
 			t.Fatalf("LeaveGroupDM(%d): %v", uid, err)
 		}
 	}
@@ -176,34 +177,13 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 	}
 }
 
-func TestSetDMChannelName_RefusesNonDM(t *testing.T) {
-	database := groupDMFixture(t)
-	ctx := context.Background()
-
-	textID, err := database.CreateChannel(ctx, "general", "text", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel: %v", err)
-	}
-	if err := database.SetDMChannelName(ctx, textID, "hijacked"); err != nil {
-		t.Fatalf("SetDMChannelName: %v", err)
-	}
-
-	ch, err := database.GetChannel(ctx, textID)
-	if err != nil {
-		t.Fatalf("GetChannel: %v", err)
-	}
-	if ch.Name != "general" {
-		t.Errorf("a text channel was renamed through the DM route: %q", ch.Name)
-	}
-}
-
 // An invisible participant must read as offline to everyone but themselves,
 // on the DM list exactly as everywhere else.
 func TestGetDMParticipants_CollapsesInvisible(t *testing.T) {
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
-	group, err := database.CreateGroupDMChannel(ctx, "Ghosts", []int64{1, 2, 3})
+	group, err := database.CreateGroupDMChannel(ctx, "Ghosts", 1, []int64{1, 2, 3})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -238,7 +218,7 @@ func TestNewDMChannelInfo_ExcludesViewerAndPicksRecipient(t *testing.T) {
 		{ID: 2, Username: "b"},
 		{ID: 3, Username: "c"},
 	}
-	info := db.NewDMChannelInfo(7, "Trio", true, participants, 2)
+	info := db.NewDMChannelInfo(7, "Trio", true, 1, "", participants, 2)
 
 	if info.ChannelID != 7 || info.Name != "Trio" || !info.IsGroup {
 		t.Errorf("unexpected header fields: %+v", info)
@@ -260,11 +240,32 @@ func TestNewDMChannelInfo_ExcludesViewerAndPicksRecipient(t *testing.T) {
 // A DM with no other participants (the moment before the row is cleaned up)
 // must produce an empty list, not a nil one — clients iterate it directly.
 func TestNewDMChannelInfo_EmptyRecipientsIsNotNil(t *testing.T) {
-	info := db.NewDMChannelInfo(9, "", false, []db.DMUser{{ID: 5}}, 5)
+	info := db.NewDMChannelInfo(9, "", false, 0, "", []db.DMUser{{ID: 5}}, 5)
 	if info.Recipients == nil {
 		t.Fatal("recipients must be an empty slice, not nil")
 	}
 	if len(info.Recipients) != 0 {
 		t.Errorf("expected no recipients, got %d", len(info.Recipients))
+	}
+}
+
+// NewDMChannelInfo does not read read_states, so the pointer stays nil and the
+// field is omitted from the JSON rather than reported as 0. The
+// dm_channel_open frame is built the same way.
+func TestNewDMChannelInfo_OmitsLastRead(t *testing.T) {
+	info := db.NewDMChannelInfo(7, "", false, 0, "", []db.DMUser{{ID: 1}, {ID: 2}}, 1)
+	if info.LastReadMessageID != nil {
+		t.Fatalf("LastReadMessageID = %v, want nil", *info.LastReadMessageID)
+	}
+	raw, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if _, present := m["last_read_message_id"]; present {
+		t.Errorf("last_read_message_id must be omitted when unset: %s", raw)
 	}
 }

@@ -28,6 +28,9 @@ type maintenance struct {
 	uploads    *service.UploadService
 	reports    *service.ReportService
 	moderation *service.ModerationService
+	// backupDir is backup.dir as configured; maintainBackups resolves it
+	// (empty = data/backups) so a hand-built maintenance keeps the default.
+	backupDir string
 	// reportRetentionDays is moderation.report_retention_days (0 = never).
 	reportRetentionDays int
 	// actionRetentionDays is moderation.action_retention_days (0 = never).
@@ -36,6 +39,13 @@ type maintenance struct {
 	// attention records each step's outcome for the admin attention panel
 	// (RI-07); nil-safe, so partial wirings skip it.
 	attention *service.AttentionService
+	// erasureCtx is cancelled when the loop is told to stop, so a resumed
+	// erasure drain ends between chunks instead of outliving the shutdown
+	// join; the queued job resumes at the next start. Nil: no cancellation.
+	erasureCtx context.Context
+	// stepsOverride replaces steps() when non-nil. A test seam: the shutdown
+	// tests need a step they can block and observe. Never set in production.
+	stepsOverride []maintenanceStep
 }
 
 // maintenanceStep is one sweep: job is its name on the admin attention
@@ -49,9 +59,10 @@ type maintenanceStep struct {
 // newMaintenance builds the pass over the composition root's services. svc
 // may be nil (a partial wiring in tests), which leaves every service-backed
 // step skipped.
-func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) *maintenance {
+func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services, files *storage.Storage) *maintenance {
 	m := &maintenance{
 		log: log, database: database,
+		backupDir:           cfg.Backup.Dir,
 		reportRetentionDays: cfg.Moderation.ReportRetentionDays,
 		actionRetentionDays: cfg.Moderation.ActionRetentionDays,
 	}
@@ -63,38 +74,48 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 		m.attention = svc.Attention
 	}
 	// Periodically purge expired sessions and orphaned attachments.
-	files, err := storage.New(cfg.Upload.StorageDir, cfg.Upload.MaxSizeMB)
-	if err != nil {
-		log.Warn("failed to create file storage for maintenance; orphan file cleanup disabled", "error", err)
+	// files is the one upload store StartRuntime shares with the router and
+	// the erasure replay (WP 5.6g). It already holds the erasure and
+	// retention runners' file remover (wireAuth), so nothing is installed
+	// here — in particular no setter runs after the hub started.
+	if files == nil {
+		log.Warn("failed to create file storage for maintenance; orphan file cleanup disabled")
 		return m
 	}
 	m.files = files
-	// The erasure runner removes files through whichever storage was
-	// installed first (the router's, normally); this one is the fallback so
-	// journaled jobs still finish when the upload routes did not mount.
-	if m.erasure != nil && !m.erasure.HasFiles() {
-		m.erasure.SetFiles(files)
-	}
-	if m.retention != nil {
-		m.retention.SetFiles(files)
-	}
 	return m
 }
 
 // startMaintenanceLoop starts the periodic maintenance loop and returns the
 // stop step the maintenance stage registers with App.Close.
-func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services) func() {
-	m := newMaintenance(log, cfg, database, svc)
+func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services, files *storage.Storage) func() {
+	m := newMaintenance(log, cfg, database, svc, files)
+	erasureCtx, cancelErasure := context.WithCancel(bgCtx)
+	m.erasureCtx = erasureCtx
+	stop := runMaintenanceLoop(bgCtx, log, m)
+	return func() {
+		cancelErasure()
+		stop()
+	}
+}
 
+// runMaintenanceLoop is startMaintenanceLoop over an already-built pass.
+func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, m *maintenance) func() {
 	// The attention panel (RI-07) lists every job, in step order, before the
 	// loop's start-up runs record the first outcomes.
 	for _, step := range m.steps() {
 		m.attention.RegisterJob(step.job, step.failLog)
 	}
 
+	// The loop has a context of its own, so the stop step can cancel an
+	// in-flight tick (a long VACUUM INTO, an erasure pass) BEFORE its bounded
+	// join. bgCtx is cancelled only after that join, by event persistence or
+	// the first-registered background-context step, so a stop that merely
+	// closed a channel always waited out the whole 5 s on a busy tick (ARCH-034).
+	loopCtx, cancelLoop := context.WithCancel(context.WithoutCancel(bgCtx))
 	stopMaintenance := make(chan struct{})
 	maintenanceDone := make(chan struct{})
-	go m.loop(bgCtx, stopMaintenance, maintenanceDone)
+	go m.loop(loopCtx, stopMaintenance, maintenanceDone)
 
 	// The attention sampler samples on its own minute cadence, independent
 	// of a long tick.
@@ -116,6 +137,7 @@ func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.C
 		// and a bounded join so an in-flight tick (a scheduled backup's
 		// VACUUM INTO can run for seconds) isn't still using the database
 		// while the LIFO-later Close defer tears it down.
+		cancelLoop()
 		close(stopMaintenance)
 		select {
 		case <-maintenanceDone:
@@ -152,6 +174,13 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	_ = m.runJob(bgCtx, "Push subscriptions")
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
+	// An erasure that outran its inline budget, or failed after its lock,
+	// asks for a resume now instead of at the next tick (WP 4.1a). A nil
+	// channel (no erasure runner) never fires.
+	var erasureWake <-chan struct{}
+	if m.erasure != nil {
+		erasureWake = m.erasure.WakeCh()
+	}
 	consecutiveFailures := 0
 	const maxConsecutiveFailures = 5
 	for {
@@ -170,6 +199,8 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 			} else {
 				consecutiveFailures = 0
 			}
+		case <-erasureWake:
+			_ = m.runJob(bgCtx, "Account erasure")
 		case <-stopMaintenance:
 			return
 		}
@@ -180,6 +211,9 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 // run: voice mute reconciliation precedes moderation action retention so a
 // mute owner is released before its row can be retired.
 func (m *maintenance) steps() []maintenanceStep {
+	if m.stepsOverride != nil {
+		return m.stepsOverride
+	}
 	return []maintenanceStep{
 		{job: "Expired sessions", failLog: "failed to delete expired sessions", run: m.sweepSessions},
 		{job: "Delivery receipts", failLog: "failed to delete expired message delivery receipts", run: m.sweepMessageDeliveryReceipts},
@@ -204,6 +238,11 @@ func (m *maintenance) steps() []maintenanceStep {
 func (m *maintenance) tick(ctx context.Context) bool {
 	failed := false
 	for _, step := range m.steps() {
+		// Once the loop is cancelled (shutdown), the remaining steps would
+		// only do wasted work before failing; stop walking.
+		if ctx.Err() != nil {
+			break
+		}
 		if m.runStep(ctx, step) != nil {
 			failed = true
 		}
@@ -216,7 +255,9 @@ func (m *maintenance) tick(ctx context.Context) bool {
 func (m *maintenance) runStep(ctx context.Context, step maintenanceStep) error {
 	err := step.run(ctx)
 	m.attention.RecordJob(step.job, err, time.Now())
-	if err != nil {
+	// A step cut short by the shutdown cancelling its context is expected, not
+	// a failure worth a Warn.
+	if err != nil && ctx.Err() == nil {
 		m.log.Warn(step.failLog, "error", err)
 	}
 	return err
@@ -268,7 +309,7 @@ func (m *maintenance) maintainBackups(ctx context.Context) error {
 	if m.settings == nil {
 		return nil
 	}
-	return admin.MaintainBackups(ctx, m.database, m.settings)
+	return admin.MaintainBackups(ctx, m.database, m.settings, admin.ResolveBackupDir(m.backupDir))
 }
 
 // sweepOrphans cleans up orphaned attachments (uploaded but never linked to
@@ -376,6 +417,13 @@ func (m *maintenance) reconcileOrphanedVoiceMutes(ctx context.Context) error {
 func (m *maintenance) resumeErasure(ctx context.Context) error {
 	if m.erasure == nil {
 		return nil
+	}
+	if m.erasureCtx != nil {
+		// Ends the drain between chunks once the loop is told to stop.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		defer context.AfterFunc(m.erasureCtx, cancel)() //nolint:contextcheck // erasureCtx is the loop's own stop signal, derived from its lifecycle context
 	}
 	done, err := m.erasure.Resume(ctx)
 	if done > 0 {

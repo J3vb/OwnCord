@@ -28,6 +28,15 @@
 //! gone.
 //! `--simulcast` (with `--video`) publishes that camera simulcast, as the app
 //! does for every camera quality but "source".
+//! `--codec h264` or `--codec vp9` (with `--video`) publishes the camera as
+//! H.264 or VP9 (one L1T3 SVC layer, never simulcast) instead of the default
+//! VP8 (WP LP-7c, M-11b). `--screen-codec vp9` (with `--screen`) does the same
+//! for the share.
+//! `--probe-codecs` prints `{"event":{"type":"codecs","h264":bool,"vp9":bool,
+//! "decode":[..]}}` and exits:
+//! whether this build's libwebrtc can encode H.264 or VP9 and which codecs it
+//! decodes, so the browser half can skip its H.264 and VP9 cases with a reason
+//! instead of failing them.
 //! `--camera-cycles N` (with `--video`) first turns the camera off and on
 //! N times the way the app does (unpublish, stop capture, start capture,
 //! publish), printing the thread count before and after: each publish is a
@@ -43,6 +52,28 @@
 //! `--screen-cycles N` (with `--screen`) first stops and restarts the share
 //! N times, printing the thread and file-descriptor counts before and after
 //! and checking that a stale stop leaves the live share alone.
+//! `--screen-audio` (with `--screen`) also publishes the share's audio the way
+//! the app does (`ScreenshareAudio`, 128 kbps, no DTX, no RED), from a
+//! synthetic 2-channel source (440 Hz left, 660 Hz right: CI has no sound
+//! server) and reports its sid as a `screenAudio` event, with the opus
+//! `channels` and `sdpFmtpLine` the publisher's own sender negotiated (LP-8d:
+//! 2 and `stereo=1` once the vendored SDK signals stereo). The browser half
+//! asserts it decodes with the right key and in stereo.
+//! `--screen-audio-cycles N` (with `--screen-audio`) first publishes and
+//! unpublishes the app's real capture-fed share audio N times (silence here:
+//! no sound server), printing the thread count before and after: each cycle
+//! starts and joins the capture thread.
+//! `--republish-screen` (with `--screen-audio`) then unpublishes and
+//! republishes the video with the capture kept, the way a codec change does,
+//! and reports the audio sid again (`screenAudio`, phase `after-republish`):
+//! it must be the same one. It finishes by stopping the share and reporting
+//! the session's resources (`screenStopped`): video and audio are both gone.
+//! `--screen-quality-after SECS` (with `--screen`, not with `--republish-screen`)
+//! changes the live share's quality after SECS seconds the way the app does
+//! (`NativeSession::set_screen_quality`: the capture is capped to half the
+//! source's size and the share republished at that size) and reports the previous
+//! and new sids, the new size and the session's resources (`screenQuality`).
+//! The share audio is left alone.
 //! `--volume G` sets every remote participant's volume to G the way the
 //! per-user volume menu does, pulls the session's own playout mix at the
 //! device cadence (CI has no sound device to play it on) and reports its RMS
@@ -65,7 +96,8 @@ mod linux {
     use owncord_client_lib::native_voice::playout::{Mixer, SAMPLE_RATE as PLAYOUT_RATE};
     use owncord_client_lib::native_voice::screen::{self, CaptureOptions, Target};
     use owncord_client_lib::native_voice::session::{
-        process_threads, shared_key_material, CameraOptions, Event, NativeSession, ScreenOptions,
+        process_threads, screen_audio_source, shared_key_material, CameraOptions, Event,
+        NativeSession, PublishCodec, ScreenOptions,
     };
     use tokio_tungstenite::tungstenite::Message;
 
@@ -110,6 +142,34 @@ mod linux {
                 data: data.into(),
                 sample_rate: SAMPLE_RATE,
                 num_channels: 1,
+                samples_per_channel: samples as u32,
+            };
+            if source.capture_frame(&frame).await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Push 440 Hz (left) and 660 Hz (right) into the stereo `source` forever.
+    async fn play_stereo(source: NativeAudioSource) {
+        let samples = (SAMPLE_RATE as u64 * FRAME_MS / 1000) as usize;
+        let (mut left, mut right) = (0.0f64, 0.0f64);
+        let step = |hz: f64| 2.0 * std::f64::consts::PI * hz / SAMPLE_RATE as f64;
+        let (left_step, right_step) = (step(440.0), step(660.0));
+        let mut ticker = tokio::time::interval(Duration::from_millis(FRAME_MS));
+        loop {
+            ticker.tick().await;
+            let mut data = Vec::with_capacity(samples * 2);
+            for _ in 0..samples {
+                left += left_step;
+                right += right_step;
+                data.push((left.sin() * SINE_AMPLITUDE) as i16);
+                data.push((right.sin() * SINE_AMPLITUDE) as i16);
+            }
+            let frame = AudioFrame {
+                data: data.into(),
+                sample_rate: SAMPLE_RATE,
+                num_channels: 2,
                 samples_per_channel: samples as u32,
             };
             if source.capture_frame(&frame).await.is_err() {
@@ -217,6 +277,7 @@ mod linux {
         width: u32,
         height: u32,
         simulcast: bool,
+        codec: PublishCodec,
     ) -> Result<(u64, String), String> {
         let (capture, started) = session
             .start_camera(
@@ -238,6 +299,7 @@ mod linux {
                     max_bitrate: 1_700_000,
                     max_framerate: 30.0,
                     simulcast,
+                    codec,
                 },
             )
             .await?;
@@ -300,8 +362,20 @@ mod linux {
 
     /// Start a synthetic screen capture and publish it, as the app's
     /// `native_voice_start_screen` then `native_voice_publish_screen` do.
-    /// Returns the capture id.
+    /// Returns the capture id and the video publication's sid.
     async fn share_screen(
+        session: &mut NativeSession,
+        width: u32,
+        height: u32,
+        codec: PublishCodec,
+    ) -> Result<(u64, String), String> {
+        let capture = start_screen_capture(session, width, height).await?;
+        let sid = publish_screen_video(session, capture, width, height, codec).await?;
+        Ok((capture, sid))
+    }
+
+    /// Start the synthetic capture. Returns its id.
+    async fn start_screen_capture(
         session: &mut NativeSession,
         width: u32,
         height: u32,
@@ -316,20 +390,49 @@ mod linux {
                 },
             )
             .await?;
-        let (w, h) = started.await.map_err(|_| "screen capture dropped")??;
+        started.await.map_err(|_| "screen capture dropped")??;
+        Ok(capture)
+    }
+
+    /// The publisher-side opus codec of the share audio `sid`: the SFU's
+    /// answer carries `stereo=1` only when the track was published as stereo
+    /// (LP-8d). The sender's stats appear once the transport is up, so retry
+    /// for a few seconds; a miss reports 0 channels and the reason as the fmtp
+    /// line, which the test then fails on with that text.
+    async fn screen_audio_codec(session: &NativeSession, sid: &str) -> (u32, String) {
+        let mut last = String::new();
+        for _ in 0..50 {
+            match session.screen_audio_codec(sid).await {
+                Ok(codec) => return codec,
+                Err(e) => last = e,
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        (0, last)
+    }
+
+    /// Publish running capture `capture`'s video. `width` and `height` are
+    /// the synthetic source's own size. Returns the publication's sid.
+    async fn publish_screen_video(
+        session: &mut NativeSession,
+        capture: u64,
+        width: u32,
+        height: u32,
+        codec: PublishCodec,
+    ) -> Result<String, String> {
         session
             .publish_screen(
                 capture,
                 ScreenOptions {
-                    width: w,
-                    height: h,
+                    width,
+                    height,
                     max_bitrate: 3_000_000,
                     max_framerate: 15.0,
                     simulcast: false,
+                    codec,
                 },
             )
-            .await?;
-        Ok(capture)
+            .await
     }
 
     /// Whether a WebSocket handshake to `url` is refused.
@@ -338,6 +441,18 @@ mod linux {
     }
 
     pub async fn run() -> Result<(), String> {
+        if std::env::args().any(|a| a == "--probe-codecs") {
+            let codecs = owncord_client_lib::native_voice::probe_video_codecs();
+            emit(serde_json::json!({
+                "event": {
+                    "type": "codecs",
+                    "h264": codecs.h264,
+                    "vp9": codecs.vp9,
+                    "decode": codecs.decode,
+                }
+            }));
+            return Ok(());
+        }
         let url = arg("--url").ok_or("--url required")?;
         let token = arg("--token").ok_or("--token required")?;
         let key = arg("--key").ok_or("--key required")?;
@@ -362,6 +477,17 @@ mod linux {
         let video = size_arg("--video")?;
         let screen_size = size_arg("--screen")?;
         let simulcast = std::env::args().any(|a| a == "--simulcast");
+        let codec = match arg("--codec").as_deref() {
+            None | Some("vp8") => PublishCodec::Vp8,
+            Some("h264") => PublishCodec::H264,
+            Some("vp9") => PublishCodec::Vp9,
+            Some(_) => return Err("--codec must be vp8, h264 or vp9".into()),
+        };
+        let screen_codec = match arg("--screen-codec").as_deref() {
+            None | Some("vp8") => PublishCodec::Vp8,
+            Some("vp9") => PublishCodec::Vp9,
+            Some(_) => return Err("--screen-codec must be vp8 or vp9".into()),
+        };
 
         if cycles > 0 {
             emit(
@@ -410,7 +536,7 @@ mod linux {
             // A synthetic camera through the same capture thread and publish
             // the app uses (CI has no camera).
             let (mut capture, mut camera_sid) =
-                start_camera(&mut session, width, height, simulcast).await?;
+                start_camera(&mut session, width, height, simulcast, codec).await?;
             let camera_cycles: u32 = arg("--camera-cycles")
                 .as_deref()
                 .unwrap_or("0")
@@ -433,7 +559,7 @@ mod linux {
                     session.stop_camera(capture).await;
                     let stale = camera_sid;
                     (capture, camera_sid) =
-                        start_camera(&mut session, width, height, simulcast).await?;
+                        start_camera(&mut session, width, height, simulcast, codec).await?;
                     session.unpublish_camera(&stale).await;
                     await_camera_bound(&mut room_events, &mut pending_events, &camera_sid).await?;
                 }
@@ -455,8 +581,10 @@ mod linux {
         }
 
         let mut preview = None;
+        let mut stereo = None;
         if let Some((width, height)) = screen_size {
-            let mut capture = share_screen(&mut session, width, height).await?;
+            let (mut capture, mut screen_sid) =
+                share_screen(&mut session, width, height, screen_codec).await?;
             let screen_cycles: u32 = arg("--screen-cycles")
                 .as_deref()
                 .unwrap_or("0")
@@ -469,10 +597,10 @@ mod linux {
                 for _ in 0..screen_cycles {
                     session.stop_screen(capture).await;
                     tokio::time::sleep(Duration::from_millis(50)).await;
-                    let stale = std::mem::replace(
-                        &mut capture,
-                        share_screen(&mut session, width, height).await?,
-                    );
+                    let (fresh, fresh_sid) =
+                        share_screen(&mut session, width, height, screen_codec).await?;
+                    screen_sid = fresh_sid;
+                    let stale = std::mem::replace(&mut capture, fresh);
                     // A late stop of the replaced capture must leave the
                     // new one running and published.
                     session.stop_screen(stale).await;
@@ -481,6 +609,83 @@ mod linux {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 emit(
                     serde_json::json!({ "event": { "type": "threads", "phase": "screen-after", "cycles": screen_cycles, "count": process_threads(), "fds": open_fds(), "captures": screen::active_captures() } }),
+                );
+            }
+            if std::env::args().any(|a| a == "--screen-audio") {
+                let audio_cycles: u32 = arg("--screen-audio-cycles")
+                    .as_deref()
+                    .unwrap_or("0")
+                    .parse()
+                    .map_err(|_| "--screen-audio-cycles")?;
+                if audio_cycles > 0 {
+                    emit(
+                        serde_json::json!({ "event": { "type": "threads", "phase": "screen-audio-before", "count": process_threads(), "fds": open_fds() } }),
+                    );
+                    for _ in 0..audio_cycles {
+                        let sid = session.publish_screen_audio(capture).await?;
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        session.unpublish_screen_audio(&sid).await;
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    emit(
+                        serde_json::json!({ "event": { "type": "threads", "phase": "screen-audio-after", "cycles": audio_cycles, "count": process_threads(), "fds": open_fds() } }),
+                    );
+                }
+                let source = screen_audio_source();
+                let sid = session
+                    .publish_screen_audio_source(capture, source.clone())
+                    .await?;
+                stereo = Some(tokio::spawn(play_stereo(source)));
+                let (channels, fmtp) = screen_audio_codec(&session, &sid).await;
+                emit(
+                    serde_json::json!({ "event": { "type": "screenAudio", "phase": "published", "sid": sid, "channels": channels, "sdpFmtpLine": fmtp } }),
+                );
+                if std::env::args().any(|a| a == "--republish-screen") {
+                    // Let the browser subscribe and decode first, so the
+                    // test can see the audio carry on across the republish.
+                    tokio::time::sleep(Duration::from_secs(6)).await;
+                    session.unpublish_screen_keep_capture(capture).await;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    publish_screen_video(&mut session, capture, width, height, screen_codec)
+                        .await?;
+                    let (channels, fmtp) = screen_audio_codec(&session, &sid).await;
+                    emit(
+                        serde_json::json!({ "event": { "type": "screenAudio", "phase": "after-republish", "sid": sid, "channels": channels, "sdpFmtpLine": fmtp } }),
+                    );
+                    // Then stop the share: the video and its audio both go, and
+                    // so does the capture thread.
+                    tokio::time::sleep(Duration::from_secs(8)).await;
+                    let before = session.resources();
+                    session.stop_screen(capture).await;
+                    emit(
+                        serde_json::json!({ "event": { "type": "screenStopped", "before": before, "after": session.resources() } }),
+                    );
+                }
+            }
+            if let Some(secs) = arg("--screen-quality-after") {
+                let secs: u64 = secs.parse().map_err(|_| "--screen-quality-after")?;
+                tokio::time::sleep(Duration::from_secs(secs)).await;
+                let (sid, new_width, new_height) = session
+                    .set_screen_quality(
+                        capture,
+                        CaptureOptions {
+                            fps: 15.0,
+                            max_width: width / 2,
+                            max_height: height / 2,
+                        },
+                        ScreenOptions {
+                            width,
+                            height,
+                            max_bitrate: 1_000_000,
+                            max_framerate: 15.0,
+                            simulcast: false,
+                            codec: PublishCodec::default(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| format!("{e:?}"))?;
+                emit(
+                    serde_json::json!({ "event": { "type": "screenQuality", "previousSid": screen_sid, "sid": sid, "width": new_width, "height": new_height, "resources": session.resources() } }),
                 );
             }
             preview = Some(tokio::spawn(watch(
@@ -536,6 +741,9 @@ mod linux {
             }
         }
         sine.abort();
+        if let Some(stereo) = stereo {
+            stereo.abort();
+        }
         emit(
             serde_json::json!({ "event": { "type": "resources", "resources": session.resources() } }),
         );

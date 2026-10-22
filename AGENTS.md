@@ -22,23 +22,23 @@ Prerequisites ([README.md](README.md#prerequisites)):
 
 Read the file for the area you are changing, not all of them:
 
-| Changing…                                              | Read first                                                                 |
-| ------------------------------------------------------ | -------------------------------------------------------------------------- |
-| Product scope or a user-facing feature                 | [PRD.md](PRD.md)                                                           |
-| How components connect, data flow, deployment          | [ARCHITECTURE.md](ARCHITECTURE.md)                                         |
-| Client UI, CSS, themes, accessibility                  | [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md)                                       |
-| Any code: formatting, lint rules, tests                | [CODE_STYLE.md](CODE_STYLE.md)                                             |
-| Schema, migrations, SQL queries                        | [DATABASE.md](DATABASE.md), then [docs/schema.md](docs/schema.md)          |
-| REST routes or WebSocket messages                      | [API.md](API.md), then [docs/protocol.md](docs/protocol.md)                |
-| Auth, permissions, secrets, E2EE, input handling       | [SECURITY.md](SECURITY.md)                                                 |
-| Server or client internals and their component gotchas | [Server/CLAUDE.md](Server/CLAUDE.md), [Client/CLAUDE.md](Client/CLAUDE.md) |
+| Changing…                                              | Read first                                                                                      |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Product scope or a user-facing feature                 | [docs/summaries/product.md](docs/summaries/product.md)                                          |
+| How components connect, data flow, deployment          | [docs/summaries/architecture.md](docs/summaries/architecture.md)                                |
+| Client UI, CSS, themes, accessibility                  | [docs/summaries/design-system.md](docs/summaries/design-system.md)                              |
+| Any code: formatting, lint rules, tests                | [docs/code-style.md](docs/code-style.md)                                                        |
+| Schema, migrations, SQL queries                        | [docs/summaries/database.md](docs/summaries/database.md), then [docs/schema.md](docs/schema.md) |
+| REST routes or WebSocket messages                      | [docs/summaries/api.md](docs/summaries/api.md), then [docs/protocol.md](docs/protocol.md)       |
+| Auth, permissions, secrets, E2EE, input handling       | [SECURITY.md](SECURITY.md)                                                                      |
+| Server or client internals and their component gotchas | [Server/CLAUDE.md](Server/CLAUDE.md), [Client/CLAUDE.md](Client/CLAUDE.md)                      |
 
 Inspect existing code before creating a new component, helper or pattern. OwnCord has established layouts and extraction patterns per component; reuse them rather than introducing a parallel structure. If these files conflict, or a decision you need is missing, ask before making a major assumption.
 
 ## General rules
 
 - **Branches:** branch from `dev` and open the PR against `dev`. `dev` is protected and PR-only (every required check must pass); `main` carries releases only. Branch names: `feature/<name>`, `fix/<name>`, `docs/<name>`. Full model: [docs/contributing.md](docs/contributing.md#branch-and-pr-model).
-- **Commits:** squash merge, with a conventional-commit subject on the squashed commit (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:`, `ci:`). For anything non-trivial the body carries the reasoning, a `Verified:` paragraph and a `Not included:` line; the full rule is in [CODE_STYLE.md](CODE_STYLE.md#commits-and-prs).
+- **Commits:** squash merge, with a conventional-commit subject on the squashed commit (`feat:`, `fix:`, `refactor:`, `docs:`, `test:`, `chore:`, `perf:`, `ci:`). For anything non-trivial the body carries the reasoning, a `Verified:` paragraph and a `Not included:` line; the full rule is in [docs/code-style.md](docs/code-style.md#commits-and-prs).
 - **Changelog:** a change an operator would notice gets a `CHANGELOG.md` entry under `## Unreleased`, following that file's "How to write an entry" section.
 - **Tests:** follow a test-driven workflow. The rules on assertions and coverage are under [Boundaries](#boundaries).
 - **Verify before pushing:** run `npm run check:<stack>` for every stack you touched (see [Commands](#commands)), plus the extra CI-only checks that apply to your change. CI (`.github/workflows/ci.yml`) is the source of truth.
@@ -46,7 +46,7 @@ Inspect existing code before creating a new component, helper or pattern. OwnCor
 
 ## Code guidelines
 
-Full rules: [CODE_STYLE.md](CODE_STYLE.md). Match the surrounding code rather than reasoning about style from scratch.
+Full rules: [docs/code-style.md](docs/code-style.md). Match the surrounding code rather than reasoning about style from scratch.
 
 - **Go:** `gofmt` + `golangci-lint` (CI pins v2.14.0). Prefer the standard library, except for the concurrency-heavy packages: in `ws/` and `service/` declare `syncutil.Mutex`/`syncutil.RWMutex` (`Server/syncutil/`), never a raw `sync.Mutex`/`sync.RWMutex`. `syncutil` gains deadlock detection under `-tags deadlock`, and the `syncutil-locks` rule in `Server/invariants/` fails `go test` on a raw lock outside the frozen set — the rule's scope is `ws/` and `service/`, and a handful of other production files use raw locks deliberately (`Server/invariants/syncutil_locks.go` lists them).
 - **Server layering:** `api → service → db`. Only `db/` and `service/` import `db` freely; new persistence goes behind a service, not into a handler. New authorization code resolves a `permissions.Subject` and calls the predicate that owns the property; only `permissions/` and a frozen residue listed in `AuthzResidueAllow` (`Server/invariants/authz_chokepoint.go`) call the raw permission-bit helpers.
@@ -65,7 +65,7 @@ Binding for every agent and model. Full rules and rationale: [CLAUDE.md](CLAUDE.
 
 ## Design rules
 
-Full rules: [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md).
+Full rules: [docs/summaries/design-system.md](docs/summaries/design-system.md).
 
 - Colours, spacing, radii and type sizes come from the tokens in `Client/src/styles/tokens.css`. Text on an accent fill is `var(--on-accent)`, the accent used as text is `var(--accent-text)`, and a focus indicator is `var(--focus-ring)`, never `var(--accent)`.
 - `src/styles/app.css` is an `@import` manifest over `src/styles/app/*.css`, and its import order is the cascade: add rules to the owning fragment, and never reorder imports or move rules between fragments in a visual PR.
@@ -128,7 +128,7 @@ go test -tags otel -count=1 ./telemetry/... ./api/...
 golangci-lint run
 ```
 
-Rust (from `Client/src-tauri/`): `cargo fmt --all -- --check`, `cargo test --lib`, `cargo clippy --all-targets -- -D warnings`. A Linux Rust build first needs, in each shell, `eval "$(Client/scripts/linux-webrtc-toolchain.sh)"` run from the repository root (from `Client/src-tauri/` the path is `../scripts/linux-webrtc-toolchain.sh`). It uses `CC`/`CXX` or an installed clang >= 21, installs clang-21 from apt.llvm.org only on Debian/Ubuntu (elsewhere, install clang >= 21 yourself), and fetches a pinned libwebrtc. Windows and server-only work need none of this ([Client/CLAUDE.md](Client/CLAUDE.md)).
+Rust (from `Client/src-tauri/`): `cargo fmt --all -- --check`, `cargo test --lib`, `cargo clippy --all-targets -- -D warnings`. A Linux Rust build first needs, in each shell, `eval "$(Client/scripts/linux-webrtc-toolchain.sh)"` run from the repository root (from `Client/src-tauri/` the path is `../scripts/linux-webrtc-toolchain.sh`). It uses `CC`/`CXX` or an installed clang >= 21, installs clang-21 from apt.llvm.org only on Debian/Ubuntu (elsewhere, install clang >= 21 yourself), and fetches a pinned libwebrtc and the CUDA headers that build NVENC. Windows and server-only work need none of this ([Client/CLAUDE.md](Client/CLAUDE.md)).
 
 `Server/Makefile` wraps the generators (`sqlc-generate`, `protocol-generate`, `docs-generate`) and their `*-verify` twins, but `make` is not on a stock Windows PATH. Every `*-verify` target is its generator followed by `git diff --exit-code` on the generated paths.
 
@@ -171,7 +171,7 @@ CI fails on drift, and the next generator run silently discards a hand edit. `np
 
 ### Other boundaries
 
-- A migration that has shipped is immutable; write a new migration instead. A new one is numbered one past the highest on `dev`. `scripts/check-migrations.mjs` enforces both; see [DATABASE.md](DATABASE.md#migrations-and-rollback).
+- A migration that has shipped is immutable; write a new migration instead. A new one is numbered one past the highest on `dev`. `scripts/check-migrations.mjs` enforces both; see [docs/summaries/database.md](docs/summaries/database.md#migrations-and-rollback).
 - The `DBImportAllow` and `AuthzResidueAllow` inventories in `Server/invariants/` only shrink. Put new persistence behind a service, and new authorization behind a permission predicate, rather than adding a row.
 - Never run `npm run tauri build` locally; the full desktop installer build is CI-only (the `tauri-build` job, on PRs to `main`). `cargo build --example native_voice_interop` (the native-voice interop proof) is fine.
 - `.superpowers/findings-ledger.json` is the bug-hunt ledger and its only tracked copy. `FINDINGS.md` is generated (`node .superpowers/render-ledger.mjs`, gitignored): edit the ledger, never the rendering. Statuses are `open`, `fixed`, `declined`, `refuted`, `duplicate`, `blocked`; `severity` is `critical`, `high`, `medium` or `low`.

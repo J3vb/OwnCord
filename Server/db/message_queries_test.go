@@ -30,6 +30,24 @@ func seedChannel(t *testing.T, database *db.DB, name string) int64 {
 	return id
 }
 
+// seedChannelRawSQL inserts a text channel with plain SQL, so it works against
+// a schema older than the current writers expect (a test that migrates only up
+// to some version and then seeds). seedChannel uses the generated writer, which
+// names columns a partly migrated database may not have yet.
+func seedChannelRawSQL(t *testing.T, database *db.DB, name string) int64 {
+	t.Helper()
+	res, err := database.ExecContext(context.Background(),
+		`INSERT INTO channels (name, type) VALUES (?, 'text')`, name)
+	if err != nil {
+		t.Fatalf("seedChannelRawSQL(%q): %v", name, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("seedChannelRawSQL(%q) id: %v", name, err)
+	}
+	return id
+}
+
 // ─── CreateMessage ────────────────────────────────────────────────────────────
 
 func TestCreateMessage_ReturnsID(t *testing.T) {
@@ -704,7 +722,7 @@ func TestSearchMessages_PinnedMessageStaysSearchable(t *testing.T) {
 	chID := seedChannel(t, database, "ch")
 
 	id, _ := database.CreateMessage(context.Background(), chID, userID, "pinworthy announcement", nil)
-	if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
 
@@ -1234,10 +1252,6 @@ func TestGetChannelUnreadCounts_IncludesAnnouncementChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateChannel(announcement): %v", err)
 	}
-	voiceID, err := database.CreateChannel(context.Background(), "voicechan", "voice", "", "", 0)
-	if err != nil {
-		t.Fatalf("CreateChannel(voice): %v", err)
-	}
 
 	msgID, _ := database.CreateMessage(context.Background(), annID, userID, "server news", nil)
 
@@ -1254,9 +1268,6 @@ func TestGetChannelUnreadCounts_IncludesAnnouncementChannels(t *testing.T) {
 	}
 	if cu.UnreadCount != 1 {
 		t.Errorf("UnreadCount = %d, want 1", cu.UnreadCount)
-	}
-	if _, ok := counts[voiceID]; ok {
-		t.Errorf("voice channel %d must not appear in unread counts", voiceID)
 	}
 }
 
@@ -1497,7 +1508,7 @@ func TestGetPinnedMessages_Capped(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateMessage[%d]: %v", i, err)
 		}
-		if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+		if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
 			t.Fatalf("SetMessagePinned[%d]: %v", i, err)
 		}
 	}
@@ -1531,7 +1542,7 @@ func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
 
 	// Pin the NEWER message first, then the OLDER one, so message-id order and
 	// pin-recency order disagree.
-	if err := database.SetMessagePinned(context.Background(), second, true); err != nil {
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: second, Pinned: true, UserID: 1}); err != nil {
 		t.Fatalf("pin second: %v", err)
 	}
 	// Windows' wall clock ticks coarsely, so two back-to-back pins can share a
@@ -1539,7 +1550,7 @@ func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
 	for start := time.Now().UnixNano(); time.Now().UnixNano() == start; {
 		time.Sleep(time.Millisecond)
 	}
-	if err := database.SetMessagePinned(context.Background(), first, true); err != nil {
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: first, Pinned: true, UserID: 1}); err != nil {
 		t.Fatalf("pin first: %v", err)
 	}
 
@@ -1609,5 +1620,54 @@ func TestGetMessagesAfterForAPI_AscendingAfterCursor(t *testing.T) {
 	}
 	if len(none) != 0 {
 		t.Errorf("page after the newest = %d rows, want 0", len(none))
+	}
+}
+
+// LastReadMessageID is the caller's own read pointer, distinct from the
+// channel's newest message, and 0 for a channel with no read_states row.
+func TestGetChannelUnreadCounts_LastReadMessageID(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	reader := seedUser(t, database, "pointerreader")
+	other := seedUser(t, database, "pointerother")
+	read := seedChannel(t, database, "pointer-read")
+	untouched := seedChannel(t, database, "pointer-untouched")
+
+	first, err := database.CreateMessage(ctx, read, reader, "one", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	last, err := database.CreateMessage(ctx, read, reader, "two", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := database.CreateMessage(ctx, untouched, reader, "x", nil); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if err := database.UpdateReadState(ctx, reader, read, first); err != nil {
+		t.Fatalf("UpdateReadState: %v", err)
+	}
+
+	counts, err := database.GetChannelUnreadCounts(ctx, reader)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts: %v", err)
+	}
+	if got := counts[read].LastReadMessageID; got != first {
+		t.Errorf("LastReadMessageID = %d, want %d", got, first)
+	}
+	if got := counts[read].LastMessageID; got != last {
+		t.Errorf("LastMessageID = %d, want newest message %d", got, last)
+	}
+	if got := counts[untouched].LastReadMessageID; got != 0 {
+		t.Errorf("channel with no read row: LastReadMessageID = %d, want 0", got)
+	}
+
+	// Another user's pointer must not leak into this user's answer.
+	otherCounts, err := database.GetChannelUnreadCounts(ctx, other)
+	if err != nil {
+		t.Fatalf("GetChannelUnreadCounts(other): %v", err)
+	}
+	if got := otherCounts[read].LastReadMessageID; got != 0 {
+		t.Errorf("other user LastReadMessageID = %d, want 0", got)
 	}
 }

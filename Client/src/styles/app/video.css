@@ -16,16 +16,23 @@
   justify-content: center;
   background: var(--bg-primary);
   position: relative;
+  container-type: inline-size;
 }
 
-/* The always-present way out of video/focus mode. Pinned top-left so it stays
-   reachable when the focus layout has scrolled the focused tile's own nav off. */
+/* The call view's own controls (view toggles, pop-out, show chat) sit bottom
+   right, beside the control bar, as Discord's do, so they never cover a
+   tile's name or its own top-right nav. Show chat stays reachable when the
+   focus layout has scrolled the focused tile's nav off. */
+.video-grid__views {
+  position: absolute;
+  right: 12px;
+  bottom: 16px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+}
 .video-grid__exit,
 .video-grid__view {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 5;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -48,21 +55,14 @@
 .video-grid__view[hidden] {
   display: none;
 }
-
-/* The call view's view toggles, beside the exit control. */
-.video-grid__views {
-  position: absolute;
-  top: 8px;
-  left: 44px;
-  z-index: 5;
-  display: flex;
-  gap: 4px;
-}
-.video-grid__view {
-  position: static;
-}
 .video-grid__view[aria-pressed="false"] {
   opacity: 0.55;
+}
+/* Too narrow for both in one row (a small pop-out): they stack above it. */
+@container (max-width: 680px) {
+  .video-grid .video-grid__views {
+    bottom: 60px;
+  }
 }
 
 /* Room below the tiles (and the focus strip) for the call view's control bar. */
@@ -180,6 +180,29 @@
   font-size: var(--font-size-xxs);
   font-weight: 800;
   letter-spacing: 0.05em;
+}
+/* Who is watching a screen share: an eye and the count, top-right. The tile's
+   hover controls step down below it while it shows. */
+.video-viewers {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+  color: var(--on-fill);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+.video-viewers[hidden] {
+  display: none;
+}
+.video-cell--has-viewers .video-tile-nav {
+  top: 40px;
 }
 .video-cell--speaking {
   box-shadow: 0 0 0 2px var(--text-positive);
@@ -401,6 +424,10 @@
 .video-self-detail {
   font-size: var(--font-size-xs);
 }
+.video-self-stats {
+  font-size: var(--font-size-xs);
+  opacity: 0.8;
+}
 .video-self-actions {
   display: flex;
   flex-wrap: wrap;
@@ -419,6 +446,7 @@
 .video-focus-strip .video-tile-nav,
 .video-focus-strip .video-tile-overlay,
 .video-focus-strip .video-self-detail,
+.video-focus-strip .video-self-stats,
 .video-focus-strip .video-self-actions {
   display: none;
 }

@@ -1,4 +1,5 @@
 /* ═══ Compact Mode ═══ */
+/* Compact mode changes the message list only (like Discord); the shell keeps its size. */
 /* Messages: hide avatars, inline timestamp + author, tighter spacing */
 .compact-mode .message {
   padding: 2px 16px 2px 40px;
@@ -28,6 +29,13 @@
 .compact-mode .message .msg-header {
   display: flex;
 }
+.compact-mode .message .msg-compact-time {
+  display: inline;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .compact-mode .message.grouped .msg-header {
   display: none;
 }
@@ -45,23 +53,6 @@
 .compact-mode .msg-day-divider {
   padding: 4px 16px 4px;
   margin-bottom: 2px;
-}
-/* Channel sidebar */
-.compact-mode .channel-item {
-  padding: 3px 8px;
-}
-.compact-mode .channel-item .ch-name {
-  font-size: var(--font-size-sm);
-}
-.compact-mode .channel-sidebar-header {
-  height: 40px;
-}
-.compact-mode .category {
-  padding: 10px 8px 2px 16px;
-}
-/* Chat header */
-.compact-mode .chat-header {
-  height: 38px;
 }
 /* Empty states */
 .channel-list-empty,
@@ -92,41 +83,6 @@
   color: var(--on-accent);
   font-size: var(--font-size-sm);
   cursor: pointer;
-}
-
-/* Members */
-.compact-mode .member-item {
-  padding: 2px 8px;
-}
-.compact-mode .member-item .mi-avatar {
-  width: 24px;
-  height: 24px;
-  font-size: 10px;
-}
-.compact-mode .member-item .mi-name {
-  font-size: var(--font-size-sm);
-}
-.compact-mode .member-role-group {
-  padding: 12px 16px 2px;
-}
-/* Voice */
-.compact-mode .voice-user-item {
-  padding: 2px 8px;
-  font-size: var(--font-size-xs);
-}
-.compact-mode .voice-user-item .vu-avatar {
-  width: 16px;
-  height: 16px;
-  font-size: 7px;
-}
-/* User bar */
-.compact-mode .user-bar {
-  height: 42px;
-}
-.compact-mode .user-bar .ub-avatar {
-  width: 28px;
-  height: 28px;
-  font-size: 12px;
 }
 /* Messages container */
 .compact-mode .messages-container {

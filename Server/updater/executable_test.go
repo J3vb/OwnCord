@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -76,5 +77,42 @@ func assertExecutablePathAfterRename(t *testing.T) {
 		if err != nil || imagePath != exePath+".old" {
 			t.Fatalf("renamed running image = %q, %v; want %q", imagePath, err, exePath+".old")
 		}
+	}
+}
+
+func TestCanReplaceExecutable_WritableDir(t *testing.T) {
+	dir := t.TempDir()
+	exePath := filepath.Join(dir, "chatserver")
+	if err := CanReplaceExecutable(exePath); err != nil {
+		t.Fatalf("CanReplaceExecutable = %v, want nil", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("probe left %d file(s) behind: %v", len(entries), entries)
+	}
+}
+
+func TestCanReplaceExecutable_ReadOnlyDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permission bits do not make a Windows folder read-only")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	err := CanReplaceExecutable(filepath.Join(dir, "chatserver"))
+	if err == nil {
+		t.Fatal("CanReplaceExecutable = nil, want an error for a read-only directory")
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Errorf("error %q does not name the directory", err)
 	}
 }

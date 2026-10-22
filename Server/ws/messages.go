@@ -53,8 +53,26 @@ type memberUserPayload struct {
 	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
 }
 
+// memberJoinUser is the member_join user object: memberUserPayload plus the
+// profile fields the member list shows. It is its own struct because
+// memberUserPayload is also chat_message.user, which must not carry them.
+type memberJoinUser struct {
+	memberUserPayload
+	// About is the profile bio (About Me). Null when unset.
+	About *string `json:"about"`
+	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
+	CreatedAt string `json:"created_at"`
+	// RoleIDs is every role the member holds, top role first (WP 6.3c); Role
+	// stays the top role's name. Omitted when the holder list was not read.
+	RoleIDs []int64 `json:"role_ids,omitempty"`
+	// Banner (the /api/v1/files/<id> path) and BannerColor are omitted when
+	// unset, like members[] in ready: absent means no banner.
+	Banner      *string `json:"banner,omitempty"`
+	BannerColor *string `json:"banner_color,omitempty"`
+}
+
 type memberJoinPayload struct {
-	User memberUserPayload `json:"user"`
+	User memberJoinUser `json:"user"`
 	// Status is the viewer-safe presence the connecting user comes online as
 	// (db.BroadcastStatus of the ConnectStatus-mapped value): an invisible
 	// connector reports "offline" here, never their true chosen status. This
@@ -69,6 +87,9 @@ type memberJoinPayload struct {
 type memberUpdatePayload struct {
 	UserID int64  `json:"user_id"`
 	Role   string `json:"role"`
+	// RoleIDs is every role the member holds, top role first (WP 6.3c); Role
+	// is the top role's name. Omitted when the holder list was not read.
+	RoleIDs []int64 `json:"role_ids,omitempty"`
 }
 
 type userUpdatePayload struct {
@@ -83,6 +104,10 @@ type userUpdatePayload struct {
 	// IdentityPublicKey mirrors memberUserPayload — carried so peers can
 	// detect an identity-key change (TOFU mismatch) as it happens.
 	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
+	// Banner and BannerColor are always present (null = cleared) for the same
+	// reason as DisplayName and About: user_update replaces the client's copy.
+	Banner      *string `json:"banner"`
+	BannerColor *string `json:"banner_color"`
 }
 
 type memberBanPayload struct {
@@ -128,6 +153,9 @@ type chatSendOKPayload struct {
 	Deduplicated    bool   `json:"deduplicated,omitempty"`
 	MessageID       int64  `json:"message_id"`
 	Timestamp       string `json:"timestamp"`
+	// SkippedAttachmentIDs are requested uploads the send did not attach (no
+	// reason per id); absent when every one was attached.
+	SkippedAttachmentIDs []string `json:"skipped_attachment_ids,omitempty"`
 }
 
 type chatEditedPayload struct {
@@ -139,6 +167,8 @@ type chatEditedPayload struct {
 	// edit that adds or drops a mention updates the highlight too.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
+	// MentionRoles: see chatMessagePayload.MentionRoles.
+	MentionRoles []int64 `json:"mention_roles"`
 	// MentionsHere: see chatMessagePayload.MentionsHere.
 	MentionsHere bool `json:"mentions_here"`
 }
@@ -193,7 +223,13 @@ type voiceStatePayload struct {
 // through the normal voice_join path.
 type voiceMovedPayload struct {
 	ToChannelID int64 `json:"to_channel_id"`
+	// Reason says why the server moved the client; "afk" for the idle sweep
+	// (WP 6.10b). Omitted for a moderator move, so those bytes are unchanged.
+	Reason string `json:"reason,omitempty"`
 }
+
+// voiceMovedReasonAFK is voice_moved's reason for a move by the AFK sweep.
+const voiceMovedReasonAFK = "afk"
 
 // voiceDisconnectedPayload tells one client a moderator removed it from voice.
 type voiceDisconnectedPayload struct {
@@ -233,6 +269,9 @@ type voiceE2EEAnnounceBroadcast struct {
 	UserID    int64  `json:"user_id"`
 	PublicKey string `json:"public_key"`
 	Signature string `json:"signature,omitempty"`
+	// VideoDecode is the sender's sanitized decodable video codec list
+	// (WP M-4), omitted when absent so legacy announces serialize unchanged.
+	VideoDecode []string `json:"video_decode,omitempty"`
 }
 
 // voiceE2EEOfferRelay is the server→client relay with from_user_id.
@@ -245,61 +284,6 @@ type voiceE2EEOfferRelay struct {
 type voiceLeavePayload struct {
 	ChannelID int64 `json:"channel_id"`
 	UserID    int64 `json:"user_id"`
-}
-
-type channelPayload struct {
-	ID       int64  `json:"id"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Category string `json:"category"`
-	Topic    string `json:"topic"`
-	Position int    `json:"position"`
-	// SlowMode lets the client pre-disable the composer for the cooldown
-	// instead of accepting a message the server will refuse with SLOW_MODE.
-	// Seconds; 0 means off.
-	SlowMode int `json:"slow_mode"`
-	// NSFW marks the channel as possibly carrying sensitive content. It is
-	// shipped so clients can gate or label it; the server applies no content
-	// behaviour of its own to a flagged channel.
-	NSFW bool `json:"nsfw"`
-	// Voice capacity limits (0 = unlimited), the same values the voice-join
-	// path enforces with CHANNEL_FULL / VIDEO_LIMIT. Sent so the sidebar can
-	// show "3/5" and the client can explain a refusal it could have predicted.
-	VoiceMaxUsers int `json:"voice_max_users"`
-	VoiceMaxVideo int `json:"voice_max_video"`
-	// CanSend is the per-recipient composer affordance, the same value the
-	// ready payload ships per channel. It is per-client, so only the targeted
-	// channel_create sends (BroadcastChannelCreate, RefreshChannelVisibility)
-	// populate it — the shared-buffer channel_update broadcast leaves it nil,
-	// since one encoded frame is delivered to every recipient and a single
-	// value would be wrong for some of them.
-	//
-	// Pointer + omitempty so "not stated" stays distinguishable from "false":
-	// a client must keep its existing verdict when the field is absent, and an
-	// older server that never sends it keeps the permissive default.
-	CanSend *bool `json:"can_send,omitempty"`
-	// CanModerateVoice is the per-recipient voice-moderation affordance (B9
-	// Q5), the same value the ready payload ships per channel. Same
-	// per-recipient, targeted-only, absent-means-unchanged rules as CanSend.
-	CanModerateVoice *bool `json:"can_moderate_voice,omitempty"`
-}
-
-// channelPayloadFrom narrows a channel row to the wire shape shared by the
-// channel_create and channel_update broadcasts. One constructor so the two
-// events can never disagree about which fields a client is told about.
-func channelPayloadFrom(ch *db.Channel) channelPayload {
-	return channelPayload{
-		ID:            ch.ID,
-		Name:          ch.Name,
-		Type:          ch.Type,
-		Category:      ch.Category,
-		Topic:         ch.Topic,
-		Position:      ch.Position,
-		SlowMode:      ch.SlowMode,
-		NSFW:          ch.NSFW,
-		VoiceMaxUsers: ch.VoiceMaxUsers,
-		VoiceMaxVideo: ch.VoiceMaxVideo,
-	}
 }
 
 type channelDeletePayload struct {
@@ -441,21 +425,21 @@ func buildPresenceMsg(userID int64, status string, customStatus *string) []byte 
 // which runs before this); Status here applies the BroadcastStatus collapse
 // so an invisible connector's member_join reports "offline" like every other
 // payload another user can see, instead of the raw chosen status.
-func buildMemberJoin(user *db.User, roleName string) []byte {
+func buildMemberJoin(user *db.User, roleName string, roleIDs []int64) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeMemberJoin,
 		Payload: memberJoinPayload{
-			User:   memberPayloadFor(user, roleName),
+			User:   memberPayloadFor(user, roleName, roleIDs),
 			Status: db.BroadcastStatus(user.Status),
 		},
 	})
 }
 
 // buildMemberUpdate constructs a member_update broadcast per PROTOCOL.md.
-func buildMemberUpdate(userID int64, roleName string) []byte {
+func buildMemberUpdate(userID int64, roleName string, roleIDs []int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeMemberUpdate,
-		Payload: memberUpdatePayload{UserID: userID, Role: roleName},
+		Payload: memberUpdatePayload{UserID: userID, Role: roleName, RoleIDs: roleIDs},
 	})
 }
 
@@ -469,6 +453,8 @@ type UserUpdate struct {
 	DisplayName       *string
 	About             *string
 	IdentityPublicKey *string
+	Banner            *string // /api/v1/files/<id> path; nil = none
+	BannerColor       *string
 }
 
 // buildUserUpdate constructs a user_update broadcast for profile changes.
@@ -539,18 +525,21 @@ func buildUploadPolicy(blocked, allowed []string) []byte {
 }
 
 // buildChatSendOK correlates the current request with the original commit.
-func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool) []byte {
+func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool, skippedAttachmentIDs []string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChatSendOK,
 		ID:      requestID,
-		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp, ClientMessageID: clientMessageID, Deduplicated: duplicate},
+		Payload: chatSendOKPayload{MessageID: msgID, Timestamp: timestamp, ClientMessageID: clientMessageID, Deduplicated: duplicate, SkippedAttachmentIDs: skippedAttachmentIDs},
 	})
 }
 
 // buildChatEdited constructs a chat_edited broadcast.
-func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions []int64, mentionsEveryone, mentionsHere bool) []byte {
+func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions, mentionRoles []int64, mentionsEveryone, mentionsHere bool) []byte {
 	if mentions == nil {
 		mentions = []int64{}
+	}
+	if mentionRoles == nil {
+		mentionRoles = []int64{}
 	}
 	return buildJSON(wsMsg{
 		Type: MsgTypeChatEdited,
@@ -560,6 +549,7 @@ func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions 
 			Content:          content,
 			EditedAt:         editedAt,
 			Mentions:         mentions,
+			MentionRoles:     mentionRoles,
 			MentionsEveryone: mentionsEveryone,
 			MentionsHere:     mentionsHere,
 		},
@@ -634,10 +624,12 @@ func buildVoiceState(state db.VoiceState) []byte {
 }
 
 // buildVoiceMoved constructs a voice_moved message for the moved client.
-func buildVoiceMoved(toChannelID int64) []byte {
+//
+// reason is "" for a moderator move and "afk" for the AFK sweep's.
+func buildVoiceMoved(toChannelID int64, reason string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceMoved,
-		Payload: voiceMovedPayload{ToChannelID: toChannelID},
+		Payload: voiceMovedPayload{ToChannelID: toChannelID, Reason: reason},
 	})
 }
 
@@ -686,14 +678,15 @@ func buildVoiceToken(channelID int64, token string, proxyPath string, directURL 
 }
 
 // buildVoiceE2EEAnnounce constructs a voice_e2ee_announce server→client relay.
-// signature may be "" (legacy announce) — the field is then omitted.
-func buildVoiceE2EEAnnounce(userID int64, publicKey, signature string) []byte {
+// An empty signature (legacy announce) or video decode list is omitted.
+func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceE2EEAnnounceBC,
 		Payload: voiceE2EEAnnounceBroadcast{
-			UserID:    userID,
-			PublicKey: publicKey,
-			Signature: signature,
+			UserID:      userID,
+			PublicKey:   a.key,
+			Signature:   a.sig,
+			VideoDecode: a.videoDecode,
 		},
 	})
 }
@@ -719,11 +712,14 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 }
 
 // buildChannelCreateFor constructs a channel_create addressed to ONE client,
-// carrying that client's can_send and can_moderate_voice verdicts.
-func buildChannelCreateFor(ch *db.Channel, canSend, canModerateVoice bool) []byte {
-	p := channelPayloadFrom(ch)
-	p.CanSend = &canSend
-	p.CanModerateVoice = &canModerateVoice
+// carrying that client's own affordance verdicts (see channelAffordances).
+func buildChannelCreateFor(ch *db.Channel, private bool, a channelAffordances) []byte {
+	p := channelPayloadFrom(ch, private)
+	p.CanSend = &a.CanSend
+	p.CanModerateVoice = &a.CanModerateVoice
+	p.CanDeleteOthers = &a.CanDeleteOthers
+	p.CanPin = &a.CanPin
+	p.CanReact = &a.CanReact
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelCreate,
 		Payload: p,
@@ -731,10 +727,10 @@ func buildChannelCreateFor(ch *db.Channel, canSend, canModerateVoice bool) []byt
 }
 
 // buildChannelUpdate constructs a channel_update broadcast.
-func buildChannelUpdate(ch *db.Channel) []byte {
+func buildChannelUpdate(ch *db.Channel, private bool) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelUpdate,
-		Payload: channelPayloadFrom(ch),
+		Payload: channelPayloadFrom(ch, private),
 	})
 }
 

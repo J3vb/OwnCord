@@ -39,9 +39,15 @@ export interface NotifierSubject {
 
 export function describeNotifierSuite(
   makeSubject: () => Promise<NotifierSubject>,
-  options?: { expectEveryTestToFail?: boolean },
+  options?: {
+    expectEveryTestToFail?: boolean;
+    /** False for a platform with no window to flash (the browser): the two
+     *  attention tests are skipped and that platform's own test pins the no-op. */
+    windowAttention?: boolean;
+  },
 ): void {
   const check = options?.expectEveryTestToFail ? test.fails : test;
+  const checkAttention = options?.windowAttention === false ? test.skip : check;
   describe("Notifier", () => {
     let ctx: NotifierSubject;
     beforeEach(async () => {
@@ -74,12 +80,12 @@ export function describeNotifierSuite(
       expect(ctx.native.shown()).toEqual([{ title: "Alice in #general", body: "hello" }]);
     });
 
-    check("asks for the user's attention once per flash", async () => {
+    checkAttention("asks for the user's attention once per flash", async () => {
       await ctx.subject.flashTaskbar();
       expect(ctx.native.attentionRequests()).toBe(1);
     });
 
-    check(
+    checkAttention(
       "asks for urgent attention once per call request, not the informational kind",
       async () => {
         await ctx.subject.requestAttention();

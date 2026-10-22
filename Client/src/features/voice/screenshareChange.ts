@@ -6,10 +6,11 @@
  * (`LocalTrack.replaceTrack`), so the publication and its sid stay: viewers
  * keep watching, and the server hears no `voice_screenshare` at all. Quality
  * re-sizes the running capture and re-sets its encoding, with no new picker.
- * Quality is web-path only: the Linux native capture picks its quality in
- * its own dialog, so its share has no `quality`. Change source there is the
- * track's own (`inPlaceSourceChange`): the host swaps the capture under the
- * same publication.
+ * The Linux native capture cannot do either in the webview, so its track does
+ * both itself: Change source (`inPlaceSourceChange`) has the host swap the
+ * capture under the same publication, and Quality (`inPlaceQualityChange`) has
+ * the host re-size the running capture and republish it (a new publication, so
+ * viewers see the codec switch's short blip).
  */
 
 import {
@@ -26,18 +27,22 @@ import {
   SCREENSHARE_PRESETS,
   disableScreenshare,
   getEffectiveScreenShareFps,
+  inPlaceQualityChange,
   inPlaceSourceChange,
   getScreenShareCaptureOptions,
   getScreenShareFps,
   getScreenShareMaxBitrate,
   unpublishManualTrack,
   watchScreenEnded,
+  type InPlaceQualityChange,
   type InPlaceSourceChange,
   type ScreenTrackState,
   type StreamQuality,
   type VideoTrackDeps,
 } from "../../lib/screenShare";
 import { bumpLocalShareRev } from "../../stores/voice.store";
+import { isLinuxDesktop } from "./native/platform";
+import { startAppShareAudio, wantsAppAudio, type AppShareAudio } from "../../lib/appAudioShare";
 import { voiceText } from "../../i18n/voice";
 
 const log = createLogger("screenShare");
@@ -112,6 +117,7 @@ export async function changeScreenshareSource(
   state.changing = true;
   let fresh: LocalTrack[] = [];
   let swapped = false;
+  let appShare: AppShareAudio | null = null;
   try {
     fresh = await createLocalScreenTracks(getScreenShareCaptureOptions(live.quality, live.fps));
     const freshVideo = fresh.find((t) => t.kind === Track.Kind.Video);
@@ -123,8 +129,25 @@ export async function changeScreenshareSource(
       for (const t of fresh) t.stop();
       return;
     }
-    const freshAudio = fresh.find((t) => t.kind === Track.Kind.Audio);
+    let freshAudio: LocalTrack | undefined = fresh.find((t) => t.kind === Track.Kind.Audio);
     const oldAudio = live.tracks.find((t) => t.kind === Track.Kind.Audio);
+    // Windows (WP 6.7b): a window gets its app's sound as the "fresh audio".
+    // The host replaces the capture of the window being left; leaving a
+    // window for anything else stops it below.
+    if (
+      !isLinuxDesktop() &&
+      wantsAppAudio(state.appAudioOn, freshVideo.mediaStreamTrack, freshAudio !== undefined)
+    ) {
+      appShare = await startAppShareAudio(freshVideo.mediaStreamTrack, () =>
+        superseded(state, deps, live),
+      );
+      if (superseded(state, deps, live)) {
+        // startAppShareAudio already stopped a capture it opened.
+        for (const t of fresh) t.stop();
+        return;
+      }
+      if (appShare !== null) freshAudio = appShare.track;
+    }
     swapped = true;
     state.screenTrackEndedCleanup?.();
     // The SDK stops the old capture once the sender carries the new one.
@@ -148,6 +171,7 @@ export async function changeScreenshareSource(
       // The stop already released the share's tracks; these captures are the
       // only ones it could not reach.
       for (const t of fresh) t.stop();
+      appShare?.close();
       if (freshAudio !== undefined && tracks.includes(freshAudio)) {
         unpublishManualTrack(live.room, freshAudio);
       }
@@ -156,6 +180,12 @@ export async function changeScreenshareSource(
     // The `fresh` wrappers stay unstopped: stopping one would stop the
     // capture the published track now carries.
     state.manualScreenTracks = tracks;
+    // The app's sound follows the window.
+    const oldApp = state.appAudio;
+    state.appAudio = appShare ?? undefined;
+    // A newer start (window to window) already replaced the old capture on the
+    // host, so closing the old one skips the stop; to a screen it stops.
+    oldApp?.close();
     watchScreenEnded(state, deps, live.video, tracks, live.generation);
     if (live.video.mediaStreamTrack.readyState === "ended") {
       // The new capture ended while it was being swapped in, before the
@@ -168,6 +198,7 @@ export async function changeScreenshareSource(
     log.info("Screenshare source changed", { audio: freshAudio !== undefined });
   } catch (err) {
     for (const t of fresh) t.stop();
+    if (appShare !== null && state.appAudio !== appShare) appShare.close();
     if (superseded(state, deps, live)) return;
     if (!swapped) {
       // The picker was closed (not a failure) or could not open: the old
@@ -220,6 +251,53 @@ async function changeInPlace(
   }
 }
 
+/** A quality change the host could not complete, by its `stage`
+ *  (`ScreenQualityError`): "publish" means the share's video is gone. Read by
+ *  shape, so this web-loaded module does not import the Linux track. */
+function isPublishFailure(err: unknown): boolean {
+  return err instanceof Error && (err as { stage?: unknown }).stage === "publish";
+}
+
+/** Quality on a track that changes it itself (Linux): the host re-sizes the
+ *  running capture and republishes it. A refusal changed nothing, so the
+ *  toast shows and the select reverts to the live quality; a failed republish
+ *  left no video, so the share ends. A stop, reconnect or new session while
+ *  the host works makes the change go silent. */
+async function qualityInPlace(
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  share: InPlaceQualityChange,
+  quality: StreamQuality,
+): Promise<void> {
+  const room = deps.getRoom();
+  const ws = deps.getWs();
+  if (state.changing === true || room === null || ws === null) return;
+  if (state.quality === undefined || state.quality === quality) return;
+  const generation = state.generation ?? 0;
+  const tracks = state.manualScreenTracks;
+  const fps = state.fps ?? share.fps;
+  const stale = (): boolean =>
+    (state.generation ?? 0) !== generation ||
+    state.manualScreenTracks !== tracks ||
+    deps.getRoom() !== room ||
+    deps.getWs() !== ws;
+  state.changing = true;
+  try {
+    await share.setQuality(quality, fps, state.published ?? "vp8");
+    if (stale()) return;
+    state.quality = quality;
+    bumpLocalShareRev();
+    log.info("Screenshare quality changed", { quality, fps, inPlace: true });
+  } catch (err) {
+    if (stale()) return;
+    log.error("Failed to change screenshare quality", err);
+    if (isPublishFailure(err)) await disableScreenshare(state, deps);
+    deps.onError(voiceText("share.qualityFailed"));
+  } finally {
+    state.changing = false;
+  }
+}
+
 /** The encoding the top layer carries (the one at full size). */
 async function setTopLayer(
   sender: RTCRtpSender | undefined,
@@ -249,6 +327,11 @@ export async function setScreenshareQuality(
   deps: VideoTrackDeps,
   quality: StreamQuality,
 ): Promise<void> {
+  const inPlace = inPlaceQualityChange(state);
+  if (inPlace !== null) {
+    await qualityInPlace(state, deps, inPlace, quality);
+    return;
+  }
   const live = liveShare(state, deps);
   if (live === null || live.quality === quality) return;
   state.changing = true;

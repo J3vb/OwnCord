@@ -3,11 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -353,6 +357,338 @@ func TestRestoreCLI_RefusesSourceWithPendingWAL(t *testing.T) {
 
 	if code := runRestoreCLI(cfgPath, []string{"--force", source}); code == 0 {
 		t.Fatal("restore of a source with a pending WAL exited 0, want a refusal")
+	}
+	if !userExists(t, dbPath, "existing-owner") {
+		t.Fatal("the live database changed despite the refusal")
+	}
+}
+
+// TestRestoreCLI_PrunesKeepsSource: restoring from the oldest pre_restore_ copy
+// while four exist keeps the source and the new safety copy and removes only
+// the excess unprotected copy.
+func TestRestoreCLI_PrunesKeepsSource(t *testing.T) {
+	cfgPath, _, backupDir := restoreCLIFixture(t)
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	oldest := makeBackup(t, backupDir, "pre_restore_20200101_000000.db", "restored-user")
+	olds := make([]string, 0, 4)
+	olds = append(olds, oldest)
+	for _, n := range []string{"pre_restore_20200102_000000.db", "pre_restore_20200103_000000.db", "pre_restore_20200104_000000.db"} {
+		p := filepath.Join(backupDir, n)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		olds = append(olds, p)
+	}
+	for i, p := range olds {
+		ts := time.Now().Add(-time.Duration(len(olds)-i) * 24 * time.Hour)
+		if err := os.Chtimes(p, ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manual := filepath.Join(backupDir, "chatserver_20200101_000000.db")
+	if err := os.WriteFile(manual, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", oldest}); code != 0 {
+		t.Fatalf("restore exited %d, want 0", code)
+	}
+	exists := func(p string) bool { _, err := os.Stat(p); return err == nil }
+	if !exists(oldest) {
+		t.Error("the restore source was pruned")
+	}
+	if exists(olds[1]) {
+		t.Error("the excess unprotected copy was kept")
+	}
+	for _, p := range olds[2:] {
+		if !exists(p) {
+			t.Errorf("%s was removed, want kept", p)
+		}
+	}
+	if !exists(manual) {
+		t.Error("manual backup was touched")
+	}
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "pre_restore_") {
+			n++
+		}
+	}
+	if n != 4 { // new copy + p3 + p2 + source (protected)
+		t.Errorf("pre_restore_ copies = %d, want 4", n)
+	}
+}
+
+// TestRestoreCLI_PruneFailureStillExitsZero: a prune error is a warning on
+// stderr; the restore stands and the command exits 0.
+func TestRestoreCLI_PruneFailureStillExitsZero(t *testing.T) {
+	cfgPath, dbPath, backupDir := restoreCLIFixture(t)
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range []string{"pre_restore_20200101_000000.db", "pre_restore_20200102_000000.db", "pre_restore_20200103_000000.db", "pre_restore_20200104_000000.db"} {
+		p := filepath.Join(backupDir, n)
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ts := time.Now().Add(-time.Duration(10-i) * 24 * time.Hour)
+		if err := os.Chtimes(p, ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+	defer admin.SetRemoveSafetyCopyForTest(func(string) error { return errors.New("injected remove failure") })()
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	code := runRestoreCLI(cfgPath, []string{"--force", backup})
+	os.Stderr = oldStderr
+	_ = w.Close()
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(r)
+
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 despite the prune error", code)
+	}
+	if !userExists(t, dbPath, "restored-user") {
+		t.Fatal("the restore did not take effect")
+	}
+	if !strings.Contains(buf.String(), "could not prune old safety copies") {
+		t.Fatalf("stderr = %q, want the prune warning", buf.String())
+	}
+}
+
+// sidecarFloor reads the ws seq floor sidecar beside dbPath.
+func sidecarFloor(t *testing.T, dbPath string) (uint64, bool) {
+	t.Helper()
+	database, err := db.OpenShared(dbPath)
+	if err != nil {
+		t.Fatalf("OpenShared: %v", err)
+	}
+	defer database.Close() //nolint:errcheck
+	floor, ok, err := database.WSSeqFloorSidecar()
+	if err != nil {
+		t.Fatalf("WSSeqFloorSidecar: %v", err)
+	}
+	return floor, ok
+}
+
+// TestRestoreCLI_CarriesTheLiveSeqFloorAcrossTheRestore: the live database's
+// settings.ws_seq_floor is recorded in the sidecar before the file is
+// replaced, even on an install that never wrote one; a larger sidecar
+// already beside the database survives.
+func TestRestoreCLI_CarriesTheLiveSeqFloorAcrossTheRestore(t *testing.T) {
+	cfgPath, dbPath, backupDir := restoreCLIFixture(t)
+	live, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := live.SetSetting(context.Background(), db.WSSeqFloorSettingKey, "5000000000"); err != nil {
+		t.Fatal(err)
+	}
+	if err := live.Close(); err != nil {
+		t.Fatal(err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("restore exited %d", code)
+	}
+	if got, ok := sidecarFloor(t, dbPath); !ok || got != 5_000_000_000 {
+		t.Fatalf("sidecar = %d ok=%v, want 5000000000", got, ok)
+	}
+
+	// A larger planted sidecar survives a second restore of the same backup.
+	if err := os.WriteFile(dbPath+".ws-seq-floor", []byte("7000000000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Safety copies are named to the second; clear the first run's.
+	if err := os.RemoveAll(backupDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	backup = makeBackup(t, t.TempDir(), "backup2.db", "restored-user")
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("second restore exited %d", code)
+	}
+	if got, ok := sidecarFloor(t, dbPath); !ok || got != 7_000_000_000 {
+		t.Fatalf("sidecar = %d ok=%v, want 7000000000", got, ok)
+	}
+}
+
+// fileExists reports whether path exists.
+func fileExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// TestRestoreCLI_RefusesWhileRestoreStaged: a restore the admin panel staged
+// would be applied at the next boot over whatever the CLI restores, so the CLI
+// refuses and leaves both the live database and the pending restore alone.
+func TestRestoreCLI_RefusesWhileRestoreStaged(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	staged := makeBackup(t, t.TempDir(), "staged.db", "panel-user")
+	if err := db.StageRestore(context.Background(), dbPath, staged, db.StagedRestoreMarker{Backup: "staged.db"}); err != nil {
+		t.Fatalf("StageRestore: %v", err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+	// OpenShared refuses while a restore is pending, so compare the bytes.
+	before, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 1 {
+		t.Fatalf("restore with a staged restore exited %d, want 1", code)
+	}
+	if after, err := os.ReadFile(dbPath); err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("the live database changed despite the refusal (%v)", err)
+	}
+	if aside, _ := filepath.Glob(dbPath + ".pre_restore_*"); len(aside) > 0 {
+		t.Errorf("the refused run moved files aside: %v", aside)
+	}
+	for _, suffix := range []string{".restore-pending.json", ".restore-staged"} {
+		if !fileExists(dbPath + suffix) {
+			t.Errorf("%s was removed by the refused run", suffix)
+		}
+	}
+	if fileExists(dbPath + ".restore-result.json") {
+		t.Error("the refused run applied the staged restore")
+	}
+}
+
+// TestRestoreCLI_RefusesWhileRollbackPresent: files moved aside by an
+// unfinished swap mean a restore is half done; the CLI must not touch them.
+func TestRestoreCLI_RefusesWhileRollbackPresent(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	// A swap interrupted after the live database moved aside: no live file.
+	rollback := dbPath + ".restore-rollback"
+	if err := os.Rename(dbPath, rollback); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		_ = os.Remove(dbPath + suffix)
+	}
+	before, err := os.ReadFile(rollback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 1 {
+		t.Fatalf("restore with a rollback file exited %d, want 1", code)
+	}
+	if after, err := os.ReadFile(rollback); err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("the rollback file was touched (%v)", err)
+	}
+	if fileExists(dbPath + ".restore-result.json") {
+		t.Error("the refused run applied a restore over the half-done one")
+	}
+}
+
+// TestRestoreCLI_AppliedLeavesOnlyTheResult: a finished run leaves no staged
+// copy, marker or rollback file, and the result file records status applied
+// for the next boot to report.
+func TestRestoreCLI_AppliedLeavesOnlyTheResult(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("restore --force exited %d, want 0", code)
+	}
+	for _, suffix := range []string{".restore-staged", ".restore-staged.tmp", ".restore-pending.json", ".restore-rollback", ".restore-rollback-wal", ".restore-rollback-shm"} {
+		if fileExists(dbPath + suffix) {
+			t.Errorf("%s was left behind", suffix)
+		}
+	}
+	res, found, err := db.ReadRestoreResult(dbPath)
+	if err != nil || !found {
+		t.Fatalf("ReadRestoreResult = found %v, err %v; want a result", found, err)
+	}
+	if res.Status != db.RestoreStatusApplied || res.Backup != "backup.db" {
+		t.Fatalf("result = %+v, want status applied for backup.db", res)
+	}
+}
+
+// TestRestoreCLI_KeepsLiveMode: the restored file is a renamed-in copy, so it
+// takes the live database's mode (and owner) rather than the copy's default.
+func TestRestoreCLI_KeepsLiveMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no Unix file modes on Windows")
+	}
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	if err := os.Chmod(dbPath, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("restore --force exited %d, want 0", code)
+	}
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o640 {
+		t.Fatalf("restored database mode = %o, want 640", got)
+	}
+}
+
+// TestRestoreCLI_RestoresThroughSymlink: a symlinked database path keeps its
+// link; the database it points at is the one replaced.
+func TestRestoreCLI_RestoresThroughSymlink(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	real := filepath.Join(t.TempDir(), "real.db")
+	if err := os.Rename(dbPath, real); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, dbPath); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", backup}); code != 0 {
+		t.Fatalf("restore --force exited %d, want 0", code)
+	}
+	if info, err := os.Lstat(dbPath); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the database path is no longer a symlink (%v)", err)
+	}
+	if !userExists(t, real, "restored-user") {
+		t.Fatal("the symlink's target was not restored")
+	}
+}
+
+// TestRestoreCLI_RefusesSourceAmongRestoreFiles: staging clears leftover
+// working files first, so a source with one of those names is refused, not
+// deleted.
+func TestRestoreCLI_RefusesSourceAmongRestoreFiles(t *testing.T) {
+	cfgPath, dbPath, _ := restoreCLIFixture(t)
+	backup := makeBackup(t, t.TempDir(), "backup.db", "restored-user")
+	source := dbPath + ".restore-staged"
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := runRestoreCLI(cfgPath, []string{"--force", source}); code != 1 {
+		t.Fatalf("restore from a working-file name exited %d, want 1", code)
+	}
+	if !fileExists(source) {
+		t.Fatal("the source was deleted")
 	}
 	if !userExists(t, dbPath, "existing-owner") {
 		t.Fatal("the live database changed despite the refusal")

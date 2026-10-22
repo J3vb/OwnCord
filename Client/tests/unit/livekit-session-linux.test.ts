@@ -23,11 +23,12 @@ const mockVoiceState = vi.hoisted(() => ({
   localScreenshare: false,
   pttGated: false,
   listenOnly: false,
+  inAfkChannel: false,
   currentChannelId: 1 as number | null,
   voiceConfigs: new Map<number, { bitrate: number }>(),
   // The server still holds our membership, so the reconnect loop reuses the
   // token rather than rejoining.
-  voiceUsers: { get: () => ({ has: () => true }) },
+  voiceUsers: { get: () => ({ has: () => true, keys: () => [].values() }) },
 }));
 
 vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
@@ -88,6 +89,7 @@ vi.mock("@stores/voice.store", () => ({
     get: vi.fn(),
     set: vi.fn(),
     subscribe: vi.fn(),
+    subscribeSelector: vi.fn(() => () => {}),
   },
   setLocalMuted: vi.fn(),
   setLocalDeafened: vi.fn(),
@@ -118,6 +120,8 @@ const host = vi.hoisted(() => ({
   nextSession: 1,
   connectFails: false,
   screens: { portal: true, sources: [] } as { portal: boolean; sources: Array<{ id: string }> },
+  screenQuality: (): Promise<unknown> =>
+    Promise.resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 }),
 }));
 
 vi.mock("../../src/platform/desktop", () => ({
@@ -128,6 +132,8 @@ vi.mock("../../src/platform/desktop", () => ({
       stopLiveKitProxy: vi.fn(),
     },
     nativeVoice: {
+      // DeviceManager subscribes to the host's device watch on every join.
+      watchDevices: () => () => {},
       setRoomKey: (key: string) => {
         host.commands.push(["setRoomKey", [key]]);
         return Promise.resolve();
@@ -188,6 +194,10 @@ vi.mock("../../src/platform/desktop", () => ({
       publishScreen: (...args: unknown[]) => {
         host.commands.push(["publishScreen", args]);
         return Promise.resolve("TR_screen");
+      },
+      setScreenQuality: (...args: unknown[]) => {
+        host.commands.push(["setScreenQuality", args]);
+        return host.screenQuality();
       },
       stopScreen: (...args: unknown[]) => {
         host.commands.push(["stopScreen", args]);
@@ -289,6 +299,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     mockVoiceState.localMuted = false;
     mockVoiceState.localDeafened = false;
     mockVoiceState.currentChannelId = 1;
+    mockVoiceState.inAfkChannel = false;
     nativeCounters.openRooms = 0;
     nativeCounters.listeners = 0;
     nativeCounters.rust = null;
@@ -350,6 +361,20 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(session.getSessionDebugInfo()).toMatchObject({
       native: { rust: { rooms: 1, localTracks: 1, threads: 41 } },
     });
+  });
+
+  it("publishes no microphone when joining the AFK channel and keeps the session up", async () => {
+    mockVoiceState.inAfkChannel = true;
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    // The capture is never switched on (only the disable the facade always
+    // issues), and the join still completes.
+    expect(host.commands.filter(([n]) => n === "setMicrophone")).not.toContainEqual([
+      "setMicrophone",
+      [1, true],
+    ]);
+    expect(names()).not.toContain("disconnect");
+    expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
+    expect(setListenOnly).not.toHaveBeenCalledWith(true);
   });
 
   it("honours the saved input and output devices at join through the native session", async () => {
@@ -635,7 +660,14 @@ describe("LiveKitSession on the Linux native backend", () => {
         [
           1,
           3,
-          { width: 1920, height: 1080, maxBitrate: 3_000_000, maxFramerate: 30, simulcast: true },
+          {
+            width: 1920,
+            height: 1080,
+            maxBitrate: 3_000_000,
+            maxFramerate: 30,
+            simulcast: true,
+            codec: "vp8",
+          },
         ],
       ],
     ]);
@@ -655,6 +687,70 @@ describe("LiveKitSession on the Linux native backend", () => {
       payload: { enabled: false },
     });
     expect(nativeCounters.screenTracks).toBe(0);
+  });
+
+  it("a Linux share shows its picked quality and changes it live through the host", async () => {
+    const ws = { send: vi.fn(() => "req-1"), on: vi.fn() };
+    session.setWsClient(ws as never);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const sharing = session.enableScreenshare();
+    await pressGoLive();
+    await sharing;
+    // The stream card's Quality select reads this: the dialog's pick (the
+    // default, medium), not nothing.
+    expect(session.getScreenshareQuality()).toBe("medium");
+    expect(session.canChangeScreenshareSource()).toBe(true);
+    host.commands.length = 0;
+    const announced = ws.send.mock.calls.length;
+
+    await session.setScreenshareQuality("high");
+
+    expect(host.commands).toEqual([
+      [
+        "setScreenQuality",
+        [
+          1,
+          3,
+          { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+          {
+            width: 1920,
+            height: 1080,
+            maxBitrate: 6_000_000,
+            maxFramerate: 30,
+            simulcast: true,
+            codec: "vp8",
+          },
+        ],
+      ],
+    ]);
+    expect(session.getScreenshareQuality()).toBe("high");
+    // The server hears nothing: the share carries on under the same flag.
+    expect(ws.send).toHaveBeenCalledTimes(announced);
+  });
+
+  it("a refused Linux quality change leaves the quality and the share", async () => {
+    const onError = vi.fn();
+    session.setOnError(onError);
+    const ws = { send: vi.fn(() => "req-1"), on: vi.fn() };
+    session.setWsClient(ws as never);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const sharing = session.enableScreenshare();
+    await pressGoLive();
+    await sharing;
+    const announced = ws.send.mock.calls.length;
+    host.screenQuality = () =>
+      Promise.resolve({ ok: false, stage: "refused", message: "a source change is pending" });
+    try {
+      await session.setScreenshareQuality("high");
+    } finally {
+      host.screenQuality = () =>
+        Promise.resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 });
+    }
+
+    expect(session.getScreenshareQuality()).toBe("medium");
+    expect(onError).toHaveBeenCalledWith("Couldn't change the stream quality");
+    expect(nativeCounters.screenTracks).toBe(1);
+    expect(ws.send).toHaveBeenCalledTimes(announced);
   });
 
   it("a portal that never started shows a soft notice, not a refused share", async () => {

@@ -2,6 +2,7 @@ import { configDefaults, defineConfig } from "vitest/config";
 import { readFileSync } from "node:fs";
 import { resolve } from "path";
 import { changelogModule } from "./vite.config.ts";
+import { browserPlatform } from "./vite.config.web.ts";
 
 // D7 of the check-reliability pain-points report: the aggregate statements floor
 // lived in two places, and they disagreed — `coverage-floor.json` said 93.0 for
@@ -33,6 +34,7 @@ if (!(process.env.NODE_OPTIONS ?? "").includes(WEBSTORAGE_OFF)) {
 
 export default defineConfig({
   plugins: [changelogModule()],
+  define: { __OWNCORD_WEB__: false },
   resolve: {
     alias: {
       "@lib": resolve(import.meta.dirname, "src/lib"),
@@ -58,13 +60,38 @@ export default defineConfig({
     // Asserts the NODE_OPTIONS flag below actually arrived; see its comment
     // and tests/setup.ts's header.
     setupFiles: ["./tests/setup.ts"],
-    // Both the `tests/**/*.test.ts` suite and component-local
-    // `src/**/*.test.ts` files are picked up.
-    include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
-    // tests/browser/ runs real browser APIs (AudioContext, WASM) under
-    // vitest.config.browser.ts (`npm run test:browser`); it cannot pass in
-    // jsdom and is not part of this suite.
-    exclude: [...configDefaults.exclude, "tests/browser/**"],
+    // Two projects over one config (WP 6.13e): `desktop` is the suite as it
+    // always was, with `__OWNCORD_WEB__` false. `web` builds the portal's
+    // branches in (`__OWNCORD_WEB__` true, the platform registry swapped for
+    // the browser one exactly as `vite.config.web.ts` does) and runs only
+    // tests/web/. A plain `vitest run` runs both. `include` and `exclude` live
+    // in the projects, not here: `extends` concatenates arrays, so a root
+    // `include` would run the whole desktop suite in the web project too.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "desktop",
+          // Both the `tests/**/*.test.ts` suite and component-local
+          // `src/**/*.test.ts` files are picked up.
+          include: ["tests/**/*.test.ts", "src/**/*.test.ts"],
+          // tests/browser/ runs real browser APIs (AudioContext, WASM) under
+          // vitest.config.browser.ts (`npm run test:browser`); it cannot pass
+          // in jsdom and is not part of this suite.
+          exclude: [...configDefaults.exclude, "tests/browser/**", "tests/web/**"],
+        },
+      },
+      {
+        extends: true,
+        plugins: [browserPlatform()],
+        define: { __OWNCORD_WEB__: true },
+        test: {
+          name: "web",
+          include: ["tests/web/**/*.test.ts"],
+          exclude: [...configDefaults.exclude],
+        },
+      },
+    ],
     coverage: {
       provider: "v8",
       // json-summary emits coverage/coverage-summary.json, which

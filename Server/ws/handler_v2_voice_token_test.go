@@ -98,6 +98,9 @@ func seedTokenRefreshUser(t *testing.T, database *db.DB, userID, roleID int64) {
 	); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
+	if err := database.UpdateUserRole(context.Background(), userID, roleID); err != nil {
+		t.Fatalf("seed user role: %v", err)
+	}
 }
 
 func TestVoiceTokenRefreshV2_HappyPath(t *testing.T) {

@@ -29,6 +29,7 @@ func allClientToServerTypes() []string {
 		MsgTypeVoiceScreenshare,
 		MsgTypeVoiceE2EEAnnounce,
 		MsgTypeVoiceE2EEOffer,
+		MsgTypeVoiceWatch,
 	}
 }
 
@@ -56,6 +57,8 @@ func TestCommandTypeAndUserID(t *testing.T) {
 		{"ChannelFocusCmd", ChannelFocusCmd{userID: 7, ChannelID: 12}, MsgTypeChannelFocus, 7},
 		{"MarkReadCmd", MarkReadCmd{userID: 7, ChannelID: 12}, MsgTypeMarkRead, 7},
 		{"ReactionAddCmd", ReactionAddCmd{userID: 8, MessageID: 40, Emoji: "👍"}, MsgTypeReactionAdd, 8},
+		{"PollVoteCmd", PollVoteCmd{userID: 10, MessageID: 5}, MsgTypePollVote, 10},
+		{"PollEndCmd", PollEndCmd{userID: 11, MessageID: 5}, MsgTypePollEnd, 11},
 		{"ReactionRemoveCmd", ReactionRemoveCmd{userID: 9, MessageID: 41, Emoji: "👎"}, MsgTypeReactionRemove, 9},
 		{"VoiceJoinCmd", VoiceJoinCmd{userID: 10, ChannelID: 13}, MsgTypeVoiceJoin, 10},
 		{"VoiceLeaveCmd", VoiceLeaveCmd{userID: 11}, MsgTypeVoiceLeave, 11},
@@ -66,6 +69,7 @@ func TestCommandTypeAndUserID(t *testing.T) {
 		{"VoiceScreenshareCmd", VoiceScreenshareCmd{userID: 16, Enabled: true}, MsgTypeVoiceScreenshare, 16},
 		{"VoiceE2EEAnnounceCmd", VoiceE2EEAnnounceCmd{userID: 17, PublicKey: "abc"}, MsgTypeVoiceE2EEAnnounce, 17},
 		{"VoiceE2EEOfferCmd", VoiceE2EEOfferCmd{userID: 18, TargetUserID: 99}, MsgTypeVoiceE2EEOffer, 18},
+		{"VoiceWatchCmd", VoiceWatchCmd{userID: 19, UserIDs: []int64{2}}, MsgTypeVoiceWatch, 19},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -351,6 +355,7 @@ func TestCommandConstructorRejectsInvalidJSON(t *testing.T) {
 		MsgTypeVoiceScreenshare,
 		MsgTypeVoiceE2EEAnnounce,
 		MsgTypeVoiceE2EEOffer,
+		MsgTypeVoiceWatch,
 	}
 	badJSON := json.RawMessage(`{not valid json`)
 	for _, msgType := range typesWithPayload {
@@ -415,5 +420,40 @@ func TestCommandAttachmentsDefensiveCopy(t *testing.T) {
 	got[0] = "mutated"
 	if cmd.attachments[0] == "mutated" {
 		t.Error("Attachments() did not return a defensive copy")
+	}
+}
+
+func TestChatSend_ReplyPingParse(t *testing.T) {
+	ctor := commandConstructors[MsgTypeChatSend]
+	cases := []struct {
+		name     string
+		payload  string
+		wantPing bool
+		wantErr  bool
+	}{
+		{"true on a reply", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":true}`, true, false},
+		{"false on a reply", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":false}`, false, false},
+		{"absent on a reply does not ping", `{"channel_id":1,"content":"hi","reply_to":7}`, false, false},
+		{"null on a reply does not ping", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":null}`, false, false},
+		{"true without reply_to is ignored", `{"channel_id":1,"content":"hi","reply_ping":true}`, false, false},
+		{"non-bool string is a bad payload", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":"yes"}`, false, true},
+		{"non-bool number is a bad payload", `{"channel_id":1,"content":"hi","reply_to":7,"reply_ping":1}`, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, err := ctor(1, "", json.RawMessage(tc.payload))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("payload %s parsed, want an error", tc.payload)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := cmd.(ChatSendCmd).ReplyPing; got != tc.wantPing {
+				t.Errorf("ReplyPing = %v, want %v", got, tc.wantPing)
+			}
+		})
 	}
 }

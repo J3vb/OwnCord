@@ -76,6 +76,10 @@ export type NativeVoiceEvent =
   | { type: "permission"; canPublish: boolean; canPublishSources: number[] }
   /** The input-sensitivity gate opened (speech) or closed (silence). */
   | { type: "voiceGate"; open: boolean }
+  /** A capture level report, every ~50 ms while the microphone runs: the
+   *  loudest ~10 ms RMS after the input volume (the detector's scale) and
+   *  whether the voice gate is open. */
+  | { type: "inputLevel"; rms: number; open: boolean }
   | { type: "encryptionStatus"; identity: string; encrypted: boolean }
   /** Screen capture `capture` ended on its own after it started: stopped
    *  from the desktop's sharing indicator, or the shared window closed. */
@@ -105,6 +109,19 @@ export interface NativeVoiceDevices {
   outputs: NativeVoiceDevice[];
 }
 
+/** One note of an app sound's tone spec (WP LP-6b): a sine whose frequency
+ *  steps at the given offsets, fading exponentially from `gain` to `endGain`
+ *  over `duration`. Times are seconds, `freqs` entries are `[offset from the
+ *  note's start, hertz]`. The host synthesizes it; the same table drives the
+ *  Web Audio renderer, so the two cannot drift. */
+export interface NativeToneNote {
+  at: number;
+  duration: number;
+  gain: number;
+  endGain: number;
+  freqs: ReadonlyArray<readonly [number, number]>;
+}
+
 export interface NativeVoiceConnected {
   session: number;
   /** Our LiveKit identity in the room (`user-<id>…`). */
@@ -115,6 +132,17 @@ export interface NativeVoiceConnected {
   frames: string;
 }
 
+/** A video codec the native engine publishes (WP LP-7c). */
+export type NativeVoiceVideoCodec = "vp8" | "h264" | "vp9";
+
+/** What the native engine can encode beyond VP8 (`h264`, `vp9`) and decode
+ *  (`decode`: lowercase codec names from libwebrtc's receiver capabilities). */
+export interface NativeVoiceVideoCodecs {
+  h264: boolean;
+  vp9: boolean;
+  decode: string[];
+}
+
 /** How the camera is published: the web path's `publishTrack` options. */
 export interface NativeVoiceCameraOptions {
   width: number;
@@ -122,6 +150,9 @@ export interface NativeVoiceCameraOptions {
   maxBitrate: number;
   maxFramerate: number;
   simulcast: boolean;
+  /** The codec to publish with. The host defaults to VP8 when it is absent;
+   *  `h264` and `vp9` only go out when `videoCodecs` said the engine can encode them. */
+  codec: NativeVoiceVideoCodec;
 }
 
 /** A native camera device: the id `startCamera` takes. */
@@ -169,6 +200,9 @@ export interface NativeVoiceScreenSource {
   title: string;
   /** An image URL of the source as it looks now, when it could be read. */
   thumbnail: string | null;
+  /** Refresh rate in Hz of the monitor a `screen` source is (X11, from
+   *  XRandR). `null` for windows and when it could not be read. */
+  readonly refreshHz?: number | null;
 }
 
 /** What can be shared. `portal`: the desktop portal's dialog picks
@@ -176,6 +210,9 @@ export interface NativeVoiceScreenSource {
 export interface NativeVoiceScreenSources {
   portal: boolean;
   sources: NativeVoiceScreenSource[];
+  /** Other applications' sound can be shared with the screen: a PulseAudio
+   *  protocol server (PulseAudio or pipewire-pulse) answered. */
+  audio: boolean;
 }
 
 /** Capture pacing and size cap; 0 for both sizes is the source size. */
@@ -201,6 +238,131 @@ export interface NativeVoiceScreenOptions {
   maxBitrate: number;
   maxFramerate: number;
   simulcast: boolean;
+  /** The codec to publish with. The host defaults to VP8 when it is absent;
+   *  `h264` and `vp9` only go out when `videoCodecs` said the engine can encode them. */
+  codec: NativeVoiceVideoCodec;
+}
+
+/** What a live quality change published: the new publication's sid and the
+ *  size the capture now delivers. */
+export interface NativeVoiceScreenQualitySet {
+  sid: string;
+  width: number;
+  height: number;
+}
+
+/** The outcome of `setScreenQuality`. `refused`: nothing changed and the
+ *  share goes on (no published share, a stale capture, a source change
+ *  pending, or a host that rejected without a stage). `publish`: the
+ *  republish failed and only the screen video is unpublished: the capture
+ *  and the share audio stay up, so the caller must `stopScreen` or retry
+ *  `publishScreen`. */
+export type NativeVoiceScreenQualityResult =
+  | ({ ok: true } & NativeVoiceScreenQualitySet)
+  | { ok: false; stage: "refused" | "publish"; message: string };
+
+/** What the settings tab's mic test starts with (Linux only). */
+export interface NativeMicTestOptions {
+  /** `listDevices` ids; empty selects the host default. */
+  input: string;
+  output: string;
+  audio: NativeVoiceAudioOptions;
+  /** The input volume, percent (0-200). */
+  inputGain: number;
+  /** The output volume, linear (0-1). */
+  outputGain: number;
+  /** The voice gate's threshold on the web path's scale; 0 is no gate. */
+  threshold: number;
+  /** Capture and report levels only: no output is opened or played. */
+  monitor?: boolean;
+}
+
+/** A live change to a running mic test. */
+export type NativeMicTestUpdate =
+  | { kind: "processing"; audio: NativeVoiceAudioOptions }
+  | { kind: "inputGain"; percent: number }
+  | { kind: "voiceGate"; threshold: number; retune: boolean }
+  | { kind: "outputGain"; gain: number }
+  | { kind: "inputDevice"; deviceId: string }
+  | { kind: "outputDevice"; deviceId: string };
+
+export type NativeMicTestEvent =
+  | { type: "inputLevel"; rms: number; open: boolean }
+  /** The host stopped the test (a call joined). */
+  | { type: "ended" };
+
+export interface NativeMicTestEnvelope {
+  /** The id `startMicTest` resolved with. */
+  test: number;
+  event: NativeMicTestEvent;
+}
+
+/** The host's refusal of a mic test start during a call. */
+// i18n-exempt: the host's refusal code, matched by the tab, never shown
+export const NATIVE_MIC_TEST_IN_CALL = "mic test unavailable during a call";
+
+/** One W3C-shaped stats entry (`RTCStats` field names) of a transport, cut to
+ *  what `connectionStats.ts` reads. Times are seconds, as in the W3C reports. */
+export type NativeVoiceStatsEntry =
+  | {
+      type: "candidate-pair";
+      id: string;
+      currentRoundTripTime: number;
+      bytesSent: number;
+      bytesReceived: number;
+    }
+  | { type: "outbound-rtp"; id: string; kind: string; packetsSent: number; bytesSent: number }
+  | {
+      type: "inbound-rtp";
+      id: string;
+      kind: string;
+      packetsReceived: number;
+      bytesReceived: number;
+      packetsLost: number;
+      jitter: number;
+    }
+  | {
+      type: "remote-inbound-rtp";
+      id: string;
+      kind: string;
+      /** The id of the outbound entry this one reports on. */
+      localId: string;
+      packetsLost: number;
+      jitter: number;
+    };
+
+/** A subscribed remote video track's receiver sample. */
+export interface NativeVoiceReceiverSample {
+  frameWidth: number;
+  frameHeight: number;
+  framesDecoded: number;
+  bytesReceived: number;
+  packetsLost: number;
+  packetsReceived: number;
+  mimeType?: string;
+}
+
+/** One encoder layer of a local video track. */
+export interface NativeVoiceSenderLayer {
+  framesPerSecond?: number;
+  frameWidth: number;
+  frameHeight: number;
+  qualityLimitationReason: string;
+  encoderImplementation?: string;
+  active: boolean;
+}
+
+/** One stats sample of a native session (LP-5). */
+export interface NativeVoiceStats {
+  /** Host wall clock (ms since the epoch) at collection. */
+  atMs: number;
+  publisher: NativeVoiceStatsEntry[];
+  /** Empty in single-PC mode. */
+  subscriber: NativeVoiceStatsEntry[];
+  /** Subscribed remote video by publication sid. */
+  remoteVideo: Record<string, NativeVoiceReceiverSample>;
+  /** Local video by source. */
+  localVideo: { camera?: NativeVoiceSenderLayer[]; screen_share?: NativeVoiceSenderLayer[] };
 }
 
 /** A simulcast layer, as `native_voice_set_video_view` names it. */
@@ -226,8 +388,20 @@ export interface NativeVoice {
   setPttGated(session: number, gated: boolean): Promise<void>;
   /** The input-sensitivity gate: the level (`vadThreshold`'s scale) the
    *  capture must reach to send, 0 for no gate. Its verdicts arrive as
-   *  `voiceGate` events. */
-  setVoiceGate(session: number, threshold: number): Promise<void>;
+   *  `voiceGate` events. `retune` moves the level without restarting the
+   *  detector (automatic sensitivity's steps). */
+  setVoiceGate(session: number, threshold: number, retune?: boolean): Promise<void>;
+  /** The input volume, 0-200 % as the `inputVolume` pref: a gain on the
+   *  processed microphone, ahead of the voice gate and the level reports. */
+  setInputGain(session: number, percent: number): Promise<void>;
+  /** Echo cancellation, noise suppression, automatic gain control and
+   *  Enhanced Noise Suppression for the running call: the capture and the
+   *  echo canceller's reference switch to them within a few frames, muted
+   *  or not. */
+  setAudioProcessing(session: number, audio: NativeVoiceAudioOptions): Promise<void>;
+  /** One stats sample of `session` (LP-5); null when the host could not read
+   *  one (stale session, timeout). Never rejects. */
+  getStats(session: number): Promise<NativeVoiceStats | null>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
   /** Layer control for remote video `sid` (P3-07): stop it, or ask for
    *  `quality` while it is shown. */
@@ -263,6 +437,10 @@ export interface NativeVoice {
    *  available is "no camera plugged in"; this false is "camera support is
    *  missing". */
   cameraSupport(): Promise<NativeVoiceCameraSupport>;
+  /** Which codecs the engine encodes (libwebrtc's sender capabilities) and
+   *  decodes (its receiver capabilities). A rejection resolves
+   *  `{ h264: false, vp9: false, decode: [] }`, never throws. */
+  videoCodecs(): Promise<NativeVoiceVideoCodecs>;
   /** Start capturing native camera `source` (replacing any running capture)
    *  and resolve once its first frame arrives; a source that fails or yields
    *  no frame in time rejects. The preview then plays on the frame socket's
@@ -305,6 +483,18 @@ export interface NativeVoice {
     capture: number,
     options: NativeVoiceScreenOptions,
   ): Promise<string>;
+  /** Unpublish the share of capture `capture` but keep the capture running,
+   *  so a codec republish can publish it again; a stale id is a no-op. */
+  unpublishScreen(session: number, capture: number): Promise<void>;
+  /** Publish the sound of the other applications as capture `capture`'s
+   *  `ScreenShareAudio` track (E2EE as every track); resolves with the
+   *  publication's sid. The audio lives as long as the capture and survives
+   *  a codec republish and a Change source; rejects when `capture` is not
+   *  running. A second call replaces the first. */
+  publishScreenAudio(session: number, capture: number): Promise<string>;
+  /** Unpublish screen audio `sid` and stop capturing the sound; a stale sid
+   *  is a no-op. */
+  unpublishScreenAudio(session: number, sid: string): Promise<void>;
   /** Unpublish and stop capture `capture`, releasing the capturer and any
    *  portal session; a stale id is a no-op. */
   stopScreen(session: number, capture: number): Promise<void>;
@@ -319,12 +509,70 @@ export interface NativeVoice {
     source: string,
     capture: NativeVoiceScreenCapture,
   ): Promise<NativeVoiceScreenStarted>;
+  /** Change the quality of the live, published share `capture` without a
+   *  new pick: the running capture is re-paced and re-capped to `capture`'s
+   *  `NativeVoiceScreenCapture`, then published again with `publish` at the
+   *  size it now delivers (the host's `publish.width`/`height` is the
+   *  fallback), which gives viewers a new sid. The share audio is untouched.
+   *  Never rejects: see `NativeVoiceScreenQualityResult`. */
+  setScreenQuality(
+    session: number,
+    capture: number,
+    options: NativeVoiceScreenCapture,
+    publish: NativeVoiceScreenOptions,
+  ): Promise<NativeVoiceScreenQualityResult>;
+  /** Use camera `source` instead under the live, published camera: a new
+   *  capture starts beside it and takes the publication over (same sid, same
+   *  preview socket) once its first frame arrives, then the old capture
+   *  stops. Resolves with the new capture, which `stopCamera` then names;
+   *  rejects, leaving the live camera untouched, when the device cannot be
+   *  opened beside it or no camera is published. */
+  changeCamera(
+    session: number,
+    source: string,
+    capture: NativeVoiceCameraCapture,
+  ): Promise<NativeVoiceCameraStarted>;
   debugInfo(): Promise<NativeVoiceResources>;
   /** Enumerate audio devices, in or out of a call. */
   listDevices(): Promise<NativeVoiceDevices>;
   /** Switch the session's capture (`audioinput`) or playout (`audiooutput`)
    *  device to a `listDevices` id; an empty id selects the host default. */
   setDevice(session: number, kind: "audioinput" | "audiooutput", deviceId: string): Promise<void>;
+  /** Start the mic test: the chosen microphone, with the call's processing,
+   *  gain and voice gate, played back on the chosen output (the echo
+   *  canceller gets no reference); `monitor` skips the output and only
+   *  reports levels. Replaces a running test or monitor. Resolves with the
+   *  test's id once the streams are open; rejects with the host's reason, a
+   *  call in progress being `NATIVE_MIC_TEST_IN_CALL`. */
+  startMicTest(options: NativeMicTestOptions): Promise<number>;
+  /** Apply a live change to test `test`; a stale id is a no-op. A device
+   *  fallback rejects while the test plays on the default. */
+  updateMicTest(test: number, update: NativeMicTestUpdate): Promise<void>;
+  /** Stop test `test`; a stale id is a no-op. */
+  stopMicTest(test: number): Promise<void>;
+  /** The mic test's level reports and its end, for every test. Returns a
+   *  synchronous unsubscribe that is safe to call before the host
+   *  subscription has finished registering. */
+  onMicTestEvent(handler: (envelope: NativeMicTestEnvelope) => void): () => void;
+  /** Start the host's app-level device watch (idempotent, kept for the app's
+   *  life) and subscribe to its changes: `handler` runs with the new lists each
+   *  time the capture or playout devices change, in or out of a call. A
+   *  restarting sound server is not reported as a change. Returns a
+   *  synchronous unsubscribe that is safe to call before the host subscription
+   *  has finished registering, as `onEvent`'s is. */
+  watchDevices(handler: (devices: NativeVoiceDevices) => void): () => void;
+  /** Play an app sound on output `deviceId` (empty: the default) at the
+   *  app-sounds volume `gain`, in or out of a call. Resolves with an id for
+   *  `stopSound`, or null when the host could not play it (no device, the
+   *  stream failed to open), so the caller can fall back. Never rejects. */
+  playSound(
+    notes: readonly NativeToneNote[],
+    deviceId: string,
+    gain: number,
+  ): Promise<number | null>;
+  /** Cut sound `id` (a ring burst); an unknown or finished id is a no-op.
+   *  Never rejects. */
+  stopSound(id: number): Promise<void>;
   /** Room events for every session. Returns a synchronous unsubscribe that
    *  is safe to call before the host subscription has finished registering. */
   onEvent(handler: (envelope: NativeVoiceEnvelope) => void): () => void;

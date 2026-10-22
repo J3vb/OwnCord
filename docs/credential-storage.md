@@ -62,7 +62,12 @@ password". That password stays inside the Rust backend:
   through IPC just to avoid wiping it — which is why it used to be returned
   at all. A read failure on the preserve path aborts the save rather than
   rewriting the blob without a password it could not read.
-- Declining "Remember password" on an interactive login **deletes** the stored
+- "Auto connect" (stay signed in) and "Remember password" are separate. With
+  Auto connect ticked and Remember password unticked, an interactive login
+  keeps only the session token and erases any stored password
+  (`clear_password`). Moving Auto connect off such a profile deletes the
+  credential when no profile on that host still has either box ticked.
+- Declining both on an interactive login **deletes** the stored
   credential rather than leaving an earlier one in place, so a password saved
   under a previous opt-in does not outlive the opt-out. The delete is
   unconditional for the host: the store holds one credential per host, so

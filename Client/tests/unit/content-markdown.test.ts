@@ -46,7 +46,12 @@ function seedStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   setChannels(CHANNELS);
 }
 
@@ -705,6 +710,208 @@ describe("syntax highlighting", () => {
   it("classifies go keywords", () => {
     const tokens = highlightCode("func main() {}", "go");
     expect(tokens[0]).toEqual({ text: "func", cls: "keyword" });
+  });
+
+  it("highlights each added language's keyword, string and comment", () => {
+    const cases: [string, string, string, string, string][] = [
+      [
+        "c",
+        '#include <stdio.h>\nint main() { return 0; } // c\nchar *s = "x";',
+        "int",
+        '"x"',
+        "// c",
+      ],
+      ["cpp", 'namespace a { auto s = "x"; } /* c */', "namespace", '"x"', "/* c */"],
+      ["java", 'public class A { String s = "x"; } // c', "class", '"x"', "// c"],
+      ["csharp", 'using System; var s = "x"; // c', "using", '"x"', "// c"],
+      ["sql", "SELECT 'x' FROM t; -- c", "SELECT", "'x'", "-- c"],
+      ["yaml", 'name: "x" # c\nok: true', "true", '"x"', "# c"],
+    ];
+    for (const [lang, code, keyword, str, comment] of cases) {
+      const tokens = highlightCode(code, lang);
+      expect(tokens).toContainEqual({ text: keyword, cls: "keyword" });
+      expect(tokens).toContainEqual({ text: str, cls: "string" });
+      expect(tokens).toContainEqual({ text: comment, cls: "comment" });
+      expect(tokens.map((t) => t.text).join("")).toBe(code);
+    }
+  });
+
+  it("highlights yaml keys", () => {
+    expect(highlightCode("name: x", "yaml")[0]).toEqual({ text: "name", cls: "keyword" });
+  });
+
+  it("resolves aliases for the added languages", () => {
+    expect(resolveLanguage("c")).toBe("c");
+    expect(resolveLanguage("h")).toBe("c");
+    expect(resolveLanguage("cpp")).toBe("cpp");
+    expect(resolveLanguage("c++")).toBe("cpp");
+    expect(resolveLanguage("hpp")).toBe("cpp");
+    expect(resolveLanguage("cs")).toBe("csharp");
+    expect(resolveLanguage("c#")).toBe("csharp");
+    expect(resolveLanguage("yml")).toBe("yaml");
+    expect(resolveLanguage("postgres")).toBe("sql");
+    expect(resolveLanguage("mysql")).toBe("sql");
+  });
+
+  it("keeps c++ and c# fence tags intact through the fence parser", () => {
+    expect(splitCodeFences("```c++\nint x;\n```")[0]).toMatchObject({ lang: "c++" });
+    expect(splitCodeFences("```c#\nint x;\n```")[0]).toMatchObject({ lang: "c#" });
+  });
+
+  it("matches SQL keywords case-insensitively", () => {
+    expect(highlightCode("SELECT", "sql")[0]).toEqual({ text: "SELECT", cls: "keyword" });
+    expect(highlightCode("select", "sql")[0]).toEqual({ text: "select", cls: "keyword" });
+  });
+
+  it("does not start a SQL string inside a -- comment", () => {
+    const tokens = highlightCode("-- don't stop\nselect 1", "sql");
+    expect(tokens[0]).toEqual({ text: "-- don't stop", cls: "comment" });
+    expect(tokens.filter((t) => t.cls === "string")).toEqual([]);
+  });
+
+  it("keeps yaml #, apostrophes and quoted values in their place", () => {
+    const url = highlightCode("url: http://x.com/#frag", "yaml");
+    expect(url.filter((t) => t.cls === "comment")).toEqual([]);
+    const plain = highlightCode("title: don't stop # note", "yaml");
+    expect(plain.filter((t) => t.cls === "string")).toEqual([]);
+    expect(plain).toContainEqual({ text: "# note", cls: "comment" });
+    expect(highlightCode("a: 'it''s'", "yaml")).toContainEqual({ text: "'it''s'", cls: "string" });
+    expect(highlightCode("- 'x'", "yaml")).toContainEqual({ text: "'x'", cls: "string" });
+  });
+
+  it("closes SQL, C# verbatim and Java text-block strings correctly", () => {
+    expect(highlightCode("'C:\\' -- c", "sql")).toContainEqual({ text: "-- c", cls: "comment" });
+    const cs = highlightCode('@"C:\\dir\\" + x; // c', "csharp");
+    expect(cs[0]).toEqual({ text: '@"C:\\dir\\"', cls: "string" });
+    expect(cs).toContainEqual({ text: "// c", cls: "comment" });
+    const java = highlightCode('"""\nreturn if\n""" + x', "java");
+    expect(java[0]).toEqual({ text: '"""\nreturn if\n"""', cls: "string" });
+  });
+
+  it("highlights a hostile 40,000-character yaml run in linear time", () => {
+    // A key that rescans a run of key characters from every position is
+    // O(n^2): ~50 ms at the 4000-rune cap and seconds at 40k.
+    const src = "-".repeat(40_000);
+    const start = performance.now();
+    const tokens = highlightCode(src, "yaml");
+    const elapsed = performance.now() - start;
+    expect(tokens.map((t) => t.text).join("")).toBe(src);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("colours diff insertions, deletions, hunk and file headers", () => {
+    const code = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n keep\n-old\n+new";
+    const tokens = highlightCode(code, "diff");
+    expect(tokens.map((t) => t.text).join("")).toBe(code);
+    expect(tokens).toContainEqual({ text: "diff --git a/x b/x", cls: "keyword" });
+    expect(tokens).toContainEqual({ text: "--- a/x", cls: "keyword" });
+    expect(tokens).toContainEqual({ text: "+++ b/x", cls: "keyword" });
+    expect(tokens).toContainEqual({ text: "@@ -1,2 +1,2 @@", cls: "keyword" });
+    expect(tokens).toContainEqual({ text: "-old", cls: "deleted" });
+    expect(tokens).toContainEqual({ text: "+new", cls: "inserted" });
+    expect(tokens.filter((t) => t.cls === "inserted" || t.cls === "deleted")).toHaveLength(2);
+  });
+
+  it("does not colour a diff + or - that is not at the start of a line", () => {
+    const tokens = highlightCode(" a - b + c\nx-y", "diff");
+    expect(tokens.every((t) => t.cls === null)).toBe(true);
+  });
+
+  it("resolves patch and diff to the diff highlighter", () => {
+    expect(resolveLanguage("patch")).toBe("diff");
+    expect(resolveLanguage("diff")).toBe("diff");
+    expect(highlightCode("+x", resolveLanguage("patch"))[0]).toEqual({
+      text: "+x",
+      cls: "inserted",
+    });
+  });
+
+  it("renders a diff block with inserted and deleted spans", () => {
+    const el = message("```diff\n-a\n+b\n```");
+    expect(el.querySelector(".msg-codeblock .tok-inserted")?.textContent).toBe("+b");
+    expect(el.querySelector(".msg-codeblock .tok-deleted")?.textContent).toBe("-a");
+    expect(el.querySelector(".msg-codeblock")?.textContent).toBe("-a\n+b");
+  });
+
+  it("highlights diff in linear time on a hostile run", () => {
+    const src = "-".repeat(40_000) + "\n" + "+\n".repeat(10_000);
+    const start = performance.now();
+    const tokens = highlightCode(src, "diff");
+    const elapsed = performance.now() - start;
+    expect(tokens.map((t) => t.text).join("")).toBe(src);
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it("styles ansi colour, bold, underline, background and reset", () => {
+    const tokens = highlightCode("\u001b[1;31mred\u001b[0m plain \u001b[42;4mx\u001b[0m", "ansi");
+    expect(tokens).toEqual([
+      { text: "red", cls: null, ansi: "ansi-31 ansi-b" },
+      { text: " plain ", cls: null },
+      { text: "x", cls: null, ansi: "ansi-42 ansi-u" },
+    ]);
+  });
+
+  it("skips extended colour arguments and honours the per-attribute resets", () => {
+    expect(highlightCode("\u001b[38;5;32my\u001b[48;2;1;31;4mz", "ansi")).toEqual([
+      { text: "yz", cls: null },
+    ]);
+    expect(highlightCode("\u001b[1;4;31;42ma\u001b[39;49;22;24mb", "ansi")).toEqual([
+      { text: "a", cls: null, ansi: "ansi-31 ansi-42 ansi-b ansi-u" },
+      { text: "b", cls: null },
+    ]);
+  });
+
+  it("treats a ---/+++ line after a hunk as a header, like highlight.js", () => {
+    const tokens = highlightCode("@@ -1 +1 @@\n--- removed sql comment", "diff");
+    expect(tokens).toContainEqual({ text: "--- removed sql comment", cls: "keyword" });
+  });
+
+  it("ignores unknown ansi codes and drops every escape from the text", () => {
+    const input = "\u001b[99mA\u001b[2JB\u001b[34;99mC\u001b[0m";
+    const tokens = highlightCode(input, "ansi");
+    expect(tokens.map((t) => t.text).join("")).toBe("ABC");
+    expect(tokens).toEqual([
+      { text: "AB", cls: null },
+      { text: "C", cls: null, ansi: "ansi-34" },
+    ]);
+  });
+
+  it("keeps an ESC that does not start a complete sequence as text", () => {
+    const tokens = highlightCode("a\u001b[3 b\u001bc", "ansi");
+    expect(tokens.map((t) => t.text).join("")).toBe("a\u001b[3 b\u001bc");
+  });
+
+  it("treats an empty SGR parameter as reset", () => {
+    const tokens = highlightCode("\u001b[31ma\u001b[mb", "ansi");
+    expect(tokens).toEqual([
+      { text: "a", cls: null, ansi: "ansi-31" },
+      { text: "b", cls: null },
+    ]);
+  });
+
+  it("renders ansi spans by class with no escape in the text", () => {
+    const el = message("```ansi\n\u001b[31mred\u001b[0m ok\n```");
+    const block = el.querySelector(".msg-codeblock")!;
+    expect(block.querySelector("span.ansi-31")?.textContent).toBe("red");
+    expect(block.textContent).toBe("red ok");
+    expect(block.getAttribute("data-lang")).toBe("ansi");
+  });
+
+  it("tokenizes hostile ansi input in linear time", () => {
+    const inputs = [
+      "\u001b".repeat(40_000),
+      "\u001b[".repeat(20_000),
+      "\u001b[1".repeat(13_000),
+      "\u001b[" + "1;".repeat(20_000),
+      "\u001b[31m".repeat(8_000),
+    ];
+    for (const src of inputs) {
+      const start = performance.now();
+      const tokens = highlightCode(src, "ansi");
+      const elapsed = performance.now() - start;
+      expect(tokens.length).toBeGreaterThanOrEqual(0);
+      expect(elapsed).toBeLessThan(500);
+    }
   });
 
   it("does not treat a keyword-prefixed identifier as a keyword", () => {

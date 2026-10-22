@@ -27,3 +27,19 @@ describe(".msg-actions-bar keyboard-focus visibility", () => {
     ).toBe("auto");
   });
 });
+
+describe(".msg-actions-bar Shift-only buttons", () => {
+  it("are display:none until the list root has .shift-held", () => {
+    expect(keyword(cascadedDeclaration(".msg-actions-bar .msg-shift-only", "display"))).toBe(
+      "none",
+    );
+    // `flex` is a typed display pair, not a bare keyword: assert the rule
+    // exists and no longer says none.
+    const shown = cascadedDeclaration(
+      ".messages-container.shift-held .msg-actions-bar .msg-shift-only",
+      "display",
+    );
+    expect(shown).toBeDefined();
+    expect(keyword(shown)).not.toBe("none");
+  });
+});

@@ -33,8 +33,8 @@ model, coding standards and how to run the checks CI runs.
 ## Working with an AI coding agent?
 
 Point it at [AGENTS.md](AGENTS.md). It sends each kind of change to the one
-short context file it needs, such as [ARCHITECTURE.md](ARCHITECTURE.md) or
-[CODE_STYLE.md](CODE_STYLE.md).
+short context file it needs, such as [docs/summaries/architecture.md](docs/summaries/architecture.md) or
+[docs/code-style.md](docs/code-style.md).
 
 ## Why this file is here
 

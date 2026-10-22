@@ -76,6 +76,7 @@ function resetStores(): void {
     voiceStatus: "idle",
   }));
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],
@@ -154,6 +155,7 @@ describe("VoiceWidget", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -191,6 +193,7 @@ describe("VoiceWidget", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -228,6 +231,7 @@ describe("VoiceWidget", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -390,6 +394,37 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
+  it("the stream card shows the share's quality in the select and reverts a refused change", async () => {
+    // A Linux share now carries its quality (the native track changes it), so
+    // the card shows the select like a web share's.
+    mockShareQuality.mockReturnValue("high");
+    mockCanChange.mockReturnValueOnce(true);
+    setVoiceChannel(1, []);
+    voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
+    voiceStore.flush();
+    const widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: vi.fn(),
+    });
+    widget.mount(container);
+    await vi.dynamicImportSettled();
+    const quality = container.querySelector<HTMLSelectElement>(
+      '[data-testid="vw-stream-quality"]',
+    )!;
+    expect(quality.hidden).toBe(false);
+    expect(quality.value).toBe("high");
+
+    // The host refuses: the live quality stays "high", so the select goes back.
+    quality.value = "low";
+    quality.dispatchEvent(new Event("change"));
+    expect(mockSetQuality).toHaveBeenCalledWith("low");
+    await vi.waitFor(() => expect(quality.disabled).toBe(false));
+    expect(quality.value).toBe("high");
+    mockShareQuality.mockReturnValue("medium");
+    widget.destroy?.();
+  });
+
   it("cleans up on destroy", () => {
     const widget = createVoiceWidget({
       onDisconnect: vi.fn(),
@@ -515,6 +550,7 @@ describe("VoiceWidget", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -590,6 +626,7 @@ describe("VoiceWidget", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 2,
       });
@@ -1182,13 +1219,19 @@ describe("VoiceWidget", () => {
       widget.destroy?.();
     });
 
-    it("says the change applies on the next join on Linux native", () => {
-      mockIsLinuxDesktop.mockReturnValueOnce(true);
-      const { widget, btn } = mountWidget();
-      expect(btn.getAttribute("aria-label")).toBe(
-        "Enhanced Noise Suppression (applies the next time you join)",
-      );
+    it("labels the button the same on Linux native as elsewhere: it applies live", () => {
+      const { widget, btn: other } = mountWidget();
+      const label = other.getAttribute("aria-label");
       widget.destroy?.();
+      mockIsLinuxDesktop.mockReturnValue(true);
+      try {
+        const { widget: linux, btn } = mountWidget();
+        expect(btn.getAttribute("aria-label")).toBe(label);
+        expect(label).not.toMatch(/next time you join/);
+        linux.destroy?.();
+      } finally {
+        mockIsLinuxDesktop.mockReturnValue(false);
+      }
     });
 
     it("starts from the saved pref and follows a change made in Settings", () => {

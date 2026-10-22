@@ -50,7 +50,9 @@ CREATE TABLE IF NOT EXISTS roles (
     color       TEXT,
     permissions INTEGER NOT NULL DEFAULT 0,
     position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    hoist       INTEGER NOT NULL DEFAULT 0,
+    mentionable INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
     (1, 'Owner',     '#E74C3C', 2147483647, 100, 0),
@@ -75,7 +77,27 @@ CREATE TABLE IF NOT EXISTS users (
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
-    custom_status TEXT
+    custom_status TEXT,
+    custom_status_expires_at TEXT,
+    banner_id TEXT,
+    banner_color TEXT
+);
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+) WITHOUT ROWID;
+
+CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
+BEGIN
+    INSERT OR IGNORE INTO user_roles (user_id, role_id)
+    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
+END;
+
+CREATE TABLE IF NOT EXISTS erasure_jobs (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    state   TEXT    NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,19 +142,57 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     revoked_at   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS category_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS category_user_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     name           TEXT    NOT NULL,
     type           TEXT    NOT NULL DEFAULT 'text',
-    category       TEXT    NOT NULL DEFAULT '',
+    category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
+    permissions_synced INTEGER NOT NULL DEFAULT 0,
     topic          TEXT    NOT NULL DEFAULT '',
     position       INTEGER NOT NULL DEFAULT 0,
     slow_mode      INTEGER NOT NULL DEFAULT 0,
     archived       INTEGER NOT NULL DEFAULT 0,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     voice_max_users INTEGER NOT NULL DEFAULT 0,
+    voice_quality   TEXT,
+    mixing_threshold INTEGER,
+    voice_max_video INTEGER NOT NULL DEFAULT 0,
     is_group        INTEGER NOT NULL DEFAULT 0,
-    nsfw            INTEGER NOT NULL DEFAULT 0
+    nsfw            INTEGER NOT NULL DEFAULT 0,
+    afk             INTEGER NOT NULL DEFAULT 0,
+    parent_channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    thread_starter_message_id INTEGER,
+    thread_owner_id INTEGER,
+    thread_archived INTEGER NOT NULL DEFAULT 0,
+    thread_locked INTEGER NOT NULL DEFAULT 0,
+    thread_auto_archive_minutes INTEGER NOT NULL DEFAULT 1440,
+    thread_last_activity_at TEXT,
+    forum_require_tag INTEGER NOT NULL DEFAULT 0,
+    forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
+    dm_owner_id     INTEGER,
+    dm_icon     TEXT
 );
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,12 +203,18 @@ CREATE TABLE IF NOT EXISTS messages (
     edited_at   TEXT,
     deleted     INTEGER NOT NULL DEFAULT 0,
     mentions_everyone INTEGER NOT NULL DEFAULT 0,
-    pinned_at  TEXT
+    pinned_at  TEXT,
+    kind       INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     PRIMARY KEY (message_id, mentioned_user_id)
+);
+CREATE TABLE IF NOT EXISTS message_role_mentions (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL,
+    PRIMARY KEY (message_id, role_id)
 );
 
 CREATE TABLE IF NOT EXISTS attachments (

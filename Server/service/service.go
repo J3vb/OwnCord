@@ -46,9 +46,11 @@ type Services struct {
 	Settings    *SettingsService
 	Uploads     *UploadService
 	Voice       *VoiceService
-	Tokens      *TokenService
-	Sessions    *SessionService
-	Setup       *SetupService
+	// ChannelPrivacy is the channel-level private flag (3D-6).
+	ChannelPrivacy *ChannelPrivacyService
+	Tokens         *TokenService
+	Sessions       *SessionService
+	Setup          *SetupService
 	// Erasure runs account erasure for the self-service route and the admin
 	// route alike (B4-9); the composition root installs the upload storage
 	// on it and the maintenance loop resumes its unfinished jobs.
@@ -79,6 +81,14 @@ type Services struct {
 	NSFW *NSFWService
 	// GIFFavorites is the per-user saved-GIF list (migration 059).
 	GIFFavorites *GIFFavoriteService
+	// UserNotes is the private per-user profile note (migration 069). It is nil
+	// when the Store does not also satisfy UserNoteStore (a test double), and
+	// the profile routes then leave the note routes out.
+	UserNotes *UserNoteService
+	// Privacy is the per-user DM privacy setting (migration 070). It is nil
+	// when the Store does not also satisfy PrivacyStore (a test double), and
+	// the profile routes then leave the privacy routes out.
+	Privacy *PrivacyService
 	// PushDispatch is Web Push dispatch (B5-11, behind HP-5), nil unless
 	// the composition root constructed it — which it does only when both
 	// push.enabled and push.dispatch_enabled are true. Exists on Services
@@ -88,6 +98,24 @@ type Services struct {
 	// Attention is the admin attention panel's state (RI-07), nil until the
 	// composition root builds it over the hub's counters.
 	Attention *AttentionService
+	// StatusExpiry clears custom statuses at their expiry. The composition
+	// root installs its notifier and runs it; ChannelService wakes it when a
+	// status with an expiry is set.
+	StatusExpiry *CustomStatusExpirer
+	// PollExpiry ends polls at their expiry and tells the notifier. The
+	// composition root installs its notifier and runs it. It is nil when the
+	// Store does not also serve polls (a test double). MessageService wakes it
+	// when a poll is created.
+	PollExpiry *PollExpirer
+	// CallLog writes the call log rows of DM calls from voice presence (WP
+	// 3B-9). The hub installs its sink; the composition root starts it.
+	CallLog *CallLogService
+	// Threads owns thread create, update, delete and listing (WP 6.9c). The
+	// archiver and the hub share it.
+	Threads *ThreadService
+	// ThreadArchiver archives idle threads (WP 6.9c). The composition root
+	// installs its notifier and runs it.
+	ThreadArchiver *ThreadArchiver
 }
 
 // New creates all domain services wired together.
@@ -97,6 +125,9 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	erasure := NewErasureService(st)
 	moderation := NewModerationService(st, permSvc)
 	moderation.erasure = erasure
+	moderation.limiter = limiter
+	users := NewUserService(st)
+	moderation.users = users
 	blocks := NewBlockService(st)
 	messages := NewMessageService(st, permSvc, limiter)
 	// The report-linked removal entry point (ActOnReport, kind="removal")
@@ -110,14 +141,45 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	messageRequests := NewMessageRequestService(st, blocks)
 	messages.SetMessageRequests(messageRequests)
 	uploads := NewUploadService(st, permSvc)
+	messages.SetUploads(uploads)
+	if bs, ok := st.(BannerFileStore); ok {
+		uploads.banners = bs
+	}
+	channels := NewChannelService(st, permSvc)
+	statusExpiry := NewCustomStatusExpirer(st)
+	channels.SetExpiryWake(statusExpiry.Wake)
+	var pollExpiry *PollExpirer
+	if ps, ok := st.(pollExpiryStore); ok {
+		pollExpiry = NewPollExpirer(ps, messages)
+		messages.SetPollWake(pollExpiry.Wake)
+	}
+	dms := NewDMService(st, permSvc)
+	voice := NewVoiceService(st)
+	callLog := NewCallLogService(st, dms)
+	voice.SetCallLog(callLog)
+	var userNotes *UserNoteService
+	if ns, ok := st.(UserNoteStore); ok {
+		userNotes = NewUserNoteService(ns)
+	}
+	var privacy *PrivacyService
+	if ps, ok := st.(PrivacyStore); ok {
+		privacy = NewPrivacyService(ps)
+	}
 	return &Services{
+		UserNotes:       userNotes,
+		Privacy:         privacy,
+		CallLog:         callLog,
 		Erasure:         erasure,
 		Retention:       NewRetentionService(st),
 		Messages:        messages,
-		Channels:        NewChannelService(st, permSvc),
+		Channels:        channels,
+		StatusExpiry:    statusExpiry,
+		PollExpiry:      pollExpiry,
+		Threads:         NewThreadService(st, permSvc, limiter),
+		ThreadArchiver:  NewThreadArchiver(st),
 		Permissions:     permSvc,
-		Users:           NewUserService(st),
-		DMs:             NewDMService(st, permSvc),
+		Users:           users,
+		DMs:             dms,
 		Invites:         NewInviteService(st),
 		Blocks:          blocks,
 		Moderation:      moderation,
@@ -125,7 +187,8 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Emoji:           NewEmojiService(st, permSvc),
 		Settings:        NewSettingsService(st),
 		Uploads:         uploads,
-		Voice:           NewVoiceService(st),
+		Voice:           voice,
+		ChannelPrivacy:  NewChannelPrivacyService(st),
 		Tokens:          NewTokenService(st),
 		Sessions:        NewSessionService(st),
 		Setup:           NewSetupService(st, limiter),

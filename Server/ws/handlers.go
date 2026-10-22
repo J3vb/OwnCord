@@ -23,7 +23,9 @@ func (h *Hub) HandleMessageForTest(c *Client, raw []byte) {
 // disconnect-triggered cleanup without an explicit voice_leave message.
 // Exported for ws_test package use only.
 func (h *Hub) HandleVoiceLeaveForTest(c *Client) {
-	h.handleVoiceLeave(context.Background(), c, voiceLeaveReasonDisconnect)
+	txn := h.begin(c.userID)
+	defer txn.end()
+	h.handleVoiceLeave(context.Background(), txn, c, voiceLeaveReasonDisconnect)
 }
 
 // handleMessage parses the envelope and dispatches to the appropriate handler.
@@ -42,7 +44,14 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if c.isSendClosed() {
 		return
 	}
-	if h.handleMessageSessionRecheck(c) {
+	// fctx is this frame's database deadline (WP 4.1b). It is derived from the
+	// connection context, so a disconnect still cancels it. Exempt types
+	// (command_deadline.go) dispatch on c.ctx below. handleMessageApply takes it
+	// only for the voice join's pre-commit work; its events and the rest of the
+	// join keep the connection context.
+	fctx, cancel := context.WithTimeout(c.ctx, commandDeadline())
+	defer cancel()
+	if h.handleMessageSessionRecheck(fctx, c) {
 		return
 	}
 
@@ -52,7 +61,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	}
 	// The app-level heartbeat keeps an idle socket's session sliding (DP-05).
 	if env.Type == MsgTypePing {
-		h.touchSession(c.ctx, c)
+		h.touchSession(fctx, c)
 	}
 
 	// ── Typed command dispatch ───────────────────────────────────────────
@@ -81,7 +90,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		avatar = c.user.Avatar
 		displayName = c.user.DisplayName
 	}
-	voiceChID, voiceJoinTok := c.getVoiceState()
+	voiceChID, voiceJoinTok := c.voice.state()
 	info := ClientInfo{
 		UserID:         c.userID,
 		Username:       username,
@@ -93,7 +102,22 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		VoiceJoinToken: voiceJoinTok,
 	}
 
-	result, dispatched := h.registry.DispatchV2(c.ctx, cmd, info)
+	dispatchCtx := fctx
+	exempt := isCommandDeadlineExempt(env.Type)
+	if exempt {
+		dispatchCtx = c.ctx
+	}
+	// A frame whose deadline was spent before dispatch (a slow session recheck)
+	// is refused without running its handler, which would only fail on the
+	// expired context. voice_leave is the exception: it must still release the
+	// user's voice slot.
+	if !exempt && env.Type != MsgTypeVoiceLeave && commandDeadlineExceeded(fctx, errDeadlineSpent) {
+		slog.Warn("ws command deadline exceeded",
+			"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "stage", "before_dispatch")
+		c.sendMsg(buildErrorMsgWithID(ErrCodeRequestTimeout, "the server is busy, try again", env.ID))
+		return
+	}
+	result, dispatched := h.registry.DispatchV2(dispatchCtx, cmd, info)
 	if !dispatched {
 		// A registered constructor with no V2 handler is a wiring bug — the
 		// guard test (TestEveryConstructorHasV2Handler) locks this shut.
@@ -106,29 +130,54 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		supersedeDeferredFocus(c)
 	}
 	if result.Error != nil {
-		if ce, ok := errors.AsType[ClientError](result.Error); ok {
-			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
-		} else {
-			slog.Error("ws handler internal error",
-				"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
-			c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
-		}
-		// A rejection may still need to evict: voice_token_refresh returns
-		// LeaveVoice alongside its error when the join gate now refuses, so the
-		// user is removed from the SFU rather than merely denied a new token.
-		if result.LeaveVoice {
-			h.leaveVoiceLocked(c, result.LeaveVoiceReason)
-		}
+		h.handleMessageError(fctx, c, env, msgType, reqID, result, exempt)
 		return
 	}
 
-	h.handleMessageApply(c, env, reqID, result, receivedAt)
+	h.handleMessageApply(c.ctx, fctx, c, env, reqID, result, receivedAt)
+}
+
+// handleMessageError answers a failed command: REQUEST_TIMEOUT when the
+// per-frame deadline fctx cut it short, otherwise the handler's own error.
+func (h *Hub) handleMessageError(fctx context.Context, c *Client, env envelope, msgType, reqID string, result Result, exempt bool) {
+	// A client voice_leave (including one refused by its rate limit) still
+	// releases the user's slot, so a spent deadline never turns it into a
+	// timeout that drops the leave.
+	clientLeave := result.LeaveVoice && result.LeaveVoiceReason == voiceLeaveReasonClient
+	if !exempt && !clientLeave && commandDeadlineExceeded(fctx, result.Error) {
+		// REQUEST_TIMEOUT means "not applied": a transaction whose context
+		// ends before Commit rolls back, and post-commit work is detached.
+		slog.Warn("ws command deadline exceeded",
+			"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
+		c.sendMsg(buildErrorMsgWithID(ErrCodeRequestTimeout, "the server is busy, try again", env.ID))
+		// A lookup that timed out is not a refusal, so the LeaveVoice a
+		// handler attaches to a failed gate read (voice_token_refresh) is
+		// not honoured: the user stays in voice and retries.
+		return
+	}
+	if ce, ok := errors.AsType[ClientError](result.Error); ok {
+		if ce.ThreadID != 0 {
+			c.sendMsg(buildThreadErrorMsg(ce, env.ID))
+		} else {
+			c.sendMsg(buildErrorMsgWithID(ce.Code, ce.Message, env.ID))
+		}
+	} else {
+		slog.Error("ws handler internal error",
+			"user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", result.Error)
+		c.sendMsg(buildErrorMsgWithID(ErrCodeInternal, "internal error", env.ID))
+	}
+	// A rejection may still need to evict: voice_token_refresh returns
+	// LeaveVoice alongside its error when the join gate now refuses, so the
+	// user is removed from the SFU rather than merely denied a new token.
+	if result.LeaveVoice {
+		h.leaveVoiceLocked(c, result.LeaveVoiceReason)
+	}
 }
 
 // handleMessageSessionRecheck performs handleMessage's periodic session
-// revalidation. It reports whether the connection was closed, in which case
+// revalidation on ctx (the frame's deadline). It reports whether the connection was closed, in which case
 // the caller must stop processing the frame.
-func (h *Hub) handleMessageSessionRecheck(c *Client) bool {
+func (h *Hub) handleMessageSessionRecheck(ctx context.Context, c *Client) bool {
 	// Periodic session expiry check: every SessionCheckInterval messages,
 	// re-validate the session token. This catches sessions that are revoked or
 	// expire while the WebSocket connection is still open.
@@ -141,7 +190,7 @@ func (h *Hub) handleMessageSessionRecheck(c *Client) bool {
 	c.mu.Unlock()
 
 	if shouldCheck && c.tokenHash != "" {
-		result, dbErr := h.readers.Dispatch.GetSessionWithBanStatus(c.ctx, c.tokenHash)
+		result, dbErr := h.readers.Dispatch.GetSessionWithBanStatus(ctx, c.tokenHash)
 		if dbErr != nil {
 			// A failed read says nothing about this session's validity —
 			// kicking the client on a transient DB error (SQLITE_BUSY, an
@@ -217,31 +266,37 @@ func (h *Hub) handleMessageDecode(c *Client, raw []byte) (envelope, string, stri
 
 // handleMessageApply applies the client state mutations and side effects that a
 // successful V2 Result asks for. receivedAt is when handleMessage read the
-// frame, used to time the send→ack round trip (chat_send_ok).
-func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result Result, receivedAt time.Time) {
+// frame, used to time the send→ack round trip (chat_send_ok). fctx is the
+// frame's deadline: only the voice join's pre-commit work runs on it; ctx, the
+// connection context, serves the rest of the apply.
+func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envelope, reqID string, result Result, receivedAt time.Time) {
 	// Apply client state mutations and side effects.
 	if result.SetChannelID != nil {
 		h.applyFocusResult(c, env.Type, *result.SetChannelID)
 	}
+	if result.SetThreadID != nil {
+		h.applyThreadFocus(c, *result.SetThreadID)
+	}
 	if result.DeferChannelFocus != nil {
-		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID)
+		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID, !result.DeferChannelFocusNoRead)
 	}
 	if result.SetPresence != nil {
-		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus)
+		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus, result.SetPresence.customStatusExpiresAt)
 	}
-	if result.SetE2EEPubKey != nil {
-		sig := ""
-		if result.SetE2EESignature != nil {
-			sig = *result.SetE2EESignature
+	if result.SetE2EEAnnounce != nil {
+		c.setE2EEAnnounce(*result.SetE2EEAnnounce)
+	}
+	if sw := result.SetVoiceWatching; sw != nil {
+		// Relay only when the slot is still in the channel the handler decided
+		// against; a frame that lost a channel switch reaches nobody.
+		if c.voice.setWatchingIfChannel(sw.chID, sw.ids) {
+			h.sendToVoiceChannelExcept(sw.chID, c.userID, buildVoiceWatching(c.userID, sw.ids))
 		}
-		c.setE2EEPubKey(*result.SetE2EEPubKey, sig)
 	}
 	if result.SetVoiceJoinToken != nil {
-		unlock := h.voiceLock(c.userID)
-		if chID := c.getVoiceChID(); chID != 0 {
-			c.setVoiceState(chID, *result.SetVoiceJoinToken)
-		}
-		unlock()
+		txn := h.begin(c.userID)
+		txn.setJoinToken(c, *result.SetVoiceJoinToken)
+		txn.end()
 	}
 	if result.Reply != nil {
 		c.sendMsg(result.Reply)
@@ -253,7 +308,7 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		}
 	}
 	if len(result.Events) > 0 {
-		h.emitEventsFrom(c.ctx, c.userID, result.Events)
+		h.emitEventsFrom(ctx, c.userID, result.Events)
 	}
 	// Voice join/leave hand off to the hub-internal routines (also called
 	// un-throttled on disconnect/switch). handleVoiceJoin re-reads channel_id
@@ -262,7 +317,7 @@ func (h *Hub) handleMessageApply(c *Client, env envelope, reqID string, result R
 		h.leaveVoiceLocked(c, result.LeaveVoiceReason)
 	}
 	if result.JoinVoice {
-		h.handleVoiceJoin(c.ctx, c, env.Payload, reqID)
+		h.handleVoiceJoinFrame(fctx, ctx, c, env.Payload, reqID)
 	}
 }
 
@@ -294,6 +349,10 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 	if newChID <= 0 {
 		return
 	}
+	if h.refusesForumTopic(c, newChID) {
+		h.unwindChannelFocus(c, newChID)
+		return
+	}
 	h.pubsub.Subscribe(c, ChannelTopic(newChID))
 	// The re-validation is permissions.CanAdmitSession — the same predicate
 	// as HandleChannelFocus's admission gate (S-12): DMs are participant-gated
@@ -309,6 +368,11 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 		return
 	}
 	if ch != nil {
+		// A socket without the forums feature never holds a forum's topic.
+		if ch.Type == channelTypeForum && !c.features.forums {
+			h.unwindChannelFocus(c, newChID)
+			return
+		}
 		sub, subErr := h.subjectFor(c.ctx, c.userID, newChID)
 		if subErr != nil {
 			return
@@ -325,9 +389,14 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 			return
 		}
 	}
-	h.pubsub.Unsubscribe(c, ChannelTopic(newChID))
+	h.unwindChannelFocus(c, newChID)
+}
+
+// unwindChannelFocus drops the topic and the slot a refused focus took.
+func (h *Hub) unwindChannelFocus(c *Client, chID int64) {
+	h.pubsub.Unsubscribe(c, ChannelTopic(chID))
 	c.mu.Lock()
-	if c.channelID == newChID {
+	if c.channelID == chID {
 		c.channelID = 0
 	}
 	c.mu.Unlock()

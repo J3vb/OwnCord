@@ -336,15 +336,38 @@ func alphaInsertUsers(tx *sql.Tx, rng *rand.Rand, joined []time.Time) error {
 
 func alphaInsertChannels(tx *sql.Tx, windowStart time.Time) error {
 	created := windowStart.AddDate(0, 0, -60)
+	// One category row per distinct name, in order of first appearance, so
+	// ids and positions are deterministic (migration 072).
+	categoryIDs := map[string]int64{}
+	for _, c := range alphaChannelDefs {
+		if _, seen := categoryIDs[c.category]; seen || c.category == "" {
+			continue
+		}
+		pos := len(categoryIDs)
+		res, err := tx.Exec(`INSERT INTO channel_categories (name, position, created_at) VALUES (?, ?, ?)`,
+			c.category, pos, ts(created.Add(time.Duration(pos)*time.Minute)))
+		if err != nil {
+			return fmt.Errorf("alpha: category %q: %w", c.category, err)
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("alpha: category %q id: %w", c.category, err)
+		}
+		categoryIDs[c.category] = id
+	}
 	for i, c := range alphaChannelDefs {
 		archived := 0
 		if c.archived {
 			archived = 1
 		}
+		var categoryID any
+		if id, ok := categoryIDs[c.category]; ok {
+			categoryID = id
+		}
 		if _, err := tx.Exec(
-			`INSERT INTO channels (id, name, type, category, topic, position, archived, is_group, created_at)
+			`INSERT INTO channels (id, name, type, category_id, topic, position, archived, is_group, created_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-			i+1, c.name, c.ctype, c.category, c.topic, c.position, archived, ts(created.Add(time.Duration(i)*time.Minute)),
+			i+1, c.name, c.ctype, categoryID, c.topic, c.position, archived, ts(created.Add(time.Duration(i)*time.Minute)),
 		); err != nil {
 			return fmt.Errorf("alpha: channel %q: %w", c.name, err)
 		}

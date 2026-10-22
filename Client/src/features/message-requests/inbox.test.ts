@@ -279,6 +279,8 @@ describe("inbox view", () => {
   }
   const status = (): HTMLElement => root.querySelector("[data-testid='requests-status']")!;
   const list = (): HTMLElement => root.querySelector("[data-testid='requests-list']")!;
+  const retry = (): HTMLButtonElement =>
+    root.querySelector<HTMLButtonElement>("[data-testid='requests-retry']")!;
   const rows = (): HTMLElement[] => [...root.querySelectorAll<HTMLElement>(".requests-item")];
 
   afterEach(() => {
@@ -308,13 +310,88 @@ describe("inbox view", () => {
     await settle();
     open();
     expect(status().textContent).toBe(
-      "Message requests couldn't be loaded. They load again when you reconnect.",
+      "Message requests couldn't be loaded. Try again, or they load again when you reconnect.",
     );
 
     setConnectionStatus("reconnecting");
     const { uiStore } = await import("@stores/ui.store");
     uiStore.flush();
     expect(status().textContent).toBe("Reconnecting. This list may be out of date.");
+  });
+
+  describe("Retry when the inbox is unavailable", () => {
+    it("offers Retry only while unavailable and connected", async () => {
+      const { api, calls } = deferredApi();
+      open();
+      expect(retry().hidden).toBe(true);
+      applyReadyDmRequests(api);
+      calls[0]!.reject(new Error("HTTP 500"));
+      await settle();
+      messageRequestsStore.flush();
+      expect(retry().hidden).toBe(false);
+      expect(retry().textContent).toBe("Retry");
+
+      setConnectionStatus("reconnecting");
+      const { uiStore } = await import("@stores/ui.store");
+      uiStore.flush();
+      expect(retry().hidden).toBe(true);
+    });
+
+    it("refetches on click, is disabled while loading, and recovers on success", async () => {
+      const { api, calls } = deferredApi();
+      applyReadyDmRequests(api);
+      calls[0]!.reject(new Error("HTTP 500"));
+      await settle();
+      open();
+      expect(retry().hidden).toBe(false);
+
+      retry().click();
+      retry().click();
+      expect(api.listDmRequests).toHaveBeenCalledTimes(2);
+      expect(retry().getAttribute("aria-disabled")).toBe("true");
+      expect(retry().textContent).toBe("Retrying…");
+
+      calls[1]!.resolve([item(1)]);
+      await settle();
+      messageRequestsStore.flush();
+      expect(messageRequestsStore.getState().status).toBe("ready");
+      expect(retry().hidden).toBe(true);
+      expect(ids()).toEqual([1]);
+    });
+
+    it("moves focus to the list when Retry succeeds while it held focus", async () => {
+      const { api, calls } = deferredApi();
+      applyReadyDmRequests(api);
+      calls[0]!.reject(new Error("HTTP 500"));
+      await settle();
+      open();
+      retry().focus();
+      expect(document.activeElement).toBe(retry());
+
+      retry().click();
+      calls[1]!.resolve([item(1)]);
+      await settle();
+      messageRequestsStore.flush();
+      expect(retry().hidden).toBe(true);
+      expect(document.activeElement).toBe(list());
+    });
+
+    it("shows the message and Retry again after a second failure", async () => {
+      const { api, calls } = deferredApi();
+      applyReadyDmRequests(api);
+      calls[0]!.reject(new Error("HTTP 500"));
+      await settle();
+      open();
+
+      retry().click();
+      calls[1]!.reject(new Error("HTTP 500"));
+      await settle();
+      messageRequestsStore.flush();
+      expect(status().textContent).toContain("couldn't be loaded");
+      expect(retry().hidden).toBe(false);
+      expect(retry().getAttribute("aria-disabled")).toBe("false");
+      expect(retry().textContent).toBe("Retry");
+    });
   });
 
   it("shows sender and message as inert text, and fetches nothing", async () => {

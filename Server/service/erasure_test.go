@@ -594,6 +594,10 @@ type recordingErasureHub struct {
 	calls []string
 }
 
+func (h *recordingErasureHub) DisconnectRevokedUser(userID int64) {
+	h.calls = append(h.calls, fmt.Sprintf("disconnect:%d", userID))
+}
+
 func (h *recordingErasureHub) BroadcastMemberBan(userID int64) {
 	h.calls = append(h.calls, fmt.Sprintf("ban:%d", userID))
 }
@@ -629,7 +633,7 @@ func TestErasureService_HubBroadcastsThenPurges(t *testing.T) {
 	if err := svc.DeleteAccount(ctx, Principal{User: user}, "correct horse battery", ""); err != nil {
 		t.Fatalf("DeleteAccount: %v", err)
 	}
-	want := fmt.Sprintf("[ban:%d purge:%d]", uid, uid)
+	want := fmt.Sprintf("[disconnect:%d ban:%d purge:%d]", uid, uid, uid)
 	if got := fmt.Sprint(hub.calls); got != want {
 		t.Errorf("hub calls = %s, want %s", got, want)
 	}
@@ -916,7 +920,7 @@ func TestErasureService_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
 	if err != nil || !job.ReplayPurged || job.State != db.ErasureStateDone {
 		t.Fatalf("job after the resume = %+v, %v; want purged and done", job, err)
 	}
-	if fmt.Sprint(hub.calls) != fmt.Sprintf("[ban:%d purge:%d]", uid, uid) {
+	if fmt.Sprint(hub.calls) != fmt.Sprintf("[disconnect:%d ban:%d purge:%d]", uid, uid, uid) {
 		t.Errorf("hub calls = %v", hub.calls)
 	}
 	// Without a hub the persisted rows are purged directly and the job

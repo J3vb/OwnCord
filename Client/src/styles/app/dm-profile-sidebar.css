@@ -1,4 +1,7 @@
 /* ── DM Profile Sidebar ── */
+.dm-profile-slot {
+  display: flex;
+}
 .dm-profile-sidebar {
   width: 340px;
   background: var(--bg-secondary);
@@ -58,6 +61,7 @@
   padding: 0 16px 16px;
 }
 .dps-username {
+  overflow-wrap: anywhere;
   text-align: center;
   font-size: var(--font-size-xl);
   font-weight: 600;
@@ -111,4 +115,33 @@
   font-size: var(--font-size-sm);
   padding: 8px;
   font-family: inherit;
+}
+.dps-block-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--red);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.dps-block-btn:hover {
+  background: var(--red);
+  color: var(--on-accent);
+}
+
+/* Shown only for a member who has a banner; the avatar overlaps its lower edge. */
+.dps-banner {
+  height: var(--upp-banner-h, 60px);
+  margin: 0 -16px;
+  overflow: hidden;
+  background: var(--accent-gradient);
+}
+.dps-banner + .dps-avatar {
+  margin-top: -40px;
+  border: 4px solid var(--bg-secondary);
+  box-sizing: content-box;
 }

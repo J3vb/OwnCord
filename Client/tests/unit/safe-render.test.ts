@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   safeMount,
+  renderFallback,
   installGlobalErrorHandlers,
   type MountableComponent,
 } from "../../src/lib/safe-render";
@@ -184,5 +185,84 @@ describe("installGlobalErrorHandlers", () => {
     handler({ reason: err });
     expect(errorSpy).toHaveBeenCalled();
     expectConsole("error", "Unhandled promise rejection");
+  });
+});
+
+describe("recovery buttons on the fallback", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+
+  const buttons = (container: Element) => ({
+    reload: container.querySelector<HTMLButtonElement>('[data-testid="render-fallback-reload"]'),
+    signOut: container.querySelector<HTMLButtonElement>('[data-testid="render-fallback-sign-out"]'),
+  });
+
+  it("shows Reload and Sign out when a mount throws, and each calls its callback", () => {
+    const container = document.createElement("div");
+    const recovery = { reload: vi.fn(), signOut: vi.fn() };
+    safeMount(
+      {
+        mount() {
+          throw new Error("Render failed");
+        },
+      },
+      container,
+      recovery,
+    );
+    expectConsole("error", "Component mount failed");
+
+    const { reload, signOut } = buttons(container);
+    expect(reload?.textContent).toBe("Reload");
+    expect(signOut?.textContent).toBe("Sign out");
+
+    reload!.click();
+    expect(recovery.reload).toHaveBeenCalledTimes(1);
+    expect(recovery.signOut).not.toHaveBeenCalled();
+    signOut!.click();
+    expect(recovery.signOut).toHaveBeenCalledTimes(1);
+    expect(recovery.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the same buttons for a failure outside a mount (a rejected page import)", () => {
+    const container = document.createElement("div");
+    container.textContent = "stale";
+    const recovery = { reload: vi.fn(), signOut: vi.fn() };
+    renderFallback(container, new Error("chunk failed"), recovery);
+
+    expect(container.textContent).not.toContain("stale");
+    expect(container.textContent).toContain("Something went wrong");
+    const { reload, signOut } = buttons(container);
+    reload!.click();
+    signOut!.click();
+    expect(recovery.reload).toHaveBeenCalledTimes(1);
+    expect(recovery.signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps working when a recovery action throws", () => {
+    const container = document.createElement("div");
+    renderFallback(container, null, {
+      reload: () => {
+        throw new Error("reload blocked");
+      },
+      signOut: vi.fn(),
+    });
+    expect(() => buttons(container).reload!.click()).not.toThrow();
+    expectConsole("error", "Recovery action failed");
+  });
+
+  it("shows no buttons when the caller gives no recovery", () => {
+    const container = document.createElement("div");
+    safeMount(
+      {
+        mount() {
+          throw new Error("x");
+        },
+      },
+      container,
+    );
+    expectConsole("error", "Component mount failed");
+    expect(container.querySelector("button")).toBeNull();
   });
 });

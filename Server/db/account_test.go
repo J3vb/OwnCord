@@ -201,7 +201,7 @@ func TestEraseAccount_ReversesMentionCounts(t *testing.T) {
 	bob := seedUser(t, database, "bob-mention")
 	chID := seedChannel(t, database, "general-mention")
 
-	msg, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, false)
+	msg, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestEraseAccount_MentionCounts_PreservesOthersContribution(t *testing.T) {
 	bob := seedUser(t, database, "bob-mention2")
 	chID := seedChannel(t, database, "general-mention2")
 
-	msgAlice, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, false)
+	msgAlice, err := database.CreateMessageWithMentions(ctx, chID, alice, "hi @bob", nil, []int64{bob}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions(alice): %v", err)
 	}
@@ -242,7 +242,7 @@ func TestEraseAccount_MentionCounts_PreservesOthersContribution(t *testing.T) {
 		t.Fatalf("IncrementMentionCounts(alice): %v", err)
 	}
 
-	msgCarol, err := database.CreateMessageWithMentions(ctx, chID, carol, "hey @bob too", nil, []int64{bob}, false)
+	msgCarol, err := database.CreateMessageWithMentions(ctx, chID, carol, "hey @bob too", nil, []int64{bob}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions(carol): %v", err)
 	}
@@ -322,14 +322,14 @@ func TestEraseAccount_LastGroupDMParticipant_RemovesChannel(t *testing.T) {
 	userB := seedUser(t, database, "dmlast-b")
 	userC := seedUser(t, database, "dmlast-c")
 
-	ch, err := database.CreateGroupDMChannel(context.Background(), "grp", []int64{userA, userB, userC})
+	ch, err := database.CreateGroupDMChannel(context.Background(), "grp", userA, []int64{userA, userB, userC})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
-	if _, err := database.LeaveGroupDM(context.Background(), userB, ch.ID); err != nil {
+	if _, err := database.LeaveGroupDM(context.Background(), userB, ch.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM(userB): %v", err)
 	}
-	if _, err := database.LeaveGroupDM(context.Background(), userC, ch.ID); err != nil {
+	if _, err := database.LeaveGroupDM(context.Background(), userC, ch.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM(userC): %v", err)
 	}
 
@@ -425,8 +425,8 @@ func TestEraseAccount_SurvivingDM_KeepsAttachmentsLinked(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed attachment: %v", err)
 	}
-	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, alice, []string{"att-survivor-1"}); err != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, alice, []string{"att-survivor-1"}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 	}
 
 	if err := eraseAccount(ctx, database, bob); err != nil {
@@ -463,7 +463,7 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 	userB := seedUser(t, database, "dmatt-b")
 	userC := seedUser(t, database, "dmatt-c")
 
-	ch, err := database.CreateGroupDMChannel(ctx, "grp", []int64{userA, userB, userC})
+	ch, err := database.CreateGroupDMChannel(ctx, "grp", userA, []int64{userA, userB, userC})
 	if err != nil {
 		t.Fatalf("CreateGroupDMChannel: %v", err)
 	}
@@ -481,17 +481,17 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 		); err != nil {
 			t.Fatalf("seed attachment: %v", err)
 		}
-		if n, err := database.LinkAttachmentsToMessage(ctx, msgID, uploader, []string{attID}); err != nil || n != 1 {
-			t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", n, err)
+		if n, err := database.LinkAttachmentsToMessage(ctx, msgID, uploader, []string{attID}); err != nil || len(n) != 1 {
+			t.Fatalf("LinkAttachmentsToMessage: n=%d err=%v", len(n), err)
 		}
 	}
 	seedLinked(userA, "att-dm-a", "stored-a.png")
 	seedLinked(userB, "att-dm-b", "stored-b.png")
 
-	if _, err := database.LeaveGroupDM(ctx, userB, ch.ID); err != nil {
+	if _, err := database.LeaveGroupDM(ctx, userB, ch.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM(userB): %v", err)
 	}
-	if _, err := database.LeaveGroupDM(ctx, userC, ch.ID); err != nil {
+	if _, err := database.LeaveGroupDM(ctx, userC, ch.ID, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM(userC): %v", err)
 	}
 
@@ -533,7 +533,7 @@ func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *t
 
 func setRole(t *testing.T, database *db.DB, userID, roleID int64) {
 	t.Helper()
-	if _, err := database.ExecContext(context.Background(), "UPDATE users SET role_id = ? WHERE id = ?", roleID, userID); err != nil {
+	if err := database.UpdateUserRole(context.Background(), userID, roleID); err != nil {
 		t.Fatalf("setRole(%d, %d): %v", userID, roleID, err)
 	}
 }

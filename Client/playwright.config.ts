@@ -4,7 +4,13 @@ import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
 export default defineConfig({
   outputDir: "test-results/mock",
   testDir: "./tests/e2e",
-  testIgnore: ["**/native/**", "**/admin/**", "**/fullstack/**", "**/artifact-smoke/**"],
+  testIgnore: [
+    "**/native/**",
+    "**/admin/**",
+    "**/fullstack/**",
+    "**/web/**",
+    "**/artifact-smoke/**",
+  ],
   // Known flakes tracked in tests/e2e/quarantine.json are excluded from the
   // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
   // docs/testing-behavior.md, scripts/check-quarantine.mjs.
@@ -35,9 +41,11 @@ export default defineConfig({
   // time. Abort after 20 failures instead so the job reports a
   // usable red quickly. 0 = unlimited (local runs see every failure).
   maxFailures: process.env.CI ? 20 : 0,
-  // Self-terminate before the workflow's timeout-minutes (25) SIGKILLs the
-  // runner, so the HTML/JUnit report still gets written and uploaded.
-  globalTimeout: process.env.CI ? 20 * 60 * 1000 : 0,
+  // Self-terminate before the workflow's timeout-minutes (40) SIGKILLs the
+  // runner, so the HTML/JUnit report still gets written and uploaded. CI runs
+  // only the smoke set from this config now; the ceiling stays as headroom
+  // (the full dev-server suite once took about 20 minutes on 2 workers).
+  globalTimeout: process.env.CI ? 30 * 60 * 1000 : 0,
   reporter: process.env.CI
     ? [
         ["html", { open: "never", outputFolder: "playwright-report/mock" }],

@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import { channelsStore, removeChannel } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { DmChannelPayload } from "@lib/types";
@@ -33,7 +34,20 @@ export interface DmChannel {
   readonly name: string;
   /** True for a group DM (3+ participants at creation). */
   readonly isGroup: boolean;
+  /**
+   * The group's owner (user id). Present only for a group on a server with
+   * member management (WP 3B-10); its absence is the feature-detection signal
+   * that hides Add People, Remove and Make Group Owner.
+   */
+  readonly ownerId?: number;
+  /** The group's icon file path; "" or absent for none (WP 3B-11b). */
+  readonly icon?: string;
   readonly lastMessageId: number | null;
+  /**
+   * The current user's read pointer in this DM (see Channel.lastReadMessageId).
+   * Undefined when the server never said.
+   */
+  readonly lastReadMessageId?: number | undefined;
   readonly lastMessage: string;
   readonly lastMessageAt: string;
   readonly unreadCount: number;
@@ -85,6 +99,8 @@ export function addDmChannel(channel: DmChannel): void {
             // last message was, and blanking it would leave the row emptier
             // than before the rename.
             lastMessageId: channel.lastMessageId ?? existing.lastMessageId,
+            // dm_channel_open frames carry no pointer; do not forget ours.
+            lastReadMessageId: channel.lastReadMessageId ?? existing.lastReadMessageId,
             lastMessage: channel.lastMessage !== "" ? channel.lastMessage : existing.lastMessage,
             lastMessageAt:
               channel.lastMessageAt !== "" ? channel.lastMessageAt : existing.lastMessageAt,
@@ -138,6 +154,7 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
     // carries it, so a DM mention badge survives a reconnect.
     mentionCount: dmChannel.mentionCount,
     lastMessageId: dmChannel.lastMessageId,
+    lastReadMessageId: dmChannel.lastReadMessageId,
     // Channel-level permission is always true for DMs; block state is layered on
     // top by the composer via blocks.store (see ChannelController), not canSend.
     canSend: true,
@@ -147,6 +164,7 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
     // guild channels, and a DM row is synthesised here rather than coming from
     // the server's channel list.
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
   };
@@ -186,7 +204,11 @@ export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
     participants,
     name: p.name ?? "",
     isGroup: p.is_group ?? false,
+    ...(p.owner_id !== undefined && { ownerId: p.owner_id }),
+    // "" is kept, not dropped: addDmChannel's spread must clear an old icon.
+    ...(p.icon !== undefined && { icon: p.icon }),
     lastMessageId: p.last_message_id,
+    lastReadMessageId: p.last_read_message_id,
     lastMessage: p.last_message,
     lastMessageAt: p.last_message_at,
     unreadCount: p.unread_count,
@@ -307,6 +329,32 @@ export function reviseDmLastMessage(
   });
 }
 
+/**
+ * Set a DM's read pointer (and optionally its counts) outright; the DM twin of
+ * channels.store's setReadPointer. A no-op for a DM this client does not list.
+ */
+export function setDmReadPointer(
+  channelId: number,
+  pointer: number | undefined,
+  counts?: { readonly unread: number; readonly mention: number },
+): void {
+  dmStore.setState((prev) =>
+    prev.channels.some((c) => c.channelId === channelId)
+      ? {
+          channels: prev.channels.map((c) =>
+            c.channelId === channelId
+              ? {
+                  ...c,
+                  lastReadMessageId: pointer,
+                  ...(counts && { unreadCount: counts.unread, mentionCount: counts.mention }),
+                }
+              : c,
+          ),
+        }
+      : prev,
+  );
+}
+
 /** Clear the unread and mention counts for a DM channel — they clear together,
  *  matching channels.store.clearUnread and the server's read-state advance. */
 export function clearDmUnread(channelId: number): void {
@@ -374,3 +422,10 @@ export function updateDmParticipant(userId: number, patch: Partial<DmUser>): voi
     return changed ? { channels } : prev;
   });
 }
+
+/** Forget the previous server's DM list and unread badges on sign-out or server switch. */
+export function resetDmStore(): void {
+  dmStore.setState(() => INITIAL);
+}
+
+void registerSessionReset("dm:store", resetDmStore); // app-lifetime

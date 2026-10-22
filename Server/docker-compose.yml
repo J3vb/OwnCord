@@ -2,15 +2,15 @@
 #
 # Quick start:
 #   1. cp .env.example .env  && edit .env (set secrets)
-#   2. cp livekit.yaml.example livekit.yaml  && edit livekit.yaml (same keys)
+#   2. cp livekit.yaml.example livekit.yaml  && edit livekit.yaml (optional;
+#      the LiveKit key and secret come from .env, so they are typed only there)
 #   3. cp config.yaml.example config.yaml  && edit as needed
 #   4. docker compose up -d
 #
 # LiveKit runs as a separate container on the same internal network.
 # The OwnCord server reaches it at ws://livekit:7880 (Docker DNS), and it
 # proxies signalling to clients at :8443/livekit — so 7880 need not be
-# published or forwarded. Firewall TCP 7881 and UDP 50000-60000 for media
-# (or a single UDP port — see the livekit service's ports below).
+# published or forwarded. Firewall TCP 7881 and UDP 7882 for media.
 #
 # The environment block below already points the server at that service and
 # keeps its own auto-download off (LiveKit is its own container here), so
@@ -36,8 +36,8 @@ services:
       - "8443:8443"
     environment:
       # Secrets injected from .env — never hardcode these
-      OWNCORD_VOICE_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
-      OWNCORD_VOICE_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      OWNCORD_VOICE_LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in .env}
+      OWNCORD_VOICE_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in .env}
       # Voice wiring for this stack: reach LiveKit by its compose service name
       # and leave the server's own auto-download off, so it never starts a
       # second LiveKit inside this container on media ports nothing publishes.
@@ -48,11 +48,9 @@ services:
       # The image bundles a LiveKit and defaults to starting it, on one UDP
       # port. Here LiveKit is its own container, so turn both defaults off.
       OWNCORD_VOICE_LIVEKIT_BINARY: ""
-      # Match livekit.yaml's media ports so the admin connectivity report and
-      # boot warning name them: "0" is the 50000-60000 range published below;
-      # for single-port media set livekit.yaml's `rtc.udp_port: 7882` and this
-      # to "7882".
-      OWNCORD_VOICE_UDP_PORT: "0"
+      # The single UDP media port LiveKit is pinned to below, so the admin
+      # connectivity report and boot warning name it.
+      OWNCORD_VOICE_UDP_PORT: "7882"
     volumes:
       # Mount your config.yaml for non-secret settings (server name, TLS, etc.)
       # See the example config at: https://github.com/J3vb/OwnCord#configuration
@@ -107,8 +105,17 @@ services:
     # version skew here is invisible until voice fails.
     image: livekit/livekit-server:v1.13.7
     restart: unless-stopped
-    # LiveKit config file — copy livekit.yaml.example → livekit.yaml and fill in
-    command: --config /etc/livekit/livekit.yaml
+    # LiveKit config file — copy livekit.yaml.example → livekit.yaml and fill in.
+    # The media port is pinned here, not in the file: LiveKit prefers a
+    # port_range in the file over udp_port, so the two range flags zero any
+    # range an older livekit.yaml still carries and 7882 is always the port.
+    command: --config /etc/livekit/livekit.yaml --udp-port 7882 --rtc.port_range_start 0 --rtc.port_range_end 0
+    environment:
+      # The key and secret are typed once, in .env, and replace any keys: in
+      # livekit.yaml. Passed by env so the secret stays out of `ps` argv.
+      # LiveKit reads this as YAML, so both sides are single-quoted to keep a
+      # numeric secret, or one with `#` or `: `, intact.
+      LIVEKIT_KEYS: "'${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY in .env}': '${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET in .env}'"
     ports:
       # 7880 is LiveKit's own API/signalling endpoint and is deliberately NOT
       # published: clients tunnel signalling through the OwnCord server's
@@ -116,11 +123,7 @@ services:
       # the host network for no benefit — and would let anyone who knows the
       # credentials in your .env mint room tokens directly.
       - "7881:7881" # TCP fallback for WebRTC (clients behind strict NAT)
-      # WebRTC UDP media. The default is the 50000-60000 range; to forward a
-      # single port instead, set `rtc.udp_port: 7882` in livekit.yaml,
-      # replace the range below with `- "7882:7882/udp"`, and set
-      # OWNCORD_VOICE_UDP_PORT to "7882" on the owncord service above.
-      - "50000-60000:50000-60000/udp" # WebRTC UDP media streams
+      - "7882:7882/udp" # WebRTC UDP media, all streams on one port
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
     logging: *default-logging

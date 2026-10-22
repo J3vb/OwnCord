@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -20,10 +21,13 @@ import (
 //
 // It refuses rather than overwrites silently. Without --force it makes no
 // change and explains what to do; with --force it still takes a pre-restore
-// safety copy, verifies the backup, and only then replaces the live file. It
-// holds the database's single-process lock for the whole operation, so a
-// running server stops it rather than letting two processes fight over one
-// file.
+// safety copy, verifies the backup, and only then swaps it in. The swap is the
+// admin panel's and the boot's: db.StageRestore stages the verified backup and
+// db.ApplyStagedRestore moves the live files aside, renames the staged copy in
+// and rolls back if it fails its check. The CLI holds the database's
+// single-process lock for the whole operation, so a running server stops it
+// rather than letting two processes fight over one file, and it refuses while
+// another restore is still staged or half done.
 //
 // Path flags are separated from the config so a test never starts a real
 // server: runRestoreCLI takes the config path explicitly.
@@ -76,6 +80,36 @@ first), or copy the file in by hand if that is what you meant to do.
 	}
 	defer lock()
 
+	// A restore the panel staged (or one that stopped half way) would be applied
+	// at the next boot over whatever this run restores, so it must finish or be
+	// cancelled first.
+	// The lock follows the configured path, as the server's does; the files
+	// are replaced beside the real database a symlinked path points at.
+	configured := dbPath
+	if real, err := filepath.EvalSymlinks(dbPath); err == nil {
+		dbPath = real
+	}
+	if err := errors.Join(db.RestorePending(configured), db.RestorePending(dbPath)); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v — database untouched.\n", err)
+		marker := configured + ".restore-pending.json"
+		if _, statErr := os.Stat(dbPath + ".restore-pending.json"); statErr == nil {
+			marker = dbPath + ".restore-pending.json"
+		}
+		if _, statErr := os.Stat(marker); statErr == nil {
+			fmt.Fprintf(os.Stderr, "Start the server to finish it, or delete %s to cancel it, then run this again.\n", marker)
+		} else {
+			fmt.Fprintln(os.Stderr, "A swap was interrupted. Start the server once so it puts the previous database back, then run this again.")
+		}
+		return 1
+	}
+
+	// Staging clears leftovers under these names first, so a source among
+	// them would be deleted before it is read.
+	if real, err := filepath.EvalSymlinks(source); err == nil && strings.HasPrefix(real, dbPath+".restore-") {
+		fmt.Fprintf(os.Stderr, "error: %s is one of the restore's own working files; copy it elsewhere and restore from the copy\n", source)
+		return 1
+	}
+
 	backupDir := cfg.Backup.Dir
 	if backupDir == "" {
 		backupDir = filepath.Join("data", "backups")
@@ -89,8 +123,9 @@ first), or copy the file in by hand if that is what you meant to do.
 }
 
 // replaceLiveDatabase takes the pre-restore safety copy (or moves an unreadable
-// live database aside) and copies source over dbPath. The caller holds the
-// process lock and has already verified source.
+// live database aside), stages source and applies it with the same db code the
+// admin panel and boot use. The caller holds the process lock, has verified
+// source and has checked that no other restore is pending.
 func replaceLiveDatabase(source, dbPath, backupDir string) int {
 	// A pre-restore safety copy of the CURRENT database, so the overwrite is
 	// reversible. It is skipped only when the live database is missing or
@@ -105,59 +140,154 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 		return 1
 	}
 
-	// Preserve the message-delivery cutoff across the replacement, exactly as
-	// the admin restore path does: a restored database may have lost the
-	// receipts for messages this server already accepted.
-	if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
-		fmt.Fprintf(os.Stderr, "error: could not preserve message retry protection — database untouched: %v\n", err)
+	if !preserveFloors(dbPath) {
+		dropSafetyCopy(safety)
 		return 1
 	}
 
-	// A dead server's -wal would be replayed onto the restored file on the next
-	// boot, so no sidecar may stay beside it. With a safety copy they hold
-	// nothing it did not capture. Without one, the unreadable database and its
-	// sidecars are the only pre-restore state left, so they are moved aside
-	// rather than truncated and deleted.
+	// With a safety copy the apply moves the live database and its sidecars
+	// aside itself and drops them once the swap holds. Without one, the
+	// unreadable database and its sidecars are the only pre-restore state left
+	// and the apply deletes its own rollback file on success, so they are moved
+	// to a name the apply does not know. A dead server's -wal is never replayed
+	// onto the restored file either way.
 	aside := ""
 	if safety == "" {
 		aside = dbPath + ".pre_restore_" + time.Now().UTC().Format("20060102_150405")
-	}
-	if aside == "" {
-		if err := db.RemoveWALSidecars(dbPath); err != nil {
-			fmt.Fprintf(os.Stderr, "error: could not clear the database's WAL files before restoring: %v\n", err)
+		if err := moveAside(dbPath, aside); err != nil {
+			fmt.Fprintf(os.Stderr, "error: could not clear %s before restoring: %v\n", dbPath, err)
+			putBack(dbPath, aside)
+			dropSafetyCopy(safety)
 			return 1
-		}
-	} else {
-		for _, suffix := range []string{"", "-wal", "-shm"} {
-			if err := os.Rename(dbPath+suffix, aside+suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintf(os.Stderr, "error: could not clear %s before restoring: %v\n", dbPath+suffix, err)
-				return 1
-			}
 		}
 	}
 
-	if err := db.CopyDatabaseFile(source, dbPath); err != nil {
-		fmt.Fprintf(os.Stderr, "error: restoring %s failed: %v\n", source, err)
-		if safety != "" {
-			if rbErr := db.CopyDatabaseFile(safety, dbPath); rbErr != nil {
-				fmt.Fprintf(os.Stderr, "error: rollback from %s also failed: %v\n", safety, rbErr)
-			} else {
-				fmt.Fprintf(os.Stderr, "the pre-restore safety copy was put back\n")
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "the previous database files, if any, are at %s*\n", aside)
+	marker := db.StagedRestoreMarker{Backup: filepath.Base(source), RequestedAt: time.Now().UTC()}
+	if safety != "" {
+		marker.SafetyCopy = filepath.Base(safety)
+	}
+	if err := db.StageRestore(context.Background(), dbPath, source, marker); err != nil {
+		fmt.Fprintf(os.Stderr, "error: staging %s failed — database untouched: %v\n", source, err)
+		putBack(dbPath, aside)
+		dropSafetyCopy(safety)
+		return 1
+	}
+
+	// Both outcomes leave <db>.restore-result.json beside the database. It is
+	// left there on purpose: the next server boot reads it, shows it on the
+	// admin attention panel and then clears it.
+	res, err := db.ApplyStagedRestore(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: applying the restore failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "the restore files were left beside %s (*.restore-*) for an operator to inspect; starting the server retries or recovers the restore\n", dbPath)
+		if aside != "" {
+			fmt.Fprintf(os.Stderr, "the previous database files, if any, are at %s*; the next start may open an empty database, so put them back by hand if it does\n", aside)
 		}
+		return 1
+	}
+	if res.Status != db.RestoreStatusApplied {
+		fmt.Fprintf(os.Stderr, "error: the restore was not applied (%s): %s\n", res.Status, res.Error)
+		fmt.Fprintf(os.Stderr, "the previous database was kept\n")
+		putBack(dbPath, aside)
+		dropSafetyCopy(safety)
 		return 1
 	}
 
 	fmt.Printf("restored %s from %s\n", dbPath, source)
 	if safety != "" {
+		// Restore succeeded: trim old safety copies, keeping the new one and
+		// the source. A failure only warns; the restore stands.
+		removed, pruneErr := admin.PruneSafetyCopies(backupDir, admin.SafetyCopiesKept, safety, source)
+		if pruneErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not prune old safety copies: %v\n", pruneErr)
+		}
+		if len(removed) > 0 {
+			fmt.Printf("pruned %d old safety copies\n", len(removed))
+		}
 		fmt.Printf("pre-restore safety copy: %s\n", safety)
 	} else {
 		fmt.Printf("the previous database files, if any, were moved aside to %s*\n", aside)
 	}
 	fmt.Println("start the server to load the restored data")
 	return 0
+}
+
+// preserveFloors carries the message retry cutoff and the event sequence floor
+// past the replacement. It reports false, having said why, when the restore
+// must be refused; nothing has been moved yet at that point.
+func preserveFloors(dbPath string) bool {
+	// Preserve the message-delivery cutoff across the replacement, exactly as
+	// the admin restore path does: a restored database may have lost the
+	// receipts for messages this server already accepted. The apply takes the
+	// floors again (they are idempotent max-floors), but the unreadable-live
+	// case moves the live files aside first, so only this call can read them.
+	if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: could not preserve message retry protection — database untouched: %v\n", err)
+		return false
+	}
+
+	// Carry the live event sequence floor across the replacement as well, so
+	// the next boot reserves above what the old database handed out. A floor
+	// that cannot be stored refuses the restore; a missing or unreadable live
+	// database only warns.
+	err := db.CarryWSSeqFloorForRestore(context.Background(), dbPath)
+	if errors.Is(err, db.ErrWSSeqFloorNotStored) {
+		fmt.Fprintf(os.Stderr, "error: could not preserve the event sequence floor — database untouched: %v\n", err)
+		return false
+	}
+	if err != nil && !onlyMissingFile(err) {
+		fmt.Fprintf(os.Stderr, "warning: could not carry the live event sequence floor across the restore (%v)\n", err)
+	}
+	return true
+}
+
+// moveAside renames dbPath and its -wal and -shm to aside plus the same
+// suffix. A file that is not there is skipped.
+func moveAside(dbPath, aside string) error {
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Rename(dbPath+suffix, aside+suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("moving %s aside: %w", dbPath+suffix, err)
+		}
+	}
+	return nil
+}
+
+// putBack undoes moveAside after a restore that did not take effect, so the
+// database is as the operator left it. It does nothing when no files were moved
+// aside (aside is empty) or when a real database is already in place. A
+// zero-length file is the empty placeholder a rolled-back apply puts back when
+// there was no live database to park, so it is replaced.
+func putBack(dbPath, aside string) {
+	if aside == "" {
+		return
+	}
+	if info, err := os.Stat(dbPath); err == nil {
+		if info.Size() > 0 {
+			return
+		}
+		if err := os.Remove(dbPath); err != nil {
+			fmt.Fprintf(os.Stderr, "error: could not clear the empty placeholder %s: %v; the previous files are at %s*\n", dbPath, err, aside)
+			return
+		}
+	}
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Rename(aside+suffix, dbPath+suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "error: could not put %s back: %v; the previous files are at %s*\n", dbPath+suffix, err, aside)
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr, "the previous database files were put back\n")
+}
+
+// dropSafetyCopy removes a safety copy of a restore that did not happen. A
+// failure only warns; a stray copy is harmless and the next restore prunes it.
+func dropSafetyCopy(safety string) {
+	if safety == "" {
+		return
+	}
+	if err := os.Remove(safety); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "warning: could not remove the unused safety copy %s: %v\n", safety, err)
+	}
 }
 
 // checkRestoreSource refuses a source that is not safe to copy over dbPath.
@@ -202,7 +332,7 @@ func safetyCopy(dbPath, backupDir string) (string, error) {
 	}
 	defer src.Close() //nolint:errcheck
 
-	out := filepath.Join(backupDir, "pre_restore_"+time.Now().UTC().Format("20060102_150405")+".db")
+	out := filepath.Join(backupDir, admin.PreRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
 	if err := src.BackupToSafe(context.Background(), out, backupDir); err != nil {
 		return "", err
 	}
@@ -216,6 +346,25 @@ Put a database backup back on a server that will not boot, without the admin
 panel. The file must be a backup this server wrote (POST /admin/api/backup or
 the full archive's data/chatserver.db). Without --force the command makes no
 change; --force replaces the live database after taking a pre-restore safety
-copy. Stop the server first — it holds the database's process lock.
+copy, using the same staged swap as the admin panel (the previous database is
+kept if the restored one fails its check). Stop the server first — it holds
+the database's process lock. It refuses while another restore is staged or
+unfinished: start the server to finish it, or delete the marker file
+(<database>.restore-pending.json) to cancel it.
 `)
+}
+
+// onlyMissingFile reports whether every error joined into err is a missing
+// file, the case of a live database that is simply not there. Any other part,
+// such as a damaged sidecar report, still gets shown.
+func onlyMissingFile(err error) bool {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok { //nolint:errorlint // walking an errors.Join tree
+		for _, e := range joined.Unwrap() {
+			if !onlyMissingFile(e) {
+				return false
+			}
+		}
+		return true
+	}
+	return errors.Is(err, os.ErrNotExist)
 }

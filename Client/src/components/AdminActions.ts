@@ -8,6 +8,10 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createMenuItem as buildMenuItem, enableMenuKeyboard } from "@lib/context-menu";
 import { appendPurgeSection } from "./purge-prompt";
 import { shellText } from "../i18n/shell";
+import { voiceText } from "../i18n/voice";
+import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
+import { TIMEOUT_PRESETS } from "../features/moderation/timeoutPresets";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,29 +33,48 @@ export interface MemberContextMenuOptions {
   canKick?: boolean;
   canBan?: boolean;
   canManageRoles?: boolean;
+  /** MODERATE_MEMBERS plus outrank; defaults to `showAdminActions`. The items
+   *  also need their callbacks, so a caller that wires none shows none. */
+  canTimeout?: boolean;
+  /** MANAGE_NICKNAMES plus outrank plus the server capability; defaults to
+   *  `showAdminActions`. The item also needs `onChangeNickname`. */
+  canManageNicknames?: boolean;
+  /** The menu's target is the signed-in user: no Block and no moderation. */
+  isSelf?: boolean;
+  /** Whether the target is timed out, from the server's timeout view: `unknown`
+   *  (an older server, no view) offers both Timeout and Remove Timeout. */
+  timeoutState?: "active" | "none" | "unknown";
+  /** Optional items: each is absent when its option is left out. */
+  onProfile?(): void;
+  onMention?(): void;
+  /** Why Mention is greyed (no composer to write into); absent means usable. */
+  mentionDisabledReason?: string;
+  onMessage?(): void;
+  onCall?(): void;
+  /** Voice moderation rows for a target in a server voice channel; a string is
+   *  why they are unavailable and renders them greyed with that reason. */
+  voiceMod?: VoiceModMenuOptions | string;
+  /** Time the member out for `seconds` (one of the six presets). */
+  onTimeout?(seconds: number): Promise<void>;
+  onRemoveTimeout?(): Promise<void>;
+  /** Opens the Change Nickname dialog. The menu closes first. */
+  onChangeNickname?(): void;
+  /** Runs once when the menu goes away, by any path. */
+  onClosed?(): void;
+  /** Where focus goes on close when the opener row is gone. */
+  restoreFocusTo?(): HTMLElement | null;
   /** Whether the local user currently blocks this member (labels the toggle). */
   isBlocked: boolean;
   onToggleBlock(): Promise<void>;
   /** Revokes every session the target holds (the "Force Logout" item). */
   onKick(): Promise<void>;
-  /**
-   * The reason is stored and displayed by the server; empty means "no reason
-   * given". durationHours 0 = permanent, otherwise the ban auto-expires.
-   */
-  onBan(reason: string, durationHours: number): Promise<void>;
+  /** Opens the Ban dialog (reason, length, message history). The menu closes
+   *  first, so the dialog returns focus to the member row. */
+  onBan(): void;
   onChangeRole(newRole: string): Promise<void>;
 }
 
-/** Ban duration choices offered in the ban flow (label key → hours; 0 = permanent). */
 const noop = (): void => {};
-
-const BAN_DURATIONS = [
-  { key: "ban.forever", hours: 0 },
-  { key: "ban.oneHour", hours: 1 },
-  { key: "ban.oneDay", hours: 24 },
-  { key: "ban.sevenDays", hours: 24 * 7 },
-  { key: "ban.thirtyDays", hours: 24 * 30 },
-] as const;
 
 export interface ChannelContextMenuOptions {
   channelId: number;
@@ -168,23 +191,368 @@ function withConfirmation(
 /** Wrap a finished menu: enable the shared keyboard model and return the
  *  result. `destroy` tears the menu and its listeners down, whether called by
  *  Escape/close or by the owner, and always restores focus to the opener. */
-function finishMenu(menu: HTMLDivElement, disposable: Disposable): ContextMenuResult {
+function finishMenu(
+  menu: HTMLDivElement,
+  disposable: Disposable,
+  onClosed: () => void = noop,
+  restoreFocusTo?: () => HTMLElement | null,
+): ContextMenuResult {
   let restoreFocus: () => void = noop;
+  let closed = false;
   function destroy(): void {
     disposable.destroy();
     menu.remove();
     restoreFocus();
+    if (closed) return;
+    closed = true;
+    onClosed();
   }
-  restoreFocus = enableMenuKeyboard(menu, { signal: disposable.signal, onClose: destroy });
+  restoreFocus = enableMenuKeyboard(menu, {
+    signal: disposable.signal,
+    onClose: destroy,
+    ...(restoreFocusTo === undefined ? {} : { restoreFocusTo }),
+  });
   return { element: menu, destroy };
+}
+
+/** One flat menu row. `disabledReason` greys it and keeps it inert; the reason
+ *  shows as its tooltip. */
+function appendRow(
+  parent: Node,
+  label: string,
+  onClick: () => void,
+  signal: AbortSignal,
+  opts: { testId?: string; disabledReason?: string } = {},
+): HTMLElement {
+  const item = buildMenuItem(
+    label,
+    "context-menu__item",
+    opts.testId === undefined ? {} : { testId: opts.testId },
+  );
+  if (opts.disabledReason !== undefined) {
+    item.setAttribute("aria-disabled", "true");
+    item.title = opts.disabledReason;
+  } else {
+    item.addEventListener("click", onClick, { signal });
+  }
+  parent.appendChild(item);
+  return item;
+}
+
+/** A submenu trigger whose flyout opens on hover (the keyboard path is the
+ *  same reveal plus focus, in context-menu.ts). */
+function buildFlyout(
+  label: string,
+  fill: (flyout: HTMLElement) => void,
+  signal: AbortSignal,
+): HTMLElement {
+  const trigger = buildMenuItem(label, "context-menu__item", { submenu: true });
+  const flyout = createElement("div", { class: "context-menu__submenu" });
+  fill(flyout);
+  trigger.addEventListener(
+    "mouseenter",
+    () => {
+      flyout.style.display = "";
+    },
+    { signal },
+  );
+  trigger.addEventListener(
+    "mouseleave",
+    () => {
+      flyout.style.display = "none";
+    },
+    { signal },
+  );
+  flyout.style.display = "none";
+  appendChildren(trigger, flyout);
+  return trigger;
+}
+
+/** Server Mute / Deafen / Disconnect for a target in a server voice channel. */
+function appendVoiceRows(
+  parent: Node,
+  mod: VoiceModMenuOptions | string,
+  close: () => void,
+  signal: AbortSignal,
+): void {
+  const reason = typeof mod === "string" ? mod : mod.disabledReason;
+  const muted = typeof mod !== "string" && mod.serverMuted;
+  const deafened = typeof mod !== "string" && mod.serverDeafened;
+  const run = (action: (m: VoiceModMenuOptions) => void) => (): void => {
+    if (typeof mod === "string") return;
+    action(mod);
+    close();
+  };
+  const opts = (testId: string): { testId: string; disabledReason?: string } =>
+    reason === undefined ? { testId } : { testId, disabledReason: reason };
+  appendRow(
+    parent,
+    voiceText(muted ? "volume.serverUnmute" : "volume.serverMute"),
+    run((m) => m.onServerMute(!m.serverMuted)),
+    signal,
+    opts("member-menu-server-mute"),
+  );
+  appendRow(
+    parent,
+    voiceText(deafened ? "volume.serverUndeafen" : "volume.serverDeafen"),
+    run((m) => m.onServerDeafen(!m.serverDeafened)),
+    signal,
+    opts("member-menu-server-deafen"),
+  );
+  appendRow(
+    parent,
+    voiceText("volume.disconnect"),
+    run((m) => m.onDisconnect()),
+    signal,
+    opts("member-menu-disconnect"),
+  );
 }
 
 export function createMemberContextMenu(options: MemberContextMenuOptions): ContextMenuResult {
   const disposable = new Disposable();
+  const signal = disposable.signal;
   const menu = createElement("div", { class: "context-menu" });
+  const isSelf = options.isSelf === true;
+  let result: ContextMenuResult | null = null;
+  const closeMenu = (): void => result?.destroy();
 
-  // Block / Unblock — available to every member, not just admins. Blocking is
-  // disruptive (kills DMs both ways) so it confirms; unblocking is one click.
+  // Groups, top to bottom; a separator goes between non-empty ones.
+  const top = document.createDocumentFragment();
+  const voice = document.createDocumentFragment();
+  const manage = document.createDocumentFragment();
+  const danger = document.createDocumentFragment();
+  const bottom = document.createDocumentFragment();
+
+  // Profile / Mention / Message / Call: each appears only when wired.
+  if (options.onProfile !== undefined) {
+    const onProfile = options.onProfile;
+    appendRow(top, shellText("member.profile"), () => onProfile(), signal, {
+      testId: "member-menu-profile",
+    });
+  }
+  if (options.onMention !== undefined) {
+    const onMention = options.onMention;
+    appendRow(
+      top,
+      shellText("member.mention"),
+      () => {
+        onMention();
+        closeMenu();
+      },
+      signal,
+      {
+        testId: "member-menu-mention",
+        ...(options.mentionDisabledReason === undefined
+          ? {}
+          : { disabledReason: options.mentionDisabledReason }),
+      },
+    );
+  }
+  if (!isSelf && options.onMessage !== undefined) {
+    const onMessage = options.onMessage;
+    appendRow(
+      top,
+      shellText("member.message"),
+      () => {
+        onMessage();
+        closeMenu();
+      },
+      signal,
+      { testId: "member-menu-message" },
+    );
+  }
+  if (!isSelf && options.onCall !== undefined) {
+    const onCall = options.onCall;
+    appendRow(
+      top,
+      shellText("member.call"),
+      () => {
+        onCall();
+        closeMenu();
+      },
+      signal,
+      { testId: "member-menu-call" },
+    );
+  }
+
+  if (!isSelf && options.voiceMod !== undefined) {
+    appendVoiceRows(voice, options.voiceMod, closeMenu, signal);
+  }
+
+  const adminGate = !isSelf && options.showAdminActions;
+  const canManageRoles = adminGate && (options.canManageRoles ?? options.showAdminActions);
+  const canKick = adminGate && (options.canKick ?? options.showAdminActions);
+  const canBan = adminGate && (options.canBan ?? options.showAdminActions);
+  const canTimeout = adminGate && (options.canTimeout ?? options.showAdminActions);
+  const canManageNicknames = adminGate && (options.canManageNicknames ?? options.showAdminActions);
+
+  // Role submenu trigger
+  if (canManageRoles) {
+    const roleItem = buildFlyout(
+      shellText("member.changeRole"),
+      (roleSub) => {
+        // One guard across every option: `currentRole` only updates when the
+        // member_update echoes, so without it a double-click (or a second option
+        // clicked while the first PATCH is in flight) fires twice.
+        let roleChangeRunning = false;
+        for (const role of options.availableRoles) {
+          const cls =
+            role.toLowerCase() === options.currentRole.toLowerCase()
+              ? "context-menu__item context-menu__item--active"
+              : "context-menu__item";
+          const roleOption = createMenuItem(
+            role,
+            cls,
+            () => {
+              if (roleChangeRunning || role.toLowerCase() === options.currentRole.toLowerCase()) {
+                return;
+              }
+              roleChangeRunning = true;
+              roleOption.classList.add("context-menu__item--pending");
+              const done = (): void => {
+                roleChangeRunning = false;
+                roleOption.classList.remove("context-menu__item--pending");
+              };
+              options.onChangeRole(role).then(done, done);
+            },
+            signal,
+          );
+          roleSub.appendChild(roleOption);
+        }
+      },
+      signal,
+    );
+    manage.appendChild(roleItem);
+  }
+
+  if (canManageNicknames && options.onChangeNickname !== undefined) {
+    const onChangeNickname = options.onChangeNickname;
+    appendRow(
+      manage,
+      shellText("member.changeNickname"),
+      () => {
+        closeMenu();
+        onChangeNickname();
+      },
+      signal,
+      { testId: "member-menu-change-nickname" },
+    );
+  }
+
+  // Timeout presets, or Remove Timeout when the server says one is active. An
+  // unknown state (an older server) offers both.
+  let timeoutRunning = false;
+  const timeoutState = options.timeoutState ?? "unknown";
+  if (canTimeout && options.onTimeout !== undefined && timeoutState !== "active") {
+    const onTimeout = options.onTimeout;
+    // One guard across all six presets and Remove Timeout: the state only
+    // changes when the server's member_timeouts frame arrives.
+    manage.appendChild(
+      buildFlyout(
+        shellText("member.timeout"),
+        (sub) => {
+          for (const preset of TIMEOUT_PRESETS) {
+            const row = createMenuItem(
+              shellText(preset.key),
+              "context-menu__item",
+              () => {
+                if (timeoutRunning) return;
+                timeoutRunning = true;
+                row.classList.add("context-menu__item--pending");
+                const done = (): void => {
+                  timeoutRunning = false;
+                  row.classList.remove("context-menu__item--pending");
+                };
+                onTimeout(preset.seconds).then(done, done);
+              },
+              signal,
+            );
+            sub.appendChild(row);
+          }
+        },
+        signal,
+      ),
+    );
+  }
+  if (canTimeout && options.onRemoveTimeout !== undefined && timeoutState !== "none") {
+    const onRemove = options.onRemoveTimeout;
+    const removeItem = appendRow(
+      manage,
+      shellText("member.removeTimeout"),
+      () => {
+        if (timeoutRunning) return;
+        timeoutRunning = true;
+        removeItem.classList.add("context-menu__item--pending");
+        const done = (): void => {
+          timeoutRunning = false;
+          removeItem.classList.remove("context-menu__item--pending");
+        };
+        onRemove().then(done, done);
+      },
+      signal,
+      { testId: "member-menu-remove-timeout" },
+    );
+  }
+
+  // Force Logout with confirmation. Named for what it does: the server revokes
+  // the target's sessions (KICK_MEMBERS), it does not remove a membership —
+  // there is no membership model — so the user can sign straight back in.
+  if (canKick) {
+    const kickItem = buildMenuItem(
+      shellText("member.forceLogout"),
+      "context-menu__item context-menu__item--danger",
+      { testId: "force-logout" },
+    );
+    withConfirmation(
+      kickItem,
+      shellText("member.forceLogoutConfirm"),
+      () => options.onKick(),
+      signal,
+      shellText("member.loggingOut"),
+    );
+    danger.appendChild(kickItem);
+  }
+
+  if (canBan) {
+    appendRow(
+      danger,
+      shellText("member.ban"),
+      () => {
+        closeMenu();
+        options.onBan();
+      },
+      signal,
+      { testId: "member-menu-ban" },
+    ).classList.add("context-menu__item--danger");
+  }
+
+  // Developer Mode: copy the member's ID, just above Block (self included).
+  if (isDeveloperMode()) {
+    appendRow(
+      bottom,
+      shellText("member.copyId"),
+      () => copyWithToast(String(options.userId), "toast.userIdCopied", "toast.userIdCopyFailed"),
+      signal,
+    );
+  }
+
+  // Block / Unblock — available to every other member, not just admins. Blocking
+  // is disruptive (kills DMs both ways) so it confirms; unblocking is one click.
+  if (!isSelf) bottom.appendChild(buildBlockItem(options, signal));
+
+  let first = true;
+  for (const group of [top, voice, manage, danger, bottom]) {
+    if (group.childNodes.length === 0) continue;
+    if (!first) menu.appendChild(createSeparator());
+    first = false;
+    menu.appendChild(group);
+  }
+
+  result = finishMenu(menu, disposable, options.onClosed, options.restoreFocusTo);
+  return result;
+}
+
+function buildBlockItem(options: MemberContextMenuOptions, signal: AbortSignal): HTMLElement {
   const blockItem = buildMenuItem(
     shellText(options.isBlocked ? "member.unblock" : "member.block"),
     options.isBlocked ? "context-menu__item" : "context-menu__item context-menu__item--danger",
@@ -207,210 +575,18 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
         };
         void options.onToggleBlock().then(done, done);
       },
-      { signal: disposable.signal },
+      { signal },
     );
   } else {
     withConfirmation(
       blockItem,
       shellText("common.areYouSure"),
       () => options.onToggleBlock(),
-      disposable.signal,
+      signal,
       shellText("member.blocking"),
     );
   }
-
-  const canManageRoles = options.canManageRoles ?? options.showAdminActions;
-  const canKick = options.canKick ?? options.showAdminActions;
-  const canBan = options.canBan ?? options.showAdminActions;
-
-  if (!options.showAdminActions || (!canManageRoles && !canKick && !canBan)) {
-    menu.appendChild(blockItem);
-    return finishMenu(menu, disposable);
-  }
-
-  // Role submenu trigger
-  if (canManageRoles) {
-    const roleItem = buildMenuItem(shellText("member.changeRole"), "context-menu__item", {
-      submenu: true,
-    });
-
-    const roleSub = createElement("div", { class: "context-menu__submenu" });
-    // One guard across every option: `currentRole` only updates when the
-    // member_update echoes, so without it a double-click (or a second option
-    // clicked while the first PATCH is in flight) fires twice.
-    let roleChangeRunning = false;
-    for (const role of options.availableRoles) {
-      const cls =
-        role === options.currentRole
-          ? "context-menu__item context-menu__item--active"
-          : "context-menu__item";
-      const roleOption = createMenuItem(
-        role,
-        cls,
-        () => {
-          if (roleChangeRunning || role === options.currentRole) return;
-          roleChangeRunning = true;
-          roleOption.classList.add("context-menu__item--pending");
-          const done = (): void => {
-            roleChangeRunning = false;
-            roleOption.classList.remove("context-menu__item--pending");
-          };
-          options.onChangeRole(role).then(done, done);
-        },
-        disposable.signal,
-      );
-      roleSub.appendChild(roleOption);
-    }
-
-    // Hover reveals the flyout without moving focus; the keyboard path
-    // (ArrowRight/Enter) is the same reveal plus focus, in context-menu.ts.
-    roleItem.addEventListener(
-      "mouseenter",
-      () => {
-        roleSub.style.display = "";
-      },
-      { signal: disposable.signal },
-    );
-    roleItem.addEventListener(
-      "mouseleave",
-      () => {
-        roleSub.style.display = "none";
-      },
-      { signal: disposable.signal },
-    );
-
-    roleSub.style.display = "none";
-    appendChildren(roleItem, roleSub);
-    menu.appendChild(roleItem);
-
-    menu.appendChild(createSeparator());
-  }
-
-  // Force Logout with confirmation. Named for what it does: the server revokes
-  // the target's sessions (KICK_MEMBERS), it does not remove a membership —
-  // there is no membership model — so the user can sign straight back in.
-  if (canKick) {
-    const kickItem = buildMenuItem(
-      shellText("member.forceLogout"),
-      "context-menu__item context-menu__item--danger",
-      { testId: "force-logout" },
-    );
-    withConfirmation(
-      kickItem,
-      shellText("member.forceLogoutConfirm"),
-      () => options.onKick(),
-      disposable.signal,
-      shellText("member.loggingOut"),
-    );
-    menu.appendChild(kickItem);
-  }
-
-  if (canBan) appendBanFlow(menu, options, disposable.signal);
-
-  menu.appendChild(createSeparator());
-  menu.appendChild(blockItem);
-
-  return finishMenu(menu, disposable);
-}
-
-/** Ban entry plus its reason/duration form. Split out so the member menu can
- *  omit it wholesale for an actor without BAN_MEMBERS. */
-function appendBanFlow(
-  menu: HTMLDivElement,
-  options: MemberContextMenuOptions,
-  signal: AbortSignal,
-): void {
-  // Ban — collects the reason the server stores and displays alongside the ban.
-  const banItem = buildMenuItem(
-    shellText("member.ban"),
-    "context-menu__item context-menu__item--danger",
-  );
-  const banReasonRow = createElement("div", {
-    class: "context-menu__reason",
-    style: "display:none;padding:6px 8px",
-  });
-  const banReasonInput = createElement("input", {
-    class: "form-input",
-    type: "text",
-    placeholder: shellText("member.banReason"),
-    maxlength: "200",
-    "data-testid": "ban-reason-input",
-    style: "width:100%;font-size:12px",
-  });
-  const banDurationSelect = createElement("select", {
-    class: "form-input",
-    "data-testid": "ban-duration-select",
-    "aria-label": shellText("member.banDuration"),
-    style: "width:100%;font-size:12px;margin-top:4px",
-  });
-  for (const d of BAN_DURATIONS) {
-    const opt = createElement("option", { value: String(d.hours) }, shellText(d.key));
-    banDurationSelect.appendChild(opt);
-  }
-  const banConfirm = buildMenuItem(
-    shellText("member.banConfirm"),
-    "context-menu__item context-menu__item--danger",
-    { testId: "ban-confirm" },
-  );
-  appendChildren(banReasonRow, banReasonInput, banDurationSelect, banConfirm);
-
-  banItem.addEventListener(
-    "click",
-    (e) => {
-      e.stopPropagation();
-      banItem.style.display = "none";
-      banReasonRow.style.display = "";
-      // The confirm button is a menuitem with tabindex -1 (roving navigation
-      // owns the Tab stop); now that its form is shown it must be Tab-reachable.
-      banConfirm.setAttribute("tabindex", "0");
-      banReasonInput.focus();
-    },
-    { signal },
-  );
-
-  // Typing a reason must not close the menu or trigger the outside-click guard.
-  banReasonInput.addEventListener("click", (e) => e.stopPropagation(), { signal });
-  banReasonInput.addEventListener("mousedown", (e) => e.stopPropagation(), { signal });
-  banDurationSelect.addEventListener("click", (e) => e.stopPropagation(), { signal });
-  banDurationSelect.addEventListener("mousedown", (e) => e.stopPropagation(), {
-    signal,
-  });
-
-  let banRunning = false;
-  function submitBan(): void {
-    if (banRunning) return;
-    banRunning = true;
-    setText(banConfirm, shellText("member.banning"));
-    banConfirm.classList.add("context-menu__item--pending");
-    const done = (): void => {
-      banRunning = false;
-      banConfirm.classList.remove("context-menu__item--pending");
-      setText(banConfirm, shellText("member.banConfirm"));
-    };
-    const durationHours = Number.parseInt(banDurationSelect.value, 10) || 0;
-    void options.onBan(banReasonInput.value.trim(), durationHours).then(done, done);
-  }
-
-  banConfirm.addEventListener(
-    "click",
-    (e) => {
-      e.stopPropagation();
-      submitBan();
-    },
-    { signal },
-  );
-  banReasonInput.addEventListener(
-    "keydown",
-    (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        submitBan();
-      }
-    },
-    { signal },
-  );
-
-  appendChildren(menu, banItem, banReasonRow);
+  return blockItem;
 }
 
 // ---------------------------------------------------------------------------

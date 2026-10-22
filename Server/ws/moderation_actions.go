@@ -35,7 +35,8 @@ func buildModAction(id int64, kind, reason string, expiresAt *time.Time) []byte 
 // warning on next connect (ready's notices) or the timeout on their next
 // attempted send (the predicates), so a missed frame here costs nothing.
 //
-// A timeout issued or lifted also re-sends the target's per-channel can_send
+// A timeout issued or lifted also re-publishes the member_timeouts view
+// (publishMemberTimeouts) and re-sends the target's per-channel can_send
 // (RefreshUserChannels), and an issued one schedules the same refresh for
 // just after it expires — nothing else announces a natural expiry. The
 // timer re-resolves live, so one outliving a lift or a superseding timeout
@@ -45,6 +46,7 @@ func (h *Hub) NotifyModAction(userID, actionID int64, kind, reason string, expir
 	if kind != "timeout" {
 		return
 	}
+	h.publishMemberTimeouts(userID)
 	h.RefreshUserChannels(userID)
 	if expiresAt != nil {
 		h.scheduleTimeoutExpiryRefresh(userID, *expiresAt)
@@ -64,8 +66,61 @@ func (h *Hub) scheduleTimeoutExpiryRefresh(userID int64, expiresAt time.Time) {
 			return
 		default:
 		}
+		h.publishMemberTimeouts(userID)
 		h.RefreshUserChannels(userID)
+		ctx, cancel := h.expiryCtx()
+		defer cancel()
+		h.liftExpiredTimeoutMute(ctx, userID)
 	})
+}
+
+// expiryCtx is the bounded context an expiry timer's voice work runs under:
+// derived from the hub's lifecycle context, so Stop interrupts it. A hub
+// built without NewHub has no lifecycle context and falls back to Background.
+func (h *Hub) expiryCtx() (context.Context, context.CancelFunc) {
+	parent := h.life
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, timeoutExpiryVoiceBudget)
+}
+
+// timeoutExpiryVoiceBudget bounds one expiry timer's voice unmute (a DB read
+// plus the SFU call).
+const timeoutExpiryVoiceBudget = 10 * time.Second
+
+// liftExpiredTimeoutMute lifts the voice server-mute a timeout left on
+// userID's live session once that timeout has run out on its own — the same
+// effect the maintenance tick's orphan reconcile has, without the wait of up
+// to fifteen minutes. Only a mute stamped with a moderation action id is a
+// timeout's (server_muted_by; a moderator's own mute carries NULL and is
+// never touched), and it is cleared only when userID has no active timeout
+// left: a newer timeout that superseded the expired one took the mute's
+// ownership and still holds it. UnmuteForTimeout clears by owner, so a tick
+// or a lift that already cleared it makes this a no-op.
+func (h *Hub) liftExpiredTimeoutMute(ctx context.Context, userID int64) {
+	if h.voice == nil || h.readers.Dispatch == nil {
+		return
+	}
+	state, err := h.voice.State(ctx, userID)
+	if err != nil {
+		slog.Warn("hub: timeout expiry could not read voice state", "err", err, "user_id", userID)
+		return
+	}
+	if state == nil || !state.ServerMuted || state.ServerMutedBy == nil {
+		return
+	}
+	active, err := h.readers.Dispatch.ListActiveTimeoutExpiries(ctx)
+	if err != nil {
+		slog.Warn("hub: timeout expiry could not list active timeouts", "err", err, "user_id", userID)
+		return
+	}
+	for _, t := range active {
+		if t.UserID == userID {
+			return
+		}
+	}
+	h.UnmuteForTimeout(ctx, userID, []int64{*state.ServerMutedBy})
 }
 
 // RearmTimeoutExpiries schedules the expiry refresh for every timeout active
@@ -91,8 +146,9 @@ func (h *Hub) RearmTimeoutExpiries() {
 const timeoutExpiryRefreshSlack = time.Second
 
 // RefreshUserChannels re-sends userID's live client a channel_create for
-// every non-DM channel it can see, each carrying its CURRENT can_send and
-// can_moderate_voice — RefreshChannelVisibility's per-recipient send, for a
+// every non-DM channel it can see, each carrying its CURRENT
+// channelAffordances (can_send, can_moderate_voice, can_delete_others,
+// can_pin, can_react) — RefreshChannelVisibility's per-recipient send, for a
 // change that moves only this one user's verdicts: a timeout issued, lifted
 // or expiring (Subject.TimedOut). Visibility itself cannot move on such a
 // change, so hidden channels are skipped rather than sent a channel_delete
@@ -112,6 +168,7 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 		slog.Warn("hub: RefreshUserChannels could not list channels", "user_id", userID, "err", err)
 		return
 	}
+	privacy := h.privacySnapshot(ctx)
 	for i := range channels {
 		ch := &channels[i]
 		if ch.Type == "dm" {
@@ -131,8 +188,10 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 		if live == nil {
 			return
 		}
-		live.sendMsg(buildChannelCreateFor(ch,
-			permissions.CanSendMessage(sub) == nil, permissions.AuthorizeVoiceModerator(sub) == nil))
+		if !live.sendsChannel(ch.Type) {
+			continue
+		}
+		live.sendMsg(buildChannelCreateFor(ch, privacy.PrivateOf(ch), affordancesFor(sub)))
 	}
 }
 

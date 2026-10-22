@@ -2,10 +2,16 @@
 //
 // client_update.go serves Tauri-compatible update metadata so the desktop
 // client can check for new versions and self-update.
+//
+// Linux .deb targets ("linux-*-deb") are served only to clients that send
+// ?deb_install=pkexec; everyone else gets 204. An opted-in client also gets a
+// 200 with the latest version when it is already current (or newer), so it can
+// tell "current" from "this server cannot serve me".
 package api
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/updater"
@@ -45,16 +51,30 @@ func handleClientUpdate(u *updater.Updater) http.HandlerFunc {
 			return
 		}
 
+		// A .deb client that has not opted in cannot install the package, so
+		// it gets 204 before any lookup and keeps its "cannot update itself"
+		// banner. Opted-in clients are answered below.
+		isDeb := strings.HasSuffix(target, "-deb")
+		optedIn := debOptIn(target, r.URL.Query())
+		if isDeb && !optedIn {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		info, err := u.CheckForUpdate(r.Context())
 		if err != nil {
 			http.Error(w, "failed to check for updates", http.StatusBadGateway)
 			return
 		}
 
-		// Compare versions — return 204 if no update available.
+		// Compare versions — return 204 if no update available. An opted-in
+		// .deb client is the exception: the plugin resolves the platform
+		// entry before it compares versions, so the entry must be sent even
+		// when the client is current; its own comparator then reports "no
+		// update" while knowing the server can serve the package.
 		cv := ensureV(currentVersion)
 		lv := ensureV(info.Latest)
-		if semver.Compare(cv, lv) >= 0 {
+		if semver.Compare(cv, lv) >= 0 && !optedIn {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -103,6 +123,14 @@ func handleClientUpdate(u *updater.Updater) http.HandlerFunc {
 
 		writeJSON(w, http.StatusOK, resp)
 	}
+}
+
+// debOptIn reports whether the request is from a .deb client that asked to be
+// offered the .deb package: the target ends in "-deb" and the query carries
+// deb_install=pkexec (exact, case-sensitive). Clients that predate the helper
+// that installs a .deb never send it.
+func debOptIn(target string, q url.Values) bool {
+	return strings.HasSuffix(target, "-deb") && q.Get("deb_install") == "pkexec"
 }
 
 // ensureV returns a version string with a "v" prefix for semver comparison.

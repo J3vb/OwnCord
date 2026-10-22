@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -236,8 +237,8 @@ func TestSendMessage_EmptyContentAllAttachmentsSkipped(t *testing.T) {
 		Content:       "",
 		AttachmentIDs: []string{"att-foreign", "att-missing"},
 	})
-	if !errors.Is(err, ErrBadRequest) {
-		t.Fatalf("err = %v, want ErrBadRequest", err)
+	if !errors.Is(err, ErrBadRequest) || !errors.Is(err, ErrAttachmentsUnavailable) {
+		t.Fatalf("err = %v, want ErrBadRequest and ErrAttachmentsUnavailable", err)
 	}
 	if result != nil {
 		t.Fatalf("result = %v, want nil", result)
@@ -737,7 +738,7 @@ func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 	}
 
 	// While the moderator can still read the channel, pinning works.
-	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, true); err != nil {
+	if _, err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, true); err != nil {
 		t.Fatalf("moderator with READ_MESSAGES must be able to pin: %v", err)
 	}
 
@@ -745,13 +746,13 @@ func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 	seedChannelOverride(t, database, permissions.ModeratorRoleID, 10, 0, denyPrivate)
 	permSvc.InvalidateChannel(10)
 
-	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, false); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID, false); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("moderator denied READ_MESSAGES must not unpin: got %v", err)
 	}
 	// The existence oracle is closed with it: an id that is not in this channel
 	// is refused by the same permission check, not by a distinguishable
 	// not-found answer.
-	if err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID+999, true); !errors.Is(err, ErrForbidden) {
+	if _, err := svc.SetMessagePinned(context.Background(), 2, 10, sent.MessageID+999, true); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("denied role must not learn which message ids exist: got %v", err)
 	}
 
@@ -820,7 +821,7 @@ func TestDMBlock_EnforcedOnEveryInteractionSink(t *testing.T) {
 	if _, err := svc.AddReaction(context.Background(), 1, sent.MessageID, "👋"); !errors.Is(err, ErrBlocked) {
 		t.Fatalf("blocked reaction must be refused: got %v", err)
 	}
-	if err := svc.SetMessagePinned(context.Background(), 1, 50, sent.MessageID, true); !errors.Is(err, ErrBlocked) {
+	if _, err := svc.SetMessagePinned(context.Background(), 1, 50, sent.MessageID, true); !errors.Is(err, ErrBlocked) {
 		t.Fatalf("blocked pin must be refused: got %v", err)
 	}
 
@@ -860,7 +861,7 @@ func TestSetMessagePinned_DeletedMessageReturnsNotFound(t *testing.T) {
 		t.Fatalf("send: %v", err)
 	}
 
-	if err := svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, true); err != nil {
+	if _, err := svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, true); err != nil {
 		t.Fatalf("pin: %v", err)
 	}
 
@@ -868,11 +869,83 @@ func TestSetMessagePinned_DeletedMessageReturnsNotFound(t *testing.T) {
 		t.Fatalf("delete: %v", err)
 	}
 
-	err = svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, false)
+	_, err = svc.SetMessagePinned(context.Background(), 1, 10, sent.MessageID, false)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected service.ErrNotFound for a soft-deleted message, got %v", err)
 	}
 	if errors.Is(err, ErrInternal) {
 		t.Fatalf("must not be classified as an internal error: %v", err)
 	}
+}
+
+// newReadOnlyAuthorFixture seeds channel 10 with a role that can read but not
+// send (user 5), a moderator (user 6, to time users out) and one message by
+// user 5. SEND_MESSAGES was taken away after they wrote it.
+func newReadOnlyAuthorFixture(t *testing.T) (svc *MessageService, database *db.DB, msgID int64) {
+	t.Helper()
+	database = newTestDB(t)
+	seedRole(t, database, &db.Role{
+		ID: permissions.MemberRoleID, Name: "member", Position: 1,
+		Permissions: permissions.SendMessages | permissions.ReadMessages,
+	})
+	seedRole(t, database, &db.Role{
+		ID: permissions.ModeratorRoleID, Name: "moderator", Position: 10,
+		Permissions: permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages | permissions.MuteMembers,
+	})
+	seedRole(t, database, &db.Role{ID: 5, Name: "readonly", Position: 2, Permissions: permissions.ReadMessages})
+	seedUser(t, database, &db.User{ID: 5, Username: "quiet"})
+	seedUserRole(t, database, 5, 5)
+	seedUser(t, database, &db.User{ID: 6, Username: "mod_bob"})
+	seedUserRole(t, database, 6, permissions.ModeratorRoleID)
+	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
+	var err error
+	msgID, err = database.CreateMessage(context.Background(), 10, 5, "written before", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	permSvc := NewPermissionService(database, permissions.NewChecker(database))
+	return NewMessageService(database, permSvc, nil), database, msgID
+}
+
+func requireDeletedByAuthor(t *testing.T, svc *MessageService, database *db.DB, userID, msgID int64) {
+	t.Helper()
+	res, err := svc.DeleteMessage(context.Background(), userID, msgID)
+	if err != nil {
+		t.Fatalf("DeleteMessage: %v", err)
+	}
+	if res.IsMod {
+		t.Error("IsMod = true: an author's delete must not be a moderation removal")
+	}
+	msg, err := database.GetMessage(context.Background(), msgID)
+	if err != nil || msg == nil || !msg.Deleted {
+		t.Fatalf("message after delete = (%+v, %v), want deleted", msg, err)
+	}
+}
+
+// C29: an author needs READ_MESSAGES only to delete their own message.
+func TestDeleteMessage_AuthorWithoutSendCanDelete(t *testing.T) {
+	svc, database, msgID := newReadOnlyAuthorFixture(t)
+	requireDeletedByAuthor(t, svc, database, 5, msgID)
+}
+
+func TestDeleteMessage_AuthorUserDenySendCanDelete(t *testing.T) {
+	svc, database, msgID := newReadOnlyAuthorFixture(t)
+	seedUserRole(t, database, 5, permissions.MemberRoleID)
+	seedChannelUserOverride(t, database, 5, 10, 0, permissions.SendMessages)
+	requireDeletedByAuthor(t, svc, database, 5, msgID)
+}
+
+// Today's behaviour, now pinned: HasChannelPerm does not read the timeout
+// mirror, so a timed-out author can still remove their own message.
+func TestDeleteMessage_AuthorTimedOutCanDelete(t *testing.T) {
+	svc, database, msgID := newReadOnlyAuthorFixture(t)
+	seedUserRole(t, database, 5, permissions.MemberRoleID)
+	if _, _, err := database.TimeoutUser(context.Background(), 5, 6, nil, "cool off", time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("TimeoutUser: %v", err)
+	}
+	// The timeout is live: the same user cannot send.
+	if _, err := svc.SendMessage(context.Background(), SendMessageParams{ChannelID: 10, UserID: 5, Username: "quiet", Content: "hi"}); !errors.Is(err, ErrTimedOut) {
+		t.Fatalf("send while timed out = %v, want ErrTimedOut", err)
+	}
+	requireDeletedByAuthor(t, svc, database, 5, msgID)
 }

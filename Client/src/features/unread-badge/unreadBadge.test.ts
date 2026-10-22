@@ -2,8 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { channelsStore, type Channel } from "../../stores/channels.store";
 import { dmStore, type DmChannel } from "../../stores/dm.store";
 import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "../../lib/channel-mutes";
-import { setGlobalNotificationLevel } from "../../lib/notificationLevel";
+import { savePref } from "../../lib/preferences";
+import {
+  setChannelNotificationLevel,
+  setGlobalNotificationLevel,
+} from "../../lib/notificationLevel";
 import { startUnreadBadge, unreadBadgeCount } from "./unreadBadge";
+import { followedThreadsStore } from "../../stores/followedThreads.store";
+import { adoptReadyThreads, resetThreadsStore } from "../../stores/threads.store";
+import type { ReadyThread } from "../../lib/types";
 
 function channel(id: number, patch: Partial<Channel>): Channel {
   return {
@@ -19,6 +26,7 @@ function channel(id: number, patch: Partial<Channel>): Channel {
     canSend: true,
     slowMode: 0,
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
     ...patch,
@@ -46,10 +54,34 @@ function setChannelList(list: readonly Channel[]): void {
   channelsStore.flush();
 }
 
+function followedFlush(): void {
+  followedThreadsStore.flush();
+}
+
 function setDms(list: readonly DmChannel[]): void {
   dmStore.setState(() => ({ channels: list }));
   dmStore.flush();
 }
+
+const followedThread = (id: number, parent: number, mentions: number): ReadyThread => ({
+  thread: {
+    id,
+    parent_id: parent,
+    name: `t${id}`,
+    owner_id: 1,
+    starter_message_id: id,
+    archived: false,
+    locked: false,
+    auto_archive_minutes: 1440,
+    message_count: 1,
+    last_message_at: null,
+    created_at: "2026-10-20T00:00:00Z",
+  },
+  last_message_id: 9,
+  last_read_message_id: 1,
+  unread_count: mentions,
+  mention_count: mentions,
+});
 
 describe("unread badge", () => {
   beforeEach(() => {
@@ -122,6 +154,34 @@ describe("unread badge", () => {
     expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([3, 3, 3, 0]);
   });
 
+  it("with the Unread message badge pref off it pushes 0 and stays 0 as the count changes, and turning it on pushes the current count", () => {
+    const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
+    setDms([dm(30, 4)]);
+    savePref("unreadBadge", false);
+    const stop = startUnreadBadge({ setUnreadBadge });
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0]);
+
+    setDms([dm(30, 9)]);
+    setChannelList([channel(1, { mentionCount: 2 })]);
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0]);
+
+    savePref("unreadBadge", true);
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0, 11]);
+
+    savePref("unreadBadge", false);
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0, 11, 0]);
+    stop();
+  });
+
+  it("a wrong-typed stored Unread message badge value behaves as on", () => {
+    const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
+    setDms([dm(31, 5)]);
+    localStorage.setItem("owncord:settings:unreadBadge", JSON.stringify("off"));
+    const stop = startUnreadBadge({ setUnreadBadge });
+    expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([5]);
+    stop();
+  });
+
   it("a mention in a muted channel counts; plain unread in a muted channel does not", () => {
     setChannelList([
       channel(1, { unreadCount: 9, mentionCount: 1 }),
@@ -144,6 +204,36 @@ describe("unread badge", () => {
     expect(unreadBadgeCount()).toBe(5);
     setGlobalNotificationLevel("mentions");
     expect(unreadBadgeCount()).toBe(3 + 5);
+  });
+
+  it("a channel at Nothing drops its mentions; others still count", () => {
+    setChannelList([channel(1, { mentionCount: 3 }), channel(2, { mentionCount: 4 })]);
+    setChannelNotificationLevel(1, "nothing");
+    expect(unreadBadgeCount()).toBe(4);
+    setChannelNotificationLevel(1, null);
+    expect(unreadBadgeCount()).toBe(7);
+  });
+
+  it("an override to All counts under a server at Nothing, and a DM is untouched", () => {
+    setChannelList([
+      channel(1, { mentionCount: 3 }),
+      channel(2, { mentionCount: 4 }),
+      channel(20, { type: "dm", unreadCount: 5, mentionCount: 1 }),
+    ]);
+    setDms([dm(20, 5, 1)]);
+    setGlobalNotificationLevel("nothing");
+    setChannelNotificationLevel(2, "all");
+    expect(unreadBadgeCount()).toBe(4 + 5);
+  });
+
+  it("re-pushes the count when a channel's level changes", () => {
+    const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
+    setChannelList([channel(1, { mentionCount: 3 })]);
+    const stop = startUnreadBadge({ setUnreadBadge });
+    expect(setUnreadBadge).toHaveBeenLastCalledWith(3);
+    setChannelNotificationLevel(1, "nothing");
+    expect(setUnreadBadge).toHaveBeenLastCalledWith(0);
+    stop();
   });
 
   it("at the 'nothing' level a muted DM still counts only its mentions", () => {
@@ -173,5 +263,38 @@ describe("unread badge", () => {
     await Promise.resolve();
     expect(setUnreadBadge).toHaveBeenCalledTimes(2);
     stop();
+  });
+
+  describe("followed threads (WP 6.9c)", () => {
+    afterEach(() => resetThreadsStore());
+
+    it("counts a followed thread's mentions with the channels' and DMs'", () => {
+      setChannelList([channel(1, { mentionCount: 2 })]);
+      setDms([dm(11, 1)]);
+      adoptReadyThreads([followedThread(91, 1, 3)]);
+      expect(unreadBadgeCount()).toBe(2 + 1 + 3);
+    });
+
+    it("pushes the new count when a thread mention arrives", () => {
+      const setUnreadBadge = vi.fn((_count: number) => Promise.resolve());
+      setChannelList([channel(1, {})]);
+      const stop = startUnreadBadge({ setUnreadBadge });
+      adoptReadyThreads([followedThread(91, 1, 2)]);
+      followedFlush();
+      expect(setUnreadBadge.mock.calls.map((c) => c[0])).toEqual([0, 2]);
+      stop();
+    });
+
+    it("drops them when the parent's level is Nothing, and when the parent is not listed", () => {
+      setChannelList([channel(1, {}), channel(2, {})]);
+      adoptReadyThreads([
+        followedThread(91, 1, 3),
+        followedThread(92, 2, 4),
+        followedThread(93, 9, 5),
+      ]);
+      expect(unreadBadgeCount()).toBe(3 + 4);
+      setChannelNotificationLevel(1, "nothing");
+      expect(unreadBadgeCount()).toBe(4);
+    });
   });
 });

@@ -281,3 +281,55 @@ func BenchmarkDeliverBroadcast_ErasedUsers(b *testing.B) {
 		})
 	}
 }
+
+func callFrame(authorID int64, participants ...int64) []byte {
+	b, _ := json.Marshal(map[string]any{
+		"type": MsgTypeChatMessage,
+		"payload": map[string]any{
+			"id": 9, "channel_id": 5, "user": map[string]any{"id": authorID}, "kind": "call",
+			"call": map[string]any{"started_at": "2026-10-16 10:00:00", "ended_at": nil, "participants": participants},
+		},
+	})
+	return b
+}
+
+// A call log row names its participants, so a late frame that lists an erased
+// user is dropped even though they did not author it.
+func TestTombstone_DropsFrameNamingErasedCallParticipant(t *testing.T) {
+	h := newTestHubWith(t, HubOptions{DB: newTeardownTestDB(t)})
+	if err := h.PurgeUserFromReplay(context.Background(), 42); err != nil {
+		t.Fatal(err)
+	}
+	if !droppedByTombstones(h, callFrame(7, 7, 42)) {
+		t.Error("a call frame listing the erased user was not dropped")
+	}
+	if droppedByTombstones(h, callFrame(7, 7, 8)) {
+		t.Error("a call frame that does not name the erased user was dropped")
+	}
+}
+
+func groupAddFrame(authorID, targetID int64) []byte {
+	b, _ := json.Marshal(map[string]any{
+		"type": MsgTypeChatMessage,
+		"payload": map[string]any{
+			"id": 10, "channel_id": 5, "user": map[string]any{"id": authorID}, "kind": "group_add",
+			"group_event": map[string]any{"target_user_id": targetID},
+		},
+	})
+	return b
+}
+
+// A group add or remove row names its target, so a late frame that names an
+// erased user is dropped even though they did not author it.
+func TestTombstone_DropsFrameNamingErasedGroupTarget(t *testing.T) {
+	h := newTestHubWith(t, HubOptions{DB: newTeardownTestDB(t)})
+	if err := h.PurgeUserFromReplay(context.Background(), 42); err != nil {
+		t.Fatal(err)
+	}
+	if !droppedByTombstones(h, groupAddFrame(7, 42)) {
+		t.Error("a group_add frame naming the erased user was not dropped")
+	}
+	if droppedByTombstones(h, groupAddFrame(7, 8)) {
+		t.Error("a group_add frame that does not name the erased user was dropped")
+	}
+}

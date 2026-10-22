@@ -42,8 +42,9 @@ function response(id: number): MessageResponse {
     pinned: false,
     edited_at: null,
     deleted: false,
-    // 5 minutes apart on one UTC day: no grouping, no day dividers.
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 5)).toISOString(),
+    // 10 minutes apart on one UTC day: past the 7-minute group window, so no
+    // grouping, and no day dividers.
+    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
   };
 }
 
@@ -72,6 +73,8 @@ describe("MessageList — a full-ready resync keeps the reading position (P2-T4)
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),

@@ -7,7 +7,8 @@ size a server, or before you change anything that could slow the server down.
 If you only want a sizing answer, read [The profile](#the-profile),
 [Reference hardware](#reference-hardware) and
 [Sizing for 1,000–2,000 online](#sizing-for-10002000-online). The rest of the
-page is the method and the measured results.
+page is the method and the measured results. The scale profile has been
+measured at [1,000 and 2,000 online](#measured): 1,000 is valid, 2,000 is not.
 
 > **The hardware and the commands in this document were published before the
 > first qualifying run.** That order is deliberate, and the commit history
@@ -83,7 +84,7 @@ Why each part of that is load-bearing:
 - The **ceiling leg** of `load-baseline.yml` runs the same profile with no
   cgroup at all, on the whole runner. It shows headroom. It is not capacity.
 - The **benchmark baseline** in
-  [plans/b3-bench-baseline-2026-09-01.md](plans/b3-bench-baseline-2026-09-01.md)
+  [archive/plans/b3-bench-baseline-2026-09-01.md](archive/plans/b3-bench-baseline-2026-09-01.md)
   was recorded on a 16-core developer workstation. It is a relative
   before/after instrument for Go benchmarks. It is not capacity either.
 
@@ -91,18 +92,25 @@ Why each part of that is load-bearing:
 
 The profile above is the **published floor**: the cheapest box an owner is
 likely to buy, qualified at 2 vCPU / 4 GB for 100 connections. The scaling
-target is larger, but **1,000–2,000 online is an estimate, not a
-measurement.** What has been measured is narrower: on the constrained
-reference cgroup, the [ceiling search](#ceiling-search) held every budget up
-to **300 stress-shape connections**, and step 400 broke the login budget. The
-scale profile has [no qualifying run yet](#measured). Until those runs are
-published here, the two tiers below are the size we would buy for a community
-that size, not a qualified result.
+target is larger. What is measured, on the 2 vCPU / 4 GB reference cgroup:
 
-| Tier  | Hardware            | Estimated to carry (not yet measured)          | Why this one                                                                                        |
-| ----- | ------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Base  | 2 vCPU / 4 GB / SSD | the published profile and roughly 1,000 online | Steady state at realistic chat rates fits on 2 vCPU; the published 100-connection profile has room  |
-| 2,000 | 4 vCPU / 8 GB / SSD | about 2,000 online                             | Roughly doubles bcrypt login throughput and fan-out CPU headroom, which are the two 2-vCPU ceilings |
+- **1,000 online** at the [scale traffic model](#traffic-model) holds every
+  steady-chat and 4x-burst budget with wide room (acknowledgement p95 12 ms,
+  delivery p95 14 ms, the server at 0.14 of its 2 cores). A **500-login burst
+  in 10 s** and a **full reconnect herd** do not meet their budgets at 1,000:
+  105 of 500 logins gave up, and dial → `ready` p95 was 13.9 s against 5 s,
+  though all 1,000 were `ready` again within the 30 s budget.
+- **2,000 online has no valid run yet**, so it stays an estimate. The one run
+  failed its validity gate and says nothing about the server or the ceiling.
+- The [ceiling search](#ceiling-search) held every budget up to **300
+  stress-shape connections**, and step 400 broke the login budget.
+
+The figures are in [Scale profile > Measured](#measured).
+
+| Tier  | Hardware            | Carries                                                                                                                                    | Why this one                                                                                                   |
+| ----- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Base  | 2 vCPU / 4 GB / SSD | measured: the published profile, and steady chat and a 4x burst at 1,000 online; login burst and herd miss, see [Scale profile](#measured) | Steady state at realistic chat rates fits on 2 vCPU with room; login throughput (bcrypt) is the measured limit |
+| 2,000 | 4 vCPU / 8 GB / SSD | estimate, not measured: about 2,000 online                                                                                                 | Roughly doubles bcrypt login throughput and fan-out CPU headroom, which are the two 2-vCPU ceilings            |
 
 Memory is not expected to be the constraint at either tier: the estimate is
 about 266 MB resident for 2,000 idle connections, 324 MB at 100 messages/s and
@@ -298,7 +306,14 @@ They are selected by `K6_PROFILE`, and `capacity` remains the default.
 gh workflow run load-baseline.yml -f profile=operational    --ref <branch>   # both TLS legs in one run
 gh workflow run load-baseline.yml -f profile=restart        --ref <branch>
 gh workflow run load-baseline.yml -f profile=ceiling-search -f ceiling_max=500 --ref <branch>
+gh workflow run load-baseline.yml -f profile=ceiling-search -f event_persistence=off --ref <branch>   # A/B arm, WP 4.6
 ```
+
+`event_persistence=off` (any profile) boots the server with event persistence
+off (no writes to, or replay from, the events table), for the WP 4.6 comparison of the replay tiers. The run fails if the
+metrics snapshot does not show the arm that was asked for. The spread of the
+`scale` herd is fixed at 15 s and is no longer a dispatch input, because GitHub
+allows ten.
 
 **None of them introduces a latency budget.** A scenario either applies a budget
 this document already publishes, or publishes its number as what it is with no
@@ -359,6 +374,45 @@ carryover asked for pool wait deltas, and `/api/v1/metrics` reported only the
 writer's `Stats()`. OwnCord runs one writer and a separate reader pool, so both
 are reported side by side — "the reader never waited" is a claim a document can
 only make after looking.
+
+**Account erasure holds the writer for one chunk at a time (WP 4.1a).** The
+database half of an account erasure used to be one transaction, so every other
+write queued behind it for as long as the account's history took to delete.
+It is now a lock, a drain of short transactions and a finish
+(`docs/architecture/data-lifecycle.md`, O1), and the writer is handed back
+after every one. `BenchmarkEraseAccount` (`Server/db/erasure_bench_test.go`)
+erases a member with 10,000 and 100,000 messages from a file-backed WAL
+database — with a mention on every seventh, an attachment on every tenth,
+reactions on a third as many of another member's messages, and replay events
+naming the member — and reports how the work was cut up:
+
+```
+cd Server && go test -run '^$' -bench 'BenchmarkEraseAccount' -benchtime 1x ./db/
+```
+
+| Messages | Wall time (`ns/op`) | `chunks` | `max_chunk_ms` | Before: one transaction |
+| -------- | ------------------- | -------- | -------------- | ----------------------- |
+| 10,000   | 0.34-0.41 s         | 30       | 27-35 ms       | 0.31 s                  |
+| 100,000  | 4.16-4.22 s         | 228      | 61-97 ms       | 2.89 s                  |
+
+Machine: 4 vCPU Intel Xeon @ 2.1 GHz, 15 GB, ext4 on a virtual disk, Linux
+6.18, Go 1.27; five runs each, quiet host, the same seed in every run.
+`chunks` counts drain transactions; `max_chunk_ms` is the longest any one
+stage (lock, a drain chunk, finish, checkpoint) held the writer, measured
+between consecutive commits. **The gate is `max_chunk_ms` <= 250 at 100,000
+messages: met, with a factor of 2.5 to 4 to spare.** Wall time is recorded, not
+gated: chunking trades a longer erasure (about 1.4x here) for a writer that is
+never held longer than the slowest chunk, which is about 3% of what the single
+transaction held it. The slowest stage is the finish transaction, and a busy
+host or a slow disk moves every figure: an earlier run on the same box, with
+other test binaries running beside it, measured up to 184 ms. Nothing here has
+been measured on an SD card.
+
+Not yet measured: erasure under the `capacity` profile's load (a user seeded
+with 100,000-500,000 messages and erased mid-run, recording pong-timeout
+disconnects and `db_writer_wait_seconds`). `load-baseline.yml` has no erasure
+step, so that run needs a small harness addition; its result decides whether
+the per-connection command worker (4.1-F2) is needed.
 
 ### Message fan-out, to the ceiling
 
@@ -609,7 +663,7 @@ the scaling phase measures itself against, and like the rest of this document
 ```
 gh workflow run load-baseline.yml -f profile=scale --ref dev
 # the defaults, spelled out:
-#   -f scale_connections=2000 -f scale_active=0.1 -f scale_burst_send_ms=2000 -f scale_herd_spread_s=15
+#   -f scale_connections=2000 -f scale_active=0.1 -f scale_burst_send_ms=2000
 ```
 
 Constrained leg only, no voice leg. `K6_PROFILE=scale` in
@@ -653,7 +707,7 @@ defaults are:
 | `steady`    | [180, 360) s      | The traffic model above                                                                                                                                     | acknowledgement, delivery, the held population                                                      |
 | `burst`     | [360, 420) s      | Active users send every `K6_SCALE_BURST_SEND_MS` (default 2,000 ms: about **100 messages/s**)                                                               | acknowledgement, delivery                                                                           |
 | `login`     | [420, 510) s      | `K6_SCALE_LOGINS` (default **500**) fresh password logins over `K6_SCALE_LOGIN_SPREAD_S` (default **10 s**), each from its own address, over steady traffic | time to a token including retries, give-ups, per-attempt login time, refusals                       |
-| `herd`      | [510, 600) s      | Every socket drops on its own slot of a `scale_herd_spread_s` spread (default **15 s**) and redials a full `ready`                                          | time until all N are `ready`, dial → `ready` p50/p95/p99, `auth_ok`, backpressure queue disconnects |
+| `herd`      | [510, 600) s      | Every socket drops on its own slot of a 15 s spread and redials a full `ready`                                                                              | time until all N are `ready`, dial → `ready` p50/p95/p99, `auth_ok`, backpressure queue disconnects |
 | `ramp-down` | [600, end) and on | Draining                                                                                                                                                    | Excluded                                                                                            |
 
 `K6_SCALE_RAMP_S`, `_STEADY_S`, `_BURST_S`, `_LOGIN_S` and `_HERD_S` move the
@@ -822,11 +876,212 @@ K6_PEAK_VUS=2000 K6_SCALE_CHANNELS="$CHANNEL_IDS" K6_SCALE_TOKENS="$WORK/tokens.
   taskset -c 2,3 k6 run --insecure-skip-tls-verify ws-load.js
 ```
 
+### Role changes
+
+An optional scenario on the scale profile (WP 4.4a), off unless
+`K6_ROLE_FLIP_EVERY` is set. Changing a role fans out per affected user inside
+the admin request today, so this is the instrument that shows what that costs
+the other 2,000 people online, before and after the refresh worker of WP 4.4b.
+
+```
+gh workflow run load-baseline.yml -f profile=scale-role-flip --ref dev
+# the scale profile with K6_ROLE_FLIP_EVERY=30; by hand, add to the scale
+# command above (the token file holds the owner session token from setup):
+#   K6_ROLE_FLIP_EVERY=30 K6_ROLE_FLIP_TOKEN="$WORK/admin-token.txt"
+```
+
+- **What it does.** One admin VU, from the start of `steady` to the start of
+  `herd`, every N seconds: moves one loadtest user (`loadtest<K6_PEAK_VUS>`,
+  override with `K6_ROLE_FLIP_USER`) between the default role and
+  `K6_ROLE_FLIP_ROLE` (default Moderator), and PATCHes the default role, which
+  every loadtest user holds, renaming it and flipping its ADD_REACTIONS bit.
+  The second call is the one that touches every connected client: a
+  `member_update` per holder and a visibility refresh of everyone. It stops
+  before the herd, so the herd's zero-kick gate stays about the herd: the last
+  tick before it only restores, so the run ends with the default role, its mask
+  and the user as they started. Each PATCH has a 120 s timeout, so a slow
+  handler is a measurement, not a failed request.
+- **The flipped user may be offline.** VU ids come from a shared pool, so
+  `loadtest<K6_PEAK_VUS>` is not guaranteed to hold a socket. The fan-out to
+  everyone else is the same either way; only that one user's own revocation path
+  may go unexercised.
+- **Artifacts.** The workflow's artifact is named with a `-role-flip` suffix
+  for this variant, so the two runs sit side by side.
+- **Admin token.** The owner session token the workflow already obtains at setup
+  is written to the run directory (mode 0600, never uploaded) only when the
+  scenario is on, and read by k6 from that file, not from its environment.
+- **One more account.** The admin VU takes an id from the same pool as the
+  connections, so the workflow seeds one more user (`N + 502`) when it is on.
+- **What it reports** (in `load_measurement.role_flip` and the k6 sub-metrics,
+  per window): role-PATCH handler time p50/p95/p99 (`role_patch_time`, measured
+  by the VU around the request), the user-role PATCH time, `bpQueueDisconnects`
+  (`obs_backpressure{kind:queue_disconnects}`), `broadcastDrops`
+  (`obs_broadcast_drops`) and dispatch lag (`obs_dispatch_lag_p99_ms` and
+  `_max_ms`, gauges whose last value in each window is published). The server's
+  figure covers everything since boot, seeding and ramp included, so a lag
+  caused by the role changes is diluted in it; a real effect may be larger
+  than it shows, so treat it as indicative, not a per-window measurement. `role_patches` must be at least 1 and
+  `role_flip_errors` must be 0. The scale budgets and gates (steady and burst
+  p95, population, login burst, herd) still apply, so a red run is a possible,
+  readable outcome: it says the role changes cost the rest of the server more
+  than the budgets allow. The role-change figures themselves are recorded to be
+  compared, not gated.
+- **How to read it.** Compare a run of `scale-role-flip` with a plain `scale`
+  run at the same commit, and with the same run after WP 4.4b. A rise in the
+  steady, burst or login latencies over the plain run is the cost of the role
+  changes to everyone else.
+
+Baseline on `dev` (before WP 4.4b): **not yet measured.** The owner runs it and
+fills in this table.
+
+| Window | Role-PATCH p95   | `bpQueueDisconnects` | `broadcastDrops` | Dispatch lag p99 |
+| ------ | ---------------- | -------------------- | ---------------- | ---------------- |
+| steady | not yet measured | not yet measured     | not yet measured | not yet measured |
+| burst  | not yet measured | not yet measured     | not yet measured | not yet measured |
+| login  | not yet measured | not yet measured     | not yet measured | not yet measured |
+
 ### Measured
 
-**No qualifying run yet.** The first run will be dispatched on `dev` after this
-section lands there. Its per-window table, its generator column and its run link
-will be published here.
+Two runs, both dispatched on `dev` on 2026-10-17 from the same commit with
+`profile=scale`, one at 1,000 connections and one at 2,000. Both ended red:
+k6 crossed thresholds, which is expected for a first run and is published as
+measured. Every later step (metrics snapshot, topic-limiter assert, CPU slice,
+upload) passed, `topic_sheds_total` was 0 and `obs_ws_conn_rejects` was 0 in
+both, and k6 ran to completion.
+
+The 1,000 run is a **valid** measurement. The 2,000 run is **not a valid
+measurement**: it failed a validity gate, so per the rule above it did not
+measure what it claims. Its numbers are published as measured and labelled
+invalid; they are neither a server result nor a generator result.
+
+#### Scale profile at 1,000 connections (valid)
+
+```
+commit:          59197a25d51e5fd1ee9c2d20e501912c5db192fc  (on dev)
+date (UTC):      2026-10-17
+workflow run:    39069195764  (.github/workflows/load-baseline.yml, profile=scale, scale_connections=1000)
+job:             117503072275  (scale, constrained)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container: 2 CPUs pinned to 0-1, 4 GB, no swap
+                 (the recipe above; the limits.txt contents are in the run artifact)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6 pinned to CPUs 2-3 with taskset (k6 version: in the run artifact)
+population:      1,501 users seeded; planned steady 12.5 msg/s, burst 50 msg/s, 500 logins
+```
+
+Latency in ms, p95 / p99. Samples are the window's count for that series;
+`ack` is send → sender acknowledgement, `delivery` is send → recipient delivery.
+CPU is cores of 2, average / peak. No window was `GENERATOR-LIMITED`.
+
+| Window                  | Ack p95 / p99 | Delivery p95 / p99 | `auth_ok` p95 / p99 | `ready` p95 / p99 | Ack samples | Population min | Server CPU  | k6 CPU      |
+| ----------------------- | ------------- | ------------------ | ------------------- | ----------------- | ----------- | -------------- | ----------- | ----------- |
+| `ramp`                  | 31.5 / 65.5   | 40 / 94            | 2 / 7               | 68 / 155          | 950         | n/a            | 0.16 / 0.28 | 0.48 / 0.86 |
+| `steady`                | 12 / 39       | 14 / 42            | n/a                 | n/a               | 2,250       | 1,000          | 0.14 / 0.16 | 0.37 / 0.48 |
+| `burst`                 | 54 / 97       | 53 / 92            | n/a                 | n/a               | 3,000       | 1,000          | 0.22 / 0.25 | 0.68 / 0.75 |
+| `login`                 | 90 / 127      | 112 / 147          | n/a                 | n/a               | 1,120       | 1,000          | 1.35 / 2.03 | 0.40 / 0.57 |
+| `herd`                  | 1,220 / 2,674 | 1,082 / 2,842      | 3,091 / 4,091       | 13,918 / 15,071   | 1,013       | 581            | 0.22 / 0.47 | 0.91 / 2.02 |
+| `ramp-down` (not gated) | 30 / 75       | 27 / 92            | n/a                 | n/a               | 476         | n/a            | 0.13 / 0.18 | 0.43 / 0.78 |
+
+**Steady and burst meet every budget with wide room.** In `steady` the
+acknowledgement p95 is 12 ms against 150 ms and the delivery p95 is 14 ms
+against 200 ms; in `burst` they are 54 ms against 150 ms and 53 ms against
+200 ms. The server averaged 0.14 of its 2 CPUs in `steady`. 8,809 of 8,809 sends
+were acknowledged (`ws_message_success` rate 1), and there were 0 backpressure
+queue disconnects in `ramp`, `steady` and `herd`.
+
+| Scenario    | Measure                                           | Achieved                    | Budget         | Met?          |
+| ----------- | ------------------------------------------------- | --------------------------- | -------------- | ------------- |
+| `steady`    | Held population, window minimum                   | 1,000 of 1,000              | ≥ N            | Yes           |
+| `steady`    | Acknowledgement p95 / p99                         | 12 / 39 ms                  | 150 / 300 ms   | Yes           |
+| `steady`    | Delivery p95 / p99                                | 14 / 42 ms                  | 200 / 400 ms   | Yes           |
+| `burst`     | Acknowledgement p95; delivery p95                 | 54 ms; 53 ms                | 150; 200 ms    | Yes           |
+| herd        | Every VU `ready` again                            | 1,000 of 1,000 in 29,523 ms | ≤ 30 s         | Yes           |
+| herd        | Dial → `ready` p95                                | 13,918 ms                   | ≤ 5 s          | No            |
+| herd        | WebSocket connect p95                             | 7,535 ms                    | < 2 s          | No            |
+| herd        | Backpressure queue disconnects                    | 0                           | 0              | Yes           |
+| login burst | Give-ups                                          | 105 of 500                  | 0              | No            |
+| login burst | `login_burst_ok`                                  | 395 of 500                  | ≥ 500          | No            |
+| login burst | First attempt → token, max, for those who got one | 53,727 ms                   | ≤ 70 s         | Yes (partial) |
+| `login`     | REST login (`auth_time`) p95 / p99, per attempt   | 10,556 / 10,656 ms          | 600 / 1,000 ms | No            |
+
+Validity gates: none of the validity-gate expressions was among the six that
+failed. `obs_population{phase:steady}` min was 1,000 (≥ N); `steady` sent 2,250
+and `burst` 3,000 messages, the planned counts; `obs_ws_conn_rejects` was 0 and
+`topic_sheds_total` was 0. The run is valid.
+
+The six threshold expressions that failed (of 220) are exactly the misses above:
+`auth_time{phase:login}` p95 and p99, `login_burst_giveups`, `login_burst_ok`,
+`ws_connect_time{phase:herd}` p95 and `ws_ready_time{phase:herd}` p95.
+
+**What the misses say.** The login burst is the one place the server was busy:
+1.35 of 2 cores on average and 2.03 at the peak during `login`, against 0.14 in
+`steady`. That is consistent with the bcrypt admission budget (`auth/admission.go`)
+bounding login throughput on the 2 vCPU reference. The herd's per-dial budgets missed
+while the whole population was nevertheless back in 29.5 s, inside its 30 s
+budget; in that window k6 peaked at 2.02 of 2 cores, so the per-dial figures
+may include generator time that this run cannot separate out. The misses are in the
+findings ledger (OC-0490, OC-0491). No budget was changed and nothing was
+re-run on a bigger box.
+
+#### Scale profile at 2,000 connections (NOT a valid measurement)
+
+```
+commit:          59197a25d51e5fd1ee9c2d20e501912c5db192fc  (on dev)
+date (UTC):      2026-10-17
+workflow run:    39069193852  (.github/workflows/load-baseline.yml, profile=scale, scale_connections=2000)
+job:             117503067669  (scale, constrained)
+runner:          ubuntu-latest, 4 CPU / 16 GB host
+cgroup as seen from inside the container: 2 CPUs pinned to 0-1, 4 GB, no swap
+                 (the recipe above; the limits.txt contents are in the run artifact)
+livekit-server:  1.13.7
+lk:              2.18.6
+load generators: k6 pinned to CPUs 2-3 with taskset (k6 version: in the run artifact)
+population:      2,501 users seeded; planned steady 25 msg/s, burst 100 msg/s, 500 logins
+```
+
+**This run failed a validity gate:** `obs_population{phase:steady}` min ≥ N. The
+smallest held population in the `steady` window was **1,917 of 2,000**. By the
+rule above it did not measure what it claims, so none of its figures is a
+statement of what a 2 vCPU server carries at 2,000. The `burst` and `herd`
+windows are `GENERATOR-LIMITED`. The table is published as measured, for the
+record.
+
+Latency in ms, p95 / p99; CPU is cores of 2, average / peak.
+
+| Window                      | Ack p95 / p99   | Delivery p95 / p99 | `auth_ok` p95 / p99            | `ready` p95 / p99       | Ack samples | Population min | Server CPU  | k6 CPU      |
+| --------------------------- | --------------- | ------------------ | ------------------------------ | ----------------------- | ----------- | -------------- | ----------- | ----------- |
+| `ramp`                      | 10,327 / 19,094 | 12,927 / 20,139    | 1,470 / 2,311                  | 7,325 / 9,057           | 1,761       | n/a            | 0.54 / 0.95 | 1.48 / 2.06 |
+| `steady`                    | 11,153 / 25,921 | 8,756 / 21,285     | 2,123 / 2,455 (132 reconnects) | 8,041 / 8,581 (132)     | 4,750       | **1,917**      | 0.50 / 0.67 | 1.42 / 2.03 |
+| `burst` (generator-limited) | 17,082 / 23,760 | 13,865 / 20,719    | n/a                            | n/a                     | 4,611       | 1,987          | 0.82 / 0.87 | 1.99 / 2.05 |
+| `login`                     | 33,983 / 44,100 | 23,075 / 28,045    | n/a                            | n/a                     | 3,386       | 1,903          | 1.80 / 2.09 | 1.62 / 2.09 |
+| `herd` (generator-limited)  | 18,375 / 27,405 | 18,576 / 25,094    | 12,273 / 20,635 (1,938)        | 50,777 / 52,817 (1,886) | n/a         | 724            | 0.50 / 0.90 | 1.98 / 2.05 |
+| `ramp-down` (not gated)     | n/a             | n/a                | n/a                            | n/a                     | n/a         | n/a            | 0.43 / 0.65 | 1.64 / 2.04 |
+
+The 2,000 run's herd: 2,000 drops and 2,000 readies, all `ready` again after
+106,027 ms (budget ≤ 30 s), dial → `ready` p95 50,777 ms (≤ 5 s), connect p95
+27,797 ms (< 2 s). Its login burst: 394 ok, 106 give-ups, `login_burst_time`
+max 77,270 ms (≤ 70 s), per-attempt `auth_time` p95 / p99 11,949 / 12,787 ms.
+`ws_message_success` was 16,369 passes and 1 fail (0.99994). Backpressure queue
+disconnects were 0 in every window.
+
+18 of 220 threshold expressions failed, among them the validity gate itself,
+`ws_broadcast_latency_ms` and `ws_delivery_latency_ms` in `steady` and `burst`,
+`ws_auth_ok_time{phase:ramp}`, `ws_connect_time` in `ramp` and `herd`,
+`ws_ready_time{phase:herd}`, `herd_ready_at_ms` and the login-burst measures.
+
+**Reading, and what is not established.** Over the 2,000 run the server
+averaged 0.50 of its 2 cores in `steady` and peaked at 0.67, while k6 peaked at
+2.03 of its 2 cores and the server-side writer waited 4.83 s over the window.
+`steady` is not marked `GENERATOR-LIMITED` by the 90% rule (k6 averaged 1.42 of
+2), but k6 peaks at about 2.0 of 2 in every window. The latency is measured at
+k6 receipt, so a saturated k6 event loop inflates it. The evidence points at the
+generator; the run does not prove it. **The cause of the 2,000 miss is not
+established**, so this run is neither a server result nor a generator result,
+and it is not a ceiling. There is **no valid 2,000 run**, and the
+2,000 tier stays an estimate. Choosing a larger runner or a lighter driver to
+find out is the owner's call (decision D6). The run is recorded in the findings
+ledger (OC-0492).
 
 ## Measured
 
@@ -1720,3 +1975,32 @@ to 500, passes the zero-shedding gate, and locates the last all-budget step at
 also queueing, and the message paths break at 500 on the **SQLite writer**. The 2026-09-16 table above remains historical single-channel evidence and is
 **not** comparable to the multi-channel shape — the new spread changes recipient
 fan-out at every step, including 100.
+
+### Event persistence ablation (WP 4.6c, 2026-10-20)
+
+**Question.** Does the persisted `events` table (every message is also written to it, for the `db` reconnect tier) cost enough writer time to matter, and does it serve enough resumes to earn that cost?
+
+**Method.** Four `ceiling-search` runs, `ceiling_max=500`, constrained leg, all dispatched within ten seconds of each other from `dev` commit `e6df78a6`, in the order on, off, on, off. Each run's metrics snapshot confirmed its arm (`event_persister` present with `persisted > 0` for `on`, absent for `off`). Runs: `on` [39454778655](https://github.com/J3vb/OwnCord/actions/runs/39454778655) and [39454792958](https://github.com/J3vb/OwnCord/actions/runs/39454792958); `off` [39454788891](https://github.com/J3vb/OwnCord/actions/runs/39454788891) and [39454797909](https://github.com/J3vb/OwnCord/actions/runs/39454797909). The runs shared one four-core runner type, but not one machine at one time, which matters below.
+
+Recipient delivery p95 / p99 in ms, from the k6 summary printed in each job log:
+
+| Step | on #1         | on #2         | off #1        | off #2        |
+| ---- | ------------- | ------------- | ------------- | ------------- |
+| 100  | 7 / 9         | 8 / 10        | 7 / 9         | 5 / 8         |
+| 200  | 17 / 25       | 20 / 29       | 19 / 29       | 10 / 16       |
+| 300  | 33 / 62       | 41 / 70       | 32 / 57       | 20 / 41       |
+| 400  | 118 / 191     | 167 / 271     | 129 / 199     | 83 / 140      |
+| 500  | 19388 / 25244 | 23034 / 27925 | 21216 / 26757 | 11517 / 16770 |
+
+Writer wait at step 500 (seconds waited / waits): on 324 s / 15,444 and 1,396 s / 17,079; off 383 s / 15,252 and 352 s / 14,111. Event persister in the `on` runs: 82,338 and 80,794 events persisted, 4,956 and 4,937 flushes, 0 dropped, 0 errors.
+
+**What the runs say.**
+
+- **Step 500 is a cliff in every run**, on or off, and step 400 holds in every run. The message paths break on the SQLite writer at 500, as in the earlier runs. Turning the table off did not move the last step that holds.
+- **The two arms do not separate.** The two `off` runs differ from each other (step 400 p95: 129 and 83 ms) by more than the mean `off` run differs from the mean `on` run (about 106 against 143 ms). One `on` run shows 1,396 s of writer wait at step 500 against 324 to 383 s in the others. The noise between runs on a shared runner is larger than any effect of the table that these runs can resolve. **No claim is made that the table costs, or does not cost, delivery latency at this load.**
+- **The load does not exercise the tier it is meant to judge.** In all four runs `reconnect_tier_buffer`, `reconnect_tier_db`, `reconnect_tier_full` and `reconnect_ring_misses` ended at 0: no client resumed. These runs measure the write cost of the table only. They cannot say how often it is read.
+- Run totals for context: 0 topic sheds and 0 connection rejects in all four runs.
+
+**Recommendation to the owner.** Keep the table for now; remove nothing. The removal rule set for this work package needs one of two facts: the table serves under 1% of resumes and under 10% of ring misses, or switching it off gains a ceiling step. The runs above show neither: there were no resumes to count, and no step gained. The second fact would need a quieter measurement than a shared runner gives. The first needs production data.
+
+**Next step, and what it needs.** Save `GET /api/v1/metrics` once a day for at least seven days on a build that includes WP 4.6a, before any restart, and record the daily growth of `reconnect_tier_buffer`, `reconnect_tier_db`, `reconnect_tier_full` and `reconnect_ring_misses`. The table's hit rate is `reconnect_tier_db / reconnect_ring_misses`. If that is under 10% and `reconnect_tier_db` is under 1% of all resumes, remove the table's reads and writes; otherwise keep it. `reconnect_tier_db` and `reconnect_tier_full` are readable on any build today.

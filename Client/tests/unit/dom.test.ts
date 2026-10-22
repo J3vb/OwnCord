@@ -6,6 +6,7 @@ import {
   clearChildren,
   qs,
   setOwnedTimeout,
+  wantsNativeMenu,
 } from "../../src/lib/dom";
 
 describe("createElement", () => {
@@ -138,6 +139,25 @@ describe("setOwnedTimeout", () => {
     }
   });
 
+  it("returns a function that cancels the pending step early", () => {
+    vi.useFakeTimers();
+    try {
+      const fn = vi.fn();
+      const cancel = setOwnedTimeout(new AbortController().signal, fn, 100);
+      cancel();
+      vi.advanceTimersByTime(100);
+      expect(fn).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+      // Nothing was scheduled for an already-aborted owner, and cancelling it is safe.
+      const owner = new AbortController();
+      owner.abort();
+      setOwnedTimeout(owner.signal, fn, 100)();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("clears the pending step when its owner aborts", () => {
     vi.useFakeTimers();
     try {
@@ -181,5 +201,29 @@ describe("setOwnedTimeout", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("wantsNativeMenu", () => {
+  it("keeps the webview menu in text fields", () => {
+    expect(wantsNativeMenu(document.createElement("textarea"))).toBe(true);
+    for (const type of ["text", "search", "password", "url"]) {
+      const input = document.createElement("input");
+      input.type = type;
+      expect(wantsNativeMenu(input)).toBe(true);
+    }
+    const editable = document.createElement("div");
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    expect(wantsNativeMenu(editable)).toBe(true);
+  });
+
+  it("suppresses it everywhere else", () => {
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    expect(wantsNativeMenu(checkbox)).toBe(false);
+    expect(wantsNativeMenu(document.createElement("div"))).toBe(false);
+    expect(wantsNativeMenu(document.createElement("img"))).toBe(false);
+    expect(wantsNativeMenu(document)).toBe(false);
+    expect(wantsNativeMenu(null)).toBe(false);
   });
 });

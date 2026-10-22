@@ -106,6 +106,36 @@ export function emojiMatches(e: UnicodeEmoji, query: string): boolean {
   return e.keywords.includes(query) || e.keywords.replaceAll("_", "").includes(query);
 }
 
+let byName: Map<string, UnicodeEmoji> | null = null;
+let byNameOf: EmojiCatalog | null = null;
+
+/**
+ * The emoji a typed `:name:` stands for, or null: an exact name first, then a
+ * name equal once underscores drop (`thumbsup` is `thumbs_up`), the way the
+ * composer popup ranks them. Null until the catalog has loaded.
+ */
+export function emojiForShortcode(name: string): UnicodeEmoji | null {
+  const cat = catalog;
+  if (cat === null) return null;
+  if (byName === null || byNameOf !== cat) {
+    const exact = new Map<string, UnicodeEmoji>();
+    const loose = new Map<string, UnicodeEmoji>();
+    for (const group of cat.groups) {
+      for (const e of group.emoji) {
+        for (const n of e.names) {
+          if (!exact.has(n)) exact.set(n, e);
+          const bare = n.replaceAll("_", "");
+          if (!loose.has(bare)) loose.set(bare, e);
+        }
+      }
+    }
+    for (const [n, e] of loose) if (!exact.has(n)) exact.set(n, e);
+    byName = exact;
+    byNameOf = cat;
+  }
+  return byName.get(name.toLowerCase()) ?? null;
+}
+
 /** The remembered skin tone, an index into SKIN_TONES. */
 export function skinTone(): number {
   const tone = loadPref(SKIN_TONE_PREF, 0);

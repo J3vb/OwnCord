@@ -16,9 +16,38 @@
 .dm-call-panel[hidden] {
   display: none;
 }
+/* --dcp-height is the dragged height. DmCallPanel caps a drag at what the
+   header, composer and a few messages leave; the clamp is the floor for a
+   window shrunk later (160px matches its MIN_HEIGHT). */
 .dm-call-panel--expanded {
-  height: 58%;
+  height: clamp(160px, var(--dcp-height, 58%), calc(100% - 160px));
   min-height: fit-content;
+}
+/* The drag handle straddles the bottom border; ns-resize like Discord's. */
+.dcp-resize {
+  position: absolute;
+  inset: auto 0 -4px;
+  /* Above the unread bar (6) and the video grid's overlays. */
+  z-index: 7;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.dcp-resize[hidden] {
+  display: none;
+}
+.dcp-resize:hover,
+.dm-call-panel--resizing > .dcp-resize {
+  background: linear-gradient(var(--accent) 0 0) center / 100% 2px no-repeat;
+}
+.dcp-resize:focus-visible {
+  outline: none;
+  background: linear-gradient(var(--focus-ring) 0 0) center / 100% 2px no-repeat;
+}
+.dm-call-panel--resizing,
+.dm-call-panel--resizing * {
+  cursor: ns-resize;
+  user-select: none;
 }
 .dcp-body {
   display: contents;
@@ -153,6 +182,15 @@
 .dcp-avatar--ringing {
   opacity: 0.55;
   animation: dcp-ring 1.4s ease-in-out infinite;
+}
+/* A group member who is not in the call: greyed out, no pulse. The title and
+   the screen-reader text ("Not in call") carry the state. */
+.dcp-avatar--absent {
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+.dcp-person--absent .dcp-person-name {
+  color: var(--text-muted);
 }
 @keyframes dcp-ring {
   0%,

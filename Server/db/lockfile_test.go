@@ -10,7 +10,7 @@ import (
 )
 
 // TestTryLockFile_Exclusive locks the single-process guard's contract: the
-// second acquisition fails with errAlreadyLocked while the first holds the
+// second acquisition fails with ErrAlreadyLocked while the first holds the
 // lock, and succeeds after release.
 //
 // Note this exercises the raw tryLockFile, not acquireProcessLock — the
@@ -23,8 +23,8 @@ func TestTryLockFile_Exclusive(t *testing.T) {
 		t.Fatalf("first tryLockFile: %v", err)
 	}
 
-	if _, err := tryLockFile(path); !errors.Is(err, errAlreadyLocked) {
-		t.Fatalf("second tryLockFile err = %v, want errAlreadyLocked", err)
+	if _, err := tryLockFile(path); !errors.Is(err, ErrAlreadyLocked) {
+		t.Fatalf("second tryLockFile err = %v, want ErrAlreadyLocked", err)
 	}
 
 	release1()

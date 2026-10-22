@@ -396,6 +396,19 @@ describe("setScreenshareQuality", () => {
     });
   });
 
+  it("a quality change on a 120 fps share keeps balanced degradation (M-2)", async () => {
+    const rig = setup(false);
+    rig.state.fps = 120;
+    rig.video.publishOptions = { ...rig.video.publishOptions, degradationPreference: "balanced" };
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.video.publishOptions).toMatchObject({
+      degradationPreference: "balanced",
+      screenShareEncoding: { maxFramerate: 120 },
+    });
+  });
+
   it("a refused size keeps the old quality and says so", async () => {
     const rig = setup(false);
     rig.video.mediaStreamTrack.applyConstraints.mockRejectedValueOnce(new Error("over"));
@@ -406,5 +419,104 @@ describe("setScreenshareQuality", () => {
     expect(rig.state.quality).toBe("medium");
     expect(rig.deps.onError).toHaveBeenCalledWith("Couldn't change the stream quality");
     expect(rig.state.changing).toBe(false);
+  });
+});
+
+describe("setScreenshareQuality on a share that changes its own quality (Linux native)", () => {
+  /** A share whose video track runs the quality change itself, as the native
+   *  track does: it asks the host to re-size the capture and republish. */
+  function nativeRig(setQuality = vi.fn().mockResolvedValue(undefined)) {
+    const rig = setup(false);
+    rig.state.fps = 60;
+    rig.state.published = "h264";
+    Object.assign(rig.video, { quality: "medium", fps: 60, setQuality });
+    return { ...rig, setQuality };
+  }
+
+  it("asks the track with the share's frame rate and published codec, then records the quality", async () => {
+    const rig = nativeRig();
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.setQuality).toHaveBeenCalledWith("high", 60, "h264");
+    expect(rig.state.quality).toBe("high");
+    expect(rig.video.replaceTrack).not.toHaveBeenCalled();
+    expect(rig.video.mediaStreamTrack.applyConstraints).not.toHaveBeenCalled();
+    expect(rig.wsSend).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localShareRev).toBe(1);
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("the current quality, or a change already running, asks nothing", async () => {
+    const rig = nativeRig();
+    await setScreenshareQuality(rig.state, rig.deps, "medium");
+    rig.state.changing = true;
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.setQuality).not.toHaveBeenCalled();
+    expect(rig.state.changing).toBe(true);
+  });
+
+  it("a refused change shows the toast and keeps the quality and the share", async () => {
+    const refused = Object.assign(new Error("a source change is pending"), { stage: "refused" });
+    const rig = nativeRig(vi.fn().mockRejectedValue(refused));
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expectConsole("error", /\[screenShare\] Failed to change screenshare quality/);
+    expect(rig.deps.onError).toHaveBeenCalledWith("Couldn't change the stream quality");
+    expect(rig.state.quality).toBe("medium");
+    expect(rig.state.manualScreenTracks[0]).toBe(rig.video);
+    expect(rig.video.stop).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localScreenshare).toBe(true);
+    expect(voiceStore.getState().localShareRev).toBe(0);
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("a publish-stage failure ends the share and says so", async () => {
+    const failed = Object.assign(new Error("publish failed"), { stage: "publish" });
+    const rig = nativeRig(vi.fn().mockRejectedValue(failed));
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expectConsole("error", /\[screenShare\] Failed to change screenshare quality/);
+    expect(rig.deps.onError).toHaveBeenCalledWith("Couldn't change the stream quality");
+    expect(rig.video.stop).toHaveBeenCalled();
+    expect(rig.state.manualScreenTracks).toEqual([]);
+    expect(voiceStore.getState().localScreenshare).toBe(false);
+    expect(rig.wsSend).toHaveBeenCalledWith({
+      type: "voice_screenshare",
+      payload: { enabled: false },
+    });
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("a Stop that overtook the host's answer leaves the stopped share alone", async () => {
+    let finish!: () => void;
+    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+
+    const changing = setScreenshareQuality(rig.state, rig.deps, "high");
+    rig.state.generation = 1;
+    rig.state.manualScreenTracks = [];
+    finish();
+    await changing;
+
+    expect(rig.state.quality).toBe("medium");
+    expect(voiceStore.getState().localShareRev).toBe(0);
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+  });
+
+  it("a failure after a Stop stays silent and does not end the newer state", async () => {
+    let fail!: (e: Error) => void;
+    const rig = nativeRig(vi.fn(() => new Promise<void>((_, rej) => (fail = rej))));
+
+    const changing = setScreenshareQuality(rig.state, rig.deps, "high");
+    rig.state.generation = 1;
+    rig.state.manualScreenTracks = [];
+    fail(Object.assign(new Error("gone"), { stage: "publish" }));
+    await changing;
+
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+    expect(rig.wsSend).not.toHaveBeenCalled();
   });
 });

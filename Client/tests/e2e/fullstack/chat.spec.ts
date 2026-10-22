@@ -221,12 +221,22 @@ test("revisiting a channel shows what changed while away and keeps unchanged row
   await submit(fresh);
   const edited = row(bob, before);
   await edited.hover();
-  await edited.locator("[data-testid^='msg-edit-']").click();
-  await submit(after);
+  await edited
+    .locator(
+      "[data-testid^='msg-edit-']:not([data-testid^='msg-edit-input-']):not([data-testid^='msg-edit-cancel-']):not([data-testid^='msg-edit-save-'])",
+    )
+    .click();
+  // The edit happens in the row itself (WP 3A-8), not in the composer.
+  // The row no longer has its text, so find it by its editor.
+  const editInput = bob.locator(".message.editing .msg-inline-edit-input");
+  await editInput.fill(after);
+  await editInput.press("Enter");
+  await expect(row(bob, after)).toHaveCount(1);
   const doomed = row(bob, gone);
   await doomed.hover();
-  const del = doomed.locator("[data-testid^='msg-delete-']");
-  await del.click();
+  // Through the menu: the bar's Delete is Shift-only and skips the confirm.
+  await doomed.locator("[data-testid^='msg-more-']").click();
+  await bob.locator("[data-testid='msg-menu-delete']").click();
   await bob.locator("[data-testid='msg-delete-confirm']").click();
   await expect(row(bob, gone)).toHaveCount(0);
 
@@ -283,6 +293,49 @@ test("a server restart keeps the reader where they were in older history", async
   await alice.waitForTimeout(2_000);
   await expect(reading).toBeInViewport();
   await expect(alice.locator(".messages-loading")).toHaveCount(0);
+});
+
+test("pressing Enter while a file uploads posts the message with its attachment once the upload ends", async ({
+  alice,
+  bob,
+  aliceTransport,
+}) => {
+  const id = crypto.randomUUID().slice(0, 8);
+  const composer = alice.locator("[data-testid='message-input']");
+  // Hold the upload at the transport, so Enter always lands while it is running.
+  const release = aliceTransport.holdHttpRequests(
+    ({ path, method }) => method === "POST" && path.endsWith("/uploads"),
+  );
+  await composer.locator("input[type='file']").setInputFiles({
+    name: `notes-${id}.txt`,
+    mimeType: "text/plain",
+    buffer: Buffer.from(`notes ${id}\n`),
+  });
+  await expect(composer.locator(".attachment-preview-item")).toHaveClass(/uploading/);
+  await composer.locator("textarea").fill(`quick-${id}`);
+  await composer.locator("textarea").press("Enter");
+
+  // The composer is free at once and the message waits in the chat, uploading.
+  await expect(composer.locator("textarea")).toHaveValue("");
+  await expect(composer.locator(".attachment-preview-item")).toHaveCount(0);
+  const mine = alice.locator(".message.pending", {
+    has: alice.locator(".msg-text", { hasText: `quick-${id}` }),
+  });
+  await expect(mine.locator(".msg-upload-chip progress")).toBeVisible();
+  await expect(bob.locator(".msg-text", { hasText: `quick-${id}` })).toHaveCount(0);
+
+  release();
+
+  // Once the upload ends it posts for both users, with the file.
+  for (const page of [alice, bob]) {
+    const row = page.locator(".message", {
+      has: page.locator(".msg-text", { hasText: `quick-${id}` }),
+    });
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(".msg-file-name")).toHaveText(`notes-${id}.txt`);
+  }
+  await expect(alice.locator(".msg-upload-strip")).toHaveCount(0);
+  await expect(alice.locator(".message.pending, .message.failed")).toHaveCount(0);
 });
 
 test("a playing video keeps playing while bob reacts to another message 20 times", async ({

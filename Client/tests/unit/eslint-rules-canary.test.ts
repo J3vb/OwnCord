@@ -8,7 +8,7 @@
 // still pass. So each canary asserts that the real eslint.config.js ENABLES the
 // rule at the filePath of a real production module it is meant to cover, and
 // separately that the rule reports on the canary's code shape when run in
-// isolation (without that filePath).
+// isolation (the filePath is passed only so a path-scoped rule sees its module).
 //
 // Adding a rule to eslint-rules.js without a canary here fails the
 // "every rule has a canary" check at the bottom of this file.
@@ -29,6 +29,8 @@ const clientRoot = path.resolve(__dirname, "../..");
 const eslint = new ESLint({ cwd: clientRoot });
 const linter = new Linter({ configType: "flat" });
 const flatConfig = {
+  // The canary filenames are .ts paths, which a flat config only lints when it names them.
+  files: ["**/*.ts"],
   languageOptions: { ecmaVersion: 2022 as const, sourceType: "module" as const },
   plugins: { local: localRules },
 };
@@ -46,6 +48,8 @@ interface Canary {
   readonly shape?: string;
   /** The severity eslint.config.js sets: 2 (error, the default) or 1 (warn). */
   readonly severity?: 1 | 2;
+  /** True when eslint.config.js passes the rule an options object (a baseline). */
+  readonly hasOptions?: boolean;
 }
 
 const CANARIES: readonly Canary[] = [
@@ -142,6 +146,71 @@ const CANARIES: readonly Canary[] = [
     ws.on("x", onX);`,
     messageId: "storeWriteOutsideDispatcher",
   },
+  {
+    rule: "local/no-raw-html-sink",
+    filePath: "src/lib/dom.ts",
+    code: `function f(el, text) { el.innerHTML = text; }`,
+    messageId: "htmlSink",
+  },
+  {
+    rule: "local/no-raw-html-sink",
+    shape: "insertAdjacentHTML",
+    filePath: "src/components/EmojiPicker.ts",
+    code: `function f(el, html) { el.insertAdjacentHTML("beforeend", html); }`,
+    messageId: "htmlSink",
+  },
+  {
+    rule: "local/subscription-result-kept",
+    filePath: "src/main.ts",
+    code: `import { onAuthCleared } from "@stores/auth.store";
+    onAuthCleared(reset);`,
+    messageId: "discarded",
+  },
+  {
+    rule: "local/subscription-result-kept",
+    shape: "registerSessionReset",
+    filePath: "src/stores/messages.store.ts",
+    code: `import { registerSessionReset } from "@lib/sessionRegistry";
+    registerSessionReset("x:y", reset);`,
+    messageId: "discarded",
+  },
+  {
+    rule: "local/subscription-result-kept",
+    shape: "store.subscribe",
+    filePath: "src/stores/voice.store.ts",
+    code: `voiceStore.subscribe(() => {});`,
+    messageId: "discarded",
+  },
+  {
+    rule: "local/subscription-result-kept",
+    shape: "ws.on",
+    filePath: "src/lib/dispatcher.ts",
+    code: `this.ws.on("x", () => {});`,
+    messageId: "discarded",
+  },
+  {
+    rule: "local/layer-direction",
+    filePath: "src/lib/presence.ts",
+    code: `import { MainPage } from "@pages/MainPage";`,
+    messageId: "upwardImport",
+    hasOptions: true,
+  },
+  {
+    rule: "local/layer-direction",
+    shape: "relative",
+    filePath: "src/stores/voice.store.ts",
+    code: `import { x } from "../components/Foo";`,
+    messageId: "upwardImport",
+    hasOptions: true,
+  },
+  {
+    rule: "local/layer-direction",
+    shape: "dynamic import",
+    filePath: "src/lib/livekitSession.ts",
+    code: `async function f() { return import("@pages/MainPage"); }`,
+    messageId: "upwardImport",
+    hasOptions: true,
+  },
 ];
 
 describe("custom lint-rule canaries (ARCH-06)", () => {
@@ -151,14 +220,25 @@ describe("custom lint-rule canaries (ARCH-06)", () => {
       // Scope check: a rule that a refactor scoped away is disabled here, and
       // an inert rule is exactly the failure this canary exists to catch.
       const config = await eslint.calculateConfigForFile(path.join(clientRoot, canary.filePath));
-      expect(
-        config?.rules?.[canary.rule],
-        `${canary.rule} not enabled at ${canary.filePath}`,
-      ).toEqual([canary.severity ?? 2]);
+      const configured = config?.rules?.[canary.rule];
+      if (canary.hasOptions) {
+        expect(configured?.[0], `${canary.rule} not enabled at ${canary.filePath}`).toBe(
+          canary.severity ?? 2,
+        );
+        expect(configured?.[1], `${canary.rule} lost its options`).toBeDefined();
+      } else {
+        expect(configured, `${canary.rule} not enabled at ${canary.filePath}`).toEqual([
+          canary.severity ?? 2,
+        ]);
+      }
 
-      const fired = linter.verify(canary.code, [
-        { ...flatConfig, rules: { [canary.rule]: "error" } },
-      ]);
+      // The filename is passed so a path-scoped rule (layer-direction) sees
+      // the module it guards; the other rules ignore it.
+      const fired = linter.verify(
+        canary.code,
+        [{ ...flatConfig, rules: { [canary.rule]: "error" } }],
+        path.join(clientRoot, canary.filePath),
+      );
       expect(
         fired.map((m) => m.messageId),
         `${canary.rule} did not fire on its canary shape at ${canary.filePath}`,
@@ -186,4 +266,92 @@ describe("custom lint-rule canaries (ARCH-06)", () => {
       expect(() => readFileSync(abs, "utf8"), canary.filePath).not.toThrow();
     }
   });
+});
+
+// 5.4e: a *.view.ts draws from a row model and imports no store. These are
+// core rules, so they are checked through the real config, not a flat Linter.
+describe("view-file store ban (5.4e)", () => {
+  const VIEW = "src/features/members/memberRow.view.ts";
+  const NON_VIEW = "src/features/members/memberRowModel.ts";
+
+  async function restricted(code: string, filePath: string): Promise<string[]> {
+    const [result] = await eslint.lintText(code, { filePath: path.join(clientRoot, filePath) });
+    return (result?.messages ?? [])
+      .map((m) => m.ruleId)
+      .filter((id) => id === "no-restricted-imports" || id === "no-restricted-syntax")
+      .map(String);
+  }
+
+  it("flags a static store import in a view file", async () => {
+    expect(
+      await restricted(`import { membersStore } from "@stores/members.store";`, VIEW),
+    ).toContain("no-restricted-imports");
+    expect(await restricted(`import { x } from "../../stores/ui.store";`, VIEW)).toContain(
+      "no-restricted-imports",
+    );
+    expect(await restricted(`import { x } from "@lib/livekitSession";`, VIEW)).toContain(
+      "no-restricted-imports",
+    );
+    expect(await restricted(`import { x } from "../safety/store";`, VIEW)).toContain(
+      "no-restricted-imports",
+    );
+  }, 60_000);
+
+  it("flags a dynamic import of a store in a view file", async () => {
+    expect(
+      await restricted(`export const f = () => import("@stores/members.store");`, VIEW),
+    ).toContain("no-restricted-syntax");
+    expect(
+      await restricted(`export const f = () => import("../moderation/store");`, VIEW),
+    ).toContain("no-restricted-syntax");
+    expect(
+      await restricted(`export const f = () => import("@lib/livekitSession");`, VIEW),
+    ).toContain("no-restricted-syntax");
+  }, 60_000);
+
+  it("does not flag a store import outside a view file", async () => {
+    expect(
+      await restricted(`import { membersStore } from "@stores/members.store";`, NON_VIEW),
+    ).toEqual([]);
+    expect(
+      await restricted(`export const f = () => import("@stores/members.store");`, NON_VIEW),
+    ).toEqual([]);
+  }, 60_000);
+});
+
+// 6.13b: the browser platform must stay free of native imports. The ban in
+// eslint.config.js exempts only src/platform/desktop, so it already covers
+// src/platform/browser; these cases fail if that exemption ever widens.
+describe("browser platform native-import ban (6.13b)", () => {
+  const BROWSER = "src/platform/browser/index.ts";
+  const DESKTOP = "src/platform/desktop/appMetadata.ts";
+
+  async function restricted(code: string, filePath: string): Promise<string[]> {
+    const [result] = await eslint.lintText(code, { filePath: path.join(clientRoot, filePath) });
+    return (result?.messages ?? [])
+      .map((m) => m.ruleId)
+      .filter((id) => id === "no-restricted-imports" || id === "no-restricted-syntax")
+      .map(String);
+  }
+
+  it("flags a static @tauri-apps import in the browser platform", async () => {
+    expect(
+      await restricted(
+        `import { invoke } from "@tauri-apps/api/core";\nexport const x = invoke;`,
+        BROWSER,
+      ),
+    ).toContain("no-restricted-imports");
+  }, 60_000);
+
+  it("flags a dynamic @tauri-apps import in the browser platform", async () => {
+    expect(
+      await restricted(`export const f = () => import("@tauri-apps/api/app");`, BROWSER),
+    ).toContain("no-restricted-syntax");
+  }, 60_000);
+
+  it("still allows the desktop platform to import it", async () => {
+    expect(
+      await restricted(`export const f = () => import("@tauri-apps/api/app");`, DESKTOP),
+    ).toEqual([]);
+  }, 60_000);
 });

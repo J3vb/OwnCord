@@ -4,20 +4,51 @@
 
 import { createElement } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
+import { channelsStore } from "@stores/channels.store";
+import { authorityChannelId } from "@stores/threads.store";
+import { messagingText } from "../../i18n/messaging";
+import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { formatUntil, safetyText } from "../../i18n/safety";
+import { shellText } from "../../i18n/shell";
 import type { MessageListOptions } from "../MessageList";
 import { attachReactionTooltip } from "./reaction-tooltip";
 import { buildCustomEmojiNode } from "./custom-emoji";
 
 // -- Reaction rendering -------------------------------------------------------
 
-/** While timed out (B9-15, Q4): why reacting is disabled, with the server's expiry; else null. */
-export function reactionLockReason(): string | null {
+/** Why reacting is disabled: the socket is down (a reaction frame would be
+ *  lost), or the user is timed out (B9-15, Q4), with the server's expiry.
+ *  Null when reacting works. */
+export function reactionLockReason(canReact?: boolean): string | null {
+  const status = uiStore.getState().connectionStatus;
+  if (status !== "connected") {
+    return shellText(status === "reconnecting" ? "channel.reconnecting" : "channel.notConnected");
+  }
   const timeout = safetyStore.getState().timeout;
-  return timeout === null
-    ? null
-    : safetyText("timeout.react", { time: formatUntil(timeout.expiresAt) });
+  if (timeout !== null)
+    return safetyText("timeout.react", { time: formatUntil(timeout.expiresAt) });
+  // Only an explicit false locks; absent (an older server) leaves reacting on.
+  return canReact === false ? messagingText("reaction.channelLocked") : null;
+}
+
+/** The server refuses a new emoji on a message that already has this many (3A-12). */
+const MAX_DISTINCT_REACTIONS = 20;
+
+/** A new emoji would push the message past the cap; existing pills stay clickable. */
+export function atReactionLimit(
+  reactions: readonly { emoji: string }[],
+  emoji: string | null,
+): boolean {
+  return (
+    reactions.length >= MAX_DISTINCT_REACTIONS &&
+    (emoji === null || !reactions.some((r) => r.emoji === emoji))
+  );
+}
+
+/** The server's can_react verdict for a channel; undefined when it never said. */
+export function channelCanReact(channelId: number): boolean | undefined {
+  return channelsStore.getState().channels.get(authorityChannelId(channelId))?.canReact;
 }
 
 export function renderReactions(
@@ -26,7 +57,7 @@ export function renderReactions(
   signal: AbortSignal,
 ): HTMLDivElement {
   const container = createElement("div", { class: "msg-reactions" });
-  const locked = reactionLockReason();
+  const locked = reactionLockReason(channelCanReact(msg.channelId));
   for (const reaction of msg.reactions) {
     const chip = createElement("span", {
       class: reaction.me ? "reaction-chip me" : "reaction-chip",
@@ -123,12 +154,12 @@ export function applyReactionLock(el: HTMLElement, locked: string | null, defaul
   el.title = locked;
 }
 
-/** Apply the current timeout lock to every reaction control under `root`.
- *  Called when the timeout changes; no row is rebuilt. */
-export function refreshReactionLocks(root: ParentNode): void {
-  const locked = reactionLockReason();
+/** Apply the current lock to every reaction control under `root`. Called when
+ *  the timeout or the connection changes; no row is rebuilt. */
+export function refreshReactionLocks(root: ParentNode, channelId: number): void {
+  const locked = reactionLockReason(channelCanReact(channelId));
   for (const el of root.querySelectorAll<HTMLElement>(
-    ".reaction-chip, [data-testid^='msg-react-']",
+    ".reaction-chip, [data-testid^='msg-react-'], [data-testid^='msg-quick-react-']",
   )) {
     applyReactionLock(el, locked, defaultTitles.get(el) ?? "");
   }

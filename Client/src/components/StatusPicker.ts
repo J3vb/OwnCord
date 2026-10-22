@@ -10,7 +10,10 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { MAX_CUSTOM_STATUS_LEN } from "@lib/userStatus";
+import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/nameLimits";
 import { shellText } from "../i18n/shell";
+import { connectText } from "../i18n/connect";
+import { STATUS_DEFS, colorForStatus, type StatusDef } from "@components/statusDefs";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -38,33 +41,6 @@ export type StatusPickerComponent = MountableComponent & {
    */
   setEnabled(enabled: boolean): void;
 };
-
-// ---------------------------------------------------------------------------
-// Status definitions
-// ---------------------------------------------------------------------------
-
-interface StatusDef {
-  readonly value: UserStatus;
-  readonly labelKey: "status.online" | "status.idle" | "status.dnd" | "status.invisible";
-  readonly color: string;
-}
-
-/**
- * "invisible" is its own value now, not "offline" wearing a different label.
- * The server stores it as chosen and shows everyone else offline, so the
- * picker can finally send what it means — and the status survives a reconnect
- * instead of flashing back to online.
- */
-const STATUS_DEFS: readonly StatusDef[] = [
-  { value: "online", labelKey: "status.online", color: "var(--green)" },
-  { value: "idle", labelKey: "status.idle", color: "var(--yellow)" },
-  { value: "dnd", labelKey: "status.dnd", color: "var(--red)" },
-  { value: "invisible", labelKey: "status.invisible", color: "var(--text-micro)" },
-];
-
-function colorForStatus(status: UserStatus): string {
-  return STATUS_DEFS.find((d) => d.value === status)?.color ?? "var(--text-micro)";
-}
 
 // ---------------------------------------------------------------------------
 // Component factory
@@ -189,20 +165,37 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
       class: "status-picker-custom-input",
       type: "text",
       placeholder: shellText("status.customPlaceholder"),
-      maxlength: String(MAX_CUSTOM_STATUS_LEN),
       "aria-label": shellText("status.customLabel"),
       "data-testid": "custom-status-input",
     });
     input.value = options.currentCustomStatus ?? "";
+    const hint = attachLimitHint(input, {
+      max: MAX_CUSTOM_STATUS_LEN,
+      hint: lineHintText(MAX_CUSTOM_STATUS_LEN),
+      countCharacters: true,
+      id: "custom-status-hint",
+      signal,
+    });
+    hint.el.dataset["testid"] = "custom-status-hint";
     customInputEl = input;
 
-    const commit = (): void => {
-      if (!enabled) return;
-      const text = input.value.trim().slice(0, MAX_CUSTOM_STATUS_LEN);
-      if (text === lastCommittedCustom) return;
+    /** True when the text was sent or was already current; false when it was
+     *  refused for length and stays in the field. */
+    const commit = (): boolean => {
+      if (!enabled) return true;
+      // The collapsed text is what the server stores, so it is what is checked and sent.
+      const text = collapseSpaces(input.value);
+      // Over the limit (a paste past maxlength, a scripted value): the server
+      // would refuse it, so send nothing and leave the text to be shortened.
+      if (runeCount(text) > MAX_CUSTOM_STATUS_LEN) {
+        hint.showError(connectText("limits.statusTooLong", { max: MAX_CUSTOM_STATUS_LEN }));
+        return false;
+      }
+      if (text === lastCommittedCustom) return true;
       lastCommittedCustom = text;
       input.value = text;
       onChange(text);
+      return true;
     };
 
     input.addEventListener(
@@ -213,7 +206,8 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
         e.stopPropagation();
         if (e.key === "Enter") {
           e.preventDefault();
-          commit();
+          // A refused (over-limit) status keeps the menu open with the hint.
+          if (!commit()) return;
           closeDropdown();
           // Leave the input: a hidden input keeps focus, and setCustomStatus()
           // skips a focused one, so a TIMED_OUT rollback arriving right after
@@ -222,6 +216,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
         } else if (e.key === "Escape") {
           e.preventDefault();
           input.value = lastCommittedCustom;
+          hint.reset();
           closeDropdown();
         }
       },
@@ -232,7 +227,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     // as picking a status or as an outside click.
     input.addEventListener("click", (e: MouseEvent) => e.stopPropagation(), { signal });
 
-    row.appendChild(input);
+    appendChildren(row, input, hint.el);
     return row;
   }
 
@@ -303,6 +298,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
       "keydown",
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && isOpen()) {
+          e.preventDefault();
           closeDropdown();
           dotEl?.focus();
         }

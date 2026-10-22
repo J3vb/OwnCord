@@ -35,7 +35,7 @@ import {
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
+import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
 
 const CHANNELS: ReadyChannel[] = [
@@ -44,6 +44,7 @@ const CHANNELS: ReadyChannel[] = [
 
 const KNOWN_MEMBER_ID = 10;
 const SELF_ID = 12;
+const KNOWN_ROLE_ID = 5;
 const KNOWN_SHORTCODE = "wave";
 const KNOWN_CHANNEL_ID = 1;
 
@@ -70,8 +71,15 @@ function seedStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   setChannels(CHANNELS);
+  setRoles([{ id: KNOWN_ROLE_ID, name: "Mods", color: "#ff8800", permissions: 0 }]);
+  channelsStore.flush();
   clearCustomEmoji();
   emojiStore.flush();
   setCustomEmoji([{ id: 1, shortcode: KNOWN_SHORTCODE, url: "/api/v1/emoji/1/image" }]);
@@ -117,6 +125,14 @@ const TOKEN_CHARS = [
   "here",
   "wave",
   "general",
+  // Id tokens (WP 6.3e): the brackets, the role marker, a known and an unknown id.
+  "<@",
+  "<@&",
+  ">",
+  "&",
+  "10",
+  "12",
+  "999",
 ];
 const tokenFragment = fc.string({ unit: fc.constantFrom(...TOKEN_CHARS), maxLength: 200 });
 
@@ -198,6 +214,39 @@ describe("chips only render for what actually resolves", () => {
         }
       }),
       { numRuns: 500 },
+    );
+  });
+
+  it("every rendered id-token pill points at a known member, self or role, and unknown ids stay plain", () => {
+    fc.assert(
+      fc.property(tokenFragment, (s) => {
+        const host = document.createElement("div");
+        host.appendChild(renderMentionSegment(s));
+        for (const span of Array.from(host.querySelectorAll(".mention[data-user-id]"))) {
+          expect([KNOWN_MEMBER_ID, SELF_ID]).toContain(Number(span.getAttribute("data-user-id")));
+        }
+        for (const span of Array.from(host.querySelectorAll(".mention-role"))) {
+          expect(Number(span.getAttribute("data-role-id"))).toBe(KNOWN_ROLE_ID);
+        }
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("an id token for a known member always renders a pill, an unknown one never does", () => {
+    expect(
+      renderMentionSegment("<@10>").querySelector(".mention[data-user-id='10']"),
+    ).not.toBeNull();
+    expect(renderMentionSegment("<@999>").querySelector(".mention")).toBeNull();
+    expect(renderMentionSegment("<@&999>").querySelector(".mention")).toBeNull();
+    fc.assert(
+      fc.property(fc.integer({ min: 1000, max: 99999 }), (id) => {
+        const host = document.createElement("div");
+        host.appendChild(renderMentionSegment(`<@${id}> <@&${id}>`));
+        expect(host.querySelector(".mention")).toBeNull();
+        expect(host.textContent).toBe("@unknown-user @deleted-role");
+      }),
+      { numRuns: 100 },
     );
   });
 

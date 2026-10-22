@@ -597,7 +597,7 @@ func TestAuthCharacterization_LoginFailurePaths(t *testing.T) {
 
 func TestAuthCharacterization_SessionShape(t *testing.T) {
 	hexToken := regexp.MustCompile(`^[0-9a-f]{64}$`)
-	userKeys := []string{"about", "created_at", "custom_status", "display_name", "id", "role_id", "status", "totp_enabled", "username"}
+	userKeys := []string{"about", "banner", "banner_color", "created_at", "custom_status", "custom_status_expires_at", "display_name", "id", "role_id", "status", "totp_enabled", "username"}
 	checkSuccess := func(t *testing.T, rr *httptest.ResponseRecorder, wantStatus int) string {
 		t.Helper()
 		if rr.Code != wantStatus {
@@ -620,7 +620,7 @@ func TestAuthCharacterization_SessionShape(t *testing.T) {
 		if !slices.Equal(got, userKeys) {
 			t.Errorf("user keys = %v, want %v (avatar omitted when empty; nullable fields present as null)", got, userKeys)
 		}
-		for _, k := range []string{"display_name", "about", "custom_status"} {
+		for _, k := range []string{"display_name", "about", "custom_status", "custom_status_expires_at"} {
 			if user[k] != nil {
 				t.Errorf("user.%s = %v, want null when unset", k, user[k])
 			}

@@ -60,7 +60,8 @@ function response(id: number): MessageResponse {
     pinned: false,
     edited_at: null,
     deleted: false,
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 5)).toISOString(),
+    // 10 minutes apart: past the 7-minute group window, so rows never group.
+    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
   };
 }
 
@@ -94,6 +95,8 @@ describe("MessageList: paging down from a detached window", () => {
       onScrollBottom,
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),

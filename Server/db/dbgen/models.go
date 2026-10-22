@@ -59,22 +59,58 @@ type AuditLog struct {
 	ActorToken   *string `json:"actorToken"`
 }
 
+type CategoryOverride struct {
+	CategoryID int64 `json:"categoryId"`
+	RoleID     int64 `json:"roleId"`
+	Allow      int64 `json:"allow"`
+	Deny       int64 `json:"deny"`
+}
+
+type CategoryUserOverride struct {
+	CategoryID int64 `json:"categoryId"`
+	UserID     int64 `json:"userId"`
+	Allow      int64 `json:"allow"`
+	Deny       int64 `json:"deny"`
+}
+
 type Channel struct {
-	ID              int64   `json:"id"`
-	Name            string  `json:"name"`
-	Type            string  `json:"type"`
-	Category        *string `json:"category"`
-	Topic           *string `json:"topic"`
-	Position        int64   `json:"position"`
-	SlowMode        int64   `json:"slowMode"`
-	Archived        int64   `json:"archived"`
-	CreatedAt       string  `json:"createdAt"`
-	VoiceMaxUsers   int64   `json:"voiceMaxUsers"`
-	VoiceQuality    *string `json:"voiceQuality"`
-	MixingThreshold *int64  `json:"mixingThreshold"`
-	VoiceMaxVideo   int64   `json:"voiceMaxVideo"`
-	Nsfw            int64   `json:"nsfw"`
-	IsGroup         int64   `json:"isGroup"`
+	ID                             int64   `json:"id"`
+	Name                           string  `json:"name"`
+	Type                           string  `json:"type"`
+	Category                       *string `json:"category"`
+	Topic                          *string `json:"topic"`
+	Position                       int64   `json:"position"`
+	SlowMode                       int64   `json:"slowMode"`
+	Archived                       int64   `json:"archived"`
+	CreatedAt                      string  `json:"createdAt"`
+	VoiceMaxUsers                  int64   `json:"voiceMaxUsers"`
+	VoiceQuality                   *string `json:"voiceQuality"`
+	MixingThreshold                *int64  `json:"mixingThreshold"`
+	VoiceMaxVideo                  int64   `json:"voiceMaxVideo"`
+	Nsfw                           int64   `json:"nsfw"`
+	IsGroup                        int64   `json:"isGroup"`
+	DmOwnerID                      *int64  `json:"dmOwnerId"`
+	DmIcon                         *string `json:"dmIcon"`
+	Afk                            int64   `json:"afk"`
+	CategoryID                     *int64  `json:"categoryId"`
+	ParentChannelID                *int64  `json:"parentChannelId"`
+	ThreadStarterMessageID         *int64  `json:"threadStarterMessageId"`
+	ThreadOwnerID                  *int64  `json:"threadOwnerId"`
+	ThreadArchived                 int64   `json:"threadArchived"`
+	ThreadLocked                   int64   `json:"threadLocked"`
+	ThreadAutoArchiveMinutes       int64   `json:"threadAutoArchiveMinutes"`
+	ThreadLastActivityAt           *string `json:"threadLastActivityAt"`
+	ForumRequireTag                int64   `json:"forumRequireTag"`
+	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
+	ThreadPostMessageID            *int64  `json:"threadPostMessageId"`
+	PermissionsSynced              int64   `json:"permissionsSynced"`
+}
+
+type ChannelCategory struct {
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Position  int64  `json:"position"`
+	CreatedAt string `json:"createdAt"`
 }
 
 type ChannelOverride struct {
@@ -141,6 +177,15 @@ type Event struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type ForumTag struct {
+	ID        int64   `json:"id"`
+	ForumID   int64   `json:"forumId"`
+	Name      string  `json:"name"`
+	Emoji     *string `json:"emoji"`
+	Position  int64   `json:"position"`
+	CreatedAt string  `json:"createdAt"`
+}
+
 type GifFavorite struct {
 	ID         int64  `json:"id"`
 	UserID     int64  `json:"userId"`
@@ -182,6 +227,12 @@ type MemberGeneration struct {
 	Generation int64 `json:"generation"`
 }
 
+type MentionReceipt struct {
+	UserID    int64 `json:"userId"`
+	ChannelID int64 `json:"channelId"`
+	MessageID int64 `json:"messageId"`
+}
+
 type Message struct {
 	ID               int64   `json:"id"`
 	ChannelID        int64   `json:"channelId"`
@@ -194,6 +245,20 @@ type Message struct {
 	Timestamp        string  `json:"timestamp"`
 	MentionsEveryone int64   `json:"mentionsEveryone"`
 	PinnedAt         *string `json:"pinnedAt"`
+	Kind             int64   `json:"kind"`
+}
+
+type MessageCall struct {
+	MessageID  int64   `json:"messageId"`
+	ChannelID  int64   `json:"channelId"`
+	StartedAt  string  `json:"startedAt"`
+	EndedAt    *string `json:"endedAt"`
+	LastSeenAt string  `json:"lastSeenAt"`
+}
+
+type MessageCallParticipant struct {
+	MessageID int64 `json:"messageId"`
+	UserID    int64 `json:"userId"`
 }
 
 type MessageDeliveryReceipt struct {
@@ -206,9 +271,24 @@ type MessageDeliveryReceipt struct {
 	ExpiresAtMs     int64  `json:"expiresAtMs"`
 }
 
+type MessageForward struct {
+	MessageID       int64  `json:"messageId"`
+	SourceMessageID *int64 `json:"sourceMessageId"`
+	SourceChannelID int64  `json:"sourceChannelId"`
+	SourceTimestamp string `json:"sourceTimestamp"`
+}
+
+type MessageGroupEvent struct {
+	MessageID    int64   `json:"messageId"`
+	TargetUserID *int64  `json:"targetUserId"`
+	Name         *string `json:"name"`
+	IconRemoved  int64   `json:"iconRemoved"`
+}
+
 type MessageMention struct {
 	MessageID       int64 `json:"messageId"`
 	MentionedUserID int64 `json:"mentionedUserId"`
+	ReplyPing       int64 `json:"replyPing"`
 }
 
 type MessageRequest struct {
@@ -220,6 +300,11 @@ type MessageRequest struct {
 	State          string  `json:"state"`
 	CreatedAt      string  `json:"createdAt"`
 	DecidedAt      *string `json:"decidedAt"`
+}
+
+type MessageRoleMention struct {
+	MessageID int64 `json:"messageId"`
+	RoleID    int64 `json:"roleId"`
 }
 
 type MessagesFt struct {
@@ -275,6 +360,28 @@ type PluginKv struct {
 	PluginID int64  `json:"pluginId"`
 	Key      string `json:"key"`
 	Value    []byte `json:"value"`
+}
+
+type Poll struct {
+	MessageID        int64   `json:"messageId"`
+	Question         string  `json:"question"`
+	AllowMultiselect int64   `json:"allowMultiselect"`
+	ExpiresAt        string  `json:"expiresAt"`
+	EndedAt          *string `json:"endedAt"`
+	Version          int64   `json:"version"`
+}
+
+type PollAnswer struct {
+	MessageID int64   `json:"messageId"`
+	AnswerID  int64   `json:"answerId"`
+	Text      string  `json:"text"`
+	Emoji     *string `json:"emoji"`
+}
+
+type PollVote struct {
+	MessageID int64 `json:"messageId"`
+	AnswerID  int64 `json:"answerId"`
+	UserID    int64 `json:"userId"`
 }
 
 type PushSubscription struct {
@@ -399,6 +506,8 @@ type Role struct {
 	Permissions int64   `json:"permissions"`
 	Position    int64   `json:"position"`
 	IsDefault   int64   `json:"isDefault"`
+	Hoist       int64   `json:"hoist"`
+	Mentionable int64   `json:"mentionable"`
 }
 
 type Session struct {
@@ -416,6 +525,17 @@ type Session struct {
 type Setting struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+}
+
+type ThreadMember struct {
+	ThreadID int64  `json:"threadId"`
+	UserID   int64  `json:"userId"`
+	JoinedAt string `json:"joinedAt"`
+}
+
+type ThreadTag struct {
+	ThreadID int64 `json:"threadId"`
+	TagID    int64 `json:"tagId"`
 }
 
 type TotpRecoveryCode struct {
@@ -440,29 +560,51 @@ type TrustedSender struct {
 }
 
 type User struct {
-	ID                 int64   `json:"id"`
-	Username           string  `json:"username"`
-	Password           string  `json:"password"`
-	Avatar             *string `json:"avatar"`
-	RoleID             int64   `json:"roleId"`
-	TotpSecret         *string `json:"totpSecret"`
-	Status             string  `json:"status"`
-	CreatedAt          string  `json:"createdAt"`
-	LastSeen           *string `json:"lastSeen"`
-	Banned             int64   `json:"banned"`
-	BanReason          *string `json:"banReason"`
-	BanExpires         *string `json:"banExpires"`
-	IdentityPublicKey  *string `json:"identityPublicKey"`
-	DisplayName        *string `json:"displayName"`
-	About              *string `json:"about"`
-	CustomStatus       *string `json:"customStatus"`
-	RegistrationStatus string  `json:"registrationStatus"`
+	ID                    int64   `json:"id"`
+	Username              string  `json:"username"`
+	Password              string  `json:"password"`
+	Avatar                *string `json:"avatar"`
+	RoleID                int64   `json:"roleId"`
+	TotpSecret            *string `json:"totpSecret"`
+	Status                string  `json:"status"`
+	CreatedAt             string  `json:"createdAt"`
+	LastSeen              *string `json:"lastSeen"`
+	Banned                int64   `json:"banned"`
+	BanReason             *string `json:"banReason"`
+	BanExpires            *string `json:"banExpires"`
+	IdentityPublicKey     *string `json:"identityPublicKey"`
+	DisplayName           *string `json:"displayName"`
+	About                 *string `json:"about"`
+	CustomStatus          *string `json:"customStatus"`
+	RegistrationStatus    string  `json:"registrationStatus"`
+	CustomStatusExpiresAt *string `json:"customStatusExpiresAt"`
+	BannerID              *string `json:"bannerId"`
+	BannerColor           *string `json:"bannerColor"`
 }
 
 type UserBlock struct {
 	BlockerID int64  `json:"blockerId"`
 	BlockedID int64  `json:"blockedId"`
 	CreatedAt string `json:"createdAt"`
+}
+
+type UserNote struct {
+	OwnerID   int64  `json:"ownerId"`
+	TargetID  int64  `json:"targetId"`
+	Note      string `json:"note"`
+	UpdatedAt string `json:"updatedAt"`
+}
+
+type UserPrivacy struct {
+	UserID          int64  `json:"userId"`
+	AllowMemberDms  int64  `json:"allowMemberDms"`
+	MessageRequests int64  `json:"messageRequests"`
+	UpdatedAt       string `json:"updatedAt"`
+}
+
+type UserRole struct {
+	UserID int64 `json:"userId"`
+	RoleID int64 `json:"roleId"`
 }
 
 type UserStorage struct {

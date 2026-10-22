@@ -42,7 +42,12 @@ function seedStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   setChannels(CHANNELS);
 }
 
@@ -212,7 +217,8 @@ describe("renderMessageContent / renderInlineContent — never throw, always saf
 });
 
 describe("bounded time on pathological input", () => {
-  const BUDGET_MS = 3000;
+  // Stryker's instrumentation makes the wall-clock bound meaningless, so it gets a far larger budget.
+  const BUDGET_MS = process.env.OC_MUTATION_RUN ? 60_000 : 3000;
 
   it("a long run of unmatched '[' stays within budget", () => {
     const input = "[".repeat(5000);

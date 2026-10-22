@@ -38,13 +38,13 @@ pub(crate) fn update_in_progress() -> bool {
     UPDATE_IN_PROGRESS.load(Ordering::SeqCst)
 }
 
-struct InstallGuard<'a> {
+pub(crate) struct InstallGuard<'a> {
     active: &'a AtomicBool,
     installed: bool,
 }
 
 impl<'a> InstallGuard<'a> {
-    fn acquire(active: &'a AtomicBool) -> Result<Self, String> {
+    pub(crate) fn acquire(active: &'a AtomicBool) -> Result<Self, String> {
         active
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .map_err(|_| "an update is already in progress or waiting for restart".to_string())?;
@@ -54,7 +54,7 @@ impl<'a> InstallGuard<'a> {
         })
     }
 
-    fn installed(mut self) {
+    pub(crate) fn installed(mut self) {
         // Linux returns after replacing the AppImage, before the frontend
         // relaunches. Its running version is still old in that interval, so
         // retain ownership until process exit even if relaunch fails.
@@ -79,6 +79,11 @@ pub struct UpdateCheckResult {
     /// True when this install kind cannot update itself at all, so
     /// `available: false` must not be read as "you are up to date".
     pub manual_upgrade: bool,
+    /// Set with `manual_upgrade` on a .deb install that is ready to update
+    /// itself: the server gave no offer (an older server, one withholding the
+    /// release, or a release with no .deb), which is not proof this install
+    /// cannot be updated. The banner words it neutrally.
+    pub unconfirmed: bool,
 }
 
 /// Download progress, emitted to the webview as `update-progress` so the banner
@@ -142,23 +147,70 @@ fn build_tls_config(
 /// (expanded by the updater plugin to e.g. "windows-x86_64-nsis") must match
 /// the `{os}-{arch}-{installer}` key the plugin looks up FIRST in the response
 /// `platforms` map — the server echoes this path segment back as that key.
-/// The bundle type matters: a deb-installed client must get 204, not the
+/// The bundle type matters: a deb-installed client must not be handed the
 /// AppImage archive, or its install step rejects every update.
-fn build_update_endpoint(server_url: &str, current_version: &str) -> String {
+///
+/// `deb_opt_in` adds `?deb_install=pkexec`, which a .deb install that can run
+/// its root helper sends so the server offers the .deb (and answers 200 even
+/// when the client is current). Every other client omits it and keeps the 204
+/// the server gives a .deb target by default.
+fn build_update_endpoint(server_url: &str, current_version: &str, deb_opt_in: bool) -> String {
+    let query = if deb_opt_in {
+        "?deb_install=pkexec"
+    } else {
+        ""
+    };
     format!(
-        "{}/api/v1/client-update/{{{{target}}}}-{{{{arch}}}}-{{{{bundle_type}}}}/{}",
+        "{}/api/v1/client-update/{{{{target}}}}-{{{{arch}}}}-{{{{bundle_type}}}}/{}{}",
         server_url.trim_end_matches('/'),
         current_version,
+        query,
     )
+}
+
+/// An updater plus what one check learned beyond its result.
+struct BuiltUpdater {
+    updater: tauri_plugin_updater::Updater,
+    /// Whether this is a .deb install that can run its root helper, so the
+    /// request opted in to being offered the .deb.
+    deb_ready: bool,
+    /// Set by the version comparator when the server sent a release at all,
+    /// even one this client is already at or past.
+    answered: Arc<AtomicBool>,
+}
+
+/// Record in `answered` that the server sent a release, and otherwise decide
+/// exactly as the plugin's default comparator does: only a newer version is an
+/// update. The plugin resolves the platform entry before it compares versions,
+/// so reaching the comparator means the server answered with a release.
+fn track_offers(
+    builder: tauri_plugin_updater::UpdaterBuilder,
+    answered: &Arc<AtomicBool>,
+) -> tauri_plugin_updater::UpdaterBuilder {
+    let seen = Arc::clone(answered);
+    builder.version_comparator(move |current, release| {
+        seen.store(true, Ordering::SeqCst);
+        release.version > current
+    })
+}
+
+/// Whether this install is a .deb that can update itself in the app.
+fn deb_install_ready(bundle: Option<&BundleType>) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        matches!(bundle, Some(BundleType::Deb)) && crate::deb_install::ready()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = bundle;
+        false
+    }
 }
 
 /// Build an updater wired to the given OwnCord server: dynamic endpoint plus
 /// host-scoped TOFU TLS. Shared by check and install so the two paths can
 /// never diverge on endpoint format or trust configuration.
-fn build_updater(
-    app: &AppHandle,
-    server_url: &str,
-) -> Result<tauri_plugin_updater::Updater, String> {
+fn build_updater(app: &AppHandle, server_url: &str) -> Result<BuiltUpdater, String> {
     validate_server_url(server_url)?;
 
     let current_version = app
@@ -167,7 +219,8 @@ fn build_updater(
         .clone()
         .unwrap_or_else(|| "0.0.0".to_string());
 
-    let endpoint = build_update_endpoint(server_url, &current_version);
+    let deb_ready = deb_install_ready(bundle_type().as_ref());
+    let endpoint = build_update_endpoint(server_url, &current_version, deb_ready);
     let url: url::Url = endpoint
         .parse()
         .map_err(|e: url::ParseError| format!("bad endpoint URL: {e}"))?;
@@ -175,25 +228,34 @@ fn build_updater(
     // Use TOFU-pinned certificate for self-signed servers, or system certs
     // for CA-signed servers. Never blindly accept invalid certs (BUG-134).
     let tls_config = build_tls_config(app, server_url)?;
-    app.updater_builder()
-        .pubkey(updater_public_key(app)?)
-        .endpoints(vec![url])
-        .map_err(|e| format!("failed to set endpoints: {e}"))?
-        .configure_client(move |client| {
-            // This callback applies to both metadata checks and downloads.
-            // UpdaterBuilder::timeout only bounds checks through updater 2.13;
-            // its returned Update has no timeout. Bound idle reads instead
-            // of total download time so slow, progressing downloads finish.
-            let client = client
-                .connect_timeout(UPDATE_CONNECT_TIMEOUT)
-                .read_timeout(UPDATE_READ_TIMEOUT);
-            match &tls_config {
-                Some(config) => client.use_preconfigured_tls(config.clone()),
-                None => client,
-            }
-        })
-        .build()
-        .map_err(|e| format!("failed to build updater: {e}"))
+    let answered = Arc::new(AtomicBool::new(false));
+    let updater = track_offers(
+        app.updater_builder()
+            .pubkey(updater_public_key(app)?)
+            .endpoints(vec![url])
+            .map_err(|e| format!("failed to set endpoints: {e}"))?,
+        &answered,
+    )
+    .configure_client(move |client| {
+        // This callback applies to both metadata checks and downloads.
+        // UpdaterBuilder::timeout only bounds checks through updater 2.13;
+        // its returned Update has no timeout. Bound idle reads instead
+        // of total download time so slow, progressing downloads finish.
+        let client = client
+            .connect_timeout(UPDATE_CONNECT_TIMEOUT)
+            .read_timeout(UPDATE_READ_TIMEOUT);
+        match &tls_config {
+            Some(config) => client.use_preconfigured_tls(config.clone()),
+            None => client,
+        }
+    })
+    .build()
+    .map_err(|e| format!("failed to build updater: {e}"))?;
+    Ok(BuiltUpdater {
+        updater,
+        deb_ready,
+        answered,
+    })
 }
 
 /// Use one configured trust anchor for the plugin and the artifact-name check.
@@ -222,19 +284,36 @@ fn validate_server_url(server_url: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether an install packaged this way can ever update itself from an OwnCord
-/// server.
+/// Whether an install packaged this way cannot update itself from an OwnCord
+/// server, so `available: false` must not be read as "you are up to date".
 ///
 /// The release publishes signed updater artifacts for the appimage and nsis
-/// targets only, and the server answers every other target with 204
-/// (`Server/updater/assets.go`, `TestClientUpdate_DebTargetNoContent`). A .deb
-/// or .rpm client therefore gets `None` from `check()` whether or not it is
-/// behind — indistinguishable from an up-to-date one. `bundle_type()` is the
-/// type the bundler patched into this binary, i.e. how it was packaged, which
-/// is what decides whether any updater artifact exists for it. An unpatched or
-/// tarball binary reports no type and stays silent rather than guessing.
-fn cannot_self_update(bundle: Option<&BundleType>) -> bool {
-    matches!(bundle, Some(BundleType::Deb | BundleType::Rpm))
+/// targets, and for the .deb on request (`?deb_install=pkexec`, sent only when
+/// `deb_ready`: pkexec and the root helper are present). Otherwise the server
+/// answers 204 (`Server/updater/assets.go`, `TestClientUpdate_DebTargetNoContent`),
+/// which for a .deb or .rpm client is indistinguishable from an up-to-date one.
+/// `bundle_type()` is the type the bundler patched into this binary, i.e. how
+/// it was packaged, which is what decides whether any updater artifact exists
+/// for it. An unpatched or tarball binary reports no type and stays silent
+/// rather than guessing.
+///
+/// A ready .deb install is the one case that can tell the two apart: the server
+/// answers it with a release (200) even when it is current, so `answered`
+/// means "the server can serve me, and there is nothing newer". Without that
+/// answer (an older server, one withholding the release, a release with no
+/// .deb) the old rule stands: no claim of being up to date.
+fn manual_upgrade_for(bundle: Option<&BundleType>, deb_ready: bool, answered: bool) -> bool {
+    match bundle {
+        Some(BundleType::Rpm) => true,
+        Some(BundleType::Deb) => !(deb_ready && answered),
+        _ => false,
+    }
+}
+
+/// A ready .deb install the server gave no answer to. `manual_upgrade` is true
+/// for it too, but the cause is unknown (see `UpdateCheckResult::unconfirmed`).
+fn upgrade_unconfirmed(bundle: Option<&BundleType>, deb_ready: bool, answered: bool) -> bool {
+    matches!(bundle, Some(BundleType::Deb)) && deb_ready && !answered
 }
 
 /// Whether the artifact a release offers is built for the given machine target
@@ -318,9 +397,10 @@ pub async fn check_client_update(
     app: AppHandle,
     server_url: String,
 ) -> Result<UpdateCheckResult, String> {
-    let updater = build_updater(&app, &server_url)?;
+    let built = build_updater(&app, &server_url)?;
 
-    let update = updater
+    let update = built
+        .updater
         .check()
         .await
         .map_err(|e| format!("update check failed: {e}"))?;
@@ -332,6 +412,7 @@ pub async fn check_client_update(
                 version: Some(u.version.clone()),
                 body: Some(u.body.clone().unwrap_or_default()),
                 manual_upgrade: false,
+                unconfirmed: false,
             })
         }
         // An offered file built for another OS or processor is not an update
@@ -347,14 +428,20 @@ pub async fn check_client_update(
                 version: None,
                 body: None,
                 manual_upgrade: false,
+                unconfirmed: false,
             })
         }
-        None => Ok(UpdateCheckResult {
-            available: false,
-            version: None,
-            body: None,
-            manual_upgrade: cannot_self_update(bundle_type().as_ref()),
-        }),
+        None => {
+            let bundle = bundle_type();
+            let answered = built.answered.load(Ordering::SeqCst);
+            Ok(UpdateCheckResult {
+                available: false,
+                version: None,
+                body: None,
+                manual_upgrade: manual_upgrade_for(bundle.as_ref(), built.deb_ready, answered),
+                unconfirmed: upgrade_unconfirmed(bundle.as_ref(), built.deb_ready, answered),
+            })
+        }
     }
 }
 
@@ -406,7 +493,10 @@ fn verify_artifact_target(
     let matches_bundle = match bundle {
         BundleType::AppImage => lower.ends_with(".appimage.tar.gz"),
         BundleType::Nsis => lower.ends_with(".nsis.zip") || lower.ends_with("-setup.exe"),
-        // OwnCord only publishes updater artifacts for these two bundles.
+        // The .deb is signed by release.yml and installed by the root helper
+        // (deb_install.rs), never by the plugin.
+        BundleType::Deb => lower.ends_with(".deb"),
+        // OwnCord publishes no updater artifact for any other bundle.
         _ => false,
     };
     if !matches_bundle || !artifact_matches_target(filename, target) {
@@ -438,7 +528,7 @@ async fn download_for_target<C: FnMut(usize, Option<u64>)>(
 #[tauri::command]
 pub async fn download_and_install_update(app: AppHandle, server_url: String) -> Result<(), String> {
     let install_guard = InstallGuard::acquire(&UPDATE_IN_PROGRESS)?;
-    let updater = build_updater(&app, &server_url)?;
+    let updater = build_updater(&app, &server_url)?.updater;
 
     let update = updater
         .check()
@@ -473,6 +563,27 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
                 u.version
             );
 
+            // A .deb is installed by the root helper through pkexec, in a task
+            // that owns the guard until pkexec returns. It sets no
+            // INSTALLER_LAUNCHING: that flag covers the Windows ShellExecuteW
+            // gap, and a password prompt can stay open for minutes.
+            #[cfg(target_os = "linux")]
+            if matches!(bundle, BundleType::Deb) {
+                use tauri::Manager;
+                let cache_dir = app
+                    .path()
+                    .app_cache_dir()
+                    .map_err(|e| format!("download/install failed: {e}"))?;
+                return crate::deb_install::install_deb_with(
+                    install_guard,
+                    crate::deb_install::PkexecRunner,
+                    crate::deb_install::LiveHooks::new(app.clone()),
+                    cache_dir,
+                    bytes,
+                )
+                .await;
+            }
+
             // The split from `download_and_install` exists for this point: from
             // here the old process may still be alive (the plugin hides the
             // window, then blocks in ShellExecuteW on Windows) while any
@@ -483,12 +594,21 @@ pub async fn download_and_install_update(app: AppHandle, server_url: String) -> 
                 "[update] installer launching for version {} (old window will ignore forwarded launches)",
                 u.version
             );
+            #[cfg(target_os = "linux")]
+            crate::exit_watch::note_update_handoff();
             // A successful Windows install exits the process and never returns.
             // Any return (an error, or Linux/macOS success awaiting the
             // frontend relaunch) leaves this process serving the user, so clear
             // the flag or every later forwarded launch is swallowed until restart.
+            // The restart copies this process's argv; make it show its window.
+            #[cfg(desktop)]
+            crate::window_prefs::set_show_next_launch(&app, true);
             let installed = u.install(&bytes);
             INSTALLER_LAUNCHING.store(false, Ordering::SeqCst);
+            #[cfg(desktop)]
+            if installed.is_err() {
+                crate::window_prefs::set_show_next_launch(&app, false);
+            }
             installed.map_err(|e| format!("download/install failed: {e}"))?;
             install_guard.installed();
             Ok(())
@@ -585,7 +705,7 @@ mod tests {
         // looks up first in the response platforms map — the server echoes
         // this path segment back as that key.
         assert_eq!(
-            build_update_endpoint("https://chat.example.com/", "1.2.3"),
+            build_update_endpoint("https://chat.example.com/", "1.2.3", false),
             "https://chat.example.com/api/v1/client-update/{{target}}-{{arch}}-{{bundle_type}}/1.2.3"
         );
     }
@@ -593,17 +713,31 @@ mod tests {
     #[test]
     fn endpoint_keeps_non_default_port() {
         assert_eq!(
-            build_update_endpoint("https://chat.example.com:8443", "0.0.0"),
+            build_update_endpoint("https://chat.example.com:8443", "0.0.0", false),
             "https://chat.example.com:8443/api/v1/client-update/{{target}}-{{arch}}-{{bundle_type}}/0.0.0"
         );
     }
 
     #[test]
+    fn endpoint_adds_the_deb_opt_in_only_when_asked() {
+        let plain = build_update_endpoint("https://chat.example.com", "1.2.3", false);
+        let opted = build_update_endpoint("https://chat.example.com", "1.2.3", true);
+        assert!(!plain.contains('?'));
+        assert_eq!(opted, format!("{plain}?deb_install=pkexec"));
+        // The templated path survives URL parsing with the query attached.
+        let parsed: url::Url = opted.parse().expect("opted-in endpoint parses");
+        assert_eq!(parsed.query(), Some("deb_install=pkexec"));
+    }
+
+    #[test]
     fn package_installs_report_they_cannot_self_update() {
-        // Only these two mean "the server has no updater artifact for you"
-        // rather than "you are current".
-        assert!(cannot_self_update(Some(&BundleType::Deb)));
-        assert!(cannot_self_update(Some(&BundleType::Rpm)));
+        // Without the root helper (deb_ready = false) a deb or rpm gets no
+        // updater artifact: "the server has no update for you" rather than
+        // "you are current".
+        for answered in [false, true] {
+            assert!(manual_upgrade_for(Some(&BundleType::Deb), false, answered));
+            assert!(manual_upgrade_for(Some(&BundleType::Rpm), false, answered));
+        }
 
         // Everything else — including the two targets the release does
         // publish — must stay quiet, or the banner becomes noise on every
@@ -616,9 +750,31 @@ mod tests {
             None,
         ] {
             assert!(
-                !cannot_self_update(bundle.as_ref()),
+                !manual_upgrade_for(bundle.as_ref(), false, false),
                 "{bundle:?} must not ask for a manual upgrade"
             );
+        }
+    }
+
+    #[test]
+    fn ready_deb_is_manual_only_when_the_server_did_not_answer() {
+        let deb = Some(&BundleType::Deb);
+        // The server sent a release (even one this client already has): the
+        // install can update itself and is current.
+        assert!(!manual_upgrade_for(deb, true, true));
+        assert!(!upgrade_unconfirmed(deb, true, true));
+        // No answer (an older server, an epoch withhold, a release with no
+        // .deb): keep the banner, worded as "not confirmed" rather than
+        // "cannot update itself".
+        assert!(manual_upgrade_for(deb, true, false));
+        assert!(upgrade_unconfirmed(deb, true, false));
+        // Not ready: today's behaviour, and not "unconfirmed" (it never asked).
+        assert!(manual_upgrade_for(deb, false, false));
+        assert!(!upgrade_unconfirmed(deb, false, false));
+        // An rpm never opts in, and nothing else is ever unconfirmed.
+        assert!(manual_upgrade_for(Some(&BundleType::Rpm), true, true));
+        for bundle in [Some(&BundleType::Rpm), Some(&BundleType::AppImage), None] {
+            assert!(!upgrade_unconfirmed(bundle, true, false));
         }
     }
 
@@ -898,6 +1054,169 @@ mod tests {
             .await
             .is_err());
         }
+    }
+
+    // Signed like the .deb the release ships: `tauri signer sign` over the same
+    // payload, with an ephemeral key whose private half was discarded. The
+    // `file:` field is `OwnCord_99.0.0_{amd64,arm64}.deb` bound to 99.0.0, plus
+    // `OwnCord_2.0.0_amd64.deb` bound to 2.0.0.
+    fn deb_fixtures() -> serde_json::Value {
+        serde_json::from_str(include_str!("update_commands/deb-fixtures.json"))
+            .expect("signed deb fixtures")
+    }
+
+    #[tokio::test]
+    async fn signed_deb_artifact_is_accepted_for_a_deb_install() {
+        let fixtures = deb_fixtures();
+        for (name, target) in [("deb_x64", "linux-x86_64"), ("deb_arm64", "linux-aarch64")] {
+            assert_eq!(
+                download_offer_for_target(
+                    "99.0.0",
+                    fixtures[name].as_str().unwrap(),
+                    fixtures["pubkey"].as_str().unwrap(),
+                    Some((target, &BundleType::Deb)),
+                )
+                .await,
+                Ok(()),
+                "{name}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn signed_appimage_archive_is_refused_for_a_deb_install() {
+        let fixtures = target_fixtures();
+        assert_eq!(
+            download_offer_for_target(
+                "99.0.0",
+                fixtures["linux_x64"].as_str().unwrap(),
+                fixtures["pubkey"].as_str().unwrap(),
+                Some(("linux-x86_64", &BundleType::Deb)),
+            )
+            .await,
+            Err(
+                "download/install failed: signed update artifact is not built for this machine"
+                    .into()
+            )
+        );
+        // And a .deb is not accepted where an AppImage is installed.
+        let debs = deb_fixtures();
+        assert!(download_offer_for_target(
+            "99.0.0",
+            debs["deb_x64"].as_str().unwrap(),
+            debs["pubkey"].as_str().unwrap(),
+            Some(("linux-x86_64", &BundleType::AppImage)),
+        )
+        .await
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn signed_deb_for_another_architecture_is_refused() {
+        let fixtures = deb_fixtures();
+        for (name, target) in [("deb_arm64", "linux-x86_64"), ("deb_x64", "linux-aarch64")] {
+            assert_eq!(
+                download_offer_for_target(
+                    "99.0.0",
+                    fixtures[name].as_str().unwrap(),
+                    fixtures["pubkey"].as_str().unwrap(),
+                    Some((target, &BundleType::Deb)),
+                )
+                .await,
+                Err(
+                    "download/install failed: signed update artifact is not built for this machine"
+                        .into()
+                ),
+                "{name} must be refused on {target}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn deb_offer_signed_for_an_older_version_is_refused() {
+        // The deb twin of `update_signed_for_an_older_version_is_refused`: a
+        // genuine signature for an old package cannot be served as a new
+        // version, so the helper is never handed those bytes.
+        let fixtures = deb_fixtures();
+        let pubkey = fixtures["pubkey"].as_str().unwrap();
+        assert!(download_offer_for_target(
+            "99.0.0",
+            fixtures["deb_v2_0_0"].as_str().unwrap(),
+            pubkey,
+            Some(("linux-x86_64", &BundleType::Deb)),
+        )
+        .await
+        .is_err());
+    }
+
+    /// What one update check against a stub server learned: the offered version
+    /// (None when the plugin reported no update) and whether the server sent a
+    /// release at all.
+    async fn check_stub_server(base: String) -> (Option<String>, bool) {
+        let shipped: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let mut updater_config = shipped["plugins"]["updater"].clone();
+        updater_config["pubkey"] = FIXTURE_PUBKEY.into();
+        updater_config["dangerousInsecureTransportProtocol"] = true.into();
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        context
+            .config_mut()
+            .plugins
+            .0
+            .insert("updater".into(), updater_config);
+        let app = tauri::test::mock_builder()
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .build(context)
+            .expect("mock app");
+        let answered = Arc::new(AtomicBool::new(false));
+        let update = track_offers(
+            app.updater_builder()
+                .endpoints(vec![format!("{base}/update").parse().expect("endpoint")])
+                .expect("endpoints"),
+            &answered,
+        )
+        .build()
+        .expect("updater")
+        .check()
+        .await
+        .expect("check");
+        (update.map(|u| u.version), answered.load(Ordering::SeqCst))
+    }
+
+    #[tokio::test]
+    async fn deb_offer_older_than_running_is_not_an_update() {
+        // The mock app runs 0.1.0. An offer at or below it is answered (the
+        // server can serve this install) but is not an update, so a signed
+        // old package is never offered for install.
+        for version in ["0.0.9", "0.1.0"] {
+            let (update, answered) =
+                check_stub_server(serve_update_offer(version, SIG_UNVERSIONED)).await;
+            assert_eq!(update, None, "{version} is not newer than 0.1.0");
+            assert!(answered, "{version} still shows the server answered");
+        }
+        let (update, answered) =
+            check_stub_server(serve_update_offer("0.2.0", SIG_UNVERSIONED)).await;
+        assert_eq!(update.as_deref(), Some("0.2.0"));
+        assert!(answered);
+        // With no update the command answers "no update available", which is
+        // `download_and_install_update`'s `None` arm.
+    }
+
+    #[tokio::test]
+    async fn no_content_from_the_server_leaves_the_comparator_unanswered() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub server");
+        let base = format!("http://{}", listener.local_addr().expect("stub address"));
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for mut stream in listener.incoming().flatten() {
+                let mut request = [0u8; 4096];
+                let _ = stream.read(&mut request);
+                let _ = stream.write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+            }
+        });
+        let (update, answered) = check_stub_server(base).await;
+        assert_eq!(update, None);
+        assert!(!answered, "a 204 is not an answer the install can rely on");
     }
 
     #[tokio::test]

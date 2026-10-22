@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS roles (
     color       TEXT,
     permissions INTEGER NOT NULL DEFAULT 0,
     position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    hoist       INTEGER NOT NULL DEFAULT 0,
+    mentionable INTEGER NOT NULL DEFAULT 0
 );
 
 INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
@@ -43,9 +45,29 @@ CREATE TABLE IF NOT EXISTS users (
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
-    custom_status TEXT
+    custom_status TEXT,
+    custom_status_expires_at TEXT,
+    banner_id TEXT,
+    banner_color TEXT
 );
 
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+) WITHOUT ROWID;
+
+CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
+BEGIN
+    INSERT OR IGNORE INTO user_roles (user_id, role_id)
+    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
+END;
+
+CREATE TABLE IF NOT EXISTS erasure_jobs (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    state   TEXT    NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

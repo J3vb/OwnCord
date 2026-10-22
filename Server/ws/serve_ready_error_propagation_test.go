@@ -9,7 +9,7 @@ package ws_test
 // DMs" and wipes dmStore (and the active channel, if a DM was open) on that
 // basis -- so a transient DB error on any of these three queries was
 // indistinguishable on the wire from "you genuinely have none".
-// ListChannels/ListRoles/GetChannelOverridesFor already do the right thing
+// ListChannels/ListRoles/GetMemberGrants already do the right thing
 // (return the error and abort the handshake so the client retries); these
 // three should too.
 //

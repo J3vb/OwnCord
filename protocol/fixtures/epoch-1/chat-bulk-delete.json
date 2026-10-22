@@ -1,0 +1,67 @@
+{
+  "journey": "chat-bulk-delete",
+  "connections": {
+    "a": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 5,
+          "payload": {
+            "channel_id": 1,
+            "ids": [
+              1,
+              2,
+              3
+            ]
+          },
+          "seq": "<seq:number>",
+          "type": "chat_bulk_deleted"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 3,
+          "payload": {
+            "channel_id": 1,
+            "ids": [
+              1,
+              2,
+              3
+            ]
+          },
+          "seq": "<seq:number>",
+          "type": "chat_bulk_deleted"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

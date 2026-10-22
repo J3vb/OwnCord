@@ -54,21 +54,21 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 	if targets, err := dms.DeclineTargets(ctx, fixtureMember, group.Channel.ID); err != nil || len(targets) != 2 {
 		t.Errorf("DeclineTargets while timed out = %v, %v; want the two other members", targets, err)
 	}
-	if err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true); !errors.Is(err, ErrTimedOut) {
+	if _, err := f.messages.SetMessagePinned(ctx, fixtureMember, direct.Channel.ID, sent.MessageID, true); !errors.Is(err, ErrTimedOut) {
 		t.Errorf("DM pin while timed out = %v, want ErrTimedOut", err)
 	}
 	status := "look at me"
-	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "online", &status, nil); !errors.Is(err, ErrTimedOut) {
+	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "online", &status, nil, nil); !errors.Is(err, ErrTimedOut) {
 		t.Errorf("custom status while timed out = %v, want ErrTimedOut", err)
 	}
 
 	// Changing only the presence status, or clearing the custom status,
 	// publishes no text of the user's own, so it stays allowed.
-	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "idle", nil, nil); err != nil {
+	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "idle", nil, nil, nil); err != nil {
 		t.Errorf("plain status change while timed out = %v, want nil", err)
 	}
 	cleared := ""
-	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "online", &cleared, nil); err != nil {
+	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "online", &cleared, nil, nil); err != nil {
 		t.Errorf("clearing custom status while timed out = %v, want nil", err)
 	}
 
@@ -81,7 +81,7 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 	if _, err := dms.RingTargets(ctx, fixtureMember2, direct.Channel.ID); err != nil && !errors.Is(err, ErrCallNeedsAcceptance) {
 		t.Errorf("RingTargets by a participant who is not timed out = %v", err)
 	}
-	if err := f.messages.SetMessagePinned(ctx, fixtureMember2, direct.Channel.ID, sent.MessageID, true); err != nil {
+	if _, err := f.messages.SetMessagePinned(ctx, fixtureMember2, direct.Channel.ID, sent.MessageID, true); err != nil {
 		t.Errorf("DM pin by a participant who is not timed out = %v", err)
 	}
 }

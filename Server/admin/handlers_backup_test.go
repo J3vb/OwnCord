@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,12 +31,9 @@ func chdirTemp(t *testing.T) string {
 	if err := os.Chdir(tmpDir); err != nil {
 		t.Fatalf("os.Chdir(%q): %v", tmpDir, err)
 	}
-	// Update the package-level backup dir to match the new CWD (L14).
-	admin.SetBackupBaseDir(filepath.Join(tmpDir, "data", "backups"))
-	t.Cleanup(func() {
-		_ = os.Chdir(origDir)
-		admin.SetBackupBaseDir(filepath.Join(origDir, "data", "backups"))
-	})
+	// Build the API after this returns: an empty SetupOptions.BackupDir
+	// resolves data/backups against the new CWD when the API is built (L14).
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 	return tmpDir
 }
 
@@ -307,6 +305,17 @@ func TestHandleRestoreBackup_Success(t *testing.T) {
 		t.Error("restore did not request a process restart")
 	}
 
+	// The copy is staged beside the database with its marker, never copied
+	// over it; the next boot applies it.
+	for _, suffix := range []string{".restore-staged", ".restore-pending.json"} {
+		if _, err := os.Stat(filepath.Join(dataDir, "chatserver.db"+suffix)); err != nil {
+			t.Errorf("chatserver.db%s was not written: %v", suffix, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "chatserver.db")); err == nil {
+		t.Error("the restore wrote the live database file itself")
+	}
+
 	// The safety copy the panel promises must exist on disk.
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
@@ -396,259 +405,6 @@ func TestHandleRestoreBackup_RefusesNewerSchema(t *testing.T) {
 	}
 }
 
-// Restore must drain accepted sends before advancing the durable retry floor,
-// then persist that floor before the first byte of the database is replaced.
-func TestHandleRestoreBackup_PreservesRetryFloorBeforeCopy(t *testing.T) {
-	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
-	backupDir := filepath.Join(tmpDir, "data", "backups")
-	if err := os.MkdirAll(backupDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	backupName := "chatserver_retry_floor.db"
-	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
-		t.Fatal(err)
-	}
-	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
-	admin.SetDatabasePath(dbPath)
-	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
-	started := time.Now()
-	var floorBeforeCopy int64
-	restoreCopy := admin.StubCopyBackup(func(src, dst string) error {
-		if err := database.SQLDb().Ping(); err == nil {
-			t.Error("copy ran before the live database drained and closed")
-		}
-		// Reopen proves the on-disk cutoff is readable by the replacement
-		// process before the handler has copied any backed-up bytes.
-		probe, err := db.Open(dst)
-		if err != nil {
-			return err
-		}
-		floorBeforeCopy = probe.MessageDeliveryFloorMS()
-		if err := probe.Close(); err != nil {
-			return err
-		}
-		return admin.CopyBackupForTest(src, dst)
-	})
-	defer restoreCopy()
-	restarted, restoreRestart := admin.StubRestart()
-	defer restoreRestart()
-	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("restore status = %d: %s", w.Code, w.Body.String())
-	}
-	if floorBeforeCopy <= started.Add(db.MessageDeliveryClockSkew).UnixMilli() {
-		t.Fatalf("copy began with cutoff %d, which does not reject every pre-restore id", floorBeforeCopy)
-	}
-	reopened, err := db.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close() //nolint:errcheck
-	if reopened.MessageDeliveryFloorMS() != floorBeforeCopy {
-		t.Fatal("restoring database bytes lost the durable retry cutoff")
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for !restarted() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !restarted() {
-		t.Fatal("restore did not request a process restart")
-	}
-}
-
-func TestHandleRestoreBackup_AbortsCopyWhenRetryFloorCannotPersist(t *testing.T) {
-	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
-	backupDir := filepath.Join(tmpDir, "data", "backups")
-	if err := os.MkdirAll(backupDir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	backupName := "chatserver_retry_floor_failure.db"
-	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
-		t.Fatal(err)
-	}
-	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
-	admin.SetDatabasePath(dbPath)
-	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
-	const original = "original database bytes"
-	if err := os.WriteFile(dbPath, []byte(original), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// Portable even when tests run as root: the cutoff cannot be a directory.
-	if err := os.Mkdir(dbPath+".message-retry-floor", 0o700); err != nil {
-		t.Fatal(err)
-	}
-	restarted, restoreRestart := admin.StubRestart()
-	defer restoreRestart()
-	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("restore status = %d: %s", w.Code, w.Body.String())
-	}
-	data, err := os.ReadFile(dbPath)
-	if err != nil || string(data) != original {
-		t.Fatalf("failed cutoff write changed the live database: %q, %v", data, err)
-	}
-	deadline := time.Now().Add(2 * time.Second)
-	for !restarted() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !restarted() {
-		t.Fatal("failed restore left a running process with closed database pools")
-	}
-}
-
-// TestHandleRestoreBackup_RollsBackWhenCopyFails verifies the live database file
-// is not left destroyed when the copy fails partway. copyBackupFile truncates the live
-// DB with os.Create before it can know whether the read will succeed, so a
-// failure there leaves a closed DB and a zero-byte file underneath it; the
-// pre-restore safety copy must be put back, and the process must still respawn
-// because the DB is closed either way.
-//
-// The failure is injected by making the "backup" a directory: it passes the
-// handler's existence check and opens, but reading it fails after the truncate.
-func TestHandleRestoreBackup_RollsBackWhenCopyFails(t *testing.T) {
-	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
-
-	backupDir := filepath.Join(tmpDir, "data", "backups")
-	if err := os.MkdirAll(backupDir, 0o750); err != nil {
-		t.Fatalf("MkdirAll backups: %v", err)
-	}
-	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
-	if err := os.WriteFile(dbPath, []byte("live database contents"), 0o600); err != nil {
-		t.Fatalf("WriteFile live db: %v", err)
-	}
-
-	// A valid backup (it must pass the pre-copy integrity gate); the mid-copy
-	// failure is injected through the copy hook below, reproducing the exact
-	// failure mode the rollback exists for: os.Create truncates the live DB,
-	// then the copy dies.
-	backupName := "chatserver_20240102_120000.db"
-	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
-		t.Fatalf("BackupToSafe fixture: %v", err)
-	}
-
-	failedOnce := false
-	restoreCopy := admin.StubCopyBackup(func(src, dst string) error {
-		if !failedOnce {
-			failedOnce = true
-			// Truncate the destination the way the real copy's os.Create
-			// does, then fail — the state the rollback must repair.
-			f, createErr := os.Create(dst)
-			if createErr == nil {
-				_ = f.Close()
-			}
-			return fmt.Errorf("injected copy failure")
-		}
-		return admin.CopyBackupForTest(src, dst)
-	})
-	defer restoreCopy()
-
-	restarted, restoreHook := admin.StubRestart()
-	defer restoreHook()
-
-	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
-	}
-
-	entries, err := os.ReadDir(backupDir)
-	if err != nil {
-		t.Fatalf("ReadDir backups: %v", err)
-	}
-	preRestore := ""
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "pre_restore_") {
-			preRestore = filepath.Join(backupDir, e.Name())
-		}
-	}
-	if preRestore == "" {
-		t.Fatal("no pre_restore_*.db safety backup was created")
-	}
-	want, err := os.Stat(preRestore)
-	if err != nil {
-		t.Fatalf("Stat pre-restore backup: %v", err)
-	}
-
-	got, err := os.Stat(dbPath)
-	if err != nil {
-		t.Fatalf("Stat live db after failed restore: %v", err)
-	}
-	if got.Size() == 0 {
-		t.Error("live database file was left truncated after the failed restore")
-	}
-	if got.Size() != want.Size() {
-		t.Errorf("live db size = %d, want %d (the safety copy should have been put back)", got.Size(), want.Size())
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for !restarted() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !restarted() {
-		t.Error("failed restore did not request a process restart, but the database is closed")
-	}
-}
-
-// TestHandleRestoreBackup_RestartsWhenCloseFails verifies OC-0209: a failed
-// database.Close() must still schedule a process restart. database.Close()
-// closes the writer and reader pools regardless of the error it returns
-// (Server/db/db.go), and the server_restart broadcast already went out to
-// every client before Close() is even called — so a process that answers 500
-// here without respawning leaves clients pinned on "Reconnecting..." forever
-// while the process quietly keeps failing every request with a closed DB.
-func TestHandleRestoreBackup_RestartsWhenCloseFails(t *testing.T) {
-	tmpDir := chdirTemp(t)
-	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	token := createAdminUser(t, database)
-
-	backupDir := filepath.Join(tmpDir, "data", "backups")
-	if err := os.MkdirAll(backupDir, 0o750); err != nil {
-		t.Fatalf("MkdirAll backups: %v", err)
-	}
-	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
-	if err := os.WriteFile(dbPath, []byte("original live contents"), 0o600); err != nil {
-		t.Fatalf("WriteFile live db: %v", err)
-	}
-	// A real SQLite backup — the restore handler verifies backups with
-	// integrity_check before touching the live database, so a text fixture
-	// would be (correctly) refused with 400 before the Close-failure branch
-	// under test is ever reached.
-	backupName := "chatserver_20240103_120000.db"
-	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, backupName), backupDir); err != nil {
-		t.Fatalf("BackupToSafe fixture: %v", err)
-	}
-
-	restarted, restoreRestartHook := admin.StubRestart()
-	defer restoreRestartHook()
-	restoreCloseHook := admin.StubCloseError("simulated close failure")
-	defer restoreCloseHook()
-
-	w := doRequest(t, handler, http.MethodPost, "/backups/"+backupName+"/restore", token, nil)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for !restarted() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !restarted() {
-		t.Error("a failed database.Close() did not request a process restart, " +
-			"leaving a live server answering requests against closed DB pools")
-	}
-}
-
 // TestHandleRestoreBackup_AbortsWithoutSafetyBackup verifies the restore fails
 // closed when the pre-restore backup can't be written: the panel promises that
 // safety copy, and overwriting the live database without one is unrecoverable.
@@ -678,7 +434,6 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 	// already exists. The name is pre_restore_<UTC seconds>.db, so occupy the
 	// next two minutes' worth of candidates — a 4-second window flaked on slow
 	// Windows CI runners where the request itself outlived it.
-	admin.SetBackupBaseDir(backupDir)
 	for i := range 120 {
 		name := "pre_restore_" + time.Now().UTC().Add(time.Duration(i)*time.Second).Format("20060102_150405") + ".db"
 		if err := os.WriteFile(filepath.Join(backupDir, name), []byte("occupied"), 0o644); err != nil {
@@ -704,14 +459,13 @@ func TestHandleRestoreBackup_AbortsWithoutSafetyBackup(t *testing.T) {
 }
 
 // TestHandleRestoreBackup_UsesConfiguredDatabasePath verifies that the
-// restore handler writes to the SQLite file the server was actually
-// configured to use (SetDatabasePath), not a hardcoded "data/chatserver.db".
+// restore handler stages beside the SQLite file the server was actually
+// configured to use (SetupOptions.DatabasePath), not a hardcoded "data/chatserver.db".
 // A server with database.path set to anything else must not have its real
 // database silently left untouched by a "successful" restore (OC-0097).
 func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 	tmpDir := chdirTemp(t)
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
 	token := createAdminUser(t, database)
 
 	backupDir := filepath.Join(tmpDir, "data", "backups")
@@ -728,8 +482,8 @@ func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 	if err := os.WriteFile(customDBPath, []byte("original live contents"), 0o644); err != nil {
 		t.Fatalf("WriteFile custom db: %v", err)
 	}
-	admin.SetDatabasePath(customDBPath)
-	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{DatabasePath: customDBPath})
 
 	backupName := "chatserver_20240101_120000.db"
 	backupPath := filepath.Join(backupDir, backupName)
@@ -757,12 +511,21 @@ func TestHandleRestoreBackup_UsesConfiguredDatabasePath(t *testing.T) {
 		t.Error("restore did not request a process restart")
 	}
 
-	got, err := os.ReadFile(customDBPath)
+	// The copy is staged beside the configured database, which is untouched
+	// until the next boot applies it.
+	got, err := os.ReadFile(customDBPath + ".restore-staged")
 	if err != nil {
-		t.Fatalf("ReadFile(%q): %v", customDBPath, err)
+		t.Fatalf("ReadFile staged copy: %v", err)
 	}
 	if !bytes.Equal(got, backupContent) {
-		t.Errorf("configured database file content = %q, want %q — restore wrote to the wrong path", got, backupContent)
+		t.Error("the staged copy is not the backup — restore staged the wrong file")
+	}
+	if _, err := os.Stat(customDBPath + ".restore-pending.json"); err != nil {
+		t.Errorf("no marker beside the configured database: %v", err)
+	}
+	live, err := os.ReadFile(customDBPath)
+	if err != nil || string(live) != "original live contents" {
+		t.Errorf("configured database = %q, %v; staging must not touch it", live, err)
 	}
 
 	// The hardcoded default path must NOT have been created/touched.
@@ -853,5 +616,161 @@ func TestHandleRestoreBackup_RequiresOwner(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("admin user on restore status = %d, want 403", w.Code)
+	}
+}
+
+// restorePruneFixture sets up a handler, a restore source backup and a backup
+// dir already holding five staggered old pre_restore_ copies (oldest first is
+// pre_restore_20200101_000000.db), three pre_migrate_ copies and a manual one.
+func restorePruneFixture(t *testing.T) (handler http.Handler, token, backupDir string, olds []string) {
+	t.Helper()
+	tmpDir := chdirTemp(t)
+	database := openAdminTestDB(t)
+	handler = admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	token = createAdminUser(t, database)
+	backupDir = filepath.Join(tmpDir, "data", "backups")
+	if err := os.MkdirAll(backupDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "data"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// A valid database for the oldest copy so it can be a restore source.
+	oldest := "pre_restore_20200101_000000.db"
+	if err := database.BackupToSafe(context.Background(), filepath.Join(backupDir, oldest), backupDir); err != nil {
+		t.Fatalf("BackupToSafe fixture: %v", err)
+	}
+	olds = []string{oldest, "pre_restore_20200102_000000.db", "pre_restore_20200103_000000.db", "pre_restore_20200104_000000.db", "pre_restore_20200105_000000.db"}
+	for _, n := range olds[1:] {
+		if err := os.WriteFile(filepath.Join(backupDir, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, n := range olds {
+		ts := time.Now().Add(-time.Duration(len(olds)-i) * 24 * time.Hour)
+		if err := os.Chtimes(filepath.Join(backupDir, n), ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 3 {
+		n := "pre_migrate_021_x_" + string(rune('a'+i)) + ".db"
+		if err := os.WriteFile(filepath.Join(backupDir, n), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, "chatserver_20200101_000000.db"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return handler, token, backupDir, olds
+}
+
+func fileSet(t *testing.T, dir string) map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	for _, e := range entries {
+		out[e.Name()] = true
+	}
+	return out
+}
+
+// TestHandleRestoreBackup_PrunesSafetyCopiesKeepsSourceAndNew: restoring from
+// the OLDEST pre_restore_ copy while five old ones exist leaves the source and
+// the new safety copy in place, removes exactly the excess unprotected copy,
+// and touches no other prefix.
+func TestHandleRestoreBackup_PrunesSafetyCopiesKeepsSourceAndNew(t *testing.T) {
+	handler, token, backupDir, olds := restorePruneFixture(t)
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+olds[0]+"/restore", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Error("restore did not request a restart")
+	}
+
+	got := fileSet(t, backupDir)
+	if !got[olds[0]] {
+		t.Errorf("the restore source %s was pruned", olds[0])
+	}
+	for _, n := range olds[1:3] {
+		if got[n] {
+			t.Errorf("%s (excess, unprotected) was kept", n)
+		}
+	}
+	for _, n := range olds[3:] {
+		if !got[n] {
+			t.Errorf("%s was removed, want kept", n)
+		}
+	}
+	newCopies := 0
+	for n := range got {
+		if strings.HasPrefix(n, "pre_restore_") && !slices.Contains(olds, n) {
+			newCopies++
+		}
+	}
+	if newCopies != 1 {
+		t.Errorf("new pre_restore_ copies = %d, want 1", newCopies)
+	}
+	if !got["chatserver_20200101_000000.db"] {
+		t.Error("manual backup was touched")
+	}
+	for i := range 3 {
+		if n := "pre_migrate_021_x_" + string(rune('a'+i)) + ".db"; !got[n] {
+			t.Errorf("%s of another prefix was touched", n)
+		}
+	}
+}
+
+// TestHandleRestoreBackup_PruneErrorDoesNotFailRestore: one failing removal
+// leaves the restore at 200 with the restart requested, and the other excess
+// copies are still removed.
+func TestHandleRestoreBackup_PruneErrorDoesNotFailRestore(t *testing.T) {
+	handler, token, backupDir, olds := restorePruneFixture(t)
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+	failName := olds[1]
+	defer admin.SetRemoveSafetyCopyForTest(func(p string) error {
+		if filepath.Base(p) == failName {
+			return errors.New("injected remove failure")
+		}
+		return os.Remove(p)
+	})()
+
+	// Restore from the manual backup so that two old copies are excess.
+	src := "chatserver_20200101_000000.db"
+	if err := os.Remove(filepath.Join(backupDir, src)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(backupDir, olds[0]), filepath.Join(backupDir, src)); err != nil {
+		t.Fatal(err)
+	}
+
+	w := doRequest(t, handler, http.MethodPost, "/backups/"+src+"/restore", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 despite the prune error; body: %s", w.Code, w.Body.String())
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for !restarted() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !restarted() {
+		t.Error("restart was not requested after a prune error")
+	}
+	got := fileSet(t, backupDir)
+	if !got[failName] {
+		t.Error("the copy whose removal failed should still exist")
+	}
+	if got[olds[2]] {
+		t.Errorf("%s (the other excess copy) was kept", olds[2])
 	}
 }

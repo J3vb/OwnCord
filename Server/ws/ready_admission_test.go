@@ -109,7 +109,10 @@ func TestReadyAdmission_1000FreshConnects_BoundedBuilds(t *testing.T) {
 	h.readers.Ready = reader
 	const k = 4
 	h.readyGate = make(chan struct{}, k)
-	setReadyAdmissionWait(t, time.Minute) // this test is about the bound, not the deadline
+	// This test is about the bound, not the deadline. 1,000 builds through 4
+	// permits queue 250 deep, and on a loaded -race runner that queue once took
+	// over a minute, so the last connects were refused SERVER_BUSY.
+	setReadyAdmissionWait(t, 5*time.Minute)
 	go h.Run()
 	t.Cleanup(h.Stop)
 
@@ -119,19 +122,19 @@ func TestReadyAdmission_1000FreshConnects_BoundedBuilds(t *testing.T) {
 	t.Cleanup(srv.Close)
 	url := "ws" + strings.TrimPrefix(srv.URL, "http")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
 	dialSlots := make(chan struct{}, 50)
 	for _, tok := range tokens {
 		wg.Go(func() {
-			typ, _, conn, err := dialFresh(ctx, url, tok, dialSlots)
+			typ, frame, conn, err := dialFresh(ctx, url, tok, dialSlots)
 			if conn != nil {
 				defer func() { _ = conn.CloseNow() }()
 			}
 			if err == nil && typ != MsgTypeReady {
-				err = fmt.Errorf("first frame after auth_ok = %q, want ready", typ)
+				err = fmt.Errorf("first frame after auth_ok = %q, want ready: %.300s", typ, frame)
 			}
 			if err != nil {
 				errs <- err
@@ -273,7 +276,7 @@ func TestServerRestart_SpreadScalesWithConnectedCount(t *testing.T) {
 		}
 		u, _ := database.GetUserByID(ctx, id)
 		c := herdClient(ctx, h, u)
-		h.registerNow(c, nil)
+		h.registerNowTest(c, nil)
 		clients = append(clients, c)
 	}
 	h.BroadcastServerRestart(RestartReasonUpdate, 5)

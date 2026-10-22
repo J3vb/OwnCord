@@ -30,6 +30,7 @@ describeAppUpdaterSuite(async () => {
 
   const mod = await import("../../../src/lib/updater");
   const legacy: AppUpdater = {
+    available: true,
     checkForUpdate: mod.checkForUpdate,
     downloadAndInstallUpdate: mod.downloadAndInstallUpdate,
     subscribeToInstall: mod.subscribeToUpdateInstall,

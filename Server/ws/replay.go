@@ -2,7 +2,6 @@ package ws
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -58,7 +57,7 @@ func (h *Hub) handleReconnect(
 	var liveVoiceChID int64
 	old := h.GetClient(c.userID)
 	if old != nil {
-		liveVoiceChID = old.getVoiceChID()
+		liveVoiceChID = old.voice.channel()
 	}
 
 	events, replaySource, persistedTail, maxPersistedSeq := h.reconnectSelectReplay(ctx, c, lastSeq, allowedChannelIDs, nsfwReadableChannelIDs)
@@ -96,8 +95,8 @@ func (h *Hub) handleReconnect(
 	// startup + one RTT) is delivered to nobody on this socket, and the client
 	// can never ask for it back because it only ever reports max(seq).
 	//
-	// Set outside the h.seqMu section below so this does not introduce a
-	// seqMu -> c.mu lock-order edge that nothing else in the hub has.
+	// Set outside the h.seqMu section below: it needs no seq ordering, so it
+	// stays out of that section. (seqMu -> c.mu is a normal edge: lock_order.go.)
 	//
 	// c.authChannelID is attacker-controlled, so it is honoured only when the
 	// freshly computed read-permission set contains it. Fail closed: an
@@ -247,36 +246,13 @@ func (h *Hub) reconnectPrecheck(
 			"user_id", c.userID, "err", err)
 		return nil, nil, false
 	}
+	// A socket without the forums feature replays nothing sequenced on a forum.
+	if err := h.dropForumChannels(ctx, database, c, allowedChannelIDs, nsfwReadableChannelIDs); err != nil {
+		slog.Warn("ws handleReconnect: dropForumChannels failed, falling back to full ready",
+			"user_id", c.userID, "err", err)
+		return nil, nil, false
+	}
 	return allowedChannelIDs, nsfwReadableChannelIDs, true
-}
-
-// computeReadableChannels narrows allowed (the visible set) to B5-7's
-// readable set: every visible channel that is either not labelled, or
-// labelled and acknowledged by user. Bounded by how many labelled channels
-// sit in the visible set (typically zero), not by the full channel list.
-func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityReader, user *db.User, allowed map[int64]bool) (map[int64]bool, error) {
-	channels, err := database.ListChannels(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("computeReadableChannels ListChannels: %w", err)
-	}
-	readable := make(map[int64]bool, len(allowed))
-	for id := range allowed {
-		readable[id] = true
-	}
-	for i := range channels {
-		ch := &channels[i]
-		if !ch.NSFW || !allowed[ch.ID] {
-			continue
-		}
-		ok, ackErr := database.HasNSFWAcknowledgement(ctx, user.ID, ch.ID)
-		if ackErr != nil {
-			return nil, fmt.Errorf("computeReadableChannels HasNSFWAcknowledgement: %w", ackErr)
-		}
-		if !ok {
-			delete(readable, ch.ID)
-		}
-	}
-	return readable, nil
 }
 
 // reconnectSelectReplay picks the tier that serves this resume — the ring
@@ -298,8 +274,8 @@ func (h *Hub) reconnectSelectReplay(
 		events = buf
 		return events, replaySource, persistedTail, maxPersistedSeq
 	}
-	// Phase B Step 7 — try cold-tier replay from the EventStore before
-	// giving up and forcing a full ready re-sync.
+	h.noteRingMiss(lastSeq)
+	// Phase B Step 7 — try cold-tier replay from the EventStore before forcing a full ready.
 	if esp := h.eventStore.Load(); esp != nil {
 		es := *esp
 		channelIDs := make([]int64, 0, len(allowedChannelIDs))
@@ -434,9 +410,9 @@ func (h *Hub) reconnectRegister(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
 ) (events [][]byte, ok, refused bool) {
-	// RT-8: drop a parked grace entry whose row is gone (a DB read, before
-	// h.seqMu); the voice lock spans that and registerNow.
-	defer h.voiceLock(c.userID)()
+	// RT-8: drop a parked grace entry whose row is gone (a DB read, before h.seqMu).
+	txn := h.begin(c.userID)
+	defer txn.end()
 	h.dropOrphanVoiceGrace(ctx, c.userID)
 	h.seqMu.Lock()
 	start := time.Now()
@@ -485,7 +461,7 @@ func (h *Hub) reconnectRegister(
 	// the fan-out can't reach an unregistered client, and the entry check has
 	// already passed, so nothing else catches it before this resume commits
 	// to permissions computed before the change (OC-0206).
-	if h.mustFullResyncAtRegister(lastSeq) {
+	if h.mustFullResyncAtRegister(lastSeq, c.userID) {
 		h.observeSeqMuHold(start)
 		h.seqMu.Unlock()
 		slog.Warn("ws handleReconnect: resync watermark moved during handshake, forcing full ready",
@@ -497,7 +473,7 @@ func (h *Hub) reconnectRegister(
 	if handleReconnectPostCheckPreRegisterRaceHook != nil {
 		handleReconnectPostCheckPreRegisterRaceHook()
 	}
-	refused = h.registerNow(c, allowedChannelIDs)
+	refused = h.registerNow(c, allowedChannelIDs, txn)
 	h.observeSeqMuHold(start)
 	h.seqMu.Unlock()
 	return events, !refused, refused
@@ -515,7 +491,7 @@ func (h *Hub) reconnectWriteReplay(
 	// is included in the payload so the client can attribute reconnect
 	// behaviour without separate metric scraping.
 	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName, "replay_source", replaySource)
-	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, replaySource)); err != nil {
+	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, c.roleIDs, replaySource)); err != nil {
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -535,11 +511,11 @@ func (h *Hub) reconnectWriteReplay(
 			if reconnectFrameReadableRaceHook != nil {
 				reconnectFrameReadableRaceHook(c.userID, chID)
 			}
-			if !h.frameReadableNow(ctx, c.user.ID, chID) {
+			if !h.replayFrameAllowed(ctx, c, chID) {
 				continue
 			}
 		}
-		if err := handshakeWrite(ctx, conn, evt); err != nil {
+		if err := handshakeWrite(ctx, conn, c.stampCseq(evt)); err != nil {
 			slog.Warn("ws: failed to send replay event", "user_id", c.userID, "err", err)
 			h.unregisterFailedHandshake(ctx, c)
 			_ = conn.Close(websocket.StatusInternalError, "handshake failed")

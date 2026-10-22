@@ -7,11 +7,18 @@ DELETE FROM attachments WHERE id = ? AND uploader_id = ? AND message_id IS NULL;
 
 -- name: DiscardUnlinkedAttachment :one
 -- The uploader withdraws a file it staged and never sent. A live avatar is an
--- unlinked row too, so it is kept, as in the orphan sweep.
+-- unlinked row too, so it is kept, as in the orphan sweep. So is a live group
+-- DM icon and a live profile banner (users.banner_id).
 DELETE FROM attachments
 WHERE id = ? AND uploader_id = ? AND message_id IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM channels c WHERE c.dm_icon = attachments.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.banner_id = attachments.id
   )
 RETURNING stored_as;
 
@@ -23,18 +30,24 @@ FROM attachments WHERE id = ?;
 -- c.nsfw is the channel's label (B5-7's read gate, UploadService.Authorize):
 -- NULL when the attachment is unlinked or its message/channel is gone, same
 -- as c.type, so both are read through the caller's nil-safe mapping.
+-- parent_nsfw is the parent's label when the channel is a thread (migration
+-- 074), whose own nsfw is always 0; the gate reads either one being set.
 SELECT a.id, a.message_id, a.filename, a.stored_as, a.mime_type, a.size,
-       a.uploaded_at, a.uploader_id, m.channel_id, c.type, c.nsfw
+       a.uploaded_at, a.uploader_id, m.channel_id, c.type, c.nsfw,
+       p.nsfw AS parent_nsfw
 FROM attachments a
 LEFT JOIN messages m ON m.id = a.message_id
 LEFT JOIN channels c ON c.id = m.channel_id
+LEFT JOIN channels p ON p.id = c.parent_channel_id
 WHERE a.id = ?;
 
 -- name: DeleteOrphanedAttachments :many
 -- Avatars are attachments that are never linked to a message on purpose: the
 -- users.avatar URL is what keeps them alive and authorizes serving them
 -- (migration 027). Excluding them here is what stops the sweep from destroying
--- every avatar in the instance. idx_users_avatar makes the lookup cheap.
+-- every avatar in the instance. idx_users_avatar makes the lookup cheap. A
+-- group DM icon (channels.dm_icon, migration 066) and a profile banner
+-- (users.banner_id, migration 069) are kept the same way.
 --
 -- OC-0279: a message delete is a soft delete (messages.deleted=1, the row
 -- survives), so an attachment linked to a deleted message keeps a non-NULL
@@ -57,5 +70,21 @@ WHERE uploaded_at < ?
   AND NOT EXISTS (
     SELECT 1 FROM users u WHERE u.avatar = '/api/v1/files/' || attachments.id
   )
+  AND NOT EXISTS (
+    SELECT 1 FROM channels c WHERE c.dm_icon = attachments.id
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM users u WHERE u.banner_id = attachments.id
+  )
 RETURNING stored_as;
 
+
+-- name: IsGroupDMIconForUser :one
+-- Whether the attachment is the live icon of a group DM the user is a member
+-- of. Members only: a non-member, a former member and a replaced icon all
+-- answer false.
+SELECT EXISTS (
+  SELECT 1 FROM channels c
+  JOIN dm_participants dp ON dp.channel_id = c.id
+  WHERE c.dm_icon = ?1 AND c.is_group = 1 AND dp.user_id = ?2
+) AS is_icon;

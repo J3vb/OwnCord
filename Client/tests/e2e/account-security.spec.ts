@@ -226,7 +226,11 @@ test.describe("Settings > Account — profile edit", () => {
     await page.locator("[data-testid='profile-save-btn']").focus();
     await page.keyboard.press("Enter");
 
-    await expect(page.locator("[data-testid='profile-error']")).toHaveText("Display_name too long");
+    // Said once, under the display name field; the status line points at it.
+    await expect(page.locator(".limit-hint--error")).toHaveText("Display_name too long");
+    await expect(page.locator("[data-testid='profile-error']")).toHaveText(
+      "Check the highlighted field.",
+    );
     await expect(page.locator("[data-testid='profile-save-btn']")).toBeFocused();
     await expect(page.locator("[data-testid='display-name-input']")).toHaveValue("Ada");
     await expect(page.locator(".account-header-name")).toHaveText("testuser");

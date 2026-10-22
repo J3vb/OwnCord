@@ -1,11 +1,11 @@
 -- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone, pinned_at;
+          mentions_everyone, pinned_at, kind;
 
 -- name: GetMessage :one
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-       mentions_everyone, pinned_at
+       mentions_everyone, pinned_at, kind
 FROM messages WHERE id = ?;
 
 -- name: GetMessagesForAPI :many
@@ -19,18 +19,26 @@ ORDER BY m.id DESC LIMIT ?;
 -- The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
 -- already carry (OC-0284): an edit that races a delete must not rewrite a
 -- tombstone. No row comes back when it loses, which the wrapper reports as
--- ErrNotFound rather than a silent success (OC-0358).
-UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
+-- ErrNotFound rather than a silent success (OC-0358). kind = 0 keeps a call log
+-- row (kind 1) read-only: only the server rewrites its content, through
+-- call_log.sql. A forward (WP 6.9a) is read-only too: its text is a snapshot of
+-- another message, so no row comes back and the wrapper reports "cannot edit".
+-- A poll (WP 6.9b) is read-only too: an edit would change what people voted on.
+UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0 AND kind = 0
+  AND NOT EXISTS (SELECT 1 FROM message_forwards f WHERE f.message_id = messages.id)
+  AND NOT EXISTS (SELECT 1 FROM polls p WHERE p.message_id = messages.id)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone, pinned_at;
+          mentions_everyone, pinned_at, kind;
 
 -- name: SoftDeleteMessage :execresult
-UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0;
+-- kind IN (0, 7): an ordinary message or a pin row (kind 7) may be deleted. A
+-- call log row (kind 1) or a group event row (kinds 2 to 6) never is.
+UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind IN (0, 7);
 
 -- name: SetMessagePinned :execresult
 -- pinned_at is the pin timestamp for ordering; the Go layer passes a stamp when
 -- pinning and NULL when unpinning (a re-pin stamps freshly).
-UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0;
+UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0 AND kind = 0;
 
 -- name: GetLatestMessageID :one
 SELECT COALESCE(MAX(id), 0) FROM messages WHERE channel_id = ? AND deleted = 0;
@@ -76,9 +84,11 @@ SELECT c.id,
                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
          LIMIT 100)) AS unread,
        COALESCE((SELECT rs.mention_count FROM read_states rs
-                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
+                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions,
+       COALESCE((SELECT rs.last_message_id FROM read_states rs
+                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
 FROM channels c
-WHERE c.type IN ('text', 'announcement')
+WHERE c.type IN ('text', 'announcement', 'voice')
    OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
                                   WHERE dp.channel_id = c.id AND dp.user_id = ?));
 

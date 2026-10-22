@@ -3,6 +3,7 @@ package admin
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,67 +11,17 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
 )
 
-// backupBaseDir is the directory for backup files, resolved to an absolute
-// path at package init time so handlers don't depend on the process CWD (L14).
-// Overridden at startup via SetBackupDir with cfg.Backup.Dir.
-var backupBaseDir string
-
-func init() {
-	backupBaseDir = absOrRaw(filepath.Join("data", "backups"))
-}
-
-// SetBackupDir points every backup handler and the scheduled-backup
-// maintenance at the operator-configured directory. Call once at startup with
-// cfg.Backup.Dir (main.go, next to SetDatabasePath); tests use it to isolate
-// a temp dir. Mirrors SetDatabasePath: without it, a configured backup.dir
-// would be ignored while backups keep landing in the default location.
-func SetBackupDir(dir string) {
-	if dir == "" {
-		return
-	}
-	backupBaseDir = absOrRaw(dir)
-}
-
-// BackupDir is the resolved backup directory SetBackupDir configured.
-func BackupDir() string { return backupBaseDir }
-
-func absOrRaw(p string) string {
-	if abs, err := filepath.Abs(p); err == nil {
-		return abs
-	}
-	return p
-}
-
-// dbFilePath is the live SQLite database file that "Restore backup"
-// overwrites. It defaults to the historical "data/chatserver.db" but must be
-// pointed at cfg.Database.Path via SetDatabasePath before the server starts
-// serving requests (main.go, right after db.Open): without that call, a
-// server configured with a non-default database.path would open its real
-// database at cfg.Database.Path while restore keeps copying backups over an
-// unrelated (possibly newly created) file at the default path, reporting
-// success while the live database is never touched.
-var dbFilePath = filepath.Join("data", "chatserver.db")
-
-// SetDatabasePath points the restore handler at the SQLite file the server
-// actually opened. Call once at startup with cfg.Database.Path; tests use it
-// to point restore at an isolated temp file.
-func SetDatabasePath(path string) {
-	dbFilePath = path
-}
-
 // ─── Backup Handlers ─────────────────────────────────────────────────────────
 
-func handleBackup(database *db.DB) http.Handler {
+func handleBackup(database *db.DB, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		backupDir := backupBaseDir
+		backupDir := paths.dir
 		if err := os.MkdirAll(backupDir, 0o750); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create backup directory")
 			return
@@ -83,8 +34,8 @@ func handleBackup(database *db.DB) http.Handler {
 		// the VACUUM on the reader pool and publishes the result with an
 		// atomic rename, so an interrupted backup leaves a .tmp the listing
 		// ignores rather than a truncated .db it would present as restorable.
-		// It is rooted at the configured backup dir (SetBackupDir), not the
-		// historical hardcoded default.
+		// It is rooted at the configured backup dir (SetupOptions.BackupDir), not
+		// the historical hardcoded default.
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), backupPath, backupDir); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed")
 			return
@@ -119,9 +70,9 @@ type backupEntry struct {
 	Date string `json:"date"`
 }
 
-func handleListBackups() http.HandlerFunc {
+func handleListBackups(paths backupPaths) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		backupDir := backupBaseDir
+		backupDir := paths.dir
 		entries, err := os.ReadDir(backupDir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -161,23 +112,23 @@ func handleListBackups() http.HandlerFunc {
 // resolveBackupName reads the {name} path parameter and joins it onto the
 // backup directory, refusing a name that could leave it. On false it has
 // already written the 400.
-func resolveBackupName(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+func resolveBackupName(w http.ResponseWriter, r *http.Request, backupDir string) (string, string, bool) {
 	name := chi.URLParam(r, "name")
 	if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
 		return "", "", false
 	}
-	target := filepath.Join(backupBaseDir, name)
-	if !strings.HasPrefix(target, backupBaseDir+string(filepath.Separator)) {
+	target := filepath.Join(backupDir, name)
+	if !strings.HasPrefix(target, backupDir+string(filepath.Separator)) {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
 		return "", "", false
 	}
 	return name, target, true
 }
 
-func handleDeleteBackup(database *db.DB) http.Handler {
+func handleDeleteBackup(database *db.DB, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name, target, ok := resolveBackupName(w, r)
+		name, target, ok := resolveBackupName(w, r, paths.dir)
 		if !ok {
 			return
 		}
@@ -232,16 +183,22 @@ func verifyRestoreSource(w http.ResponseWriter, r *http.Request, name, target st
 	return true
 }
 
-func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
+// restoreCarryTimeout bounds the live seq floor read in a restore request.
+const restoreCarryTimeout = 10 * time.Second
+
+// handleRestoreBackup verifies a backup and stages it for the next boot. It
+// never writes over the open database: the staged copy and a marker (written
+// last) are applied by db.ApplyStagedRestore before the database opens again,
+// and the restart goes through the normal shutdown path.
+func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name, target, ok := resolveBackupName(w, r)
+		name, target, ok := resolveBackupName(w, r, paths.dir)
 		if !ok {
 			return
 		}
 
 		// Serialize against a concurrent update apply (which stages a new
-		// binary and then restarts) and an already-requested restart — a
-		// restore must not close the database out from under either. The
+		// binary and then restarts) and an already-requested restart. The
 		// deferred release is a busy→idle CAS, so it covers every failure
 		// return below and harmlessly no-ops once a branch has promoted the
 		// state to restart-pending via commitRestartPending.
@@ -260,204 +217,96 @@ func handleRestoreBackup(database *db.DB, hub HubBroadcaster) http.Handler {
 			return
 		}
 
-		dbPath := dbFilePath
+		dbPath := paths.dbFile
+		ctx := context.WithoutCancel(r.Context())
 
 		actor := actorFromContext(r)
 		// Audit the restore BEFORE the pre-restore safety copy is taken, and
-		// synchronously (LogAudit, not WriteAudit): the restore overwrites the
-		// live database file, so the only durable home for this row is the
-		// pre_restore_* backup captured below — an entry enqueued on the async
-		// WriteAudit path could still be sitting in the writer's buffer when
-		// BackupTo snapshots the DB. Best-effort per policy D8: a failed write
-		// is logged, never a reason to refuse the restore.
-		if err := database.LogAudit(context.WithoutCancel(r.Context()), actor, "backup_restore", "server", 0,
+		// synchronously (LogAudit, not WriteAudit), so the row is durable in the
+		// live database and in the safety copy. Best-effort per policy D8: a
+		// failed write is logged, never a reason to refuse the restore.
+		if err := database.LogAudit(ctx, actor, "backup_restore", "server", 0,
 			fmt.Sprintf("restoring backup %s", name)); err != nil {
 			slog.Error("audit log write failed", "action", "backup_restore", "actor_id", actor, "error", err)
 		}
 
-		// Safety: create a pre-restore backup before overwriting. WithoutCancel:
-		// the restore proceeds regardless of client disconnect (Close/copyBackupFile
-		// below are not ctx-aware), so the safety backup must not be skippable
-		// by a canceled request ctx.
-		// backupBaseDir, not a cwd-relative path: the safety copy has to land in
-		// the same directory the rest of the backup handlers read and write, or
-		// a server started from another working directory writes it somewhere
-		// the operator will never find it.
-		preRestore := filepath.Join(backupBaseDir, preRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
-		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), preRestore, backupBaseDir); err != nil {
+		// Safety: create a pre-restore backup first. WithoutCancel: the safety
+		// copy must not be skippable by a canceled request ctx. paths.dir,
+		// not a cwd-relative path, so it lands beside the rest of the backups.
+		preRestore := filepath.Join(paths.dir, PreRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
+		if err := database.BackupToSafe(ctx, preRestore, paths.dir); err != nil {
 			// Fail closed. The admin panel promises "a pre-restore backup will
-			// be created" before an irreversible overwrite; proceeding without
-			// one takes away the safety net the operator was shown, exactly
-			// when they need it (restoring the wrong or a corrupt backup).
+			// be created"; proceeding without one takes away the safety net the
+			// operator was shown, exactly when they need it.
 			slog.Error("pre-restore backup failed — aborting restore", "err", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
 				"could not create the pre-restore safety backup — restore aborted, database untouched")
 			return
 		}
-
-		ctx := context.WithoutCancel(r.Context())
-		if !checkpointForRestore(ctx, w, database) {
-			// Nothing was restored, so the safety copy protects nothing. It is
-			// kept from retention, so a retried refusal would otherwise leave
-			// one database-sized file per attempt.
+		// Nothing is restored on a refusal below, so the safety copy protects
+		// nothing; it is kept from retention, so a retried refusal would
+		// otherwise leave one database-sized file per attempt.
+		dropSafetyCopy := func() {
 			if err := os.Remove(preRestore); err != nil {
 				slog.Warn("could not remove the unused pre-restore safety copy", "path", preRestore, "err", err)
 			}
+		}
+
+		// Carry the live event sequence floor into the sidecar that outlives the
+		// swap, so the next boot reserves its block above everything this server
+		// handed out. The boot-time apply folds it in again from the closed
+		// database. A floor that cannot be stored refuses the restore; any other
+		// trouble (an unreadable live database) only warns.
+		carryCtx, carryCancel := context.WithTimeout(ctx, restoreCarryTimeout)
+		err := db.CarryWSSeqFloorForRestore(carryCtx, dbPath)
+		carryCancel()
+		if errors.Is(err, db.ErrWSSeqFloorNotStored) {
+			slog.Error("restore refused: could not preserve the event sequence floor", "err", err)
+			dropSafetyCopy()
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+				"could not preserve the event sequence floor — restore refused, database untouched")
+			return
+		}
+		if err != nil {
+			slog.Warn("restore: could not carry the live ws seq floor across the restore", "err", err)
+		}
+
+		marker := db.StagedRestoreMarker{
+			Backup:      name,
+			SafetyCopy:  filepath.Base(preRestore),
+			RequestedAt: time.Now().UTC(),
+			ActorID:     actor,
+		}
+		if err := db.StageRestore(ctx, dbPath, target, marker); err != nil {
+			slog.Error("restore refused: could not stage the backup", "backup", name, "err", err)
+			dropSafetyCopy()
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+				"could not stage the backup — database untouched")
 			return
 		}
 
-		// Notify clients that the server is restarting.
-		hub.BroadcastServerRestart(ws.RestartReasonBackupRestore, 5)
+		slog.Warn("restore staged — the next start applies it", "actor_id", actor, "backup", name)
 
-		slog.Warn("database restored from backup — closing DB", "actor_id", actor, "backup", name)
-
-		if !closeForRestore(ctx, w, database, dbPath) {
-			return
+		// The marker is committed. Trim old safety copies, protecting the new
+		// one and the restore source (an operator undoing a bad restore
+		// restores from a pre_restore_ copy). A prune failure is logged and
+		// never changes the outcome. The staged copy is not in backup.dir, so
+		// it can never be pruned.
+		if removed, pruneErr := PruneSafetyCopies(paths.dir, SafetyCopiesKept, preRestore, target); pruneErr != nil {
+			slog.Warn("could not prune old safety copies", "dir", paths.dir, "error", pruneErr)
+		} else if len(removed) > 0 {
+			slog.Info("pruned old safety copies", "count", len(removed), "names", removed)
 		}
-
-		// Stream the backup file over the (now closed) database to avoid loading
-		// the entire DB into memory (could be hundreds of MiB).
-		if err := copyBackupFile(target, dbPath); err != nil {
-			// copyBackupFile truncates the destination with os.Create before it can know
-			// whether the read will succeed, so the live database file is already
-			// destroyed by the time we get here — and the DB is closed, so nothing
-			// is holding the old contents. Put the safety copy back rather than
-			// leaving the operator with a zero-byte database.
-			slog.Error("restore copy failed — rolling back to the pre-restore safety copy", "backup", name, "err", err)
-			msg := "failed to restore database file — the pre-restore safety copy was put back, server restarting"
-			if rbErr := copyBackupFile(preRestore, dbPath); rbErr != nil {
-				slog.Error("rollback from the pre-restore safety copy failed — recover manually",
-					"safety_copy", preRestore, "err", rbErr)
-				msg = "failed to restore database file AND failed to roll back — recover manually from " + filepath.Base(preRestore)
-			}
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", msg)
-			// The database was closed before the copy: this process cannot serve
-			// anything more either way, so it must restart exactly as it does on
-			// the success path.
-			commitRestartPending()
-			go requestRestart("backup_restore_failed")
-			return
-		}
-
-		slog.Warn("database file replaced — restarting to load the restored data", "backup", name)
 
 		writeJSON(w, http.StatusOK, map[string]string{
-			"message": "database restored — server restarting",
+			"message": "restore staged — server restarting",
 			"backup":  name,
 		})
 
-		// The database is closed and the file underneath it has been swapped:
-		// this process can serve nothing more. It used to stop here, leaving a
-		// live server answering every request against a closed DB while the
-		// response and the restart broadcast both claimed a restart was
-		// happening. Restart for real, the same way applying an update does.
+		// Restart through the normal shutdown path: the restart coordinator
+		// tells clients (one server_restart notice), drains requests and closes
+		// the database, and the next start swaps the staged copy in.
 		commitRestartPending()
 		go requestRestart("backup_restore")
 	})
 }
-
-// checkpointForRestore empties the WAL before anything is closed or announced.
-// A reader still inside a snapshot can keep the checkpoint from emptying the
-// log; the restore is refused then, while the live database is untouched and
-// still serving. It reports whether the restore may go on.
-func checkpointForRestore(ctx context.Context, w http.ResponseWriter, database *db.DB) bool {
-	truncated, err := database.CheckpointForRestore(ctx)
-	if err != nil {
-		slog.Error("pre-restore WAL checkpoint failed", "err", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
-			"could not checkpoint the database — restore refused, database untouched")
-		return false
-	}
-	if !truncated {
-		slog.Warn("restore refused: the database is busy, the WAL checkpoint could not finish")
-		writeErr(w, http.StatusConflict, "DATABASE_BUSY",
-			"the database is busy — restore refused, database untouched; try again in a moment")
-		return false
-	}
-	return true
-}
-
-// closeForRestore closes the database and readies dbPath for the copy. Every
-// failure leaves the file untouched and restarts, because the pools are
-// closed either way. It reports whether the copy may go on.
-func closeForRestore(ctx context.Context, w http.ResponseWriter, database *db.DB, dbPath string) bool {
-	fail := func(msg, reason string) bool {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", msg)
-		commitRestartPending()
-		go requestRestart(reason)
-		return false
-	}
-
-	if err := closeDatabase(database); err != nil {
-		// database.Close() closes the writer and reader pools regardless of
-		// the error it returns (Server/db/db.go), so this process cannot
-		// serve anything more either way — every other failure path below
-		// (copyBackupFile failing, and the success path itself) restarts for
-		// exactly that reason. The live database file is still intact here
-		// (copyBackupFile hasn't run yet), so the restarted process comes back on
-		// the pre-restore data rather than leaving clients pinned on
-		// "Reconnecting..." against a process that never actually restarts.
-		slog.Error("failed to close database before restore — restarting anyway, DB pools are closed either way", "err", err)
-		return fail("failed to close database", "backup_restore_close_failed")
-	}
-
-	// Close leaves a connection that is mid-query open until the query
-	// returns, and the last connection to close checkpoints its log into the
-	// main file. Copy only once none is left.
-	waitCtx, cancel := context.WithTimeout(ctx, restoreConnDrainTimeout)
-	err := database.WaitConnsClosed(waitCtx)
-	cancel()
-	if err != nil {
-		slog.Error("restore refused: database connections did not close", "err", err)
-		return fail(
-			"database connections did not close — database untouched, server restarting", "backup_restore_conns_open")
-	}
-
-	// The close drained every accepted send. Preserve the greatest possible
-	// pre-restore logical id outside the database before restoring a snapshot
-	// that may have lost its receipt. A failed cutoff write must not copy.
-	if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
-		slog.Error("restore refused: could not preserve message retry cutoff", "err", err)
-		return fail(
-			"could not preserve message retry protection — database untouched, server restarting", "backup_restore_cutoff_failed")
-	}
-
-	// SQLite replays a -wal it finds beside the main file at the next open,
-	// so none may outlive the copy. Every connection is closed by now, and
-	// whatever a leftover log still holds belongs to the database this copy
-	// replaces.
-	if err := db.RemoveWALSidecars(dbPath); err != nil {
-		slog.Error("restore refused: could not remove the database's WAL files", "err", err)
-		return fail(
-			"could not clear the database's WAL files — database untouched, server restarting", "backup_restore_sidecars_failed")
-	}
-	return true
-}
-
-// restoreConnDrainTimeout bounds how long a restore waits for in-flight
-// queries to release their connections after Close.
-const restoreConnDrainTimeout = 5 * time.Second
-
-// dbCloser is swappable in tests to simulate database.Close() returning an
-// error. modernc.org/sqlite's sqlite3_close_v2 essentially never fails on a
-// normally-open connection, so there is no portable way to provoke a genuine
-// Close() error from a real driver in a unit test; this seam lets tests
-// exercise that branch directly. Guarded like restartSelf, for the same
-// reason (swap happens on the test goroutine, read on the handler's).
-var (
-	closeMu  sync.Mutex
-	dbCloser = func(database *db.DB) error { return database.Close() }
-)
-
-// closeDatabase invokes the current close hook.
-func closeDatabase(database *db.DB) error {
-	closeMu.Lock()
-	fn := dbCloser
-	closeMu.Unlock()
-	return fn(database)
-}
-
-// copyBackupFile is the restore path's file-copy hook. It exists as a var so
-// tests can inject the hard-to-simulate mid-copy failure (truncate-then-fail)
-// the rollback branch exists for; production never swaps it.
-var copyBackupFile = db.CopyDatabaseFile

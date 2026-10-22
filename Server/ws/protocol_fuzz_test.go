@@ -224,11 +224,31 @@ var commandPayloadSeeds = []struct {
 	{MsgTypeChatSend, `{"channel_id":1,"content":"hello"}`},
 	{MsgTypeChatSend, `{"channel_id":"1","content":"","attachments":[],"reply_to":null}`},
 	{MsgTypeChatSend, `{"channel_id":1,"user_id":999,"content":"spoof"}`},
+	{MsgTypeChatForward, `{"client_message_id":"x","channel_id":0,"message_id":-1}`},
+	{MsgTypeChatForward, `{"client_message_id":"","channel_id":1,"message_id":1}`},
+	{MsgTypePollCreate, `{"client_message_id":"x","channel_id":0,"question":"q","answers":null,"duration_hours":-1}`},
+	{MsgTypePollVote, `{"message_id":1,"answer_ids":[1,2,3]}`},
+	{MsgTypePollVote, `{"message_id":-1,"answer_ids":null}`},
+	{MsgTypePollEnd, `{"message_id":"x"}`},
+	{MsgTypePollCreate, `{"client_message_id":"","channel_id":1,"answers":[{"text":"a","emoji":null}],"duration_hours":24}`},
 	{MsgTypeChatEdit, `{"message_id":1,"content":"edited"}`},
+	{MsgTypeThreadCreate, `{"channel_id":1,"message_id":1,"name":"t","auto_archive_minutes":1440}`},
+	{MsgTypeThreadCreate, `{"channel_id":"1","message_id":0,"name":null}`},
+	{MsgTypeThreadUpdate, `{"thread_id":1,"name":"n","archived":true,"locked":false,"auto_archive_minutes":60}`},
+	{MsgTypeThreadDelete, `{"thread_id":-1}`},
+	{MsgTypeThreadFocus, `{"thread_id":null}`},
+	{MsgTypeThreadFocus, `{"thread_id":1}`},
+	{MsgTypeThreadUpdate, `{"thread_id":1,"tag_ids":[1,2]}`},
+	{MsgTypeForumPostCreate, `{"client_message_id":"1:x","channel_id":1,"name":"t","content":"c","attachments":["a"],"tag_ids":[1]}`},
+	{MsgTypeForumPostCreate, `{"client_message_id":"","channel_id":"1","tag_ids":"x","attachments":null}`},
+	{MsgTypeThreadFollow, `{"thread_id":1,"follow":true}`},
 	{MsgTypeChatDelete, `{"message_id":1}`},
 	{MsgTypeTypingStart, `{"channel_id":0}`},
 	{MsgTypeMarkRead, `{"channel_id":-1}`},
 	{MsgTypeChannelFocus, `{"channel_id":1.5}`},
+	{MsgTypeChannelFocus, `{"channel_id":1,"read":"no"}`},
+	{MsgTypeMarkRead, `{"channel_id":1,"message_id":"x"}`},
+	{MsgTypeMarkUnread, `{"channel_id":1,"message_id":0}`},
 	{MsgTypeReactionAdd, `{"message_id":1,"emoji":"x"}`},
 	{MsgTypeVoiceJoin, `{"channel_id":9223372036854775808}`},
 	{MsgTypeVoiceLeave, `garbage-not-json`},
@@ -285,8 +305,8 @@ func corpusFirstString(t *testing.T, target string) []string {
 // TestCommandPayloadSeedsCoverEveryConstructor is the guardrail that keeps the
 // corpus honest: registering a command in commandConstructors without a seed
 // leaves its decoder reachable only if the fuzzer guesses the type string,
-// which is not coverage. Ten of the 26 constructors appear in no epoch-1
-// journey, so their corpus entries carry a minimal valid payload instead.
+// which is not coverage. Constructors that appear in no epoch-1 journey get
+// a corpus entry with a minimal valid payload instead.
 func TestCommandPayloadSeedsCoverEveryConstructor(t *testing.T) {
 	seeded := make(map[string]bool, len(commandConstructors))
 	for _, s := range commandPayloadSeeds {

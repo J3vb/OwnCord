@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS roles (
     color       TEXT,
     permissions INTEGER NOT NULL DEFAULT 0,
     position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    hoist       INTEGER NOT NULL DEFAULT 0,
+    mentionable INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
     (1, 'Owner', '#E74C3C', 2147483647, 100, 0),
@@ -62,7 +64,27 @@ CREATE TABLE IF NOT EXISTS users (
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
-    custom_status TEXT
+    custom_status TEXT,
+    custom_status_expires_at TEXT,
+    banner_id TEXT,
+    banner_color TEXT
+);
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+) WITHOUT ROWID;
+
+CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
+BEGIN
+    INSERT OR IGNORE INTO user_roles (user_id, role_id)
+    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
+END;
+
+CREATE TABLE IF NOT EXISTS erasure_jobs (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    state   TEXT    NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,11 +123,34 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS category_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS category_user_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
-    category         TEXT,
+    category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
+    permissions_synced INTEGER NOT NULL DEFAULT 0,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -116,6 +161,16 @@ CREATE TABLE IF NOT EXISTS channels (
     mixing_threshold INTEGER,
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
     nsfw             INTEGER NOT NULL DEFAULT 0,
+    afk              INTEGER NOT NULL DEFAULT 0,
+    parent_channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    thread_starter_message_id INTEGER,
+    thread_owner_id INTEGER,
+    thread_archived INTEGER NOT NULL DEFAULT 0,
+    thread_locked INTEGER NOT NULL DEFAULT 0,
+    thread_auto_archive_minutes INTEGER NOT NULL DEFAULT 1440,
+    thread_last_activity_at TEXT,
+    forum_require_tag INTEGER NOT NULL DEFAULT 0,
+    forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
     is_group         INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (
@@ -135,6 +190,11 @@ CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     PRIMARY KEY (message_id, mentioned_user_id)
+);
+CREATE TABLE IF NOT EXISTS message_role_mentions (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL,
+    PRIMARY KEY (message_id, role_id)
 );
 
 CREATE TABLE IF NOT EXISTS invites (
@@ -327,6 +387,10 @@ func TestAdminAuthMiddleware_RoleNotFound(t *testing.T) {
 	if _, err := database.ExecContext(context.Background(), `UPDATE users SET role_id = 9999 WHERE id = ?`, uid); err != nil {
 		t.Fatalf("UPDATE role_id: %v", err)
 	}
+	// The member holds no existing role at all: drop the user_roles row too.
+	if _, err := database.ExecContext(context.Background(), `DELETE FROM user_roles WHERE user_id = ?`, uid); err != nil {
+		t.Fatalf("DELETE user_roles: %v", err)
+	}
 	if _, err := database.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`); err != nil {
 		t.Fatalf("re-enable FK: %v", err)
 	}
@@ -459,11 +523,13 @@ type mockHubWB struct{}
 func (m *mockHubWB) BroadcastServerRestart(reason ws.RestartReason, delaySeconds int) {}
 func (m *mockHubWB) BroadcastChannelCreate(ch *db.Channel)                            {}
 func (m *mockHubWB) BroadcastChannelUpdate(ch *db.Channel)                            {}
+func (m *mockHubWB) BroadcastChannelCategories(cats []db.ChannelCategory)             {}
 func (m *mockHubWB) BroadcastChannelDelete(channelID int64)                           {}
 func (m *mockHubWB) BroadcastMemberBan(userID int64)                                  {}
-func (m *mockHubWB) BroadcastMemberUpdate(userID int64, roleName string)              {}
+func (m *mockHubWB) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)     {}
+func (m *mockHubWB) RevokeUnreadableChannels(userID int64)                            {}
+func (m *mockHubWB) EnqueueRoleRefresh(r ws.RoleRefresh)                              {}
 func (m *mockHubWB) RefreshChannelVisibility(ch *db.Channel)                          {}
-func (m *mockHubWB) RefreshAllChannelVisibility()                                     {}
 func (m *mockHubWB) BroadcastRolesUpdate(roles []*db.Role)                            {}
 func (m *mockHubWB) CleanupVoiceForChannel(channelID int64)                           {}
 func (m *mockHubWB) ClientCount() int                                                 { return 0 }

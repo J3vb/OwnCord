@@ -12,6 +12,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -39,6 +40,9 @@ const (
 
 	// gifMaxQueryLen caps the search term length before it is forwarded.
 	gifMaxQueryLen = 100
+
+	// gifMaxPosLen caps the opaque paging cursor (`pos` in, `next` out).
+	gifMaxPosLen = 256
 
 	// gifUpstreamTimeout is the total budget for one upstream call.
 	gifUpstreamTimeout = 10 * time.Second
@@ -93,8 +97,12 @@ type gifResult struct {
 }
 
 // gifResponse is the JSON envelope returned by both GIF endpoints.
+//
+// Next is the opaque cursor for the following page (Tenor v2's `next`). It is
+// empty when there is nothing more, and the client passes it back as `pos`.
 type gifResponse struct {
 	Results []gifResult `json:"results"`
+	Next    string      `json:"next"`
 }
 
 // MountGIFRoutes registers the authenticated GIF proxy endpoints.
@@ -159,13 +167,21 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 			params.Set("q", q)
 		}
 
-		results, err := fetchGIFs(r, gifAPIBase+upstreamPath+"?"+params.Encode(), apiKey, limit)
+		if pos := strings.TrimSpace(r.URL.Query().Get("pos")); pos != "" {
+			if !validGIFPos(pos) {
+				writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "pos must be 1 to "+strconv.Itoa(gifMaxPosLen)+" characters from A-Z a-z 0-9 . _ : = + / % ~ -")
+				return
+			}
+			params.Set("pos", pos)
+		}
+
+		page, err := fetchGIFs(r, gifAPIBase+upstreamPath+"?"+params.Encode(), apiKey, limit)
 		if err != nil {
 			writeErr(w, http.StatusBadGateway, "BAD_GATEWAY", "GIF provider is unavailable")
 			return
 		}
 
-		writeJSON(w, http.StatusOK, gifResponse{Results: results})
+		writeJSON(w, http.StatusOK, page)
 	}
 }
 
@@ -186,27 +202,79 @@ func validGIFResultURL(raw string) bool {
 	return u.Scheme == "https" && u.Hostname() != "" && u.User == nil
 }
 
-// fetchGIFs performs the upstream request and returns the allowlisted results.
+// gifUpstreamBody is the upstream envelope as decoded. `next` is kept raw so
+// an odd type (number, null, object) can never fail the page of results.
+type gifUpstreamBody struct {
+	Results []gifResult     `json:"results"`
+	Next    json.RawMessage `json:"next"`
+}
+
+// decodeGIFNext turns the raw upstream `next` into a string: a JSON string as
+// is, a JSON number as its literal decimal text, anything else as "".
+func decodeGIFNext(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return ""
+	}
+	switch c := raw[0]; {
+	case c == '"':
+		var str string
+		if err := json.Unmarshal(raw, &str); err != nil {
+			return ""
+		}
+		return str
+	case c == '-' || (c >= '0' && c <= '9'):
+		var n json.Number
+		if err := json.Unmarshal(raw, &n); err != nil {
+			return ""
+		}
+		return n.String()
+	default:
+		return ""
+	}
+}
+
+// validGIFPos reports whether s is an acceptable paging cursor: 1 to
+// gifMaxPosLen characters, each in [A-Za-z0-9._:=+/%~-] (params.Encode escapes them). The same rule gates the
+// client's `pos` going upstream and the upstream's `next` coming back, so a
+// hostile upstream cannot hand the client (or a later request) arbitrary text.
+func validGIFPos(s string) bool {
+	if s == "" || len(s) > gifMaxPosLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.', c == '_', c == ':', c == '=', c == '-', c == '+', c == '/', c == '%', c == '~':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// fetchGIFs performs the upstream request and returns the allowlisted page.
 // It never returns the upstream error to the caller and never logs the request
 // URL, because that URL carries the API key.
-func fetchGIFs(r *http.Request, upstreamURL, apiKey string, limit int) ([]gifResult, error) {
+func fetchGIFs(r *http.Request, upstreamURL, apiKey string, limit int) (gifResponse, error) {
 	resp, err := gifFetcher.Fetch(r.Context(), safefetch.Request{URL: upstreamURL})
 	if err != nil {
 		// The error embeds the request URL, which contains the API key.
 		slog.Warn("gif proxy: upstream request failed", "error", redactKey(err.Error(), apiKey))
-		return nil, err
+		return gifResponse{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		slog.Warn("gif proxy: upstream returned non-200", "status", resp.StatusCode)
-		return nil, errGIFUpstream
+		return gifResponse{}, errGIFUpstream
 	}
 
 	// The body is already inside the byte ceilings and already type-checked,
 	// so there is nothing left to bound here.
-	var upstream gifResponse
+	var upstream gifUpstreamBody
 	if err := json.Unmarshal(resp.Body, &upstream); err != nil {
 		slog.Warn("gif proxy: decoding upstream response failed", "error", redactKey(err.Error(), apiKey))
-		return nil, err
+		return gifResponse{}, err
 	}
 
 	// Drop entries missing either renderable format, or carrying a result URL
@@ -225,7 +293,15 @@ func fetchGIFs(r *http.Request, upstreamURL, apiKey string, limit int) ([]gifRes
 		}
 		results = append(results, g)
 	}
-	return results, nil
+
+	// A cursor that fails the pos rule is dropped, not forwarded: the client
+	// simply sees no further pages.
+	next := decodeGIFNext(upstream.Next)
+	if next != "" && (!validGIFPos(next) || next == apiKey) {
+		slog.Debug("gif proxy: dropped upstream next cursor")
+		next = ""
+	}
+	return gifResponse{Results: results, Next: next}, nil
 }
 
 // errGIFUpstream marks a non-200 upstream response.
@@ -255,4 +331,14 @@ func parseGIFLimit(raw string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// mountGIF mounts the GIF proxy, which keeps the Klipy API key server-side.
+// Mounted unconditionally; with no key configured the endpoints answer 503
+// GIF_DISABLED so the client can hide the picker rather than discover a 404.
+func mountGIF(r chi.Router, cfg *config.Config, svc *service.Services, limiter *auth.RateLimiter) {
+	MountGIFRoutes(r, svc.Sessions, limiter, cfg, svc.GIFFavorites)
+	if cfg.GIF.APIKey == "" {
+		slog.Info("gif.api_key not set — GIF picker disabled (clients will hide it)")
+	}
 }

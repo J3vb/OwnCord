@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createUserProfilePopup, type UserProfileData } from "@components/UserProfilePopup";
+import {
+  createUserProfilePopup,
+  type ProfileRolesControl,
+  type ProfileRolesState,
+  type UserProfileData,
+} from "@components/UserProfilePopup";
+import { createNoteBinding } from "../../src/features/profiles/userNotes";
 
 function makeUser(overrides?: Partial<UserProfileData>): UserProfileData {
   return {
@@ -25,6 +31,23 @@ describe("UserProfilePopup", () => {
 
   afterEach(() => {
     container.remove();
+  });
+
+  it("paints a banner colour on the strip and leaves the gradient without one", () => {
+    const first = createUserProfilePopup({
+      user: makeUser({ banner: null, banner_color: "#336699" }),
+      anchorX: 1,
+      anchorY: 1,
+    });
+    first.mount(container);
+    const strip = container.querySelector<HTMLElement>(".upp-banner")!;
+    expect(strip.style.background).toContain("rgb(51, 102, 153)");
+    first.destroy?.();
+
+    const second = createUserProfilePopup({ user: makeUser(), anchorX: 1, anchorY: 1 });
+    second.mount(container);
+    expect(container.querySelector<HTMLElement>(".upp-banner")!.style.background).toBe("");
+    second.destroy?.();
   });
 
   it("click trigger opens popup with correct content", () => {
@@ -477,6 +500,219 @@ describe("UserProfilePopup profile fields", () => {
 
     expect(container.querySelector(".upp-avatar .avatar-initial")?.textContent).toBe("Z");
 
+    popup.destroy?.();
+  });
+
+  describe("block and availability (WP 3B-2)", () => {
+    const mountPopup = (extra: Partial<Parameters<typeof createUserProfilePopup>[0]> = {}) => {
+      const popup = createUserProfilePopup({
+        user: makeUser(),
+        anchorX: 10,
+        anchorY: 10,
+        onMessage: vi.fn(),
+        onCall: vi.fn(),
+        ...extra,
+      });
+      popup.mount(container);
+      return popup;
+    };
+    const btn = (id: string) => container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
+
+    it("shows Block, or Unblock when blocked, and calls onToggleBlock once", () => {
+      const onToggleBlock = vi.fn();
+      const popup = mountPopup({ onToggleBlock, blocked: false });
+      expect(btn("upp-block-btn")?.textContent).toContain("Block");
+      btn("upp-block-btn")?.click();
+      expect(onToggleBlock).toHaveBeenCalledExactlyOnceWith(42, true);
+      popup.destroy?.();
+
+      const again = vi.fn();
+      const popup2 = mountPopup({ onToggleBlock: again, blocked: true });
+      expect(btn("upp-block-btn")?.textContent).toContain("Unblock");
+      btn("upp-block-btn")?.click();
+      expect(again).toHaveBeenCalledExactlyOnceWith(42, false);
+      popup2.destroy?.();
+    });
+
+    it("has no Block button without a handler", () => {
+      const popup = mountPopup();
+      expect(btn("upp-block-btn")).toBeNull();
+      popup.destroy?.();
+    });
+
+    it("disables Message and Call with the reason as their tooltip", () => {
+      const onMessage = vi.fn();
+      const onCall = vi.fn();
+      const popup = mountPopup({ onMessage, onCall, unavailableReason: "Offline right now" });
+      for (const id of ["upp-message-btn", "upp-call-btn"]) {
+        expect(btn(id)?.getAttribute("aria-disabled")).toBe("true");
+        expect(btn(id)?.getAttribute("aria-describedby")).toBeTruthy();
+        expect(btn(id)?.title).toBe("Offline right now");
+        btn(id)?.click();
+      }
+      expect(onMessage).not.toHaveBeenCalled();
+      expect(onCall).not.toHaveBeenCalled();
+      popup.destroy?.();
+    });
+
+    it("leaves Message and Call enabled with no reason", () => {
+      const popup = mountPopup();
+      expect(btn("upp-message-btn")?.hasAttribute("aria-disabled")).toBe(false);
+      expect(btn("upp-call-btn")?.title).toBe("");
+      popup.destroy?.();
+    });
+  });
+
+  describe("private note (6.11c)", () => {
+    const localNote = () =>
+      createNoteBinding(
+        { api: null, host: "a.example.com", sessionSignal: new AbortController().signal },
+        42,
+      );
+
+    it("note hidden on own card", () => {
+      // The opener passes no binding for the viewer's own card.
+      const popup = createUserProfilePopup({ user: makeUser(), anchorX: 10, anchorY: 10 });
+      popup.mount(container);
+      expect(container.querySelector('[data-testid="upp-note"]')).toBeNull();
+      expect(container.querySelector(".upp-note")?.childElementCount).toBe(0);
+      popup.destroy?.();
+    });
+
+    it("maxlength 256", () => {
+      const note = localNote();
+      const popup = createUserProfilePopup({
+        user: makeUser(),
+        anchorX: 10,
+        anchorY: 10,
+        note,
+        onNoteFlush: () => note.destroy(),
+      });
+      popup.mount(container);
+      const input = container.querySelector<HTMLTextAreaElement>('[data-testid="upp-note"]');
+      expect(input?.maxLength).toBe(256);
+      popup.destroy?.();
+    });
+
+    it("flushes the note on destroy", () => {
+      const onNoteFlush = vi.fn();
+      const popup = createUserProfilePopup({
+        user: makeUser(),
+        anchorX: 10,
+        anchorY: 10,
+        note: localNote(),
+        onNoteFlush,
+      });
+      popup.mount(container);
+      popup.destroy?.();
+      expect(onNoteFlush).toHaveBeenCalledOnce();
+    });
+  });
+});
+
+describe("UserProfilePopup role chips (WP 6.3d)", () => {
+  let container: HTMLDivElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+  afterEach(() => {
+    container.remove();
+  });
+
+  function controlFor(
+    state: ProfileRolesState,
+  ): ProfileRolesControl & { add: ReturnType<typeof vi.fn>; remove: ReturnType<typeof vi.fn> } {
+    return {
+      read: () => state,
+      subscribe: () => () => undefined,
+      add: vi.fn(() => Promise.resolve()),
+      remove: vi.fn(() => Promise.resolve()),
+    };
+  }
+  const xButtons = (): HTMLButtonElement[] =>
+    Array.from(container.querySelectorAll<HTMLButtonElement>(".upp-chip-x"));
+
+  it("removes a chip only for roles below the viewer", () => {
+    const control = controlFor({
+      chips: [
+        { id: 2, name: "Staff", color: "#3498db", removable: false },
+        { id: 3, name: "Helper", color: null, removable: true },
+        { id: 4, name: "Member", color: null, removable: true },
+      ],
+      addable: [],
+    });
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 1,
+      anchorY: 1,
+      rolesControl: control,
+    });
+    popup.mount(container);
+
+    const chips = Array.from(container.querySelectorAll(".upp-chip"));
+    expect(chips.map((c) => c.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("Staff")]),
+    );
+    expect(chips).toHaveLength(3);
+    expect(xButtons().map((b) => b.dataset["roleId"])).toEqual(["3", "4"]);
+    xButtons()[0]!.click();
+    expect(control.remove).toHaveBeenCalledWith(3);
+    popup.destroy?.();
+  });
+
+  it("last chip has no x", () => {
+    const control = controlFor({
+      chips: [{ id: 4, name: "Member", color: null, removable: true }],
+      addable: [{ id: 3, name: "Helper" }],
+    });
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 1,
+      anchorY: 1,
+      rolesControl: control,
+    });
+    popup.mount(container);
+    expect(container.querySelectorAll(".upp-chip")).toHaveLength(1);
+    expect(xButtons()).toHaveLength(0);
+    popup.destroy?.();
+  });
+
+  it("the plus menu lists the assignable roles and adds the chosen one", () => {
+    const control = controlFor({
+      chips: [{ id: 4, name: "Member", color: null, removable: true }],
+      addable: [
+        { id: 3, name: "Helper" },
+        { id: 5, name: "Artist" },
+      ],
+    });
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 1,
+      anchorY: 1,
+      rolesControl: control,
+    });
+    popup.mount(container);
+    container.querySelector<HTMLElement>('[data-testid="upp-chip-add"]')!.click();
+    const items = Array.from(container.querySelectorAll<HTMLElement>(".upp-role-option"));
+    expect(items.map((i) => i.dataset["role"])).toEqual(["Helper", "Artist"]);
+    items[1]!.click();
+    expect(control.add).toHaveBeenCalledWith(5);
+    popup.destroy?.();
+  });
+
+  it("shows no plus when nothing is assignable", () => {
+    const popup = createUserProfilePopup({
+      user: makeUser(),
+      anchorX: 1,
+      anchorY: 1,
+      rolesControl: controlFor({
+        chips: [{ id: 4, name: "Member", color: null, removable: false }],
+        addable: [],
+      }),
+    });
+    popup.mount(container);
+    expect(container.querySelector('[data-testid="upp-chip-add"]')).toBeNull();
     popup.destroy?.();
   });
 });

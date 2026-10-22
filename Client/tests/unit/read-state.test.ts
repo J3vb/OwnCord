@@ -9,7 +9,9 @@ import {
   markActiveChannelReadOnUnload,
   markAllRead,
   markChannelRead,
+  markChannelsRead,
   hasUnread,
+  showsUnreadBadge,
   noteLiveMessageSeen,
   setMarkReadSender,
   unreadChannelIds,
@@ -57,7 +59,12 @@ let sent: number[];
 beforeEach(() => {
   sent = [];
   setMarkReadSender((id) => sent.push(id));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   dmStore.setState(() => ({ channels: [] }));
 });
 
@@ -80,6 +87,16 @@ describe("hasUnread", () => {
 
   it("is false for an unknown channel", () => {
     expect(hasUnread(999)).toBe(false);
+  });
+
+  it("a voice channel's badge counts only its mentions", () => {
+    setChannels([
+      { ...channel(1, 4), type: "voice" },
+      { ...channel(2, 4, 1), type: "voice" },
+    ]);
+    expect(showsUnreadBadge(1)).toBe(false);
+    expect(showsUnreadBadge(2)).toBe(true);
+    expect(hasUnread(1)).toBe(true);
   });
 });
 
@@ -138,6 +155,22 @@ describe("unreadChannelIds / markAllRead", () => {
     setDmChannels([dm(50, 2), dm(51, 0)]);
 
     expect([...unreadChannelIds()].sort((a, b) => a - b)).toEqual([1, 3, 50]);
+  });
+
+  it("voice unread without a mention is not unread; a voice mention is", () => {
+    setChannels([
+      channel(1, 0),
+      { ...channel(2, 6), type: "voice" },
+      { ...channel(3, 6, 2), type: "voice" },
+    ]);
+    expect(unreadChannelIds({ includeDms: false })).toEqual([3]);
+    setChannels([channel(1, 0), { ...channel(2, 6), type: "voice" }]);
+    expect(unreadChannelIds()).toEqual([]);
+    expect(showsUnreadBadge(2)).toBe(false);
+    // Still unread for the mark-read paths, so viewing the chat clears it.
+    expect(hasUnread(2)).toBe(true);
+    setChannels([{ ...channel(3, 6, 2), type: "voice" }]);
+    expect(showsUnreadBadge(3)).toBe(true);
   });
 
   it("marks everything read and reports how many", () => {
@@ -211,6 +244,34 @@ describe("unreadChannelIds / markAllRead", () => {
       expect(sent.length).toBe(6);
       expect(new Set(sent)).toEqual(new Set([1, 2, 3, 4, 5, 6]));
       expect(hasUnread(deferredId)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("merges an overlapping markChannelsRead into the pacing queue without dropping or bursting", () => {
+    vi.useFakeTimers();
+    try {
+      const at: number[] = [];
+      setMarkReadSender((id) => {
+        sent.push(id);
+        at.push(Date.now());
+      });
+      const all = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      setChannels(all.map((id) => channel(id, 1)));
+
+      markAllRead();
+      expect(sent).toHaveLength(4);
+      // Mid-burst: a subset, some already sent, some still queued.
+      vi.advanceTimersByTime(300);
+      markChannelsRead([2, 8, 9]);
+      expect(sent).toHaveLength(4);
+      vi.advanceTimersByTime(10_000);
+
+      expect(sent.toSorted((a, b) => a - b)).toEqual(all);
+      for (const t of at) {
+        expect(at.filter((u) => u >= t && u < t + 1100).length).toBeLessThanOrEqual(4);
+      }
     } finally {
       vi.useRealTimers();
     }

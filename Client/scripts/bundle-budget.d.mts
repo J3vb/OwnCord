@@ -21,3 +21,12 @@ export function allCssFiles(manifest: Manifest): Set<string>;
 
 /** Relative paths of emitted .js files under `dir` that contain `marker`. */
 export function findEmbeddedWasm(dir: string, marker: string): string[];
+
+/** Longest a budget `note` may be. */
+export const MAX_NOTE_LENGTH: number;
+
+/** The base64 WASM magic the embedded-WASM check searches for. */
+export const WASM_MARKER: string;
+
+/** Problems with the shape of bundle-budgets.json; empty when well formed. */
+export function validateBudgets(budgets: unknown): string[];

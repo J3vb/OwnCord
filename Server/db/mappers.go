@@ -6,7 +6,7 @@ import "github.com/J3vb/OwnCord/Server/db/dbgen"
 // (db/dbgen) to the domain model types this package exposes. sqlc emits int64
 // for integer columns and *string for nullable text; the domain models use
 // narrower Go types (int, bool, non-pointer string) for ergonomics, so each
-// delegating read maps through one of these helpers. See docs/plans/sqlc-adoption.md.
+// delegating read maps through one of these helpers. See docs/archive/plans/sqlc-adoption.md.
 
 // derefString returns the pointed-to string, or "" when the pointer is nil.
 // Used for columns the schema allows to be NULL but the domain model exposes
@@ -76,6 +76,10 @@ func userFromGen(u dbgen.User) *User {
 		About:              u.About,
 		CustomStatus:       u.CustomStatus,
 		RegistrationStatus: u.RegistrationStatus,
+
+		CustomStatusExpiresAt: u.CustomStatusExpiresAt,
+		BannerID:              u.BannerID,
+		BannerColor:           u.BannerColor,
 	}
 }
 

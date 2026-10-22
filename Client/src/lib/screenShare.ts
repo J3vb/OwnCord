@@ -37,9 +37,19 @@ import {
   PORTAL_NOT_STARTED,
 } from "../features/voice/native/platform";
 import type { NativeCameraTrack } from "../features/voice/native/nativeCameraTrack";
+import {
+  readSenderSample,
+  type SenderStatsTrack,
+  type ShareSenderSample,
+} from "../features/voice/shareSenderStats";
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
-import { resolveVideoCodec } from "../features/voice/videoCodec";
+import { channelPeerDecode } from "../features/voice/peerDecode";
+import {
+  resolveCodecChoice,
+  type CodecChoice,
+  type PublishCodec,
+} from "../features/voice/videoCodec";
 import {
   getScreenSourcePicker,
   type ScreenSourcePicker,
@@ -74,6 +84,50 @@ export const CAMERA_PUBLISH_BITRATES: Record<StreamQuality, number> = {
  *  below it. Mirrored by `camera_publish_options` in native_voice/session.rs. */
 export function cameraSimulcastLayers(quality: StreamQuality): VideoPreset[] | undefined {
   return quality === "high" ? [VideoPresets.h360, VideoPresets.h720] : undefined;
+}
+
+/** The simulcast part of a video publish's options. VP9 is published as SVC,
+ *  where livekit-client builds its own spatial layers and never reads ours, so
+ *  it gets none; VP8 and H.264 keep the camera's and the share's layers. */
+export function videoLayerOptions(
+  kind: "camera" | "screen",
+  codec: PublishCodec,
+  quality: StreamQuality,
+  fps: number,
+): Pick<TrackPublishOptions, "simulcast" | "videoSimulcastLayers" | "screenShareSimulcastLayers"> {
+  if (codec === "vp9") return { simulcast: false };
+  if (kind === "camera") {
+    const layers = cameraSimulcastLayers(quality);
+    return {
+      simulcast: quality !== "source",
+      ...(layers ? { videoSimulcastLayers: layers } : {}),
+    };
+  }
+  const simulcast = isScreenShareSimulcast(quality, fps);
+  return {
+    simulcast,
+    ...(simulcast ? { screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS] } : {}),
+  };
+}
+
+/** The camera's frame-rate cap: 15 fps at the low preset, else 30. */
+function cameraMaxFramerate(quality: StreamQuality): number {
+  return quality === "low" ? 15 : 30;
+}
+
+/** The camera's video publish options for `codec`. One factory for the first
+ *  publish and for the live codec switch, so the two cannot drift. */
+export function cameraPublishOptions(
+  codec: PublishCodec,
+  quality: StreamQuality,
+): TrackPublishOptions {
+  const maxFramerate = cameraMaxFramerate(quality);
+  return {
+    source: Track.Source.Camera,
+    ...videoLayerOptions("camera", codec, quality, maxFramerate),
+    videoEncoding: { maxBitrate: CAMERA_PUBLISH_BITRATES[quality], maxFramerate },
+    videoCodec: codec,
+  };
 }
 
 /** Screen-share audio: capture it, but exclude OwnCord's own playback from the
@@ -186,12 +240,42 @@ export function getEffectiveScreenShareFps(quality: StreamQuality, fps: number):
   return fps;
 }
 
+/** How WebRTC gives way when the encoder or link cannot keep up. At 120 fps
+ *  it lowers the resolution a little before it halves the frame rate (a
+ *  120 fps share is chosen for motion); otherwise text stays sharp and the
+ *  frame rate gives. Always explicit, so an SDK default cannot move 30/60. */
+export function screenShareDegradation(effectiveFps: number): RTCDegradationPreference {
+  return effectiveFps >= 120 ? "balanced" : "maintain-resolution";
+}
+
 /** High frame rates need proportionally more bitrate to stay sharp. */
 const FPS_BITRATE_MULTIPLIER: Readonly<Record<number, number>> = { 60: 1.5, 120: 2 };
 
 export function getScreenShareMaxBitrate(quality: StreamQuality, fps: number): number {
   const multiplier = FPS_BITRATE_MULTIPLIER[fps] ?? 1;
   return Math.round(SCREENSHARE_PUBLISH_BITRATES[quality] * multiplier);
+}
+
+/** The share's video publish options for `codec` (`fps` is the saved choice,
+ *  30 meaning the quality's own rate). One factory for the first publish and
+ *  for the live codec switch. livekit-client takes a screen share's encoding
+ *  from `screenShareEncoding` and ignores `videoEncoding` for that source. */
+export function screenVideoPublishOptions(
+  codec: PublishCodec,
+  quality: StreamQuality,
+  fps: number,
+): TrackPublishOptions {
+  const effectiveFps = getEffectiveScreenShareFps(quality, fps);
+  return {
+    source: Track.Source.ScreenShare,
+    ...videoLayerOptions("screen", codec, quality, fps),
+    screenShareEncoding: {
+      maxBitrate: getScreenShareMaxBitrate(quality, fps),
+      maxFramerate: effectiveFps,
+    },
+    videoCodec: codec,
+    degradationPreference: screenShareDegradation(effectiveFps),
+  };
 }
 
 /** Capture options for a quality with the fps preference applied. Presets with
@@ -303,6 +387,12 @@ export interface CameraTrackState extends GenerationGuarded {
   onCameraEnded?: () => void;
   /** The track the server was last told is on. */
   announced?: LocalVideoTrack | NativeCameraTrack;
+  /** The live camera's quality, for a republish with the same options. */
+  quality?: StreamQuality;
+  /** The codec the settings asked for, before peers were considered (WP M-5b). */
+  preferred?: PublishCodec;
+  /** The codec the camera is published with now. */
+  published?: PublishCodec;
 }
 
 /** The native camera publication surface `NativeRoom` adds to
@@ -349,6 +439,8 @@ export function stopManualCameraTrack(state: CameraTrackState, room: Room | null
   // A stopped track is no longer what the server was told is on, and holding
   // it would keep the left room reachable through its signal client.
   state.announced = undefined;
+  state.preferred = undefined;
+  state.published = undefined;
   unpublishManualTrack(room, track);
   track.stop();
 }
@@ -440,13 +532,13 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       await disableCamera(state, deps);
       return;
     }
-    const simulcastLayers = cameraSimulcastLayers(quality);
-    const maxFramerate = quality === "low" ? 15 : 30;
-    const videoCodec = await resolveVideoCodec(
+    const choice = await resolveCodecChoice(
       videoTrack.mediaStreamTrack,
-      maxFramerate,
+      cameraMaxFramerate(quality),
       CAMERA_PUBLISH_BITRATES[quality],
+      channelPeerDecode,
     );
+    const videoCodec = choice.codec;
     if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
       // Auto's probe was pending: it already stopped this track and sent
@@ -455,16 +547,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       videoTrack.stop();
       return;
     }
-    await room.localParticipant.publishTrack(videoTrack, {
-      source: Track.Source.Camera,
-      simulcast: quality !== "source",
-      ...(simulcastLayers ? { videoSimulcastLayers: simulcastLayers } : {}),
-      videoEncoding: {
-        maxBitrate: CAMERA_PUBLISH_BITRATES[quality],
-        maxFramerate,
-      },
-      videoCodec,
-    });
+    await room.localParticipant.publishTrack(videoTrack, cameraPublishOptions(videoCodec, quality));
     if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
       // publishTrack was in flight — it already reset localCamera, stopped the
@@ -481,6 +564,9 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
     const sendId = ws.send({ type: "voice_camera", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "camera");
     state.announced = videoTrack;
+    state.quality = quality;
+    state.preferred = choice.preferred;
+    state.published = videoCodec;
     deps.reapplyAudioPipeline();
     log.info("Camera enabled", {
       quality,
@@ -547,8 +633,9 @@ export async function disableCamera(state: CameraTrackState, deps: VideoTrackDep
 export interface ScreenTrackState extends GenerationGuarded {
   manualScreenTracks: LocalTrack[];
   screenTrackEndedCleanup?: () => void;
-  /** The live share's quality, set once it is published (web path only):
-   *  Change source and Quality act on a share only while it is set. */
+  /** The live share's quality, set once it is published: Change source and
+   *  Quality act on a share only while it is set. On Linux it is the quality
+   *  the native picker chose, and the track changes it itself. */
   quality?: StreamQuality;
   /** The live share's frame-rate choice (30 = the quality's own rate). */
   fps?: number;
@@ -556,12 +643,51 @@ export interface ScreenTrackState extends GenerationGuarded {
   changing?: boolean;
   /** The share's video track the server was last told is on. */
   announced?: LocalTrack;
+  /** The codec the settings asked for, before peers were considered (WP M-5b). */
+  preferred?: PublishCodec;
+  /** The codec the share's video is published with now. */
+  published?: PublishCodec;
+  /** The picker's "Share the app's sound" switch was on for this share
+   *  (Windows web path, WP 6.7b). Change source reads it for the new window. */
+  appAudioOn?: boolean;
+  /** The app's sound going out as this share's audio, until the share stops. */
+  appAudio?: AppAudioRelease;
+}
+
+/** What a share holds to end its app-audio capture (`lib/appAudioShare.ts`,
+ *  a lazy module: only this shape is needed on the stop paths). */
+export interface AppAudioRelease {
+  /** Close the page side, and stop the host capture unless a newer start
+   *  already replaced it. Idempotent. */
+  close(): void;
 }
 
 /** A share whose video track changes its own source under the publication
  *  (the Linux native capture, which picks in its own dialog). */
 export interface InPlaceSourceChange {
   changeSource(): Promise<void>;
+}
+
+/** A share whose video track runs at a new quality by itself (the Linux native
+ *  capture: the host re-sizes the running capture and republishes it). It
+ *  carries the quality and frame rate it was picked at. `published` is the
+ *  codec the share goes out with now. */
+export interface InPlaceQualityChange {
+  readonly quality: StreamQuality;
+  readonly fps: number;
+  setQuality(quality: StreamQuality, fps: number, published: PublishCodec): Promise<void>;
+}
+
+function qualityOf(track: LocalTrack | undefined): InPlaceQualityChange | null {
+  const t = track as Partial<InPlaceQualityChange> | undefined;
+  return typeof t?.setQuality === "function" && t.quality !== undefined && typeof t.fps === "number"
+    ? (t as InPlaceQualityChange)
+    : null;
+}
+
+/** The live share's video track when it changes quality by itself, else null. */
+export function inPlaceQualityChange(state: ScreenTrackState): InPlaceQualityChange | null {
+  return qualityOf(state.manualScreenTracks.find((t) => t.kind === Track.Kind.Video));
 }
 
 /** The live share's video track when it changes source by itself, else null. */
@@ -610,12 +736,18 @@ export function watchScreenEnded(
 
 export function stopManualScreenTracks(state: ScreenTrackState, room: Room | null): void {
   state.screenTrackEndedCleanup?.();
+  // Every stop path ends here: the app's sound and the host capture go too.
+  const appAudio = state.appAudio;
+  state.appAudio = undefined;
+  appAudio?.close();
   state.quality = undefined;
   state.fps = undefined;
   if (state.manualScreenTracks.length === 0 || room === null) return;
   const tracks = state.manualScreenTracks;
   state.manualScreenTracks = [];
   state.announced = undefined;
+  state.preferred = undefined;
+  state.published = undefined;
   for (const track of tracks) {
     unpublishManualTrack(room, track);
     track.stop();
@@ -628,7 +760,7 @@ async function pickWebShareQuality(
   showPicker: ScreenSourcePicker,
   quality: StreamQuality,
   fps: number,
-): Promise<{ quality: StreamQuality; fps: number } | null> {
+): Promise<{ quality: StreamQuality; fps: number; appAudio: boolean } | null> {
   try {
     const pick = await showPicker({
       sources: [],
@@ -637,11 +769,13 @@ async function pickWebShareQuality(
       defaultQuality: quality,
       defaultFps: fps,
     });
-    return pick === null ? null : { quality: pick.quality, fps: pick.fps };
+    return pick === null
+      ? null
+      : { quality: pick.quality, fps: pick.fps, appAudio: pick.audio === true };
   } catch (err) {
     // The dialog's chunk failed to load: share at the defaults rather than not at all.
     log.warn("Screen share quality step unavailable", err);
-    return { quality, fps };
+    return { quality, fps, appAudio: false };
   }
 }
 
@@ -660,6 +794,7 @@ export async function enableScreenshare(
   const generation = state.generation ?? 0;
   let quality = getScreenShareQuality();
   let fps = getScreenShareFps();
+  let appAudioOn = false;
   // Linux picks inside its own capture; a headless run (no dialog registered)
   // keeps the saved defaults.
   const showPicker = isLinuxDesktop() ? null : getScreenSourcePicker();
@@ -672,6 +807,7 @@ export async function enableScreenshare(
       return;
     }
     ({ quality, fps } = pick);
+    appAudioOn = pick.appAudio;
   }
   const effectiveFps = getEffectiveScreenShareFps(quality, fps);
   const maxBitrate = getScreenShareMaxBitrate(quality, fps);
@@ -703,10 +839,16 @@ export async function enableScreenshare(
         return;
       }
     }
-    const videoCodec =
+    const choice: CodecChoice =
       videoTrack === undefined
-        ? "vp8"
-        : await resolveVideoCodec(videoTrack.mediaStreamTrack, effectiveFps, maxBitrate);
+        ? { preferred: "vp8", codec: "vp8" }
+        : await resolveCodecChoice(
+            videoTrack.mediaStreamTrack,
+            effectiveFps,
+            maxBitrate,
+            channelPeerDecode,
+          );
+    const videoCodec = choice.codec;
     if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks) {
       // A disableScreenshare (or the OS stop-sharing button) ran to
       // completion while Auto's probe was pending: it already stopped these
@@ -717,24 +859,15 @@ export async function enableScreenshare(
     }
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
-      const simulcast = isVideo && isScreenShareSimulcast(quality, fps);
       // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
       await room.localParticipant.publishTrack(track, {
-        source: isVideo ? Track.Source.ScreenShare : Track.Source.ScreenShareAudio,
-        simulcast,
-        // livekit-client takes a screen share's encoding from
-        // screenShareEncoding; it ignores videoEncoding for that source.
         ...(isVideo
-          ? {
-              screenShareEncoding: {
-                maxBitrate,
-                maxFramerate: effectiveFps,
-              },
-              videoCodec,
-            }
-          : {}),
-        ...(isVideo ? {} : SCREENSHARE_AUDIO_PUBLISH),
-        ...(simulcast ? { screenShareSimulcastLayers: [...SCREENSHARE_SIMULCAST_LAYERS] } : {}),
+          ? screenVideoPublishOptions(videoCodec, quality, fps)
+          : {
+              source: Track.Source.ScreenShareAudio,
+              simulcast: false,
+              ...SCREENSHARE_AUDIO_PUBLISH,
+            }),
       });
       if ((state.generation ?? 0) !== generation) {
         removeEndedListener?.();
@@ -754,11 +887,44 @@ export async function enableScreenshare(
         return;
       }
     }
+    state.appAudioOn = appAudioOn;
+    if (
+      appAudioOn &&
+      videoTrack !== undefined &&
+      !isLinuxDesktop() &&
+      !screenTracks.some((t) => t.kind === Track.Kind.Audio)
+    ) {
+      // Windows web path (WP 6.7b): a shared window gets its app's sound. A
+      // stop or newer share meanwhile has released everything it made.
+      const outcome = await import("./appAudioShare")
+        .then((m) =>
+          m.publishAppAudio(state, room, screenTracks, videoTrack, generation, {
+            ...SCREENSHARE_AUDIO_PUBLISH,
+            source: Track.Source.ScreenShareAudio,
+            simulcast: false,
+          }),
+        )
+        .catch((err: unknown) => {
+          log.warn("App audio unavailable; the video share goes on", err);
+          return "done" as const;
+        });
+      if (outcome === "stale" || (state.generation ?? 0) !== generation) {
+        removeEndedListener?.();
+        return;
+      }
+    }
     const sendId = ws.send({ type: "voice_screenshare", payload: { enabled: true } });
     registerPendingVideoEnable(sendId, "screen");
     state.announced = videoTrack;
-    // The Linux native capture changes source through its own picker only.
-    if (!isLinuxDesktop()) {
+    state.preferred = choice.preferred;
+    state.published = videoCodec;
+    // The Linux native capture carries the quality and frame rate its own
+    // picker chose, not the saved prefs.
+    const nativeQuality = isLinuxDesktop() ? qualityOf(videoTrack) : null;
+    if (nativeQuality !== null) {
+      state.quality = nativeQuality.quality;
+      state.fps = nativeQuality.fps;
+    } else if (!isLinuxDesktop()) {
       state.quality = quality;
       state.fps = fps;
     }
@@ -834,6 +1000,152 @@ export async function disableScreenshare(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Live codec switch (WP M-5b)
+// ---------------------------------------------------------------------------
+
+/** Publish the live camera or share video again with `codec`, on the same
+ *  capture. livekit-client 2.22.3 cannot change a published codec in place and
+ *  E2EE allows no backup codec, so the track is unpublished without stopping
+ *  it (the room default would stop it, and a stopped share would reopen the OS
+ *  picker) and published again with the same options but for the codec. No
+ *  `voice_camera`/`voice_screenshare` is sent: the server flag stays on and the
+ *  server ignores track unpublishes. Screen audio stays published.
+ *
+ *  Superseded, not cancelled: after each await a stop, a leave, a reconnect or
+ *  a new socket (`generation`, `getRoom()`, `getWs()`) ends the run, and a
+ *  publish that lands after a stop is undone as the enable does. A failed
+ *  republish takes the normal disable path, so no half state is left.
+ *  Resolves true when the track now carries `codec`. */
+export function republishVideo(
+  kind: "camera",
+  state: CameraTrackState,
+  deps: VideoTrackDeps,
+  codec: PublishCodec,
+): Promise<boolean>;
+export function republishVideo(
+  kind: "screen",
+  state: ScreenTrackState,
+  deps: VideoTrackDeps,
+  codec: PublishCodec,
+): Promise<boolean>;
+export async function republishVideo(
+  kind: "camera" | "screen",
+  state: CameraTrackState | ScreenTrackState,
+  deps: VideoTrackDeps,
+  codec: PublishCodec,
+): Promise<boolean> {
+  const room = deps.getRoom();
+  const ws = deps.getWs();
+  const live =
+    kind === "camera"
+      ? liveCameraVideo(state as CameraTrackState)
+      : liveShareVideo(state as ScreenTrackState);
+  if (room === null || ws === null || live === null || live.quality === undefined) return false;
+  if (kind === "screen" && (state as ScreenTrackState).changing === true) return false;
+  const { track, quality } = live;
+  const generation = state.generation ?? 0;
+  const stale = (): boolean =>
+    (state.generation ?? 0) !== generation ||
+    deps.getRoom() !== room ||
+    deps.getWs() !== ws ||
+    (kind === "camera"
+      ? (state as CameraTrackState).manualCameraTrack !== track
+      : (state as ScreenTrackState).announced !== track);
+  const options =
+    kind === "camera"
+      ? cameraPublishOptions(codec, quality)
+      : screenVideoPublishOptions(
+          codec,
+          quality,
+          (state as ScreenTrackState).fps ?? getScreenShareFps(),
+        );
+  // A Change source or Quality change must not start under the republish.
+  if (kind === "screen") (state as ScreenTrackState).changing = true;
+  try {
+    await room.localParticipant.unpublishTrack(track, false);
+    // A stop between the two awaits already unpublished and stopped the track
+    // and sent its `false`: publishing now would resurrect it.
+    if (stale()) return false;
+    await room.localParticipant.publishTrack(track, options);
+    if (stale()) {
+      // The stop's unpublish may have run before this publish landed: undo it
+      // again and stay silent, so no `true` reaches the server.
+      unpublishManualTrack(room, track);
+      track.stop();
+      return false;
+    }
+    state.published = codec;
+    if (kind === "screen") bumpLocalShareRev();
+    log.info("Republished with a codec every viewer plays", { kind, codec });
+    return true;
+  } catch (err) {
+    if (stale()) {
+      log.warn("Superseded codec switch failed, leaving the newer state alone", err);
+      return false;
+    }
+    log.error("Failed to republish with a new codec", { kind, codec, err });
+    if (kind === "camera") {
+      await disableCamera(state as CameraTrackState, deps);
+      deps.onError(voiceText("share.cameraFailed"));
+    } else {
+      await disableScreenshare(state as ScreenTrackState, deps);
+      deps.onError(voiceText("share.screenFailed"));
+    }
+    return false;
+  } finally {
+    if (kind === "screen") (state as ScreenTrackState).changing = false;
+  }
+}
+
+/** What the live codec switch needs of a published video: the codec the
+ *  settings asked for, the one it goes out with, and whether a Change source or
+ *  Quality change is running under it. */
+export interface LiveCodec {
+  readonly preferred: PublishCodec;
+  readonly published: PublishCodec;
+  readonly busy: boolean;
+}
+
+/** The camera's codecs while it is published and announced, else null (it is
+ *  starting, stopping or not on). */
+export function cameraLiveCodec(state: CameraTrackState): LiveCodec | null {
+  const live = liveCameraVideo(state);
+  if (live === null || live.quality === undefined) return null;
+  if (state.preferred === undefined || state.published === undefined) return null;
+  return { preferred: state.preferred, published: state.published, busy: false };
+}
+
+/** The share's codecs while its video is published and announced, else null. */
+export function screenLiveCodec(state: ScreenTrackState): LiveCodec | null {
+  const live = liveShareVideo(state);
+  if (live === null || live.quality === undefined) return null;
+  if (state.preferred === undefined || state.published === undefined) return null;
+  return {
+    preferred: state.preferred,
+    published: state.published,
+    busy: state.changing === true,
+  };
+}
+
+/** The announced camera video and its quality, or null while it starts or stops. */
+function liveCameraVideo(
+  state: CameraTrackState,
+): { track: LocalVideoTrack; quality: StreamQuality | undefined } | null {
+  const track = state.manualCameraTrack;
+  if (track === null || state.announced !== track) return null;
+  return { track: track as LocalVideoTrack, quality: state.quality };
+}
+
+/** The announced share video and its quality, or null while it starts or stops. */
+function liveShareVideo(
+  state: ScreenTrackState,
+): { track: LocalVideoTrack; quality: StreamQuality | undefined } | null {
+  const track = state.announced;
+  if (track === undefined || !state.manualScreenTracks.includes(track)) return null;
+  return { track: track as LocalVideoTrack, quality: state.quality };
+}
+
 /** Bring the server's camera and share flags from `ready` back in line with
  *  what this session sends. A live track the server lost track of (its
  *  announce went out while the socket was down) is announced again, and the
@@ -890,15 +1202,11 @@ export function getLocalScreenshareStream(room: Room | null): MediaStream | null
   return null;
 }
 
-/** The frame rate your screen share's top layer is sending, or null before a
- *  layer reports one or where the track has no WebRTC sender (the Linux
- *  native track publishes in the backend). */
-export async function getLocalScreenshareFps(room: Room | null): Promise<number | null> {
+/** What your screen share is sending and why it falls short (its own tile's
+ *  readout, M-1), or null where the track has no sender stats (the Linux
+ *  native track publishes in the backend) or nothing is shared. */
+export function getLocalScreenshareStats(room: Room | null): Promise<ShareSenderSample | null> {
   const track = room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track as
-    Partial<Pick<LocalVideoTrack, "getSenderStats">> | undefined;
-  if (typeof track?.getSenderStats !== "function") return null;
-  const rates = (await track.getSenderStats())
-    .map((s) => s.framesPerSecond as number | undefined)
-    .filter((fps): fps is number => fps !== undefined);
-  return rates.length > 0 ? Math.max(...rates) : null;
+    SenderStatsTrack | undefined;
+  return readSenderSample(track);
 }

@@ -7,6 +7,7 @@
 // =============================================================================
 
 import { createLogger } from "@lib/logger";
+import { publicAssetUrl } from "@lib/publicAssets";
 
 const log = createLogger("noise-suppression");
 
@@ -20,7 +21,7 @@ let rnnoiseBytes: Promise<ArrayBuffer> | null = null;
 /** Fetch rnnoise.wasm once; later joins reuse the bytes (each node gets its own copy). */
 function loadRNNoiseBytes(): Promise<ArrayBuffer> {
   if (rnnoiseBytes === null) {
-    const loading = fetch("/rnnoise.wasm").then((response) => {
+    const loading = fetch(publicAssetUrl("rnnoise.wasm")).then((response) => {
       // i18n-exempt: internal diagnostic, logged by micProcessor, never rendered
       if (response.ok === false) throw new Error(`rnnoise.wasm: HTTP ${response.status}`);
       return response.arrayBuffer();
@@ -35,7 +36,7 @@ function loadRNNoiseBytes(): Promise<ArrayBuffer> {
 
 /** Load the worklet and WASM into `audioContext` and return a ready node. */
 export async function createRNNoiseNode(audioContext: AudioContext): Promise<RNNoiseNode> {
-  await audioContext.audioWorklet.addModule("/rnnoise-worklet.js");
+  await audioContext.audioWorklet.addModule(publicAssetUrl("rnnoise-worklet.js"));
   const bytesPromise = loadRNNoiseBytes();
   const cachedBytes = await bytesPromise;
 

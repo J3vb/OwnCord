@@ -1,6 +1,6 @@
 {
   "productName": "OwnCord",
-  "version": "2.3.0-beta.1",
+  "version": "2.4.0-beta.1",
   "identifier": "com.owncord.client",
   "build": {
     "frontendDist": "../dist",
@@ -47,7 +47,12 @@
           "gstreamer1.0-plugins-base",
           "gstreamer1.0-plugins-good"
         ],
+        "files": {
+          "/usr/lib/owncord-client/owncord-deb-update": "packaging/linux/owncord-deb-update",
+          "/usr/share/polkit-1/actions/com.owncord.client.update.policy": "packaging/linux/com.owncord.client.update.policy"
+        },
         "recommends": [
+          "pkexec | policykit-1",
           "fonts-noto-color-emoji",
           "gstreamer1.0-libav",
           "gstreamer1.0-plugins-bad",

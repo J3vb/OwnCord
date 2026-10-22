@@ -1,12 +1,4 @@
 /* ═══ Responsive ═══ */
-@media (max-width: 1200px) {
-  .member-list {
-    width: 0;
-    padding: 0;
-    overflow: hidden;
-  }
-}
-
 /* The narrow-width drawer's backdrop and toggle. Both exist in the DOM at every
    width; the media rule below is what makes them matter only below 800px, where
    the sidebar itself collapses (WCAG 1.4.10 Reflow). */
@@ -69,5 +61,55 @@
     overflow: hidden;
     z-index: 100;
     box-shadow: var(--shadow-lg);
+  }
+}
+
+/* The drawer clears the notch; the member overlay (member-list.css) its right edge. */
+@media (max-width: 800px) {
+  .unified-sidebar.drawer-open {
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  /* The channel column fills the drawer instead of keeping its 260px. */
+  .unified-sidebar.drawer-open .channel-sidebar {
+    width: auto;
+  }
+}
+@media (max-width: 800px) and (pointer: coarse) {
+  .unified-sidebar.drawer-open {
+    width: min(320px, 88vw);
+  }
+}
+
+/* Phones: a wider drawer, and the chat header drops its text-only extras. */
+@media (max-width: 600px) {
+  .unified-sidebar.drawer-open {
+    width: min(320px, 88vw);
+  }
+  .chat-header {
+    padding: 0 8px;
+    gap: 8px;
+  }
+  .chat-header .ch-divider,
+  .chat-header .ch-topic {
+    display: none;
+  }
+  /* Search stays reachable: it shrinks to fit instead of hiding. */
+  .chat-header .ch-tools {
+    flex-shrink: 1;
+    min-width: 0;
+    margin-left: auto;
+  }
+  .chat-header .search-input,
+  .chat-header .search-input:focus {
+    flex: 0 1 100px;
+    width: auto;
+    min-width: 0;
+  }
+}
+
+@media (pointer: coarse) {
+  .ch-sidebar-toggle {
+    min-width: 44px;
+    min-height: 44px;
   }
 }

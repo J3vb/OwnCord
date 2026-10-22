@@ -33,7 +33,12 @@ function resetStores(): void {
     detachedChannels: new Set(),
   }));
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
 }
 
 function makeMessage(id: number): Message {
@@ -48,8 +53,8 @@ function makeMessage(id: number): Message {
     pinned: false,
     editedAt: null,
     deleted: false,
-    // Spaced far enough apart that grouping never merges rows.
-    timestamp: new Date(Date.UTC(2024, 0, 15, 12, id * 5)).toISOString(),
+    // Spaced past the 7-minute group window, so grouping never merges rows.
+    timestamp: new Date(Date.UTC(2024, 0, 15, 12, id * 10)).toISOString(),
     status: "sent",
     correlationId: null,
     errorCode: null,
@@ -109,6 +114,8 @@ describe("MessageList — new-messages divider", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -276,7 +283,7 @@ describe("MessageList — new-messages divider", () => {
         content: `Message ${id}`,
         reply_to: null,
         attachments: [],
-        timestamp: new Date(Date.UTC(2024, 0, 15, 12, id * 5)).toISOString(),
+        timestamp: new Date(Date.UTC(2024, 0, 15, 12, id * 10)).toISOString(),
       });
     }
     messagesStore.flush();
@@ -315,7 +322,7 @@ describe("MessageList — new-messages divider", () => {
     // A live message lands first, via the real append path — exactly what
     // dispatcher.ts's chat_message handler does while a history fetch for
     // the same channel is still outstanding.
-    const liveTimestamp = new Date(Date.UTC(2024, 0, 15, 0, 51 * 5)).toISOString();
+    const liveTimestamp = new Date(Date.UTC(2024, 0, 15, 0, 51 * 10)).toISOString();
     addMessage({
       id: 1001,
       channel_id: CHANNEL_ID,
@@ -331,7 +338,7 @@ describe("MessageList — new-messages divider", () => {
     // had already arrived live, exactly as the real merge produces.
     const history = Array.from({ length: 50 }, (_, i) => ({
       ...makeMessage(951 + i),
-      timestamp: new Date(Date.UTC(2024, 0, 15, 0, (i + 1) * 5)).toISOString(),
+      timestamp: new Date(Date.UTC(2024, 0, 15, 0, (i + 1) * 10)).toISOString(),
     }));
     setMessages([...history, { ...makeMessage(1001), timestamp: liveTimestamp }]);
     messagesStore.flush();

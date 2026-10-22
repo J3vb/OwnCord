@@ -24,46 +24,25 @@ const SessionCheckInterval = 10
 // Client represents a single authenticated WebSocket connection.
 // The underlying transport (conn) is set by ServeWS; in tests it remains nil.
 type Client struct {
-	hub            *Hub
-	conn           wsConn          // interface — nil in unit tests
-	ctx            context.Context // derived from WS upgrade request; cancelled on disconnect
-	userID         int64
-	user           *db.User
-	channelID      int64  // currently viewed channel for channel-scoped broadcasts
-	voiceChID      int64  // voice channel the user is in (0 = not in voice); guarded by voiceMu
-	voiceJoinToken string // opaque join-instance token for the current voice session; guarded by voiceMu
-	// voiceJoinCompleted is true once voiceJoinComplete's supersession guard
-	// has passed for the current (voiceChID, voiceJoinToken) pair — i.e. the
-	// join actually reached the SFU handoff (token sent, voice topic
-	// subscribed, voice_state broadcast). It starts false the moment
-	// voiceJoinPersist calls setVoiceState (BUG-088, immediately after the DB
-	// row commits but well before completion) and is reset to false by every
-	// state change, so it is true only while a real, deliverable membership
-	// is live. registerNow reads it (via clearVoiceState) to decide whether a
-	// network reconnect's replaced connection had a completed join to hand
-	// off, or only a persisted-but-not-yet-delivered one still racing its own
-	// supersession guards in voice_join.go — transferring the latter makes
-	// those guards misread the transfer as an eviction and abandon the join
-	// while its voice_states row stays behind for nothing to reap (OC-0270).
-	// Guarded by voiceMu.
-	voiceJoinCompleted bool
-	e2eePubKey         string // ECDH P-256 public key (base64) for voice E2EE; guarded by voiceMu
-	e2eeSignature      string // identity-key signature over e2eePubKey (F3 TOFU); "" for legacy announces; guarded by voiceMu
-	// pendingModServerMuted/pendingModServerDeafened stash a moderator-imposed
-	// mute/deafen across a server-driven leave (voice_mod_move), which deletes
-	// the voice_states row those flags normally live in before the target's
-	// own re-join can read them back. Guarded by voiceMu; see
-	// setPendingModFlags/takePendingModFlags.
-	pendingModServerMuted    bool
-	pendingModServerDeafened bool
-	// pendingModServerMutedBy is the stashed mute's owner (round 5, Codex
-	// review P2) — nil for a manual mute; carried the same way as the two
-	// booleans above so the re-join's restore can tell a timeout-owned mute
-	// from a manual one.
-	pendingModServerMutedBy *int64
-	roleName                string // cached role name for chat_message broadcasts
-	tokenHash               string // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq                 uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	hub       *Hub
+	conn      wsConn          // interface — nil in unit tests
+	ctx       context.Context // derived from WS upgrade request; cancelled on disconnect
+	userID    int64
+	user      *db.User
+	channelID int64 // currently viewed channel for channel-scoped broadcasts
+	// threadID is the second subscription slot (WP 6.9c thread_focus): the
+	// thread open beside the focused channel, 0 for none. It is a channel id
+	// like channelID, so its topic is ChannelTopic(threadID). Guarded by mu.
+	threadID int64
+	// voice is this connection's voice membership (voice_registry.go):
+	// channel, join token, completed flag, E2EE announce and the moderator
+	// stash, all guarded by voice.voiceMu.
+	voice     voiceSlot
+	roleName  string          // cached role name for chat_message broadcasts
+	held      *db.MemberRoles // the one held-role read of this handshake (refreshUserSnapshot)
+	roleIDs   []int64         // held role ids, top first; set by refreshUserSnapshot before registration
+	tokenHash string          // SHA-256 hex of the session token; used for periodic revalidation
+	lastSeq   uint64          // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
 	// authChannelID is the channel the client says it had open when it
 	// disconnected, sent alongside last_seq in the auth frame (0 = none).
 	//
@@ -88,32 +67,39 @@ type Client struct {
 	// Set once during the handshake, before the client is visible to any
 	// other goroutine, so no lock guards it.
 	wakeReconnect bool
-	connectedAt   time.Time      // when the WS connection was established
-	remoteAddr    string         // client IP resolved through trusted_proxies (clientip.Resolve), no port
-	msgCount      int            // count of messages processed; resets after session check
-	msgsReceived  int64          // total messages received over the lifetime of this connection
-	msgsSent      int64          // total messages sent over the lifetime of this connection
-	msgsDropped   int64          // messages dropped due to full send buffer
-	invalidCount  int            // consecutive invalid messages; reset on valid parse
-	lastActivity  time.Time      // last message received from this client; guarded by mu
-	lastTouch     time.Time      // last touchSession write for this socket's session; guarded by mu
-	sendClosed    bool           // true after all send channels have been closed
-	terminalKick  bool           // set by markTerminalKick: the server ended this session for good; guarded by mu
-	send          chan []byte    // normal-priority outbound messages (chat messages, reactions)
-	sendHigh      chan []byte    // high-priority outbound messages (DMs, mentions)
-	sendLow       chan []byte    // low-priority outbound messages (typing, moderation and mention-badge notices) — dropped on overflow
-	presenceStale atomic.Bool    // a presence frame was dropped; the next presence flush sends a full snapshot
-	mu            syncutil.Mutex // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
-	voiceMu       syncutil.Mutex // guards voiceChID and voiceJoinToken
+	// features is what the auth frame declared (client_features.go). Set once
+	// during the handshake, before the client is visible to any other
+	// goroutine, so no lock guards it.
+	features      clientFeatures
+	connectedAt   time.Time                     // when the WS connection was established
+	remoteAddr    string                        // client IP resolved through trusted_proxies (clientip.Resolve), no port
+	msgCount      int                           // count of messages processed; resets after session check
+	msgsReceived  int64                         // total messages received over the lifetime of this connection
+	msgsSent      int64                         // total messages sent over the lifetime of this connection
+	msgsDropped   int64                         // messages dropped due to full send buffer
+	invalidCount  int                           // consecutive invalid messages; reset on valid parse
+	lastActivity  time.Time                     // last message received from this client; guarded by mu
+	lastTouch     time.Time                     // last touchSession write for this socket's session; guarded by mu
+	sendClosed    bool                          // true after all send channels have been closed
+	terminalKick  bool                          // set by markTerminalKick: the server ended this session for good; guarded by mu
+	send          chan []byte                   // normal-priority outbound messages (chat messages, reactions)
+	sendHigh      chan []byte                   // high-priority outbound messages (DMs, mentions)
+	sendLow       chan []byte                   // low-priority outbound messages (typing, moderation and mention-badge notices) — dropped on overflow
+	timeouts      heldTimeouts                  // which member_timeouts list this client holds (member_timeouts_delivery.go)
+	presenceStale atomic.Bool                   // a presence frame was dropped; the next presence flush sends a full snapshot
+	cseq          cseqState                     // per-socket sequenced-frame count, stamped by the writer (client_cseq.go)
+	mu            syncutil.Ranked[lockRankLeaf] // guards sendClosed, msgCount, channelID, lastActivity, msgsReceived, msgsSent, msgsDropped
 
 	// focusMu serialises every channel_focus APPLY (the readPump applier and the
 	// deferred-focus drain goroutine), so an older deferred intent can never land
 	// after a newer one. Lock order: focusMu before mu.
-	focusMu syncutil.Mutex
+	focusMu syncutil.Ranked[lockRankSerialiser]
 	// focusSeq is bumped on every focus intent, deferred or applied; guarded by mu.
 	focusSeq uint64
 	// pendingFocusChID is the latest deferred focus intent (0 = none); guarded by mu.
 	pendingFocusChID int64
+	// pendingFocusRead is the read flag of the deferred focus (false = the frame said read:false); guarded by mu.
+	pendingFocusRead bool
 	// pendingFocusReqID is the req_id of the deferred frame, echoed on an error; guarded by mu.
 	pendingFocusReqID string
 	// pendingFocusSeq is the focusSeq the pending intent was assigned; guarded by mu.
@@ -167,6 +153,13 @@ func (c *Client) getLastActivity() time.Time {
 	return c.lastActivity
 }
 
+// getThreadID returns the thread in the second focus slot under mu.
+func (c *Client) getThreadID() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.threadID
+}
+
 // getChannelID returns the currently focused channel ID under mu.
 func (c *Client) getChannelID() int64 {
 	c.mu.Lock()
@@ -178,6 +171,35 @@ func (c *Client) getChannelID() int64 {
 type livePresence struct {
 	status       string
 	customStatus *string
+	// customStatusExpiresAt is the stored expiry (db.CustomStatusExpiryLayout)
+	// of customStatus, "" when it has none. It is the tag the expirer's
+	// CustomStatusExpired compares: only a connection still showing the status
+	// that expired is cleared.
+	customStatusExpiresAt string
+	// idleSince is when status last became "idle" on this connection, the zero
+	// time while it is anything else (WP 6.10b). It is kept while the status
+	// stays idle, across a custom-status change and its expiry, so the AFK sweep
+	// measures one unbroken idle stretch. A reconnect re-stamps it at connect.
+	idleSince time.Time
+}
+
+// afkNow is the clock the idle stamp and the AFK sweep read. A var so tests
+// can move time without sleeping.
+var afkNow = time.Now
+
+// nextLivePresence is the presence that follows prev when the connection takes
+// status: it keeps prev.idleSince while the status stays idle and stamps now on
+// entry to idle, and leaves it zero for every other status.
+func nextLivePresence(prev *livePresence, status string, customStatus *string, expiresAt string, now time.Time) *livePresence {
+	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt}
+	if !isIdleStatus(status) {
+		return next
+	}
+	next.idleSince = now
+	if prev != nil && isIdleStatus(prev.status) && !prev.idleSince.IsZero() {
+		next.idleSince = prev.idleSince
+	}
+	return next
 }
 
 // livePresence returns the connection's live presence, a zero value (status
@@ -190,129 +212,17 @@ func (c *Client) livePresence() livePresence {
 }
 
 // setLivePresence records the presence this connection just stamped or chose.
-func (c *Client) setLivePresence(status string, customStatus *string) {
-	c.presence.Store(&livePresence{status: status, customStatus: customStatus})
-}
-
-// getVoiceChID returns the voice channel ID under voiceMu.
-func (c *Client) getVoiceChID() int64 {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.voiceChID
-}
-
-func (c *Client) getVoiceState() (int64, string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.voiceChID, c.voiceJoinToken
-}
-
-func (c *Client) setVoiceState(chID int64, joinToken string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.voiceChID = chID
-	c.voiceJoinToken = joinToken
-	// A new join instance starts (BUG-088 sets this before the token round
-	// trip and completion guard even run); only voiceJoinComplete may mark it
-	// done, via markVoiceJoinCompleteIfMatch.
-	c.voiceJoinCompleted = false
-}
-
-// markVoiceJoinCompleteIfMatch records that the join for (chID, joinToken) has
-// passed voiceJoinComplete's supersession guard, but only if the client is
-// still in exactly that join instance — re-checked under this same lock
-// acquisition so nothing can land between voiceJoinComplete's guard check and
-// this call and have it silently mark a superseded/cleared state as done.
-// Returns whether it matched and was recorded.
-func (c *Client) markVoiceJoinCompleteIfMatch(chID int64, joinToken string) bool {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	if c.voiceChID != chID || c.voiceJoinToken != joinToken {
-		return false
+// The idle stamp is derived from the previous value, so the swap is a
+// compare-and-swap loop: two writers (a presence_update and the connect stamp)
+// cannot both read the same prev and drop each other's idleSince.
+func (c *Client) setLivePresence(status string, customStatus *string, expiresAt string) {
+	now := afkNow()
+	for {
+		prev := c.presence.Load()
+		if c.presence.CompareAndSwap(prev, nextLivePresence(prev, status, customStatus, expiresAt, now)) {
+			return
+		}
 	}
-	c.voiceJoinCompleted = true
-	return true
-}
-
-// clearVoiceState clears the client's voice state and returns the old channel
-// ID, join token, and whether that join had completed (see
-// voiceJoinCompleted) — the last is what registerNow consults before handing
-// a resuming connection this state (OC-0270).
-func (c *Client) clearVoiceState() (int64, string, bool) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	oldChID := c.voiceChID
-	oldJoinToken := c.voiceJoinToken
-	oldCompleted := c.voiceJoinCompleted
-	c.voiceChID = 0
-	c.voiceJoinToken = ""
-	c.voiceJoinCompleted = false
-	c.e2eePubKey = ""
-	c.e2eeSignature = ""
-	return oldChID, oldJoinToken, oldCompleted
-}
-
-// clearVoiceStateIfMatch clears the voice state only when the current channel
-// is chID, returning the join token and whether it cleared. Delayed evictions
-// decided against a snapshotted channel use it so a membership committed after
-// the snapshot survives — the in-memory analogue of LeaveVoiceChannelIfMatch.
-func (c *Client) clearVoiceStateIfMatch(chID int64) (string, bool) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	if c.voiceChID != chID {
-		return "", false
-	}
-	oldJoinToken := c.voiceJoinToken
-	c.voiceChID = 0
-	c.voiceJoinToken = ""
-	c.voiceJoinCompleted = false
-	c.e2eePubKey = ""
-	c.e2eeSignature = ""
-	return oldJoinToken, true
-}
-
-// setPendingModFlags stashes a moderator-imposed mute/deafen on this client
-// before a server-driven leave (voice_mod_move) deletes the voice_states row
-// those flags live in. Guarded by voiceMu, the same lock
-// clearVoiceStateIfMatch takes for the delete, so the stash can never
-// interleave with it. Paired with takePendingModFlags, which the client's own
-// subsequent voice_join consults when there is no live row left to read the
-// flags back from (currentChID == 0).
-func (c *Client) setPendingModFlags(serverMuted, serverDeafened bool, serverMutedBy *int64) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.pendingModServerMuted = serverMuted
-	c.pendingModServerDeafened = serverDeafened
-	c.pendingModServerMutedBy = serverMutedBy
-}
-
-// takePendingModFlags reads and clears the flags stashed by
-// setPendingModFlags. Take-and-clear so an ordinary later join — one not
-// preceded by a moderator move — is unaffected by a stash nobody consumed.
-func (c *Client) takePendingModFlags() (serverMuted, serverDeafened bool, serverMutedBy *int64) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	serverMuted, serverDeafened, serverMutedBy = c.pendingModServerMuted, c.pendingModServerDeafened, c.pendingModServerMutedBy
-	c.pendingModServerMuted = false
-	c.pendingModServerDeafened = false
-	c.pendingModServerMutedBy = nil
-	return serverMuted, serverDeafened, serverMutedBy
-}
-
-// setE2EEPubKey stores the ECDH public key for voice E2EE key exchange,
-// together with its identity-key signature ("" for legacy announces).
-func (c *Client) setE2EEPubKey(key, signature string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	c.e2eePubKey = key
-	c.e2eeSignature = signature
-}
-
-// getE2EEPubKey returns the stored ECDH public key and its signature.
-func (c *Client) getE2EEPubKey() (string, string) {
-	c.voiceMu.Lock()
-	defer c.voiceMu.Unlock()
-	return c.e2eePubKey, c.e2eeSignature
 }
 
 // sendMsg queues a normal-priority message (chat messages, reactions, channel events).

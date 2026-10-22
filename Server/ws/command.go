@@ -33,7 +33,9 @@ type ChatSendCmd struct {
 	ChannelID       int64
 	Content         string
 	ReplyTo         *int64
-	attachments     []string
+	// ReplyPing is true only when the client sent reply_ping=true on a reply.
+	ReplyPing   bool
+	attachments []string
 }
 
 func (c ChatSendCmd) Type() string          { return MsgTypeChatSend }
@@ -80,31 +82,12 @@ type PresenceUpdateCmd struct {
 	// sends a bare status flip several times an hour and must not wipe the
 	// text the user typed.
 	CustomStatus *string
+	// ExpiresIn is custom_status_expires_in (seconds), nil when absent.
+	ExpiresIn *int64
 }
 
 func (c PresenceUpdateCmd) Type() string  { return MsgTypePresenceUpdate }
 func (c PresenceUpdateCmd) UserID() int64 { return c.userID }
-
-// ChannelFocusCmd represents a channel_focus message.
-type ChannelFocusCmd struct {
-	userID    int64
-	ChannelID int64
-}
-
-func (c ChannelFocusCmd) Type() string  { return MsgTypeChannelFocus }
-func (c ChannelFocusCmd) UserID() int64 { return c.userID }
-
-// MarkReadCmd represents a mark_read message: advance the caller's read state
-// for a channel without making it their focused channel. channel_focus already
-// marks read, but it also rebinds the connection's focused channel, so it is
-// the wrong tool for "mark that other channel read from its context menu".
-type MarkReadCmd struct {
-	userID    int64
-	ChannelID int64
-}
-
-func (c MarkReadCmd) Type() string  { return MsgTypeMarkRead }
-func (c MarkReadCmd) UserID() int64 { return c.userID }
 
 // ReactionAddCmd represents a reaction_add message.
 type ReactionAddCmd struct {
@@ -242,10 +225,24 @@ type VoiceE2EEAnnounceCmd struct {
 	userID    int64
 	PublicKey string
 	Signature string
+	// VideoDecode is the sender's raw video_decode list (WP M-4). Unvalidated
+	// here; handleVoiceE2EEAnnounceV2 runs it through sanitizeVideoDecode.
+	VideoDecode []string
 }
 
 func (c VoiceE2EEAnnounceCmd) Type() string  { return MsgTypeVoiceE2EEAnnounce }
 func (c VoiceE2EEAnnounceCmd) UserID() int64 { return c.userID }
+
+// VoiceWatchCmd represents a voice_watch message: the whole set of users whose
+// screen share the sender watches now. Unvalidated here; handleVoiceWatchV2
+// bounds, filters, dedupes and sorts it.
+type VoiceWatchCmd struct {
+	userID  int64
+	UserIDs []int64
+}
+
+func (c VoiceWatchCmd) Type() string  { return MsgTypeVoiceWatch }
+func (c VoiceWatchCmd) UserID() int64 { return c.userID }
 
 // ChatCommandCmd represents a chat_command (plugin slash command) message.
 type ChatCommandCmd struct {
@@ -351,6 +348,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			ChannelID       json.Number `json:"channel_id"`
 			Content         string      `json:"content"`
 			ReplyTo         *int64      `json:"reply_to"`
+			ReplyPing       *bool       `json:"reply_ping"`
 			Attachments     []string    `json:"attachments"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -385,9 +383,22 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 			ChannelID:       chID,
 			Content:         p.Content,
 			ReplyTo:         p.ReplyTo,
+			ReplyPing:       p.ReplyTo != nil && p.ReplyPing != nil && *p.ReplyPing,
 			attachments:     attachments,
 		}, nil
 	},
+
+	MsgTypeChatForward: parseChatForward,
+	MsgTypePollCreate:  parsePollCreate,
+	MsgTypePollVote:    parsePollVote,
+	MsgTypePollEnd:     parsePollEnd,
+
+	MsgTypeThreadCreate:    parseThreadCreate,
+	MsgTypeThreadUpdate:    parseThreadUpdate,
+	MsgTypeThreadDelete:    parseThreadDelete,
+	MsgTypeThreadFocus:     parseThreadFocus,
+	MsgTypeThreadFollow:    parseThreadFollow,
+	MsgTypeForumPostCreate: parseForumPostCreate,
 
 	MsgTypeChatEdit: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {
 		var p struct {
@@ -436,31 +447,12 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 	},
 
 	MsgTypePresenceUpdate: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		var p struct {
-			Status       string  `json:"status"`
-			CustomStatus *string `json:"custom_status"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("invalid presence_update payload: %w", err)
-		}
-		return PresenceUpdateCmd{userID: userID, Status: p.Status, CustomStatus: p.CustomStatus}, nil
+		return parsePresenceUpdate(userID, raw)
 	},
 
-	MsgTypeChannelFocus: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		chID, err := parseCallChannelID(MsgTypeChannelFocus, raw)
-		if err != nil {
-			return nil, err
-		}
-		return ChannelFocusCmd{userID: userID, ChannelID: chID}, nil
-	},
-
-	MsgTypeMarkRead: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
-		chID, err := parseCallChannelID(MsgTypeMarkRead, raw)
-		if err != nil {
-			return nil, err
-		}
-		return MarkReadCmd{userID: userID, ChannelID: chID}, nil
-	},
+	MsgTypeChannelFocus: parseChannelFocus,
+	MsgTypeMarkRead:     parseMarkRead,
+	MsgTypeMarkUnread:   parseMarkUnread,
 
 	MsgTypeCallRing: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
 		chID, err := parseCallChannelID(MsgTypeCallRing, raw)
@@ -630,13 +622,29 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 
 	MsgTypeVoiceE2EEAnnounce: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
 		var p struct {
-			PublicKey string `json:"public_key"`
-			Signature string `json:"signature"`
+			PublicKey   string          `json:"public_key"`
+			Signature   string          `json:"signature"`
+			VideoDecode json.RawMessage `json:"video_decode"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_e2ee_announce payload: %w", err)
 		}
-		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature}, nil
+		// A wrongly typed list is dropped like an invalid one; it must never cost the key.
+		var videoDecode []string
+		if len(p.VideoDecode) > 0 && json.Unmarshal(p.VideoDecode, &videoDecode) != nil {
+			videoDecode = nil
+		}
+		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature, VideoDecode: videoDecode}, nil
+	},
+
+	MsgTypeVoiceWatch: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
+		var p struct {
+			UserIDs []int64 `json:"user_ids"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("invalid voice_watch payload: %w", err)
+		}
+		return VoiceWatchCmd{userID: userID, UserIDs: p.UserIDs}, nil
 	},
 
 	MsgTypeChatCommand: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {

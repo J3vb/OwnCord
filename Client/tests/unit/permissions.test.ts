@@ -5,11 +5,17 @@ import {
   currentUserPermissions,
   isLegacyAdminRole,
   roleHasPermission,
+  roleHasPermissionIn,
+  permissionsForRoleIn,
+  permissionsForMemberIn,
+  topPositionFor,
   canManageChannels,
   canViewAuditLog,
+  canManageInvites,
+  canModerateMembers,
 } from "../../src/lib/permissions";
 import { Permission } from "../../src/lib/types";
-import { setRoles } from "../../src/stores/channels.store";
+import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 
 // Default role permission values (from SCHEMA.md)
@@ -173,7 +179,7 @@ describe("isLegacyAdminRole", () => {
 // hid the affordance, because the old check asked whether the role was called
 // "owner" or "admin".
 
-describe("canManageChannels / canViewAuditLog", () => {
+describe("canManageChannels / canViewAuditLog / canManageInvites / canModerateMembers", () => {
   function signInAs(role: string): void {
     authStore.setState(() => ({
       token: "tok",
@@ -249,7 +255,11 @@ describe("canManageChannels / canViewAuditLog", () => {
         id: 20,
         name: "",
         color: null,
-        permissions: Permission.MANAGE_CHANNELS | Permission.VIEW_AUDIT_LOG,
+        permissions:
+          Permission.MANAGE_CHANNELS |
+          Permission.VIEW_AUDIT_LOG |
+          Permission.MANAGE_INVITES |
+          Permission.MODERATE_MEMBERS,
       },
     ]);
     authStore.setState(() => ({
@@ -261,5 +271,146 @@ describe("canManageChannels / canViewAuditLog", () => {
     }));
     expect(canManageChannels()).toBe(true);
     expect(canViewAuditLog()).toBe(true);
+    expect(canManageInvites()).toBe(true);
+    expect(canModerateMembers()).toBe(true);
+  });
+
+  it("gates the Invite button on MANAGE_INVITES", () => {
+    setRoles([
+      { id: 11, name: "Recruiter", color: null, permissions: Permission.MANAGE_INVITES },
+      { id: 4, name: "Member", color: null, permissions: MEMBER_PERMS },
+    ]);
+    signInAs("Recruiter");
+    expect(canManageInvites()).toBe(true);
+    signInAs("Member");
+    expect(canManageInvites()).toBe(false);
+  });
+
+  it("gates the Moderation Center on MODERATE_MEMBERS", () => {
+    setRoles([
+      { id: 12, name: "Warden", color: null, permissions: Permission.MODERATE_MEMBERS },
+      { id: 4, name: "Member", color: null, permissions: MEMBER_PERMS },
+    ]);
+    signInAs("Warden");
+    expect(canModerateMembers()).toBe(true);
+    signInAs("Member");
+    expect(canModerateMembers()).toBe(false);
+  });
+});
+
+describe("pure role variants", () => {
+  const ROLES = [
+    { id: 1, name: "Owner", color: null, permissions: OWNER_PERMS },
+    { id: 3, name: "Moderator", color: null, permissions: MODERATOR_PERMS },
+    { id: 4, name: "Muted", color: null, permissions: 0 },
+  ];
+  const PERMS = [
+    Permission.MANAGE_CHANNELS,
+    Permission.MANAGE_MESSAGES,
+    Permission.MANAGE_INVITES,
+    Permission.KICK_MEMBERS,
+    Permission.MANAGE_SERVER,
+  ];
+
+  it("roleHasPermissionIn agrees with roleHasPermission over the store's roles", () => {
+    setRoles(ROLES);
+    // "admin" is absent from the list: the legacy fallback must agree too.
+    for (const role of ["owner", "Moderator", "muted", "admin", "member", ""]) {
+      for (const perm of PERMS) {
+        expect(
+          roleHasPermissionIn(channelsStore.getState().roles, role, perm),
+          `${role}/${perm}`,
+        ).toBe(roleHasPermission(role, perm));
+      }
+    }
+  });
+
+  it("permissionsForRoleIn matches case-insensitively", () => {
+    expect(permissionsForRoleIn(ROLES, "mOdErAtOr")).toBe(MODERATOR_PERMS);
+    expect(permissionsForRoleIn(ROLES, "MUTED")).toBe(0);
+    expect(permissionsForRoleIn(ROLES, "nobody")).toBeNull();
+    expect(permissionsForRoleIn([], "owner")).toBeNull();
+  });
+});
+
+// ─── Several roles per member (WP 6.3d) ──────────────────────────────────────
+
+describe("permissionsForMemberIn", () => {
+  const ROLES = [
+    { id: 1, name: "Owner", color: null, permissions: Permission.MANAGE_SERVER, position: 30 },
+    { id: 2, name: "Helper", color: null, permissions: Permission.KICK_MEMBERS, position: 20 },
+    { id: 3, name: "Member", color: null, permissions: MEMBER_PERMS, position: 10 },
+  ];
+
+  it("is the OR of held roles", () => {
+    const got = permissionsForMemberIn(ROLES, [2, 3], "helper");
+    expect(got).toBe(Permission.KICK_MEMBERS | MEMBER_PERMS);
+    expect(hasPermission(got ?? 0, Permission.KICK_MEMBERS)).toBe(true);
+    expect(hasPermission(got ?? 0, Permission.SEND_MESSAGES)).toBe(true);
+    expect(hasPermission(got ?? 0, Permission.MANAGE_SERVER)).toBe(false);
+  });
+
+  it("falls back to role name without role_ids", () => {
+    expect(permissionsForMemberIn(ROLES, undefined, "helper")).toBe(Permission.KICK_MEMBERS);
+    expect(permissionsForMemberIn(ROLES, [], "member")).toBe(MEMBER_PERMS);
+    // ids the cached roster does not know either: the name still answers
+    expect(permissionsForMemberIn(ROLES, [99], "helper")).toBe(Permission.KICK_MEMBERS);
+    expect(permissionsForMemberIn(ROLES, undefined, "ghost")).toBeNull();
+  });
+
+  it("ignores a held id the roster lacks while others resolve", () => {
+    expect(permissionsForMemberIn(ROLES, [99, 2], "helper")).toBe(Permission.KICK_MEMBERS);
+  });
+});
+
+describe("topPositionFor", () => {
+  const ROLES = [
+    { id: 1, name: "Owner", color: null, permissions: 0, position: 30 },
+    { id: 2, name: "Helper", color: null, permissions: 0, position: 20 },
+    { id: 3, name: "Member", color: null, permissions: 0, position: 10 },
+  ];
+
+  it("takes the highest position among held ids, not array order", () => {
+    expect(topPositionFor(ROLES, [3, 2], "member")).toBe(20);
+    expect(topPositionFor(ROLES, [2, 3], "member")).toBe(20);
+  });
+
+  it("skips held ids the roster lacks", () => {
+    expect(topPositionFor(ROLES, [99, 2], "member")).toBe(20);
+    expect(topPositionFor(ROLES, [2, 99], "member")).toBe(20);
+  });
+
+  it("falls back to the role name when no held id resolves", () => {
+    expect(topPositionFor(ROLES, [99], "member")).toBe(10);
+    expect(topPositionFor(ROLES, [], "helper")).toBe(20);
+  });
+
+  it("falls back to the role name, then to undefined", () => {
+    expect(topPositionFor(ROLES, undefined, "member")).toBe(10);
+    expect(topPositionFor(ROLES, undefined, "ghost")).toBeUndefined();
+  });
+});
+
+describe("current user gates over held roles", () => {
+  it("grants a gate that only a lower held role provides", () => {
+    setRoles([
+      { id: 2, name: "Helper", color: null, permissions: 0, position: 20 },
+      {
+        id: 3,
+        name: "Curator",
+        color: null,
+        permissions: Permission.MANAGE_CHANNELS,
+        position: 10,
+      },
+    ]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 1, username: "A", avatar: null, role: "helper", role_ids: [2, 3] },
+      serverName: "T",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    expect(canManageChannels()).toBe(true);
+    expect(currentUserPermissions()).toBe(Permission.MANAGE_CHANNELS);
   });
 });

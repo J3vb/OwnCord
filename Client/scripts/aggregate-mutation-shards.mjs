@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Sums the nightly mutation shards into the one full-surface score the B7-8
-// baseline records (docs/plans/b7-8-mutation-baseline-2026-09-20.md). Averaging
+// baseline records (docs/archive/plans/b7-8-mutation-baseline-2026-09-20.md). Averaging
 // shard percentages would be wrong: shards differ in size and errored mutants
 // leave the denominator.
 //
@@ -50,14 +50,20 @@ export function jobSummary({ pct, configured, files, shards, scored, totals, rev
 function main() {
   const clientDir = fileURLToPath(new URL("..", import.meta.url));
   const reportsDir = join(clientDir, "reports/mutation");
-  return import(join(clientDir, "stryker.shard.config.mjs")).then(({ shards }) => {
-    const names = Object.keys(shards);
+  return import(join(clientDir, "stryker.shard.config.mjs")).then((config) => {
     const artifacts = process.argv[2];
-    const paths = names.map((n) =>
+    const reportPath = (n) =>
       artifacts
         ? join(artifacts, `mutation-report-${n}`, "mutation.json")
-        : join(reportsDir, n, "mutation.json"),
-    );
+        : join(reportsDir, n, "mutation.json");
+    // main's scheduled workflow still runs the six pre-split shards until a
+    // release carries the new matrix there; score whichever layout reported.
+    const legacyRan =
+      Object.keys(config.legacy).some((n) => existsSync(reportPath(n))) &&
+      !Object.keys(config.shards).some((n) => existsSync(reportPath(n)));
+    const shards = legacyRan ? config.legacy : config.shards;
+    const names = Object.keys(shards);
+    const paths = names.map(reportPath);
     const missing = names.filter((_, i) => !existsSync(paths[i]));
     if (missing.length) {
       console.error(`missing mutation.json for shard(s): ${missing.join(", ")}`);
@@ -98,5 +104,5 @@ function main() {
 }
 
 // The shard config throws without STRYKER_SHARD; any valid name satisfies it.
-process.env.STRYKER_SHARD ||= "livekit";
+process.env.STRYKER_SHARD ||= "livekit-1";
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) await main();

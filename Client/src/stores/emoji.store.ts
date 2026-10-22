@@ -14,6 +14,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 
 /** One custom emoji as the server describes it. */
 export interface CustomEmoji {
@@ -42,6 +43,9 @@ export interface EmojiState {
    * broadcast.
    */
   readonly rev?: number;
+  /** Whether the server's set has arrived since the last clear. Optional,
+   *  absent reads as not loaded. */
+  readonly loaded?: boolean;
 }
 
 const INITIAL: EmojiState = {
@@ -89,7 +93,7 @@ export function setCustomEmoji(list: readonly CustomEmoji[], rev?: number): void
   }
   emojiStore.setState((prev) => {
     if (rev !== undefined && rev !== (prev.rev ?? 0)) return prev;
-    return { emoji: next, byShortcode, rev: (prev.rev ?? 0) + 1 };
+    return { emoji: next, byShortcode, rev: (prev.rev ?? 0) + 1, loaded: true };
   });
 }
 
@@ -104,6 +108,7 @@ export function setCustomEmoji(list: readonly CustomEmoji[], rev?: number): void
 export function clearCustomEmoji(): void {
   emojiStore.setState((prev) => ({ ...INITIAL, rev: (prev.rev ?? 0) + 1 }));
 }
+void registerSessionReset("emoji:store", clearCustomEmoji); // app-lifetime
 
 /**
  * The emoji owning `shortcode`, or null. Accepts the bare name or the `:name:`
@@ -119,6 +124,12 @@ export function resolveEmoji(shortcode: string): CustomEmoji | null {
 }
 
 /** The whole set, for the picker and the composer autocomplete. */
+/** Whether this server's custom set is known, so a shortcode that does not
+ *  resolve really is not one of its emoji. */
+export function customEmojiLoaded(): boolean {
+  return emojiStore.getState().loaded === true;
+}
+
 export function listCustomEmoji(): readonly CustomEmoji[] {
   return emojiStore.getState().emoji;
 }

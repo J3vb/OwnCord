@@ -267,7 +267,7 @@ export async function exportSupportBundle(
   const path = await desktop.fileSaver.pickSaveLocation(`owncord-support-${stamp}.zip`);
   if (path === null) return false;
   const [appVersion, logs, nativeLogs, snapshot] = await Promise.all([
-    desktop.appMetadata.getVersion(),
+    desktop.appMetadata.getVersion().catch(() => "unknown"),
     desktop.logFiles.readAll(),
     desktop.logFiles.readNative(),
     desktop.settings.load(),

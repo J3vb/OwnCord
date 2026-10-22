@@ -129,7 +129,10 @@ SET registration_status = 'denied',
     avatar = NULL,
     display_name = NULL,
     about = NULL,
+    banner_id = NULL,
+    banner_color = NULL,
     custom_status = NULL,
+    custom_status_expires_at = NULL,
     status = 'offline'
 WHERE id = ? AND registration_status = 'pending'
 `
@@ -159,7 +162,8 @@ func (q *Queries) GetMemberGeneration(ctx context.Context) (int64, error) {
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status, registration_status
+       display_name, about, custom_status, registration_status, custom_status_expires_at,
+       banner_id, banner_color
 FROM users WHERE id = ?
 `
 
@@ -184,6 +188,9 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.About,
 		&i.CustomStatus,
 		&i.RegistrationStatus,
+		&i.CustomStatusExpiresAt,
+		&i.BannerID,
+		&i.BannerColor,
 	)
 	return i, err
 }
@@ -191,7 +198,8 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 const getUserByUsername = `-- name: GetUserByUsername :one
 SELECT id, username, password, avatar, role_id, totp_secret, status,
        created_at, last_seen, banned, ban_reason, ban_expires, identity_public_key,
-       display_name, about, custom_status, registration_status
+       display_name, about, custom_status, registration_status, custom_status_expires_at,
+       banner_id, banner_color
 FROM users WHERE username = ? COLLATE NOCASE
 `
 
@@ -216,13 +224,17 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.About,
 		&i.CustomStatus,
 		&i.RegistrationStatus,
+		&i.CustomStatusExpiresAt,
+		&i.BannerID,
+		&i.BannerColor,
 	)
 	return i, err
 }
 
 const listMembers = `-- name: ListMembers :many
 SELECT u.id, u.username, u.avatar, u.status, LOWER(r.name), u.identity_public_key,
-       u.display_name, u.custom_status
+       u.display_name, u.about, CAST(COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', u.created_at), u.created_at) AS TEXT) AS created_at,
+       u.banner_id, u.banner_color, u.custom_status
 FROM users u
 JOIN roles r ON u.role_id = r.id
 WHERE (u.banned = 0 OR (u.ban_expires IS NOT NULL AND replace(u.ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))
@@ -238,6 +250,10 @@ type ListMembersRow struct {
 	Lower             string  `json:"lower"`
 	IdentityPublicKey *string `json:"identityPublicKey"`
 	DisplayName       *string `json:"displayName"`
+	About             *string `json:"about"`
+	CreatedAt         string  `json:"createdAt"`
+	BannerID          *string `json:"bannerId"`
+	BannerColor       *string `json:"bannerColor"`
 	CustomStatus      *string `json:"customStatus"`
 }
 
@@ -263,6 +279,10 @@ func (q *Queries) ListMembers(ctx context.Context) ([]ListMembersRow, error) {
 			&i.Lower,
 			&i.IdentityPublicKey,
 			&i.DisplayName,
+			&i.About,
+			&i.CreatedAt,
+			&i.BannerID,
+			&i.BannerColor,
 			&i.CustomStatus,
 		); err != nil {
 			return nil, err

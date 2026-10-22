@@ -1,5 +1,5 @@
 /**
- * MessageInput component — textarea with send, reply bar, and edit mode.
+ * MessageInput component — textarea with send and reply bar.
  * Step 5.42 of the Tauri v2 migration.
  */
 
@@ -9,11 +9,11 @@ import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/do
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
-import { createEmojiPicker } from "@components/EmojiPicker";
-import { createGifPicker } from "@components/GifPicker";
+import { createLazyScreen } from "@components/lazyScreen";
 import {
   createMentionAutocomplete,
   type MentionAutocompleteComponent,
+  type MentionSuggestion,
 } from "@components/MentionAutocomplete";
 import {
   createEmojiAutocomplete,
@@ -21,8 +21,33 @@ import {
   type EmojiAutocompleteComponent,
 } from "@components/EmojiAutocomplete";
 import { listCustomEmoji } from "@stores/emoji.store";
+import {
+  createChannelAutocomplete,
+  type ChannelAutocompleteComponent,
+} from "@components/ChannelAutocomplete";
+import { claimComposer, focusComposer } from "../features/messaging/activeComposer";
 import { emojiCatalog, loadEmojiCatalog } from "../features/messaging/emojiCatalog";
+import {
+  createSlashAutocomplete,
+  type SlashAutocompleteComponent,
+} from "@components/SlashAutocomplete";
+import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
+import { applyPickedMentions, type PickedMention } from "@lib/pickedMentions";
+import { idMentionsEnabled } from "@lib/serverCapabilities";
+import { applySlashCommand } from "../features/messaging/slashCommands";
+import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
+import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
+import { ATTACHMENT_TTL_MS } from "../features/messaging/attachmentTtl";
+import { isSpoilerFilename, toggleSpoilerFilename } from "../features/messaging/spoilerAttachment";
+
+// The pickers load on their first open, so their code stays out of the
+// main-page chunk.
+const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("@components/EmojiPicker"));
+const gifPickerScreen = createLazyScreen("gif-picker", () => import("@components/GifPicker"));
+
+export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
+import { pollsEnabled } from "@lib/serverCapabilities";
 import { messagingText } from "../i18n/messaging";
 import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
 
@@ -39,6 +64,13 @@ export interface MessageInputOptions {
     content: string,
     replyTo: number | null,
     attachments: readonly string[],
+    files: readonly SentAttachment[],
+    /** Whether a reply mentions the author it answers (3A-12). False with no reply. */
+    replyPing: boolean,
+    /** Set when an upload was still running (3A-9): every chip in chip order,
+     *  the running ones with their handle. `attachments`/`files` then carry
+     *  only the settled ones, and the host posts the message once all land. */
+    queued?: readonly QueuedAttachment[],
   ) => void;
   readonly onUploadFile?: (
     file: File,
@@ -49,9 +81,49 @@ export interface MessageInputOptions {
    *  once. Best effort: a rejection is ignored. */
   readonly onDiscardUpload?: (id: string) => Promise<void>;
   readonly onTyping: () => void;
-  readonly onEditMessage: (messageId: number, content: string) => void;
+  /**
+   * Opens the poll dialog (WP 6.9b). Omit to leave the Poll button out; it is
+   * also left out on a server that does not advertise polls.
+   */
+  readonly onCreatePoll?: () => void;
+  /** The draft's text or reply changed; read it back with peekDraft(). */
+  readonly onDraftChange?: () => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
   readonly disabledReason?: string | null;
+  /** Replaces the "Message #channel" placeholder (a text-only thread composer). */
+  readonly placeholder?: string;
+  /** Leave the "+" attach button out (a text-only thread composer). */
+  readonly noAttach?: boolean;
+}
+
+/** A file a send carried, kept so one the server did not attach can go back
+ *  into the composer (2A-3). `file` is absent on a chip restored from an older
+ *  draft, so that chip cannot re-upload. */
+export interface SentAttachment {
+  readonly id: string;
+  readonly filename: string;
+  readonly file?: File;
+}
+
+/** One chip of a send queued behind its uploads (3A-9). A settled chip has
+ *  `id` and `uploadedAt`; a running one has `upload`, whose handle the host
+ *  takes over (its `onProgress` slot is free). `file` lets the host re-upload. */
+export interface QueuedAttachment {
+  readonly filename: string;
+  readonly file?: File;
+  readonly id?: string;
+  readonly uploadedAt?: number;
+  readonly upload?: DraftUpload;
+}
+
+/** The message a draft replies to. `username` is the name the bar shows (the
+ *  display name when there is one); `ping` is the bar's @ON/@OFF toggle,
+ *  absent meaning ON; `self` hides the toggle on a reply to your own message. */
+export interface ReplyTarget {
+  readonly messageId: number;
+  readonly username: string;
+  readonly ping?: boolean;
+  readonly self?: boolean;
 }
 
 /** A channel's unsent composer state, captured before a channel switch and
@@ -59,7 +131,9 @@ export interface MessageInputOptions {
  *  keep their server id; an upload still in flight rides along in `uploads`. */
 export interface ComposerDraft {
   readonly content: string;
-  readonly replyTo: { readonly messageId: number; readonly username: string } | null;
+  readonly replyTo: ReplyTarget | null;
+  /** Users and roles picked from the mention popup (WP 6.3e). */
+  readonly picks?: readonly PickedMention[];
   readonly attachments: readonly {
     readonly id: string;
     readonly filename: string;
@@ -67,6 +141,8 @@ export interface ComposerDraft {
     readonly uploadedAt: number;
     /** The picked file, so a restored chip past its age can re-upload. */
     readonly file?: File;
+    /** A file a send did not carry: it comes back in its error state. */
+    readonly unsent?: boolean;
   }[];
   /** Uploads still running when the composer was torn down. They keep going
    *  and the composer that restores the draft shows them again. */
@@ -93,15 +169,32 @@ export interface DraftUpload {
 }
 
 export type MessageInputComponent = MountableComponent & {
-  setReplyTo(messageId: number, username: string): void;
+  setReplyTo(messageId: number, username: string, opts?: Pick<ReplyTarget, "ping" | "self">): void;
   clearReply(): void;
-  startEdit(messageId: number, content: string): void;
-  cancelEdit(): void;
+  /** Put the caret back in the composer (the inline editor closed). */
+  focus(): void;
+  /**
+   * Insert `@username ` at the caret (member menu's Mention). Returns false,
+   * and leaves the draft alone, when the composer is not mounted, disabled or
+   * read-only.
+   */
+  insertMention(username: string): boolean;
   /** Capture the current unsent state so a channel switch can carry it. */
   getDraft(): ComposerDraft;
   /** Restore a previously captured draft into this (fresh) composer. */
   restoreDraft(draft: ComposerDraft): void;
-  /** True when the composer holds no text, reply, edit or attachment. */
+  /** The draft's text and reply, with none of getDraft()'s upload hand-off. */
+  peekDraft(): { readonly content: string; readonly replyTo: ReplyTarget | null };
+  /**
+   * Put back files a send did not carry, as chips in their error state, and
+   * the send's reply target when the composer has no reply of its own.
+   */
+  restoreUnsent(
+    files: readonly SentAttachment[],
+    reason: "skipped" | "unavailable",
+    replyTo?: ComposerDraft["replyTo"],
+  ): void;
+  /** True when the composer holds no text, reply or attachment. */
   isIdle(): boolean;
   /**
    * Disable the composer with a visible reason (permission / connection), or
@@ -116,100 +209,21 @@ export type MessageInputComponent = MountableComponent & {
    */
   setSendGate(reason: string | null): void;
   /**
+   * Show a persistent note under the composer (slow mode is on), or hide it
+   * with null. Unlike setSendGate it never refuses a send: it only tells the
+   * user about the limit before the first message.
+   */
+  setSlowModeNote(text: string | null): void;
+  /**
    * Open the attachment file picker, as the "+" button does. Backs the
-   * Ctrl+U shortcut. No-op while the composer is disabled or when the host
+   * Ctrl+Shift+U shortcut. No-op while the composer is disabled or when the host
    * didn't wire an upload handler.
    */
   openFilePicker(): void;
+  /** Open or close the emoji or GIF picker, as its button does (Ctrl+E,
+   *  Ctrl+G). No-op while that button is disabled. */
+  togglePicker(kind: "emoji" | "gif"): void;
 };
-
-/** Ctrl/Cmd shortcut → markdown marker it wraps the selection in. */
-const FORMAT_MARKERS: Readonly<Record<string, string>> = {
-  b: "**",
-  i: "*",
-  u: "__",
-};
-
-export interface WrapResult {
-  readonly value: string;
-  readonly selectionStart: number;
-  readonly selectionEnd: number;
-}
-
-/**
- * Wrap (or unwrap) `[start, end)` of `value` in `marker`, returning the new
- * value and where the selection should land. With an empty selection the
- * markers are inserted around the caret so typing continues inside them.
- *
- * Pure so the behaviour can be tested without a DOM selection.
- */
-export function wrapWithMarker(
-  value: string,
-  start: number,
-  end: number,
-  marker: string,
-): WrapResult {
-  const selected = value.slice(start, end);
-  const len = marker.length;
-
-  // Already wrapped — pressing the shortcut again takes the markers back off.
-  // The interior must not itself contain the marker: otherwise a selection
-  // that merely starts and ends with it (e.g. multiple already-wrapped spans,
-  // or a longer marker like "**" matching the outer edge of "*x*") would be
-  // mistaken for a single wrapped span and have its interior markers stripped.
-  if (
-    selected.length > 2 * len &&
-    selected.startsWith(marker) &&
-    selected.endsWith(marker) &&
-    !selected.slice(len, selected.length - len).includes(marker)
-  ) {
-    const inner = selected.slice(len, selected.length - len);
-    return {
-      value: value.slice(0, start) + inner + value.slice(end),
-      selectionStart: start,
-      selectionEnd: start + inner.length,
-    };
-  }
-  if (value.slice(start - len, start) === marker && value.slice(end, end + len) === marker) {
-    // The characters immediately outside the selection match this marker,
-    // but matching alone doesn't prove they *are* this marker rather than
-    // the edge of a longer run of the same repeated character — e.g. the
-    // single "*" bordering a double-clicked word inside "**bold**" matches
-    // the italic marker "*", but it's really one half of a "**" bold pair.
-    // Compare the full contiguous run of the marker's character against
-    // exactly one marker-width: a run that's a whole marker-width *longer*
-    // means the true neighbour is a bigger marker, so unwrapping here would
-    // tear it apart. Fall through to wrapping (adding this marker as an
-    // extra layer) instead.
-    const markerChar = marker[0];
-    const runLength = (index: number, step: -1 | 1): number => {
-      let i = index;
-      let count = 0;
-      while (value[i] === markerChar) {
-        count++;
-        i += step;
-      }
-      return count;
-    };
-    const leftRun = runLength(start - 1, -1);
-    const rightRun = runLength(end, 1);
-    const leftIsLongerMarker = leftRun - len === len;
-    const rightIsLongerMarker = rightRun - len === len;
-    if (!leftIsLongerMarker && !rightIsLongerMarker) {
-      return {
-        value: value.slice(0, start - len) + selected + value.slice(end + len),
-        selectionStart: start - len,
-        selectionEnd: start - len + selected.length,
-      };
-    }
-  }
-
-  return {
-    value: value.slice(0, start) + marker + selected + marker + value.slice(end),
-    selectionStart: start + len,
-    selectionEnd: start + len + selected.length,
-  };
-}
 
 const TYPING_THROTTLE_MS = 3_000;
 const MAX_TEXTAREA_HEIGHT = 200;
@@ -245,17 +259,12 @@ function refusedExtension(name: string): string | null {
 // the queue client-side so we never upload an attachment doomed to be
 // orphaned by a send that can never succeed.
 const MAX_ATTACHMENTS = 10;
-// Server/service/message.go's maxMessageLen refuses content past 4000 code
-// points (utf8.RuneCountInString). Mirror it here so an over-long send fails
-// visibly instead of producing an optimistic row whose retry fails identically.
-// Counted in code points, not UTF-16 units -- see the guard in handleSend.
-const MAX_MESSAGE_LEN = 4000;
-// The server's maintenance sweep deletes unlinked attachments about an hour
-// after upload (Server/internal/app/maintenance.go), and a send silently skips
-// an id it no longer knows. A staged chip past this age (a margin under the
-// sweep) is never sent: it re-uploads from its file, or is marked expired when
-// the file is gone (a restored draft), and Send refuses until it is fresh.
-const ATTACHMENT_TTL_MS = 50 * 60 * 1000;
+// The counter shows once this few characters are left, as Discord's does.
+const COUNTER_FROM_REMAINING = 200;
+/** Where a file dragged in from the OS is accepted. */
+const DROP_SLOTS = ".messages-slot, .typing-slot, .input-slot";
+/** The file a too-long paste becomes, the name Discord gives it. */
+const LONG_PASTE_FILENAME = "message.txt"; // i18n-exempt: a file name, not UI text
 /** Makes each composer's refusal-line id unique for aria-describedby. */
 let nextComposerId = 0;
 
@@ -290,28 +299,41 @@ function appendFileLabel(item: HTMLDivElement, filename: string): void {
   appendChildren(item, icon, nameEl);
 }
 
+/** Rename a chip's visible labels after its file was renamed. */
+function relabelChip(item: HTMLDivElement, filename: string): void {
+  const nameEl = item.querySelector(".attachment-preview-name");
+  if (nameEl !== null) nameEl.textContent = filename;
+  const img = item.querySelector("img");
+  if (img !== null) img.alt = filename;
+  item
+    .querySelector(".attachment-preview-remove")
+    ?.setAttribute("aria-label", messagingText("attach.remove", { filename }));
+}
+
+/** The spoiler toggle's pressed state for the file's current name. Its label
+ *  is fixed: the state is carried by aria-pressed alone. */
+function paintSpoilerButton(btn: HTMLButtonElement, filename: string): void {
+  const marked = isSpoilerFilename(filename);
+  btn.setAttribute("aria-pressed", String(marked));
+  btn.classList.toggle("active", marked);
+}
+
 export function createMessageInput(options: MessageInputOptions): MessageInputComponent {
   const disposable = new Disposable();
   const signal = disposable.signal;
   let root: HTMLDivElement | null = null;
   let state = {
-    replyTo: null as { messageId: number; username: string } | null,
-    editing: null as { messageId: number } | null,
+    replyTo: null as ReplyTarget | null,
   };
-  /** The ordinary draft (text + reply) displaced by an edit, so cancelling or
-   *  saving the edit gives the user back what they were typing (P1-08). Staged
-   *  attachments are untouched by an edit and read live from the composer. */
-  let preEditDraft: {
-    text: string;
-    replyTo: { messageId: number; username: string } | null;
-  } | null = null;
   let lastTypingTime = 0;
   let lastSendTime = 0;
 
   let textarea: HTMLTextAreaElement | null = null;
+  /** Releases this composer's claim on the member menu's Mention target. */
+  let releaseComposer: (() => void) | null = null;
   let replyBar: HTMLDivElement | null = null;
   let replyText: HTMLSpanElement | null = null;
-  let editBar: HTMLDivElement | null = null;
+  let replyPingBtn: HTMLButtonElement | null = null;
   let disabledReason: string | null = options.disabledReason ?? null;
   /** Slow-mode-style gate: refuses the send without freezing the composer. */
   let sendGateReason: string | null = null;
@@ -323,21 +345,37 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    *  sends rather than vanishing after a few seconds (A11Y-05), so it is one
    *  reused node, not a fresh one per call. */
   let uploadErrorEl: HTMLDivElement | null = null;
+  let slowModeNote: string | null = null;
+  let slowModeNoteEl: HTMLDivElement | null = null;
+  let charCounter: HTMLSpanElement | null = null;
   const uploadErrorId = `composer-refusal-${++nextComposerId}`;
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   let openPicker: (() => void) | null = null;
+  /** Set by mount(); backs togglePicker(). */
+  let togglePickerOf: ((kind: "emoji" | "gif") => void) | null = null;
   let mentionPopup: MentionAutocompleteComponent | null = null;
+  /** Users and roles picked from the popup for this draft (WP 6.3e), by the
+   *  text now in the textarea. Send turns the spans still intact into id
+   *  tokens, on a server that resolves them; an edited span is plain text. */
+  let pickedMentions: PickedMention[] = [];
+  /** The popup row just chosen; insertMention reads it as it inserts the text. */
+  let pendingPick: MentionSuggestion | null = null;
   /** Index of the "@" the open popup is completing; -1 when closed. */
   let mentionStart = -1;
   let emojiPopup: EmojiAutocompleteComponent | null = null;
   /** Index of the ":" the open emoji popup is completing; -1 when closed. */
   let emojiStart = -1;
+  let channelPopup: ChannelAutocompleteComponent | null = null;
+  /** Index of the "#" the open channel popup is completing; -1 when closed. */
+  let channelStart = -1;
+  /** Open while the whole draft is "/" plus letters (built-in slash commands). */
+  let slashPopup: SlashAutocompleteComponent | null = null;
 
   /** Pending attachment IDs to send with the next message. `upload` is set
-   *  exactly while the upload is in flight, which blocks Send (as does a chip
-   *  past ATTACHMENT_TTL_MS, see refreshStale): destroying its owner cancels
-   *  that upload when the user removes the preview, and it is detached once
-   *  the upload succeeds. A `Disposable` rather than a raw AbortController
+   *  exactly while the upload is in flight: Send then queues the message behind
+   *  it (3A-9), while a chip past ATTACHMENT_TTL_MS still blocks Send, see
+   *  refreshStale. Destroying its owner cancels that upload when the user
+   *  removes the preview, and it is detached once the upload succeeds. A `Disposable` rather than a raw AbortController
    *  keeps the upload token in the lifecycle primitives, matching
    *  MessageList's per-row owner. */
   const pendingAttachments: {
@@ -351,11 +389,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     file?: File;
     /** Past ATTACHMENT_TTL_MS with no file to re-upload from. */
     expired?: boolean;
+    /** Put back after a send did not carry it; cleared by a fresh upload. */
+    unsent?: boolean;
   }[] = [];
   /** Uploads getDraft() handed to the draft; destroy() leaves them running. */
   const handedOff = new Set<DraftUpload>();
   /** References to picker close functions, set by mount() for destroy() to call. */
   let cleanupPickers: (() => void) | null = null;
+  /** Pending animation frame for a coalesced textarea resize, or null. */
+  let resizeFrame: number | null = null;
   /** Timer IDs for cleanup on destroy. */
   const activeTimers: Set<ReturnType<typeof setTimeout>> = new Set();
 
@@ -379,6 +421,20 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     mentionPopup.destroy();
     mentionPopup = null;
     mentionStart = -1;
+    pendingPick = null;
+  }
+
+  /** Remember that the text `@token` stands for the picked user or role. */
+  function recordPick(token: string): void {
+    const pick = pendingPick;
+    pendingPick = null;
+    if (pick === null || pick.token !== token || !idMentionsEnabled()) return;
+    const id = pick.kind === "role" ? pick.roleId : pick.userId;
+    if (id === null) return;
+    const picked = { text: `@${token}`, token: pick.kind === "role" ? `<@&${id}>` : `<@${id}>` };
+    if (!pickedMentions.some((p) => p.text === picked.text && p.token === picked.token)) {
+      pickedMentions.push(picked);
+    }
   }
 
   /** Replace the token under the caret with "@token ". */
@@ -398,6 +454,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const after = textarea.value.slice(caret);
     const inserted = `@${token} `;
     textarea.value = before + inserted + after;
+    recordPick(token);
     const pos = before.length + inserted.length;
     textarea.selectionStart = pos;
     textarea.selectionEnd = pos;
@@ -451,6 +508,118 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     closeEmojiPopup();
     autoResize();
     textarea.focus();
+  }
+
+  /**
+   * The `#token` immediately before the caret, or null. It opens only after
+   * whitespace or at the start, so "C#" and "issue#12" stay text; a heading's
+   * "# " closes it at the space.
+   */
+  function activeChannelToken(): { query: string; start: number } | null {
+    if (textarea === null) return null;
+    const caret = textarea.selectionStart;
+    const before = textarea.value.slice(0, caret);
+    const match = /(?:^|\s)#([\p{L}\p{N}_-]{0,64})$/u.exec(before);
+    if (match === null) return null;
+    const query = match[1] ?? "";
+    return { query, start: caret - query.length - 1 };
+  }
+
+  function closeChannelPopup(): void {
+    if (channelPopup === null) return;
+    channelPopup.destroy();
+    channelPopup = null;
+    channelStart = -1;
+  }
+
+  /** Replace the `#token` under the caret with "#name ". */
+  function insertChannel(name: string): void {
+    // Same staleness guard as insertMention.
+    const active = activeChannelToken();
+    if (textarea === null || channelStart < 0 || active === null || active.start !== channelStart) {
+      closeChannelPopup();
+      return;
+    }
+    const caret = textarea.selectionStart;
+    const before = textarea.value.slice(0, channelStart);
+    const after = textarea.value.slice(caret);
+    const inserted = `#${name} `;
+    textarea.value = before + inserted + after;
+    const pos = before.length + inserted.length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    closeChannelPopup();
+    autoResize();
+    textarea.focus();
+  }
+
+  function closeSlashPopup(): void {
+    if (slashPopup === null) return;
+    slashPopup.destroy();
+    slashPopup = null;
+  }
+
+  /** The letters after a "/" when the draft is nothing but "/word", else null. */
+  function activeSlashQuery(): string | null {
+    if (textarea === null) return null;
+    const match = /^\/([A-Za-z]*)$/.exec(textarea.value);
+    return match === null ? null : (match[1] ?? "");
+  }
+
+  /** Replace the "/word" draft with "/name ". */
+  function insertSlashCommand(name: string): void {
+    if (textarea === null || activeSlashQuery() === null) {
+      closeSlashPopup();
+      return;
+    }
+    const inserted = `/${name} `;
+    textarea.value = inserted;
+    textarea.selectionStart = inserted.length;
+    textarea.selectionEnd = inserted.length;
+    closeSlashPopup();
+    autoResize();
+    textarea.focus();
+  }
+
+  /** Open, refilter, or close the slash-command popup for the current draft. */
+  function syncSlashPopup(): void {
+    const query = disabledReason === null ? activeSlashQuery() : null;
+    if (query === null) {
+      closeSlashPopup();
+      return;
+    }
+    if (slashPopup === null) {
+      slashPopup = createSlashAutocomplete({
+        onSelect: insertSlashCommand,
+        onClose: closeSlashPopup,
+        comboboxInput: textarea ?? undefined,
+      });
+      root?.appendChild(slashPopup.element);
+    }
+    if (!slashPopup.setQuery(query)) {
+      closeSlashPopup();
+    }
+  }
+
+  /** Open, refilter, or close the channel popup for whatever is under the caret. */
+  function syncChannelPopup(): void {
+    const active = disabledReason === null ? activeChannelToken() : null;
+    if (active === null) {
+      closeChannelPopup();
+      return;
+    }
+    if (channelPopup === null) {
+      channelPopup = createChannelAutocomplete({
+        onSelect: insertChannel,
+        onClose: closeChannelPopup,
+        comboboxInput: textarea ?? undefined,
+      });
+      root?.appendChild(channelPopup.element);
+    }
+    channelStart = active.start;
+    if (!channelPopup.setQuery(active.query)) {
+      closeChannelPopup();
+    }
   }
 
   /** Open, refilter, or close the emoji popup for whatever is under the caret. */
@@ -513,6 +682,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (mentionPopup === null) {
       mentionPopup = createMentionAutocomplete({
         onSelect: insertMention,
+        onPick: (suggestion) => {
+          pendingPick = suggestion;
+        },
         onClose: closeMentionPopup,
         channelId: options.channelId,
         // The popup manages combobox/aria-activedescendant state on the
@@ -533,34 +705,107 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
    * textarea would race for the arrow keys.
    */
   function syncAutocomplete(): void {
+    // A "/word" draft has no "@", "#" or ":" token, so the slash popup never
+    // competes with the others; it only needs to leave them closed.
+    syncSlashPopup();
+    if (slashPopup !== null) {
+      closeMentionPopup();
+      closeChannelPopup();
+      closeEmojiPopup();
+      return;
+    }
     syncMentionPopup();
     if (mentionPopup !== null) {
+      closeChannelPopup();
+      closeEmojiPopup();
+      return;
+    }
+    syncChannelPopup();
+    if (channelPopup !== null) {
       closeEmojiPopup();
       return;
     }
     syncEmojiPopup();
   }
 
-  function showReplyBar(username: string): void {
-    if (replyBar === null || replyText === null) return;
-    setText(replyText, messagingText("reply.replyingTo", { username }));
+  function showReplyBar(): void {
+    const reply = state.replyTo;
+    if (replyBar === null || replyText === null || reply === null) return;
+    setText(replyText, messagingText("reply.replyingTo", { username: reply.username }));
+    if (replyPingBtn !== null) {
+      const on = reply.ping !== false;
+      replyPingBtn.hidden = reply.self === true;
+      replyPingBtn.classList.toggle("off", !on);
+      replyPingBtn.setAttribute("aria-pressed", String(on));
+      setText(replyPingBtn, messagingText(on ? "reply.pingOn" : "reply.pingOff"));
+    }
     replyBar.classList.add("visible");
+  }
+
+  /** The reply's @ON/@OFF: false for no reply or a reply to yourself. */
+  function replyPing(): boolean {
+    const reply = state.replyTo;
+    return reply !== null && reply.self !== true && reply.ping !== false;
   }
 
   function hideReplyBar(): void {
     replyBar?.classList.remove("visible");
   }
-  function showEditBar(): void {
-    editBar?.classList.add("visible");
-  }
-  function hideEditBar(): void {
-    editBar?.classList.remove("visible");
-  }
 
-  function autoResize(): void {
+  /** The one auto/measure cycle: setting "auto" then reading scrollHeight
+   *  forces a synchronous layout, so it runs once per frame at most. Any
+   *  frame still pending is dropped, its work done here. */
+  function measureTextarea(): void {
+    if (resizeFrame !== null) {
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = null;
+    }
     if (textarea === null) return;
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+  }
+
+  /** Programmatic changes (send, draft restore, completions, formatting)
+   *  resize synchronously so the next read sees the final height. */
+  function autoResize(): void {
+    if (textarea === null) return;
+    measureTextarea();
+    updateCounter();
+    options.onDraftChange?.();
+  }
+
+  /** Typing: the counter and draft hook stay per-keystroke, but the layout
+   *  measure is coalesced to one per animation frame (before paint, so the
+   *  user sees the same height as a synchronous resize). A textarea never
+   *  measured yet gets its first height at once. */
+  function autoResizeOnInput(): void {
+    if (textarea === null) return;
+    if (textarea.style.height === "") {
+      autoResize();
+      return;
+    }
+    resizeFrame ??= requestAnimationFrame(() => {
+      resizeFrame = null;
+      measureTextarea();
+    });
+    updateCounter();
+    options.onDraftChange?.();
+  }
+
+  /** Characters left near the limit, red past it. Every change to the text,
+   *  typed or programmatic (formatting, completions), goes through
+   *  autoResize(), so the counter and the draft hook are driven from there. */
+  function updateCounter(): void {
+    if (charCounter === null || textarea === null) return;
+    const left = MAX_MESSAGE_LEN - [...textarea.value.trim()].length;
+    const show = left <= COUNTER_FROM_REMAINING;
+    charCounter.hidden = !show;
+    if (!show) return;
+    setText(charCounter, String(left));
+    charCounter.classList.toggle("over", left < 0);
+    charCounter.title = messagingText(left < 0 ? "counter.over" : "counter.left", {
+      count: String(Math.abs(left)),
+    });
   }
 
   function maybeEmitTyping(): void {
@@ -584,17 +829,37 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   function showUploadError(message: string): void {
     if (attachmentPreviewBar === null) return;
     // One persistent refusal line: the user needs to read it after the fact,
-    // so it is not removed on a timer (A11Y-05). It is cleared by the next
-    // edit or successful send (clearUploadError).
-    clearUploadError();
-    uploadErrorEl = createElement(
-      "div",
-      {
-        class: "attachment-upload-error",
-        id: uploadErrorId,
-      },
-      message,
+    // so it is not removed on a timer (A11Y-05). It is cleared by its own
+    // dismiss button, the next edit or a successful send (clearUploadError).
+    // A line already showing only swaps its text, so a ticking reason (slow
+    // mode refreshes every second) never takes focus off the dismiss button.
+    const shownText = uploadErrorEl?.querySelector(".attachment-upload-error-text");
+    if (shownText) {
+      shownText.textContent = message;
+      return;
+    }
+    uploadErrorEl = createElement("div", {
+      class: "attachment-upload-error",
+      id: uploadErrorId,
+    });
+    uploadErrorEl.appendChild(
+      createElement("span", { class: "attachment-upload-error-text" }, message),
     );
+    const dismissBtn = createElement("button", {
+      class: "attachment-upload-error-dismiss",
+      type: "button",
+      "aria-label": messagingText("error.dismiss"),
+    });
+    dismissBtn.appendChild(createIcon("x", 14));
+    dismissBtn.addEventListener(
+      "click",
+      () => {
+        clearUploadError();
+        textarea?.focus();
+      },
+      { signal },
+    );
+    uploadErrorEl.appendChild(dismissBtn);
     textarea?.setAttribute("aria-describedby", uploadErrorId);
     // app.css only shows the preview bar via .visible -- without this an
     // error with no attachments already queued renders into a display:none
@@ -619,6 +884,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
   }
 
+  function idlePlaceholder(): string {
+    return (
+      options.placeholder ?? messagingText("composer.placeholder", { channel: options.channelName })
+    );
+  }
+
   /** Reflect the current disabledReason onto the DOM (textarea + controls). */
   function applyDisabledState(): void {
     if (textarea === null) return;
@@ -630,9 +901,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // `disabled` (they are not focus targets the user is typing into).
     textarea.readOnly = disabled;
     textarea.setAttribute("aria-disabled", String(disabled));
-    textarea.placeholder = disabled
-      ? disabledReason!
-      : messagingText("composer.placeholder", { channel: options.channelName });
+    textarea.placeholder = disabled ? disabledReason! : idlePlaceholder();
     const uploadsOff = uploadsDisabledByServer();
     for (const btn of controlButtons) {
       const isAttach = btn.classList.contains("attach-btn");
@@ -676,6 +945,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     applyDisabledState();
   }
 
+  function setSlowModeNote(text: string | null): void {
+    slowModeNote = text;
+    applySlowModeNote();
+  }
+
+  function applySlowModeNote(): void {
+    if (slowModeNoteEl === null) return;
+    slowModeNoteEl.hidden = slowModeNote === null;
+    slowModeNoteEl.textContent = slowModeNote ?? "";
+  }
+
   function handleSend(): void {
     // A send gate (slow mode) refuses the send but, unlike `disabledReason`,
     // leaves the draft editable — the user can keep typing and retry.
@@ -685,43 +965,41 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       return;
     }
     if (textarea === null) return;
-    const content = textarea.value.trim();
+    // Built-in slash commands rewrite the text here, so the attachment and
+    // send-while-uploading paths below carry the rewritten message too. A bare
+    // /spoiler or /me has nothing to send and leaves the draft as typed.
+    const slash = applySlashCommand(textarea.value);
+    if (slash !== null && "empty" in slash) {
+      showUploadError(messagingText("slash.needsText", { name: slash.name }));
+      return;
+    }
+    const typed = replaceEmojiShortcodes(slash === null ? textarea.value.trim() : slash.text);
+    const content = applyPickedMentions(typed, idMentionsEnabled() ? pickedMentions : []);
     const hasAttachments = pendingAttachments.length > 0;
-    // Edits are text-only, so a queued attachment must not unlock submitting
-    // an edit whose text was cleared -- that would tear down edit mode for a
-    // send the host refuses anyway.
-    if (content.length === 0 && (state.editing !== null || !hasAttachments)) return;
+    if (content.length === 0 && !hasAttachments) return;
 
     // The spread counts code points, which is what the server counts. A
     // `.length` check here would count UTF-16 units and refuse ~2000 astral
     // emoji the server accepts. Checked before the debounce stamp below so a
     // refused send does not suppress the next one.
-    if ([...content].length > MAX_MESSAGE_LEN) {
+    if ([...typed].length > MAX_MESSAGE_LEN) {
       showUploadError(messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }));
-      return;
-    }
-
-    // Block send while uploads are still in flight
-    if (pendingAttachments.some((a) => a.upload !== undefined)) {
-      showUploadError(messagingText("error.uploadsPending"));
       return;
     }
 
     // The age timer can fire late (a sleeping machine, a throttled window), so
     // Send checks the age itself and never posts an id the sweep may have taken.
-    if (state.editing === null) {
-      const stale = pendingAttachments.filter((a) => a.expired === true || isStale(a));
-      if (stale.length > 0) {
-        for (const a of stale) refreshStale(a);
-        showUploadError(
-          messagingText(
-            stale.some((a) => a.expired === true)
-              ? "error.attachmentExpired"
-              : "error.attachmentRefreshing",
-          ),
-        );
-        return;
-      }
+    const stale = pendingAttachments.filter((a) => a.expired === true || isStale(a));
+    if (stale.length > 0) {
+      for (const a of stale) refreshStale(a);
+      showUploadError(
+        messagingText(
+          stale.some((a) => a.expired === true)
+            ? "error.attachmentExpired"
+            : "error.attachmentRefreshing",
+        ),
+      );
+      return;
     }
 
     // Debounce to prevent double-click duplicate sends
@@ -729,28 +1007,128 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (now - lastSendTime < SEND_DEBOUNCE_MS) return;
     lastSendTime = now;
 
-    if (state.editing !== null) {
-      options.onEditMessage(state.editing.messageId, content);
-      // P1-08: sending the edit returns the composer to the ordinary draft the
-      // edit displaced, instead of clearing everything.
-      restorePreEditDraft();
-      clearUploadError();
-      textarea.focus();
-      return;
-    }
-
-    // Only include attachments that have finished uploading (have a real server ID)
-    const attachmentIds = pendingAttachments
-      .filter((a) => !a.id.startsWith("pending-"))
-      .map((a) => a.id);
-    options.onSend(content, state.replyTo?.messageId ?? null, attachmentIds);
+    // Only include attachments that have finished uploading (have a real server
+    // ID); a chip refreshing a stale id is still uploading, its old id unsent.
+    const files = pendingAttachments.flatMap((a): SentAttachment[] =>
+      a.upload !== undefined || a.id.startsWith("pending-")
+        ? []
+        : [{ id: a.id, filename: a.filename, ...(a.file === undefined ? {} : { file: a.file }) }],
+    );
+    // An upload still running does not hold the message back: the host queues
+    // it, takes the handles over and posts once they all land (3A-9).
+    const queued = pendingAttachments.some((a) => a.upload !== undefined)
+      ? pendingAttachments.map((a): QueuedAttachment => {
+          if (a.upload !== undefined) a.upload.onProgress = null;
+          return {
+            filename: a.filename,
+            ...(a.file === undefined ? {} : { file: a.file }),
+            ...(a.upload === undefined
+              ? { id: a.id, ...(a.uploadedAt === undefined ? {} : { uploadedAt: a.uploadedAt }) }
+              : { upload: a.upload }),
+          };
+        })
+      : undefined;
+    options.onSend(
+      content,
+      state.replyTo?.messageId ?? null,
+      files.map((f) => f.id),
+      files,
+      replyPing(),
+      ...(queued === undefined ? [] : [queued]),
+    );
     clearReply();
     clearPendingAttachments();
 
     textarea.value = "";
+    pickedMentions = [];
+    closeSlashPopup();
     autoResize();
     textarea.focus();
     clearUploadError();
+  }
+
+  /** A paste that would take the message past the limit goes up as
+   *  message.txt, as Discord does, instead of a draft that can never send.
+   *  When the file could not be attached the paste stays plain text. */
+  function pasteLongTextAsFile(e: ClipboardEvent): void {
+    if (textarea === null || options.onUploadFile === undefined) return;
+    if (disabledReason !== null || uploadsDisabledByServer()) return;
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (text === "") return;
+    const { value, selectionStart, selectionEnd } = textarea;
+    const after = value.slice(0, selectionStart) + text + value.slice(selectionEnd);
+    if ([...after.trim()].length <= MAX_MESSAGE_LEN) return;
+    const file = new File([text], LONG_PASTE_FILENAME, { type: "text/plain" });
+    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
+    if (
+      refusedExtension(file.name) !== null ||
+      file.size > maxBytes ||
+      pendingAttachments.length >= MAX_ATTACHMENTS
+    ) {
+      return;
+    }
+    e.preventDefault();
+    void handlePasteFile(file);
+  }
+
+  /** "Upload to #channel" over the chat while a file from the OS is dragged
+   *  over a slot that takes the drop. It ignores the pointer, so the drop
+   *  still lands on the slot underneath. */
+  function wireDropOverlay(container: Element): void {
+    if (root === null) return;
+    const area = container.closest(".chat-area") ?? container;
+    const overlay = createElement("div", {
+      class: "drop-overlay",
+      "data-testid": "drop-overlay",
+      "aria-hidden": "true",
+    });
+    const card = createElement("div", { class: "drop-overlay-card" });
+    appendChildren(
+      card,
+      createElement("strong", {}, messagingText("drop.title", { channel: options.channelName })),
+      createElement("span", {}, messagingText("drop.hint")),
+    );
+    overlay.appendChild(card);
+    overlay.hidden = true;
+    root.appendChild(overlay);
+    const hide = (): void => {
+      overlay.hidden = true;
+    };
+    document.addEventListener(
+      "dragover",
+      (e: DragEvent) => {
+        if (e.dataTransfer?.types.includes("Files") !== true) return;
+        const target = e.target;
+        const accepts =
+          target instanceof Element &&
+          target.closest(DROP_SLOTS) !== null &&
+          disabledReason === null &&
+          !uploadsDisabledByServer() &&
+          !dialogOpen();
+        if (!accepts) {
+          hide();
+          return;
+        }
+        if (!overlay.hidden) return;
+        const r = area.getBoundingClientRect();
+        overlay.style.top = `${r.top}px`;
+        overlay.style.left = `${r.left}px`;
+        overlay.style.width = `${r.width}px`;
+        overlay.style.height = `${r.height}px`;
+        overlay.hidden = false;
+      },
+      { signal },
+    );
+    // A null relatedTarget is the drag leaving the window.
+    document.addEventListener(
+      "dragleave",
+      (e: DragEvent) => {
+        if (e.relatedTarget === null) hide();
+      },
+      { signal },
+    );
+    document.addEventListener("drop", hide, { signal });
+    document.addEventListener("dragend", hide, { signal });
   }
 
   /** Unique counter for preview items (before upload completes and we have a server ID). */
@@ -791,6 +1169,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Withdraw a settled upload's server copy. The promise resolves when that
    *  is done or has failed, never rejecting; undefined when nothing withdraws. */
   function discard(id: string): Promise<void> | undefined {
+    // A chip that never landed has no server copy to withdraw.
+    if (id.startsWith("pending-")) return undefined;
     return options.onDiscardUpload?.(id).catch(() => {});
   }
 
@@ -849,19 +1229,70 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     item.appendChild(removeBtn);
   }
 
+  /** Flip the spoiler mark of a chip's file (6.12). The name is part of the
+   *  upload, so the file goes up again under the new name, and only once that
+   *  copy has landed is the old one withdrawn: a failed re-upload loses nothing.
+   *  The chip is stale meanwhile, so a failed re-upload leaves it for Send to
+   *  retry from its file, and the old id is never sent. A running upload is
+   *  cancelled by a further toggle, which supersedes it. */
+  function toggleSpoiler(att: (typeof pendingAttachments)[number], btn: HTMLButtonElement): void {
+    const upload = options.onUploadFile;
+    const file = att.file;
+    if (upload === undefined || file === undefined) return;
+    const renamed = new File([file], toggleSpoilerFilename(file.name), {
+      type: file.type,
+      lastModified: file.lastModified,
+    });
+    // The chip's id is the last copy the server holds, until a new one lands.
+    const oldId = att.id.startsWith("pending-") ? undefined : att.id;
+    att.upload?.owner.destroy();
+    att.previewEl.querySelector("progress")?.remove();
+    att.file = renamed;
+    att.filename = renamed.name;
+    att.uploadedAt = 0;
+    relabelChip(att.previewEl, renamed.name);
+    paintSpoilerButton(btn, renamed.name);
+    const handle = startUpload(upload, renamed);
+    handle.result.then(
+      (r) => {
+        // A cancelled upload that landed anyway is a copy nobody will send.
+        if (handle.owner.signal.aborted) void discard(r.id);
+        else if (oldId !== undefined && r.id !== oldId) void discard(oldId);
+      },
+      () => {},
+    );
+    void followUpload(att, handle);
+  }
+
+  /** The chip's spoiler toggle; only a chip with its file can rename it. */
+  function appendSpoilerButton(item: HTMLDivElement, file: File | undefined): void {
+    if (file === undefined) return;
+    const btn = createElement("button", {
+      class: "attachment-preview-spoiler",
+      type: "button",
+      "data-testid": "attachment-spoiler",
+      "aria-label": messagingText("attach.markSpoiler"),
+      title: messagingText("attach.markSpoiler"),
+    });
+    btn.appendChild(createIcon("eye-off", 14));
+    paintSpoilerButton(btn, file.name);
+    btn.addEventListener(
+      "click",
+      (e) => {
+        e.stopPropagation();
+        const att = pendingAttachments.find((a) => a.previewEl === item);
+        if (att !== undefined) toggleSpoiler(att, btn);
+      },
+      { signal },
+    );
+    item.appendChild(btn);
+  }
+
   async function handlePasteFile(file: File): Promise<void> {
     if (options.onUploadFile === undefined || attachmentPreviewBar === null) return;
     if (disabledReason !== null) return;
     if (uploadsDisabledByServer()) {
       showUploadError(messagingText("attach.serverDisabled"));
-      return;
-    }
-
-    // Attachments queued during an edit are neither sent (the edit branch
-    // never reads pendingAttachments) nor cleared -- they'd silently ride
-    // along with the next ordinary message. Refuse at the single entry point.
-    if (state.editing !== null) {
-      showUploadError(messagingText("error.attachWhileEditing"));
       return;
     }
 
@@ -928,6 +1359,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     appendRemoveButton(item, file.name);
+    appendSpoilerButton(item, file);
     attachmentPreviewBar.appendChild(item);
     const pending: (typeof pendingAttachments)[number] = {
       id: tempId,
@@ -1014,8 +1446,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       handle.refreshing = { id: pending.id, uploadedAt: staleUploadedAt };
     }
     pending.uploadedAt = undefined;
-    // Removed preview (cancelled) or composer torn down (handed to a draft).
-    const abandoned = (): boolean => handle.owner.signal.aborted || signal.aborted;
+    // Removed preview (cancelled), composer torn down (handed to a draft), or
+    // the chip left with a queued send, which reads the result itself (3A-9).
+    const abandoned = (): boolean =>
+      handle.owner.signal.aborted || signal.aborted || !pendingAttachments.includes(pending);
 
     try {
       const result = await handle.result;
@@ -1024,6 +1458,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       pending.filename = result.filename;
       pending.upload = undefined;
       pending.uploadedAt = handle.settledAt ?? Date.now();
+      if (pending.unsent === true) {
+        pending.unsent = false;
+        item.classList.remove("unsent");
+        item.removeAttribute("title");
+      }
       item.classList.remove("uploading");
       progressBar.remove();
       if (uploadErrorEl?.textContent === messagingText("error.attachmentRefreshing")) {
@@ -1048,63 +1487,30 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
   }
 
-  function setReplyTo(messageId: number, username: string): void {
-    // Leaving edit mode for reply mode discards the edit and gives back the
-    // ordinary draft the edit displaced. Without this the stale edit text
-    // survives into reply mode and Enter reposts it as a duplicate.
-    if (state.editing !== null) cancelEdit();
-    state = { replyTo: { messageId, username }, editing: null };
-    showReplyBar(username);
+  function setReplyTo(
+    messageId: number,
+    username: string,
+    opts: Pick<ReplyTarget, "ping" | "self"> = {},
+  ): void {
+    state = { replyTo: { messageId, username, ...opts } };
+    showReplyBar();
     textarea?.focus();
+    options.onDraftChange?.();
   }
 
   function clearReply(): void {
     state = { ...state, replyTo: null };
     hideReplyBar();
+    options.onDraftChange?.();
   }
 
-  function startEdit(messageId: number, content: string): void {
-    // P1-08: stash what the user was typing (text + reply) before the edit
-    // takes over the composer, so cancelling or saving gives it back. Staged
-    // attachments are left in place and read live, not part of the stash.
-    if (preEditDraft === null) {
-      preEditDraft = { text: textarea?.value ?? "", replyTo: state.replyTo };
-    }
-    if (state.replyTo !== null) hideReplyBar();
-    state = { replyTo: null, editing: { messageId } };
-    showEditBar();
-    if (textarea !== null) {
-      textarea.value = content;
-      autoResize();
-      textarea.focus();
-    }
-  }
-
-  /** Return the composer to the ordinary draft an edit displaced. Falls back to
-   *  an empty composer when an edit was opened without one. */
-  function restorePreEditDraft(): void {
-    const stashed = preEditDraft ?? { text: "", replyTo: null };
-    preEditDraft = null;
-    state = { replyTo: stashed.replyTo, editing: null };
-    hideEditBar();
-    if (textarea !== null) {
-      textarea.value = stashed.text;
-      autoResize();
-    }
-    if (stashed.replyTo !== null) showReplyBar(stashed.replyTo.username);
-    else hideReplyBar();
-  }
-
-  function cancelEdit(): void {
-    restorePreEditDraft();
+  function focus(): void {
+    textarea?.focus();
   }
 
   function isIdle(): boolean {
     return (
-      (textarea?.value ?? "") === "" &&
-      state.replyTo === null &&
-      state.editing === null &&
-      pendingAttachments.length === 0
+      (textarea?.value ?? "") === "" && state.replyTo === null && pendingAttachments.length === 0
     );
   }
 
@@ -1115,6 +1521,25 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const replyInner = createElement("div", { class: "reply-bar-inner" });
     replyText = createElement("strong", {});
     replyInner.appendChild(replyText);
+    replyPingBtn = createElement("button", {
+      class: "reply-ping",
+      type: "button",
+      "data-testid": "reply-ping",
+      title: messagingText("reply.pingLabel"),
+      "aria-label": messagingText("reply.pingLabel"),
+    });
+    replyPingBtn.addEventListener(
+      "click",
+      () => {
+        if (state.replyTo === null) return;
+        state = { ...state, replyTo: { ...state.replyTo, ping: !replyPing() } };
+        showReplyBar();
+        options.onDraftChange?.();
+        textarea?.focus();
+      },
+      { signal },
+    );
+    replyInner.appendChild(replyPingBtn);
     const replyClose = createElement("button", {
       class: "reply-close",
       "aria-label": messagingText("reply.cancel"),
@@ -1123,19 +1548,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     replyClose.addEventListener("click", clearReply, { signal });
     replyInner.appendChild(replyClose);
     replyBar.appendChild(replyInner);
-
-    editBar = createElement("div", { class: "reply-bar" });
-    const editInner = createElement("div", { class: "reply-bar-inner" });
-    const editText = createElement("strong", {}, messagingText("edit.editing"));
-    editInner.appendChild(editText);
-    const editClose = createElement("button", {
-      class: "reply-close",
-      "aria-label": messagingText("edit.cancel"),
-    });
-    editClose.appendChild(createIcon("x", 14));
-    editClose.addEventListener("click", () => cancelEdit(), { signal });
-    editInner.appendChild(editClose);
-    editBar.appendChild(editInner);
 
     attachmentPreviewBar = createElement("div", { class: "attachment-preview-bar" });
 
@@ -1150,16 +1562,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (options.onUploadFile !== undefined) {
       const fileInput = createElement("input", {
         type: "file",
+        multiple: "",
         style: "display: none;",
       });
       fileInput.addEventListener(
         "change",
         () => {
-          const file = fileInput.files?.[0];
-          if (file != null) {
-            void handlePasteFile(file);
-          }
+          // Copied first: clearing the value empties the live FileList.
+          const files = [...(fileInput.files ?? [])];
           fileInput.value = "";
+          for (const file of files) void handlePasteFile(file);
         },
         { signal },
       );
@@ -1175,7 +1587,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
     textarea = createElement("textarea", {
       class: "msg-textarea",
-      placeholder: messagingText("composer.placeholder", { channel: options.channelName }),
+      placeholder: idlePlaceholder(),
       rows: "1",
       "data-testid": "msg-textarea",
     });
@@ -1192,6 +1604,23 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (gifUnavailable) {
       markGifUnavailable(gifBtn, messagingText("gif.disabled"));
     }
+    // The Poll button (WP 6.9b): only where the host can open the dialog and the server has polls.
+    const createPoll = options.onCreatePoll;
+    const pollBtn =
+      createPoll !== undefined && pollsEnabled()
+        ? createElement(
+            "button",
+            {
+              class: "input-btn poll-btn",
+              type: "button",
+              title: messagingText("poll.buttonTitle"),
+              "aria-label": messagingText("poll.buttonTitle"),
+              "data-testid": "poll-btn",
+            },
+            messagingText("poll.button"),
+          )
+        : null;
+    pollBtn?.addEventListener("click", () => createPoll?.(), { signal });
     const sendBtn = createElement("button", {
       class: "input-btn send-btn",
       "aria-label": messagingText("send.label"),
@@ -1201,6 +1630,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Register interactive controls so the disabled state can toggle them.
     controlButtons.length = 0;
     controlButtons.push(sendBtn, emojiBtn, gifBtn);
+    if (pollBtn !== null) controlButtons.push(pollBtn);
     if (options.onUploadFile !== undefined) {
       controlButtons.push(attachBtn);
       disposable.onStoreChange(
@@ -1213,8 +1643,10 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.addEventListener(
       "input",
       () => {
-        autoResize();
+        autoResizeOnInput();
         maybeEmitTyping();
+        // A cleared draft forgets what was picked into it.
+        if (textarea?.value === "") pickedMentions = [];
         syncAutocomplete();
         // An edit is the user acting on the refusal, so the line goes away.
         clearUploadError();
@@ -1226,7 +1658,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       (e: KeyboardEvent) => {
         // Whichever popup is open owns navigation keys, so Enter completes the
         // token instead of sending a half-typed message.
+        if (slashPopup?.handleKeydown(e) === true) return;
         if (mentionPopup?.handleKeydown(e) === true) return;
+        if (channelPopup?.handleKeydown(e) === true) return;
         if (emojiPopup?.handleKeydown(e) === true) return;
 
         // Ctrl+B / Ctrl+I / Ctrl+U wrap the selection in markdown markers.
@@ -1251,10 +1685,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           e.preventDefault();
           handleSend();
         }
+        // An Escape that cancels something is used up: the app-wide Escape
+        // (mark the channel read) leaves a prevented key alone.
         if (e.key === "Escape") {
-          if (state.editing !== null) {
-            cancelEdit();
-          } else if (state.replyTo !== null) {
+          if (state.replyTo !== null) {
+            e.preventDefault();
             clearReply();
           }
         }
@@ -1265,8 +1700,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           textarea !== null &&
           textarea.value.length === 0
         ) {
-          // The browser's own ArrowUp runs after this handler and would move
-          // the caret of the just-loaded edit text to the start.
+          // The browser's own ArrowUp would move the caret in the (empty)
+          // composer as the inline editor takes focus.
           e.preventDefault();
           root?.dispatchEvent(new CustomEvent("edit-last-message", { bubbles: true }));
         }
@@ -1280,13 +1715,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       (e: ClipboardEvent) => {
         const items = e.clipboardData?.items;
         if (items === undefined) return;
+        let pastedFile = false;
         for (const item of items) {
           if (item.kind !== "file") continue;
           const file = item.getAsFile();
           if (file === null) continue;
           e.preventDefault();
+          pastedFile = true;
           void handlePasteFile(file);
         }
+        if (!pastedFile) pasteLongTextAsFile(e);
       },
       { signal },
     );
@@ -1302,13 +1740,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           if (dt === null || !dt.types.includes("Files")) return;
           const target = e.target;
           if (!(target instanceof Element)) return;
-          if (target.closest(".messages-slot, .typing-slot, .input-slot") === null) return;
+          if (target.closest(DROP_SLOTS) === null) return;
           if (dialogOpen()) return;
           e.preventDefault();
           for (const file of dt.files) void handlePasteFile(file);
         },
         { signal },
       );
+      wireDropOverlay(container);
     }
 
     // Caret moves that aren't typing (click, arrow/Home/End keys, blur) also
@@ -1325,7 +1764,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.addEventListener(
       "blur",
       () => {
+        closeSlashPopup();
         closeMentionPopup();
+        closeChannelPopup();
         closeEmojiPopup();
       },
       { signal },
@@ -1339,8 +1780,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // One outside-click owner per open picker, destroyed when that picker closes.
     let emojiDismiss: Disposable | null = null;
     let gifDismiss: Disposable | null = null;
+    // Set while a picker's code loads. A second toggle (or any close) clears
+    // it, which cancels the mount; the load resolving later checks it still
+    // holds the same ticket and that the composer is still mounted.
+    let emojiPending: object | null = null;
+    let gifPending: object | null = null;
 
     function closeEmojiPicker(): void {
+      emojiPending = null;
       if (emojiPicker !== null) {
         emojiPicker.element.remove();
         emojiPicker.destroy();
@@ -1364,19 +1811,30 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     function toggleEmojiPicker(): void {
-      // Close GIF picker if open
-      if (gifPicker !== null) {
-        closeGifPicker();
-      }
-      if (emojiPicker !== null) {
+      // Close GIF picker if open (or still loading)
+      closeGifPicker();
+      if (emojiPicker !== null || emojiPending !== null) {
         closeEmojiPicker();
         return;
       }
-      emojiPicker = createEmojiPicker({
+      const ticket = {};
+      emojiPending = ticket;
+      void emojiPickerScreen
+        .load(() => emojiPending === ticket)
+        .then((screen) => {
+          if (emojiPending !== ticket || signal.aborted) return;
+          emojiPending = null;
+          if (screen !== null) openEmojiPicker(screen);
+        });
+    }
+
+    function openEmojiPicker(screen: typeof import("@components/EmojiPicker")): void {
+      emojiPicker = screen.createEmojiPicker({
         // Read the set at open time, not at mount: an emoji_update while the
         // composer is alive must be in the next picker the user opens.
         customEmoji: listCustomEmoji(),
-        onSelect: (emoji: string) => {
+        onSelect: (emoji: string, select) => {
+          const keepOpen = select?.keepOpen === true;
           if (textarea !== null) {
             const start = textarea.selectionStart;
             const end = textarea.selectionEnd;
@@ -1384,9 +1842,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
             const after = textarea.value.slice(end);
             textarea.value = before + emoji + after;
             textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
-            textarea.focus();
+            // Shift-pick keeps focus in the picker so the next pick lands at
+            // the caret just advanced.
+            if (!keepOpen) textarea.focus();
           }
-          closeEmojiPicker();
+          if (!keepOpen) closeEmojiPicker();
         },
         onClose: () => {
           closeEmojiPicker();
@@ -1409,6 +1869,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     // GIF picker toggle
     function closeGifPicker(): void {
+      gifPending = null;
       if (gifPicker !== null) {
         gifPicker.element.remove();
         gifPicker.destroy();
@@ -1430,15 +1891,28 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     function toggleGifPicker(): void {
       const gifApi = options.gifApi;
       if (gifApi === undefined) return;
-      // Close emoji picker if open
-      if (emojiPicker !== null) {
-        closeEmojiPicker();
-      }
-      if (gifPicker !== null) {
+      // Close emoji picker if open (or still loading)
+      closeEmojiPicker();
+      if (gifPicker !== null || gifPending !== null) {
         closeGifPicker();
         return;
       }
-      gifPicker = createGifPicker({
+      const ticket = {};
+      gifPending = ticket;
+      void gifPickerScreen
+        .load(() => gifPending === ticket)
+        .then((screen) => {
+          if (gifPending !== ticket || signal.aborted) return;
+          gifPending = null;
+          if (screen !== null) openGifPicker(screen, gifApi);
+        });
+    }
+
+    function openGifPicker(
+      screen: typeof import("@components/GifPicker"),
+      gifApi: NonNullable<MessageInputOptions["gifApi"]>,
+    ): void {
+      gifPicker = screen.createGifPicker({
         api: gifApi,
         onUnavailable: (reason: string) => {
           gifUnavailable = true;
@@ -1459,7 +1933,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
             const now = Date.now();
             if (now - lastSendTime >= SEND_DEBOUNCE_MS) {
               lastSendTime = now;
-              options.onSend(gifUrl, state.replyTo?.messageId ?? null, []);
+              options.onSend(gifUrl, state.replyTo?.messageId ?? null, [], [], replyPing());
               clearReply();
             }
           }
@@ -1483,17 +1957,46 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     gifBtn.addEventListener("click", toggleGifPicker, { signal });
 
+    togglePickerOf = (kind) => {
+      const btn = kind === "emoji" ? emojiBtn : gifBtn;
+      if (btn.disabled) return;
+      if (kind === "emoji") toggleEmojiPicker();
+      else toggleGifPicker();
+    };
+
     // Store picker cleanup for destroy()
     cleanupPickers = () => {
       closeEmojiPicker();
       closeGifPicker();
+      closeSlashPopup();
       closeMentionPopup();
+      closeChannelPopup();
       closeEmojiPopup();
     };
 
-    appendChildren(inputBox, attachBtn, textarea, emojiBtn, gifBtn, sendBtn);
-    appendChildren(root, replyBar, editBar, attachmentPreviewBar, inputBox);
+    charCounter = createElement("span", {
+      class: "char-counter",
+      "data-testid": "char-counter",
+    });
+    charCounter.hidden = true;
+    if (options.noAttach !== true) inputBox.appendChild(attachBtn);
+    appendChildren(inputBox, textarea, emojiBtn, gifBtn);
+    if (pollBtn !== null) inputBox.appendChild(pollBtn);
+    appendChildren(inputBox, charCounter, sendBtn);
+    slowModeNoteEl = createElement("div", {
+      class: "composer-slow-note",
+      "data-testid": "slow-mode-note",
+    });
+    appendChildren(root, replyBar, attachmentPreviewBar, inputBox, slowModeNoteEl);
+    applySlowModeNote();
     container.appendChild(root);
+    releaseComposer?.();
+    const mentionTarget = { insertMention: insertMentionAtCaret, canMention: canTakeText };
+    releaseComposer = claimComposer(mentionTarget);
+    // With a thread's composer beside this one, a Mention goes where the user is.
+    root.addEventListener("focusin", () => focusComposer(mentionTarget), {
+      signal: disposable.signal,
+    });
     // Apply any initial disabled reason before focusing.
     applyDisabledState();
     if (disabledReason === null) {
@@ -1502,12 +2005,18 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   function destroy(): void {
+    releaseComposer?.();
+    releaseComposer = null;
     // Close any open pickers and their document listeners before aborting
     cleanupPickers?.();
     cleanupPickers = null;
     // Clear all pending timers
     for (const t of activeTimers) clearTimeout(t);
     activeTimers.clear();
+    if (resizeFrame !== null) {
+      cancelAnimationFrame(resizeFrame);
+      resizeFrame = null;
+    }
     // SRV-05: an unmount must not leave an upload running against a composer
     // that no longer exists, unless getDraft() handed it to the draft.
     for (const att of pendingAttachments) {
@@ -1520,31 +2029,61 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.
     pendingAttachments.length = 0;
+    slowModeNoteEl = null;
     root?.remove();
     root = null;
     textarea = null;
     replyBar = null;
     replyText = null;
-    editBar = null;
-    preEditDraft = null;
+    replyPingBtn = null;
     attachmentPreviewBar = null;
     uploadErrorEl = null;
+    charCounter = null;
     openPicker = null;
+    togglePickerOf = null;
   }
 
   function openFilePicker(): void {
     openPicker?.();
   }
 
+  /** Whether the composer would take text right now. */
+  function canTakeText(): boolean {
+    return textarea !== null && disabledReason === null && !textarea.readOnly && !textarea.disabled;
+  }
+
+  /** Insert `@username ` at the caret, spaced from a preceding word. */
+  function insertMentionAtCaret(username: string): boolean {
+    if (textarea === null || !canTakeText()) return false;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = textarea.value.slice(0, start);
+    const after = textarea.value.slice(end);
+    const lead = before.length > 0 && !/\s$/.test(before) ? " " : "";
+    const inserted = `${lead}@${username} `;
+    textarea.value = before + inserted + after;
+    const pos = before.length + inserted.length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    autoResize();
+    textarea.focus();
+    return true;
+  }
+
+  function togglePicker(kind: "emoji" | "gif"): void {
+    togglePickerOf?.(kind);
+  }
+
   /** Capture the unsent state for a channel switch. Settled attachments carry
    *  their server id; an upload still in flight is handed to the draft, and
    *  destroy() then leaves it running for the composer that restores it.
    *  The caller owns those uploads: store the draft or destroy each owner.
-   *  Mid-edit this is the draft the edit displaced: the edit text itself is
-   *  never stashed, since restored outside edit mode it would send as a
-   *  duplicate new message. */
+   */
+  function peekDraft(): { content: string; replyTo: ReplyTarget | null } {
+    return { content: textarea?.value ?? "", replyTo: state.replyTo };
+  }
+
   function getDraft(): ComposerDraft {
-    const stashed = preEditDraft ?? { text: textarea?.value ?? "", replyTo: state.replyTo };
     const uploads: DraftUpload[] = [];
     for (const a of pendingAttachments) {
       if (a.upload === undefined) continue;
@@ -1552,8 +2091,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       uploads.push(a.upload);
     }
     return {
-      content: stashed.text,
-      replyTo: stashed.replyTo,
+      content: textarea?.value ?? "",
+      replyTo: state.replyTo,
+      ...(pickedMentions.length === 0 ? {} : { picks: [...pickedMentions] }),
       attachments: pendingAttachments.flatMap((a) =>
         a.uploadedAt === undefined
           ? []
@@ -1563,6 +2103,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
                 filename: a.filename,
                 uploadedAt: a.uploadedAt,
                 ...(a.file === undefined ? {} : { file: a.file }),
+                ...(a.unsent === true ? { unsent: true } : {}),
               },
             ],
       ),
@@ -1579,16 +2120,23 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       textarea.value = draft.content;
       autoResize();
     }
-    if (draft.replyTo !== null) setReplyTo(draft.replyTo.messageId, draft.replyTo.username);
+    pickedMentions = [...(draft.picks ?? [])];
+    if (draft.replyTo !== null) {
+      const { messageId, username, ...opts } = draft.replyTo;
+      setReplyTo(messageId, username, opts);
+    }
     const now = Date.now();
     const live = draft.attachments.filter(
-      (a) => a.file !== undefined || now - a.uploadedAt < ATTACHMENT_TTL_MS,
+      (a) => a.unsent === true || a.file !== undefined || now - a.uploadedAt < ATTACHMENT_TTL_MS,
     );
+    const unsent = live.filter((a) => a.unsent === true);
     for (const att of live) {
       if (attachmentPreviewBar === null) break;
+      if (att.unsent === true) continue;
       const item = createElement("div", { class: "attachment-preview-item" });
       appendFileLabel(item, att.filename);
       appendRemoveButton(item, att.filename);
+      appendSpoilerButton(item, att.file);
       attachmentPreviewBar.classList.add("visible");
       attachmentPreviewBar.appendChild(item);
       const restored = { ...att, previewEl: item };
@@ -1604,6 +2152,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       const item = createElement("div", { class: "attachment-preview-item" });
       appendFileLabel(item, handle.filename);
       appendRemoveButton(item, handle.filename);
+      appendSpoilerButton(item, handle.file);
       attachmentPreviewBar.classList.add("visible");
       attachmentPreviewBar.appendChild(item);
       const pending: (typeof pendingAttachments)[number] = {
@@ -1616,9 +2165,56 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       pendingAttachments.push(pending);
       void followUpload(pending, handle);
     }
+    if (unsent.length > 0) restoreUnsent(unsent, "skipped");
     if (live.length < draft.attachments.length) {
       showUploadError(messagingText("error.draftAttachmentExpired"));
     }
+  }
+
+  /** A chip for a file the server did not attach. It is stale from the start,
+   *  so Send re-uploads it from its file and never posts the old id again; with
+   *  no file it is expired and only removing it frees Send. */
+  function addUnsentChip(att: SentAttachment): boolean {
+    if (pendingAttachments.some((a) => a.id === att.id)) return true;
+    if (attachmentPreviewBar === null || pendingAttachments.length >= MAX_ATTACHMENTS) return false;
+    const item = createElement("div", {
+      class: "attachment-preview-item unsent",
+      title: messagingText("attach.notSent"),
+    });
+    appendFileLabel(item, att.filename);
+    appendRemoveButton(item, att.filename);
+    appendSpoilerButton(item, att.file);
+    attachmentPreviewBar.classList.add("visible");
+    attachmentPreviewBar.appendChild(item);
+    pendingAttachments.push({
+      id: att.id,
+      filename: att.filename,
+      previewEl: item,
+      uploadedAt: 0,
+      unsent: true,
+      ...(att.file === undefined ? { expired: true } : { file: att.file }),
+    });
+    return true;
+  }
+
+  function restoreUnsent(
+    files: readonly SentAttachment[],
+    reason: "skipped" | "unavailable",
+    replyTo?: ComposerDraft["replyTo"],
+  ): void {
+    if (attachmentPreviewBar === null) return;
+    if (replyTo != null && state.replyTo === null) {
+      const { messageId, username, ...opts } = replyTo;
+      setReplyTo(messageId, username, opts);
+    }
+    const dropped = files.filter((f) => !addUnsentChip(f)).length;
+    showUploadError(
+      dropped > 0
+        ? messagingText("error.tooManyAttachments", { max: String(MAX_ATTACHMENTS) })
+        : messagingText(
+            reason === "unavailable" ? "error.attachmentsUnavailable" : "error.attachmentsNotSent",
+          ),
+    );
   }
 
   return {
@@ -1626,13 +2222,17 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     destroy,
     setReplyTo,
     clearReply,
-    startEdit,
-    cancelEdit,
+    focus,
+    insertMention: insertMentionAtCaret,
     isIdle,
     setDisabled,
     setSendGate,
+    setSlowModeNote,
     openFilePicker,
+    togglePicker,
     getDraft,
     restoreDraft,
+    peekDraft,
+    restoreUnsent,
   };
 }

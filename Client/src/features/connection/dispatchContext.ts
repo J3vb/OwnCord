@@ -69,8 +69,8 @@ export type DispatchWs = Pick<WsClient, "send" | "disconnect">;
 export function createReconnectClock(): ReconnectClock {
   return {
     // A second (or later) auth_ok/ready in this call's lifetime is always a
-    // reconnect: wireDispatcher is called once per login (main.ts's
-    // wirePostAuth), and every automatic reconnect fires its events through
+    // reconnect: wireDispatcher is called once per login (app/session.ts's
+    // startSession), and every automatic reconnect fires its events through
     // these same long-lived listeners. Closure-scoped so a fresh login (a new
     // wireDispatcher call) always starts clean.
     hasAuthenticatedBefore: false,

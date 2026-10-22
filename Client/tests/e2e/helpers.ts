@@ -273,10 +273,14 @@ function buildReadyPayload(overrides?: {
   roles?: unknown[];
   dm_channels?: unknown[];
   notices?: unknown[];
+  categories?: unknown[];
+  capabilities?: Record<string, boolean>;
 }): unknown {
   return {
     type: "ready",
     payload: {
+      ...(overrides?.capabilities === undefined ? {} : { capabilities: overrides.capabilities }),
+      ...(overrides?.categories === undefined ? {} : { categories: overrides.categories }),
       channels: overrides?.channels ?? MOCK_CHANNELS,
       members: overrides?.members ?? MOCK_READY_PAYLOAD.payload.members,
       voice_states: overrides?.voice_states ?? [],
@@ -530,6 +534,10 @@ export function buildTauriMockScript(opts: {
     roles?: unknown[];
     dm_channels?: unknown[];
     notices?: unknown[];
+    /** The manager's category list (WP 6.5a); omitted = the key is absent from ready. */
+    categories?: unknown[];
+    /** The server capability flags of `ready` (for example `{ forums: true }`); omitted = absent. */
+    capabilities?: Record<string, boolean>;
   };
   /** Functions run after the mock installs `__TAURI_INTERNALS__`, inside the
    *  same init script, because Playwright does not order separate
@@ -624,6 +632,11 @@ export function buildTauriMockScript(opts: {
     function matchRoute(url, method) {
       for (const route of HTTP_ROUTES) {
         if (url.includes(route.pattern) && (!route.method || route.method === method)) return route;
+      }
+      // Default: nobody blocked, so the Privacy & Safety tab loads without its
+      // load-failure alert. A spec's own /blocks route wins (matched above).
+      if (method === "GET" && url.split("?")[0].endsWith("/api/v1/blocks")) {
+        return { status: 200, body: { blocked_user_ids: [] } };
       }
       return null;
     }
@@ -878,7 +891,8 @@ export function buildTauriMockScript(opts: {
         if (["plugin:process|restart", "plugin:app|version", "plugin:app|name",
              "plugin:deep-link|get_current", "plugin:deep-link|register", "plugin:fs|mkdir", "plugin:fs|write_text_file", "plugin:fs|remove", "plugin:autostart|is_enabled",
              "plugin:notification|is_permission_granted", "plugin:notification|notify", "notify_message", "clear_call_notification",
-             "plugin:opener|open_url", "ptt_set_key", "ptt_start", "ptt_stop",
+             // plugin:dialog|save cancels; a spec that needs a real save must override it.
+             "plugin:opener|open_url", "plugin:dialog|save", "ptt_set_key", "ptt_start", "ptt_stop",
              "voice_shortcuts_start", "voice_shortcuts_set_keys",
              "open_devtools", "frontend_ready"].includes(cmd)) return null;
         // Auto-idle's OS idle poll (DP-33): null is "the OS cannot say", so the
@@ -887,8 +901,16 @@ export function buildTauriMockScript(opts: {
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
         if (cmd === "set_unread_badge") return null;
         if (cmd === "ptt_polling_supported") return false;
+        // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
+        if (cmd === "app_audio_available") return false;
         if (cmd === "voice_shortcuts_supported") return false;
+        // Global keys backend (LP-9b): matches the two probes above, nothing delivers a key.
+        if (cmd === "global_keys_status")
+          return { backend: "none", portalVersion: 0, triggers: { ptt: null, mute: null, deafen: null }, canConfigure: false };
         if (cmd === "check_client_update") return { available: false, version: null, body: null };
+        // Close to Tray / Start Minimized (WP 2B-3): the host's defaults.
+        if (cmd === "get_window_prefs") return { minimizeToTray: true, startMinimized: false };
+        if (cmd === "set_window_pref" || cmd === "show_next_launch") return null;
         // ---- External-content broker (B7-16) ----
         // No external network here: refuse the way the native broker does,
         // with a bare failure-class string. Teardown also names a fresh

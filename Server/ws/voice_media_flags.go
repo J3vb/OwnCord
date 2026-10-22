@@ -20,9 +20,10 @@ import (
 // It runs under the user's voice lock and only touches the session it was
 // handed, so a leave or rejoin since the sweep's snapshot is left alone.
 func (h *Hub) clearRevokedVoiceMedia(ctx context.Context, c *Client, channelID int64) {
-	defer h.voiceLock(c.userID)()
+	txn := h.begin(c.userID)
+	defer txn.end()
 
-	curChID, joinToken := c.getVoiceState()
+	curChID, joinToken := c.voice.state()
 	if curChID != channelID || joinToken == "" {
 		return
 	}

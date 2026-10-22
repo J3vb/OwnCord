@@ -9,6 +9,8 @@
 // here, and nowhere else. Set in the config module so Stryker's child
 // processes inherit it.
 process.env.OC_ALLOW_UNPINNED_TZ = "1";
+// Lets wall-clock timing tests loosen their budget: instrumentation makes it meaningless.
+process.env.OC_MUTATION_RUN = "1";
 
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
 const config = {
@@ -23,12 +25,19 @@ const config = {
     "src/stores/**/*.ts",
     "src/features/**/*.ts",
     "src/components/message-list/avatar.ts",
+    "src/features/members/memberRow.view.ts",
     "!src/lib/types.ts",
     "!src/features/messaging/emojiData.ts", // generated data, no logic to mutate
     "!src/**/*.d.ts",
     "!src/**/*.test.ts",
   ],
   reporters: ["html", "clear-text", "progress"],
+  // The per-test list marks every passing test that killed no mutant with
+  // ✘ or ~, which reads as hundreds of failures in the CI log. Survivors and
+  // the score table still print.
+  clearTextReporter: {
+    reportTests: false,
+  },
   htmlReporter: {
     fileName: "reports/mutation/index.html",
   },
@@ -39,6 +48,8 @@ const config = {
   },
   concurrency: 4,
   timeoutMS: 30000,
+  // A big shard's perTest-coverage first pass takes longer than Stryker's 5-minute default.
+  dryRunTimeoutMinutes: 20,
   tempDirName: ".stryker-tmp",
 };
 

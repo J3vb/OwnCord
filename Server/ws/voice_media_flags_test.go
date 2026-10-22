@@ -56,7 +56,7 @@ func TestVoiceMediaFlags_SweepClearsRevokedFlags(t *testing.T) {
 		t.Fatalf("state: %v", err)
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
-	c.setVoiceState(100, state.JoinedAt)
+	c.voice.setState(100, state.JoinedAt)
 	h.clients[1] = c
 	setVoiceMediaFlags(t, h, 1, true, true)
 
@@ -70,7 +70,7 @@ func TestVoiceMediaFlags_SweepClearsRevokedFlags(t *testing.T) {
 	if after.Camera || after.Screenshare {
 		t.Fatalf("camera=%v screenshare=%v after the sweep, want both cleared", after.Camera, after.Screenshare)
 	}
-	if c.getVoiceChID() != 100 {
+	if c.voice.channel() != 100 {
 		t.Fatal("losing media permissions must not evict a user who may still join")
 	}
 	states := drainVoiceStateBroadcasts(t, h)
@@ -100,7 +100,7 @@ func TestVoiceMediaFlags_SweepClearsOnlyRevokedFlag(t *testing.T) {
 		t.Fatalf("state: %v", err)
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
-	c.setVoiceState(100, state.JoinedAt)
+	c.voice.setState(100, state.JoinedAt)
 	h.clients[1] = c
 
 	setVoiceMediaFlags(t, h, 1, true, false)
@@ -136,7 +136,7 @@ func TestVoiceMediaFlags_StaleSessionIsNotTouched(t *testing.T) {
 		t.Fatalf("state: %v", err)
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
-	c.setVoiceState(100, "an-older-session")
+	c.voice.setState(100, "an-older-session")
 	h.clients[1] = c
 	setVoiceMediaFlags(t, h, 1, true, true)
 

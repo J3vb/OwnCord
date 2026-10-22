@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` (2 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` and `/api/v1/users/me/banner` (2 MiB envelope).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -36,12 +36,14 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 191 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 231 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
+| GET     | `/`                                                                  |
 | GET     | `/admin/`                                                            |
 | GET     | `/admin/*`                                                           |
+| PUT     | `/admin/api/afk-channel`                                             |
 | GET     | `/admin/api/archive`                                                 |
 | GET     | `/admin/api/archive/download`                                        |
 | POST    | `/admin/api/archive/link`                                            |
@@ -55,11 +57,23 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/backups/{name}/restore`                                  |
 | GET     | `/admin/api/channels`                                                |
 | POST    | `/admin/api/channels`                                                |
+| GET     | `/admin/api/channels/categories`                                     |
+| POST    | `/admin/api/channels/categories`                                     |
+| PUT     | `/admin/api/channels/categories/order`                               |
+| DELETE  | `/admin/api/channels/categories/{id}`                                |
+| PATCH   | `/admin/api/channels/categories/{id}`                                |
+| GET     | `/admin/api/channels/categories/{id}/permissions`                    |
+| DELETE  | `/admin/api/channels/categories/{id}/permissions/{roleId}`           |
+| PUT     | `/admin/api/channels/categories/{id}/permissions/{roleId}`           |
+| DELETE  | `/admin/api/channels/categories/{id}/user-permissions/{userId}`      |
+| PUT     | `/admin/api/channels/categories/{id}/user-permissions/{userId}`      |
 | DELETE  | `/admin/api/channels/{id}`                                           |
 | PATCH   | `/admin/api/channels/{id}`                                           |
 | GET     | `/admin/api/channels/{id}/access/explain`                            |
 | POST    | `/admin/api/channels/{id}/access/preview`                            |
+| PUT     | `/admin/api/channels/{id}/forum`                                     |
 | GET     | `/admin/api/channels/{id}/permissions`                               |
+| POST    | `/admin/api/channels/{id}/permissions/sync`                          |
 | DELETE  | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | PUT     | `/admin/api/channels/{id}/permissions/{roleId}`                      |
 | DELETE  | `/admin/api/channels/{id}/retention`                                 |
@@ -104,6 +118,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/admin/api/users/{id}`                                              |
 | PATCH   | `/admin/api/users/{id}`                                              |
 | POST    | `/admin/api/users/{id}/recovery-credential`                          |
+| DELETE  | `/admin/api/users/{id}/roles/{roleId}`                               |
+| PUT     | `/admin/api/users/{id}/roles/{roleId}`                               |
 | DELETE  | `/admin/api/users/{id}/sessions`                                     |
 | GET     | `/api/v1/admin/plugins/`                                             |
 | POST    | `/api/v1/admin/plugins/install`                                      |
@@ -133,6 +149,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/channels/{id}/pins`                                         |
 | DELETE  | `/api/v1/channels/{id}/pins/{messageId}`                             |
 | POST    | `/api/v1/channels/{id}/pins/{messageId}`                             |
+| GET     | `/api/v1/channels/{id}/threads`                                      |
 | GET     | `/api/v1/client-update/{target}/{current_version}`                   |
 | GET     | `/api/v1/diagnostics/connectivity`                                   |
 | GET     | `/api/v1/dm-requests/`                                               |
@@ -145,6 +162,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/dms/group`                                                  |
 | DELETE  | `/api/v1/dms/{channelId}`                                            |
 | PATCH   | `/api/v1/dms/{channelId}`                                            |
+| DELETE  | `/api/v1/dms/{channelId}/icon`                                       |
+| POST    | `/api/v1/dms/{channelId}/icon`                                       |
+| POST    | `/api/v1/dms/{channelId}/members`                                    |
+| DELETE  | `/api/v1/dms/{channelId}/members/{userId}`                           |
+| PUT     | `/api/v1/dms/{channelId}/owner`                                      |
 | GET     | `/api/v1/emoji/`                                                     |
 | POST    | `/api/v1/emoji/`                                                     |
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
@@ -165,15 +187,24 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
+| GET     | `/api/v1/metrics/prometheus`                                         |
 | GET     | `/api/v1/moderation/appeals/`                                        |
 | GET     | `/api/v1/moderation/appeals/{id}`                                    |
 | POST    | `/api/v1/moderation/appeals/{id}/assign`                             |
 | POST    | `/api/v1/moderation/appeals/{id}/decide`                             |
 | POST    | `/api/v1/moderation/channels/`                                       |
+| GET     | `/api/v1/moderation/channels/categories`                             |
+| POST    | `/api/v1/moderation/channels/categories`                             |
+| PUT     | `/api/v1/moderation/channels/categories/order`                       |
+| DELETE  | `/api/v1/moderation/channels/categories/{id}`                        |
+| PATCH   | `/api/v1/moderation/channels/categories/{id}`                        |
 | DELETE  | `/api/v1/moderation/channels/{id}`                                   |
 | PATCH   | `/api/v1/moderation/channels/{id}`                                   |
+| PUT     | `/api/v1/moderation/channels/{id}/forum`                             |
 | GET     | `/api/v1/moderation/members/`                                        |
 | PATCH   | `/api/v1/moderation/members/{id}`                                    |
+| DELETE  | `/api/v1/moderation/members/{id}/roles/{roleId}`                     |
+| PUT     | `/api/v1/moderation/members/{id}/roles/{roleId}`                     |
 | DELETE  | `/api/v1/moderation/members/{id}/sessions`                           |
 | GET     | `/api/v1/moderation/queue/`                                          |
 | GET     | `/api/v1/moderation/queue/{id}`                                      |
@@ -182,6 +213,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/moderation/queue/{id}/close`                                |
 | POST    | `/api/v1/moderation/queue/{id}/notes`                                |
 | GET     | `/api/v1/moderation/users/{id}/actions`                              |
+| PUT     | `/api/v1/moderation/users/{id}/nickname`                             |
 | POST    | `/api/v1/moderation/users/{id}/timeout`                              |
 | POST    | `/api/v1/moderation/users/{id}/untimeout`                            |
 | POST    | `/api/v1/moderation/users/{id}/warn`                                 |
@@ -196,10 +228,17 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/uploads`                                                    |
 | DELETE  | `/api/v1/uploads/{id}`                                               |
 | PATCH   | `/api/v1/users/me/`                                                  |
+| DELETE  | `/api/v1/users/me/avatar`                                            |
 | POST    | `/api/v1/users/me/avatar`                                            |
+| DELETE  | `/api/v1/users/me/banner`                                            |
+| POST    | `/api/v1/users/me/banner`                                            |
 | GET     | `/api/v1/users/me/moderation`                                        |
+| GET     | `/api/v1/users/me/notes/{userId}`                                    |
+| PUT     | `/api/v1/users/me/notes/{userId}`                                    |
 | POST    | `/api/v1/users/me/notices/{id}/ack`                                  |
 | PUT     | `/api/v1/users/me/password`                                          |
+| GET     | `/api/v1/users/me/privacy`                                           |
+| PUT     | `/api/v1/users/me/privacy`                                           |
 | GET     | `/api/v1/users/me/recovery-kit`                                      |
 | POST    | `/api/v1/users/me/recovery-kit`                                      |
 | DELETE  | `/api/v1/users/me/sessions`                                          |
@@ -210,6 +249,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/users/me/totp/enable`                                       |
 | POST    | `/api/v1/users/me/totp/recovery-codes`                               |
 | GET     | `/api/v1/ws`                                                         |
+| GET     | `/assets/*`                                                          |
 | GET     | `/health`                                                            |
 | CONNECT | `/livekit/*`                                                         |
 | DELETE  | `/livekit/*`                                                         |
@@ -272,9 +312,28 @@ endpoints return plain-text errors — see their section):
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
 | `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                    |
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
+| `SERVICE_UNAVAILABLE`           | 503         | The request ran past the server's 15 s request deadline and failed (`Retry-After: 2`; see Request deadline below), or the auth store was unavailable while resolving a token                                                                     |
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
 | `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
+| `CATEGORY_NAME_TAKEN`           | 409         | Category create or rename onto a name another category already has, ignoring case                                                                                                                                                                |
+| `CATEGORY_LIST_STALE`           | 409         | `PUT .../categories/order` with an id set that is not exactly the current set of categories; nothing is written                                                                                                                                  |
+| `PERMISSIONS_CHANGED`           | 409         | A channel sync found override rows it had not checked (they changed under it); nothing is written, retry                                                                                                                                         |
+
+### Request deadline
+
+Every REST route except the streaming and long-running ones carries a 15 s
+deadline on its request context. A handler that answers 500 or 503 after that
+deadline passed (a database call cancelled behind a stalled writer, say) is
+answered `503 {"error":"SERVICE_UNAVAILABLE","message":"the server is busy; try again"}` with `Retry-After: 2` in place
+of its own error body; a retry is safe, as the server finishes or undoes any partial step.
+The clock starts when the request arrives, so it includes reading the request
+body. Any other status, including a 2xx written after the deadline and a
+specific 5xx such as 502 or 507, is never rewritten. Exempt, with no deadline of their own beyond the transfer and
+archive progress deadlines: the WebSocket upgrade, the LiveKit proxy, file
+uploads and downloads, avatar, banner, emoji and group-icon uploads, client-update, the admin
+log stream, archive, backup, restore, update-apply and restart routes, plugin
+install, enable and disable, and account erasure.
 
 ---
 
@@ -311,11 +370,11 @@ its former `registration_open` choice as `invite` (1) or `closed` (0), never
 }
 ```
 
-| Field         | Type   | Required         | Notes                                                                                                        |
-| ------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| `username`    | string | Yes              | HTML-stripped, trimmed. Must be non-empty.                                                                   |
-| `password`    | string | Yes              | Validated for strength (min length, complexity).                                                             |
-| `invite_code` | string | In `invite` mode | Must be a valid, non-expired, non-revoked invite with remaining uses. Ignored in `approval` and `open` mode. |
+| Field         | Type   | Required         | Notes                                                                                                                                                                                                                                                                                                                     |
+| ------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `username`    | string | Yes              | HTML-stripped, trimmed, 2–32 characters. Letters (any script), digits, `_`, `.` and `-` only; a combining accent may follow a letter (at most 2 in a row). No spaces, must start with a letter or digit; `everyone` and `here` are reserved. Login and recovery do not apply these rules, so older accounts keep working. |
+| `password`    | string | Yes              | Validated for strength (min length, complexity).                                                                                                                                                                                                                                                                          |
+| `invite_code` | string | In `invite` mode | Must be a valid, non-expired, non-revoked invite with remaining uses. Ignored in `approval` and `open` mode.                                                                                                                                                                                                              |
 
 #### Response 201 Created
 
@@ -550,7 +609,10 @@ Get the current authenticated user's profile.
   "avatar": "/api/v1/files/uuid",
   "display_name": "Alex",
   "about": "A short bio.",
+  "banner": "/api/v1/files/uuid",
+  "banner_color": "#5865f2",
   "custom_status": "building things",
+  "custom_status_expires_at": "2026-10-15T18:00:00Z",
   "status": "online",
   "role_id": 2,
   "totp_enabled": true,
@@ -561,18 +623,21 @@ Get the current authenticated user's profile.
 This is the canonical **user object**, also returned as `user` by register,
 login and the TOTP challenge.
 
-| Field           | Type         | Description                                                                                                                                                                                                   |
-| --------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`            | int64        | User ID                                                                                                                                                                                                       |
-| `username`      | string       | Unique handle; the name `@mentions` resolve against                                                                                                                                                           |
-| `avatar`        | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                      |
-| `display_name`  | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                      |
-| `about`         | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                              |
-| `custom_status` | string\|null | Free-text status line, max 128 characters; null when unset. Set over WebSocket (`presence_update`), not over REST                                                                                             |
-| `status`        | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead |
-| `role_id`       | int64        | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member)                                                                                                                                                     |
-| `totp_enabled`  | bool         | Whether the user has a confirmed TOTP secret                                                                                                                                                                  |
-| `created_at`    | string       | ISO 8601 timestamp                                                                                                                                                                                            |
+| Field                      | Type         | Description                                                                                                                                                                                                       |
+| -------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                       | int64        | User ID                                                                                                                                                                                                           |
+| `username`                 | string       | Unique handle; the name `@mentions` resolve against                                                                                                                                                               |
+| `avatar`                   | string       | Avatar URL (`/api/v1/files/{id}` after an upload, or an `https://` URL), or empty string                                                                                                                          |
+| `display_name`             | string\|null | Nickname rendered instead of `username`; null when unset                                                                                                                                                          |
+| `about`                    | string\|null | Profile bio, max 300 characters; null when unset                                                                                                                                                                  |
+| `banner`                   | string\|null | Profile banner image path (`/api/v1/files/{id}`), set with `POST /api/v1/users/me/banner`; null when unset                                                                                                        |
+| `banner_color`             | string\|null | Profile banner colour, `#rgb` or `#rrggbb` in lower case; null when unset                                                                                                                                         |
+| `custom_status`            | string\|null | Free-text status line, max 128 characters, one line (no control characters, line breaks, invisible characters or stacked combining marks); null when unset. Set over WebSocket (`presence_update`), not over REST |
+| `custom_status_expires_at` | string\|null | RFC 3339 UTC instant the custom status clears itself; null when it has no expiry. Set with `presence_update`'s `custom_status_expires_in`; only the owner is told it                                              |
+| `status`                   | string       | One of: `online`, `idle`, `dnd`, `invisible`, `offline`. **This is the caller's own true status**, so `invisible` appears here; every payload describing this user to _anyone else_ reports `offline` instead     |
+| `role_id`                  | int64        | Numeric role ID (1=Owner, 2=Admin, 3=Moderator, 4=Member)                                                                                                                                                         |
+| `totp_enabled`             | bool         | Whether the user has a confirmed TOTP secret                                                                                                                                                                      |
+| `created_at`               | string       | ISO 8601 timestamp                                                                                                                                                                                                |
 
 ---
 
@@ -800,21 +865,30 @@ event replaces the client's copy rather than patching it).
   "username": "newname",
   "avatar": "https://example.com/pic.png",
   "display_name": "New Name",
-  "about": "A short bio."
+  "about": "A short bio.",
+  "banner_color": "#5865f2"
 }
 ```
 
-| Field                 | Rules                                                                                                                                                                                                                                              |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `username`            | Required. The unique handle; `@mentions` resolve against it.                                                                                                                                                                                       |
-| `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. An avatar on the server's own host must be `/api/v1/files/<uuid>`; any other same-host path is rejected with 400. Upload a file instead with `POST /api/v1/users/me/avatar`. |
-| `display_name`        | Optional, 1–32 characters. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control or invisible (bidi-override) characters.                                                         |
-| `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                                                                                      |
-| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).                                                              |
+| Field                 | Rules                                                                                                                                                                                                                                                                                                                      |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `username`            | Required. The unique handle; `@mentions` resolve against it. A changed name must follow the registration rules (2–32 characters; letters, digits, `_`, `.`, `-`; no spaces; starts with a letter or digit; `everyone` and `here` reserved). Resending your current name is not a rename.                                   |
+| `avatar`              | Optional. Must be an `https://` URL (max 512 chars) or `""` to clear. An avatar on the server's own host must be `/api/v1/files/<uuid>`; any other same-host path is rejected with 400. Upload a file instead with `POST /api/v1/users/me/avatar`.                                                                         |
+| `display_name`        | Optional, 1–32 characters, counted after runs of spaces are collapsed to one. Shown instead of `username` everywhere; `""` clears it and falls back to the username. Rejected if it contains control characters or line breaks, invisible (bidi-override, zero-width) characters, or more than 2 combining marks in a row. |
+| `about`               | Optional, max 300 characters. `""` clears it.                                                                                                                                                                                                                                                                              |
+| `banner_color`        | Optional, `#rgb` or `#rrggbb` (case-insensitive; stored lower-case). `""` clears it. There is deliberately no banner id or URL field: a banner image can only be set by uploading it with `POST /api/v1/users/me/banner`.                                                                                                  |
+| `identity_public_key` | Optional, base64, max 128 characters. Publishes the client's long-term E2EE identity public key for voice TOFU pinning (see [protocol.md](protocol.md), Voice End-to-End Encryption).                                                                                                                                      |
 
 Omitting a field leaves it unchanged; sending `""` clears the nullable ones.
 `display_name` and `about` are HTML-sanitized and trimmed server-side, and the
 length caps count characters, not bytes.
+
+While a moderator timeout is active on your account, a `display_name` or
+`username` that differs from your current one is refused with `403`
+`TIMED_OUT`, and the whole request is not applied. Resending the current
+values with other changes still works. A `display_name` that equals another
+account's username is refused with `400` (ignoring ASCII letter case, the rule
+usernames themselves use); your own username is allowed.
 
 #### Response 200 OK
 
@@ -877,6 +951,80 @@ client is expected to downscale and square-crop before uploading.
 | ------ | -------------- | -------------------------------------------------------------- |
 | 400    | `BAD_REQUEST`  | Missing `file` part, wrong type, too large, or too many pixels |
 | 429    | `RATE_LIMITED` | Too many uploads                                               |
+
+### DELETE /api/v1/users/me/avatar
+
+Remove the authenticated user's avatar. It does what `PATCH /api/v1/users/me`
+with `"avatar": ""` does, but sends no username, so a rename made on another
+device is never reverted. It works for an uploaded file and for an `https://`
+URL alike, shares the `PATCH` rate limit, and is idempotent: with no avatar it
+still answers 200. Everyone receives a `user_update` with `avatar: null`. The
+old file stays on disk for the operator sweep, but stops being served to other
+users. An older server answers 405; fall back to the `PATCH`.
+
+#### Response 200 OK
+
+The same user object `PATCH /api/v1/users/me` returns, with no `avatar` key.
+
+### POST /api/v1/users/me/banner
+
+Upload a profile banner image and point the authenticated user's banner at it.
+Broadcasts a `user_update` on success. It is the avatar upload with other
+limits: the bytes are stored as an ordinary attachment with no channel
+(counted against the uploader's storage quota), and `users.banner_id` names it.
+`GET /api/v1/files/{id}` admits the file to every authenticated user for
+exactly as long as `banner_id` names it, and refuses it to everyone but the
+uploader once the banner is replaced or removed; the orphan sweep then
+reclaims it. A banner file can never be attached to a message. If the profile
+update fails after the bytes were stored, the unlinked attachment row and the
+stored file are removed and the storage charge is released. The upload sends no
+username, so a rename or About edit made meanwhile is kept.
+
+Not registered when the server has no working storage backend.
+
+**Auth:** Required
+**Rate limit:** 5 uploads/minute per user
+
+#### Request
+
+`multipart/form-data` with a single `file` part.
+
+| Rule       | Value                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 1 MiB                                                                                                                 |
+| Dimensions | At most 1920x960, measured from the sniffed image                                                                     |
+
+GIF and SVG are refused for the reasons given for avatars. The server does not
+re-encode or crop; the client is expected to crop and scale before uploading.
+
+#### Response 201 Created
+
+The same shape as the avatar upload, with `url` set to `/api/v1/files/{id}`.
+
+#### Errors
+
+| Status | Code           | Cause                                                          |
+| ------ | -------------- | -------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | Missing `file` part, wrong type, too large, or too many pixels |
+| 429    | `RATE_LIMITED` | Too many uploads                                               |
+
+### DELETE /api/v1/users/me/banner
+
+Remove the authenticated user's banner image. The colour is separate: clear it
+with `PATCH /api/v1/users/me` and `"banner_color": ""`. It shares the `PATCH`
+rate limit and is idempotent: with no banner it still answers 200. Everyone
+receives a `user_update` with `banner: null`. The old file stops being served to
+other users.
+
+#### Response 200 OK
+
+The same user object `PATCH /api/v1/users/me` returns, with `banner: null`.
+
+| Status | Code           | Cause             |
+| ------ | -------------- | ----------------- |
+| 401    | `UNAUTHORIZED` | Not authenticated |
+| 429    | `RATE_LIMITED` | Too many requests |
 
 ---
 
@@ -1018,19 +1166,21 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field             | Type   | Description                                                                                                               |
-| ----------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | int64  | Channel ID                                                                                                                |
-| `name`            | string | Channel name                                                                                                              |
-| `type`            | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
-| `topic`           | string | Channel topic/description                                                                                                 |
-| `category`        | string | Category grouping                                                                                                         |
-| `position`        | int    | Sort order within category                                                                                                |
-| `slow_mode`       | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
-| `archived`        | bool   | Whether the channel is archived                                                                                           |
-| `nsfw`            | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
-| `voice_max_users` | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
-| `voice_max_video` | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
+| Field               | Type   | Description                                                                                                               |
+| ------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | int64  | Channel ID                                                                                                                |
+| `name`              | string | Channel name                                                                                                              |
+| `type`              | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
+| `topic`             | string | Channel topic/description                                                                                                 |
+| `category`          | string | Name of the channel's category, `""` when none                                                                            |
+| `category_id`       | int64  | The category's id, `0` when none (WP 6.5a)                                                                                |
+| `category_position` | int    | The category's position in the category order, `0` when none                                                              |
+| `position`          | int    | Sort order within category                                                                                                |
+| `slow_mode`         | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
+| `archived`          | bool   | Whether the channel is archived                                                                                           |
+| `nsfw`              | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
+| `voice_max_users`   | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
+| `voice_max_video`   | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
 
 #### The `nsfw` flag
 
@@ -1100,6 +1250,7 @@ Paginated message history for a channel.
       "deleted": false,
       "timestamp": "2026-03-14T10:30:00Z",
       "mentions": [7],
+      "mention_roles": [],
       "mentions_everyone": false
     }
   ],
@@ -1108,12 +1259,48 @@ Paginated message history for a channel.
 ```
 
 `mentions` is the server-resolved list of mentioned user IDs (always present,
-empty when the message mentions nobody) and `mentions_everyone` reports an
-`@everyone`/`@here` that cleared the `MENTION_EVERYONE` permission. Both are
-resolved at send time and re-resolved on edit; an `@word` that matches no
-username, or an `@everyone` from a user without the bit, carries no mention
-semantics and stays plain text. The same two fields appear on pinned-message
-responses and on the WebSocket `chat_message`/`chat_edited` payloads.
+empty when the message mentions nobody), `mention_roles` the role IDs whose
+`<@&id>` token cleared the role-mention gate (the role is mentionable, or the
+author holds `MENTION_EVERYONE`; always present, empty for none) and
+`mentions_everyone` reports an `@everyone`/`@here` that cleared the
+`MENTION_EVERYONE` permission. All are resolved at send time and re-resolved on
+edit; an `@word` that matches no username, a `<@&id>` the author may not ping,
+or an `@everyone` from a user without the bit, carries no mention semantics and
+stays plain text. The same fields appear on pinned-message responses and on the
+WebSocket `chat_message`/`chat_edited` payloads.
+
+A DM can also hold a call log row: a message the server writes for a call in
+the DM's voice channel. It carries two more fields, both omitted for an ordinary
+message: `"kind": "call"` and `"call": {"started_at", "ended_at", "participants"}`.
+`started_at` and `ended_at` use the message `timestamp` format (`ended_at` is
+`null` while the call is live), and `participants` is the list of user IDs who
+were in the call at any point. `content` is fallback text for clients that do not
+know the field. A call row is read-only: editing, deleting, pinning, reacting to
+or replying to it is refused, and search does not return it. A client treats an
+unknown `kind` as an ordinary message and shows `content`.
+
+A forwarded message (`chat_forward`, see `docs/protocol.md`) carries a `forward`
+block, omitted for every other message: `{"source_channel_id", "source_message_id",
+"source_timestamp"}`. `source_message_id` is `null` when the original is deleted or
+purged. The block has no author and no channel name, and a deleted forward carries
+none. The forward's `content` and `attachments` are its own snapshot and copies,
+and it cannot be edited.
+
+A poll message (`poll_create`, see `docs/protocol.md`) carries a `poll` block,
+omitted for every other message and for a deleted one: `{"question", "answers":
+[{"answer_id", "text", "emoji"}], "allow_multiselect", "expires_at", "ended",
+"ended_at", "results": {"version", "total_voters", "counts": [{"answer_id",
+"count"}], "me"}}`. `me` is the requesting user's own answer ids. `ended` is true
+when the poll was ended or `expires_at` has passed, even before anything marked it
+ended. The poll's `content` is a readable fallback of the question and answers. A poll
+cannot be edited or forwarded.
+
+A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
+`group_leave`, `group_rename` or `group_icon`, with a `group_event` block
+(`{"target_user_id"}` for add and remove, `{}` for leave, `{"name"}` for rename,
+`{"icon_removed"}` for icon). They are read-only in the same way as call rows
+(see `docs/protocol.md`). The server writes one when a member is added, removed,
+leaves, or the group is renamed; the group icon row comes with the icon.
 
 #### Pagination
 
@@ -1290,12 +1477,33 @@ Returns `{ "messages": [...], "has_more": false }`, most recently pinned first (
 
 ---
 
+### GET /api/v1/channels/{id}/threads
+
+List the threads of a text channel or the posts of a forum, newest activity first by default. A forum's items carry the `post` block (tags and opening message preview).
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel
+
+| Query      | Description                                                                   |
+| ---------- | ----------------------------------------------------------------------------- |
+| `archived` | `0` (default) for open threads, `1` for archived ones                         |
+| `before`   | The previous page's `next_before` (an opaque cursor); omit for the first page |
+| `limit`    | Page size, default 50, at most 100                                            |
+| `sort`     | `activity` (default) or `created`, both newest first                          |
+| `tag`      | A forum tag id, repeatable up to 5 times, any-of; forums only                 |
+
+#### Response 200 OK
+
+`{ "threads": [ThreadInfo, ...], "has_more": bool, "next_before": string }`; `next_before` is the cursor for the following page and is `""` when `has_more` is false. The cursor carries the last row's activity time and id, so activity in that thread between requests does not shift the paging; see [Threads](protocol.md#threads) for `ThreadInfo`. Order is `thread_last_activity_at DESC, id DESC` (activity has one-second resolution, so `id` breaks ties) or `id DESC` for `sort=created`; the cursor is the sort's own, so a `next_before` from one sort is refused under the other. A post that gains a reply while a viewer pages moves to the top: rows already past the cursor are never repeated, but a post that was still below it jumps above the cursor and is not returned by later pages, so a client merges live `thread_changed` frames into the list and dedupes by id. A forum parent uses the same `limit` bounds as a text channel. `400 BAD_REQUEST` for a malformed query, an unknown `sort`, a `tag` that is not a tag of this forum, more than 5 tags, a `tag` on a non-forum channel, or a cursor from the other sort, `403 FORBIDDEN` without read, `404 NOT_FOUND` for an unknown channel or a thread id.
+
+---
+
 ### POST /api/v1/channels/{id}/pins/{messageId}
 
 Pin a message in a channel. A successful pin or unpin is broadcast to the channel as [`chat_pinned`](protocol.md#chat_pinned-server---client-broadcast).
 
 **Auth:** Required
-**Permission:** `MANAGE_MESSAGES` on the channel, or participant in a DM
+**Permission:** `READ_MESSAGES` and `MANAGE_MESSAGES` on the channel; in a DM, a participant who is not blocked and not timed out
 
 #### Response 204 No Content
 
@@ -1306,7 +1514,7 @@ Pin a message in a channel. A successful pin or unpin is broadcast to the channe
 Unpin a message from a channel.
 
 **Auth:** Required
-**Permission:** `MANAGE_MESSAGES` on the channel, or participant in a DM
+**Permission:** `READ_MESSAGES` and `MANAGE_MESSAGES` on the channel; in a DM, a participant who is not blocked and not timed out
 
 #### Response 204 No Content
 
@@ -1323,13 +1531,57 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
 
 #### Query Parameters
 
-| Param        | Type   | Default        | Range                   | Description                                                                                                                                                    |
-| ------------ | ------ | -------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `q`          | string | (required)     | non-empty               | Search words. Punctuation separates words; the last word, if three or more characters, also matches as a prefix (`deplo` finds `deploy`; `de` finds only `de`) |
-| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                                                                            |
-| `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                                                                      |
-| `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first; `recent` is newest first                                                                                                      |
-| `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before`                                                     |
+| Param        | Type   | Default        | Range                   | Description                                                                                                                                                                                                     |
+| ------------ | ------ | -------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `q`          | string | (required)     | non-empty               | Search words and filters (see [Filters](#filters)). Punctuation separates words; the last word, if three or more characters, also matches as a prefix (`deplo` finds `deploy`; `de` finds only `de`)            |
+| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                                                                                                                             |
+| `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                                                                                                                       |
+| `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first among the newest 2,000 matching messages in scope (older matches appear only with `recent`); `recent` is newest first. A query with filters and no words is always newest first |
+| `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before`                                                                                                      |
+| `tz`         | string | `UTC`          | IANA zone name          | Time zone for the `before:`, `after:` and `during:` day boundaries, e.g. `Europe/Amsterdam`. Unknown names are a 400                                                                                            |
+
+#### Filters
+
+Filters are `key:value` tokens inside `q`; the remaining words are the search
+text. Keys are case-insensitive and only count at the start of a token, so
+`http://x`, `12:30` and `note:x` stay ordinary words. A value may be
+double-quoted to hold spaces (`from:"ann lee"`); an unterminated quote runs to
+the end of `q`.
+
+| Filter          | Value                                                     | Matches                                                                  |
+| --------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `from:name`     | username, optional leading `@`                            | Messages by that user (case-insensitive)                                 |
+| `in:name`       | channel name, optional leading `#`                        | Messages in every readable channel with that name (names are not unique) |
+| `before:date`   | `YYYY-MM-DD`                                              | Sent before 00:00 of that day in `tz`                                    |
+| `after:date`    | `YYYY-MM-DD`                                              | Sent from 00:00 of the day after, in `tz`                                |
+| `during:date`   | `YYYY-MM-DD`                                              | Sent during that day in `tz`                                             |
+| `has:kind`      | `link`, `file`, `image`, `video`, `sound` (alias `audio`) | Messages with a link, or with an attachment of that kind                 |
+| `mentions:name` | username, optional leading `@`                            | Messages whose text mentions that user (case-insensitive)                |
+| `pinned:bool`   | `true` or `false`                                         | Messages that are (or are not) pinned                                    |
+
+- Repeated `from:` or `in:` values match any of them; repeated `has:` or
+  `mentions:` values must all match; different filters must all match. Several date filters intersect, and an empty range returns no results.
+- An empty value (`from:`) is ignored. At most 25 filters per query and 10
+  values each of `from:`, `in:`, `has:` and `mentions:`.
+- `has:link` means the text contains `http://` or `https://` (approximate; there
+  is no embed index). `has:file` is any attachment; `image`, `video` and `sound`
+  match the attachment MIME type (`image/*`, `video/*`, `audio/*`). An upload
+  not yet sent, and any deleted message, never match. `embed`, `sticker` and
+  `poll` are not supported and are a `400`.
+- `mentions:` matches `@user` mentions in the text. A reply ping (the reply
+  notification to the replied-to author) and `@everyone` / `@here` do not count,
+  and an edit that removes the mention stops the match. A reply that pings a
+  user and also names them in the text still matches, judged from the current
+  text (approximate: `@bobby` also counts for `bob`).
+- `pinned:` takes `true` or `false`; `pinned:true pinned:false` returns nothing.
+- An unknown user or channel name returns an empty `200`. `in:` only matches
+  channels the caller can read, so a private, unacknowledged NSFW or someone
+  else's DM channel gives exactly the answer a nonexistent name gives, with or
+  without `channel_id`. `channel_id` itself keeps its `403` / `404` answers.
+- A query with filters and no words has no relevance order: results are newest
+  first and page with `next_before`, the same as `sort=recent`. Send
+  `sort=recent&before=<next_before>` for the following pages; filters and scope
+  carry over because `q` is sent again.
 
 #### Response 200 OK
 
@@ -1355,16 +1607,16 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
 ```
 
 `next_before` is the `before` value for the next `sort=recent` page, or `null`
-when there are no more results. It is always `null` for `sort=relevance`.
+when there are no more results. It is always `null` for `sort=relevance` when `q` has words.
 
 #### Error Responses
 
-| Status | Code                            | When                                                                                       |
-| ------ | ------------------------------- | ------------------------------------------------------------------------------------------ |
-| 400    | `BAD_REQUEST`                   | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent` |
-| 403    | `FORBIDDEN`                     | `channel_id` names a channel the caller cannot read                                        |
-| 403    | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | `channel_id` names an NSFW channel the caller has not acknowledged                         |
-| 404    | `NOT_FOUND`                     | `channel_id` names no channel                                                              |
+| Status | Code                            | When                                                                                                                                                                                                                                                                              |
+| ------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`                   | `q` missing; bad `channel_id`, `limit`, `sort` or `before`; `before` without `sort=recent`; bad `tz`; a malformed `before:` / `after:` / `during:` date; an unknown `has:` kind or a `pinned:` value other than `true` / `false`; too many filters (the message names the filter) |
+| 403    | `FORBIDDEN`                     | `channel_id` names a channel the caller cannot read                                                                                                                                                                                                                               |
+| 403    | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | `channel_id` names an NSFW channel the caller has not acknowledged                                                                                                                                                                                                                |
+| 404    | `NOT_FOUND`                     | `channel_id` names no channel                                                                                                                                                                                                                                                     |
 
 ---
 
@@ -1389,10 +1641,11 @@ them against its `klipy.com` CDN allowlist before rendering.
 
 #### Query Parameters
 
-| Param   | Type   | Default    | Range       | Description               |
-| ------- | ------ | ---------- | ----------- | ------------------------- |
-| `q`     | string | (required) | 1-100 chars | Search term               |
-| `limit` | int    | 20         | 1-50        | Maximum results to return |
+| Param   | Type   | Default    | Range       | Description                                                                   |
+| ------- | ------ | ---------- | ----------- | ----------------------------------------------------------------------------- |
+| `q`     | string | (required) | 1-100 chars | Search term                                                                   |
+| `limit` | int    | 20         | 1-50        | Maximum results to return                                                     |
+| `pos`   | string | (none)     | 1-256 chars | Paging cursor from the previous response's `next` (`A-Za-z0-9._:=+/%~-` only) |
 
 #### Response 200 OK
 
@@ -1407,7 +1660,8 @@ them against its `klipy.com` CDN allowlist before rendering.
         "gif": { "url": "https://media.klipy.com/abc123.gif" }
       }
     }
-  ]
+  ],
+  "next": "CAoQ"
 }
 ```
 
@@ -1415,24 +1669,31 @@ Only `id`, `title`, and the two `media_formats` URLs are forwarded. Every other
 field the upstream returns is dropped, so an upstream that echoed the API key
 could not leak it to clients. Results missing either format are omitted.
 
+`next` is the opaque cursor for the following page: send it back as `pos` to
+get it. It is `""` when there is nothing more, and also when the upstream's
+cursor fails the same character rule as `pos` (it is dropped, never relayed).
+A provider that ignores `pos` returns the same page again, so a client pages
+only while a page brings GIFs it has not seen.
+
 #### Errors
 
-| Status | Code            | When                                                           |
-| ------ | --------------- | -------------------------------------------------------------- |
-| 400    | `INVALID_INPUT` | Missing/blank `q`, `q` over 100 chars, or `limit` outside 1-50 |
-| 401    | `UNAUTHORIZED`  | No valid session (checked before the disabled check)           |
-| 429    | `RATE_LIMITED`  | Over 30 requests/minute                                        |
-| 502    | `BAD_GATEWAY`   | Upstream error, timeout, or unparseable response               |
-| 503    | `GIF_DISABLED`  | `gif.api_key` is not configured                                |
+| Status | Code            | When                                                                              |
+| ------ | --------------- | --------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT` | Missing/blank `q`, `q` over 100 chars, `limit` outside 1-50, or a malformed `pos` |
+| 401    | `UNAUTHORIZED`  | No valid session (checked before the disabled check)                              |
+| 429    | `RATE_LIMITED`  | Over 30 requests/minute                                                           |
+| 502    | `BAD_GATEWAY`   | Upstream error, timeout, or unparseable response                                  |
+| 503    | `GIF_DISABLED`  | `gif.api_key` is not configured                                                   |
 
 ### GET /api/v1/gif/trending
 
 Same auth, rate limit, response shape, and error codes as
 `/api/v1/gif/search`, minus the `q` parameter.
 
-| Param   | Type | Default | Range | Description               |
-| ------- | ---- | ------- | ----- | ------------------------- |
-| `limit` | int  | 20      | 1-50  | Maximum results to return |
+| Param   | Type   | Default | Range       | Description               |
+| ------- | ------ | ------- | ----------- | ------------------------- |
+| `limit` | int    | 20      | 1-50        | Maximum results to return |
+| `pos`   | string | (none)  | 1-256 chars | Paging cursor, as above   |
 
 ### GET /api/v1/gif/favorites
 
@@ -1634,6 +1895,13 @@ user, `POST /api/v1/dms` accepts it, atomically: trusts the sender, opens the
 conversation and marks the request `accepted`, and sends the caller's other
 devices the `dm_channel_open` and `dm_request` frames `accept` sends.
 
+If either user has blocked the other, or the recipient has turned off direct
+messages from members (`allow_member_dms` in `/users/me/privacy`) and has no
+trust row for the caller (accepted, written to first, or grandfathered), the
+call is refused with `403 FORBIDDEN` and the same body for every cause:
+`you can't message this user`. A recipient who does not exist or whose account
+is not active is `404 NOT_FOUND`.
+
 ---
 
 ### GET /api/v1/dms
@@ -1678,20 +1946,24 @@ List all open DM channels for the authenticated user, ordered by most recent act
       "last_message": "Hey, how's it going?",
       "last_message_at": "2026-03-28T14:30:00Z",
       "unread_count": 3,
-      "mention_count": 1
+      "mention_count": 1,
+      "last_read_message_id": 5039
     }
   ]
 }
 ```
 
-| Field           | Description                                                                                                            |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `recipient`     | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`. |
-| `recipients`    | Every participant except the caller. What group-aware clients read.                                                    |
-| `name`          | Optional group name; `""` for a 1:1 DM and for an unnamed group.                                                       |
-| `is_group`      | True for a group DM. Stored, not derived from the live participant count.                                              |
-| `unread_count`  | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.          |
-| `mention_count` | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.    |
+| Field                  | Description                                                                                                                                                                                                                |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `recipient`            | The other participant of a 1:1 DM. **Backward compatibility only** — for a group it carries the first of `recipients`.                                                                                                     |
+| `recipients`           | Every participant except the caller. What group-aware clients read.                                                                                                                                                        |
+| `name`                 | Optional group name, max 100 characters, one line: runs of spaces collapse, and control characters, line breaks, invisible characters and stacked combining marks are refused. `""` for a 1:1 DM and for an unnamed group. |
+| `is_group`             | True for a group DM. Stored, not derived from the live participant count.                                                                                                                                                  |
+| `owner_id`             | Groups only, omitted for a 1:1 DM: the group's owner, always a current member. The creator at create, then the lowest remaining member id when the owner leaves or their account is erased.                                |
+| `icon`                 | The group's icon as a file URL (`/api/v1/files/{id}`), `""` when it has none and for a 1:1 DM. Always present. Only the group's members can fetch the file, and only while it is the live icon.                            |
+| `unread_count`         | Unread messages for the caller, capped at 100 (a value of 100 means "100 or more") — the same cap as `ready`.                                                                                                              |
+| `mention_count`        | The caller's `read_states.mention_count` for the DM — the same value the `ready` payload's `dm_channels[]` carries.                                                                                                        |
+| `last_read_message_id` | The caller's read pointer (`read_states.last_message_id`) for the DM; `0` when they have never read it.                                                                                                                    |
 
 `status` is viewer-adjusted: an `invisible` participant reads as `offline`.
 
@@ -1707,7 +1979,11 @@ to look up.
 
 Blocks are enforced in both directions, per recipient — a user may neither pull
 someone they have blocked into a room with them nor use a group to reach
-someone who has blocked them. The check is creation-time only; see
+someone who has blocked them. A recipient is also refused when they have turned
+off direct messages from members (`allow_member_dms`) and hold no trust row for
+the caller, or when the caller holds a message request to them that they have not
+accepted (pending, ignored or deleted); only the caller's own trust counts. Staff
+are checked like anyone else. The check is creation-time only; see
 `docs/protocol.md` § DM Authorization for why sending into a group is not
 block-checked.
 
@@ -1731,13 +2007,14 @@ block-checked.
 
 The same DM summary shape `GET /api/v1/dms` returns, from the creator's seat.
 Every participant — the creator included — also receives a `dm_channel_open`.
+The creator is the group's owner (`owner_id`).
 
 #### Errors
 
 | Status | Code          | Reason                                                                |
 | ------ | ------------- | --------------------------------------------------------------------- |
 | 400    | `BAD_REQUEST` | Fewer than 2 or more than 8 recipients, or a name over 100 characters |
-| 403    | `FORBIDDEN`   | A recipient is blocked by, or has blocked, the caller                 |
+| 403    | `FORBIDDEN`   | A recipient cannot be added to a group by the caller (any cause)      |
 | 403    | `TIMED_OUT`   | The caller is timed out                                               |
 | 404    | `NOT_FOUND`   | A recipient does not exist                                            |
 
@@ -1747,10 +2024,8 @@ Every participant — the creator included — also receives a `dm_channel_open`
 
 Set or clear a group DM's name.
 
-Any participant may rename it. That is Discord's rule and the only one that
-works here: a group DM has no owner column and no roles, so "who may rename" has
-exactly one answer that does not require inventing an ownership model. A 1:1 DM
-refuses — its name is who is in it.
+Any participant may rename it, the owner included; renaming is not an owner
+power. A 1:1 DM refuses — its name is who is in it.
 
 **Auth:** Required (participant)
 
@@ -1762,18 +2037,33 @@ refuses — its name is who is in it.
 
 An empty name clears it, and the group falls back to listing its members.
 
+The name follows the same single-line rule as at creation: no line breaks,
+control or invisible characters, and at most 2 combining marks in a row.
+
 #### Response 200 OK
 
 The DM summary shape, from the caller's seat. Every participant also receives a
-`dm_channel_open` carrying the new name.
+`dm_channel_open` carrying the new name, then one sequenced `chat_message` of
+kind `group_rename` (author = the caller, `group_event.name` = the new name, `""`
+when the name was removed). A name equal to the current one writes no row and
+sends nothing.
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead (the change and its events have happened, and the
+caller gets the same summary from its `dm_channel_open`), so a client must not
+treat a missing body as a failure.
+
+Limited to 20 group changes per user per minute, shared with add, remove and
+owner transfer.
 
 #### Errors
 
-| Status | Code          | Reason                                                      |
-| ------ | ------------- | ----------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | The channel is a 1:1 DM, or the name exceeds 100 characters |
-| 403    | `TIMED_OUT`   | The caller is timed out                                     |
-| 404    | `NOT_FOUND`   | Not a participant of this DM                                |
+| Status | Code           | Reason                                                      |
+| ------ | -------------- | ----------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | The channel is a 1:1 DM, or the name exceeds 100 characters |
+| 403    | `TIMED_OUT`    | The caller is timed out                                     |
+| 404    | `NOT_FOUND`    | Not a participant of this DM                                |
+| 429    | `RATE_LIMITED` | More than 20 group changes in a minute                      |
 
 ---
 
@@ -1790,7 +2080,13 @@ and the route is shared because the _gesture_ is shared:
   by nobody, and its messages cascade off the channel).
 
 The caller receives `dm_channel_close`; after a group leave the remaining
-participants receive a fresh `dm_channel_open` with the new membership.
+participants receive a fresh `dm_channel_open` with the new membership. If the
+leaver owned the group, ownership passes to the lowest remaining member id in the
+same transaction, and the refreshed `dm_channel_open` carries the new `owner_id`.
+The remaining participants then get a sequenced `chat_message` of kind
+`group_leave` (author = the leaver). The last leaver writes no row, because the
+channel goes with them. The leaver's own read state for the DM is deleted.
+A leave is never refused for a timeout and is not rate limited.
 
 **Auth:** Required (participant)
 
@@ -1801,6 +2097,225 @@ participants receive a fresh `dm_channel_open` with the new membership.
 | Status | Code        | Reason                       |
 | ------ | ----------- | ---------------------------- |
 | 404    | `NOT_FOUND` | Not a participant of this DM |
+
+---
+
+### POST /api/v1/dms/{channelId}/members
+
+Add people to a group DM. Any member may add, up to 10 members in all. A 1:1 DM
+refuses.
+
+The recipient checks are the ones create runs (the same code): every user must
+exist and not be banned (either is "not found"), and none of the new people may
+be blocked by, or have blocked, any other new person or any current member. Each
+new person must also be reachable by the caller: they have not turned off direct
+messages from members without trusting the caller, and the caller holds no
+message request to them that they have not accepted (pending, ignored or
+deleted). Only the caller's trust counts, not that of the members already in the
+group, and staff are checked like anyone else. If one of several new people is
+refused, nobody is added. The pairs between people who are already in the group
+are not re-checked, and a member who later turns direct messages off stays in the
+group, keeps sending and can leave. Once added, the group is a shared room and
+sends are not block-checked. Added people see the earlier history.
+
+**Auth:** Required (member)
+
+#### Request
+
+```json
+{ "user_ids": [4, 5] }
+```
+
+| Field      | Type  | Required | Description                                                                                       |
+| ---------- | ----- | -------- | ------------------------------------------------------------------------------------------------- |
+| `user_ids` | int[] | Yes      | 1–9 users. De-duplicated. Users who are already members are skipped; if none is new, it is a 400. |
+
+#### Response 200 OK
+
+The DM summary shape from the caller's seat, with the new members. Then, in this
+order, from the request:
+
+1. Every member after the change, the added people included, receives a
+   `dm_channel_open` (the full summary from their own seat).
+2. Every member receives one sequenced `chat_message` of kind `group_add` per
+   added user (author = the caller, `group_event.target_user_id` = the added
+   user).
+
+So on each connection the open arrives before the row, and an added user never
+sees a row for a DM they do not know yet. The cap is counted inside the
+transaction: two adds that together pass 10 cannot both succeed.
+
+The blocked-pair and reachability checks run again inside the transaction, so a
+block, a changed setting or another add that lands between the first check and
+the commit cannot slip a refused person into the room (403 `FORBIDDEN`).
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead (the change and its events have happened, and the
+caller gets the same summary from its `dm_channel_open`), so a client must not
+treat a missing body as a failure.
+
+Limited to 20 group changes per user per minute.
+
+#### Errors
+
+| Status | Code            | Reason                                                                                             |
+| ------ | --------------- | -------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`   | A 1:1 DM, no ids, more than 9 ids, a non-positive id, or every id is already a member              |
+| 403    | `FORBIDDEN`     | A new person cannot be added by the caller, or a blocked pair among the new people and the members |
+| 403    | `TIMED_OUT`     | The caller is timed out                                                                            |
+| 404    | `NOT_FOUND`     | The caller is not a member, or a new user does not exist or is banned                              |
+| 409    | `GROUP_DM_FULL` | The group would pass 10 members                                                                    |
+| 429    | `RATE_LIMITED`  | More than 20 group changes in a minute                                                             |
+
+---
+
+### DELETE /api/v1/dms/{channelId}/members/{userId}
+
+Remove a member from a group DM. Owner only. To remove yourself, leave
+(`DELETE /api/v1/dms/{channelId}`).
+
+**Auth:** Required (owner)
+
+#### Response 204 No Content
+
+The removed member receives `dm_channel_close` (the visibility watermark is bumped
+first, as on a leave) and is evicted from the group's voice call with reason
+`dm_removed`. They get no row. Then the remaining members receive a refreshed
+`dm_channel_open` and one sequenced `chat_message` of kind `group_remove`
+(author = the owner, `group_event.target_user_id` = the removed user). The removed
+member's unread state for the DM is deleted. The owner can remove everyone else,
+which leaves a group of one.
+
+A remove that races the target's own leave writes one row: whichever commits first
+wins and the other gets a 404.
+
+Limited to 20 group changes per user per minute.
+
+#### Errors
+
+| Status | Code           | Reason                                                |
+| ------ | -------------- | ----------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | A 1:1 DM, or the target is the caller (leave instead) |
+| 403    | `FORBIDDEN`    | The caller is not the owner                           |
+| 403    | `TIMED_OUT`    | The caller is timed out                               |
+| 404    | `NOT_FOUND`    | The caller or the target is not a member              |
+| 429    | `RATE_LIMITED` | More than 20 group changes in a minute                |
+
+---
+
+### PUT /api/v1/dms/{channelId}/owner
+
+Hand a group DM to another member. Owner only.
+
+**Auth:** Required (owner)
+
+#### Request
+
+```json
+{ "user_id": 3 }
+```
+
+#### Response 200 OK
+
+The DM summary shape from the caller's seat, with the new `owner_id`. Every member
+receives a refreshed `dm_channel_open`. A transfer writes no row. `owner_id`
+always names a current member: a transfer to someone who has just left or been
+removed is a 404 and changes nothing.
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead (the change and its events have happened, and the
+caller gets the same summary from its `dm_channel_open`), so a client must not
+treat a missing body as a failure.
+
+Limited to 20 group changes per user per minute.
+
+#### Errors
+
+| Status | Code           | Reason                                   |
+| ------ | -------------- | ---------------------------------------- |
+| 400    | `BAD_REQUEST`  | A 1:1 DM, or the target is the caller    |
+| 403    | `FORBIDDEN`    | The caller is not the owner              |
+| 403    | `TIMED_OUT`    | The caller is timed out                  |
+| 404    | `NOT_FOUND`    | The caller or the target is not a member |
+| 429    | `RATE_LIMITED` | More than 20 group changes in a minute   |
+
+---
+
+### POST /api/v1/dms/{channelId}/icon
+
+Set a group DM's icon. Any member may.
+
+**Auth:** Required (any member). Not mounted on a server whose file storage failed to open.
+
+#### Request
+
+`multipart/form-data` with one `file` part, under the same rules as an avatar
+(`POST /api/v1/users/me/avatar`): at most 1 MiB, a PNG, JPEG or WebP image
+(sniffed from the bytes, never from the filename or the client's type), at most
+1024 x 1024 pixels, and it counts against the uploader's storage quota. The
+request body is capped at 2 MiB. Crop to a square client-side.
+
+#### Response 200 OK
+
+The DM summary shape from the caller's seat, with the new `icon`. The file is an
+unlinked attachment that the group names: its members can fetch it from
+`/api/v1/files/{id}` while it is the live icon, and nobody else can (the
+uploader can still read their own file). Every member receives a refreshed
+`dm_channel_open`, then one sequenced `chat_message` of kind `group_icon`
+(author = the caller, `group_event` `{"icon_removed": false}`). A file that
+the icon replaced stops being served to the members and is deleted by the
+orphan sweep. Two members changing the icon at once is not an error: the last
+change to commit is the icon, and each change leaves its own row.
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead, as the other group routes do.
+
+Limited to 5 uploads per user per minute, on its own limit apart from the group
+changes below and from avatar uploads.
+
+#### Errors
+
+| Status | Code           | Reason                                                             |
+| ------ | -------------- | ------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`  | A 1:1 DM, a missing `file`, or a file that breaks the image rules  |
+| 403    | `TIMED_OUT`    | The caller is timed out                                            |
+| 404    | `NOT_FOUND`    | The caller is not a member, or stopped being one before the commit |
+| 429    | `RATE_LIMITED` | More than 5 icon uploads in a minute                               |
+
+If the group cannot be changed after the file was stored (for instance the caller
+left the group in between) the file and its record are deleted and nothing is
+written or sent.
+
+---
+
+### DELETE /api/v1/dms/{channelId}/icon
+
+Remove a group DM's icon. Any member may.
+
+**Auth:** Required (any member)
+
+#### Response 200 OK
+
+The DM summary shape from the caller's seat, with `icon` `""`. Every member
+receives a refreshed `dm_channel_open`, then a `group_icon` row with
+`group_event` `{"icon_removed": true}`. A group that has no icon changes
+nothing: the same `200`, no row and no event. The old file stops being served
+and is deleted by the orphan sweep.
+
+If the change commits but the server cannot then read the summary back, the route
+answers `204 No Content` instead.
+
+Limited to 20 group changes per user per minute, shared with add, remove, owner
+transfer and rename.
+
+#### Errors
+
+| Status | Code           | Reason                                 |
+| ------ | -------------- | -------------------------------------- |
+| 400    | `BAD_REQUEST`  | A 1:1 DM                               |
+| 403    | `TIMED_OUT`    | The caller is timed out                |
+| 404    | `NOT_FOUND`    | The caller is not a member             |
+| 429    | `RATE_LIMITED` | More than 20 group changes in a minute |
 
 ---
 
@@ -1822,6 +2337,14 @@ silence, not a rejection. `block` is not part of this claim: a blocked
 sender's _later_ sends fail with `ErrBlocked` (Codex P2-9) — that denial is
 the existing block gate (`PUT /api/v1/blocks/{userId}`), unchanged by B5-6,
 and it is visible to the sender by design.
+
+A recipient who has direct messages on and message requests off
+(`message_requests: false` in `/users/me/privacy`) gets no request: the first
+message is recorded as already accepted, the conversation opens for them
+(`dm_channel_open`) and the message is delivered, mentioned and pushed as for
+any trusted sender, with no `dm_request` frame. Requests already in the inbox
+stay `pending`, and turning requests back on keeps that pair trusted. With
+direct messages off the send is refused instead (see above).
 
 Transitions are **recipient-only** and legal **only from `pending`**:
 
@@ -1930,10 +2453,11 @@ Idempotent. Sends the caller's other live sockets an `nsfw_ack` frame
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
-| 409    | `NOT_NSFW`  | The channel is not labelled — nothing to acknowledge       |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
+| 409    | `NOT_NSFW`    | The channel is not labelled — nothing to acknowledge       |
 
 ---
 
@@ -1950,9 +2474,10 @@ with `"acknowledged": false`.
 
 #### Errors
 
-| Status | Code        | Reason                                                     |
-| ------ | ----------- | ---------------------------------------------------------- |
-| 404    | `NOT_FOUND` | The channel does not exist or is not visible to the caller |
+| Status | Code          | Reason                                                     |
+| ------ | ------------- | ---------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | The channel is a thread: its consent is its parent's       |
+| 404    | `NOT_FOUND`   | The channel does not exist or is not visible to the caller |
 
 ---
 
@@ -2712,6 +3237,59 @@ to be linked from your own action ledger.
 
 ---
 
+### PUT /api/v1/moderation/users/{id}/nickname
+
+Set or clear another member's nickname (`users.display_name`). **Auth:**
+Required. **Permission:** `MANAGE_NICKNAMES` (the `ADMINISTRATOR` bypass
+applies to the bit, never to the hierarchy). The actor must strictly outrank
+the target by top role; the bit is read from the OR of every role the actor
+holds. Both are re-checked inside the write transaction, so an actor who loses
+the bit, or a target who is promoted, between the check and the write is
+refused with nothing changed and nothing broadcast. A member changes their
+own nickname with `PATCH /api/v1/users/me`, never this route.
+
+`MANAGE_NICKNAMES` is granted automatically only to an untouched, default
+Moderator role (the untouched Admin and the Owner already hold it). A
+Moderator or Admin role that was renamed or had its permissions edited does
+not hold it: grant "Manage Nicknames" to the role that should have it by hand,
+in the admin panel's role grid.
+
+#### Request
+
+```json
+{ "display_name": "at most 32 runes, or null / \"\" to clear" }
+```
+
+`display_name` must be present. The value goes through the same cleaning and
+checks as the member's own edit (spaces collapsed; no control characters, line
+breaks, invisible fillers or more than two stacked combining marks).
+
+A name that equals, ignoring case, another account's username is refused with
+`400`; the member's own username is allowed.
+
+#### Response 200 OK
+
+```json
+{ "user_id": 7, "display_name": "Big Bird" }
+```
+
+`display_name` is `null` when cleared. Every connected client also receives
+the usual `user_update` frame carrying the committed row. One `nickname_change`
+audit row records the actor and the old and new nickname. Rate limit: 10 per
+minute per actor, spent only after authorization.
+
+#### Errors
+
+| Status | Code            | Cause                                                                    |
+| ------ | --------------- | ------------------------------------------------------------------------ |
+| 400    | `BAD_REQUEST`   | `{id}` is not a positive integer                                         |
+| 400    | `INVALID_INPUT` | self-target, `display_name` absent or not a string/null, or name refused |
+| 403    | `FORBIDDEN`     | caller lacks `MANAGE_NICKNAMES`, or does not outrank the target          |
+| 404    | `NOT_FOUND`     | no such user, or a pending account (only after the permission check)     |
+| 429    | `RATE_LIMITED`  | over 10 changes a minute                                                 |
+
+---
+
 ### POST /api/v1/users/me/notices/{id}/ack
 
 Acknowledge a warning — own rows only. `{id}` is the ledger row id from
@@ -3159,12 +3737,15 @@ Runtime server metrics. IP-restricted (not token-based): allowed CIDRs come from
   "reconnect_tier_buffer": 120,
   "reconnect_tier_db": 4,
   "reconnect_tier_full": 1,
+  "reconnect_ring_misses": 3,
   "backpressure_queue_disconnects": 0,
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
   "backpressure_presence_drops": 0,
+  "delivery_loss_marks": 0,
   "ws_conn_rejects": 0,
   "disk_free_mb": 51200.5,
+  "db_wal_mb": 4.2,
   "db_writer_wait_count": 3,
   "db_writer_wait_seconds": 0.021,
   "db_reader_wait_count": 11,
@@ -3198,10 +3779,18 @@ sends that fell back to the normal queue), `backpressure_low_drops`
 means clients are draining too slowly), and `backpressure_presence_drops`
 (presence frames dropped on a full normal queue instead of disconnecting the
 client; each is repaired by a presence snapshot, and growth during a reconnect
-herd is expected). `reconnect_tier_*` counts resume
+herd is expected). `delivery_loss_marks` counts connected clients told to
+resync because a sequenced frame meant for them was dropped or withheld before
+it reached their queue: each such client sees a gap in `cseq` and its next
+resume takes the full-ready path. `reconnect_tier_*` counts resume
 attempts served from the in-memory ring buffer, the persisted event log, and
 full-resync fallback; a rising `full` share means the replay budget is too
-small for observed disconnect gaps. `db_writer_wait_count`/`_seconds`
+small for observed disconnect gaps. `reconnect_ring_misses` counts the resumes
+that passed the resync checks but fell behind the in-memory ring, the only ones
+the persisted event log can serve; it is not a tier, and a miss normally ends in `db` or
+`full` (a refused or revoked resume ends in neither). The log's hit rate is `reconnect_tier_db / reconnect_ring_misses`. A
+resume forced to a full ready by a visibility, content or presence change, a
+client already ahead of the ring and an empty ring are not counted. `db_writer_wait_count`/`_seconds`
 accumulate time requests spent queueing for SQLite's single write connection —
 the most direct saturation signal for the write path. `db_reader_wait_count`/
 `_seconds` are the same pair for the reader pool (`max_readers` connections);
@@ -3210,7 +3799,9 @@ pairs report one pool. `perm_cache_*` report
 permission-cache effectiveness (a miss is any lookup that repopulated from the
 database). `ws_conn_rejects` counts upgrades refused by the
 `server.max_ws_connections` cap, and `disk_free_mb` is free space on the data
-volume (omitted when the platform can't report it). `livekit_healthy` is
+volume (omitted when the platform can't report it). `db_wal_mb` is the size of
+the SQLite write-ahead log file, read on each request (omitted when it can't be
+read). `livekit_healthy` is
 omitted when no LiveKit health check is wired; `event_persister` is omitted
 when event persistence is disabled.
 
@@ -3231,16 +3822,161 @@ switch), `persist` (the `voice_states` write and moderator-flag restore),
 `token` (minting and sending `voice_token`), `complete` (the voice topic
 subscription, `voice_state` fan-out, existing states and `voice_config`) and
 `total`; a refused or rolled-back join is not counted. A
-`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating. It is the
-longest hold since start, not a recent one; the replay purges run their
-database deletes outside `seqMu`.
+`hub_seqmu_max_hold_ms` above ~100 ms is worth investigating. The top-level
+figure is the longest hold since start, so it never falls; read the same key
+under `windows` for the longest hold in the last minute or fifteen. The replay
+purges run their database deletes outside `seqMu`.
 
-### GET /metrics (Prometheus)
+#### The `windows` block
 
-A Prometheus text-format exporter is mounted at `/metrics` **only** when the
-server was built with `-tags otel` and `telemetry.exporter` is set to
-`prometheus`. It is admin-IP-restricted like the JSON endpoint. In the default
-build the route does not exist (404).
+Every figure above is cumulative since boot, so after a day of uptime ten
+minutes of stall barely moves a lifetime `p95`. The `windows` key holds the
+same figures for the last minute (`1m`) and the last fifteen minutes (`15m`).
+Use it to see what is happening now; keep the top-level figures for scrapers
+that take their own deltas.
+
+```json
+{
+  "windows": {
+    "1m": {
+      "seconds": 60.0,
+      "as_of": "2026-10-17T12:00:00Z",
+      "ws_broadcast_ms": { "count": 52, "p50": 1, "p95": 5, "p99": 20, "max": 18.4 },
+      "ws_dispatch_lag_ms": { "count": 52, "p50": 0.5, "p95": 2, "p99": 5, "max": 6.1 },
+      "chat_send_ack_ms": { "count": 9, "p50": 2, "p95": 10, "p99": 10, "max": 9.7 },
+      "voice_join_ms": {
+        "precheck": { "count": 0, "p50": 0, "p95": 0, "p99": 0, "max": 0 },
+        "...": "five more phases"
+      },
+      "hub_seqmu_max_hold_ms": 3.1,
+      "broadcast_drops": 0,
+      "topic_sheds_total": 0,
+      "reconnect_tier_buffer": 2,
+      "reconnect_tier_db": 0,
+      "reconnect_tier_full": 0,
+      "reconnect_ring_misses": 0,
+      "backpressure_queue_disconnects": 0,
+      "backpressure_high_fallbacks": 0,
+      "backpressure_low_drops": 3,
+      "backpressure_presence_drops": 0,
+      "delivery_loss_marks": 0,
+      "ws_conn_rejects": 0,
+      "db_writer_wait_count": 0,
+      "db_writer_wait_seconds": 0,
+      "db_reader_wait_count": 0,
+      "db_reader_wait_seconds": 0
+    },
+    "15m": { "seconds": 900.0, "as_of": "2026-10-17T12:00:00Z", "...": "same keys" }
+  }
+}
+```
+
+- **Latency distributions** (`ws_broadcast_ms`, `ws_dispatch_lag_ms`,
+  `chat_send_ack_ms`, each `voice_join_ms` phase) use the same fields as the
+  lifetime ones, over the observations made inside the window. `max` is the
+  largest observation the window saw, to the microsecond; the percentiles are
+  the same coarse bucket bounds. Each observation is counted once, but at a
+  sample boundary its count and its `max` can land in adjacent windows. A
+  window with no observations reports `count: 0` and zero percentiles, and its
+  `max` can still show a value carried from an observation at the window's
+  edge.
+- **`hub_seqmu_max_hold_ms`** is the longest hold inside the window.
+- **Counters** (`broadcast_drops`, `topic_sheds_total`, the `reconnect_tier_*`
+  and `backpressure_*` counts, `reconnect_ring_misses`, `delivery_loss_marks`, `ws_conn_rejects` and the
+  `db_*_wait_*` pairs) are how much each grew during the window. They are never
+  negative: a counter that was reset counts as no change.
+- **`seconds`** is the time the window really covers. A server that started 40
+  seconds ago reports `seconds: 40` under `1m`, and a gap in sampling (missed
+  ticks) can make it longer than the nominal length.
+- **`as_of`** is the newest sample's time (UTC). A sampler takes one sample
+  every 10 seconds, so the figures can be up to 10 seconds old.
+- **Omitted when unknown.** Until two samples exist, the whole `windows` key is
+  absent, and a window that cannot be answered is left out, so a missing
+  window is never a reassuring zero. A restart resets the windows with the rest
+  of the process state.
+- Only the figures listed above are windowed. Gauges that already describe
+  now (`connected_users`, `hub_broadcast_queue_depth`, the disk and heap
+  figures) are unchanged and not repeated.
+
+### GET /api/v1/metrics/prometheus
+
+The same figures as `GET /api/v1/metrics`, in the Prometheus text exposition
+format (version 0.0.4). It exists in **every build**, with no build tag and no
+config key, and it is limited exactly like the JSON endpoint: the addresses in
+`server.metrics_allowed_cidrs`, falling back to `server.admin_allowed_cidrs`. A
+scraper outside a private network needs `metrics_allowed_cidrs` set. It serves
+only aggregates: no per-user label, no version string, no path or address.
+
+**Auth:** IP restriction (metrics CIDRs, admin fallback)
+
+**Content-Type:** `text/plain; version=0.0.4; charset=utf-8`
+
+```text
+# HELP owncord_connected_users Users with a live WebSocket connection.
+# TYPE owncord_connected_users gauge
+owncord_connected_users 8
+# HELP owncord_ws_dispatch_lag_seconds Time a frame waited for the dispatch goroutine.
+# TYPE owncord_ws_dispatch_lag_seconds histogram
+owncord_ws_dispatch_lag_seconds_bucket{le="0.0005"} 1180
+owncord_ws_dispatch_lag_seconds_bucket{le="0.001"} 1196
+owncord_ws_dispatch_lag_seconds_bucket{le="+Inf"} 1204
+owncord_ws_dispatch_lag_seconds_sum 0.412
+owncord_ws_dispatch_lag_seconds_count 1204
+# HELP owncord_latency_max_seconds Largest single observation of each latency over the last minute (1m), fifteen minutes (15m) or the process lifetime. The one figure rate() and histogram_quantile() cannot derive.
+# TYPE owncord_latency_max_seconds gauge
+owncord_latency_max_seconds{metric="ws_dispatch_lag",window="1m"} 0.0021
+owncord_latency_max_seconds{metric="ws_dispatch_lag",window="lifetime"} 0.09
+```
+
+Names carry the `owncord_` prefix and base units: seconds and bytes, where the
+JSON uses milliseconds and megabytes. Counters end in `_total`.
+Large values may print in exponent form (for example `5.305304e+06`), which
+Prometheus parses.
+
+| Family                                                                                                                             | Type      | Labels                                                                                                                                  | JSON field                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `owncord_uptime_seconds`, `owncord_goroutines`, `owncord_connected_users`, `owncord_voice_sessions`                                | gauge     |                                                                                                                                         | `uptime_seconds`, `goroutines`, `connected_users`, `voice_sessions`              |
+| `owncord_heap_alloc_bytes`, `owncord_heap_sys_bytes`                                                                               | gauge     |                                                                                                                                         | `heap_alloc_mb`, `heap_sys_mb`                                                   |
+| `owncord_gc_cycles_total`                                                                                                          | counter   |                                                                                                                                         | `num_gc`                                                                         |
+| `owncord_broadcast_drops_total`, `owncord_topic_sheds_total`, `owncord_delivery_loss_marks_total`, `owncord_ws_conn_rejects_total` | counter   |                                                                                                                                         | `broadcast_drops`, `topic_sheds_total`, `delivery_loss_marks`, `ws_conn_rejects` |
+| `owncord_ws_broadcast_seconds`, `owncord_ws_dispatch_lag_seconds`, `owncord_chat_send_ack_seconds`                                 | histogram |                                                                                                                                         | `ws_broadcast_ms`, `ws_dispatch_lag_ms`, `chat_send_ack_ms`                      |
+| `owncord_voice_join_seconds`                                                                                                       | histogram | `phase`: `precheck`, `leave`, `persist`, `token`, `complete`, `total`                                                                   | `voice_join_ms`                                                                  |
+| `owncord_latency_max_seconds`                                                                                                      | gauge     | `metric`: `ws_broadcast`, `ws_dispatch_lag`, `chat_send_ack`, `hub_seqmu_hold`, `voice_join_<phase>`; `window`: `1m`, `15m`, `lifetime` | the `max` fields, `hub_seqmu_max_hold_ms`, and the same under `windows`          |
+| `owncord_hub_broadcast_queue_depth`                                                                                                | gauge     |                                                                                                                                         | `hub_broadcast_queue_depth`                                                      |
+| `owncord_reconnect_tier_total`                                                                                                     | counter   | `tier`: `buffer`, `db`, `full`                                                                                                          | `reconnect_tier_*`                                                               |
+| `owncord_reconnect_ring_misses_total`                                                                                              | counter   |                                                                                                                                         | `reconnect_ring_misses`                                                          |
+| `owncord_backpressure_total`                                                                                                       | counter   | `kind`: `queue_disconnect`, `high_fallback`, `low_drop`, `presence_drop`                                                                | `backpressure_*`                                                                 |
+| `owncord_db_wait_total`, `owncord_db_wait_seconds_total`                                                                           | counter   | `pool`: `writer`, `reader`                                                                                                              | `db_writer_wait_*`, `db_reader_wait_*`                                           |
+| `owncord_perm_cache_lookups_total`                                                                                                 | counter   | `result`: `hit`, `miss`                                                                                                                 | `perm_cache_hits`, `perm_cache_misses`                                           |
+| `owncord_push_total`                                                                                                               | counter   | `result`: `dispatched`, `failed`, `pruned`                                                                                              | `push_*`                                                                         |
+| `owncord_event_persister_total`                                                                                                    | counter   | `kind`: `persisted`, `dropped`, `flushes`, `errors`                                                                                     | `event_persister` (omitted while event persistence is off)                       |
+| `owncord_livekit_healthy`, `owncord_disk_low`                                                                                      | gauge 0/1 |                                                                                                                                         | `livekit_healthy`, `disk_low` (omitted when the JSON omits them)                 |
+| `owncord_disk_free_bytes`, `owncord_disk_min_free_bytes`, `owncord_upload_storage_used_bytes`                                      | gauge     |                                                                                                                                         | `disk_free_mb`, `disk_min_free_mb`, `upload_storage_used_mb`                     |
+| `owncord_db_wal_bytes`                                                                                                             | gauge     |                                                                                                                                         | `db_wal_mb` (omitted when the JSON omits it)                                     |
+
+Notes:
+
+- **Histogram buckets** are cumulative, in seconds (0.5 ms to 5 s, then `+Inf`).
+  `+Inf` and `_count` are the same number within one scrape. `_sum` is read
+  separately and can differ from the buckets by one observation still in flight.
+- **Windows are Prometheus's own.** Use `rate()`, `increase()` and
+  `histogram_quantile()` for deltas and quantiles; the JSON `windows` counter
+  deltas and the `p50`/`p95`/`p99` fields are not exported. The one figure a
+  query cannot derive is the worst single observation, so
+  `owncord_latency_max_seconds` carries a `window` label. A window the server
+  cannot answer yet (before its second sample) has no series, never a zero.
+- **Absent sources are omitted**, as in the JSON: no `owncord_livekit_healthy`
+  without a LiveKit probe, no `owncord_event_persister_total` with persistence
+  off, no disk or upload family when the figure is unavailable.
+- Each scrape runs the LiveKit health probe once, as each JSON read does.
+
+### GET /metrics (OpenTelemetry exporter)
+
+Only in a server built with `-tags otel` and `telemetry.exporter` set to
+`prometheus`: the OpenTelemetry SDK's own Prometheus exporter, mounted at
+`/metrics` and limited like the JSON endpoint. In the default build the route
+does not exist (404); use [`GET /api/v1/metrics/prometheus`](#get-apiv1metricsprometheus),
+which serves the built-in figures in every build.
 
 ---
 
@@ -3269,13 +4005,14 @@ Authorization is two-layered:
 | `GET /admin/api/stats`                                                                                                                               | perimeter only                                                                               |
 | `GET /admin/api/users`                                                                                                                               | perimeter only                                                                               |
 | `PATCH /admin/api/users/{id}`                                                                                                                        | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
+| `PUT/DELETE /admin/api/users/{id}/roles/{roleId}`                                                                                                    | perimeter; `MANAGE_ROLES` (checked in the service) — WP 6.3c                                 |
 | `DELETE /admin/api/users/{id}/sessions`                                                                                                              | `KICK_MEMBERS`                                                                               |
 | `DELETE /admin/api/users/{id}`                                                                                                                       | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
 | `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
 | `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                               |
 | `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                             |
-| `GET/PATCH /admin/api/settings`                                                                                                                      | `MANAGE_SERVER`                                                                              |
+| `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                              |
 | `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                              |
 | `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
 | `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
@@ -3362,6 +4099,10 @@ reopen the wizard; afterwards the endpoint returns an error.
 
 **Auth:** None (public), plus the one-time setup token
 **Rate limit:** 5 requests/minute per IP
+
+The owner's `username` follows the registration rules: 2–32 characters; letters
+(any script), digits, `_`, `.` and `-`; no spaces; starting with a letter or
+digit; `everyone` and `here` reserved. A refused name is `400 BAD_REQUEST`.
 
 `setup_token` must equal the token the server printed in its start-up output;
 a missing or different value is `403 FORBIDDEN`. The server makes a fresh token each time it starts.
@@ -3526,7 +4267,7 @@ Nothing here is exported off the host.
   both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `voice`,
-  `certificate`, `last_exit`, `backup`, and `job:<name>` for each maintenance
+  `certificate`, `last_exit`, `last_restore`, `backup`, and `job:<name>` for each maintenance
   step.
 - `certificate` reports the served TLS certificate's expiry. A `self_signed`
   or `manual` certificate is `ok` with 21 days or more left, `warning` inside
@@ -3544,6 +4285,11 @@ Nothing here is exported off the host.
   start time as `value` and the last panic it recovered, if any, in `detail`;
   `unknown` on a first start, when there was no marker to read. A planned
   (clean) restart clears the marker, so it recovers this warning.
+- `last_restore` appears only on a start that handled a staged backup restore
+  (WP 5.5), and is read once from the result the boot-time apply left: `ok`
+  with the backup name and time as `value` when it was applied, `warning`
+  when it was rolled back or refused and the previous database is still in use,
+  with the reason in `detail`.
 - `voice` reports LiveKit. An OwnCord-managed companion reports its
   supervisor's local state — `running`, plus a `not running` warning when it is
   down and a `gave up` critical when the backoff stopped restarting it; a
@@ -3581,8 +4327,8 @@ the query, so they narrow every page, not just the one returned.
 
 **Auth:** Admin perimeter
 **Query params:** `limit` (default 50, min 1, max 500), `offset` (default 0),
-`q` (case-insensitive username substring, at most 64 characters; longer is
-`400`), `role_id` (one role; omitted or `0` means any), `banned=1` (only
+`q` (case-insensitive substring of the username or the nickname, at most 64
+characters; longer is `400`), `role_id` (members who hold this role; omitted or `0` means any), `banned=1` (only
 effective bans: a lapsed temporary ban is not listed)
 
 #### Response 200 OK
@@ -3593,10 +4339,12 @@ Array of:
 | --------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`            | int     |                                                                                                                                                                                                 |
 | `username`      | string  |                                                                                                                                                                                                 |
+| `display_name`  | string? | the member's nickname; omitted when unset                                                                                                                                                       |
 | `avatar`        | string? | omitted when unset                                                                                                                                                                              |
 | `role_id`       | int     |                                                                                                                                                                                                 |
 | `role_name`     | string  |                                                                                                                                                                                                 |
 | `role_position` | int     | the role's hierarchy position; the server refuses role changes and moderation on a member whose position is at or above the caller's (`/me` `role_position`), and the panel hides those actions |
+| `role_ids`      | int[]   | every role the member holds, highest-ranked first (`role_id` is the first); the `role_id` query filter keeps members who hold that role, not only those whose top role it is                    |
 | `status`        | string  | presence status                                                                                                                                                                                 |
 | `created_at`    | string  |                                                                                                                                                                                                 |
 | `last_seen`     | string? | omitted when never seen                                                                                                                                                                         |
@@ -3624,22 +4372,85 @@ audit row.
   "role_id": 3,
   "banned": true,
   "ban_reason": "spam",
-  "ban_duration_hours": 24
+  "ban_duration_hours": 24,
+  "delete_message_seconds": 86400
 }
 ```
 
 All fields optional. `ban_duration_hours` makes the ban temporary (1–8760;
 omitted or `0` = permanent) and is only meaningful with `banned: true`.
 
+`delete_message_seconds` (integer, 0–604800) also deletes the target's messages
+posted in the last that many seconds. It is accepted only with `banned: true`
+and needs `MANAGE_MESSAGES` as well as `BAN_MEMBERS`. Messages are deleted in
+every non-DM, non-archived channel where the actor holds `READ_MESSAGES` and
+`MANAGE_MESSAGES`, up to 10,000 messages or 20 seconds per request. The checks
+run before the ban is written, so a refused request bans nobody. Connected
+clients receive a `chat_bulk_deleted` event per batch. Omitting the field, or
+sending `0`, deletes nothing.
+
+The purge may stop early. When the response has `"complete": false`, send the
+same request again to continue. A retry must resend `ban_reason` and
+`ban_duration_hours` unchanged: if the target is already banned and the ban
+fields match, the ban is not written a second time (no new ledger row, no
+refreshed reason or expiry) and only the deletion continues. For a temporary
+ban, the same `ban_duration_hours` retried within an hour counts as unchanged.
+Each request measures the window back from its own arrival time, so a message
+that crosses the window's edge between two requests stays.
+
 #### Response 200 OK -- the updated user (same shape as the list entry).
+
+When `delete_message_seconds` was above 0, the object also carries:
+
+```json
+{ "purge": { "deleted": 42, "complete": true } }
+```
+
+`deleted` counts the messages deleted by this request. Without the field the
+response has no `purge` member.
 
 #### Errors
 
-| Status | Code          | Cause                                                                                        |
-| ------ | ------------- | -------------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Invalid id/body, `ban_duration_hours` out of range, or attempting to modify your own account |
-| 403    | `FORBIDDEN`   | Missing bit, or the actor does not outrank the target                                        |
-| 404    | `NOT_FOUND`   | User not found                                                                               |
+| Status | Code           | Cause                                                                                                                                                                                               |
+| ------ | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | Invalid id/body, `ban_duration_hours` or `delete_message_seconds` out of range or not an integer, `delete_message_seconds` above 0 without `banned: true`, or attempting to modify your own account |
+| 403    | `FORBIDDEN`    | Missing bit (including `MANAGE_MESSAGES` for `delete_message_seconds`), or the actor does not outrank the target                                                                                    |
+| 404    | `NOT_FOUND`    | User not found                                                                                                                                                                                      |
+| 429    | `RATE_LIMITED` | `delete_message_seconds` used again too soon (one per actor every 2 seconds); nothing was changed                                                                                                   |
+
+---
+
+### PUT /admin/api/users/{id}/roles/{roleId}
+
+### DELETE /admin/api/users/{id}/roles/{roleId}
+
+Add or remove one role of a member without touching the others (WP 6.3c). A
+member holds one or more roles; `users.role_id`, `role` on the wire and the
+rank checks follow the **top** role (highest `position`, lowest id on a tie),
+while permissions are the union of every held role. `PATCH` with `role_id`
+still replaces every role the member holds with that one.
+
+The checks are those of `PATCH` with `role_id`: `MANAGE_ROLES`, the actor must
+outrank the target's top role, and the role must sit below the actor's own top
+role. Both calls are idempotent (adding a held role or removing one that is not
+held changes nothing and writes no audit row). Each real change writes a
+`role_add` or `role_remove` audit row, drops the target's cached permissions and
+sends one `member_update` (with `role_ids`) plus a visibility refresh to the
+target's live connection. The same routes exist under
+`/api/v1/moderation/members/{id}/roles/{roleId}`.
+
+**Auth:** Admin perimeter + `MANAGE_ROLES` (checked in the service)
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                                                                                                                      |
+| ------ | ------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Invalid id, unknown role, or the target is the caller                                                                      |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, the actor does not outrank the target, or the role is at or above theirs                           |
+| 404    | `NOT_FOUND`   | User not found                                                                                                             |
+| 409    | `LAST_ROLE`   | `DELETE` only: the role is the member's only one. Two concurrent removals of a member's last two roles cannot both succeed |
 
 ---
 
@@ -4024,7 +4835,7 @@ audited as `setting_change`.
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
-`upload_blocked_extensions`, `upload_allowed_extensions`.
+`upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -4059,6 +4870,12 @@ channel (pinned messages exempt, direct messages never in scope); a
 per-channel override in either direction is
 [`PUT /admin/api/channels/{id}/retention`](#put-adminapichannelsidretention).
 
+`afk_timeout_seconds` (WP 6.10a) is how long a member must have been idle
+before the AFK channel may take them: one of `60`, `300`, `900`, `1800` or
+`3600`, anything else is refused with `400`. A server with no row uses `300`.
+Which channel is the AFK channel is not a setting: see
+[`PUT /admin/api/afk-channel`](#put-adminapiafk-channel).
+
 `server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
 held to the same limits the first-run setup wizard enforces.
 
@@ -4082,6 +4899,39 @@ user has TOTP enabled.
 | 400    | `BAD_REQUEST` | Unknown key, a value outside its key's rules above, or `require_2fa` preconditions not met |
 
 ---
+
+### PUT /admin/api/afk-channel
+
+Names the server's AFK channel, or clears it (WP 6.10a). Clearing the old flag
+and setting the new one is one transaction, audited as `afk_channel_change`,
+and a `channel_update` is broadcast for each channel whose flag moved. The AFK
+channel is listen-only: its voice tokens grant no microphone, camera or screen
+sharing.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Request
+
+```json
+{ "channel_id": 12 }
+```
+
+`channel_id` must be present: a channel id flags that channel, `null` clears
+the flag.
+
+#### Response 200 OK
+
+```json
+{ "channel_id": 12 }
+```
+
+#### Errors
+
+| Status | Code            | Cause                                                 |
+| ------ | --------------- | ----------------------------------------------------- |
+| 400    | `BAD_REQUEST`   | `channel_id` missing or not an id or `null`           |
+| 400    | `INVALID_INPUT` | The channel is not a voice channel, or it is archived |
+| 404    | `NOT_FOUND`     | No such channel (a DM id answers the same)            |
 
 ### GET /admin/api/config
 
@@ -4287,11 +5137,12 @@ other-file token or a principal that no longer qualifies.
 
 ### POST /admin/api/backups/{name}/restore
 
-Restore the database from a backup. The server first writes a
+Restore the database from a backup. The server checks the backup, writes a
 `pre_restore_<timestamp>.db` safety backup (the restore is aborted if that
-fails), broadcasts a `server_restart` to connected clients, checkpoints and
-closes the database, copies the backup over it, responds, and then restarts
-itself.
+fails), stages a checked copy and a marker beside the database, responds, and
+restarts itself through the normal shutdown. The database that is running is
+not written. The next start swaps the staged copy in before the database
+opens, checks it, and keeps the previous database if the check fails.
 
 **Auth:** Owner role
 
@@ -4299,10 +5150,14 @@ itself.
 
 ```json
 {
-  "message": "database restored — server restarting",
+  "message": "restore staged — server restarting",
   "backup": "chatserver_20260804_120000.db"
 }
 ```
+
+A `500 INTERNAL_ERROR` ("could not stage the backup — database untouched")
+means the copy could not be written, for example because the database volume
+is full; nothing restarts. `409 DATABASE_BUSY` is no longer returned.
 
 ---
 
@@ -4390,10 +5245,15 @@ Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see
 }
 ```
 
-`can_apply` is `false` in container deployments (detected via
-`OWNCORD_CONTAINER`, which the shipped Dockerfile sets, or the engine marker
-files): checking still works, but `POST /updates/apply` will refuse — the
-admin SPA replaces the apply button with an image-upgrade note.
+`can_apply` is `false` when `POST /updates/apply` would refuse; checking still
+works, and `apply_blocked` (present only then) says why:
+
+- `container`: a container deployment (detected via `OWNCORD_CONTAINER`, which
+  the shipped Dockerfile sets, or the engine marker files). The admin SPA
+  replaces the apply button with an image-upgrade note. This wins when both
+  reasons apply.
+- `install_read_only`: the service cannot create files in the folder that holds
+  its program file. The admin SPA says to install the new release by hand.
 
 #### Errors
 
@@ -4423,10 +5283,13 @@ re-verification against TOCTOU swaps), spawns the new process and shuts down.
 | Status | Code                                                         | Cause                                                                                                                                                       |
 | ------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 503    | `CONTAINER_DEPLOYMENT`                                       | Container deployment — the binary is image content; upgrade by pulling the new image (opt back in with `OWNCORD_CONTAINER=0` if the binary is bind-mounted) |
+| 503    | `INSTALL_READ_ONLY`                                          | The service cannot write to the folder that holds its program file; checked before any download. Install the new release by hand                            |
 | 503    | `UPDATE_UNAVAILABLE`                                         | Update checking is not configured                                                                                                                           |
+| 503    | `SHUTTING_DOWN`                                              | The server has begun shutting down, so the update was not downloaded or applied (checked before the download and again before the restart countdown starts) |
 | 409    | `RESTART_PENDING`                                            | A restart from an earlier apply/restore is already pending                                                                                                  |
 | 409    | `UPDATE_IN_PROGRESS`                                         | Another restart-sensitive operation (update apply or backup restore) is running                                                                             |
 | 409    | `NO_UPDATE`                                                  | Already up to date                                                                                                                                          |
+| 503    | `SERVER_SHUTTING_DOWN`                                       | The server began shutting down while the update was being checked or downloaded; nothing was applied, try again once it is back                             |
 | 502    | `UPDATE_CHECK_FAILED` / `MISSING_ASSETS` / `DOWNLOAD_FAILED` | Check, asset or download/verification failure                                                                                                               |
 
 ---
@@ -4554,14 +5417,18 @@ principal that clears the bit still cannot escalate through it.
   entirely (it is what lets the owner hand out anything).
 - The default role (`is_default = 1`) cannot be deleted: every member falls
   back to it.
-- Deleting a role moves its members onto the default role in one `UPDATE`,
-  drops the role's `channel_overrides` rows, invalidates the moved members'
+- Deleting a role gives the default role to each member it leaves with no
+  role (a member who holds another role keeps it and is not moved), re-derives
+  every holder's top role in the same transaction, drops the role's `channel_overrides` rows, invalidates the moved members'
   cached permissions, and broadcasts a `member_update` per member.
 - Names are unique **case-insensitively** (migration `023`), matching the
   case-insensitive lookup the desktop client does. Max 32 characters.
 - Colors are `#rgb` or `#rrggbb`, normalized to uppercase. `""` clears the
   color. Anything else is `400`.
 - Unknown permission bits are masked off rather than rejected.
+- Moving a role (a `position` edit or a reorder) re-derives the top role of
+  every member who holds it next to another role, and sends them a
+  `member_update`.
 - Every mutation writes an audit row (`role_create`, `role_update`,
   `role_delete`, `role_reorder`) and broadcasts `roles_update` (see
   `docs/protocol.md`) carrying the full new list.
@@ -4614,11 +5481,14 @@ Roles ordered by position descending, each with its member count.
 | `color`       | string  | No       | `#rgb`/`#rrggbb`, or `""` for none                                    |
 | `permissions` | integer | No       | Bitfield; defaults to `0`                                             |
 | `position`    | integer | No       | Must be free; defaults to the highest free slot below the actor's own |
+| `hoist`       | boolean | No       | The role is its own member-list group; defaults to `false`            |
+| `mentionable` | boolean | No       | Any member may ping the role; defaults to `false`                     |
 
 #### Response 201 Created
 
 The created role (`id`, `name`, `color`, `permissions`, `position`,
-`is_default` — always `false`; the default role is seeded, never created).
+`is_default` — always `false`; the default role is seeded, never created —
+`hoist` and `mentionable`).
 
 #### Errors
 
@@ -4632,6 +5502,18 @@ The created role (`id`, `name`, `color`, `permissions`, `position`,
 Partial update — every field is optional and an omitted one is left alone.
 Same body and same errors as `POST`, plus `404 NOT_FOUND` for a missing role.
 Editing a role at or above your own position is `403`.
+
+`expected_permissions` (optional integer) is the permission mask the editor
+loaded. When present and the role's stored mask is different, nothing is
+written and the response is `409` with code `ROLE_CONFLICT`: another admin
+changed the role since it was loaded, so reload it and apply the change again.
+Omit the field to skip the check (the admin panel always sends it). The
+comparison and the write happen under one lock, so two edits that carry the
+same `expected_permissions` cannot both succeed.
+
+| Status | Code            | When                                                       |
+| ------ | --------------- | ---------------------------------------------------------- |
+| 409    | `ROLE_CONFLICT` | `expected_permissions` differs from the role's stored mask |
 
 A permission change additionally invalidates the cached permissions of that
 role's members and re-syncs their channel visibility (the server sends targeted
@@ -4683,8 +5565,8 @@ The full role list after the reorder, position descending.
 
 ## Channel Management (admin)
 
-`POST /admin/api/channels` takes `{name, type, category, topic, position}`;
-`PATCH /admin/api/channels/{id}` takes `{name, topic, category, slow_mode,
+`POST /admin/api/channels` takes `{name, type, category_id, category, topic, position}`;
+`PATCH /admin/api/channels/{id}` takes `{name, topic, category_id, category, slow_mode,
 position, archived, nsfw, voice_max_users, voice_max_video}` and seeds every
 omitted field from the current row, so a partial body is safe.
 
@@ -4718,15 +5600,85 @@ to a synthetic "Voice" group only for voice channels with no category at all.
 (Before phase 5 the server refused any non-voice channel under a category
 literally named "Voice Channels", and any voice channel outside it.)
 
-`PATCH` accepts `category`, so moving a channel between categories is an edit
-rather than a delete-and-recreate. An empty string makes it uncategorized.
+`PATCH` accepts `category_id`, so moving a channel between categories is an edit
+rather than a delete-and-recreate. `0` makes it uncategorized, and an id that
+does not exist is `400 INVALID_INPUT`. The older `category` name string still
+works on create and `PATCH`: it is matched to a category by name ignoring case,
+a name that matches none creates the category, and an empty string means none.
+`category_id` wins when both are sent, and a `PATCH` that names neither leaves
+the category alone.
+
+### Categories (WP 6.5a)
+
+A category is an object with an `id`, a `name` (at most 100 characters, unique
+ignoring case) and a `position`. Five routes manage them, all behind
+`MANAGE_CHANNELS`, mounted under both `/admin/api/channels` and
+`/api/v1/moderation/channels`:
+
+| Route                        | Body           | Result                                                                                                               |
+| ---------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `GET  .../categories`        | none           | `200` array of `{id, name, position}` by `(position, id)`                                                            |
+| `POST .../categories`        | `{name}`       | `201` the new category, appended last. `409 CATEGORY_NAME_TAKEN` on a duplicate                                      |
+| `PUT  .../categories/order`  | `{ids: [...]}` | `200` the new list. The ids must be exactly the current set: `409 CATEGORY_LIST_STALE` and nothing written otherwise |
+| `PATCH .../categories/{id}`  | `{name}`       | `200` the renamed category. `404` when missing, `409 CATEGORY_NAME_TAKEN` on a duplicate                             |
+| `DELETE .../categories/{id}` | none           | `204`. Its channels are not deleted: they keep their overrides and become uncategorized                              |
+
+Every mutation is audited (`category_create`, `category_rename`,
+`category_reorder`, `category_delete`). A rename, reorder or delete changes the
+`category`, `category_id` and `category_position` of the channels in the
+touched categories, so the server re-broadcasts `channel_update` for each of
+them and then sends `channel_categories` to connected managers (see
+[protocol.md](protocol.md#channel_categories-server---client)).
 
 A name already used by another channel of the same `type` in the same
-`category` is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
+category (`category_id`) is refused with `409 CHANNEL_NAME_TAKEN`, ignoring case: a create,
 or a `PATCH` that changes the name or the category. It is a check at write
 time, not a database constraint, so channels that already share a name are
 left as they are, and a `PATCH` that leaves both name and category alone still
 saves.
+
+### Category permissions (WP 6.5d)
+
+A category carries permission overrides that its channels can stay **synced**
+to. They are a template that is copied onto channels, never inherited: a
+channel's effective access is still computed from its own override rows alone.
+The routes are on `/admin/api` only, behind `MANAGE_CHANNELS` like the channel
+override routes:
+
+| Route                                                      | Body            | Result                                                                                              |
+| ---------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
+| `GET  /admin/api/channels/categories/{id}/permissions`     | none            | `200` `{category_id, roles, users}`: every role (zero masks when it has no row), existing user rows |
+| `PUT  .../categories/{id}/permissions/{roleId}`            | `{allow, deny}` | `200` the role row. Writes the category row and the same row on every synced channel                |
+| `DELETE .../categories/{id}/permissions/{roleId}`          | none            | `204`. Removes the category row and the row on every synced channel                                 |
+| `PUT/DELETE .../categories/{id}/user-permissions/{userId}` | as above        | the same for one member                                                                             |
+| `POST /admin/api/channels/{id}/permissions/sync`           | none            | `200` `{channel_id, permissions_synced}`. Replaces the channel's rows with its category's template  |
+
+A write runs the channel override guards over everything it touches: the
+escalation guard covers the bits written, the bits already on the category row
+and the bits already on every synced channel row it overwrites (a role cannot
+set or clear a bit its own role lacks), and the hierarchy rules apply to a role
+or member target. Any refusal is `403` and nothing is written; the category row
+and the channel rows are written in one transaction, and the channel set is read
+inside it. A sync, or a `PATCH` with `sync_permissions: true`, is guarded the
+same way over the union of the rows it removes and the rows it writes, and
+answers `400` when the channel has no category. A changed set of rows under a
+sync answers `409 PERMISSIONS_CHANGED` (retry). Writes are audited
+(`category_perms_update`, `category_perms_clear`, `category_user_perms_update`,
+`category_user_perms_clear`, `channel_perms_sync`).
+
+Sync lifecycle: a channel created in a category (by `category_id` or the legacy
+name) starts as a copy of the template and synced; copying is not a grant by the
+creator, so it is not blocked by bits the creator lacks. A direct write or delete
+of a channel override, or a `PATCH` that moves the channel to another category,
+sets `permissions_synced` to false and keeps its rows, unless the `PATCH` carries
+`sync_permissions: true`, which replaces its rows with the target category's
+template and marks it synced. `sync_permissions` on a `PATCH` works on both channel
+mounts (`/admin/api/channels/{id}` and `/api/v1/moderation/channels/{id}`); combined
+with a legacy `category` name that would create a new category it answers `400`,
+because a new category has no template to sync with. Deleting a category drops its template; its
+channels keep their rows and become unsynced. `permissions_synced` is on the
+admin channel list and on `GET /admin/api/channels/{id}/permissions`; it is not
+on the websocket channel payload.
 
 ---
 
@@ -4752,6 +5704,10 @@ and then re-syncs connected clients with targeted `channel_create` /
 `channel_delete` messages, so sidebars converge without a reconnect.
 
 DM channels have no override surface: `400 INVALID_INPUT`.
+
+A thread has no overrides, NSFW label, archive flag or retention policy of its
+own: each is its parent channel's. Every `/admin/api/channels/{id}` route,
+retention included, answers a thread id with `400`.
 
 ### GET /admin/api/channels/{id}/permissions
 
@@ -5046,7 +6002,7 @@ Check whether the LiveKit server is reachable.
 }
 ```
 
-### /livekit/* (Reverse Proxy)
+### /livekit/\* (Reverse Proxy)
 
 All requests to `/livekit/*` are reverse-proxied to the LiveKit server URL. The `/livekit` prefix is stripped before forwarding. This allows the client to connect to LiveKit through OwnCord's HTTPS server, avoiding mixed-content blocks.
 
@@ -5154,12 +6110,25 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Path Parameters
 
-| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                  |
-| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact (e.g., `linux-x86_64-deb`) get 204. |
-| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                              |
+| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact get 204. The `linux-x86_64-deb` and `linux-aarch64-deb` targets are served only with `?deb_install=pkexec` (see below). |
+| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                                                                                                                  |
 
-#### Response 200 OK (update available)
+#### Query Parameters
+
+| Param         | Type   | Description                                                                                                                                                                                                                                                                                   |
+| ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deb_install` | string | Opt-in for the `linux-*-deb` targets. Exactly `pkexec` (case-sensitive) says the client can install a signed `.deb` through a privileged helper. Without it a `-deb` target always gets 204, so older `.deb` clients keep their "cannot update itself" notice. Ignored on every other target. |
+
+For an opted-in `-deb` client the server also answers **200 with the latest
+version** when the client is already current or newer, instead of 204. The
+Tauri plugin resolves the platform entry before it compares versions; the 200
+tells the client that the server can serve its package, so it can tell
+"up to date" from "this server cannot serve me". The protocol-epoch withhold
+and a release without a signed `.deb` still give 204.
+
+#### Response 200 OK (update available, or an opted-in `-deb` client)
 
 ```json
 {
@@ -5177,7 +6146,7 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Response 204 No Content
 
-Client is already up-to-date, no client build is published for `target`, or
+Client is already up-to-date (except an opted-in `-deb` client, see above), no client build is published for `target`, or
 the newest release speaks a **newer protocol epoch than this server** (read
 from the release's signed server-update manifest, `protocol_epoch`; a manifest
 that fails signature verification is withheld the same way). The server

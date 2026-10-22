@@ -11,9 +11,11 @@ import (
 	"runtime"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 	"github.com/J3vb/OwnCord/Server/migrations"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 	_ "modernc.org/sqlite" // register the sqlite3 driver
 )
 
@@ -51,9 +53,22 @@ type DB struct {
 	// Loaded from the durable sidecar before serving a restored database.
 	messageDeliveryFloor atomic.Int64
 
+	// attachmentBytesCache and activeMessagesCache hold the two whole-table
+	// aggregates the metrics scrape and admin stats read (SV-07).
+	attachmentBytesCache syncutil.TTLCache[int64]
+	activeMessagesCache  syncutil.TTLCache[int64]
+
 	// closed is set by Close. A backup restore closes the handle while the
 	// lifecycle is still up; teardown steps read it through Closed.
 	closed atomic.Bool
+
+	// plainMemory is true for a private ":memory:" database, the only kind
+	// Migrate may fill from the cached migrated image (migrate_memory.go).
+	plainMemory bool
+
+	// walPath is "<path>-wal" for a file-backed database, empty for an
+	// in-memory one. WALBytes stats it; nothing else reads it.
+	walPath string
 
 	// lockRelease drops the single-process advisory lock taken by openFile.
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
@@ -105,6 +120,8 @@ type DB struct {
 	// so the hook must not touch this DB's pools. Nil in production, no
 	// exported setter.
 	testEraseCommitHook func()
+	// testErasureChunkHook is a test seam (WP 4.1a), see erasure_chunks.go.
+	testErasureChunkHook func(stage string, n int) error
 }
 
 // filePragmas are the per-connection PRAGMAs applied to every file-backed
@@ -210,25 +227,14 @@ func openMemory(path string) (*DB, error) {
 	// and makes the Exec'd PRAGMAs below apply to every future statement.
 	sqlDB.SetMaxOpenConns(1)
 
-	// The same PRAGMA set as filePragmas, Exec'd because there is exactly one
-	// connection to configure. journal_mode is a no-op for :memory: (SQLite
-	// reports "memory") but is kept for symmetry with file mode.
-	for _, p := range []struct{ name, stmt string }{
-		{"enabling WAL mode", "PRAGMA journal_mode=WAL;"},
-		{"setting busy_timeout", "PRAGMA busy_timeout=5000;"},
-		{"enabling foreign keys", "PRAGMA foreign_keys=ON;"},
-		{"setting synchronous mode", "PRAGMA synchronous=NORMAL;"},
-		{"setting temp_store", "PRAGMA temp_store=MEMORY;"},
-		{"setting mmap_size", "PRAGMA mmap_size=268435456;"},
-		{"setting cache_size", "PRAGMA cache_size=-64000;"},
-	} {
-		if _, err := sqlDB.Exec(p.stmt); err != nil {
-			_ = sqlDB.Close()
-			return nil, fmt.Errorf("%s: %w", p.name, err)
-		}
+	if err := applyMemoryPragmas(sqlDB); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
 	}
 
-	return newDB(sqlDB, sqlDB), nil
+	d := newDB(sqlDB, sqlDB)
+	d.plainMemory = path == ":memory:"
+	return d, nil
 }
 
 // openFile opens the writer and reader pools for a file-backed database.
@@ -246,7 +252,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 		var lockErr error
 		release, lockErr = acquireProcessLock(path)
 		if lockErr != nil {
-			if errors.Is(lockErr, errAlreadyLocked) {
+			if errors.Is(lockErr, ErrAlreadyLocked) {
 				return nil, fmt.Errorf(
 					"database %s is in use by another running OwnCord process — stop that process first (the lock is released automatically when it exits)",
 					path)
@@ -266,9 +272,9 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 			release()
 		}
 	}()
-	retryFloor, err := readMessageDeliveryFloor(path)
+	retryFloor, err := prepareOpen(path, takeLock)
 	if err != nil {
-		return nil, fmt.Errorf("loading message retry cutoff: %w", err)
+		return nil, err
 	}
 
 	base := path
@@ -318,6 +324,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 
 	d := newDB(writer, reader)
 	d.messageDeliveryFloor.Store(retryFloor)
+	d.walPath = walFilePath(path)
 	d.lockRelease = release
 	ok = true
 	return d, nil
@@ -421,7 +428,17 @@ func hasKeywordPrefix(s, keyword string) bool {
 // lexicographic order, applying each file exactly once.  It delegates to
 // MigrateFS (defined in migrate.go) which maintains the schema_versions
 // tracking table.
+//
+// An empty in-memory database gets a copy of an already-migrated image
+// instead (migrate_memory.go); the result is the same database.
 func Migrate(database *DB) error {
+	if restoreFreshMemory(database) {
+		return nil
+	}
+	return migrateEmbedded(database)
+}
+
+func migrateEmbedded(database *DB) error {
 	applied, err := migrateFSCount(database, migrations.FS)
 	if err != nil {
 		return err
@@ -433,14 +450,18 @@ func Migrate(database *DB) error {
 	// never reached Close()'s optimize. Both write sqlite_stat rows, so they
 	// run on the writer.
 	if applied > 0 {
+		started := time.Now()
 		if _, err := database.writer.Exec("ANALYZE;"); err != nil {
 			return fmt.Errorf("running ANALYZE after migrations: %w", err)
 		}
+		slog.Info("db: analyze done", "ms", time.Since(started).Milliseconds())
 		return nil
 	}
+	started := time.Now()
 	if _, err := database.writer.Exec("PRAGMA optimize;"); err != nil {
 		return fmt.Errorf("running PRAGMA optimize at startup: %w", err)
 	}
+	slog.Info("db: optimize done", "ms", time.Since(started).Milliseconds())
 	return nil
 }
 

@@ -37,18 +37,21 @@ export interface PresenceSender {
    * Send (or, if the shared limiter's window is closed, queue) a presence
    * change. Omit `customStatus` to leave whatever custom-status text the
    * server already has standing — that is what every caller except an
-   * explicit custom-status commit wants.
+   * explicit custom-status commit wants. `expiresInSeconds` (60..604800, the
+   * "Clear after" choice) rides with a non-empty `customStatus` only and is
+   * left out otherwise: the server refuses it without text. Omitted = the
+   * status never clears by itself.
    */
-  send(status: UserStatus, customStatus?: string): void;
+  send(status: UserStatus, customStatus?: string, expiresInSeconds?: number): void;
   /**
-   * A TIMED_OUT refusal of the frame with this envelope id: put the status
+   * A TIMED_OUT or BAD_REQUEST refusal of the frame with this envelope id: put the status
    * that was in effect before that frame's optimistic apply back, in the
    * members store and in the saved prefs. Called by the dispatcher's error
    * chain (the one writer for server events), never by this module's own
    * `ws.on` — a presence sender may read store state there, not write it.
    * A no-op when the id is not the frame this sender last put on the wire.
    */
-  rollbackTimedOut(id: string | undefined): void;
+  rollbackRefused(id: string | undefined): void;
   /** Cancel any pending retry. Call on teardown of the owning session. */
   destroy(): void;
 }
@@ -80,11 +83,15 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
   // mention it — so send() below falls back to this instead of dropping it
   // (OC-0156).
   let pendingCustom: string | undefined;
+  // The "clear after" that travels with pendingCustom, so a retry (or a plain
+  // status change coalescing onto it) keeps the expiry the user chose.
+  let pendingExpiresIn: number | undefined;
   // The envelope id and custom_status of the frame most recently handed to
   // the transport, so a RATE_LIMITED reply can be correlated back to *this*
   // sender's presence_update — never another producer's rate limit.
   let lastSentId: string | null = null;
   let lastSentCustom: string | undefined;
+  let lastSentExpiresIn: number | undefined;
   // The status/text in effect just before the optimistic apply of a change,
   // so a TIMED_OUT reply can put it back. The server refuses a timed-out custom
   // status without writing or broadcasting anything (service/channel.go's
@@ -99,6 +106,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     readonly status: UserStatus;
     readonly origin: StatusOrigin;
     readonly custom: string | null;
+    readonly customExpiresAt: string | null | undefined;
   };
   let pendingBaseline: Baseline | null = null;
   let sentBaseline: Baseline | null = null;
@@ -112,32 +120,48 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     const status = customOnly ? loadUserStatus() : b.status;
     const origin = customOnly ? loadUserStatusOrigin() : b.origin;
     if (b.userId !== 0) {
-      updatePresence(b.userId, status, b.custom);
+      updatePresence(b.userId, status, b.custom, b.customExpiresAt);
       // authStore.user is the picker's seed (serverCustomStatus) on a remount;
       // an already-mounted picker re-seeds from the members store write above.
       updateUser({ status, custom_status: b.custom });
     }
-    saveUserStatus(status, origin);
+    // Only a real change is written: saveUserStatus ends a running status
+    // timer, and a rollback that restores the status already in effect (a
+    // refused custom status while on a timed Do Not Disturb) must not.
+    if (status !== loadUserStatus() || origin !== loadUserStatusOrigin()) {
+      saveUserStatus(status, origin);
+    }
     saveCustomStatus(b.custom ?? "");
   }
 
   /** Arm (or replace) the single coalescing retry the window can have. */
-  function armRetry(delayMs: number, custom: string | undefined): void {
+  function armRetry(
+    delayMs: number,
+    custom: string | undefined,
+    expiresIn: number | undefined,
+  ): void {
     if (retry !== null) {
       clearTimeout(retry);
     }
     pendingCustom = custom;
+    pendingExpiresIn = expiresIn;
     retry = setTimeout(() => {
       retry = null;
-      send(loadUserStatus(), pendingCustom);
+      send(loadUserStatus(), pendingCustom, pendingExpiresIn);
     }, delayMs);
   }
 
-  function send(status: UserStatus, customStatus?: string): void {
+  function send(status: UserStatus, customStatus?: string, expiresInSeconds?: number): void {
     // A plain call inherits whatever custom_status is still queued behind
     // the limiter; an explicit call always wins outright.
     const effectiveCustom =
       customStatus !== undefined ? customStatus : retry !== null ? pendingCustom : undefined;
+    // The expiry belongs to its text: inherited with it, dropped with it, and
+    // never sent without any (the server refuses that frame).
+    const requestedExpiresIn =
+      customStatus !== undefined ? expiresInSeconds : retry !== null ? pendingExpiresIn : undefined;
+    const effectiveExpiresIn =
+      effectiveCustom !== undefined && effectiveCustom !== "" ? requestedExpiresIn : undefined;
     const userId = authStore.getState().user?.id ?? 0;
     const existing = userId !== 0 ? membersStore.getState().members.get(userId) : undefined;
     if (
@@ -151,10 +175,20 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
         status: existing.status,
         origin: loadUserStatusOrigin(),
         custom: existing.customStatus ?? null,
+        customExpiresAt: existing.customStatusExpiresAt,
       };
     }
     if (userId !== 0) {
-      updatePresence(userId, status, effectiveCustom);
+      // Our own expiry is the one the server tells only us, so the client
+      // states it for the optimistic apply: now + the chosen delay, or none.
+      // A bare status flip (no text) says nothing about it.
+      const expiresAt =
+        effectiveCustom === undefined
+          ? undefined
+          : effectiveExpiresIn === undefined
+            ? null
+            : new Date(Date.now() + effectiveExpiresIn * 1000).toISOString();
+      updatePresence(userId, status, effectiveCustom, expiresAt);
     }
     if (retry !== null) {
       clearTimeout(retry);
@@ -164,13 +198,22 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
       sentBaseline = pendingBaseline;
       pendingBaseline = null;
       pendingCustom = undefined;
+      pendingExpiresIn = undefined;
       lastSentCustom = effectiveCustom;
+      lastSentExpiresIn = effectiveExpiresIn;
       lastSentId =
         effectiveCustom === undefined
           ? ws.send({ type: "presence_update", payload: { status } })
           : ws.send({
               type: "presence_update",
-              payload: { status, custom_status: effectiveCustom },
+              payload:
+                effectiveExpiresIn === undefined
+                  ? { status, custom_status: effectiveCustom }
+                  : {
+                      status,
+                      custom_status: effectiveCustom,
+                      custom_status_expires_in: effectiveExpiresIn,
+                    },
             });
     } else {
       // The window is still closed from an earlier send (any producer's) —
@@ -179,7 +222,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
       // reopened too. Re-reads loadUserStatus() at fire time so a burst of
       // calls in between coalesces onto a single retry carrying the latest
       // value.
-      armRetry(limiter.getRemainingMs() + RETRY_MARGIN_MS, effectiveCustom);
+      armRetry(limiter.getRemainingMs() + RETRY_MARGIN_MS, effectiveCustom, effectiveExpiresIn);
     }
   }
 
@@ -197,7 +240,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
     if (retry !== null) return;
     if (id === undefined || id !== lastSentId) return; // not our frame
     pendingBaseline = sentBaseline;
-    armRetry(limiter.getRemainingMs() + RETRY_MARGIN_MS, lastSentCustom);
+    armRetry(limiter.getRemainingMs() + RETRY_MARGIN_MS, lastSentCustom, lastSentExpiresIn);
   });
 
   /**
@@ -208,7 +251,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
    * else has. A no-op unless the id is the frame this sender last put on the
    * wire.
    */
-  function rollbackTimedOut(id: string | undefined): void {
+  function rollbackRefused(id: string | undefined): void {
     if (id === undefined || id !== lastSentId) return;
     lastSentId = null;
     const baseline = sentBaseline;
@@ -234,10 +277,11 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
       retry = null;
     }
     pendingCustom = undefined;
+    pendingExpiresIn = undefined;
     unsubError();
   }
 
-  return { send, rollbackTimedOut, destroy };
+  return { send, rollbackRefused, destroy };
 }
 
 // ---------------------------------------------------------------------------

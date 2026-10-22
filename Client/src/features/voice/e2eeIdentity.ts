@@ -7,6 +7,7 @@ import { signEphemeralKey } from "../../lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair } from "../../lib/identity";
 import { authStore } from "../../stores/auth.store";
 import { createLogger } from "../../lib/logger";
+import { localVideoDecode } from "./decodeCaps";
 
 // Same logger tag as before the extraction, so the E2EE log lines are unchanged.
 const log = createLogger("livekitE2EE");
@@ -84,18 +85,24 @@ export class E2EEIdentity {
    *  announce rather than blocking the join. */
   async buildAnnouncePayload(
     ephemeralPubBase64: string,
-  ): Promise<{ public_key: string; signature?: string }> {
+  ): Promise<{ public_key: string; signature?: string; video_decode: readonly string[] }> {
+    // Started before the key load so the load's staleness guards see the same
+    // ordering as before the decode list became async.
+    const decoding = localVideoDecode();
+    let signature: string | undefined;
     try {
       const idKeyPair = await this.ensureIdentityKeyPair();
       if (idKeyPair) {
         const myUserId = authStore.getState().user?.id ?? 0;
         const ephemeralRaw = rawFromBase64(ephemeralPubBase64);
-        const signature = await signEphemeralKey(idKeyPair.privateKey, myUserId, ephemeralRaw);
-        return { public_key: ephemeralPubBase64, signature };
+        signature = await signEphemeralKey(idKeyPair.privateKey, myUserId, ephemeralRaw);
       }
     } catch (err) {
       log.error("E2EE: failed to sign announce — sending unsigned", err);
+      signature = undefined;
     }
-    return { public_key: ephemeralPubBase64 };
+    const video_decode = await decoding;
+    if (signature !== undefined) return { public_key: ephemeralPubBase64, signature, video_decode };
+    return { public_key: ephemeralPubBase64, video_decode };
   }
 }

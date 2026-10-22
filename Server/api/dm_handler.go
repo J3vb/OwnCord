@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -69,15 +70,25 @@ var _ dmVoiceEvictor = (*ws.Hub)(nil)
 
 // MountDMRoutes registers DM-related routes onto r.
 // All routes require authentication.
-// hub is used to send real-time WebSocket events on DM close.
-func MountDMRoutes(r chi.Router, database *db.DB, svc *service.Services, broadcaster DMBroadcaster) {
+// hub is used to send real-time WebSocket events on DM close. store may be nil,
+// in which case the group icon upload route is not registered: with nowhere to
+// put the bytes, a route that 500s on every call is worse than one that 404s.
+func MountDMRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter, store FileStore) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/", handleCreateDM(svc, broadcaster))
 		r.Post("/group", handleCreateGroupDM(svc, broadcaster))
 		r.Get("/", handleListDMs(svc))
-		r.Patch("/{channelId}", handleRenameGroupDM(svc, broadcaster))
+		r.Patch("/{channelId}", handleRenameGroupDM(svc, broadcaster, limiter))
 		r.Delete("/{channelId}", handleCloseDM(svc, broadcaster))
+		r.Post("/{channelId}/members", handleAddGroupMembers(svc, broadcaster, limiter))
+		r.Delete("/{channelId}/members/{userId}", handleRemoveGroupMember(svc, broadcaster, limiter))
+		r.Put("/{channelId}/owner", handleTransferGroupOwner(svc, broadcaster, limiter))
+		r.Delete("/{channelId}/icon", handleDeleteGroupIcon(svc, broadcaster, limiter))
+		if store != nil {
+			r.With(MaxBodySize(avatarMaxBodySize)).
+				Post("/{channelId}/icon", handleUploadGroupIcon(svc, broadcaster, store, limiter))
+		}
 	})
 
 	// User blocking routes — prevent DM creation and messaging.
@@ -241,10 +252,11 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 				slog.Debug("handleCloseDM: user not connected", "user_id", user.ID, "channel_id", channelID)
 			}
 			// A group leave changes the membership everyone else renders, so
-			// the survivors get a refreshed dm_channel_open rather than being
-			// left showing a member who has gone.
+			// the survivors get a refreshed dm_channel_open (it carries the new
+			// owner_id when the leaver owned the group) rather than being left
+			// showing a member who has gone, then the group_leave row.
 			if result.Left && !result.ChannelDeleted {
-				broadcastDMOpen(r.Context(), svc, broadcaster, channelID, result.RemainingParticipantIDs)
+				fanOutGroupChange(r.Context(), svc, broadcaster, channelID, result.RemainingParticipantIDs, result.Rows)
 			}
 			// Leaving a group DM removes the caller from its membership but,
 			// without this, leaves them connected to its live voice call —
@@ -337,13 +349,13 @@ func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 		broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, result.ParticipantIDs)
 
 		writeJSON(w, http.StatusCreated,
-			db.NewDMChannelInfo(result.Channel.ID, result.Channel.Name, true, result.Participants, user.ID))
+			db.NewDMChannelInfo(result.Channel.ID, result.Channel.Name, true, user.ID, "", result.Participants, user.ID))
 	}
 }
 
-// handleRenameGroupDM sets or clears a group DM's name. Participants only —
-// there is no owner, so every member holds the same authority over it.
-func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
+// handleRenameGroupDM sets or clears a group DM's name. Any member may rename.
+// A changed name leaves a group_rename row; an unchanged one sends nothing.
+func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
 		if !ok {
@@ -354,6 +366,9 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 		if !ok {
 			return
 		}
+		if !allowGroupMutation(w, limiter, user.ID) {
+			return
+		}
 
 		var req renameDMRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -361,32 +376,23 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 			return
 		}
 
-		if _, err := svc.DMs.RenameGroupDM(r.Context(), user.ID, channelID, req.Name); err != nil {
+		result, err := svc.DMs.RenameGroupDM(r.Context(), user.ID, channelID, req.Name)
+		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
 
-		// The rename has already committed at this point, so this lookup must
-		// survive the caller's request context being cancelled right after
-		// that commit (client disconnect mid-handler) — same reasoning as
-		// broadcastDMOpen's own context.WithoutCancel, and the failure must be
-		// logged rather than silently dropping the fan-out (participants would
-		// keep rendering the stale name with no compensating resync, since
-		// dm_channel_open is unsequenced/targeted and can't be replayed).
-		bgCtx := context.WithoutCancel(r.Context())
-		participantIDs, pErr := svc.Channels.GetDMParticipantIDs(bgCtx, channelID)
-		if pErr != nil {
-			slog.Error("handleRenameGroupDM: participant lookup failed", "err", pErr, "channel_id", channelID)
-		} else {
-			broadcastDMOpen(bgCtx, svc, broadcaster, channelID, participantIDs)
+		// The rename has already committed at this point, so the fan-out runs on
+		// a context detached from the request (client disconnect mid-handler),
+		// and participants would keep rendering the stale name with no
+		// compensating resync otherwise, since dm_channel_open is
+		// unsequenced/targeted and can't be replayed. An unchanged name wrote no
+		// row and changed nothing for anyone, so it sends nothing.
+		if len(result.Rows) > 0 {
+			fanOutGroupChange(r.Context(), svc, broadcaster, channelID, result.Audience, result.Rows)
 		}
 
-		summary, sErr := svc.DMs.DMSummaryFor(r.Context(), user.ID, channelID)
-		if sErr != nil {
-			writeServiceError(r.Context(), w, sErr)
-			return
-		}
-		writeJSON(w, http.StatusOK, summary)
+		writeGroupSummary(w, r, svc, user.ID, channelID)
 	}
 }
 
@@ -426,7 +432,7 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 // already in the pair's 1:1 DM voice call stays in it indefinitely — the
 // block gate otherwise runs only on voice_join and voluntary
 // voice_token_refresh, both of which the blocked client controls. Group DM
-// calls are deliberately untouched, matching requireDMNotBlocked's group
+// calls are deliberately untouched, matching RequireDMReachable's group
 // exemption.
 func evictBlockedUserFromVoice(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, blockerID, targetID int64) {
 	ve, evictable := broadcaster.(dmVoiceEvictor)

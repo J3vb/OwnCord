@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 )
@@ -31,11 +32,11 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 			t.Fatalf("%s: %v", query, err)
 		}
 	}
-	msg, err := database.CreateMessageWithMentions(ctx, chID, uid, "hello @other-user needleword", nil, []int64{other}, false)
+	msg, err := database.CreateMessageWithMentions(ctx, chID, uid, "hello @other-user needleword", nil, []int64{other}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
-	otherMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "hi @Subject_User", nil, []int64{uid}, false)
+	otherMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "hi @Subject_User", nil, []int64{uid}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions(other): %v", err)
 	}
@@ -64,11 +65,22 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO rate_lockouts (key, expires_at) VALUES ('login_user_lock:other-user', datetime('now', '+15 minutes'))`)
 	exec(`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, 'x')`, otherMsg.ID, uid)
 	exec(`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, 'y')`, msg.ID, other)
+	// A poll (migration 073, WP 6.9b) another user posted: the subject and a
+	// bystander each hold a vote, so class 10a is proved non-empty and the
+	// bystander's vote must survive the subject's erasure.
+	pollMsg, err := database.CreateMessageWithMentions(ctx, chID, other, "poll fallback", nil, nil, 0, false, nil)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions(poll): %v", err)
+	}
+	exec(`INSERT INTO polls (message_id, question, expires_at) VALUES (?, 'q', '2999-01-01T00:00:00Z')`, pollMsg.ID)
+	exec(`INSERT INTO poll_answers (message_id, answer_id, text) VALUES (?1, 1, 'a'), (?1, 2, 'b')`, pollMsg.ID)
+	exec(`INSERT INTO poll_votes (message_id, answer_id, user_id) VALUES (?1, 1, ?2), (?1, 2, ?3)`, pollMsg.ID, uid, third)
 	// The subject's send above already advanced their read state here
 	// (advanceAuthorReadState); OR IGNORE keeps the row seeded either way.
 	exec(`INSERT OR IGNORE INTO read_states (user_id, channel_id, last_message_id) VALUES (?, ?, 0)`, uid, chID)
 	exec(`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES ('att-1', ?, 'a.png', 'stored-a.png', 'image/png', 1, ?)`, msg.ID, uid)
 	exec(`INSERT INTO attachments (id, filename, stored_as, mime_type, size, uploader_id) VALUES ('avatar-subject', 'me.png', 'stored-avatar.png', 'image/png', 1, ?)`, uid)
+	exec(`UPDATE users SET banner_id = 'avatar-subject' WHERE id = ?`, uid)
 	exec(`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES ('att-other', ?, 'o.png', 'stored-other.png', 'image/png', 1, ?)`, otherMsg.ID, other)
 	exec(`INSERT INTO user_storage (user_id, bytes_used) VALUES (?, 2)`, uid)
 	exec(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, vapid_key_id) VALUES (?, 'https://push.example/subject', 'p', 'a', 'key1')`, uid)
@@ -82,6 +94,16 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, uid, other)
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, other, uid)
 	exec(`INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 1, 0)`, chID, uid)
+	// Category permission templates (migration 076, class 18c): the subject's
+	// row is erased, another user's on the same category survives.
+	exec(`INSERT INTO channel_categories (id, name) VALUES (770, 'Erase Template')`)
+	exec(`INSERT INTO category_user_overrides (category_id, user_id, allow, deny) VALUES (770, ?, 1, 0)`, uid)
+	exec(`INSERT INTO category_user_overrides (category_id, user_id, allow, deny) VALUES (770, ?, 0, 1)`, other)
+	// Thread follows (migration 079, class 18d): the subject's row is erased,
+	// another user's on the same thread survives.
+	exec(`INSERT INTO channels (name, type, parent_channel_id) VALUES ('erase thread', 'thread', ?)`, chID)
+	exec(`INSERT INTO thread_members (thread_id, user_id) SELECT id, ? FROM channels WHERE name = 'erase thread'`, uid)
+	exec(`INSERT INTO thread_members (thread_id, user_id) SELECT id, ? FROM channels WHERE name = 'erase thread'`, other)
 	exec(`INSERT INTO voice_states (user_id, channel_id, joined_at) VALUES (?, ?, datetime('now'))`, uid, chID)
 	exec(`INSERT INTO channel_retention (channel_id, days, updated_by) VALUES (?, 30, ?)`, chID, uid)
 	// Message requests and trusted senders (migration 046, B5-6, classes 14c
@@ -142,7 +164,21 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	return eraseSubject{id: uid, other: other, channel: chID, username: "Subject_User"}
 }
 
+// Every class is zero at the shipped chunk size and at one row per chunk, the
+// shape that exercises every cursor and every chunk boundary.
 func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		chunk, window int
+	}{{"chunk 1", 1, 1}, {"default", 500, 5000}} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer db.SetErasureChunkSizesForTest(tc.chunk, tc.window)()
+			eraseEveryInventoryClassIsZero(t)
+		})
+	}
+}
+
+func eraseEveryInventoryClassIsZero(t *testing.T) {
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
@@ -161,6 +197,56 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 		`INSERT INTO report_evidence (report_id, seq, author_id, content) VALUES (902, 0, ?, 'unrelated context')`,
 		witness); err != nil {
 		t.Fatalf("seed unrelated evidence: %v", err)
+	}
+	// The shared fixture predates the mention ledger (migration 063): give the
+	// subject one receipt as a recipient so class 11a is proved non-empty too.
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO mention_receipts (user_id, channel_id, message_id)
+		 SELECT ?1, channel_id, id FROM messages WHERE channel_id = ?2 AND user_id = ?3`,
+		sub.id, sub.channel, sub.other); err != nil {
+		t.Fatalf("seed mention receipt: %v", err)
+	}
+	// Call log participation (migration 064): a call a third member authored,
+	// with the subject as a participant, so class 11b is proved non-empty too.
+	caller := seedUser(t, database, "caller-user")
+	if _, err := database.CreateCallLog(ctx, db.CallLogParams{
+		ChannelID: sub.channel, AuthorID: caller, Content: "started a call.",
+		StartedAt: "2026-10-16 10:00:00", LastSeenAt: "2026-10-16 10:00:00",
+		ParticipantIDs: []int64{caller, sub.id},
+	}); err != nil {
+		t.Fatalf("seed call log: %v", err)
+	}
+	// Group DM rows and owner (migration 065): a group the subject owns, with a
+	// row another member authored naming the subject, so classes 11c and 14e
+	// are proved non-empty too.
+	grp, err := database.CreateGroupDMChannel(ctx, "", sub.id, []int64{sub.id, sub.other, caller})
+	if err != nil {
+		t.Fatalf("seed group DM: %v", err)
+	}
+	res, err := database.ExecContext(ctx,
+		`INSERT INTO messages (channel_id, user_id, content, kind) VALUES (?, ?, 'added', 2)`, grp.ID, caller)
+	if err != nil {
+		t.Fatalf("seed group event: %v", err)
+	}
+	evID, _ := res.LastInsertId()
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO message_group_events (message_id, target_user_id) VALUES (?, ?)`, evID, sub.id); err != nil {
+		t.Fatalf("seed group event target: %v", err)
+	}
+	// Private notes (migration 069): one the subject keeps about another user,
+	// one another user keeps about the subject, so class 16a is proved
+	// non-empty on both ids. A note between two other users must survive.
+	for _, n := range []struct{ owner, target int64 }{{sub.id, sub.other}, {sub.other, sub.id}, {sub.other, witness}} {
+		if ok, err := database.UpsertUserNote(ctx, n.owner, n.target, "private note"); err != nil || !ok {
+			t.Fatalf("seed note %d about %d: ok=%v err=%v", n.owner, n.target, ok, err)
+		}
+	}
+	// DM privacy settings (migration 070): the subject's row, plus one for an
+	// unrelated user that must survive. Class 16b is proved non-empty.
+	for _, uid := range []int64{sub.id, witness} {
+		if err := database.SetUserPrivacy(ctx, uid, db.UserPrivacy{}); err != nil {
+			t.Fatalf("seed privacy %d: %v", uid, err)
+		}
 	}
 	before, err := database.TakeInventory(ctx, sub.id, sub.username)
 	if err != nil {
@@ -209,8 +295,11 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 		}
 		return n
 	}
-	if n := count(`SELECT COUNT(*) FROM messages WHERE user_id = ?`, sub.other); n != 1 {
-		t.Errorf("other user's messages = %d, want 1", n)
+	if n := count(`SELECT COUNT(*) FROM messages WHERE user_id = ?`, sub.other); n != 2 {
+		t.Errorf("other user's messages = %d, want 2 (a reply and a poll)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM poll_votes`); n != 1 {
+		t.Errorf("poll votes left = %d, want only the bystander's", n)
 	}
 	if n := count(`SELECT COUNT(*) FROM message_delivery_receipts WHERE user_id = ?`, sub.other); n != 1 {
 		t.Errorf("other user's retry receipts = %d, want 1", n)
@@ -242,7 +331,16 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	if n := count(`SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'needleword'`); n != 0 {
 		t.Errorf("FTS still finds the subject's text")
 	}
+	if n := count(`SELECT COUNT(*) FROM user_notes WHERE owner_id = ? AND target_id = ?`, sub.other, witness); n != 1 {
+		t.Errorf("a note between two other users = %d rows, want 1", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM user_privacy WHERE user_id = ?`, witness); n != 1 {
+		t.Errorf("an unrelated user's privacy row = %d rows, want 1", n)
+	}
 	// The other user's reaction on the subject's message cascaded with it.
+	if n := count(`SELECT COUNT(*) FROM users WHERE banner_id IS NOT NULL`); n != 0 {
+		t.Errorf("users still naming a banner after erasure = %d, want 0", n)
+	}
 	if n := count(`SELECT COUNT(*) FROM reactions`); n != 0 {
 		t.Errorf("reactions left = %d, want 0", n)
 	}
@@ -327,6 +425,12 @@ func TestEraseAccount_EveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM gif_favorites`); n != 1 {
 		t.Errorf("gif favorites left = %d, want 1 (the other user's)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM category_user_overrides`); n != 1 {
+		t.Errorf("category user overrides left = %d, want 1 (the other user's)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM thread_members`); n != 1 {
+		t.Errorf("thread follows left = %d, want 1 (the other user's)", n)
 	}
 }
 
@@ -764,6 +868,9 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 		{`{"seq":9,"type":"roles_update","payload":{"roles":[]}}`, false},
 		{fmt.Sprintf(`{"seq":10,"type":"presence_batch","payload":{"updates":[{"user_id":%d,"status":"online"},{"user_id":%d,"status":"idle"}]}}`, other, uid), true},
 		{fmt.Sprintf(`{"seq":11,"type":"presence_batch","payload":{"updates":[{"user_id":%d,"status":"online"}]}}`, other), false},
+		// A call log row names its participants.
+		{fmt.Sprintf(`{"seq":12,"type":"chat_message","payload":{"id":11,"user":{"id":%d},"kind":"call","call":{"started_at":"x","ended_at":null,"participants":[%d,%d]}}}`, other, other, uid), true},
+		{fmt.Sprintf(`{"seq":13,"type":"chat_edited","payload":{"message_id":11,"kind":"call","call":{"started_at":"x","ended_at":"y","participants":[%d]}}}`, other), false},
 	}
 	for i, r := range rows {
 		if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?, 'x', ?, 0)`, i+1, r.payload); err != nil {
@@ -774,19 +881,19 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, uid).Scan(&before); err != nil {
 		t.Fatalf("count: %v", err)
 	}
-	if before != 6 {
-		t.Errorf("predicate matched %d rows, want 6", before)
+	if before != 7 {
+		t.Errorf("predicate matched %d rows, want 7", before)
 	}
 	n, err := database.DeleteEventsForUser(ctx, uid)
 	if err != nil {
 		t.Fatalf("DeleteEventsForUser: %v", err)
 	}
-	if n != 6 {
-		t.Errorf("deleted %d rows, want 6", n)
+	if n != 7 {
+		t.Errorf("deleted %d rows, want 7", n)
 	}
 	var left int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 5 {
-		t.Errorf("rows left = %d (%v), want the 5 naming nobody or someone else", left, err)
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 6 {
+		t.Errorf("rows left = %d (%v), want the 6 naming nobody or someone else", left, err)
 	}
 }
 
@@ -965,4 +1072,71 @@ func TestErasureJob_ListedUntilReplayPurged(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_reply_to'`).Scan(&idx); err != nil || idx != 1 {
 		t.Errorf("idx_messages_reply_to present = %d (%v), want 1", idx, err)
 	}
+}
+
+// Deleting an erased voter's rows bumps polls.version for each poll they voted
+// on, on both the single-transaction path and the chunked drain, so a client
+// refetch reads counts fresher than any copy it holds (WP 6.9b). A poll the
+// subject did not vote on keeps its version.
+func TestEraseAccount_PollVotesBumpVersion(t *testing.T) {
+	versions := func(t *testing.T, database *db.DB) (voted, untouched int64) {
+		t.Helper()
+		ctx := context.Background()
+		if err := database.QueryRowContext(ctx,
+			`SELECT version FROM polls WHERE message_id = (SELECT MIN(message_id) FROM polls)`).Scan(&voted); err != nil {
+			t.Fatalf("read voted poll version: %v", err)
+		}
+		if err := database.QueryRowContext(ctx,
+			`SELECT version FROM polls WHERE message_id = (SELECT MAX(message_id) FROM polls)`).Scan(&untouched); err != nil {
+			t.Fatalf("read untouched poll version: %v", err)
+		}
+		return voted, untouched
+	}
+	seed := func(t *testing.T) (*db.DB, eraseSubject) {
+		t.Helper()
+		database := openMigratedMemory(t)
+		sub := seedEraseSubject(t, database)
+		ctx := context.Background()
+		m, err := database.CreateMessageWithMentions(ctx, sub.channel, sub.other, "second poll", nil, nil, 0, false, nil)
+		if err != nil {
+			t.Fatalf("CreateMessageWithMentions: %v", err)
+		}
+		for _, q := range []string{
+			`INSERT INTO polls (message_id, question, expires_at) VALUES (?1, 'q2', '2999-01-01T00:00:00Z')`,
+			`INSERT INTO poll_answers (message_id, answer_id, text) VALUES (?1, 1, 'a'), (?1, 2, 'b')`,
+			`INSERT INTO poll_votes (message_id, answer_id, user_id) VALUES (?1, 1, ?2)`,
+		} {
+			if _, err := database.ExecContext(ctx, q, m.ID, sub.other); err != nil {
+				t.Fatalf("%s: %v", q, err)
+			}
+		}
+		if v, u := versions(t, database); v != 0 || u != 0 {
+			t.Fatalf("seed versions = %d, %d; want 0, 0", v, u)
+		}
+		return database, sub
+	}
+
+	t.Run("single transaction", func(t *testing.T) {
+		database, sub := seed(t)
+		if _, err := database.EraseAccount(context.Background(), sub.id, ""); err != nil {
+			t.Fatalf("EraseAccount: %v", err)
+		}
+		if v, u := versions(t, database); v != 1 || u != 0 {
+			t.Errorf("versions after erasure = %d, %d; want 1, 0", v, u)
+		}
+	})
+	t.Run("chunked drain", func(t *testing.T) {
+		defer db.SetErasureChunkSizesForTest(1, 10)()
+		database, sub := seed(t)
+		ctx := context.Background()
+		if _, err := database.EraseAccountLock(ctx, sub.id, true); err != nil {
+			t.Fatalf("EraseAccountLock: %v", err)
+		}
+		if done, err := database.EraseAccountDrain(ctx, sub.id, time.Time{}); err != nil || !done {
+			t.Fatalf("EraseAccountDrain = %v, %v; want done", done, err)
+		}
+		if v, u := versions(t, database); v < 1 || u != 0 {
+			t.Errorf("versions after drain = %d, %d; want at least 1, 0", v, u)
+		}
+	})
 }

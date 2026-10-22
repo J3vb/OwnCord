@@ -3,7 +3,7 @@
 **Status:** implemented 2026-07-19 — re-verified 2026-08-04
 (`src-tauri/src/http_proxy.rs` + `src/lib/httpProxy.ts`; capability scope in
 `capabilities/default.json`)
-**Decision:** D5 in [audit-2026-07-19-decisions.md](audit-2026-07-19-decisions.md) — "next security work"
+**Decision:** D5 in [audit-2026-07-19-decisions.md](../archive/plans/audit-2026-07-19-decisions.md) — "next security work"
 **Closes:** audit finding A-2026-07-02 (client HTTP path accepts any TLS certificate)
 
 ## Implementation summary (what shipped)

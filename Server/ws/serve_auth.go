@@ -32,6 +32,10 @@ type resumeHint struct {
 	// security token: registerNow uses it only to refuse displacing a
 	// DIFFERENT session's live connection (U4), never to grant anything.
 	Wake bool
+	// Features is the parsed `features` list of the auth frame (6.9d-a1). Like
+	// the rest of the hint it is UNTRUSTED, and it only narrows what the
+	// socket is sent.
+	Features clientFeatures
 }
 
 func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*db.User, string, resumeHint, error) {
@@ -68,6 +72,9 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		// Wake marks a reconnect after a process suspend (U4). Optional;
 		// absent means an ordinary connect.
 		Wake bool `json:"wake"`
+		// Features declares optional client capabilities (client_features.go).
+		// Absent means none: clients before WP 6.9d predate the field.
+		Features []string `json:"features"`
 	}
 	if err := json.Unmarshal(env.Payload, &p); err != nil || p.Token == "" {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("missing token"))
@@ -105,7 +112,7 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		return nil, "", resumeHint{}, fmt.Errorf("auth: principal resolution failed: %w", err)
 	}
 
-	return user, hash, resumeHint{LastSeq: p.LastSeq, ChannelID: p.ActiveChannelID, Wake: p.Wake}, nil
+	return user, hash, resumeHint{LastSeq: p.LastSeq, ChannelID: p.ActiveChannelID, Wake: p.Wake, Features: parseClientFeatures(p.Features)}, nil
 }
 
 // handshakeWrite writes one handshake-phase message (auth_ok, ready, or a
@@ -175,6 +182,8 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	// U4: a wake reconnect must not displace another device's live session;
 	// registerNow enforces it against the live client's token hash.
 	c.wakeReconnect = hint.Wake
+	// 6.9d: what the client says it can render; forums are withheld without it.
+	c.features = hint.Features
 
 	// Look up role name for protocol-compliant payloads and cache on client.
 	// Fail closed like the sibling lookup in handleFreshConnect (BUG-094):
@@ -210,8 +219,8 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 	// Snapshot voice state BEFORE unregister, mirroring readPump's defer
 	// (serve_pumps.go): once unregisterNow removes c, there is no way to tell
 	// whether it still owned a (possibly just-transferred) voice session.
-	unlockVoice := h.voiceLock(c.userID)
-	voiceChID := c.getVoiceChID()
+	txn := h.begin(c.userID)
+	voiceChID := c.voice.channel()
 	replaced := h.unregisterNow(c)
 	if !replaced {
 		cleanupCtx := context.WithoutCancel(ctx)
@@ -222,10 +231,10 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// LiveKit participant, and a stale E2EE key-holder entry all survive
 		// this connection's death until the next sweep (up to 60s).
 		if voiceChID != 0 {
-			h.leaveVoiceOnDisconnect(cleanupCtx, c, voiceLeaveReasonHandshake)
+			h.disconnectVoice(cleanupCtx, txn, c, voiceLeaveReasonHandshake)
 		}
 	}
-	unlockVoice()
+	txn.end()
 	// shouldMarkOffline re-checks h.clients rather than trusting the
 	// `replaced` snapshot alone: it was sampled before handleVoiceLeave,
 	// which can block for seconds, so a reconnect landing during that window

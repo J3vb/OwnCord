@@ -12,6 +12,9 @@ const {
   mockInviteManagerDestroy,
   mockPinnedMessagesMount,
   mockPinnedMessagesDestroy,
+  mockPinnedSetPins,
+  mockPinnedRemovePin,
+  mockPinnedSetOnUnpin,
   mockShowToast,
   mockQuickSwitcherMount,
   mockQuickSwitcherDestroy,
@@ -19,12 +22,19 @@ const {
   mockSearchOverlayDestroy,
   mockSetActiveChannel,
   mockSetMessagePinned,
+  mockCanManageInvites,
+  mockMe,
 } = vi.hoisted(() => ({
+  mockMe: { value: "me" },
+  mockCanManageInvites: { value: true },
   mockLogError: vi.fn(),
   mockInviteManagerMount: vi.fn(),
   mockInviteManagerDestroy: vi.fn(),
   mockPinnedMessagesMount: vi.fn(),
   mockPinnedMessagesDestroy: vi.fn(),
+  mockPinnedSetPins: vi.fn(),
+  mockPinnedRemovePin: vi.fn(),
+  mockPinnedSetOnUnpin: vi.fn(),
   mockShowToast: vi.fn(),
   mockQuickSwitcherMount: vi.fn(),
   mockQuickSwitcherDestroy: vi.fn(),
@@ -61,6 +71,9 @@ vi.mock("@components/PinnedMessages", () => ({
   createPinnedMessages: vi.fn(() => ({
     mount: mockPinnedMessagesMount,
     destroy: mockPinnedMessagesDestroy,
+    setPins: mockPinnedSetPins,
+    removePin: mockPinnedRemovePin,
+    setOnUnpin: mockPinnedSetOnUnpin,
   })),
 }));
 
@@ -71,22 +84,39 @@ vi.mock("@components/SearchOverlay", () => ({
   })),
 }));
 
-// B9-7: channel 99 is labelled NSFW and not acknowledged.
-vi.mock("@stores/channels.store", () => ({
-  setActiveChannel: mockSetActiveChannel,
-  channelsStore: {
-    getState: () => ({
-      channels: new Map([
+// B9-7: channel 99 is labelled NSFW and not acknowledged. Real stores, so the
+// controller's live subscriptions run.
+vi.mock("@stores/channels.store", async () => {
+  const { createStore } = await import("@lib/store");
+  return {
+    setActiveChannel: mockSetActiveChannel,
+    // navigateToChannel (the switcher's pick path) also clears the badge.
+    clearUnread: vi.fn(),
+    channelsStore: createStore({
+      channels: new Map<number, Record<string, unknown>>([
         [99, { nsfw: true }],
         [3, { id: 3, name: "voice-lobby", type: "voice" }],
         [4, { id: 4, name: "general", type: "text" }],
+        [42, { id: 42, name: "pins", type: "text", canPin: true }],
       ]),
     }),
-  },
+  };
+});
+
+vi.mock("@stores/messages.store", async () => {
+  const { createStore } = await import("@lib/store");
+  return {
+    messagesStore: createStore({ pinRevision: new Map<number, number>() }),
+    setMessagePinned: mockSetMessagePinned,
+  };
+});
+
+vi.mock("@stores/auth.store", () => ({
+  authStore: { getState: () => ({ user: { username: mockMe.value } }) },
 }));
 
-vi.mock("@stores/messages.store", () => ({
-  setMessagePinned: mockSetMessagePinned,
+vi.mock("@lib/permissions", () => ({
+  canManageInvites: () => mockCanManageInvites.value,
 }));
 
 vi.mock("@lib/toast", () => ({
@@ -103,18 +133,31 @@ import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { createInviteManager } from "@components/InviteManager";
 import { createPinnedMessages } from "@components/PinnedMessages";
 import { createSearchOverlay } from "@components/SearchOverlay";
+import { channelsStore } from "@stores/channels.store";
+import { messagesStore } from "@stores/messages.store";
+import { membersStore } from "@stores/members.store";
+import { uiStore, setConnectionStatus } from "@stores/ui.store";
 import {
   mapInviteResponse,
   mapToPinnedMessage,
   createQuickSwitcherManager,
   createInviteManagerController,
-  createPinnedPanelController,
+  createPinnedPanelController as createPinnedPanelControllerRaw,
   createSearchOverlayController,
 } from "@pages/main-page/OverlayManagers";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// An open panel watches the shared stores, so every controller a test opens is
+// closed afterwards or it would keep reacting to the next test's store writes.
+const openPinnedControllers: Array<{ cleanup(): void }> = [];
+const createPinnedPanelController: typeof createPinnedPanelControllerRaw = (o) => {
+  const controller = createPinnedPanelControllerRaw(o);
+  openPinnedControllers.push(controller);
+  return controller;
+};
 
 function makeInviteResponse(overrides: Record<string, unknown> = {}) {
   return {
@@ -186,7 +229,7 @@ describe("createInviteManagerController", () => {
       getInvites: vi
         .fn()
         .mockResolvedValue([
-          makeInviteResponse({ code: "live1" }),
+          makeInviteResponse({ code: "live1", max_uses: null, creator_username: "me" }),
           makeInviteResponse({ code: "dead1", revoked: true }),
         ]),
     });
@@ -206,12 +249,15 @@ describe("createInviteManagerController", () => {
 
   it("filters out expired invites so Copy cannot hand out a dead code (F4)", async () => {
     const api = makeMockApi({
-      getInvites: vi
-        .fn()
-        .mockResolvedValue([
-          makeInviteResponse({ code: "live1", expires_at: "2099-01-01T00:00:00Z" }),
-          makeInviteResponse({ code: "expired1", expires_at: "2000-01-01T00:00:00Z" }),
-        ]),
+      getInvites: vi.fn().mockResolvedValue([
+        makeInviteResponse({
+          code: "live1",
+          max_uses: null,
+          creator_username: "me",
+          expires_at: "2099-01-01T00:00:00Z",
+        }),
+        makeInviteResponse({ code: "expired1", expires_at: "2000-01-01T00:00:00Z" }),
+      ]),
     });
 
     const controller = createInviteManagerController({
@@ -269,7 +315,126 @@ describe("createInviteManagerController", () => {
     expect(mockLogError).not.toHaveBeenCalled();
   });
 
-  it("shows toast when open fails to load invites", async () => {
+  it("opening with no live invite creates exactly one (7 days, no limit) and features it", async () => {
+    const api = makeMockApi({
+      getInvites: vi.fn().mockResolvedValue([]),
+      createInvite: vi.fn().mockResolvedValue(makeInviteResponse({ code: "fresh1" })),
+    });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    expect(api.createInvite).toHaveBeenCalledTimes(1);
+    expect(api.createInvite).toHaveBeenCalledWith({ expires_in_hours: 168, max_uses: 0 });
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+      invites: Array<{ code: string }>;
+      featuredCode: string;
+    };
+    expect(opts.featuredCode).toBe("fresh1");
+    expect(opts.invites.map((i) => i.code)).toEqual(["fresh1"]);
+  });
+
+  it("opening with a live invite creates none and features the newest live one", async () => {
+    const api = makeMockApi({
+      getInvites: vi.fn().mockResolvedValue([
+        makeInviteResponse({
+          id: 1,
+          code: "old",
+          max_uses: null,
+          creator_username: "me",
+          created_at: "2026-01-01T00:00:00Z",
+        }),
+        makeInviteResponse({
+          id: 2,
+          code: "newer",
+          max_uses: null,
+          creator_username: "me",
+          created_at: "2026-02-01T00:00:00Z",
+        }),
+        // expires within 24 h: not live for this purpose
+        makeInviteResponse({
+          id: 3,
+          code: "soon",
+          max_uses: null,
+          creator_username: "me",
+          created_at: "2026-03-01T00:00:00Z",
+          expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+        }),
+      ]),
+    });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    expect(api.createInvite).not.toHaveBeenCalled();
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as { featuredCode: string };
+    expect(opts.featuredCode).toBe("newer");
+  });
+
+  it("another member's live invite and my own limited invite do not count as the fresh link", async () => {
+    const api = makeMockApi({
+      getInvites: vi
+        .fn()
+        .mockResolvedValue([
+          makeInviteResponse({ id: 1, code: "theirs", max_uses: null, creator_username: "other" }),
+          makeInviteResponse({ id: 2, code: "limited", max_uses: 1, creator_username: "me" }),
+        ]),
+      createInvite: vi.fn().mockResolvedValue(makeInviteResponse({ code: "mine-new" })),
+    });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    expect(api.createInvite).toHaveBeenCalledTimes(1);
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as { featuredCode: string };
+    expect(opts.featuredCode).toBe("mine-new");
+  });
+
+  it("a failed create-on-open still opens the manager with the list and toasts the reason", async () => {
+    const api = makeMockApi({
+      getInvites: vi
+        .fn()
+        .mockResolvedValue([makeInviteResponse({ code: "theirs", creator_username: "other" })]),
+      createInvite: vi.fn().mockRejectedValue(new Error("Invite limit reached")),
+    });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    expect(api.createInvite).toHaveBeenCalledTimes(1);
+    const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
+      invites: Array<{ code: string }>;
+      featuredCode: string | null;
+    };
+    expect(opts.featuredCode).toBeNull();
+    expect(opts.invites.map((i) => i.code)).toEqual(["theirs"]);
+    expect(mockShowToast).toHaveBeenCalledWith("Invite limit reached", "error");
+    controller.cleanup();
+  });
+
+  it("does not open or create anything without MANAGE_INVITES", async () => {
+    mockCanManageInvites.value = false;
+    try {
+      const api = makeMockApi({ getInvites: vi.fn().mockResolvedValue([]) });
+      const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+      await controller.open();
+      expect(api.getInvites).not.toHaveBeenCalled();
+      expect(api.createInvite).not.toHaveBeenCalled();
+    } finally {
+      mockCanManageInvites.value = true;
+    }
+  });
+
+  it("a load failure shows an inline Retry that reloads", async () => {
+    const getInvites = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue([makeInviteResponse()]);
+    const api = makeMockApi({ getInvites });
+    const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+    await controller.open();
+    const retry = [...root.querySelectorAll("button")].find((b) => b.textContent === "Retry");
+    expect(retry).toBeDefined();
+    retry!.click();
+    await vi.waitFor(() => expect(createInviteManager).toHaveBeenCalledOnce());
+    expect(getInvites).toHaveBeenCalledTimes(2);
+    expect(root.textContent).not.toContain("Retry");
+    controller.cleanup();
+  });
+
+  it("shows the inline error, not a duplicate toast, when open fails to load invites", async () => {
     const api = makeMockApi({
       getInvites: vi.fn().mockRejectedValue(new Error("load failed")),
     });
@@ -281,7 +446,9 @@ describe("createInviteManagerController", () => {
 
     await controller.open();
 
-    expect(mockShowToast).toHaveBeenCalledWith("Failed to load invites", "error");
+    expect(mockShowToast).not.toHaveBeenCalled();
+    expect(root.textContent).toContain("Failed to load invites");
+    controller.cleanup();
   });
 });
 
@@ -295,6 +462,7 @@ describe("createPinnedPanelController", () => {
   });
 
   afterEach(() => {
+    for (const c of openPinnedControllers.splice(0)) c.cleanup();
     root.remove();
   });
 
@@ -312,6 +480,43 @@ describe("createPinnedPanelController", () => {
 
     expect(createPinnedMessages).toHaveBeenCalledOnce();
     expect(mockPinnedMessagesMount).toHaveBeenCalledWith(root);
+  });
+
+  it("open() opens a closed panel and never closes or rebuilds an open one", async () => {
+    const api = makeMockApi();
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 42,
+    });
+
+    await controller.open();
+    expect(createPinnedMessages).toHaveBeenCalledOnce();
+    expect(mockPinnedMessagesMount).toHaveBeenCalledOnce();
+
+    await controller.open();
+    await controller.open();
+    expect(createPinnedMessages).toHaveBeenCalledOnce();
+    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
+    expect(api.getPins).toHaveBeenCalledOnce();
+
+    // toggle still closes it, and open() then reopens it.
+    await controller.toggle();
+    expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+    await controller.open();
+    expect(createPinnedMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("concurrent open() calls fetch once", async () => {
+    const api = makeMockApi();
+    const controller = createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 42,
+    });
+    await Promise.all([controller.open(), controller.open()]);
+    expect(api.getPins).toHaveBeenCalledOnce();
+    expect(createPinnedMessages).toHaveBeenCalledOnce();
   });
 
   it("does not open, fetch or toast behind an NSFW consent gate", async () => {
@@ -397,7 +602,7 @@ describe("createPinnedPanelController", () => {
     expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
   });
 
-  it("onUnpin closes panel on success", async () => {
+  it("onUnpin removes the card in place on success and keeps the panel open", async () => {
     const api = makeMockApi();
 
     const controller = createPinnedPanelController({
@@ -418,17 +623,198 @@ describe("createPinnedPanelController", () => {
 
     // Wait for the async success handling to complete
     await vi.waitFor(() => {
-      expect(mockPinnedMessagesDestroy).toHaveBeenCalled();
+      expect(mockPinnedRemovePin).toHaveBeenCalledWith(1);
     });
 
-    // The store's `pinned` flag is the row's only local authority (there is
-    // no server pin/unpin broadcast) — without this the row still says
-    // "Unpin" after a panel unpin, and re-clicking it calls unpinMessage on
-    // an already-unpinned message.
+    // The store's `pinned` flag is the row's only local authority until the
+    // chat_pinned broadcast — without this the row still says "Unpin" after a
+    // panel unpin, and re-clicking it calls unpinMessage on an unpinned message.
     expect(mockSetMessagePinned).toHaveBeenCalledWith(42, 1, false);
+
+    // The panel stays open (jump-to-message is what closes it).
+    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
 
     // No error toast should be shown
     expect(mockShowToast).not.toHaveBeenCalled();
+  });
+
+  describe("live updates while open", () => {
+    const pin = (id: number, content: string) => ({
+      id,
+      user: { id: 1, username: "Alice" },
+      content,
+      created_at: "2024-01-01",
+    });
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      messagesStore.setState(() => ({ pinRevision: new Map<number, number>() }) as never);
+      channelsStore.setState(
+        (prev) =>
+          ({
+            channels: new Map(prev.channels).set(42, {
+              id: 42,
+              name: "pins",
+              type: "text",
+              canPin: true,
+            } as never),
+          }) as never,
+      );
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const bumpPins = (channelId: number): void => {
+      messagesStore.setState(
+        (prev) =>
+          ({
+            pinRevision: new Map(prev.pinRevision).set(
+              channelId,
+              (prev.pinRevision?.get(channelId) ?? 0) + 1,
+            ),
+          }) as never,
+      );
+      messagesStore.flush();
+    };
+
+    async function openPanel(api: ReturnType<typeof makeMockApi>, canPin = () => true) {
+      const controller = createPinnedPanelController({
+        api: api as never,
+        getRoot: () => root,
+        getCurrentChannelId: () => 42,
+        canPin,
+      });
+      await controller.toggle();
+      return controller;
+    }
+
+    it("refetches the channel's pins once, debounced, after pin changes", async () => {
+      const api = makeMockApi();
+      await openPanel(api);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+
+      api.getPins.mockResolvedValue({ messages: [pin(7, "fresh")] });
+      bumpPins(42);
+      bumpPins(42);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
+      expect(mockPinnedSetPins).toHaveBeenCalledOnce();
+      const shown = mockPinnedSetPins.mock.calls[0]![0] as Array<{ id: number }>;
+      expect(shown.map((p) => p.id)).toEqual([7]);
+    });
+
+    it("refetches once when the connection returns, with the panel's abort signal", async () => {
+      const api = makeMockApi();
+      const controller = await openPanel(api);
+      expect(api.getPins.mock.calls[0]).toHaveLength(1);
+
+      setConnectionStatus("reconnecting");
+      uiStore.flush();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+
+      setConnectionStatus("connected");
+      uiStore.flush();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
+      const signal = api.getPins.mock.calls[1]![1] as AbortSignal;
+      expect(signal.aborted).toBe(false);
+      expect(mockPinnedSetPins).toHaveBeenCalledOnce();
+
+      controller.cleanup();
+      expect(signal.aborted).toBe(true);
+      setConnectionStatus("reconnecting");
+      setConnectionStatus("connected");
+      uiStore.flush();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
+    });
+
+    it("ignores a pin change in another channel", async () => {
+      const api = makeMockApi();
+      await openPanel(api);
+      bumpPins(7);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+      expect(mockPinnedSetPins).not.toHaveBeenCalled();
+    });
+
+    it("drops a refetch response that lands after the panel closed", async () => {
+      const api = makeMockApi();
+      const controller = await openPanel(api);
+      let resolveLate: (v: unknown) => void = () => {};
+      api.getPins.mockReturnValue(new Promise((r) => (resolveLate = r)));
+      bumpPins(42);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(api.getPins).toHaveBeenCalledTimes(2);
+
+      controller.cleanup();
+      resolveLate({ messages: [pin(8, "late")] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockPinnedSetPins).not.toHaveBeenCalled();
+    });
+
+    it("stops watching once closed: no timer, no refetch", async () => {
+      const api = makeMockApi();
+      const controller = await openPanel(api);
+      bumpPins(42);
+      controller.cleanup();
+      await vi.advanceTimersByTimeAsync(500);
+      bumpPins(42);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(api.getPins).toHaveBeenCalledTimes(1);
+    });
+
+    it("withdraws Unpin when the channel's canPin turns off and offers it again when it returns", async () => {
+      const api = makeMockApi();
+      let allowed = true;
+      await openPanel(api, () => allowed);
+
+      allowed = false;
+      channelsStore.setState(
+        (prev) =>
+          ({
+            channels: new Map(prev.channels).set(42, {
+              id: 42,
+              type: "text",
+              canPin: false,
+            } as never),
+          }) as never,
+      );
+      channelsStore.flush();
+      expect(mockPinnedSetOnUnpin).toHaveBeenLastCalledWith(undefined);
+
+      allowed = true;
+      channelsStore.setState(
+        (prev) =>
+          ({
+            channels: new Map(prev.channels).set(42, {
+              id: 42,
+              type: "text",
+              canPin: true,
+            } as never),
+          }) as never,
+      );
+      channelsStore.flush();
+      expect(mockPinnedSetOnUnpin).toHaveBeenLastCalledWith(expect.any(Function));
+    });
+
+    it("re-evaluates the permission when the viewer's role revision changes", async () => {
+      const api = makeMockApi();
+      let allowed = false;
+      await openPanel(api, () => allowed);
+      expect(mockPinnedSetOnUnpin).not.toHaveBeenCalled();
+
+      allowed = true;
+      setMembers([]);
+      membersStore.flush();
+      expect(mockPinnedSetOnUnpin).toHaveBeenLastCalledWith(expect.any(Function));
+    });
   });
 
   it("onJumpToMessage forwards the panel's own channel id (captured at open time), not just the message id", async () => {
@@ -956,11 +1342,12 @@ describe("createQuickSwitcherManager", () => {
     root.remove();
   });
 
-  it("opens quick switcher on Ctrl+K", () => {
+  it("opens quick switcher on Ctrl+K", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
     expect(mockQuickSwitcherMount).toHaveBeenCalledWith(root);
@@ -968,22 +1355,24 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("closes quick switcher on second Ctrl+K", () => {
+  it("closes quick switcher on second Ctrl+K", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     // Open
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     // Close
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(mockQuickSwitcherDestroy).toHaveBeenCalled();
 
     cleanup();
   });
 
-  it("opens on Ctrl+K from the focused composer, but not while a modal is open", () => {
+  it("opens on Ctrl+K from the focused composer, but not while a modal is open", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
@@ -991,6 +1380,7 @@ describe("createQuickSwitcherManager", () => {
     modal.className = "modal-overlay visible";
     document.body.appendChild(modal);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).not.toHaveBeenCalled();
     modal.remove();
 
@@ -1000,51 +1390,56 @@ describe("createQuickSwitcherManager", () => {
     composer.dispatchEvent(
       new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }),
     );
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     composer.remove();
     cleanup();
   });
 
-  it("opens quick switcher on Meta+K (macOS)", () => {
+  it("opens quick switcher on Meta+K (macOS)", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     cleanup();
   });
 
-  it("does not open on plain K key without modifier", () => {
+  it("does not open on plain K key without modifier", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k" }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).not.toHaveBeenCalled();
 
     cleanup();
   });
 
-  it("does nothing when root is null", () => {
+  it("does nothing when root is null", async () => {
     const manager = createQuickSwitcherManager(() => null);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).not.toHaveBeenCalled();
 
     cleanup();
   });
 
-  it("cleanup removes the keydown listener and closes", () => {
+  it("cleanup removes the keydown listener and closes", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     // Open first
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     // Cleanup
@@ -1056,14 +1451,16 @@ describe("createQuickSwitcherManager", () => {
     // After cleanup, Ctrl+K should not open a new instance
     vi.clearAllMocks();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).not.toHaveBeenCalled();
   });
 
-  it("onSelectChannel callback sets active channel", () => {
+  it("onSelectChannel callback sets active channel", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     // Extract the onSelectChannel callback
     const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
@@ -1076,11 +1473,12 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("joins voice instead of setting the active channel for a voice row (F8)", () => {
+  it("joins voice instead of setting the active channel for a voice row (F8)", async () => {
     const join = vi.fn();
     const manager = createQuickSwitcherManager(() => root, undefined, join);
     const cleanup = manager.attach();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
       onSelectChannel: (channelId: number) => void;
@@ -1093,11 +1491,12 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("sets the active channel for a text row (F8)", () => {
+  it("sets the active channel for a text row (F8)", async () => {
     const join = vi.fn();
     const manager = createQuickSwitcherManager(() => root, undefined, join);
     const cleanup = manager.attach();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
       onSelectChannel: (channelId: number) => void;
@@ -1110,12 +1509,13 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("onClose callback resets instance so re-open works", () => {
+  it("onClose callback resets instance so re-open works", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     // Open
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     // Simulate component calling onClose directly
@@ -1126,17 +1526,19 @@ describe("createQuickSwitcherManager", () => {
 
     // Re-open should work
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
     expect(createQuickSwitcher).toHaveBeenCalledTimes(2);
 
     cleanup();
   });
 
-  it("does not open a second instance if already open", () => {
+  it("does not open a second instance if already open", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     // Open
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     // Simulate trying to open from external code — the instance check should prevent it
     // The attach() function only exposes Ctrl+K, and the toggle logic handles this
@@ -1145,33 +1547,35 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
-  it("opens on Ctrl+K with CapsLock on (KeyboardEvent.key reports uppercase 'K')", () => {
+  it("opens on Ctrl+K with CapsLock on (KeyboardEvent.key reports uppercase 'K')", async () => {
     // OC-0150: `e.key` reflects CapsLock/Shift state. A case-sensitive `=== "k"`
     // check means CapsLock (or Ctrl+Shift+K) silently does nothing.
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "K", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     cleanup();
   });
 
-  it("does not open on AltGr+K (Windows reports AltGr as ctrlKey+altKey)", () => {
+  it("does not open on AltGr+K (Windows reports AltGr as ctrlKey+altKey)", async () => {
     // OC-0150: without an altKey exclusion, AltGr-produced characters on
     // non-US layouts get swallowed by an unwanted preventDefault().
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, altKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).not.toHaveBeenCalled();
 
     cleanup();
   });
 
-  it("does not open while isSuspended() reports true (e.g. settings overlay open)", () => {
+  it("does not open while isSuspended() reports true (e.g. settings overlay open)", async () => {
     // OC-0150: every other global shortcut honours isSuspended; the quick
     // switcher never got the guard, so it could stack on top of Settings.
     const manager = createQuickSwitcherManager(
@@ -1181,6 +1585,7 @@ describe("createQuickSwitcherManager", () => {
     const cleanup = manager.attach();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
 
     expect(createQuickSwitcher).not.toHaveBeenCalled();
 
@@ -1316,11 +1721,11 @@ describe("createInviteManagerController (additional)", () => {
     await controller.open();
 
     const opts = (createInviteManager as Mock).mock.calls[0]![0] as {
-      onCreateInvite: () => Promise<unknown>;
+      onCreateInvite: (p: { expiresInHours: number; maxUses: number }) => Promise<unknown>;
     };
 
-    const result = await opts.onCreateInvite();
-    expect(api.createInvite).toHaveBeenCalledWith({});
+    const result = await opts.onCreateInvite({ expiresInHours: 24, maxUses: 5 });
+    expect(api.createInvite).toHaveBeenCalledWith({ expires_in_hours: 24, max_uses: 5 });
     expect((result as { code: string }).code).toBe("new123");
   });
 
@@ -1500,7 +1905,7 @@ describe("createSearchOverlayController", () => {
     root.remove();
   });
 
-  it("opens search overlay and mounts to root", () => {
+  it("opens search overlay and mounts to root", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1510,12 +1915,13 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     expect(createSearchOverlay).toHaveBeenCalledOnce();
     expect(mockSearchOverlayMount).toHaveBeenCalledWith(root);
   });
 
-  it("offers only a server-wide search behind an NSFW consent gate", () => {
+  it("offers only a server-wide search behind an NSFW consent gate", async () => {
     const controller = createSearchOverlayController({
       api: makeMockApi() as never,
       getRoot: () => root,
@@ -1523,11 +1929,12 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     expect(vi.mocked(createSearchOverlay).mock.calls[0]![0].currentChannelId).toBeUndefined();
   });
 
-  it("does nothing when root is null", () => {
+  it("does nothing when root is null", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1537,11 +1944,12 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     expect(createSearchOverlay).not.toHaveBeenCalled();
   });
 
-  it("does not open a second instance if already open", () => {
+  it("does not open a second instance if already open", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1551,12 +1959,14 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
     controller.open();
+    await vi.dynamicImportSettled();
 
     expect(createSearchOverlay).toHaveBeenCalledOnce();
   });
 
-  it("passes currentChannelId as undefined when null", () => {
+  it("passes currentChannelId as undefined when null", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1566,6 +1976,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       currentChannelId: number | undefined;
@@ -1584,6 +1995,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSearch: (
@@ -1616,6 +2028,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSearch: (
@@ -1642,6 +2055,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSearch: (
@@ -1656,7 +2070,7 @@ describe("createSearchOverlayController", () => {
     expect(mockLogError).toHaveBeenCalled();
   });
 
-  it("onSelectResult hands the whole jump to onJumpToMessage", () => {
+  it("onSelectResult hands the whole jump to onJumpToMessage", async () => {
     const api = makeMockApi();
     const mockJump = vi.fn();
 
@@ -1668,6 +2082,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSelectResult: (result: { channel_id: number; message_id: number }) => void;
@@ -1681,7 +2096,7 @@ describe("createSearchOverlayController", () => {
     expect(mockSetActiveChannel).not.toHaveBeenCalled();
   });
 
-  it("onSelectResult does not second-guess the jumper with a toast", () => {
+  it("onSelectResult does not second-guess the jumper with a toast", async () => {
     const api = makeMockApi();
     const mockJump = vi.fn();
 
@@ -1693,6 +2108,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSelectResult: (result: { channel_id: number; message_id: number }) => void;
@@ -1704,7 +2120,7 @@ describe("createSearchOverlayController", () => {
     expect(mockShowToast).not.toHaveBeenCalled();
   });
 
-  it("onSelectResult works without onJumpToMessage callback", () => {
+  it("onSelectResult works without onJumpToMessage callback", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1715,6 +2131,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onSelectResult: (result: { channel_id: number; message_id: number }) => void;
@@ -1725,7 +2142,7 @@ describe("createSearchOverlayController", () => {
     expect(mockSetActiveChannel).toHaveBeenCalledWith(3);
   });
 
-  it("onClose closes overlay and allows re-open", () => {
+  it("onClose closes overlay and allows re-open", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1735,6 +2152,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
 
     const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
       onClose: () => void;
@@ -1746,10 +2164,11 @@ describe("createSearchOverlayController", () => {
     // Re-open should work
     vi.clearAllMocks();
     controller.open();
+    await vi.dynamicImportSettled();
     expect(createSearchOverlay).toHaveBeenCalledOnce();
   });
 
-  it("cleanup destroys instance when open", () => {
+  it("cleanup destroys instance when open", async () => {
     const api = makeMockApi();
 
     const controller = createSearchOverlayController({
@@ -1759,6 +2178,7 @@ describe("createSearchOverlayController", () => {
     });
 
     controller.open();
+    await vi.dynamicImportSettled();
     controller.cleanup();
 
     expect(mockSearchOverlayDestroy).toHaveBeenCalled();

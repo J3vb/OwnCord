@@ -268,18 +268,26 @@ describe("AudioPipeline", () => {
       // No key bound: nothing else gates, so the sensitivity still does.
       setPttPollingLive(true);
       pipeline.setRoom(room as never);
-      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(70), expect.any(Function));
+      expect(setVoiceGate).toHaveBeenLastCalledWith(
+        vadThreshold(70),
+        expect.any(Function),
+        expect.any(Object),
+      );
 
       // Key bound, but this host cannot report key state (macOS, Wayland).
       prefs.set("pttVk", 0x41);
       setPttPollingLive(false);
       pipeline.applyInputMode();
-      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(70), expect.any(Function));
+      expect(setVoiceGate).toHaveBeenLastCalledWith(
+        vadThreshold(70),
+        expect.any(Function),
+        expect.any(Object),
+      );
 
       // The poller goes live: Push to Talk takes over.
       setPttPollingLive(true);
       pipeline.applyInputMode();
-      expect(setVoiceGate).toHaveBeenLastCalledWith(0, expect.any(Function));
+      expect(setVoiceGate).toHaveBeenLastCalledWith(0, expect.any(Function), expect.any(Object));
     });
   });
 
@@ -376,15 +384,134 @@ describe("AudioPipeline", () => {
         setVoiceGate,
       } as never);
 
-      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(70), expect.any(Function));
+      expect(setVoiceGate).toHaveBeenLastCalledWith(
+        vadThreshold(70),
+        expect.any(Function),
+        expect.any(Object),
+      );
       pipeline.setVoiceSensitivity(40);
-      expect(setVoiceGate).toHaveBeenLastCalledWith(vadThreshold(40), expect.any(Function));
+      expect(setVoiceGate).toHaveBeenLastCalledWith(
+        vadThreshold(40),
+        expect.any(Function),
+        expect.any(Object),
+      );
 
       const report = setVoiceGate.mock.calls.at(-1)![1] as (speaking: boolean | null) => void;
       verdicts.length = 0;
       report(false);
       report(true);
       expect(verdicts).toEqual([false, true]);
+    });
+
+    it("hands automatic sensitivity to the room's own gate, seeded and fed back like the detector's", () => {
+      prefs.set("autoInputSensitivity", true);
+      const pipeline = new AudioPipeline();
+      const setVoiceGate = vi.fn();
+      const room = { localParticipant: { getTrackPublication: () => undefined }, setVoiceGate };
+      pipeline.setRoom(room as never);
+      expect(setVoiceGate).toHaveBeenLastCalledWith("auto", expect.any(Function), {
+        seed: undefined,
+        onThreshold: expect.any(Function),
+      });
+      // The room's estimate seeds the next gate, as a restarted detector's.
+      const auto = setVoiceGate.mock.calls.at(-1)![2] as { onThreshold: (t: number) => void };
+      auto.onThreshold(0.004);
+      pipeline.applyInputMode();
+      expect(setVoiceGate).toHaveBeenLastCalledWith(
+        "auto",
+        expect.any(Function),
+        expect.objectContaining({ seed: 0.004 }),
+      );
+    });
+
+    it("gives the room's own capture the input volume and passes its level reports on", () => {
+      prefs.set("inputVolume", 150);
+      const pipeline = new AudioPipeline();
+      const setInputGain = vi.fn();
+      const setInputLevelListener = vi.fn();
+      const room = {
+        localParticipant: { getTrackPublication: () => undefined },
+        setVoiceGate: vi.fn(),
+        setInputGain,
+        setInputLevelListener,
+      };
+      const levels: Array<[number | null, boolean]> = [];
+      const unsubscribe = pipeline.onRoomInputLevel((rms, open) => levels.push([rms, open]));
+      pipeline.setRoom(room as never);
+      expect(setInputGain).toHaveBeenLastCalledWith(150);
+
+      pipeline.setInputVolume(250);
+      expect(setInputGain).toHaveBeenLastCalledWith(200);
+
+      const report = setInputLevelListener.mock.calls.at(-1)![0] as (
+        rms: number,
+        open: boolean,
+      ) => void;
+      report(0.02, true);
+      unsubscribe();
+      report(0.03, false);
+      expect(levels).toEqual([[0.02, true]]);
+
+      // A room left behind stops reporting into the pipeline.
+      pipeline.setRoom(null);
+      expect(setInputLevelListener).toHaveBeenLastCalledWith(null);
+    });
+
+    it("ends the meter when the room is let go before its capture says it stopped", () => {
+      const pipeline = new AudioPipeline();
+      const room = {
+        localParticipant: { getTrackPublication: () => undefined },
+        setVoiceGate: vi.fn(),
+        setInputGain: vi.fn(),
+        setInputLevelListener: vi.fn(),
+      };
+      const levels: Array<[number | null, boolean]> = [];
+      pipeline.onRoomInputLevel((rms, open) => levels.push([rms, open]));
+      pipeline.setRoom(null);
+      expect(levels).toEqual([]);
+      pipeline.setRoom(room as never);
+      pipeline.setRoom(null);
+      expect(levels).toEqual([[null, false]]);
+    });
+  });
+
+  describe("a room that applies the processing toggles itself", () => {
+    const nativeRoom = () => ({
+      localParticipant: { getTrackPublication: () => undefined },
+      setVoiceGate: vi.fn(),
+      setAudioProcessing: vi.fn(),
+    });
+
+    it("gets the four saved toggles from reapplyAudioProcessing, without a track restart", async () => {
+      prefs.set("echoCancellation", false);
+      prefs.set("noiseSuppression", true);
+      prefs.set("autoGainControl", false);
+      prefs.set("enhancedNoiseSuppression", true);
+      const pipeline = new AudioPipeline();
+      const room = nativeRoom();
+      pipeline.setRoom(room as never);
+      const onError = vi.fn();
+      await pipeline.reapplyAudioProcessing(onError);
+      expect(room.setAudioProcessing).toHaveBeenCalledExactlyOnceWith({
+        echoCancellation: false,
+        noiseSuppression: true,
+        autoGainControl: false,
+        enhancedNoiseSuppression: true,
+      });
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it("gets them from reapplyEnhancedNoiseSuppression too, with defaults for unset prefs", async () => {
+      const pipeline = new AudioPipeline();
+      const room = nativeRoom();
+      pipeline.setRoom(room as never);
+      await pipeline.reapplyEnhancedNoiseSuppression();
+      expect(room.setAudioProcessing).toHaveBeenCalledExactlyOnceWith({
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        enhancedNoiseSuppression: false,
+      });
     });
   });
 

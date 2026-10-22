@@ -212,14 +212,17 @@ func (q *Queries) GetUserSessions(ctx context.Context, userID int64) ([]Session,
 }
 
 const listAllUsers = `-- name: ListAllUsers :many
-SELECT u.id, u.username, u.avatar, u.role_id,
+SELECT u.id, u.username, u.display_name, u.avatar, u.role_id,
        u.status, u.created_at, u.last_seen, u.banned, u.ban_reason, u.ban_expires,
        COALESCE(r.name, '') AS role_name, COALESCE(r.position, 0) AS role_position
 FROM users u
 LEFT JOIN roles r ON r.id = u.role_id
 WHERE u.registration_status = 'active'
-  AND instr(lower(u.username), lower(?1)) > 0
-  AND (CAST(?2 AS INTEGER) = 0 OR u.role_id = ?2)
+  AND (instr(lower(u.username), lower(?1)) > 0
+       OR instr(lower(COALESCE(u.display_name, '')), lower(?1)) > 0)
+  AND (CAST(?2 AS INTEGER) = 0
+       OR EXISTS (SELECT 1 FROM user_roles ur
+                  WHERE ur.user_id = u.id AND ur.role_id = ?2))
   AND (CAST(?3 AS INTEGER) = 0
        OR (u.banned != 0 AND (u.ban_expires IS NULL
            OR replace(u.ban_expires, ' ', 'T') > strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))))
@@ -238,6 +241,7 @@ type ListAllUsersParams struct {
 type ListAllUsersRow struct {
 	ID           int64   `json:"id"`
 	Username     string  `json:"username"`
+	DisplayName  *string `json:"displayName"`
 	Avatar       *string `json:"avatar"`
 	RoleID       int64   `json:"roleId"`
 	Status       string  `json:"status"`
@@ -250,10 +254,11 @@ type ListAllUsersRow struct {
 	RolePosition int64   `json:"rolePosition"`
 }
 
-// The admin Members page. query is a case-insensitive username substring
-// (instr, so no wildcard escaping; empty matches everyone). role_id 0 means any
-// role. banned_only 1 keeps only effective bans: the negation of
-// db.notBannedClause, so a lapsed temporary ban is not listed as banned.
+// The admin Members page. query is a case-insensitive substring of the username
+// or the nickname (instr, so no wildcard escaping; empty matches everyone). role_id 0 means any
+// role; otherwise it keeps every member who HOLDS that role (user_roles), not
+// only those whose top role it is. banned_only 1 keeps only effective bans:
+// the negation of db.notBannedClause, so a lapsed temporary ban is not listed as banned.
 func (q *Queries) ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]ListAllUsersRow, error) {
 	rows, err := q.db.QueryContext(ctx, listAllUsers,
 		arg.Query,
@@ -272,6 +277,7 @@ func (q *Queries) ListAllUsers(ctx context.Context, arg ListAllUsersParams) ([]L
 		if err := rows.Scan(
 			&i.ID,
 			&i.Username,
+			&i.DisplayName,
 			&i.Avatar,
 			&i.RoleID,
 			&i.Status,
@@ -388,20 +394,6 @@ type SetSettingParams struct {
 
 func (q *Queries) SetSetting(ctx context.Context, arg SetSettingParams) error {
 	_, err := q.db.ExecContext(ctx, setSetting, arg.Key, arg.Value)
-	return err
-}
-
-const updateUserRole = `-- name: UpdateUserRole :exec
-UPDATE users SET role_id = ? WHERE id = ?
-`
-
-type UpdateUserRoleParams struct {
-	RoleID int64 `json:"roleId"`
-	ID     int64 `json:"id"`
-}
-
-func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) error {
-	_, err := q.db.ExecContext(ctx, updateUserRole, arg.RoleID, arg.ID)
 	return err
 }
 

@@ -366,7 +366,14 @@ func TestDecideAppealTx_BitRevokedBeforeTxRefuses(t *testing.T) {
 	}
 
 	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
-		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: 4, ID: modID}) // demote to plain Member
+		// demote to plain Member: replace the held roles, then re-mirror the top role
+		if err := q.ClearUserRoles(ctx, modID); err != nil {
+			return err
+		}
+		if err := q.AddUserRole(ctx, dbgen.AddUserRoleParams{UserID: modID, RoleID: 4}); err != nil {
+			return err
+		}
+		return q.SyncTopRole(ctx, modID)
 	})
 	defer db.SetAppealDecideInTxHookForTest(nil)
 
@@ -445,7 +452,7 @@ func TestDecideAppealTx_DeciderDemotedBeforeTxRefusesOverturn(t *testing.T) {
 
 	// A role equal to the target's Member position (40) but still holding
 	// MODERATE_MEMBERS: rank alone must be what refuses the overturn.
-	equalRankMod, err := database.CreateRole(ctx, "equal-rank-mod", nil, permissions.ModerateMembers, 40)
+	equalRankMod, err := database.CreateRole(ctx, "equal-rank-mod", nil, permissions.ModerateMembers, 40, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
@@ -460,7 +467,7 @@ func TestDecideAppealTx_DeciderDemotedBeforeTxRefusesOverturn(t *testing.T) {
 	}
 
 	db.SetAppealDecideInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
-		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: equalRankMod.ID, ID: modID})
+		return replaceUserRoleTx(ctx, q, modID, equalRankMod.ID)
 	})
 	defer db.SetAppealDecideInTxHookForTest(nil)
 
@@ -506,7 +513,7 @@ func TestAssignAppealForced_BitRevokedBeforeTxRefuses(t *testing.T) {
 	ctx := context.Background()
 
 	// A role that outranks the Member role (position 40) but holds no bit.
-	unprivilegedButHighRank, err := database.CreateRole(ctx, "unprivileged-high-rank", nil, 0, 70)
+	unprivilegedButHighRank, err := database.CreateRole(ctx, "unprivileged-high-rank", nil, 0, 70, false, false)
 	if err != nil {
 		t.Fatalf("CreateRole: %v", err)
 	}
@@ -524,7 +531,7 @@ func TestAssignAppealForced_BitRevokedBeforeTxRefuses(t *testing.T) {
 	}
 
 	db.SetForceReassignInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
-		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: unprivilegedButHighRank.ID, ID: modID})
+		return replaceUserRoleTx(ctx, q, modID, unprivilegedButHighRank.ID)
 	})
 	defer db.SetForceReassignInTxHookForTest(nil)
 
@@ -572,7 +579,7 @@ func TestDecideAppealTx_EligibilityCountIsFreshInsideTheTransaction(t *testing.T
 		// Promote the second user to Moderator in the exact gap between the
 		// caller's earlier (sole-moderator) view and this transaction's own
 		// fresh count.
-		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: 3, ID: secondModID})
+		return replaceUserRoleTx(ctx, q, secondModID, 3)
 	})
 	defer db.SetAppealDecideInTxHookForTest(nil)
 
@@ -627,7 +634,7 @@ func TestAssignAppealTx_EligibilityCheckIsFreshInsideTheTransaction(t *testing.T
 	}
 
 	db.SetAppealAssignInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
-		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: 3, ID: secondModID})
+		return replaceUserRoleTx(ctx, q, secondModID, 3)
 	})
 	defer db.SetAppealAssignInTxHookForTest(nil)
 
@@ -689,7 +696,7 @@ func TestAssignAppealForced_EligibilityCheckIsFreshInsideTheTransaction(t *testi
 	}
 
 	db.SetForceReassignInTxHookForTest(func(ctx context.Context, q *dbgen.Queries) error {
-		return q.UpdateUserRole(ctx, dbgen.UpdateUserRoleParams{RoleID: 3, ID: secondModID})
+		return replaceUserRoleTx(ctx, q, secondModID, 3)
 	})
 	defer db.SetForceReassignInTxHookForTest(nil)
 
@@ -1478,4 +1485,17 @@ func TestAppealQueries_GetModerationAction(t *testing.T) {
 	if _, err := database.GetModerationAction(ctx, 999999); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("GetModerationAction unknown id: want db.ErrNotFound, got %v", err)
 	}
+}
+
+// replaceUserRoleTx is db.UpdateUserRole for a hook running inside the
+// transaction the hook receives: replace every held role with roleID and
+// re-mirror users.role_id, through the same generated queries.
+func replaceUserRoleTx(ctx context.Context, q *dbgen.Queries, userID, roleID int64) error {
+	if err := q.ClearUserRoles(ctx, userID); err != nil {
+		return err
+	}
+	if err := q.AddUserRole(ctx, dbgen.AddUserRoleParams{UserID: userID, RoleID: roleID}); err != nil {
+		return err
+	}
+	return q.SyncTopRole(ctx, userID)
 }

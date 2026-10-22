@@ -18,8 +18,8 @@ import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatti
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
-import { openMenuOnKeyboard, showContextMenu } from "@lib/context-menu";
+import type { ModalInstance } from "@lib/modalFactory";
+import { openMenuOnKeyboard } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
 import { isRenderableAvatar } from "./message-list/avatar";
 import {
@@ -29,7 +29,8 @@ import {
 } from "./message-list/attachments";
 import { requestsText } from "../i18n/requests";
 import { voiceText } from "../i18n/voice";
-import { shellText } from "../i18n/shell";
+import { getChannelMute } from "@lib/channel-mutes";
+import { openDmContextMenu, openLeaveConfirm, type DmMenuConvo } from "./dmContextMenu";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -50,6 +51,10 @@ export interface DmConversation {
   readonly status?: "online" | "idle" | "dnd" | "offline";
   /** True for a group DM: draws stacked avatars and a participant count. */
   readonly isGroup?: boolean;
+  /** A group whose server reports an owner (WP 3B-10); drives the leave copy. */
+  readonly hasOwner?: boolean;
+  /** The group's uploaded icon (WP 3B-11b): a server file path; absent for none. */
+  readonly icon?: string;
   /** Everyone but the current user. Drives the stack and the count. */
   readonly participants?: readonly DmParticipant[];
   readonly lastMessage: string;
@@ -64,6 +69,8 @@ export interface DmConversation {
   /** Muted: the unread badge renders dimmed. The mention badge does not —
    *  a mute silences chatter, never something addressed to you. */
   readonly muted?: boolean;
+  /** When a timed mute ends (epoch ms); absent or null for an untimed mute. */
+  readonly mutedUntil?: number | null;
   readonly active?: boolean;
   /** Someone is in this DM's call: the row shows a phone glyph. */
   readonly inCall?: boolean;
@@ -77,7 +84,24 @@ export interface DmSidebarOptions {
    *  which one it is is the server's call, and the label says so. */
   readonly onCloseDm?: (channelId: number) => void;
   readonly onToggleMute?: (channelId: number) => void;
+  /** Row menu: set the mute outright (see `DmMenuActions.onSetMute`). */
+  readonly onSetMute?: (channelId: number, muted: boolean) => void;
+  /** Row menu: mute for a fixed time. */
+  readonly onMuteFor?: (channelId: number, durationMs: number) => void;
+  /** Row menu: mark the conversation read. Offered only while it is unread. */
+  readonly onMarkRead?: (channelId: number) => void;
+  /** Row menu, 1:1 only: open this person's profile panel. */
+  readonly onOpenProfile?: (channelId: number) => void;
+  /** Row menu, 1:1 only: start a call in this DM. */
+  readonly onCall?: (channelId: number) => void;
+  /** Row menu, 1:1 only: Block (`block` true) or Unblock the other person. The
+   *  owner confirms a Block. */
+  readonly onToggleBlock?: (userId: number, username: string, block: boolean) => void;
   readonly onRenameGroup?: (channelId: number) => void;
+  /** Row menu, groups on a 3B-10 server: pick and upload a new group icon. */
+  readonly onChangeGroupIcon?: (channelId: number) => void;
+  /** Row menu: remove the group icon. Offered only while one is set. */
+  readonly onRemoveGroupIcon?: (channelId: number) => void;
   readonly onBack?: () => void;
   readonly serverName?: string;
 }
@@ -116,6 +140,66 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
 }
 
 /**
+ * The two overlapping faces of a group DM. Shared by the DM row and the chat
+ * header so a group looks the same in both.
+ *
+ * A group with an uploaded icon (WP 3B-11b) shows that picture instead of the
+ * faces. The faces are drawn first, so a group is never an empty circle; the
+ * icon is fetched like any avatar and replaces them when it arrives, even if
+ * the stack has been detached meanwhile (the image cache owns the object URL,
+ * so it is not revoked here). If the picture then fails to decode the faces
+ * are drawn again.
+ */
+export function buildGroupAvatarStack(
+  channelId: number,
+  participants: readonly DmParticipant[],
+  fallbackLabel: string,
+  background: string,
+  testId = `dm-avatar-stack-${channelId}`,
+  icon: string | null = null,
+): HTMLDivElement {
+  const stack = createElement("div", {
+    class: "dm-avatar dm-avatar-stack",
+    "data-testid": testId,
+  });
+  const drawFaces = (): void => {
+    const shown = participants.slice(0, 2);
+    // An empty group (every other member has left) still needs a mark, so fall
+    // back to the row's own label rather than rendering an empty circle.
+    const faces = shown.length > 0 ? shown : [{ id: 0, username: fallbackLabel, avatar: null }];
+    faces.forEach((p, i) => {
+      const face = createElement("div", { class: `dm-avatar-face dm-avatar-face-${i}` });
+      face.style.background = background;
+      paintAvatar(face, p.avatar, p.username);
+      stack.appendChild(face);
+    });
+  };
+  drawFaces();
+  if (!isRenderableAvatar(icon)) return stack;
+  const resolved = resolveServerUrl(icon);
+  void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
+    if (objectUrl === null) return;
+    const img = createElement("img", {
+      src: objectUrl,
+      alt: "",
+      class: "dm-avatar-icon-img",
+      "data-testid": `${testId}-icon`,
+    });
+    recoverEvictedImage(img, { url: resolved });
+    img.addEventListener(
+      "error",
+      () => {
+        stack.replaceChildren();
+        drawFaces();
+      },
+      { once: true },
+    );
+    stack.replaceChildren(img);
+  });
+  return stack;
+}
+
+/**
  * The avatar block for a row: one circle for a 1:1 DM with a presence dot, or
  * two overlapping circles for a group.
  *
@@ -127,21 +211,14 @@ function buildAvatar(convo: DmConversation): HTMLDivElement {
   const avatarBg = convo.avatarColor ?? "#5865F2";
 
   if (convo.isGroup === true) {
-    const stack = createElement("div", {
-      class: "dm-avatar dm-avatar-stack",
-      "data-testid": `dm-avatar-stack-${convo.channelId}`,
-    });
-    const shown = (convo.participants ?? []).slice(0, 2);
-    // An empty group (every other member has left) still needs a mark, so fall
-    // back to the row's own label rather than rendering an empty circle.
-    const faces = shown.length > 0 ? shown : [{ id: 0, username: convo.username, avatar: null }];
-    faces.forEach((p, i) => {
-      const face = createElement("div", { class: `dm-avatar-face dm-avatar-face-${i}` });
-      face.style.background = avatarBg;
-      paintAvatar(face, p.avatar, p.username);
-      stack.appendChild(face);
-    });
-    return stack;
+    return buildGroupAvatarStack(
+      convo.channelId,
+      convo.participants ?? [],
+      convo.username,
+      avatarBg,
+      undefined,
+      convo.icon ?? null,
+    );
   }
 
   const avatar = createElement("div", { class: "dm-avatar" });
@@ -155,70 +232,30 @@ function buildAvatar(convo: DmConversation): HTMLDivElement {
   return avatar;
 }
 
-/**
- * The destructive group-leave confirm, modelled on DeleteChannelModal: Cancel
- * first and focused, Escape and the backdrop cancel, focus returns to the
- * opener. Tied to the sidebar's lifetime, not the row's: a row is rebuilt on
- * every new message or call change, and that must not dismiss the prompt. The
- * sidebar closes it instead when the row leaves the list.
- */
-function openLeaveConfirm(
-  convo: DmConversation,
-  onClose: (channelId: number) => void,
-  sidebarSignal: AbortSignal,
-): ModalInstance {
-  const owner = new Disposable();
-  const titleId = `dm-leave-title-${convo.channelId}`;
-  const content = createElement("div");
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, requestsText("dm.leaveConfirmTitle")));
-  const body = createElement("div", { class: "modal-body" });
-  body.appendChild(
-    createElement(
-      "p",
-      { class: "modal-danger-text" },
-      requestsText("dm.leaveConfirmBody", { name: convo.username }),
-    ),
-  );
-  const footer = createElement("div", { class: "modal-footer" });
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": "dm-leave-cancel" },
-    shellText("common.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    { class: "btn-danger", type: "button", "data-testid": "dm-leave-confirm" },
-    requestsText("dm.leaveConfirm"),
-  );
-  footer.append(cancel, confirm);
-  content.append(header, body, footer);
-
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "dm-leave-modal" },
-    signal: sidebarSignal,
-    // The modal owns its own listeners; drop this prompt's with it.
-    onClose: () => owner.destroy(),
-  });
-  cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
-  confirm.addEventListener(
-    "click",
-    () => {
-      modal.close();
-      onClose(convo.channelId);
-    },
-    { signal: owner.signal },
-  );
-  return modal;
+function menuConvo(convo: DmConversation): DmMenuConvo {
+  // Read the store as the menu opens: the list may have been drawn before a
+  // timed mute ended (or was set elsewhere). An untimed `muted` flag from the
+  // list still stands when the store has no entry.
+  const live = getChannelMute(convo.channelId);
+  const muted = live !== null || (convo.muted === true && convo.mutedUntil == null);
+  return {
+    channelId: convo.channelId,
+    userId: convo.userId,
+    username: convo.username,
+    isGroup: convo.isGroup === true,
+    hasOwner: convo.hasOwner === true,
+    hasIcon: convo.icon !== undefined && convo.icon !== "",
+    unread: convo.unread,
+    muted,
+    mutedUntil: live?.until ?? null,
+  };
 }
 
 function renderDmItem(
   convo: DmConversation,
   options: DmSidebarOptions,
   signal: AbortSignal,
-  confirmLeave: (convo: DmConversation, onClose: (channelId: number) => void) => void,
+  confirmLeave: (convo: DmMenuConvo, onClose: (channelId: number) => void) => void,
 ): HTMLDivElement {
   const item = createElement("div", {
     class: "dm-item",
@@ -296,7 +333,7 @@ function renderDmItem(
       // the prompt, as Discord's delete confirm does. A 1:1 close is only a
       // hide, so it stays one click.
       if (convo.isGroup === true && !(e instanceof MouseEvent && e.shiftKey)) {
-        confirmLeave(convo, close);
+        confirmLeave(menuConvo(convo), close);
         return;
       }
       close(convo.channelId);
@@ -356,42 +393,13 @@ function renderDmItem(
   );
 
   const openDmMenu = (x: number, y: number): void => {
-    const items = [];
-    if (options.onToggleMute !== undefined) {
-      const toggle = options.onToggleMute;
-      items.push({
-        label: convo.muted === true ? requestsText("dm.unmute") : requestsText("dm.mute"),
-        testId: `dm-mute-${convo.channelId}`,
-        onClick: () => toggle(convo.channelId),
-      });
-    }
-    if (convo.isGroup === true && options.onRenameGroup !== undefined) {
-      const rename = options.onRenameGroup;
-      items.push({
-        label: requestsText("dm.renameGroup"),
-        testId: `dm-rename-${convo.channelId}`,
-        onClick: () => rename(convo.channelId),
-      });
-    }
-    if (options.onCloseDm !== undefined) {
-      const close = options.onCloseDm;
-      const isGroup = convo.isGroup === true;
-      items.push({
-        label: isGroup ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
-        danger: true,
-        testId: `dm-close-${convo.channelId}`,
-        // The menu item has no Shift modifier, so a group always confirms here
-        // too — the destructive action is destructive whichever path opens it.
-        onClick: () => (isGroup ? confirmLeave(convo, close) : close(convo.channelId)),
-      });
-    }
-    if (items.length === 0) return;
-    showContextMenu({
+    openDmContextMenu({
+      convo: menuConvo(convo),
+      actions: options,
+      confirmLeave,
       x,
       y,
-      items,
       signal,
-      className: "dm-context-menu",
     });
   };
   item.addEventListener(
@@ -442,6 +450,7 @@ function convoSignature(convo: DmConversation): string {
     convo.avatarColor ?? "",
     convo.status ?? "",
     convo.isGroup === true ? "g" : "",
+    convo.icon ?? "",
     (convo.participants ?? []).length,
     convo.active === true ? "a" : "",
     convo.muted === true ? "m" : "",
@@ -458,6 +467,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let list: HTMLDivElement | null = null;
+  let emptyState: HTMLDivElement | null = null;
   let searchInput: HTMLInputElement | null = null;
   // The sorted list the current filter runs over, kept in sync with the DOM.
   let rendered: readonly DmConversation[] = [];
@@ -467,7 +477,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
   const rowOwners = new Map<Element, Disposable>();
   let leavePrompt: { channelId: number; modal: ModalInstance } | null = null;
 
-  function confirmLeave(convo: DmConversation, onClose: (channelId: number) => void): void {
+  function confirmLeave(convo: DmMenuConvo, onClose: (channelId: number) => void): void {
     leavePrompt = {
       channelId: convo.channelId,
       modal: openLeaveConfirm(convo, onClose, disposable.signal),
@@ -510,6 +520,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
       leavePrompt = null;
     }
     applyFilter();
+    if (emptyState !== null) emptyState.hidden = rendered.length > 0;
   }
 
   function mount(container: Element): void {
@@ -601,7 +612,25 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
       { signal: disposable.signal },
     );
 
-    appendChildren(root, header, sectionLabel, list);
+    // Nothing to list: say so, with the way to start (Discord's DM list does).
+    emptyState = createElement("div", {
+      class: "dm-empty",
+      "data-testid": "dm-empty-state",
+    });
+    emptyState.hidden = true;
+    const startBtn = createElement(
+      "button",
+      { type: "button", class: "dm-empty-start", "data-testid": "dm-empty-start" },
+      requestsText("dm.emptyStart"),
+    );
+    startBtn.addEventListener("click", () => options.onNewDm(), { signal: disposable.signal });
+    appendChildren(
+      emptyState,
+      createElement("p", { class: "dm-empty-text" }, requestsText("dm.empty")),
+      startBtn,
+    );
+
+    appendChildren(root, header, sectionLabel, list, emptyState);
     container.appendChild(root);
 
     update(options.conversations);
@@ -616,6 +645,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
       root = null;
     }
     list = null;
+    emptyState = null;
     searchInput = null;
     rendered = [];
   }

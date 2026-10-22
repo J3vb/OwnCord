@@ -11,6 +11,11 @@ function rcHead(title,desc,action){
 async function renderChannels(){
   let channels;
   try{channels=await api('GET','/channels')}catch(e){return'<div class="page-title">Channels</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  /* Every category, empty ones too: a category with no channel has no header
+     row below but still carries a permission template. */
+  let cats=[];
+  try{cats=await api('GET','/channels/categories')}catch(e){cats=[]}
+  state.categoryList=Array.isArray(cats)?cats:[];
   const chIcon=t=>t==='voice'?I.voice:t==='announcement'?I.megaphone:I.channels;
   /* Categories are free text — a channel of any type may live under any one of
      them. Collect the ones already in use so the create/edit forms can offer
@@ -23,21 +28,39 @@ async function renderChannels(){
      channel does. The type is the row's icon (named for screen readers), and
      Archived shows only on a channel that is. */
   const groups=new Map();
+  const catIds=new Map();
   channels.forEach(ch=>{
     const cat=ch.category||ch.Category||((ch.type||ch.Type)==='voice'?'Voice':'');
     if(!groups.has(cat))groups.set(cat,[]);
     groups.get(cat).push(ch);
+    if(ch.category_id)catIds.set(cat,ch.category_id);
   });
+  if(state.categoryList.length){
+    /* The permission template of a category, edited in the same matrix a
+       channel uses. Saving writes the same rows to every channel that is
+       synced with the category. */
+    html+='<div class="section-card"><div class="section-card-body"><div class="form-group" style="margin-bottom:0"><label class="form-label" for="catPermPick">Category permissions</label>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><select class="form-input" id="catPermPick" style="appearance:auto;max-width:280px">'
+      +state.categoryList.map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join('')
+      +'</select><button class="btn btn-outline" data-action="openCategoryPermsPicker">Edit permissions</button></div>'
+      +'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">A category\'s permissions are a template. Channels marked &ldquo;Synced with category&rdquo; follow it; editing a channel\'s own permissions stops that.</div></div></div></div>';
+  }
   html+='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl ch-tbl"><thead><tr><th>Channel</th><th style="text-align:right">Actions</th></tr></thead>';
   if(!channels.length)html+='<tbody><tr><td colspan="2" class="tbl-empty">No channels yet. Create one to get started.</td></tr></tbody>';
   groups.forEach((chs,cat)=>{
     html+='<tbody>';
-    if(groups.size>1||cat)html+='<tr class="ch-cat"><th colspan="2" scope="rowgroup">'+esc(cat||'No category')+'</th></tr>';
+    if(groups.size>1||cat){
+      const cid=catIds.get(cat);
+      html+='<tr class="ch-cat"><th colspan="2" scope="rowgroup">'+esc(cat||'No category')
+        +(cid?' <button class="act-btn" title="Category permissions" aria-label="Permissions for category '+esc(cat)+'" data-action="openCategoryPermsModal" data-args="'+actArgs(cid,cat)+'">'+I.lock+'</button>':'')+'</th></tr>';
+    }
     chs.forEach(ch=>{
       const id=ch.id||ch.ID;const name=ch.name||ch.Name||'';const type=ch.type||ch.Type||'text';
       const archived=ch.archived||ch.Archived||false;
       html+='<tr data-channel="'+esc(id)+'"><td><div class="ch-name"><span class="ch-type" title="'+esc(CH_TYPE_NAME[type]||type)+'">'+chIcon(type)+'<span class="sr-only">'+esc(CH_TYPE_NAME[type]||type)+'</span></span><strong>'+esc(name)+'</strong>'
-        +(archived?'<span class="badge badge-muted">Archived</span>':'')+'</div></td>';
+        +(archived?'<span class="badge badge-muted">Archived</span>':'')+(ch.afk?'<span class="badge badge-accent">AFK</span>':'')
+        +(ch.permissions_synced?'<span class="badge badge-green">Synced with category</span>':'')
+        +(ch.category_id&&!ch.permissions_synced?'<button class="btn btn-ghost btn-sm" aria-label="Sync #'+esc(name)+' with its category" data-action="syncChannelPerms" data-args="'+actArgs(id,name)+'">Sync now</button>':'')+'</div></td>';
       const lockBtn=type==='dm'?'':'<button class="act-btn" title="Who can see this" aria-label="Who can see #'+esc(name)+'" data-action="openChannelPermsModal" data-args="'+actArgs(id,name)+'">'+I.lock+'</button>';
       state.channelCache[id]=ch;
       if(ch.category||ch.Category)catSet.add(ch.category||ch.Category);
@@ -50,7 +73,7 @@ async function renderChannels(){
   return html;
 }
 /* A channel type in words, beside its icon. */
-const CH_TYPE_NAME={text:'Text channel',voice:'Voice channel',announcement:'Announcement channel',dm:'Direct message'};
+const CH_TYPE_NAME={text:'Text channel',voice:'Voice channel',announcement:'Announcement channel',forum:'Forum channel',dm:'Direct message'};
 
 /* <datalist> of the categories currently in use. Purely a suggestion list —
    typing a brand-new name is the supported way to create a category. */
@@ -62,7 +85,13 @@ function categoryDatalist(listId){
 }
 
 function openChannelModal(){
-  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label" for="chName">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label" for="chType">Type</label><select class="form-input" id="chType" style="appearance:auto"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option></select></div><div class="form-group"><label class="form-label" for="chCat">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label" for="chTopic">Topic</label><input class="form-input" id="chTopic"></div><div class="form-group"><label class="form-label" for="chPos">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="createChannel">Create</button></div>');
+  openModal('<div class="modal-header"><h3>Create Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><div class="form-group"><label class="form-label" for="chName">Name <span class="req">*</span></label><input class="form-input" id="chName" placeholder="general"></div><div class="form-group"><label class="form-label" for="chType">Type</label><select class="form-input" id="chType" style="appearance:auto" data-change-action="onChannelTypeChange"><option value="text">Text</option><option value="voice">Voice</option><option value="announcement">Announcement</option><option value="forum">Forum</option></select></div><div class="form-group"><label class="form-label" for="chCat">Category</label><input class="form-input" id="chCat" list="chCatList" placeholder="Text Channels" autocomplete="off">'+categoryDatalist('chCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Any name works, for voice and text channels alike. Leave blank for no category.</div></div><div class="form-group"><label class="form-label" for="chTopic">Topic</label><input class="form-input" id="chTopic"><div id="chTopicHint" style="font-size:11px;color:var(--text-muted);margin-top:4px" hidden>For a forum the topic is its guidelines, shown above the posts. Tags are set after creating it, with Edit.</div></div><div class="form-group"><label class="form-label" for="chPos">Position</label><input class="form-input" id="chPos" type="number" value="0" min="0"></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="createChannel">Create</button></div>');
+}
+
+/* A forum's topic is its guidelines, and its tags come after it exists. */
+function onChannelTypeChange(){
+  const hint=document.getElementById('chTopicHint');
+  if(hint)hint.hidden=fsInput(document,'#chType').value!=='forum';
 }
 
 async function createChannel(){
@@ -98,16 +127,18 @@ function openChannelEditModal(id){
   const voiceRows=type!=='voice'?'':
      '<div class="form-group"><label class="form-label" for="chEditMaxUsers">User limit (0 = unlimited)</label><input class="form-input" id="chEditMaxUsers" type="number" min="0" max="99" value="'+esc(maxUsers)+'"></div>'
     +'<div class="form-group"><label class="form-label" for="chEditMaxVideo">Video limit (0 = unlimited)</label><input class="form-input" id="chEditMaxVideo" type="number" min="0" max="99" value="'+esc(maxVideo)+'"></div>';
+  const forumRows=type==='forum'?forumSettingsHtml(id,ch.forum||ch.Forum):'';
   openModal('<div class="modal-header"><h3>Edit Channel</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
     +'<div class="modal-body">'
     +'<div class="form-group"><label class="form-label" for="chEditName">Name</label><input class="form-input" id="chEditName" value="'+esc(name)+'"></div>'
     +'<div class="form-group"><label class="form-label" for="chEditTopic">Topic</label><input class="form-input" id="chEditTopic" value="'+esc(topic)+'"></div>'
-    +'<div class="form-group"><label class="form-label" for="chEditCat">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
+    +'<div class="form-group"><label class="form-label" for="chEditCat">Category</label><input class="form-input" id="chEditCat" list="chEditCatList" value="'+esc(cat)+'" data-orig="'+esc(cat.trim())+'" autocomplete="off">'+categoryDatalist('chEditCatList')+'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Move the channel to another category, or blank it to leave it uncategorized.</div></div>'
     +'<div class="form-group"><label class="form-label" for="chEditSlow">Slow mode (seconds, 0 = off)</label><input class="form-input" id="chEditSlow" type="number" min="0" value="'+esc(slow)+'"></div>'
     +'<div class="form-group"><label class="form-label" for="chEditPos">Position</label><input class="form-input" id="chEditPos" type="number" min="0" value="'+esc(pos)+'"></div>'
     +voiceRows
     +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditArchived-name">Archived</div><div class="setting-desc">Hide the channel without deleting its messages</div></div><div class="setting-ctrl"><button class="toggle '+(archived?'on':'')+'" id="chEditArchived" role="switch" aria-checked="'+(archived?'true':'false')+'" aria-labelledby="chEditArchived-name" data-action="toggleSwitch"></button></div></div>'
     +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="chEditNsfw-name">Age-restricted (NSFW)</div><div class="setting-desc">Clients show a one-time warning and mark the channel. The server does not filter or restrict anything.</div></div><div class="setting-ctrl"><button class="toggle '+(nsfw?'on':'')+'" id="chEditNsfw" role="switch" aria-checked="'+(nsfw?'true':'false')+'" aria-labelledby="chEditNsfw-name" data-action="toggleSwitch"></button></div></div>'
+    +forumRows
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveChannelEdit" data-args="'+actArgs(id)+'">Save</button></div>');
 }
@@ -118,12 +149,17 @@ async function saveChannelEdit(id){
   const body={
     name,
     topic:document.getElementById('chEditTopic').value.trim(),
-    category:document.getElementById('chEditCat').value.trim(),
     slow_mode:parseInt(document.getElementById('chEditSlow').value,10)||0,
     position:parseInt(document.getElementById('chEditPos').value,10)||0,
     archived:document.getElementById('chEditArchived').classList.contains('on'),
     nsfw:document.getElementById('chEditNsfw').classList.contains('on'),
   };
+  /* Send category only when the input differs from what the modal opened
+     with. The row's name can be stale (a category renamed since the list
+     loaded), and echoing it back would recreate the old name. */
+  const catEl=document.getElementById('chEditCat');
+  const catNow=catEl.value.trim();
+  if(catNow!==(catEl.dataset.orig||'')){body.category=catNow}
   /* Only present for a voice channel. Omitting them entirely (rather than
      sending 0) is what keeps a text-channel edit from clobbering limits a
      channel might carry from an earlier life as a voice channel — the handler
@@ -133,6 +169,121 @@ async function saveChannelEdit(id){
   if(maxUsersEl){body.voice_max_users=parseInt(maxUsersEl.value,10)||0}
   if(maxVideoEl){body.voice_max_video=parseInt(maxVideoEl.value,10)||0}
   try{await api('PATCH','/channels/'+id,body);closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
+}
+
+/* ═══ Forum settings (WP 6.9d) ═══ */
+/* PUT /channels/{id}/forum replaces the forum's whole settings: a tag sent with
+   its id is renamed in place (posts keep it), one without an id is created, and
+   a tag the list leaves out is deleted with its links to posts. The list order
+   is the display order. The section sits in the Edit Channel dialog and saves on
+   its own button; the limits below mirror Server/service/forum_settings.go. */
+const FORUM_MAX_TAGS=20,FORUM_MAX_TAG_NAME=20,FORUM_MAX_TAG_EMOJI=34;
+const FORUM_ARCHIVE=[[60,'1 hour'],[1440,'24 hours'],[4320,'3 days'],[10080,'1 week']];
+function forumRuneLen(v){return Array.from(v).length}
+/* The settings as one comparable string: what the dialog opened on, and what
+   the server holds when Save is pressed. */
+function forumKey(f){
+  const tags=((f&&f.tags)||[]).slice().sort((a,b)=>(a.position||0)-(b.position||0)).map(t=>[t.id,t.name,t.emoji||'']);
+  return JSON.stringify([tags,!!(f&&f.require_tag),(f&&f.default_auto_archive_minutes)||4320]);
+}
+function forumTagRowHtml(t,i,n){
+  const label=t.name.trim()||'this tag';
+  return '<div class="fs-row" data-tag-id="'+esc(t.id||0)+'">'
+    +'<input class="form-input fs-emoji" aria-label="Tag '+(i+1)+' emoji" placeholder="Emoji" autocomplete="off" value="'+esc(t.emoji||'')+'">'
+    +'<input class="form-input fs-name" aria-label="Tag '+(i+1)+' name" placeholder="Name" autocomplete="off" value="'+esc(t.name)+'">'
+    +'<button class="act-btn" type="button" title="Move up" aria-label="Move '+esc(label)+' up"'+(i===0?' disabled':'')+' data-focus="fsup-'+i+'" data-action="forumTagMove" data-args="'+actArgs(i,-1)+'">'+I.arrowUp+'</button>'
+    +'<button class="act-btn" type="button" title="Move down" aria-label="Move '+esc(label)+' down"'+(i===n-1?' disabled':'')+' data-focus="fsdown-'+i+'" data-action="forumTagMove" data-args="'+actArgs(i,1)+'">'+I.arrowDown+'</button>'
+    +'<button class="act-btn danger" type="button" title="Remove" aria-label="Remove '+esc(label)+'" data-action="forumTagRemove" data-args="'+actArgs(i)+'">'+I.trash+'</button></div>';
+}
+function forumTagsHtml(rows){
+  const body=rows.length?rows.map((t,i)=>forumTagRowHtml(t,i,rows.length)).join(''):'<div class="fs-hint">No tags yet.</div>';
+  return body+'<div class="fs-foot"><button class="btn btn-outline btn-sm" type="button" data-action="forumTagAdd"'+(rows.length>=FORUM_MAX_TAGS?' disabled':'')+'>'+I.plus+' Add tag</button><span class="fs-hint">'+rows.length+'/'+FORUM_MAX_TAGS+' tags</span></div>';
+}
+function forumSettingsHtml(id,forum){
+  const f=forum||{tags:[],require_tag:false,default_auto_archive_minutes:4320};
+  state.forumEdit={id,key:forumKey(f)};
+  const rows=(f.tags||[]).slice().sort((a,b)=>(a.position||0)-(b.position||0)).map(t=>({id:t.id,name:t.name,emoji:t.emoji||''}));
+  const opts=FORUM_ARCHIVE.map(o=>'<option value="'+o[0]+'"'+(o[0]===f.default_auto_archive_minutes?' selected':'')+'>'+o[1]+'</option>').join('');
+  return '<div class="fs-section" id="forumSettings"><div class="fs-title">Forum settings</div>'
+    +'<div class="form-group"><label class="form-label" id="fsTags-label">Tags</label><div id="fsTags" role="group" aria-labelledby="fsTags-label">'+forumTagsHtml(rows)+'</div>'
+    +'<div class="fs-hint">Members pick up to 5 per post. Renaming a tag keeps it on its posts; removing one takes it off them.</div></div>'
+    +'<div class="setting-row"><div class="setting-info"><div class="setting-name" id="fsRequire-name">Require a tag on new posts</div><div class="setting-desc">A post cannot be created without at least one tag.</div></div><div class="setting-ctrl"><button class="toggle '+(f.require_tag?'on':'')+'" id="fsRequire" role="switch" aria-checked="'+(f.require_tag?'true':'false')+'" aria-labelledby="fsRequire-name" data-action="toggleSwitch"></button></div></div>'
+    +'<div class="form-group"><label class="form-label" for="fsArchive">Default auto-archive</label><select class="form-input" id="fsArchive" style="appearance:auto">'+opts+'</select><div class="fs-hint">How long a new post may sit idle before it is archived.</div></div>'
+    +'<div class="fs-hint">Forum settings save on their own button; the fields above save with Save.</div>'
+    +'<div class="fs-actions"><button class="btn btn-outline" type="button" id="fsSave" data-action="saveForumSettings" data-args="'+actArgs(id)+'">Save forum settings</button></div></div>';
+}
+/** @param {ParentNode} root @param {string} sel @returns {HTMLInputElement} */
+function fsInput(root,sel){return /** @type {HTMLInputElement} */(root.querySelector(sel))}
+function readForumRows(){
+  return [...document.querySelectorAll('#fsTags div.fs-row')].map(r=>({
+    id:parseInt(r instanceof HTMLElement&&r.dataset.tagId||'0',10)||0,
+    name:fsInput(r,'.fs-name').value,
+    emoji:fsInput(r,'.fs-emoji').value}));
+}
+function paintForumRows(rows,focus){
+  document.getElementById('fsTags').innerHTML=forumTagsHtml(rows);
+  markModalDirty();
+  const el=focus&&document.querySelector('#fsTags button[data-focus="'+focus+'"]:not(:disabled)')||(focus==='new'&&[...document.querySelectorAll('#fsTags input.fs-name')].pop());
+  if(el instanceof HTMLElement)el.focus();
+}
+function forumTagAdd(){
+  const rows=readForumRows();
+  if(rows.length>=FORUM_MAX_TAGS)return;
+  rows.push({id:0,name:'',emoji:''});
+  paintForumRows(rows,'new');
+}
+function forumTagRemove(i){
+  const rows=readForumRows();
+  rows.splice(i,1);
+  paintForumRows(rows,'');
+  const next=document.querySelector('#fsTags input.fs-name')||document.querySelector('#fsTags button[data-action="forumTagAdd"]');
+  if(next instanceof HTMLElement)next.focus();
+}
+function forumTagMove(i,delta){
+  const rows=readForumRows();
+  const j=i+delta;
+  if(j<0||j>=rows.length)return;
+  [rows[i],rows[j]]=[rows[j],rows[i]];
+  paintForumRows(rows,(delta<0?'fsup-':'fsdown-')+j);
+}
+/* What the server would refuse, said before the round trip. */
+function forumProblem(rows){
+  const seen=new Set();
+  for(const t of rows){
+    const n=t.name.trim();
+    if(!n||forumRuneLen(n)>FORUM_MAX_TAG_NAME)return'Every tag needs a name of 1 to '+FORUM_MAX_TAG_NAME+' characters';
+    if(seen.has(n.toLowerCase()))return'Tag names must be different';
+    seen.add(n.toLowerCase());
+    const e=t.emoji.trim();
+    if(e&&(forumRuneLen(e)>FORUM_MAX_TAG_EMOJI||/[\u0000-\u001f\u007f]/.test(e)))return'A tag\'s emoji must be a single emoji';
+  }
+  return rows.length>FORUM_MAX_TAGS?'A forum holds at most '+FORUM_MAX_TAGS+' tags':'';
+}
+async function saveForumSettings(id){
+  const rows=readForumRows();
+  const problem=forumProblem(rows);
+  if(problem){showToast(problem,'error');return}
+  const body={
+    tags:rows.map(t=>{const e=t.emoji.trim();const o={name:t.name.trim()};if(t.id)o.id=t.id;if(e)o.emoji=e;return o}),
+    require_tag:document.getElementById('fsRequire').classList.contains('on'),
+    default_auto_archive_minutes:parseInt(fsInput(document,'#fsArchive').value,10)};
+  const btn=/** @type {HTMLButtonElement|null} */(document.getElementById('fsSave'));
+  if(btn)btn.disabled=true;
+  try{
+    /* The write replaces the whole list, so a tag another admin added since this
+       dialog opened would be deleted by it. Refuse instead, and say so. */
+    const fresh=(await api('GET','/channels')).find(c=>(c.id||c.ID)===id);
+    const opened=state.forumEdit&&state.forumEdit.id===id?state.forumEdit.key:null;
+    if(fresh&&opened!==null&&forumKey(fresh.forum)!==opened){
+      state.channelCache[id]=fresh;
+      closeModal();
+      showToast('Another admin changed this forum while you were editing. Reopen it to see their changes.','error');
+      renderContent();
+      return;
+    }
+    await api('PUT','/channels/'+id+'/forum',body);
+    closeModal();showToast('Forum settings saved');renderContent();
+  }catch(e){showToast(e.message,'error');if(btn)btn.disabled=false}
 }
 
 /* Deleting a channel or a role cannot be undone, so it asks for the name to be
@@ -210,7 +361,7 @@ async function openChannelPermsModal(id,name){
     ]);
   }catch(e){showToast(e.message,'error');return}
   if(Array.isArray(roles))state.roleList=roles;
-  state.permChannel={id:id,name:name,roles:data.roles||[],users:data.users||[],allUsers:users||[],tab:'access'};
+  state.permChannel={id:id,name:name,roles:data.roles||[],users:data.users||[],allUsers:users||[],tab:'access',synced:!!data.permissions_synced,categoryId:(state.channelCache[id]||{}).category_id||0};
   renderChannelPermsModal();
 }
 
@@ -269,7 +420,8 @@ function renderChannelPermsModal(){
     +tabs
     +'<div class="modal-body drawer-body">'
     +panel('access',
-      '<p class="drawer-intro">Uncheck a role to hide this channel from it (a private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
+      (pc.synced?'<p class="drawer-intro" id="chSyncedNote"><span class="badge badge-green">Synced with category</span> This channel follows its category\'s permissions. Saving a change here stops that until you sync it again.</p>':'')
+      +'<p class="drawer-intro">Uncheck a role to hide this channel from it (a private channel). Changes apply to connected users immediately; users already in the voice channel are not disconnected.</p>'
       +quick)
     +panel('overrides',
       '<p class="drawer-intro">Set single permissions for one role or member in this channel. Resolution order: base role permissions → role override → member override. A member deny beats a role allow; Administrator bypasses everything.</p>'
@@ -350,7 +502,7 @@ function renderPermMatrix(){
     html+='</tr>';
   });
   html+='</tbody></table>';
-  html+='<div class="drawer-actions"><button class="btn btn-ghost" data-action="previewPermChange">Preview change</button><button class="btn btn-outline" data-action="clearPermOverride">Clear override</button></div>';
+  html+='<div class="drawer-actions">'+(pc.kind==='category'?'':'<button class="btn btn-ghost" data-action="previewPermChange">Preview change</button>')+'<button class="btn btn-outline" data-action="clearPermOverride">Clear override</button></div>';
   box.innerHTML=html;
 }
 
@@ -371,7 +523,10 @@ function permTargetPath(){
   const val=sel?sel.value:'';
   if(!pc||!val)return null;
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
-  return '/channels/'+pc.id+(kind==='r'?'/permissions/':'/user-permissions/')+tid;
+  /* A category edits its template; the same rows are then written to every
+     synced channel by the server. */
+  const base=pc.kind==='category'?'/channels/categories/':'/channels/';
+  return base+pc.id+(kind==='r'?'/permissions/':'/user-permissions/')+tid;
 }
 
 /* The masks a target carried in the snapshot — what renderPermMatrix painted
@@ -413,6 +568,76 @@ function onPermTargetChange(){
   /* The repaint discarded the previous target's edits; keep the flag honest
      for a beforeunload or a later dismiss. */
   state.modalDirty=accessTabHasEdits();
+}
+
+/* ═══ Category permission templates ═══ */
+function openCategoryPermsPicker(){
+  const sel=document.getElementById('catPermPick');
+  if(!(sel instanceof HTMLSelectElement)||!sel.value)return;
+  const id=parseInt(sel.value,10);
+  const c=(state.categoryList||[]).find(x=>x.id===id);
+  openCategoryPermsModal(id,c?c.name:'');
+}
+
+/* The same override matrix a channel uses, over the category's template. */
+async function openCategoryPermsModal(id,name){
+  let data,users,roles;
+  try{
+    [data,users,roles]=await Promise.all([
+      api('GET','/channels/categories/'+id+'/permissions'),
+      api('GET','/users?limit=500&offset=0'),
+      api('GET','/roles').catch(()=>null),
+    ]);
+  }catch(e){showToast(e.message,'error');return}
+  if(Array.isArray(roles))state.roleList=roles;
+  const synced=Object.values(state.channelCache||{}).filter(c=>c.category_id===id&&c.permissions_synced).length;
+  state.permChannel={kind:'category',id:id,name:name,roles:data.roles||[],users:data.users||[],allUsers:users||[],tab:'overrides',syncedCount:synced};
+  renderCategoryPermsModal();
+}
+
+function renderCategoryPermsModal(){
+  const pc=state.permChannel;if(!pc||pc.kind!=='category')return;
+  let opts='<option value="">— pick a role or member —</option><optgroup label="Roles">';
+  pc.roles.forEach(r=>{opts+='<option value="r:'+r.role_id+'">'+esc(r.role_name)+'</option>'});
+  opts+='</optgroup><optgroup label="Members">';
+  const picked=[];const seen={};
+  pc.users.forEach(o=>{seen[o.user_id]=true;picked.push({id:o.user_id,username:o.username,has:true})});
+  pc.allUsers.forEach(u=>{if(!seen[u.id])picked.push({id:u.id,username:u.username,has:false})});
+  picked.sort((a,b)=>String(a.username).localeCompare(String(b.username)));
+  picked.forEach(u=>{opts+='<option value="u:'+u.id+'">'+esc(u.username)+(u.has?' (override)':'')+'</option>'});
+  opts+='</optgroup>';
+  openModal('<div class="drawer">'
+    +'<div class="modal-header"><h3>Category permissions — '+esc(pc.name)+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
+    +'<div class="modal-body drawer-body">'
+    +'<p class="drawer-intro">These permissions are a template. Saving writes the same override to the '+pc.syncedCount+' channel'+(pc.syncedCount===1?'':'s')+' synced with this category; channels that are not synced keep their own. You can only set a permission your own role holds, and the same applies to every synced channel it replaces.</p>'
+    +'<div class="form-group"><label class="form-label" for="permTarget">Role or member</label>'
+    +'<select class="form-input" id="permTarget" style="appearance:auto" data-change-action="onPermTargetChange">'+opts+'</select></div>'
+    +'<div id="permMatrix"></div>'
+    +'</div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveCategoryPerms">Save changes</button></div>'
+    +'</div>');
+  renderPermMatrix();
+}
+
+async function saveCategoryPerms(){
+  const pc=state.permChannel;if(!pc||pc.kind!=='category')return;
+  const path=permTargetPath();
+  if(!path){showToast('Pick a role or member first','error');return}
+  const masks=collectOverrideMasks();
+  try{
+    /* An all-inherit row is the same as no row, so it is a delete. */
+    if(masks.allow===0&&masks.deny===0)await api('DELETE',path);
+    else await api('PUT',path,masks);
+    closeModal();showToast('Category permissions updated');renderContent();
+  }catch(e){showToast(e.message,'error')}
+}
+
+/* Re-sync one channel to its category's template. */
+async function syncChannelPerms(id,name){
+  try{
+    await api('POST','/channels/'+id+'/permissions/sync');
+    showToast('#'+name+' is synced with its category');renderContent();
+  }catch(e){showToast(e.message,'error')}
 }
 
 /* ═══ Access explanation and change preview (RI-06) ═══ */
@@ -552,7 +777,7 @@ async function saveChannelPerms(){
 
 /* Permission checkboxes, grouped exactly as docs/schema.md's "Permission
    groups" section groups the bitfield. Keep the two in step: the doc is the
-   reference an operator reads next to this grid, and every one of the 19
+   reference an operator reads next to this grid, and every one of the 21
    defined bits must appear in exactly one group or it becomes ungrantable
    here. */
 const PERM_GROUPS=[
@@ -563,6 +788,7 @@ const PERM_GROUPS=[
     [0x2000000,'Manage Server','Read and change server settings'],
     [0x8000000,'View Audit Log','Read the action history'],
     [0x400000,'Moderate Members','Warn and time out members, work the report queue'],
+    [0x800000,'Manage Nicknames','Change or reset another member\'s nickname'],
     [0x40000000,'Administrator','Bypasses every permission check'],
   ]},
   {title:'Text',bits:[
@@ -755,6 +981,9 @@ function openRoleModal(id){
   const role=id===null?null:state.roleList.find(r=>r.id===id);
   if(id!==null&&!role){showToast('Role not found','error');return}
   state.roleEditId=role?role.id:null;
+  /* The mask as loaded into this editor; saveRole sends it back so the server
+     can refuse an edit made from a copy that has since moved (WP 5.1b). */
+  state.roleEditLoadedPerms=role?role.permissions:null;
   const name=role?role.name:'';
   const color=(role&&role.color)?role.color:'';
   const perms=role?role.permissions:0;
@@ -806,6 +1035,9 @@ function openRoleModal(id){
       +'<input class="form-input" id="rolePos" type="number" min="0" max="'+Math.max(0,myPosition()-1)+'" value="'+position+'" aria-describedby="rolePosHint rolePlacement" data-input-action="renderRolePlacement">'
       +'<div class="rc-hint" id="rolePosHint">Higher numbers rank higher. It must be below your own rank of '+myPosition()+'.</div>'
       +'<div id="rolePlacement" class="rank-placement" aria-live="polite"></div></div>'
+    +'<div class="form-group"><div class="form-label">Display</div>'
+      +'<label class="perm-item" for="roleHoist"><input type="checkbox" id="roleHoist" '+(role&&role.hoist?'checked':'')+'><span class="perm-text"><span class="perm-name">Show members separately</span><span class="perm-desc">List members with this as their top role in their own group in the member list.</span></span></label>'
+      +'<label class="perm-item" for="roleMentionable"><input type="checkbox" id="roleMentionable" '+(role&&role.mentionable?'checked':'')+'><span class="perm-text"><span class="perm-name">Allow anyone to @mention this role</span><span class="perm-desc">Without it, only members who can mention everyone can ping this role.</span></span></label></div>'
     +'<div class="form-group"><div class="form-label">Permissions</div>'+grid+'</div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveRole" data-args="'+actArgs(role?role.id:null)+'">'+(role?'Save':'Create')+'</button></div>');
@@ -834,12 +1066,34 @@ async function saveRole(id){
     color:noColor?'':document.getElementById('roleColor').value,
     permissions:collectRolePerms(),
     position:position,
+    hoist:/** @type {HTMLInputElement} */(document.getElementById('roleHoist')).checked,
+    mentionable:/** @type {HTMLInputElement} */(document.getElementById('roleMentionable')).checked,
   };
   try{
     if(id===null)await api('POST','/roles',body);
-    else await api('PATCH','/roles/'+id,body);
+    else await api('PATCH','/roles/'+id,Object.assign({expected_permissions:state.roleEditLoadedPerms},body));
     closeModal();showToast(id===null?'Role created':'Role updated');renderContent();
-  }catch(e){showToast(e.message,'error')}
+  }catch(e){
+    if(e.status===409&&e.code==='ROLE_CONFLICT'){await reloadRoleAfterConflict(id);return}
+    showToast(e.message,'error');
+  }
+}
+
+/* Another admin changed this role's permissions after the editor loaded it, so
+   the save was refused and nothing was written. Reload the list and reopen the
+   editor on the latest copy; the edit is not carried over, so it is applied
+   again on purpose rather than on top of a mask the admin has not seen. */
+async function reloadRoleAfterConflict(id){
+  try{
+    state.roleList=(await api('GET','/roles'))||[];
+    if(state.roleList.some(r=>r.id===id))openRoleModal(id);
+    else{closeModal();renderContent()}
+  }catch(e){
+    closeModal();renderContent();
+    showToast('Someone else changed this role and it could not be reloaded. Refresh the page and apply your change again.','error');
+    return;
+  }
+  showToast('Someone else changed this role. The latest version is loaded; apply your change again.','error');
 }
 
 function openDeleteRole(id){
@@ -959,7 +1213,7 @@ async function deleteEmoji(id){
   }catch(e){showToast(e.message,'error')}
 }
 
-Object.assign(ACTIONS,{clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
+Object.assign(ACTIONS,{forumTagAdd,forumTagMove,forumTagRemove,onChannelTypeChange,saveForumSettings,openCategoryPermsModal,openCategoryPermsPicker,saveCategoryPerms,syncChannelPerms,clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
   deleteEmoji,explainAccess,moveRole,onPermTargetChange,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
   openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderRolePlacement,
   saveChannelEdit,saveChannelPerms,saveRole,selectChannelTab,syncTypedConfirm,uploadEmoji});

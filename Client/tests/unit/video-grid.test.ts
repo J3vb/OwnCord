@@ -41,6 +41,7 @@ import {
 } from "../../src/components/VideoGrid";
 import { RemoteTracks } from "../../src/features/voice/remoteTracks";
 import { VideoQuality, type Room } from "livekit-client";
+import type { ShareSenderSample } from "../../src/features/voice/shareSenderStats";
 
 /** Minimal MediaStream stub for testing. */
 function fakeStream(): MediaStream {
@@ -1222,6 +1223,70 @@ describe("VideoGrid", () => {
       expect(cell(2).classList.contains("video-cell--speaking")).toBe(false);
     });
 
+    describe("viewer badge (6.6b)", () => {
+      const badge = (id: number) =>
+        cell(id).querySelector<HTMLElement>("[data-testid='tile-viewers']");
+
+      it("is hidden at zero viewers and absent from cameras", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen());
+        grid.addStream(3, "Sam", fakeStream(), camera());
+        // Stopped (not played here): no "You", and nobody else watching.
+        grid.setStreamViewers(new Map());
+        expect(badge(SCREEN)!.hidden).toBe(true);
+        expect(badge(3)).toBeNull();
+      });
+
+      it("shows the count and lists the names on hover and to screen readers", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen());
+        grid.setStreamViewers(new Map([[2, ["Ann", "Bob"]]]));
+        const el = badge(SCREEN)!;
+        expect(el.hidden).toBe(false);
+        expect(el.querySelector(".video-viewers__count")!.textContent).toBe("2");
+        expect(el.title).toBe("Watching: Ann, Bob");
+        expect(el.getAttribute("aria-label")).toBe("Watching: Ann, Bob");
+        expect(cell(SCREEN).classList.contains("video-cell--has-viewers")).toBe(true);
+      });
+
+      it("updates live and hides again when the viewers go", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen());
+        grid.setStreamViewers(new Map([[2, ["Ann"]]]));
+        grid.setStreamViewers(new Map([[2, ["Ann", "Bob", "Cy"]]]));
+        expect(badge(SCREEN)!.querySelector(".video-viewers__count")!.textContent).toBe("3");
+        grid.setStreamViewers(new Map());
+        expect(badge(SCREEN)!.hidden).toBe(true);
+        expect(cell(SCREEN).classList.contains("video-cell--has-viewers")).toBe(false);
+      });
+
+      it("adds You while the remote share plays here, and drops it when stopped", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
+        grid.setStreamViewers(new Map([[2, ["Ann"]]]));
+        expect(badge(SCREEN)!.title).toBe("Watching: You, Ann");
+        cell(SCREEN).querySelector<HTMLElement>("[data-tile-control='stop']")!.click();
+        expect(badge(SCREEN)!.title).toBe("Watching: Ann");
+      });
+
+      it("shows on your own share tile without You", () => {
+        grid.addStream(
+          SCREEN,
+          "Me (Screen)",
+          fakeStream(),
+          screen({ isSelf: true, audioUserId: 1, name: "Me" }),
+        );
+        grid.setStreamViewers(new Map([[1, ["Ann"]]]));
+        expect(badge(SCREEN)!.title).toBe("Watching: Ann");
+      });
+
+      it("caps the list at ten names and counts the rest", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen());
+        const names = Array.from({ length: 13 }, (_, i) => `U${String(i + 1)}`);
+        grid.setStreamViewers(new Map([[2, names]]));
+        expect(badge(SCREEN)!.querySelector(".video-viewers__count")!.textContent).toBe("13");
+        expect(badge(SCREEN)!.title).toBe(
+          "Watching: U1, U2, U3, U4, U5, U6, U7, U8, U9, U10 and 3 more",
+        );
+      });
+    });
+
     it("marks a muted/deafened peer on their camera tile, and clears it", () => {
       grid.addStream(2, "Otto", fakeStream(), camera({ audioUserId: 2, name: "Otto" }));
 
@@ -1949,30 +2014,53 @@ describe("VideoGrid", () => {
           getVideoTracks: () => [track],
           getAudioTracks: () => [],
         } as unknown as MediaStream;
-        const getLocalShareFps = vi.fn(async (): Promise<number | null> => null);
-        grid.setCallbacks({ getLocalShareFps });
+        const getLocalShareStats = vi.fn(async (): Promise<ShareSenderSample | null> => ({}));
+        grid.setCallbacks({ getLocalShareStats });
         grid.addStream(1 + 1_000_000, "Your Screen", stream, {
           isSelf: true,
           audioUserId: 1,
           isScreenshare: true,
         });
         const detail = () => cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent;
+        const sender = () => cell(1 + 1_000_000).querySelector<HTMLElement>(".video-self-stats")!;
         // 1080p, not 1,080p; and never the requested 120 before a measurement.
         expect(detail()).toBe("1080p · No audio");
+        expect(sender().hidden).toBe(true);
 
-        getLocalShareFps.mockResolvedValue(58.4);
+        getLocalShareStats.mockResolvedValue({ sentFps: 58.4 });
         await vi.advanceTimersByTimeAsync(2000);
         expect(detail()).toBe("1080p · 58 fps · No audio");
+        expect(sender().hidden).toBe(true);
 
-        getLocalShareFps.mockResolvedValue(117);
+        // M-1: why the share sends what it does.
+        getLocalShareStats.mockResolvedValue({
+          sentFps: 61,
+          captureFps: 120,
+          limitation: "cpu",
+          codec: "video/VP8",
+          encoder: "libvpx",
+        });
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(detail()).toBe("1080p · 61 fps · No audio");
+        expect(sender().hidden).toBe(false);
+        expect(sender().textContent).toBe("Capture 120 fps · Limited by CPU · VP8 · libvpx");
+
+        getLocalShareStats.mockResolvedValue({ sentFps: 117, limitation: "none" });
         await vi.advanceTimersByTimeAsync(2000);
         expect(detail()).toBe("1080p · 117 fps · No audio");
+        expect(sender().textContent).toBe("Not limited");
+
+        // A share with no sender stats (the Linux native share) says so.
+        getLocalShareStats.mockResolvedValue(null);
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(detail()).toBe("1080p · No audio");
+        expect(sender().textContent).toBe("Encoder details not available");
 
         // The poll goes with the tile.
         grid.removeStream(1 + 1_000_000);
-        const calls = getLocalShareFps.mock.calls.length;
+        const calls = getLocalShareStats.mock.calls.length;
         await vi.advanceTimersByTimeAsync(6000);
-        expect(getLocalShareFps).toHaveBeenCalledTimes(calls);
+        expect(getLocalShareStats).toHaveBeenCalledTimes(calls);
       } finally {
         vi.useRealTimers();
       }
@@ -3063,6 +3151,18 @@ describe("VideoGrid", () => {
       container.remove();
     });
 
+    it("seats show chat in the view bar in the call view, and back in the grid without it", () => {
+      grid.setExitVisible(true);
+      const exit = () =>
+        root().querySelector<HTMLButtonElement>("[data-tile-control='exit-grid']")!;
+      expect(exit().parentElement!.classList.contains("video-grid__views")).toBe(true);
+      expect(exit().hidden).toBe(false);
+
+      grid.setExitVisible(false);
+      expect(exit().parentElement).toBe(root());
+      expect(exit().hidden).toBe(true);
+    });
+
     it("reads the saved toggles when the grid mounts", () => {
       localStorage.setItem("owncord:settings:callShowNonVideo", "false");
       localStorage.setItem("owncord:settings:callShowSelfCamera", "false");
@@ -3537,6 +3637,148 @@ describe("VideoGrid", () => {
       vi.advanceTimersByTime(3000);
       expect(cell()).not.toBeNull();
       expect(onStreamRemoved).not.toHaveBeenCalled();
+    });
+
+    describe("a sharer republishing for another codec (WP M-5b)", () => {
+      let live: boolean;
+      let cameraLive: boolean;
+      beforeEach(() => {
+        live = true;
+        cameraLive = false;
+        grid.setCallbacks({
+          onStreamRemoved,
+          isStreamLive: (_userId, screenshare) => (screenshare ? live : cameraLive),
+        });
+      });
+
+      it("keeps a watched camera's tile and watch through its republish", () => {
+        const forgetStreamWatch = vi.fn();
+        grid.setCallbacks({
+          onStreamRemoved,
+          forgetStreamWatch,
+          isStreamLive: (_userId, screenshare) => !screenshare && cameraLive,
+        });
+        cameraLive = true;
+        const camera = { ...screen, isScreenshare: false };
+        grid.addStream(2, "Otto", fakeStreamWithTrack().stream, camera);
+        grid.addStream(2, "Otto", null, camera);
+        grid.removeStream(2);
+
+        const tile = (): HTMLElement | null =>
+          container.querySelector(".video-cell[data-user-id='2']");
+        expect(tile()).not.toBeNull();
+        expect(tile()!.classList.contains("video-cell--stopped")).toBe(false);
+        const again = fakeStreamWithTrack().stream;
+        grid.addStream(2, "Otto", again, camera);
+        expect(tile()!.querySelector("video")!.srcObject).toBe(again);
+        vi.advanceTimersByTime(10_000);
+        expect(tile()).not.toBeNull();
+        expect(forgetStreamWatch).not.toHaveBeenCalled();
+
+        // Turned off for real: the tile goes with its watch.
+        cameraLive = false;
+        grid.removeStream(2);
+        vi.advanceTimersByTime(250);
+        expect(tile()).toBeNull();
+        expect(forgetStreamWatch).toHaveBeenCalledWith(2);
+      });
+
+      it("shows no cover while the owner's voice state still says they share, and plays the share when it returns", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStreamWithTrack().stream, screen);
+        grid.removeStream(SCREEN);
+        // The track's own ended event and the unpublish both arrive.
+        grid.removeStream(SCREEN);
+
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+        vi.advanceTimersByTime(1000);
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+
+        const again = fakeStreamWithTrack().stream;
+        grid.addStream(SCREEN, "Otto (Screen)", again, screen);
+        expect(cell()!.querySelector("video")!.srcObject).toBe(again);
+        expect(cell()!.classList.contains("video-cell--stopped")).toBe(false);
+        // The wait is over: nothing ends the tile later.
+        vi.advanceTimersByTime(10_000);
+        expect(cell()).not.toBeNull();
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+        expect(onStreamRemoved).not.toHaveBeenCalled();
+      });
+
+      it("in livekit's real order (unsubscribe, then unpublish) shows no Watch cover and plays the share when it returns", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStreamWithTrack().stream, screen);
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+        grid.removeStream(SCREEN);
+
+        expect(cell()!.classList.contains("video-cell--stopped")).toBe(false);
+        expect(cell()!.querySelector(".video-stopped")).toBeNull();
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+
+        const again = fakeStreamWithTrack().stream;
+        grid.addStream(SCREEN, "Otto (Screen)", again, screen);
+        expect(cell()!.querySelector("video")!.srcObject).toBe(again);
+        vi.advanceTimersByTime(10_000);
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+        expect(onStreamRemoved).not.toHaveBeenCalled();
+      });
+
+      it("in livekit's real order still says the stream ended once the owner stops sharing", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.addStream(SCREEN, "Otto (Screen)", null, screen);
+        grid.removeStream(SCREEN);
+
+        live = false;
+        vi.advanceTimersByTime(250);
+        expect(cell()?.querySelector(".video-ended")?.textContent).toBe("Otto ended the stream");
+      });
+
+      it("shows the cover as soon as the owner's voice state says the share is over", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+        vi.advanceTimersByTime(500);
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+
+        live = false;
+        vi.advanceTimersByTime(250);
+        expect(cell()?.querySelector(".video-ended")?.textContent).toBe("Otto ended the stream");
+        vi.advanceTimersByTime(3000);
+        expect(cell()).toBeNull();
+      });
+
+      it("shows the cover once the grace runs out with no share back", () => {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+
+        vi.advanceTimersByTime(2249);
+        expect(cell()!.querySelector(".video-ended")).toBeNull();
+        vi.advanceTimersByTime(1000);
+        expect(cell()!.querySelector(".video-ended")).not.toBeNull();
+      });
+
+      it("shows the cover at once when the owner is not sharing, and for a camera never waits", () => {
+        live = false;
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+        expect(cell()!.querySelector(".video-ended")).not.toBeNull();
+
+        live = true;
+        grid.addStream(2, "Otto", fakeStream(), { ...screen, isScreenshare: false });
+        grid.removeStream(2);
+        expect(container.querySelector(".video-cell[data-user-id='2']")).toBeNull();
+      });
+
+      it("a held tile that is closed stops looking at the owner", () => {
+        const isStreamLive = vi.fn(() => true);
+        grid.setCallbacks({ onStreamRemoved, isStreamLive });
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
+        grid.removeStream(SCREEN);
+        const looked = isStreamLive.mock.calls.length;
+
+        grid.destroy?.();
+        vi.advanceTimersByTime(10_000);
+
+        expect(isStreamLive.mock.calls.length).toBe(looked);
+        expect(onStreamRemoved).not.toHaveBeenCalled();
+      });
     });
 
     it("a re-share within the cover stays watched and in focus (WP 1C-1)", () => {

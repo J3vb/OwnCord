@@ -48,7 +48,7 @@ func newMemberActionsEnv(t *testing.T) *memberActionsEnv {
 	cfg := &config.Config{Server: config.ServerConfig{
 		Name: "Test Server", Port: 8443, DataDir: t.TempDir(), AllowedOrigins: []string{"*"},
 	}}
-	rt, err := app.StartRuntime(cfg, database, nil)
+	rt, err := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
 	if err != nil {
 		t.Fatalf("app.StartRuntime: %v", err)
 	}

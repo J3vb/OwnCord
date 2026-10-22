@@ -89,6 +89,8 @@ describe("MessageList height cache key for unconfirmed optimistic rows", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -136,7 +138,7 @@ describe("MessageList height cache key for unconfirmed optimistic rows", () => {
     // Initial mount positions the render window at the tail (wasAtBottom is
     // always true in jsdom), so rowA/rowB are not yet in the DOM and not yet
     // measured. Force them into view and measured by jumping to rowA (id 0
-    // resolves to the first such row) — OVERSCAN(20) around index 1 (rowA,
+    // resolves to the first such row) — the row-count overscan (20) around index 1 (rowA,
     // right after the single leading day divider) also covers rowB at index
     // 2, so both get real, distinct measurements written to the shared
     // height cache: heightCache["msg-0"] ends up holding rowB's height,

@@ -17,6 +17,9 @@ export interface MonitorRect {
 }
 
 export interface WindowControl {
+  /** Whether this platform can do this at all. False on the web build, where a
+   *  Settings control for it is not drawn rather than drawn to fail. */
+  readonly available: boolean;
   isMaximized(): Promise<boolean>;
   availableMonitors(): Promise<readonly MonitorRect[]>;
   outerPosition(): Promise<{ readonly x: number; readonly y: number }>;
@@ -26,4 +29,7 @@ export interface WindowControl {
    *  uses it: HTML full screen fills only the webview in WebView2. With a
    *  label, the window of that label instead (a stream pop-out). */
   setFullscreen(on: boolean, label?: string): Promise<void>;
+  /** Zoom the webview (1 is 100%). Native zoom, not CSS `zoom`, which skews
+   *  pointer coordinates. Resolves false, never rejects, when it cannot. */
+  setZoom(scale: number): Promise<boolean>;
 }

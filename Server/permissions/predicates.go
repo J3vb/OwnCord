@@ -18,6 +18,10 @@ import (
 // channel. History stays readable, so read paths do not consult it.
 var ErrArchived = errors.New("channel is archived")
 
+// ErrThreadLocked is returned for a post or reaction in a locked thread by a
+// member without MANAGE_MESSAGES (6.9c).
+var ErrThreadLocked = errors.New("thread is locked")
+
 // ErrBlocked is returned when either DM party has blocked the other.
 var ErrBlocked = errors.New("user is blocked")
 
@@ -45,12 +49,22 @@ var ErrTimedOut = errors.New("user is timed out")
 // zero value is a subject with no role and no membership, which every
 // predicate refuses.
 type Subject struct {
+	// RolePerms is the OR of every held role's mask. It decides the
+	// Administrator bypass and, when Layers is nil, is the base the single
+	// role-layer formula runs over.
 	RolePerms int64
 	Override  ChannelOverride
-	Channel   ChannelRef // Type and Archived; ID is not consulted
+	// Layers is the per-held-role breakdown for this one channel, set only
+	// when the member holds two or more roles and at least one has an
+	// override here. Nil means today's formula over RolePerms and
+	// Override.Allow/Deny (every single-role member). When non-nil the role
+	// layer is the OR over Layers and Override.Allow/Deny must be zero;
+	// Override.UserAllow/UserDeny still apply after it.
+	Layers  []RoleGrant
+	Channel ChannelRef // Type and Archived; ID is not consulted
 	// DMParticipant and DMBlocked are consulted only when Channel.Type is
-	// "dm". Group DMs pass DMBlocked=false — blocks are enforced at group
-	// creation, not per message (service.requireDMNotBlocked).
+	// "dm". DMBlocked means the 1:1 counterpart cannot be reached by this
+	// actor (service.RequireDMReachable). Group DMs pass DMBlocked=false.
 	DMParticipant bool
 	DMBlocked     bool
 	// NSFWAcknowledged is consulted only when Channel.NSFW is set: whether
@@ -75,7 +89,17 @@ type Subject struct {
 // perm is never held, administrator included. This is the single value-taking
 // bit predicate — Checker and PermissionService resolve a Subject and ask it.
 func (s Subject) Has(perm int64) bool {
-	return perm != 0 && (HasAdmin(s.RolePerms) || HasPerm(EffectiveChannelPerms(s.RolePerms, s.Override), perm))
+	return perm != 0 && (HasAdmin(s.RolePerms) || HasPerm(s.EffectivePerms(), perm))
+}
+
+// EffectivePerms is the subject's resolved permission set in the channel,
+// before the Administrator bypass: the single role layer (Layers nil) or the
+// OR over every held role's own layer, then the member override.
+func (s Subject) EffectivePerms() int64 {
+	if s.Layers != nil {
+		return MemberChannelPerms(s.Layers, s.Override.UserAllow, s.Override.UserDeny)
+	}
+	return EffectiveChannelPerms(s.RolePerms, s.Override)
 }
 
 // missing wraps ErrPermissionDenied with the bit a caller would name in its
@@ -113,6 +137,21 @@ func CanViewChannel(s Subject) error {
 	return nil
 }
 
+// IsChannelPrivate is the channel-level lock verdict (3D-6): a channel is
+// private when the default role cannot read it. defaultRolePerms is the
+// default (is_default) role's base permissions and o the channel's override
+// for that role; only the role layer applies — a per-member override is
+// per-viewer, and the verdict is the same for every recipient. It is
+// Subject.Has, so an Administrator default role is never private and an
+// override's allow still beats its deny. An archived channel is judged on its
+// permissions alone: the lock describes who may read, not whether it is listed.
+func IsChannelPrivate(defaultRolePerms int64, o ChannelOverride) bool {
+	return !Subject{
+		RolePerms: defaultRolePerms,
+		Override:  ChannelOverride{Allow: o.Allow, Deny: o.Deny},
+	}.Has(ReadMessages)
+}
+
 // CanAdmitSession decides whether a live socket may attach to a channel's
 // stream (channel_focus, the post-Subscribe revalidation). It is
 // CanViewChannel by definition: a session sees exactly what the user sees.
@@ -144,6 +183,9 @@ func CanSendMessage(s Subject) error {
 	if s.Channel.Archived {
 		return ErrArchived
 	}
+	if s.Channel.ThreadLocked && !s.Has(ManageMessages) {
+		return ErrThreadLocked
+	}
 	return nil
 }
 
@@ -173,7 +215,68 @@ func CanAddReaction(s Subject) error {
 	if !s.Has(ReadMessages | AddReactions) {
 		return missing(AddReactions)
 	}
+	if s.Channel.ThreadLocked && !s.Has(ManageMessages) {
+		return ErrThreadLocked
+	}
 	return nil
+}
+
+// CanDeleteMessage is the delete policy for one message. READ and MANAGE in
+// the channel delete anyone's message, as a moderation action (asModerator);
+// the author needs only READ, so a member whose SEND was taken away, or who is
+// timed out, can still remove what they wrote, while a denied READ blocks it.
+// In a DM membership is the whole rule and the delete is never a moderation
+// action, so the store's ownership check still applies. The archive gate is
+// the caller's shared write gate, not this predicate.
+func CanDeleteMessage(s Subject, isAuthor bool) (asModerator bool, err error) {
+	if s.Channel.Type == "dm" {
+		return false, dmMember(s)
+	}
+	if s.Has(ReadMessages | ManageMessages) {
+		return true, nil
+	}
+	if isAuthor && s.Has(ReadMessages) {
+		return false, nil
+	}
+	return false, missing(ManageMessages)
+}
+
+// CanPinMessage is the pin and unpin policy for a channel. A non-DM channel
+// needs READ and MANAGE there; the timeout is deliberately not consulted, so a
+// timed-out moderator keeps the verdict enforcement has always given them. In
+// a DM, membership then no block then no timeout decide, in that order, and
+// MANAGE is not involved. The archive gate is the caller's shared write gate,
+// not this predicate, as for CanDeleteMessage.
+func CanPinMessage(s Subject) error {
+	if s.Channel.Type == "dm" {
+		if err := dmMember(s); err != nil {
+			return err
+		}
+		if s.DMBlocked {
+			return ErrBlocked
+		}
+		if s.TimedOut {
+			return ErrTimedOut
+		}
+		return nil
+	}
+	if !s.Has(ReadMessages | ManageMessages) {
+		return missing(ManageMessages)
+	}
+	return nil
+}
+
+// CanMentionRole is the @role ping policy (WP 6.3f-1): a role may be pinged
+// when it is flagged mentionable, or when the author holds READ_MESSAGES and
+// MENTION_EVERYONE in the channel (the same bits an @everyone needs). A refusal
+// is not an error for the message: the caller leaves the token as plain text,
+// raises no badge and lists the role nowhere. mentionable is the role's own
+// flag, read by the caller.
+func CanMentionRole(s Subject, mentionable bool) error {
+	if mentionable || s.Has(ReadMessages|MentionEveryone) {
+		return nil
+	}
+	return missing(MentionEveryone)
 }
 
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
@@ -183,8 +286,9 @@ func CanAddReaction(s Subject) error {
 // channel that has a room, for a DM membership plus no block, and no archive
 // for either kind — the admin
 // PATCH accepts `archived` for any channel type, and an evicted participant
-// must not rejoin the archived room. Applies at join, at token refresh, to
-// the target of a moderator move, and in the stale-voice sweep.
+// must not rejoin the archived room. Applies at join and to the target
+// of a moderator move; a member already in the room (token refresh, the
+// stale-voice sweep) is held to CanStayInVoice, which ignores the timeout.
 func CanJoinVoice(s Subject) error {
 	if s.TimedOut {
 		return ErrTimedOut
@@ -213,6 +317,19 @@ func CanJoinVoice(s Subject) error {
 	return nil
 }
 
+// CanStayInVoice is CanJoinVoice for a member already in the room: every
+// rule of the join gate except the timeout. A timeout's voice half is a
+// server-mute applied only when the moderator could moderate voice
+// (service.ModerationService.Timeout), so a timed-out member who is already
+// in a room is not evicted — they cannot JOIN one (CanJoinVoice), but the
+// session they hold ends only for a reason that would refuse it on its own:
+// a lost CONNECT_VOICE or READ_MESSAGES, a ban or block, an archived or
+// deleted channel. Used by the stale-voice sweep and the token refresh.
+func CanStayInVoice(s Subject) error {
+	s.TimedOut = false
+	return CanJoinVoice(s)
+}
+
 // CanModerate is the report queue and B5-9's moderator-action gate:
 // MODERATE_MEMBERS or Administrator, server-wide. Deliberately independent of
 // s.Has/EffectiveChannelPerms — moderation authority is not a channel
@@ -225,6 +342,19 @@ func CanModerate(s Subject) error {
 		return nil
 	}
 	return missing(ModerateMembers)
+}
+
+// CanManageChannels is the gate on everything that edits the channel list and
+// on the channel_categories view (WP 6.5a): MANAGE_CHANNELS or Administrator,
+// server-wide. Like CanModerate it reads the role only; a per-channel override
+// can neither grant nor strip it. The ws hub asks it at send time to decide
+// which connected clients may be told the full category list, empty and
+// hidden categories included.
+func CanManageChannels(s Subject) error {
+	if HasAdmin(s.RolePerms) || HasPerm(s.RolePerms, ManageChannels) {
+		return nil
+	}
+	return missing(ManageChannels)
 }
 
 // CanModerateVoice is the actor's authority in the TARGET's channel:

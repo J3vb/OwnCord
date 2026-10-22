@@ -47,6 +47,11 @@ coraza WAF, prometheus.
   state all interact under several locks. Sequenced frames share one per-client
   FIFO because clients ack only `max(seq)` — a frame that skips the queue, or a
   seq allocated for a frame that is then dropped, is silently unrecoverable.
+- Every WebSocket frame's handler runs under a 10 s deadline (`ws/command_deadline.go`),
+  and a failure after it expires answers `REQUEST_TIMEOUT` meaning "not applied". Keep
+  that true: a handler's post-commit work (audit, mention badges, push, broadcasts)
+  must run on `context.WithoutCancel(ctx)`, never on the frame's context, and a new
+  handler that pairs a write with a LiveKit or plugin call joins the exempt set.
 - Prefer the standard library. `syncutil` exists so lock usage is uniform and
   detectable; do not hand-roll around it. `Server/invariants/` enforces this
   at `go test` time; exceptions are greppable via `grep -rn "invariant:allow" Server/`.
@@ -54,6 +59,10 @@ coraza WAF, prometheus.
   imports it needs a row in `invariants/db_import_boundary.go` (`DBImportAllow`)
   with a disposition and reason — the B3 inventory, which only shrinks. New
   persistence goes behind a service, not into a handler.
+  A new service takes a slice interface it declares; new REST response DTOs live
+  in `api` or `service`, not `db/models.go`. `service/datastore_ratchet_test.go`
+  pins the `Store` surface and the `models.go` json tags; lower the pin when you
+  shrink them.
 - Only `permissions/` calls the raw permission bit helpers (`HasPerm`,
   `HasAnyPerm`, `HasServerPerm`, `HasAdmin`, `EffectivePerms`,
   `EffectiveChannelPerms`). Everywhere else resolves a `permissions.Subject`

@@ -11,6 +11,7 @@ import { defineCatalog } from "./format";
  */
 export const connectText = defineCatalog("connect", {
   "common.cancel": "Cancel",
+  "link.openFailed": "Couldn't open the link",
   "common.close": "Close",
   "common.unknown": "Unknown",
   "common.settings": "Settings",
@@ -23,6 +24,8 @@ export const connectText = defineCatalog("connect", {
   "update.downloading": "Downloading update…",
   "update.unavailable":
     "This install cannot update itself. Ask your server administrator for the new version.",
+  "update.unconfirmed":
+    "The server offered no update for this install. If one exists, ask your server administrator.",
   "update.dismiss": "Dismiss",
   "update.available": "Update v{version} available",
   "update.ready": "OwnCord {version} is ready to install",
@@ -35,9 +38,15 @@ export const connectText = defineCatalog("connect", {
   "update.installedRestarting": "Update installed. Restarting…",
   "update.installedRestart": "Update installed. Please restart OwnCord to finish.",
   "update.failed": "Update failed. Please try again later.",
+  "update.installing": "Installing update… Enter your password to continue.",
+  "update.cancelled": "Update cancelled.",
+  "update.notAuthorized":
+    "OwnCord could not get permission to install the update. Install the new .deb by hand.",
   "update.retry": "Retry",
 
   "voice.disconnected": "You were disconnected from voice",
+  "voice.afkChannelFallback": "the AFK channel",
+  "voice.movedAfk": "Moved to {channel} because you were idle",
   "voice.channelFull": "That voice channel is full",
   "voice.videoLimit": "That voice channel has reached its video limit",
 
@@ -109,6 +118,22 @@ export const connectText = defineCatalog("connect", {
 
   "validation.hostRequired": "Server address is required.",
   "validation.usernameRequired": "Username is required.",
+  "limits.usernameHint":
+    "{min}–{max} characters: letters, digits, _ . and -. Start with a letter or digit.",
+  "limits.lineHint": "Up to {max} characters, on one line.",
+  "limits.checkField": "Check the highlighted field.",
+  "limits.reached": "Limit of {max} characters reached.",
+  "limits.usernameTooShort": "Username must be {min}–{max} characters.",
+  "limits.usernameTooLong": "Username must be {min}–{max} characters.",
+  "limits.usernameReserved": "Username is reserved.",
+  "limits.usernameInvisible": "Username must not contain invisible characters.",
+  "limits.usernameStart": "Username must start with a letter or digit.",
+  "limits.usernameChars": "Username may only contain letters, digits, '_', '.' and '-'.",
+  "limits.usernameMarkPlacement": "Username has a combining mark that does not follow a letter.",
+  "limits.usernameMarkStack": "Username must not stack more than {max} combining marks.",
+  "limits.displayNameTooLong": "Display name must be at most {max} characters.",
+  "limits.statusTooLong": "Custom status must be at most {max} characters.",
+  "limits.groupNameTooLong": "Group name must be at most {max} characters.",
   "validation.passwordRequired": "Password is required.",
   "validation.passwordTooShort": "Password must be at least {min} characters.",
   "validation.placeholderPassword":
@@ -192,6 +217,7 @@ export const connectText = defineCatalog("connect", {
   "error.storageLowDisk": "The server is low on disk space — try again later.",
   "error.storageError": "The server could not store that. Try again.",
   "error.gifDisabled": "GIF search is not configured on this server.",
+  "error.lastRole": "A member must keep at least one role.",
   "error.pushDisabled": "Notifications are not enabled on this server.",
   "session.passwordRemoveFailed": "Could not remove the saved password — it is still stored",
   "session.credentialsSaveFailed": "Could not save credentials — auto-login won't work",
@@ -207,10 +233,13 @@ export const connectText = defineCatalog("connect", {
   "session.loginUnreadable": "Login failed: the server returned an unreadable response.",
 
   "app.renderFailed": "Something went wrong rendering this section.",
-  "app.channelDeleted": "This channel was deleted",
+  "app.reload": "Reload",
+  "app.signOut": "Sign out",
+  "app.channelDeleted": "You no longer have access to this channel, or it was deleted",
   "app.dmNoMessages": "No messages yet",
   "app.dmCreateFailed": "Failed to create DM",
   "app.dmCreateGroupFailed": "Failed to create group DM",
+  "app.reactionLimit": "This message has reached the reaction limit (20)",
   "app.sendBeforeRestore":
     "The server was restored — check the conversation before sending this again.",
   "app.loadHistoryFailed": "Failed to load message history",
@@ -223,6 +252,8 @@ export const connectText = defineCatalog("connect", {
   "notifications.mentioned": "{author} mentioned you in {channel}",
   "notifications.mentionedIn": "You were mentioned in {channel}",
   "notifications.inChannel": "{author} in {channel}",
+  "notifications.inThread": "{channel} › {thread}",
+  "notifications.newIn": "New message in {channel}",
   "notifications.spoiler": "Spoiler",
   "notifications.attachment": {
     one: "sent an attachment",

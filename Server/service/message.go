@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/microcosm-cc/bluemonday"
 )
@@ -31,6 +30,19 @@ var (
 	ErrConflict       = errors.New("conflict")
 	ErrBlocked        = errors.New("blocked")
 	ErrDeletedMessage = errors.New("message is deleted")
+	// ErrAttachmentsUnavailable means a send had no text and none of its
+	// requested attachments could be linked (swept, foreign, already linked or
+	// missing). It is always wrapped together with ErrBadRequest, which it
+	// refines into the ATTACHMENTS_UNAVAILABLE wire code.
+	ErrAttachmentsUnavailable = errors.New("attachments unavailable")
+	// ErrReactionLimit means a new emoji was refused because the message already
+	// holds db.MaxDistinctReactions different ones. It is always wrapped together
+	// with ErrBadRequest, which it refines into the REACTION_LIMIT wire code.
+	ErrReactionLimit = errors.New("reaction limit reached")
+	// ErrPollEnded means a vote or an end reached a poll that was already ended
+	// or whose time ran out. It is always wrapped together with ErrBadRequest,
+	// which it refines into the POLL_ENDED wire code.
+	ErrPollEnded = errors.New("poll ended")
 	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator
 	// timeout row (B5-9) and cannot send or edit messages, add reactions,
 	// join voice, start a new DM, create or rename a group DM, ring a DM
@@ -41,88 +53,6 @@ var (
 	// answer for every untrusted state). The ring is never delivered.
 	ErrCallNeedsAcceptance = errors.New("calls work after the other person accepts your message request")
 )
-
-// SendMessageParams contains validated input for sending a message.
-type SendMessageParams struct {
-	ClientMessageID string // stable logical id, optional for older clients
-	ChannelID       int64
-	UserID          int64
-	Username        string
-	Avatar          *string
-	RoleName        string
-	Content         string // raw, will be sanitized
-	ReplyTo         *int64
-	AttachmentIDs   []string
-}
-
-// ReferencedMessage is the reply-parent snippet a chat_message frame carries.
-// It aliases the db shape so the ws transport depends on service, not db.
-type ReferencedMessage = db.ReferencedMessage
-
-// SendMessageResult contains the output of a successful message send.
-type SendMessageResult struct {
-	Duplicate bool // retry acknowledgment only, no repeated broadcasts or effects
-	MessageID int64
-	Timestamp string
-	Content   string // sanitized content
-	IsDM      bool
-	Channel   *db.Channel
-
-	// DM-specific fields populated when IsDM is true.
-	ParticipantIDs []int64
-	SenderUser     *db.User // for dm_channel_open events
-	OpenedDMFor    []int64  // participant IDs that had their DM opened
-	// DMParticipants is the full participant list of the DM, viewer-neutral:
-	// it is read with viewerID 0, which matches nobody, so every status is
-	// already broadcast-collapsed (an invisible participant reads as offline).
-	// That is what makes it safe to reuse for every addressee — the ws layer
-	// turns it into a per-recipient dm_channel_open payload without re-deriving
-	// visibility. Nil when the participant read failed, in which case the
-	// caller falls back to the sender-only 1:1 shape.
-	DMParticipants []db.DMUser
-	// DMIsGroup mirrors channels.is_group for this DM. Carried alongside the
-	// participants because a group that people have left can have two members
-	// and must still render as a group.
-	DMIsGroup bool
-
-	// Attachment data for broadcast.
-	Attachments []db.AttachmentInfo
-
-	// ReferencedMessage is the reply parent's snippet for the broadcast; nil
-	// when the send is not a reply or the parent is unavailable.
-	ReferencedMessage *ReferencedMessage
-
-	// Mentions is the resolved mentioned user ids (never nil) and
-	// MentionsEveryone an authorized @everyone/@here. Both are broadcast so
-	// clients highlight from server-resolved data instead of re-guessing.
-	Mentions         []int64
-	MentionsEveryone bool
-	// MentionsHere reports that MentionsEveryone came from @here rather than
-	// @everyone (mentionSet.HereOnly — never both, @here only narrows when
-	// @everyone is absent). mentionEntries skips the mention-count bump
-	// for an @here reader with no live connection at send time; clients need
-	// this bit to tell that case apart from a plain @everyone, which reaches
-	// every reader regardless (OC-0271).
-	MentionsHere bool
-
-	// RequestCreatedFor lists the message_requests rows freshly created by
-	// this send (B5-6 decision 4's first-contact gate,
-	// service/message_request.go): one entry per untrusted one-to-one
-	// recipient who had no existing request in any state. The ws layer sends
-	// one dm_request frame per entry; RequestPreview is what every one of
-	// those frames carries. Empty for a group DM, a trusted recipient, or a
-	// resend while a request already exists (decision 5 — there is only ever
-	// one row to create).
-	RequestCreatedFor []*db.MessageRequest
-	// RequestPreview names this send's own message — a request can only ever
-	// be created by the pair's first-ever message, since a resend finds the
-	// row already there and creates nothing. Read fresh from the DB right
-	// before use (canonicalRequestPreview), not copied from this result's
-	// own Content/Timestamp above, so it agrees with the REST inbox's
-	// deleted = 0 preview even if a delete races the frame; nil if the
-	// message was already gone by the time of that read.
-	RequestPreview *DMRequestPreview
-}
 
 // DMRequestPreview is the message preview a dm_request frame carries on
 // creation (docs/protocol.md's dm_request section).
@@ -143,10 +73,15 @@ type EditMessageResult struct {
 	ParticipantIDs []int64
 
 	// Mentions/MentionsEveryone are re-resolved from the edited content.
+	// MentionRoles lists the roles whose @role token cleared the gate; an edit
+	// never raises a badge for them or anyone else.
 	Mentions         []int64
+	MentionRoles     []int64
 	MentionsEveryone bool
 	// MentionsHere: see SendMessageResult.MentionsHere.
 	MentionsHere bool
+	// PostOpening marks the edit of a forum post's opening message (WP 6.9d).
+	PostOpening bool
 }
 
 // DeleteMessageResult contains the output of a successful message delete.
@@ -155,6 +90,7 @@ type DeleteMessageResult struct {
 	ChannelID int64
 	IsDM      bool
 	IsMod     bool
+	IsThread  bool // the message lived in a thread (its count moved)
 	// DM-specific.
 	ParticipantIDs []int64
 }
@@ -184,12 +120,19 @@ type MessageService struct {
 	st      Store
 	perms   *PermissionService
 	limiter *auth.RateLimiter
+	// mentionIDs backs the <@id> and <@&id> mention forms; nil when the store
+	// lacks it, which leaves those tokens as plain text.
+	mentionIDs MentionIDStore
 	// bg runs the deferred bookkeeping that has no dedicated worker off the send
 	// path: Web Push dispatch, and the fallback mention write used when no
-	// mention worker is running. Defaults to `go fn()`; tests swap it for an
-	// inline runner via RunBackgroundInlineForTest so they can read the results
+	// mention worker is running. It runs on bg, the lifecycle-owned group the
+	// composition root installs with SetBackground so shutdown joins it before
+	// the database closes (ARCH-034); a nil bg runs each job on a fresh
+	// unowned group (the old `go fn()`). Tests switch to inline via
+	// RunBackgroundInlineForTest so they can read the results
 	// deterministically right after a send.
-	bg func(fn func())
+	bg       *syncutil.Group
+	bgInline bool
 	// mentionWorker is the single bounded worker that owns every mention-badge
 	// write (P5-O05). It is nil until the composition root starts it
 	// (app.startHub); with no worker, SendMessage resolves and writes mentions
@@ -203,6 +146,9 @@ type MessageService struct {
 	// notify and the visibility check inside it; job resolution stays outside.
 	// See mentionWorker.emitMu and reverseMentionCounts.
 	mentionEmitMu syncutil.Mutex
+	// readStateNotifier delivers the read_state frame MoveReadPointer sends
+	// under mentionEmitMu. nil leaves it off (see SetReadStateNotifier).
+	readStateNotifier ReadStateNotifier
 	// liveStatus returns userID's live status, "" when they hold no live
 	// connection. It is wired by the ws layer (Hub.LiveStatus) after both are
 	// constructed, so @here reads the same status the member list overlays
@@ -247,6 +193,13 @@ type MessageService struct {
 	// with no hub) means no frame is pushed, exactly the pre-DP-27 behaviour.
 	// The ws layer installs the hub-backed implementation in NewHub.
 	mentionNotifier MentionCountNotifier
+	// forward backs ForwardMessage (WP 6.9a); see message_forward.go.
+	forward forwardDeps
+	// poll backs CreatePoll (WP 6.9b); see message_poll.go.
+	poll pollDeps
+	// threads reads a forum post's thread for a retry (WP 6.9d); nil disables
+	// forum posts. It is the ThreadStore slice, not a Store method.
+	threads ThreadStore
 }
 
 // SetMessageRequests wires the first-contact gate and delivery-audience
@@ -280,20 +233,29 @@ var backgroundJobTimeout = pushDispatchTimeout
 
 // NewMessageService creates a MessageService.
 func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
-	return &MessageService{
+	s := &MessageService{
 		st:      st,
 		perms:   perms,
 		limiter: limiter,
-		bg:      func(fn func()) { go fn() },
 	}
+	s.forward.store, _ = st.(ForwardStore)
+	s.poll.store, _ = st.(PollStore)
+	s.threads, _ = st.(ThreadStore)
+	s.mentionIDs, _ = st.(MentionIDStore)
+	return s
 }
+
+// SetUploads gives the service the upload service a forward clones files
+// through. service.New calls it; without it a forward that carries files is
+// refused.
+func (s *MessageService) SetUploads(u *UploadService) { s.forward.uploads = u }
 
 // RunBackgroundInlineForTest makes the fallback mention write (used when no
 // mention worker is running) and Web Push dispatch run synchronously on the
 // calling goroutine, so tests can assert on the results right after
 // SendMessage returns. Test-only.
 func (s *MessageService) RunBackgroundInlineForTest() {
-	s.bg = func(fn func()) { fn() }
+	s.bgInline = true
 }
 
 // StartMentionWorker creates and starts the single bounded mention-badge

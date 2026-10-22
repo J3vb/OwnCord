@@ -12,7 +12,9 @@ repo_root=$(git rev-parse --show-toplevel) || exit 1
 cd "$repo_root" || exit 1
 
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
-[ -z "$staged" ] && exit 0
+# Deletions can stale the inventory checks below, so they count as changes.
+changed=$(git diff --cached --name-only --diff-filter=ACMRD)
+[ -z "$changed" ] && exit 0
 
 fail() {
     printf '\npre-commit: FAIL: %s\n(bypass with --no-verify; CI will still enforce this)\n' "$1" >&2
@@ -104,16 +106,54 @@ if printf '%s\n' "$staged" | grep -qE '^\.superpowers/(findings-ledger\.json|ren
     fi
 fi
 
+# check-doc-counts.mjs is Node-stdlib-only: it compares the counts stated in the
+# watched summaries (WATCHED in the script) with the findings ledger.
+if printf '%s\n' "$changed" | grep -qE '^(docs/|CHANGELOG\.md$|README\.md$|CLAUDE\.md$|\.superpowers/findings-ledger\.json$)'; then
+    if command -v node >/dev/null 2>&1; then
+        node scripts/check-doc-counts.mjs \
+            || fail "a doc states a ledger count the ledger contradicts — update the number named above (or the ledger) and re-stage; check with 'node scripts/check-doc-counts.mjs'"
+    else
+        printf 'pre-commit: WARNING: node not installed; skipping the doc-counts check. CI will run it.\n' >&2
+    fi
+fi
+
+# ---------- Inventories (added, changed or deleted files) ----------
+# The db-import table in docs/architecture/server-boundaries.md goes stale
+# when a Go file starts or stops importing db; CI fails on it.
+if printf '%s\n' "$changed" | grep -qE '^Server/.*\.go$|^docs/architecture/server-boundaries\.md$'; then
+    if command -v go >/dev/null 2>&1; then
+        (cd Server && go test -count=1 ./cmd/dbinventory/) \
+            || fail "docs/architecture/server-boundaries.md is stale — paste the output of 'go run ./cmd/dbinventory' (in Server/) between its markers"
+    fi
+fi
+
+# Every mutated Client/src file must sit in exactly one shard of
+# Client/stryker.shard.config.mjs; an added or deleted file breaks the union.
+if printf '%s\n' "$changed" | grep -qE '^Client/src/.*\.ts$|^Client/stryker\.(shard\.)?config\.mjs$'; then
+    (cd Client && node scripts/check-mutation-shards.mjs) \
+        || fail "the mutation shards no longer match Client/src — update Client/stryker.shard.config.mjs"
+fi
+
 # ---------- Formatting (repository-wide) ----------
 # Prettier is configured once at the repository root (.prettierrc.json) and
 # covers every material tracked source, not just client TypeScript.
 # --ignore-unknown drops the Go/Rust/binary paths it has no parser for.
-if [ -d node_modules ]; then
+if [ -z "$staged" ]; then
+    :
+elif [ -d node_modules ]; then
     # Word splitting is intended: repo paths contain no spaces.
     # shellcheck disable=SC2086
     npx prettier --check --ignore-unknown $staged || fail "prettier (run: npm run format)"
 else
-    printf 'pre-commit: WARNING: node_modules missing at the repository root; skipping prettier.\n' >&2
+    # A git worktree has no root node_modules; the main checkout's install pins
+    # the same prettier as CI, so use its binary.
+    main_checkout=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+    if [ -x "$main_checkout/node_modules/.bin/prettier" ]; then
+        # shellcheck disable=SC2086
+        "$main_checkout/node_modules/.bin/prettier" --check --ignore-unknown $staged || fail "prettier (run: npm run format)"
+    else
+        printf 'pre-commit: WARNING: node_modules missing at the repository root; skipping prettier.\n' >&2
+    fi
 fi
 
 # ---------- Client (TypeScript) ----------

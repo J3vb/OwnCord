@@ -20,6 +20,13 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
+import { setConnectionStatus, uiStore } from "@stores/ui.store";
+
+// Reaction controls lock while the socket is down (3A-3); these tests react online.
+beforeEach(() => {
+  setConnectionStatus("connected");
+  uiStore.flush();
+});
 
 function resetStores(): void {
   messagesStore.setState(() => ({
@@ -88,6 +95,8 @@ describe("MessageList row listener lifecycle (OC-0286)", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),

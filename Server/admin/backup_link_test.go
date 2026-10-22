@@ -3,7 +3,9 @@ package admin_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -204,5 +206,66 @@ func TestBackupLink_NotAnArchiveToken(t *testing.T) {
 	}
 	if w := openBackupLink(t, f, path); w.Code != http.StatusOK {
 		t.Errorf("GET %s after the refusals = %d, want 200; body: %s", path, w.Code, w.Body.String())
+	}
+}
+
+// TestBackupLink_SlowDownloadOutlivesWriteTimeout: the HTTP server carrying
+// /admin has a fixed WriteTimeout (30 s in production, 300 ms here) that net/http
+// arms once per request. A download that keeps making progress must not be
+// cut by it, even when the whole transfer takes several times longer.
+func TestBackupLink_SlowDownloadOutlivesWriteTimeout(t *testing.T) {
+	f := newBackupLinkFixture(t)
+	const name = "chatserver_20260903_100000.db"
+	body := make([]byte, 32<<20) // far more than the socket buffers can hold
+	if err := os.WriteFile(filepath.Join(f.dir, name), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := issueBackupLink(t, f, name)
+
+	srv := httptest.NewUnstartedServer(http.StripPrefix("/admin/api", f.handler))
+	srv.Config.WriteTimeout = 300 * time.Millisecond
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	// A small receive buffer, so the server blocks on the connection rather
+	// than finishing into kernel buffers before the timeout can matter.
+	dialer := &net.Dialer{}
+	client := &http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := dialer.DialContext(ctx, network, addr)
+			if tcp, ok := c.(*net.TCPConn); ok {
+				_ = tcp.SetReadBuffer(64 << 10)
+			}
+			return c, err
+		},
+	}}
+	t.Cleanup(client.CloseIdleConnections)
+
+	res, err := client.Get(srv.URL + path)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer res.Body.Close() //nolint:errcheck
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	// Three pauses, each longer than the whole WriteTimeout, with the
+	// transfer moving in between.
+	got := 0
+	buf := make([]byte, 4<<20)
+	for range 3 {
+		time.Sleep(400 * time.Millisecond)
+		n, err := io.ReadFull(res.Body, buf)
+		got += n
+		if err != nil {
+			t.Fatalf("download cut after %d of %d bytes: %v", got, len(body), err)
+		}
+	}
+	rest, err := io.Copy(io.Discard, res.Body)
+	if err != nil {
+		t.Fatalf("download cut after %d of %d bytes: %v", got+int(rest), len(body), err)
+	}
+	if total := got + int(rest); total != len(body) {
+		t.Fatalf("received %d of %d bytes", total, len(body))
 	}
 }

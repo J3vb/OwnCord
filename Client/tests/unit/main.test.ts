@@ -44,6 +44,8 @@ vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
 vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
+vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
@@ -63,6 +65,13 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
   onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
+}));
+// The Reload recovery leaves a call through this lazily imported module.
+const { mockLeaveVoice } = vi.hoisted(() => ({
+  mockLeaveVoice: vi.fn((..._args: unknown[]): Promise<void> => Promise.resolve()),
+}));
+vi.mock("@lib/livekitSession", () => ({
+  leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
 }));
 vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
@@ -173,6 +182,7 @@ const capturedConnectCallbacks: {
   getRetentionNotice?: (host: string) => string | null;
   onHostSettled?: (host: string) => void;
   onDeleteProfile?: (profileId: string) => void;
+  onToggleAutoLogin?: (profileId: string, enabled: boolean) => void;
 } = {};
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
@@ -236,8 +246,9 @@ import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { setMarkReadSender } from "@lib/read-state";
 import type { ReadyChannel } from "@lib/types";
 import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.store";
-import { deleteCredential, loadCredential } from "@lib/credentials";
+import { deleteCredential, loadCredential, saveCredential } from "@lib/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
+import { voiceStore } from "@stores/voice.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
 import { createCertFirstUseModal, createCertMismatchModal } from "@components/CertMismatchModal";
@@ -322,7 +333,12 @@ describe("main.ts beforeunload", () => {
   afterEach(() => {
     hasFocus.mockRestore();
     setMarkReadSender(null);
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
   });
 
   it("marks the active channel read, so messages read live do not return as unread", () => {
@@ -458,7 +474,7 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
     // coalescing retry, and the optimistic update all live inside it.
     const fakeSender: PresenceSender = {
       send: vi.fn(),
-      rollbackTimedOut: vi.fn(),
+      rollbackRefused: vi.fn(),
       destroy: vi.fn(),
     };
     setActivePresenceSender(fakeSender);
@@ -475,6 +491,27 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
     setActivePresenceSender(null);
 
     expect(() => emitTauriEvent("status-change", "idle")).not.toThrow();
+  });
+});
+
+describe("main.ts MainPage prefetch (CL-04)", () => {
+  it("starts the MainPage chunk load when the login is accepted, before the socket connects", async () => {
+    mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
+    mockPrefetchMainPage.mockClear();
+
+    await capturedConnectCallbacks.onLogin!("prefetch.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+
+    // The offline server has not answered: the socket is not connected, yet
+    // the prefetch is already under way.
+    expect(mockPrefetchMainPage).toHaveBeenCalledTimes(1);
+    expect(createMainPage).not.toHaveBeenCalled();
+
+    // Drain the pre-auth deadline this attempt leaves behind.
+    await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS + 100);
+    expectConsole("warn", /Pre-auth connection timed out/);
+    expectConsole("warn", /\[main\] Credential delete failed/);
+    clearAuth();
   });
 });
 
@@ -830,6 +867,230 @@ describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
   });
 });
 
+describe("main.ts stay-signed-in storage split (WP 2B-4)", () => {
+  const host = "split.example:8443";
+  const authOk = {
+    user: { id: 9, username: "alice", avatar: null, role: "member" },
+    server_name: "Split Co",
+    motd: "",
+  };
+  const page = () =>
+    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      getRememberPassword: ReturnType<typeof vi.fn>;
+      getAutoConnect: ReturnType<typeof vi.fn>;
+    };
+
+  beforeEach(() => {
+    vi.mocked(saveCredential).mockClear();
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(true);
+  });
+  afterEach(() => {
+    page().getRememberPassword.mockReturnValue(false);
+    page().getAutoConnect.mockReturnValue(false);
+  });
+
+  it("Auto connect alone saves the token but not the password, and clears any older password", async () => {
+    page().getAutoConnect.mockReturnValue(true);
+    page().getRememberPassword.mockReturnValue(false);
+    await loginAndReachAuthOk(host, "alice", authOk);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(saveCredential).toHaveBeenCalledTimes(1);
+    expect(saveCredential).toHaveBeenCalledWith(host, "alice", "test-token", undefined, true);
+    expect(deleteCredential).not.toHaveBeenCalled();
+  });
+
+  it("Auto connect and Remember together save the token and the password", async () => {
+    page().getAutoConnect.mockReturnValue(true);
+    page().getRememberPassword.mockReturnValue(true);
+    await loginAndReachAuthOk(host, "alice", authOk);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(saveCredential).toHaveBeenCalledWith(host, "alice", "test-token", "hunter2", false);
+    expect(deleteCredential).not.toHaveBeenCalled();
+  });
+
+  it("Remember alone saves the token and the password as before", async () => {
+    page().getAutoConnect.mockReturnValue(false);
+    page().getRememberPassword.mockReturnValue(true);
+    await loginAndReachAuthOk(host, "alice", authOk);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(saveCredential).toHaveBeenCalledWith(host, "alice", "test-token", "hunter2", false);
+  });
+
+  it("neither box ticked deletes the credential and saves nothing", async () => {
+    await loginAndReachAuthOk(host, "alice", authOk);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(saveCredential).not.toHaveBeenCalled();
+    expect(deleteCredential).toHaveBeenCalledWith(host);
+  });
+});
+
+describe("main.ts drops an orphaned stay-signed-in token (WP 2B-4)", () => {
+  type P = {
+    id: string;
+    name: string;
+    host: string;
+    autoConnect: boolean;
+    rememberPassword: boolean;
+  };
+  const mk = (id: string, autoConnect: boolean, rememberPassword: boolean): P => ({
+    id,
+    name: id,
+    host: `${id}.example:8443`,
+    autoConnect,
+    rememberPassword,
+  });
+  let profiles: P[] = [];
+
+  beforeEach(() => {
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(true);
+    mockProfileManager.getAll.mockImplementation((() => profiles) as never);
+    mockProfileManager.setAutoLogin.mockImplementation(((id: string | null) => {
+      profiles = profiles.map((p) => ({ ...p, autoConnect: p.id === id }));
+    }) as never);
+  });
+  afterEach(() => {
+    profiles = [];
+    mockProfileManager.getAll.mockReset().mockReturnValue([]);
+    mockProfileManager.setAutoLogin.mockReset();
+  });
+
+  it("deletes the token when the panel toggles Auto connect off an auto-connect-only profile", () => {
+    profiles = [mk("a", true, false)];
+    capturedConnectCallbacks.onToggleAutoLogin!("a", false);
+    expect(deleteCredential).toHaveBeenCalledWith("a.example:8443");
+  });
+
+  it("keeps the credential when the profile also remembers its password", () => {
+    profiles = [mk("a", true, true)];
+    capturedConnectCallbacks.onToggleAutoLogin!("a", false);
+    expect(deleteCredential).not.toHaveBeenCalled();
+  });
+
+  it("keeps the credential while another profile on the host still holds a flag", () => {
+    profiles = [mk("a", true, false), { ...mk("a", false, true), id: "a2" }];
+    capturedConnectCallbacks.onToggleAutoLogin!("a", false);
+    expect(deleteCredential).not.toHaveBeenCalled();
+  });
+
+  it("deletes the previous holder's token when a second server claims auto-connect", async () => {
+    profiles = [mk("a", true, false), mk("b", false, false)];
+    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      getAutoConnect: ReturnType<typeof vi.fn>;
+    };
+    page.getAutoConnect.mockReturnValue(true);
+    try {
+      await loginAndReachAuthOk("b.example:8443", "alice", {
+        user: { id: 9, username: "alice", avatar: null, role: "member" },
+        server_name: "B",
+        motd: "",
+      });
+      await vi.advanceTimersByTimeAsync(50);
+    } finally {
+      page.getAutoConnect.mockReturnValue(false);
+    }
+    expect(deleteCredential).toHaveBeenCalledWith("a.example:8443");
+    expect(deleteCredential).not.toHaveBeenCalledWith("b.example:8443");
+  });
+});
+
+describe("main.ts startup resume of the stored token (WP 2B-4)", () => {
+  const host = "resume.example:8443";
+  const autoProfile = {
+    id: "p-r",
+    name: "Resume Co",
+    host,
+    username: "alex",
+    autoConnect: true,
+    rememberPassword: false,
+  };
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.mocked(deleteCredential).mockReset().mockResolvedValue(true);
+  });
+  afterEach(() => {
+    sessionStorage.clear();
+    mockProfileManager.getAll.mockReturnValue([]);
+    mockProfileManager.getAutoConnectProfile.mockReturnValue(null);
+    vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
+  });
+
+  /** Re-enter the connect page the way a fresh launch does: no skip flag. */
+  async function relaunch(): Promise<void> {
+    await loginAndReachAuthOk("elsewhere.example:8443", "alex", {
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+      server_name: "Elsewhere",
+      motd: "",
+    });
+    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+    await vi.advanceTimersByTimeAsync(800);
+    vi.mocked(createMainPage).mockClear();
+    // A fresh launch has no logout behind it, so the skip flag a session end
+    // would leave in sessionStorage must not exist when the page mounts.
+    const realSet = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key !== "owncord:skip-auto-login") realSet.call(this, key, value);
+    });
+    clearAuth("server_switch");
+    await vi.advanceTimersByTimeAsync(50);
+    setItem.mockRestore();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  }
+  const lastPage = () =>
+    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      showAutoConnecting: ReturnType<typeof vi.fn>;
+    };
+
+  it("resumes the auto-connect profile on a token alone (no remembered password)", async () => {
+    mockProfileManager.getAll.mockReturnValue([autoProfile]);
+    mockProfileManager.getAutoConnectProfile.mockReturnValue(autoProfile as never);
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "alex",
+      token: "stored-token",
+      hasPassword: false,
+    });
+    await relaunch();
+    expect(lastPage().showAutoConnecting).toHaveBeenCalledWith("Resume Co");
+  });
+
+  it("lands on the login form, not the main page, when the stored token is rejected", async () => {
+    mockProfileManager.getAll.mockReturnValue([autoProfile]);
+    mockProfileManager.getAutoConnectProfile.mockReturnValue(autoProfile as never);
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "alex",
+      token: "expired-token",
+      hasPassword: false,
+    });
+    await relaunch();
+    expect(lastPage().showAutoConnecting).toHaveBeenCalled();
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({ type: "auth_error", payload: { message: "Invalid or expired token" } }),
+    );
+    await vi.advanceTimersByTimeAsync(800);
+    expectConsole("error", /\[ws\] Authentication failed/);
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    expect(createMainPage).not.toHaveBeenCalled();
+  });
+
+  it("resumes nothing when the profile was deleted", async () => {
+    mockProfileManager.getAll.mockReturnValue([]);
+    mockProfileManager.getAutoConnectProfile.mockReturnValue(null);
+    vi.mocked(loadCredential).mockResolvedValue({
+      username: "alex",
+      token: "stale-token",
+      hasPassword: false,
+    });
+    await relaunch();
+    expect(lastPage().showAutoConnecting).not.toHaveBeenCalled();
+  });
+});
+
 describe("main.ts profile deletion clears the saved credential (F11)", () => {
   afterEach(() => {
     vi.mocked(deleteCredential).mockReset().mockResolvedValue(false);
@@ -1043,8 +1304,40 @@ describe("main.ts quick-switch resume", () => {
   });
 });
 
+// main.ts hands its deep-link callback to the plugin once, at module load; a
+// test's mockClear must not lose it.
+let deepLinkHandler: ((urls: readonly string[]) => void) | undefined;
+
+/** Sign in on `host`, reach the main page, and return the deep-link handler. */
+async function signedInWithDeepLinkHandler(
+  host: string,
+  serverName: string,
+): Promise<(urls: readonly string[]) => void> {
+  await loginAndReachAuthOk(host, "alex", {
+    user: { id: 1, username: "alex", avatar: null, role: "member" },
+    server_name: serverName,
+    motd: "",
+  });
+  expectConsole("warn", /\[main\] Credential delete failed/);
+  emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
+  await vi.advanceTimersByTimeAsync(800);
+  deepLinkHandler ??= mockOnOpenUrl.mock.calls[0]?.[0] as (urls: readonly string[]) => void;
+  expect(deepLinkHandler).toBeTypeOf("function");
+  return deepLinkHandler;
+}
+
+/** Wait for the lazily imported confirm dialog (and its catalog) to show `text`. */
+async function dialogShows(text: string): Promise<void> {
+  await vi.waitFor(() => expect(dialogEl()?.textContent ?? "").toContain(text));
+}
+
+const dialogEl = () => document.querySelector('[data-testid="invite-join-dialog"]');
+const clickDialog = (button: "confirm" | "cancel") =>
+  document.querySelector<HTMLButtonElement>(`[data-testid="invite-join-${button}"]`)!.click();
+
 describe("main.ts invite deep link keeps the current server's credential (F7)", () => {
   afterEach(() => {
+    document.querySelectorAll('[data-testid="invite-join-dialog"]').forEach((el) => el.remove());
     mockOnOpenUrl.mockClear();
     vi.mocked(deleteCredential).mockClear();
   });
@@ -1052,26 +1345,321 @@ describe("main.ts invite deep link keeps the current server's credential (F7)", 
   it("does not delete the signed-in server's credential when an invite link arrives", async () => {
     // An invite link is not a logout: signing in on server A and clicking an
     // invite link must not silently lose A's remembered password.
-    await loginAndReachAuthOk("server-a.example:8443", "alex", {
-      user: { id: 1, username: "alex", avatar: null, role: "member" },
-      server_name: "Server A",
-      motd: "",
-    });
-    expectConsole("warn", /\[main\] Credential delete failed/);
-    emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
-    await vi.advanceTimersByTimeAsync(800);
+    const handler = await signedInWithDeepLinkHandler("server-a.example:8443", "Server A");
 
     vi.mocked(deleteCredential).mockClear();
 
     // The deep-link plugin hands the app the invite while the session is live.
-    const handler = mockOnOpenUrl.mock.calls[0]?.[0] as (urls: readonly string[]) => void;
-    expect(handler).toBeTypeOf("function");
     handler(["owncord://invite/ABC123"]);
+    await dialogShows("Open this invite?");
+    // The link now asks first; the user confirms.
+    clickDialog("confirm");
 
     await Promise.resolve();
     await Promise.resolve();
 
     expect(vi.mocked(deleteCredential)).not.toHaveBeenCalled();
+  });
+});
+
+describe("main.ts external invite link asks before leaving the signed-in server (4.12)", () => {
+  afterEach(() => {
+    document.querySelectorAll('[data-testid="invite-join-dialog"]').forEach((el) => el.remove());
+    mockOnOpenUrl.mockClear();
+  });
+
+  const signedIn = () => signedInWithDeepLinkHandler("server-a.example:8443", "Server A");
+
+  it("does not end the session until the user confirms, then runs the old path", async () => {
+    const handler = await signedIn();
+    const connect = vi.mocked(createConnectPage);
+    connect.mockClear();
+
+    handler(["owncord://invite/ABC123?host=other.example"]);
+    await dialogShows("Open invite for other.example?");
+
+    expect(dialogEl()!.textContent).toContain("You'll leave Server A.");
+    expect(dialogEl()!.textContent).not.toContain("your call");
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(connect).not.toHaveBeenCalled();
+
+    clickDialog("confirm");
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    expect(authStore.getState().logoutReason).toBe("server_switch");
+    expect(connect).toHaveBeenCalled();
+    expect(dialogEl()).toBeNull();
+  });
+
+  it("Cancel leaves the session as it is and drops the invite", async () => {
+    const handler = await signedIn();
+    const connect = vi.mocked(createConnectPage);
+    connect.mockClear();
+
+    handler(["owncord://invite/ABC123"]);
+    await dialogShows("Open this invite?");
+    clickDialog("cancel");
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+
+    expect(dialogEl()).toBeNull();
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(connect).not.toHaveBeenCalled();
+
+    // Nothing was left pending: a later trip to the connect page carries no invite.
+    clearAuth();
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    const page = connect.mock.results.at(-1)!.value as {
+      applyInviteLink: ReturnType<typeof vi.fn>;
+    };
+    expect(page.applyInviteLink).not.toHaveBeenCalled();
+  });
+
+  it("a second link while the dialog is open replaces the first, in one dialog", async () => {
+    const handler = await signedIn();
+
+    handler(["owncord://invite/FIRST?host=first.example"]);
+    await dialogShows("first.example");
+    handler(["owncord://invite/SECOND?host=second.example"]);
+    await dialogShows("second.example");
+
+    expect(document.querySelectorAll('[data-testid="invite-join-dialog"]')).toHaveLength(1);
+    expect(dialogEl()!.textContent).toContain("second.example");
+    expect(dialogEl()!.textContent).not.toContain("first.example");
+
+    clickDialog("confirm");
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+
+    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      applyInviteLink: ReturnType<typeof vi.fn>;
+    };
+    expect(page.applyInviteLink).toHaveBeenCalledTimes(1);
+    expect(page.applyInviteLink).toHaveBeenCalledWith("SECOND", "second.example");
+  });
+
+  it("also asks while the connected overlay is up, before the main page mounts", async () => {
+    const handler = await signedIn();
+    // Back to the connect page, then sign in again and stop at auth_ok: the
+    // session is live but the router is still on the connect page.
+    clearAuth();
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    mockLogin.mockResolvedValue({ token: "t2", requires_2fa: false });
+    await capturedConnectCallbacks.onLogin!("server-b.example:8443", "alex", "hunter2");
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+    emitTauriEvent(
+      "ws-message",
+      JSON.stringify({
+        type: "auth_ok",
+        payload: {
+          user: { id: 1, username: "alex", avatar: null, role: "member" },
+          server_name: "Server B",
+          motd: "",
+        },
+      }),
+    );
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    const connect = vi.mocked(createConnectPage);
+    connect.mockClear();
+
+    handler(["owncord://invite/ABC123?host=other.example"]);
+    await dialogShows("You'll leave Server B.");
+    expect(authStore.getState().isAuthenticated).toBe(true);
+
+    clickDialog("cancel");
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    expect(connect).not.toHaveBeenCalled();
+    expectConsole("warn", /\[main\] Credential delete failed/);
+  });
+
+  it("closes a dialog left open when the session ends, so its confirm cannot fire", async () => {
+    const handler = await signedIn();
+    handler(["owncord://invite/ABC123?host=other.example"]);
+    await dialogShows("other.example");
+    const confirm = document.querySelector<HTMLButtonElement>(
+      '[data-testid="invite-join-confirm"]',
+    )!;
+
+    clearAuth();
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+
+    expect(dialogEl()).toBeNull();
+    // Even a click on the detached button does nothing.
+    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+      applyInviteLink: ReturnType<typeof vi.fn>;
+    };
+    page.applyInviteLink.mockClear();
+    confirm.click();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(page.applyInviteLink).not.toHaveBeenCalled();
+    expect(authStore.getState().logoutReason).not.toBe("server_switch");
+  });
+
+  it("returns focus to Cancel when a second link rewrites the dialog", async () => {
+    const handler = await signedIn();
+    handler(["owncord://invite/FIRST?host=first.example"]);
+    await dialogShows("first.example");
+    const confirm = document.querySelector<HTMLButtonElement>(
+      '[data-testid="invite-join-confirm"]',
+    )!;
+    confirm.focus();
+    expect(document.activeElement).toBe(confirm);
+
+    handler(["owncord://invite/SECOND?host=second.example"]);
+    await dialogShows("second.example");
+
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="invite-join-cancel"]'),
+    );
+    clickDialog("cancel");
+  });
+
+  it("says the call ends too when the user is in voice", async () => {
+    const handler = await signedIn();
+    voiceStore.setState((s) => ({ ...s, currentChannelId: 9 }));
+
+    handler(["owncord://invite/ABC123?host=other.example"]);
+    await dialogShows("You'll leave Server A and your call.");
+
+    clickDialog("cancel");
+    voiceStore.setState((s) => ({ ...s, currentChannelId: null }));
+  });
+});
+
+describe("main.ts render failure recovery (4.12)", () => {
+  it("shows Reload and Sign out when the main page's mount throws", async () => {
+    vi.mocked(createMainPage).mockImplementationOnce(
+      () =>
+        ({
+          mount: () => {
+            throw new Error("mount blew up");
+          },
+          destroy: vi.fn(),
+        }) as never,
+    );
+    await signedInWithDeepLinkHandler("server-a.example:8443", "Server A");
+
+    const app = document.getElementById("app")!;
+    expect(app.textContent).toContain("Something went wrong");
+    expect(app.textContent).toContain("mount blew up");
+    expect(app.querySelector('[data-testid="render-fallback-reload"]')?.textContent).toBe("Reload");
+    expectConsole("error", "Component mount failed");
+
+    const signOut = app.querySelector<HTMLButtonElement>(
+      '[data-testid="render-fallback-sign-out"]',
+    );
+    expect(signOut?.textContent).toBe("Sign out");
+    expect(authStore.getState().isAuthenticated).toBe(true);
+    vi.mocked(createConnectPage).mockClear();
+    signOut!.click();
+    expect(authStore.getState().isAuthenticated).toBe(false);
+    await vi.advanceTimersByTimeAsync(50);
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    // The connect page is back and the fallback is gone.
+    expect(createConnectPage).toHaveBeenCalled();
+    expect(app.querySelector('[data-testid="render-fallback-sign-out"]')).toBeNull();
+    expect(app.textContent).not.toContain("Something went wrong");
+  });
+
+  describe("Reload", () => {
+    const reload = vi.fn();
+    beforeEach(() => {
+      reload.mockReset();
+      mockLeaveVoice.mockReset().mockResolvedValue(undefined);
+      vi.stubGlobal("location", { ...window.location, reload });
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      voiceStore.setState((s) => ({ ...s, currentChannelId: null }));
+    });
+
+    async function failedMainPage(): Promise<HTMLButtonElement> {
+      vi.mocked(createMainPage).mockImplementationOnce(
+        () =>
+          ({
+            mount: () => {
+              throw new Error("mount blew up");
+            },
+            destroy: vi.fn(),
+          }) as never,
+      );
+      await signedInWithDeepLinkHandler("server-a.example:8443", "Server A");
+      expectConsole("error", "Component mount failed");
+      voiceStore.setState((s) => ({ ...s, currentChannelId: 9 }));
+      return document.querySelector<HTMLButtonElement>('[data-testid="render-fallback-reload"]')!;
+    }
+
+    it("waits for the voice leave to finish before reloading", async () => {
+      let finishLeave!: () => void;
+      mockLeaveVoice.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishLeave = resolve;
+        }),
+      );
+      const button = await failedMainPage();
+      button.click();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(mockLeaveVoice).toHaveBeenCalledWith(false);
+      expect(reload).not.toHaveBeenCalled();
+      finishLeave();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("a second click while the leave is pending waits for it too", async () => {
+      let finishLeave!: () => void;
+      mockLeaveVoice.mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishLeave = resolve;
+        }),
+      );
+      const button = await failedMainPage();
+      button.click();
+      await vi.advanceTimersByTimeAsync(100);
+      button.click();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(reload).not.toHaveBeenCalled();
+      expect(mockLeaveVoice).toHaveBeenCalledTimes(1);
+      finishLeave();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("reloads anyway when the voice leave hangs", async () => {
+      mockLeaveVoice.mockReturnValue(new Promise<void>(() => {}));
+      const button = await failedMainPage();
+      button.click();
+      await vi.advanceTimersByTimeAsync(1900);
+      expect(reload).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("reloads anyway when the voice leave throws", async () => {
+      mockLeaveVoice.mockRejectedValue(new Error("native gone"));
+      const button = await failedMainPage();
+      button.click();
+      await vi.advanceTimersByTimeAsync(100);
+      expectConsole("warn", /Failed to leave voice before reload/);
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("reloads at once, with no voice leave, when not in a call", async () => {
+      const button = await failedMainPage();
+      voiceStore.setState((s) => ({ ...s, currentChannelId: null }));
+      button.click();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(mockLeaveVoice).not.toHaveBeenCalled();
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
   });
 });
 
@@ -1439,5 +2027,62 @@ describe("main.ts pending-approval notice (DP-54)", () => {
     );
     // The info path, not the red error banner.
     expect(page.showError).not.toHaveBeenCalled();
+  });
+});
+
+describe("main.ts external links (C16)", () => {
+  async function clickLink(attrs: { href: string; masked: boolean }): Promise<void> {
+    const a = document.createElement("a");
+    a.href = attrs.href;
+    a.target = "_blank";
+    a.className = attrs.masked ? "msg-link masked" : "msg-link";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // The masked-link dialog is a lazy chunk; wait for it to load and run.
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(10);
+  }
+
+  afterEach(() => {
+    // Close through the modal's own Escape path so its document listener goes too.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    document.querySelectorAll('[data-testid="masked-link-dialog"]').forEach((el) => el.remove());
+  });
+
+  it("opens a plain link directly, with no dialog", async () => {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    vi.mocked(openUrl).mockClear();
+
+    await clickLink({ href: "https://example.com/a", masked: false });
+
+    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://example.com/a");
+    expect(document.querySelector('[data-testid="masked-link-dialog"]')).toBeNull();
+  });
+
+  it("holds a masked link behind the dialog until Go to site", async () => {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    vi.mocked(openUrl).mockClear();
+
+    await clickLink({ href: "https://masked.example/p", masked: true });
+
+    expect(openUrl).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="masked-link-url"]')?.textContent).toBe(
+      "https://masked.example/p",
+    );
+    document.querySelector<HTMLButtonElement>('[data-testid="masked-link-go"]')!.click();
+    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://masked.example/p");
+  });
+
+  it("opens a masked link to a trusted domain without the dialog", async () => {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    const { trustDomain } = await import("@lib/trustedDomains");
+    vi.mocked(openUrl).mockClear();
+    trustDomain("trusted.example");
+
+    await clickLink({ href: "https://trusted.example/x", masked: true });
+
+    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://trusted.example/x");
+    expect(document.querySelector('[data-testid="masked-link-dialog"]')).toBeNull();
   });
 });

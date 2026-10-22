@@ -63,7 +63,7 @@ vi.mock("@lib/livekitSession", () => ({
   getLocalCameraStream: vi.fn(() => null),
   getLocalScreenshareStream: vi.fn(() => null),
   getRemoteVideoStats: vi.fn().mockResolvedValue(null),
-  getLocalScreenshareFps: vi.fn().mockResolvedValue(57),
+  getLocalScreenshareStats: vi.fn().mockResolvedValue({ sentFps: 57 }),
   setRemoteVideoView: vi.fn(),
 }));
 
@@ -81,6 +81,7 @@ vi.mock("@lib/notificationSound", () => ({
 vi.mock("../../src/features/direct-messages/callAlerts", () => ({
   alertIncomingCall: vi.fn(),
   alertMissedCall: vi.fn(),
+  alertSupersededCall: vi.fn(),
   clearIncomingCall: vi.fn(),
 }));
 
@@ -102,17 +103,17 @@ vi.mock("@lib/audioElements", () => ({
   setAudioVolumeHost: mockSetAudioVolumeHost,
 }));
 
-const { capturedAutoIdleOptions, autoIdleSetInCall } = vi.hoisted(() => ({
+const { capturedAutoIdleOptions, autoIdleController } = vi.hoisted(() => ({
   capturedAutoIdleOptions: {
-    current: null as null | { onStatusChange: (status: string) => void; inCall?: boolean },
+    current: null as null | { onStatusChange: (status: string) => void },
   },
-  autoIdleSetInCall: vi.fn(),
+  autoIdleController: { destroy: vi.fn() },
 }));
 
 vi.mock("@lib/autoIdle", () => ({
   startAutoIdle: (options: { onStatusChange: (status: string) => void }) => {
     capturedAutoIdleOptions.current = options;
-    return { destroy: vi.fn(), setInCall: autoIdleSetInCall };
+    return autoIdleController;
   },
 }));
 
@@ -142,6 +143,7 @@ const {
         videoGridSlot: HTMLDivElement;
       };
       dmProfileSlot: HTMLDivElement;
+      profileBtn: HTMLButtonElement;
       videoGrid: {
         addStream: ReturnType<typeof vi.fn>;
         removeStream: ReturnType<typeof vi.fn>;
@@ -155,6 +157,7 @@ const {
         setSpeaking: ReturnType<typeof vi.fn>;
         setCallbacks: ReturnType<typeof vi.fn>;
         setCallState: ReturnType<typeof vi.fn>;
+        ensureLoaded: ReturnType<typeof vi.fn>;
         setExitVisible: ReturnType<typeof vi.fn>;
         showMiniPlayer: ReturnType<typeof vi.fn>;
         hideMiniPlayer: ReturnType<typeof vi.fn>;
@@ -185,23 +188,63 @@ vi.mock("../../src/pages/main-page/ChannelController", () => ({
   },
 }));
 
-const { mockReturnToChannel, mockRememberChannel, inertModeration } = vi.hoisted(() => ({
-  mockReturnToChannel: vi.fn(),
-  mockRememberChannel: vi.fn(),
-  inertModeration: { signals: [] as AbortSignal[] },
-}));
+const { mockReturnToChannel, mockRememberChannel, mockRenameGroup, inertModeration, memberPanels } =
+  vi.hoisted(() => ({
+    mockReturnToChannel: vi.fn(),
+    mockRenameGroup: vi.fn(),
+    mockRememberChannel: vi.fn(),
+    inertModeration: { signals: [] as AbortSignal[] },
+    // Every member-list instance either host built, and how many were destroyed.
+    memberPanels: { created: 0, destroyed: 0, events: [] as string[] },
+  }));
 
 vi.mock("../../src/pages/main-page/SidebarArea", () => ({
   createSidebarArea: (...args: unknown[]) => {
     mockCreateSidebarArea(...args);
+    const sidebarWrapper = document.createElement("div");
+    // One stand-in member list per panel: the factory both hosts share.
+    const buildMemberPanel = () => {
+      const element = document.createElement("div");
+      element.dataset["testid"] = "member-list";
+      memberPanels.created += 1;
+      memberPanels.events.push("create");
+      let destroyed = false;
+      return {
+        element,
+        destroy: () => {
+          if (destroyed) return;
+          destroyed = true;
+          memberPanels.destroyed += 1;
+          memberPanels.events.push("destroy");
+          element.remove();
+        },
+      };
+    };
+    // The left section as the real SidebarArea runs it: present in channels
+    // mode with the "left" layout, added and removed in place.
+    let leftPanel: ReturnType<typeof buildMemberPanel> | null = null;
+    const syncMemberSection = () => {
+      const left = localStorage.getItem("owncord:settings:memberListLayout") === '"left"';
+      if (left && leftPanel === null) {
+        leftPanel = buildMemberPanel();
+        sidebarWrapper.appendChild(leftPanel.element);
+      } else if (!left && leftPanel !== null) {
+        leftPanel.destroy();
+        leftPanel = null;
+      }
+    };
+    syncMemberSection();
     return {
-      sidebarWrapper: document.createElement("div"),
+      sidebarWrapper,
       children: [],
-      unsubscribers: [],
+      unsubscribers: [() => leftPanel?.destroy()],
       openQuickSwitch: vi.fn(),
       rememberChannel: mockRememberChannel,
       forgetChannel: vi.fn(),
       returnToChannel: mockReturnToChannel,
+      buildMemberPanel,
+      syncMemberSection,
+      renameGroup: mockRenameGroup,
     };
   },
 }));
@@ -230,6 +273,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       videoGridSlot: document.createElement("div"),
     };
     const dmProfileSlot = document.createElement("div");
+    const profileBtn = document.createElement("button");
     const videoGrid = {
       addStream: vi.fn(),
       removeStream: vi.fn(),
@@ -244,6 +288,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       setCallbacks: vi.fn(),
       setCallState: vi.fn(),
       setExitVisible: vi.fn(),
+      ensureLoaded: vi.fn(),
       showMiniPlayer: vi.fn(),
       hideMiniPlayer: vi.fn(),
       raiseCallPopout: vi.fn(() => false),
@@ -260,11 +305,12 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
       slots.inputSlot,
       slots.videoGridSlot,
     );
-    capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, videoGrid };
+    capturedChatAreaRef.current = { chatArea, slots, dmProfileSlot, profileBtn, videoGrid };
     return {
       chatArea,
       slots,
       callPanelSlot,
+      threadSlot: document.createElement("div"),
       videoGrid,
       chatHeaderName: document.createElement("span"),
       chatHeaderRefs: {
@@ -272,6 +318,9 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
         nameEl: document.createElement("span"),
         topicEl: document.createElement("span"),
         callBtn: document.createElement("button"),
+        profileBtn,
+        memberListBtn: document.createElement("button"),
+        callChatBtn: document.createElement("button"),
         sidebarToggle: document.createElement("button"),
       },
       sidebarToggle: document.createElement("button"),
@@ -284,9 +333,15 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
   },
 }));
 
+import { savePref } from "../../src/lib/preferences";
+
+// The remembered-open pref must never leak between tests, whatever their order.
+afterEach(() => {
+  localStorage.removeItem("owncord:settings:dmProfileOpen");
+});
 import { createMainPage } from "../../src/pages/MainPage";
 import { channelsStore, setActiveChannel } from "../../src/stores/channels.store";
-import { authStore } from "../../src/stores/auth.store";
+import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { wireConnectionStatus } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
@@ -308,10 +363,19 @@ import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
 import { startRingChime, startRingback, stopRingback } from "../../src/lib/notificationSound";
-import { alertIncomingCall, alertMissedCall } from "../../src/features/direct-messages/callAlerts";
+import {
+  alertIncomingCall,
+  alertMissedCall,
+  alertSupersededCall,
+} from "../../src/features/direct-messages/callAlerts";
 
 function resetStores(): void {
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   authStore.setState(() => ({
     token: "t",
     user: { id: 1, username: "alice", avatar: null, role: "member" },
@@ -382,6 +446,7 @@ function fakeWs(): FakeWsClient {
 function fakeApi(host = ""): ApiClient {
   return {
     getConfig: () => ({ host }),
+    getSession: () => ({ signal: new AbortController().signal }),
     getReactionUsers: vi.fn(async () => ({ users: [] })),
     getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
     getSessions: vi.fn(async () => []),
@@ -402,6 +467,7 @@ function textChannel(id: number, name: string, position = 0) {
     topic: "",
     slowMode: 0,
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
   };
@@ -491,6 +557,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     mockDestroyChannel.mockClear();
     mockCreateChatArea.mockClear();
     capturedChatAreaRef.current = null;
+    // The panel opens with a 1:1 DM by default (WP 3B-3); the toggle tests below
+    // start from "remembered closed" and the auto-open tests set it back.
+    savePref("dmProfileOpen", false);
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -498,6 +567,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   afterEach(() => {
     page?.destroy?.();
     container.remove();
+    localStorage.removeItem("owncord:settings:dmProfileOpen");
   });
 
   it("dismisses the video grid when switching to a non-voice channel (dm/announcement), not just 'text'", () => {
@@ -533,6 +603,70 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     channelsStore.flush();
 
     expect(capturedChatAreaRef.current!.slots.messagesSlot.style.display).toBe("");
+  });
+
+  it("opening the call view of a voice channel selects it and keeps its chat beside the grid (WP 6.1b)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      ch.set(9, { ...textChannel(9, "lounge", 1), type: "voice" as const });
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([[9, new Map()]]),
+    }));
+    voiceStore.flush();
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
+
+    const { chatArea, slots } = capturedChatAreaRef.current!;
+    expect(channelsStore.getState().activeChannelId).toBe(9);
+    expect(slots.videoGridSlot.style.display).toBe("block");
+    expect(slots.messagesSlot.style.display).toBe("");
+    expect(slots.inputSlot.style.display).toBe("");
+    expect(chatArea.classList.contains("chat-area--call-chat")).toBe(true);
+
+    // Leaving the call closes the grid; the voice chat stays, full width.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
+    voiceStore.flush();
+    channelsStore.flush();
+    expect(channelsStore.getState().activeChannelId).toBe(9);
+    expect(slots.videoGridSlot.style.display).toBe("none");
+    expect(slots.messagesSlot.style.display).toBe("");
+    expect(chatArea.classList.contains("chat-area--call-chat")).toBe(false);
+  });
+
+  it("opening another voice channel's chat while in a call dismisses the grid (WP 6.1d)", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(1, textChannel(1, "general"));
+      ch.set(9, { ...textChannel(9, "lounge", 1), type: "voice" as const });
+      ch.set(10, { ...textChannel(10, "music", 2), type: "voice" as const });
+      return { ...prev, channels: ch, activeChannelId: 1 };
+    });
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 9,
+      voiceUsers: new Map([[9, new Map()]]),
+    }));
+    voiceStore.flush();
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
+    const { slots } = capturedChatAreaRef.current!;
+    expect(slots.videoGridSlot.style.display).toBe("block");
+
+    setActiveChannel(10);
+    channelsStore.flush();
+    expect(slots.videoGridSlot.style.display).toBe("none");
+    expect(slots.messagesSlot.style.display).toBe("");
   });
 
   it("does not clear a just-added remote video tile when a voice-channel switch left the camera/screenshare signature unchanged (OC-0207)", () => {
@@ -884,6 +1018,235 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
+  describe("DM profile panel is open by default and remembered (WP 3B-3)", () => {
+    const panel = (): HTMLElement | null =>
+      capturedChatAreaRef.current!.dmProfileSlot.querySelector<HTMLElement>(
+        '[data-testid="dm-profile-sidebar"]',
+      );
+    const names = (): string | undefined =>
+      capturedChatAreaRef.current!.dmProfileSlot.querySelector<HTMLElement>(
+        '[data-testid="dps-username"]',
+      )?.textContent ?? undefined;
+    const pref = (): string | null => localStorage.getItem("owncord:settings:dmProfileOpen");
+    const oneToOne = (channelId: number, userId: number, username: string) => ({
+      channelId,
+      recipient: { id: userId, username, avatar: "", status: "online" },
+      participants: [{ id: userId, username, avatar: "", status: "online" }],
+      name: "",
+      isGroup: false,
+      lastMessageId: null,
+      lastMessage: "",
+      lastMessageAt: "",
+      unreadCount: 0,
+      mentionCount: 0,
+    });
+    function mountOnTwoDms(): void {
+      channelsStore.setState((prev) => {
+        const ch = new Map(prev.channels);
+        ch.set(1, textChannel(1, "general"));
+        ch.set(70, dmChannel(70, "dm-bob"));
+        ch.set(71, dmChannel(71, "dm-carol"));
+        ch.set(72, dmChannel(72, "group"));
+        return { ...prev, channels: ch, activeChannelId: 70 };
+      });
+      dmStore.setState(() => ({
+        channels: [
+          oneToOne(70, 7, "bob"),
+          oneToOne(71, 8, "carol"),
+          { ...oneToOne(72, 9, "dave"), isGroup: true, name: "group" },
+        ],
+      }));
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      // The mocked chat area's slot is detached; focus needs it in the document.
+      container.appendChild(capturedChatAreaRef.current!.dmProfileSlot);
+    }
+    async function settle(): Promise<void> {
+      await import("@components/DmProfileSidebar");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    it("opens with a 1:1 DM at mount and keeps the panel, updated for the second user, on a DM switch", async () => {
+      savePref("dmProfileOpen", true);
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(names()).toBe("bob"));
+      expect(capturedChatAreaRef.current!.profileBtn.getAttribute("aria-pressed")).toBe("true");
+      const before = panel();
+
+      setActiveChannel(71);
+      channelsStore.flush();
+      await vi.waitFor(() => expect(names()).toBe("carol"));
+      // The same panel node, repainted: it does not slide in again.
+      expect(panel()).toBe(before);
+      expect(
+        capturedChatAreaRef.current!.dmProfileSlot.querySelectorAll(
+          '[data-testid="dm-profile-sidebar"]',
+        ),
+      ).toHaveLength(1);
+      expect(pref()).toBe("true");
+    });
+
+    it("opens by default when nothing was saved", async () => {
+      localStorage.removeItem("owncord:settings:dmProfileOpen");
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+    });
+
+    it("stays closed on mount and on a DM switch when the saved preference is false", async () => {
+      mountOnTwoDms();
+      await settle();
+      expect(panel()).toBeNull();
+      setActiveChannel(71);
+      channelsStore.flush();
+      await settle();
+      expect(panel()).toBeNull();
+      expect(capturedChatAreaRef.current!.profileBtn.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("hides for a group or a server channel without changing the preference, and returns for the next 1:1 DM", async () => {
+      savePref("dmProfileOpen", true);
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+
+      setActiveChannel(72);
+      channelsStore.flush();
+      await settle();
+      expect(panel()).toBeNull();
+      expect(pref()).toBe("true");
+
+      setActiveChannel(1);
+      channelsStore.flush();
+      await settle();
+      expect(panel()).toBeNull();
+
+      setActiveChannel(71);
+      channelsStore.flush();
+      await vi.waitFor(() => expect(names()).toBe("carol"));
+    });
+
+    it("the header's Show User Profile toggle closes, remembers false, then reopens and remembers true", async () => {
+      savePref("dmProfileOpen", true);
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      const toggle = (): void => mockCreateChatArea.mock.calls[0]![0].onToggleDmProfile();
+      const pressed = (): string | null =>
+        capturedChatAreaRef.current!.profileBtn.getAttribute("aria-pressed");
+
+      toggle();
+      expect(panel()).toBeNull();
+      expect(pressed()).toBe("false");
+      expect(pref()).toBe("false");
+
+      toggle();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      expect(pressed()).toBe("true");
+      expect(pref()).toBe("true");
+    });
+
+    describe("focus and Escape", () => {
+      let composer: HTMLTextAreaElement;
+      beforeEach(() => {
+        composer = document.createElement("textarea");
+        document.body.appendChild(composer);
+      });
+      afterEach(() => composer.remove());
+      const escape = (target: EventTarget = document): KeyboardEvent => {
+        // The Settings panel is mounted inside its closed overlay, which only the
+        // stylesheet hides; jsdom has none, so hide it or it counts as a dialog.
+        for (const settings of document.querySelectorAll<HTMLElement>(".settings-panel")) {
+          if (settings.parentElement !== null) settings.parentElement.style.display = "none";
+        }
+        const ev = new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+        target.dispatchEvent(ev);
+        return ev;
+      };
+
+      it("does not steal focus when the panel opens by itself, at mount or on a DM switch", async () => {
+        savePref("dmProfileOpen", true);
+        composer.focus();
+        mountOnTwoDms();
+        await vi.waitFor(() => expect(names()).toBe("bob"));
+        expect(document.activeElement).toBe(composer);
+
+        setActiveChannel(71);
+        channelsStore.flush();
+        await vi.waitFor(() => expect(names()).toBe("carol"));
+        expect(document.activeElement).toBe(composer);
+      });
+
+      it("does focus the panel when the user opens it from the header", async () => {
+        mountOnTwoDms();
+        mockCreateChatArea.mock.calls[0]![0].onToggleDmProfile();
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+        expect(panel()!.contains(document.activeElement)).toBe(true);
+      });
+
+      it("keeps the panel and the pref when a field already used the Escape", async () => {
+        savePref("dmProfileOpen", true);
+        mountOnTwoDms();
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+        const note = panel()!.querySelector<HTMLTextAreaElement>('[data-testid="dps-note"]')!;
+        note.focus();
+        note.addEventListener("keydown", (e) => e.preventDefault(), { once: true });
+        escape(note);
+        expect(panel()).not.toBeNull();
+        expect(pref()).toBe("true");
+      });
+
+      it("ignores an Escape while focus is outside the panel", async () => {
+        savePref("dmProfileOpen", true);
+        mountOnTwoDms();
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+        composer.focus();
+        escape(composer);
+        expect(panel()).not.toBeNull();
+        expect(pref()).toBe("true");
+      });
+
+      it("closes on Escape with focus inside and remembers it", async () => {
+        savePref("dmProfileOpen", true);
+        mountOnTwoDms();
+        await vi.waitFor(() => expect(panel()).not.toBeNull());
+        panel()!.focus();
+        escape();
+        expect(panel()).toBeNull();
+        expect(pref()).toBe("false");
+      });
+
+      it("leaves the panel open when Escape belongs to a dialog opened before it", async () => {
+        savePref("dmProfileOpen", true);
+        const dialog = document.createElement("div");
+        dialog.className = "modal-overlay";
+        document.body.appendChild(dialog);
+        try {
+          mountOnTwoDms();
+          await vi.waitFor(() => expect(panel()).not.toBeNull());
+          panel()!.focus();
+          escape();
+          expect(panel()).not.toBeNull();
+          expect(pref()).toBe("true");
+        } finally {
+          dialog.remove();
+        }
+      });
+    });
+
+    it("closing with the panel's own close button is remembered", async () => {
+      savePref("dmProfileOpen", true);
+      mountOnTwoDms();
+      await vi.waitFor(() => expect(panel()).not.toBeNull());
+      capturedChatAreaRef
+        .current!.dmProfileSlot.querySelector<HTMLButtonElement>('[data-testid="dps-close"]')
+        ?.click();
+      expect(panel()).toBeNull();
+      expect(pref()).toBe("false");
+    });
+  });
+
   it("does not open the 1:1 profile panel for a group DM header click", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
@@ -997,6 +1360,68 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     noteJoinSucceeded();
     acceptBtn.click();
     expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+  });
+
+  it("Join with video on the incoming banner joins and turns the camera on once connected (3B-4)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    (document.querySelector('[data-testid="incoming-call-accept-video"]') as HTMLElement).click();
+    expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    vi.mocked(lk.enableCamera).mockClear();
+    page.destroy?.();
+  });
+
+  it("Ctrl+Enter accepts and Escape declines a ringing call (3B-4)", () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    // The closed Settings panel is hidden by stylesheet only, which jsdom does
+    // not load; hide it the way the real page's CSS does.
+    const settingsOverlay = document.querySelector<HTMLElement>('[data-testid="settings-overlay"]');
+    expect(settingsOverlay).not.toBeNull();
+    settingsOverlay!.style.display = "none";
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, cancelable: true }),
+    );
+    expect(ws.send).toHaveBeenCalledWith(expect.objectContaining({ type: "voice_join" }));
+
+    ws.emit("call_incoming", { channel_id: 51, from_user: 11, username: "carol" });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_decline", payload: { channel_id: 51 } });
+    page.destroy?.();
+  });
+
+  it("a ring replaced by a ring from another channel reports the first as missed (3B-4)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    vi.mocked(alertSupersededCall).mockClear();
+
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+    await vi.dynamicImportSettled();
+    expect(alertSupersededCall).not.toHaveBeenCalled();
+
+    ws.emit("call_incoming", { channel_id: 51, from_user: 11, username: "carol" });
+    await vi.waitFor(() => expect(alertSupersededCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertSupersededCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
+    page.destroy?.();
   });
 
   function openOneToOneDm(id: number): void {
@@ -1171,6 +1596,30 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
+  it("joining voice calls ensureLoaded once per channel, not on every voice update", () => {
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    const ensureLoaded = capturedChatAreaRef.current!.videoGrid.ensureLoaded;
+    expect(ensureLoaded).not.toHaveBeenCalled();
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
+    voiceStore.flush();
+    expect(ensureLoaded).toHaveBeenCalledTimes(1);
+
+    // Other voice updates in the same channel do not ask again.
+    voiceStore.setState((prev) => ({ ...prev, localMuted: !prev.localMuted }));
+    voiceStore.flush();
+    expect(ensureLoaded).toHaveBeenCalledTimes(1);
+
+    // A leave asks nothing; the next join (a retry after a failed import) does.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+    voiceStore.flush();
+    expect(ensureLoaded).toHaveBeenCalledTimes(1);
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
+    voiceStore.flush();
+    expect(ensureLoaded).toHaveBeenCalledTimes(2);
+  });
+
   it("rings the video tiles of whoever is speaking in the current call", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);
@@ -1235,7 +1684,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         onScreenshareToggle: () => void;
       };
       getStreamStats: (tileId: number) => Promise<unknown>;
-      getLocalShareFps: () => Promise<number | null>;
+      getLocalShareStats: () => Promise<unknown>;
       setStreamView: (tileId: number, view: { enabled: boolean }) => void;
     };
 
@@ -1248,7 +1697,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     await cbs.getStreamStats(10);
     expect(lk.getRemoteVideoStats).toHaveBeenLastCalledWith(10, "camera");
     // Your own share's tile reads the rate it is sending.
-    await expect(cbs.getLocalShareFps()).resolves.toBe(57);
+    await expect(cbs.getLocalShareStats()).resolves.toEqual({ sentFps: 57 });
     // A tile's view goes to that user's screen share or camera the same way.
     cbs.setStreamView(10 + SCREENSHARE_TILE_ID_OFFSET, { enabled: false });
     expect(lk.setRemoteVideoView).toHaveBeenLastCalledWith(10, "screenshare", { enabled: false });
@@ -1439,6 +1888,166 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     supported.mockRestore();
   });
 
+  describe("Wayland portal keys (LP-9b)", () => {
+    const portal = {
+      backend: "portal" as const,
+      portalVersion: 2,
+      triggers: { ptt: null, mute: null, deafen: null },
+      canConfigure: true,
+    };
+    // Spies on the shared registry would otherwise carry their calls into the next test.
+    const restore = ["status", "bindPortal", "supported", "start", "onStatusChange"] as const;
+    afterEach(() => {
+      localStorage.removeItem("owncord:settings:globalKeysPortalBound");
+      for (const name of restore) vi.mocked(desktop.globalShortcuts[name]).mockRestore?.();
+    });
+
+    it("restores the portal binding at startup only after an earlier successful bind", async () => {
+      const status = vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue(portal);
+      const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal").mockResolvedValue(portal);
+      vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+
+      // Never bound before: no dialog is opened on its own.
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(status).toHaveBeenCalled());
+      await Promise.resolve();
+      expect(bind).not.toHaveBeenCalled();
+      page.destroy?.();
+
+      localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
+      localStorage.setItem("owncord:settings:pttVk", String(0x77));
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(bind).toHaveBeenCalledTimes(1));
+      expect(bind).toHaveBeenCalledWith({ pttVk: 0x77, muteVk: 0x4d, deafenVk: 0x44 });
+      localStorage.removeItem("owncord:settings:pttVk");
+    });
+
+    it("does not reopen the dialog when the desktop already holds a trigger", async () => {
+      localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
+      const status = vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue({
+        ...portal,
+        triggers: { ptt: null, mute: "Ctrl+Alt+M", deafen: null },
+      });
+      const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal").mockResolvedValue(portal);
+      vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(status).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(bind).not.toHaveBeenCalled();
+    });
+
+    it("forgets the earlier bind when the restore dialog is cancelled, and keeps it on other failures", async () => {
+      vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue(portal);
+      vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+      const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal");
+      const pref = (): string | null =>
+        localStorage.getItem("owncord:settings:globalKeysPortalBound");
+
+      localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
+      bind.mockRejectedValue(Object.assign(new Error("bind_timeout"), { code: "bind_timeout" }));
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(bind).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(pref()).toBe("true");
+      page.destroy?.();
+
+      bind.mockRejectedValue(
+        Object.assign(new Error("bind_cancelled"), { code: "bind_cancelled" }),
+      );
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(pref()).toBe("false"));
+    });
+
+    it("lets only the latest supported() answer set the flag when answers arrive out of order", async () => {
+      const changeHandlers = new Set<(s: typeof portal) => void>();
+      vi.spyOn(desktop.globalShortcuts, "onStatusChange").mockImplementation((handler) => {
+        changeHandlers.add(handler);
+        return () => changeHandlers.delete(handler);
+      });
+      vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue({ ...portal, backend: "none" });
+      const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+      const answers: ((value: boolean) => void)[] = [];
+      const supported = vi
+        .spyOn(desktop.globalShortcuts, "supported")
+        .mockImplementation(() => new Promise<boolean>((resolve) => answers.push(resolve)));
+      const ws = fakeWs();
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(supported).toHaveBeenCalledTimes(1));
+      for (const handler of changeHandlers) handler(portal);
+      expect(answers).toHaveLength(2);
+
+      // The newer query answers "no keys" first; the older "yes" must not undo it.
+      answers[1]?.(false);
+      await Promise.resolve();
+      answers[0]?.(true);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(start).not.toHaveBeenCalled();
+      (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "M", code: "KeyM", ctrlKey: true, shiftKey: true }),
+      );
+      expect(vi.mocked(ws.send).mock.calls.filter((c) => c[0].type === "voice_mute")).toHaveLength(
+        1,
+      );
+    });
+
+    it("does not bind on a desktop without the portal even after an earlier bind", async () => {
+      localStorage.setItem("owncord:settings:globalKeysPortalBound", "true");
+      const status = vi
+        .spyOn(desktop.globalShortcuts, "status")
+        .mockResolvedValue({ ...portal, backend: "none" });
+      const bind = vi.spyOn(desktop.globalShortcuts, "bindPortal").mockResolvedValue(portal);
+      page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(status).toHaveBeenCalled());
+      await Promise.resolve();
+      expect(bind).not.toHaveBeenCalled();
+    });
+
+    it("keeps the in-app shortcut until both keys are bound, then stands down", async () => {
+      const changeHandlers = new Set<(s: typeof portal) => void>();
+      vi.spyOn(desktop.globalShortcuts, "onStatusChange").mockImplementation((handler) => {
+        changeHandlers.add(handler);
+        return () => changeHandlers.delete(handler);
+      });
+      vi.spyOn(desktop.globalShortcuts, "status").mockResolvedValue(portal);
+      const start = vi.spyOn(desktop.globalShortcuts, "start").mockResolvedValue(undefined);
+      const supported = vi.spyOn(desktop.globalShortcuts, "supported").mockResolvedValue(false);
+      const ws = fakeWs();
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, localMuted: false }));
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+      await vi.waitFor(() => expect(supported).toHaveBeenCalledTimes(1));
+      (document.querySelector(".settings-panel") as HTMLElement).style.display = "none";
+      const mutes = (): number =>
+        vi.mocked(ws.send).mock.calls.filter((c) => c[0].type === "voice_mute").length;
+      const press = (): void => {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "M", code: "KeyM", ctrlKey: true, shiftKey: true }),
+        );
+      };
+
+      press();
+      expect(mutes()).toBe(1); // the in-app key still answers
+
+      supported.mockResolvedValue(true);
+      for (const handler of changeHandlers) handler(portal);
+      await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+      press();
+      expect(mutes()).toBe(1); // the desktop's key owns it now
+
+      page.destroy?.();
+      expect(changeHandlers.size).toBe(0);
+    });
+  });
+
   // WP 1D-1: outside a call the shortcut toggles the local, saved state and
   // sends nothing; the next join restates it to the server.
   it("toggles mute and deafen from a global shortcut outside a voice channel, sending nothing (U6)", async () => {
@@ -1540,6 +2149,101 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(config.name).toBe("Bobby");
   });
 
+  it("the header's video call button joins the DM call and turns the camera on once connected (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+    // Not before the join lands: the camera follows "connected".
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    page.destroy?.();
+  });
+
+  it("the header's group name click renames the open DM through the sidebar (3B-1)", () => {
+    openOneToOneDm(50);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+
+    mockCreateChatArea.mock.calls[0]![0].onRenameGroup();
+
+    expect(mockRenameGroup).toHaveBeenCalledWith(50);
+    page.destroy?.();
+  });
+
+  it("Video while already connected in the DM's call turns the camera on at once (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceStatus: "connected",
+      localCamera: false,
+    }));
+    voiceStore.flush();
+    vi.mocked(lk.enableCamera).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+
+    expect(lk.enableCamera).toHaveBeenCalledTimes(1);
+    page.destroy?.();
+  });
+
+  it("a Video start refused by join backoff does not arm the camera for a later plain join (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+    const { noteJoinFailed } = await import("../../src/features/voice/joinBackoff");
+    noteJoinFailed(Date.now(), true);
+    noteJoinFailed(Date.now(), true);
+    noteJoinFailed(Date.now(), true);
+
+    mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
+    // The refused join left no channel; a later join of the same DM, plain.
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+    page.destroy?.();
+    const { noteJoinSucceeded } = await import("../../src/features/voice/joinBackoff");
+    noteJoinSucceeded();
+  });
+
+  it("a plain header call leaves the camera off (3B-1)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+    const lk = await import("@lib/livekitSession");
+    vi.mocked(lk.enableCamera).mockClear();
+
+    mockCreateChatArea.mock.calls[0]![0].onStartCall();
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
+    voiceStore.flush();
+    expect(lk.enableCamera).not.toHaveBeenCalled();
+    page.destroy?.();
+  });
+
   it("tells the caller when the callee declines, and Ring again rings once more", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
@@ -1596,6 +2300,66 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     ws.emit("call_declined", { channel_id: 50, from_user: 10, username: "bob" });
     expect(panel.dataset.state).toBe("unanswered");
+    page.destroy?.();
+  });
+
+  it("Ring again in a connected group call with a member missing re-rings the group without a Calling… state (3B-8)", async () => {
+    const ws = fakeWs();
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
+    openOneToOneDm(50);
+    dmStore.setState((prev) => ({
+      channels: prev.channels.map((c) => ({
+        ...c,
+        isGroup: true,
+        participants: [
+          ...c.participants,
+          { id: 12, username: "dan", avatar: "", status: "online" as const },
+        ],
+      })),
+    }));
+    page = createMainPage({ ws, api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+
+    // Alice and bob are in the room; dan is not.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 50,
+      voiceStatus: "connected" as const,
+      voiceUsers: new Map([
+        [
+          50,
+          new Map(
+            [
+              [1, "alice"],
+              [10, "bob"],
+            ].map(([userId, username]) => [
+              userId as number,
+              {
+                userId: userId as number,
+                username: username as string,
+                muted: false,
+                deafened: false,
+                speaking: false,
+                camera: false,
+                screenshare: false,
+              },
+            ]),
+          ),
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+    const panel = document.querySelector('[data-testid="dm-call-panel"]') as HTMLElement;
+    expect(panel.dataset.state).toBe("connected");
+    const again = panel.querySelector('[data-testid="dcp-ring-again"]') as HTMLElement;
+    expect(again).not.toBeNull();
+
+    vi.mocked(ws.send).mockClear();
+    again.click();
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    // Bob is in the call: no ringing state is started over a live call.
+    expect(panel.dataset.state).toBe("connected");
     page.destroy?.();
   });
 
@@ -2351,7 +3115,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(document.body.querySelector(".image-lightbox")).toBeNull();
   });
 
-  it("clears every external-content cache on destroy so one server's previews never reach the next (B7-16)", async () => {
+  it("clears every external-content cache on sign-out so one server's previews never reach the next (B7-16)", async () => {
     const preview = vi.spyOn(desktop.externalContent, "preview").mockResolvedValue({
       ok: true,
       value: { title: "T", description: null, siteName: null, image: null },
@@ -2388,6 +3152,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       expect(fetched(imageUrl)).toBe(1);
       const partitionBefore = externalPartition();
 
+      // The caches reset with the session (sessionRegistry, cache phase); the
+      // page itself only tears down its DOM and controllers.
+      clearAuth("server_switch");
       page.destroy?.();
 
       // Every one of them is asked for again, under a fresh broker partition.
@@ -2434,6 +3201,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getSession: () => ({ signal: new AbortController().signal }),
       getReactionUsers: vi.fn(async () => ({ users: [] })),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
@@ -2482,6 +3250,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       "password changed, but other sessions could not be revoked; revoke them from the sessions list";
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getSession: () => ({ signal: new AbortController().signal }),
       changePassword: vi.fn(async () => ({ warning, sessions_revoked: 0 })),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
@@ -2728,6 +3497,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getSession: () => ({ signal: new AbortController().signal }),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => []),
       revokeAllSessions: vi.fn(async () => ({
@@ -2757,6 +3527,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("toasts a sign-in not yet reviewed from the listing made on mount (B7-14)", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
+      getSession: () => ({ signal: new AbortController().signal }),
       getRecoveryKitStatus: vi.fn(async () => ({ enrolled: false, used_at: null })),
       getSessions: vi.fn(async () => [
         {
@@ -2882,6 +3653,40 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
+  it("the DM row menu's Profile on a DM that is not active shows that DM's panel (WP 3B-2)", async () => {
+    const { slot } = mountOnDm();
+    const bob = dmStore.getState().channels[0]!;
+    dmStore.setState(() => ({
+      channels: [
+        bob,
+        {
+          ...bob,
+          channelId: 71,
+          recipient: { id: 8, username: "carol", avatar: "", status: "online" },
+          participants: [{ id: 8, username: "carol", avatar: "", status: "online" }],
+          name: "carol",
+        },
+      ],
+    }));
+    const sidebarOpts = mockCreateSidebarArea.mock.calls.at(-1)![0] as {
+      onOpenDmProfile: () => void;
+    };
+    // What SidebarArea's row menu does: select the DM, then ask for the panel
+    // in the same tick, before the store's listeners have run.
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(71, dmChannel(71, "dm-carol"));
+      return { ...prev, channels: ch };
+    });
+    setActiveChannel(71);
+    sidebarOpts.onOpenDmProfile();
+    await vi.waitFor(() => {
+      expect(slot.querySelector('[data-testid="dps-username"]')?.textContent).toBe("carol");
+    });
+    await settleDmProfileImport();
+    expect(slot.querySelectorAll('[data-testid="dps-username"]')).toHaveLength(1);
+  });
+
   it("the last of several quick DM profile clicks wins, with one panel at most", async () => {
     const { toggle, slot } = mountOnDm();
     toggle();
@@ -2924,25 +3729,18 @@ describe("MainPage — presence", () => {
     localStorage.removeItem("owncord:settings:userStatusOrigin");
   });
 
-  it("pauses auto-idle while in a voice call and resumes it on leave (1A-7)", () => {
-    autoIdleSetInCall.mockClear();
+  it("does not tell auto-idle about voice calls: Idle still applies in a call", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);
-    expect(capturedAutoIdleOptions.current!.inCall).toBe(false);
+    const options = capturedAutoIdleOptions.current!;
+    expect(options).not.toHaveProperty("inCall");
+    expect(autoIdleController).not.toHaveProperty("setInCall");
 
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7 }));
     voiceStore.flush();
-    expect(autoIdleSetInCall).toHaveBeenLastCalledWith(true);
-
-    // A channel switch is still a call: no new edge.
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 8 }));
-    voiceStore.flush();
-    expect(autoIdleSetInCall).toHaveBeenCalledOnce();
+    expect(authStore.getState().user?.status).toBe("online");
 
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
-    voiceStore.flush();
-    expect(autoIdleSetInCall).toHaveBeenLastCalledWith(false);
-    expect(autoIdleSetInCall).toHaveBeenCalledTimes(2);
   });
 
   it("retries the return-to-online presence_update once the limiter's window reopens instead of dropping it forever (OC-0111)", () => {
@@ -3259,8 +4057,11 @@ describe("MainPage — B9-4 content view wiring", () => {
   it("places the view column between the chat column and the DM profile slot", () => {
     const view = container.querySelector("[data-testid='feature-view']");
     const chat = capturedChatAreaRef.current!;
-    expect(view?.previousElementSibling).toBe(chat.chatArea);
-    expect(view?.nextElementSibling).toBe(chat.dmProfileSlot);
+    // The thread panel's slot (WP 6.9c) sits right behind the chat column.
+    expect(view?.previousElementSibling?.previousElementSibling).toBe(chat.chatArea);
+    // The member column (3C-6b) sits between the content view and the DM panel.
+    expect(view?.nextElementSibling?.id).toBe("member-column");
+    expect(view?.nextElementSibling?.nextElementSibling).toBe(chat.dmProfileSlot);
   });
 
   it("opens in place of the chat, whose channel is torn down, and closes back", () => {
@@ -3288,6 +4089,119 @@ describe("MainPage — B9-4 content view wiring", () => {
 
     expect(inertModeration.signals[0]?.aborted).toBe(true);
     expect(uiStore.getState().activeView).toBeNull();
+  });
+});
+
+describe("MainPage — member list placement (3C-6b)", () => {
+  let container: HTMLDivElement;
+  let page: ReturnType<typeof createMainPage>;
+
+  const memberLists = (): number => document.querySelectorAll('[data-testid="member-list"]').length;
+  const live = (): number => memberPanels.created - memberPanels.destroyed;
+  const flip = (layout: "right" | "left"): void => savePref("memberListLayout", layout);
+
+  beforeEach(async () => {
+    resetStores();
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeView: null }));
+    // These tests flip from the left layout; the default has been right since 3C-6c.
+    localStorage.setItem("owncord:settings:memberListLayout", '"left"');
+    localStorage.removeItem("owncord:settings:memberListOpen");
+    memberPanels.created = 0;
+    memberPanels.destroyed = 0;
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[1, textChannel(1, "general")]]),
+      activeChannelId: 1,
+    }));
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    await vi.dynamicImportSettled();
+  });
+
+  afterEach(() => {
+    page.destroy?.();
+    container.remove();
+    localStorage.removeItem("owncord:settings:memberListLayout");
+    localStorage.removeItem("owncord:settings:memberListOpen");
+  });
+
+  it("builds an always-present, labelled, hidden member column in the app row", () => {
+    const column = container.querySelector<HTMLElement>("#member-column")!;
+    expect(column.tagName).toBe("ASIDE");
+    expect(column.dataset["testid"]).toBe("member-column");
+    expect(column.getAttribute("aria-label")).toBe("Member list");
+    expect(column.hidden).toBe(true);
+    expect(column.parentElement).toBe(container.querySelector('[data-testid="app-layout"]'));
+    expect(column.querySelector(".member-column-body")).not.toBeNull();
+  });
+
+  it("each layout flip destroys the old member list before it creates the new one", () => {
+    for (const layout of ["right", "left", "right", "left"] as const) {
+      memberPanels.events.length = 0;
+      flip(layout);
+      expect(memberPanels.events).toEqual(["destroy", "create"]);
+    }
+  });
+
+  it("switching layout leaves exactly one member-list in the document", () => {
+    // Stored left: the sidebar's section is the only instance.
+    expect(memberLists()).toBe(1);
+    expect(container.querySelector("#member-column [data-testid='member-list']")).toBeNull();
+
+    flip("right");
+    expect(memberLists()).toBe(1);
+    expect(container.querySelector("#member-column [data-testid='member-list']")).not.toBeNull();
+    expect(live()).toBe(1);
+
+    flip("left");
+    expect(memberLists()).toBe(1);
+    expect(container.querySelector("#member-column [data-testid='member-list']")).toBeNull();
+    expect(live()).toBe(1);
+
+    flip("right");
+    expect(memberLists()).toBe(1);
+    expect(live()).toBe(1);
+
+    flip("left");
+    expect(memberLists()).toBe(1);
+    expect(live()).toBe(1);
+  });
+
+  it("a flip with a DM on screen leaves no member list in either layout", () => {
+    channelsStore.setState((prev) => {
+      const ch = new Map(prev.channels);
+      ch.set(2, dmChannel(2, "dm-with-bob"));
+      return { ...prev, channels: ch, activeChannelId: 2 };
+    });
+    uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+    flip("right");
+    expect(container.querySelector("#member-column [data-testid='member-list']")).toBeNull();
+    expect(container.querySelector<HTMLElement>("#member-column")!.hidden).toBe(true);
+  });
+
+  it("destroy before the column's chunk loads mounts nothing", async () => {
+    page.destroy?.();
+    container.replaceChildren();
+    memberPanels.created = 0;
+    memberPanels.destroyed = 0;
+    localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+
+    page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    page.mount(container);
+    page.destroy?.();
+    await vi.dynamicImportSettled();
+
+    expect(memberPanels.created).toBe(0);
+    expect(document.querySelectorAll('[data-testid="member-list"]').length).toBe(0);
+  });
+
+  it("tearing the page down destroys the column's panel", () => {
+    flip("right");
+    expect(live()).toBe(1);
+    page.destroy?.();
+    expect(live()).toBe(0);
   });
 });
 
@@ -3382,5 +4296,62 @@ describe("MainPage — focus fallback when the channel is declined", () => {
 
     expect(document.activeElement).not.toBe(document.body);
     expect(document.activeElement).toBe(shown);
+  });
+});
+
+describe("MainPage — destroy isolates every teardown step (ARCH-012)", () => {
+  /** Live subscriptions on a store: every subscribe minus its unsubscribe. */
+  function trackSubscriptions(store: {
+    subscribe: (...a: never[]) => () => void;
+    subscribeSelector: (...a: never[]) => () => void;
+  }): () => number {
+    let live = 0;
+    for (const method of ["subscribe", "subscribeSelector"] as const) {
+      const original = store[method].bind(store) as (...a: unknown[]) => () => void;
+      (store as Record<string, unknown>)[method] = (...args: unknown[]) => {
+        live += 1;
+        const unsub = original(...args);
+        let done = false;
+        return () => {
+          if (!done) live -= 1;
+          done = true;
+          unsub();
+        };
+      };
+    }
+    return () => live;
+  }
+
+  it("a throwing early step still runs every later step and every store unsubscription", async () => {
+    resetStores();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const stores = [uiStore, channelsStore, voiceStore, dmStore, membersStore, authStore];
+    const originals = stores.map((s) => [s.subscribe, s.subscribeSelector] as const);
+    const counts = stores.map((s) => trackSubscriptions(s as never));
+    const lk = await import("@lib/livekitSession");
+    const page = createMainPage({ ws: fakeWs(), api: fakeApi() });
+    try {
+      page.mount(container);
+      mockDestroyChannel.mockClear();
+      const live = counts.reduce((n, c) => n + c(), 0);
+      expect(live).toBeGreaterThan(0);
+
+      // voiceCleanupAll sits early in destroy: everything after it must still run.
+      vi.mocked(lk.cleanupAll).mockImplementationOnce(() => {
+        throw new Error("boom");
+      });
+      expect(() => page.destroy?.()).not.toThrow();
+
+      expect(counts.map((c) => c())).toEqual(counts.map(() => 0));
+      expect(mockDestroyChannel).toHaveBeenCalled();
+      expect(container.querySelector("[data-testid='app-layout']")).toBeNull();
+    } finally {
+      stores.forEach((s, i) => {
+        s.subscribe = originals[i]![0];
+        s.subscribeSelector = originals[i]![1];
+      });
+      container.remove();
+    }
   });
 });

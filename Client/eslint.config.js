@@ -1,6 +1,13 @@
+import { readFileSync } from "node:fs";
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 import localRules from "./eslint-rules.js";
+
+// Upward imports that predate local/layer-direction; shrink-only
+// (tests/unit/layer-baseline.test.ts).
+const layerBaseline = JSON.parse(
+  readFileSync(new URL("./scripts/layer-baseline.json", import.meta.url), "utf8"),
+);
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -129,12 +136,41 @@ export default tseslint.config(
     },
   },
   {
+    // Layers import downward or sideways only (rank list in eslint-rules.js).
+    // Tests are exempt; the baseline lists the pre-existing upward imports.
+    files: ["src/**/*.ts"],
+    ignores: ["src/**/*.test.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/layer-direction": ["error", { baseline: layerBaseline }],
+    },
+  },
+  {
     // Warn, not error: the 46 bare invokes that predate the rule are wrapped as
-    // their files are touched (CODE_STYLE.md, "Custom ESLint rules").
+    // their files are touched (docs/code-style.md, "Custom ESLint rules").
     files: ["src/platform/desktop/**/*.ts"],
     plugins: { local: localRules },
     rules: {
       "local/invoke-needs-try-catch": "warn",
+    },
+  },
+  {
+    // Raw HTML sinks (ARCH-038). icons.ts writes static Lucide path data into
+    // an <svg>; nothing else may parse markup.
+    files: ["src/**/*.ts"],
+    ignores: ["src/lib/icons.ts", "src/**/*.test.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/no-raw-html-sink": "error",
+    },
+  },
+  {
+    // Tests discard subscriptions on purpose and build DOM fixtures from markup.
+    files: ["src/**/*.ts"],
+    ignores: ["src/**/*.test.ts"],
+    plugins: { local: localRules },
+    rules: {
+      "local/subscription-result-kept": "error",
     },
   },
   // --- Native imports stay behind the desktop seam (B7-1) ---
@@ -171,7 +207,55 @@ export default tseslint.config(
       ],
     },
   },
+  // --- Row views draw from a model and never read a store (5.4e) ---
+  // This block replaces the native-import config above for view files, so it
+  // repeats that ban. no-restricted-syntax covers a dynamic `import()`.
   {
-    ignores: ["dist/", "src-tauri/", "node_modules/", "public/", "*.js", "*.cjs"],
+    files: ["src/**/*.view.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@tauri-apps/*"],
+              message:
+                "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
+            },
+            {
+              group: [
+                "@stores/*",
+                "**/stores/*",
+                "@features/*/store",
+                "**/features/*/store",
+                "./store",
+                "**/store",
+                "@lib/livekitSession",
+                "**/lib/livekitSession",
+              ],
+              message:
+                "A *.view.ts draws from its row model and imports no store or voice session; build the model in the caller (5.4e).",
+            },
+          ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "ImportExpression[source.value=/^@tauri-apps\\//]",
+          message:
+            "Native imports belong in src/platform/desktop (B7-4/B7-5). See docs/architecture/platform-contracts.md.",
+        },
+        {
+          selector:
+            "ImportExpression[source.value=/(^@stores\\/|\\/stores\\/|(^|\\/)store$|livekitSession$)/]",
+          message:
+            "A *.view.ts draws from its row model and imports no store or voice session; build the model in the caller (5.4e).",
+        },
+      ],
+    },
+  },
+  {
+    ignores: ["dist/", "dist-web/", "src-tauri/", "node_modules/", "public/", "*.js", "*.cjs"],
   },
 );

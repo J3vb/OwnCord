@@ -9,11 +9,14 @@ import {
   handleMessagingError,
   handleSendFailure,
 } from "./wsHandlers";
+import { claimForwardRequest } from "./forwardRequests";
 import {
   messagesStore,
   addMessage,
   setMessagePinned,
   addOptimisticMessage,
+  addOptimisticReaction,
+  markSendFailed,
   resetMessagesStore,
 } from "../../stores/messages.store";
 import { dmStore, setDmChannels, updateDmLastMessage } from "../../stores/dm.store";
@@ -192,11 +195,30 @@ describe("handleChatPinned (F5)", () => {
 });
 
 describe("handleMessagingError", () => {
+  it("consumes the error of an in-flight Forward so only its picker row reports it", () => {
+    claimForwardRequest("fwd-1");
+    expect(handleMessagingError({ code: "FORBIDDEN", message: "" }, "fwd-1")).toBe(true);
+    expect(handleMessagingError({ code: "FORBIDDEN", message: "" }, "other")).toBe(false);
+  });
+
   it("consumes an error answering a pending send and fails that row", () => {
     pendingSend("corr-1");
 
     expect(handleMessagingError({ code: "SLOW_MODE", message: "" }, "corr-1")).toBe(true);
     expect(messagesStore.getState().pendingSends.has("corr-1")).toBe(false);
+  });
+
+  it("marks a pending send failed with the busy reason on REQUEST_TIMEOUT", () => {
+    pendingSend("corr-busy");
+
+    expect(handleMessagingError({ code: "REQUEST_TIMEOUT", message: "" }, "corr-busy")).toBe(true);
+
+    expect(messagesStore.getState().pendingSends.has("corr-busy")).toBe(false);
+    const failed = [...messagesStore.getState().messagesByChannel.values()]
+      .flat()
+      .find((m) => m.correlationId === "corr-busy");
+    expect(failed?.status).toBe("failed");
+    expect(failed?.errorCode).toBe("REQUEST_TIMEOUT");
   });
 
   it("labels a refused pre-restore retry and keeps its text (OC-0476)", () => {
@@ -231,6 +253,53 @@ describe("handleMessagingError", () => {
     }
   });
 
+  it("drops the row of a send whose files were all unavailable (2A-3)", () => {
+    pendingSend("corr-1");
+
+    expect(handleMessagingError({ code: "ATTACHMENTS_UNAVAILABLE", message: "" }, "corr-1")).toBe(
+      true,
+    );
+    expect(messagesStore.getState().pendingSends.has("corr-1")).toBe(false);
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.some((m) => m.correlationId === "corr-1"),
+    ).toBe(false);
+  });
+
+  it("drops the row even after it already failed as unconfirmed (2A-3)", () => {
+    pendingSend("corr-1");
+    markSendFailed("corr-1", "UNCONFIRMED");
+
+    expect(handleMessagingError({ code: "ATTACHMENTS_UNAVAILABLE", message: "" }, "corr-1")).toBe(
+      true,
+    );
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.some((m) => m.correlationId === "corr-1"),
+    ).toBe(false);
+  });
+
+  it("rolls back a refused reaction and names the 20-emoji limit (3A-12)", () => {
+    addMessage(chat(77, "2026-03-15T10:00:00Z"));
+    addOptimisticReaction("react-1", { channelId: 1, messageId: 77, emoji: "🎉", action: "add" });
+
+    expect(handleMessagingError({ code: "REACTION_LIMIT", message: "" }, "react-1")).toBe(true);
+    expect(
+      messagesStore
+        .getState()
+        .messagesByChannel.get(1)
+        ?.find((m) => m.id === 77)?.reactions,
+    ).toEqual([]);
+    expect(showToast).toHaveBeenCalledWith(
+      "This message has reached the reaction limit (20)",
+      "error",
+    );
+  });
+
   it("leaves an error with no matching send or reaction to the rest of the chain", () => {
     expect(handleMessagingError({ code: "FORBIDDEN", message: "" }, "other")).toBe(false);
     expect(handleMessagingError({ code: "FORBIDDEN", message: "" }, undefined)).toBe(false);
@@ -248,6 +317,31 @@ describe("failPendingOnDisconnect", () => {
 
     pendingSend("corr-b");
     failPendingOnDisconnect("disconnected");
+    expect(messagesStore.getState().pendingSends.size).toBe(0);
+  });
+});
+
+describe("failPendingOnDisconnect with an uploading row (WP 3A-9)", () => {
+  it("leaves the uploading row alone while failing the pending sends beside it", () => {
+    addOptimisticMessage({
+      correlationId: "up-1",
+      channelId: 1,
+      user: me,
+      content: "waiting for files",
+      replyTo: null,
+      timestamp: "2026-03-15T10:00:00Z",
+      status: "uploading",
+    });
+    pendingSend("corr-a");
+
+    failPendingOnDisconnect("reconnecting");
+    failPendingOnDisconnect("disconnected");
+
+    const rows = messagesStore.getState().messagesByChannel.get(1) ?? [];
+    expect(rows.map((m) => [m.correlationId, m.status])).toEqual([
+      ["corr-a", "failed"],
+      ["up-1", "uploading"],
+    ]);
     expect(messagesStore.getState().pendingSends.size).toBe(0);
   });
 });
@@ -473,6 +567,7 @@ describe("DM preview follows an edit or delete of its last message", () => {
 // The focus source is document.hasFocus(), as in lib/notifications.ts.
 function seedActiveChannel(lastMessageId: number | null = null): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map([
       [
         1,
@@ -489,6 +584,7 @@ function seedActiveChannel(lastMessageId: number | null = null): void {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         },
@@ -511,7 +607,12 @@ describe("handleChatMessage counts the active channel while the window is unfocu
   afterEach(() => {
     vi.restoreAllMocks();
     setDmChannels([]);
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
   });
 
   it("counts a message in the active, attached channel while the window is unfocused", () => {
@@ -593,7 +694,12 @@ describe("handleChatMessage counts the active channel while its live tail is out
   afterEach(() => {
     setLiveTailInView(1, true);
     vi.restoreAllMocks();
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
   });
 
   it("counts a message and a mention while the list is scrolled up", () => {
@@ -615,5 +721,24 @@ describe("handleChatMessage counts the active channel while its live tail is out
     handleChatMessage(createReconnectClock(), live(10));
 
     expect(channel().unreadCount).toBe(0);
+  });
+});
+
+describe("handleChatMessage counts a group row as unread (WP 3B-11a)", () => {
+  afterEach(() => setDmChannels([]));
+
+  it("raises the unread badge of a background group DM for each group kind", () => {
+    authStore.setState((prev) => ({ ...prev, user: { ...me, role: "member" } }));
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 99 }));
+    seedDm(0, "", "");
+    const kinds = ["group_add", "group_remove", "group_leave", "group_rename", "group_icon"];
+    kinds.forEach((kind, i) => {
+      handleChatMessage(createReconnectClock(), {
+        ...chat(10 + i, `2026-03-15T10:00:0${i}Z`),
+        kind,
+        group_event: { target_user_id: 3 },
+      });
+    });
+    expect(dm().unreadCount).toBe(kinds.length);
   });
 });

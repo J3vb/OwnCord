@@ -11,12 +11,18 @@
  * and the consent, so `portal: true` shows only the Quality step and
  * resolves `"portal"` for the host to hand to the portal.
  *
- * Linux native capture is video-only, so the Audio option says so instead of
- * offering a switch that would do nothing.
+ * Linux native capture shares other applications' sound when the host can
+ * capture it (`audioAvailable`): the Audio option is then a Share audio switch,
+ * on by default as on Windows. Without a PulseAudio-protocol sound server it
+ * is a note instead of a switch that would do nothing.
  *
  * On the web path (Windows) the OS picker owns the source and the audio
  * switch, so `osPicker: true` shows only the Quality step and resolves
- * `"os"`; the caller opens the OS picker after it.
+ * `"os"`; the caller opens the OS picker after it. On Windows, when the host
+ * can capture one app's sound (`appAudioAvailable`), the step also has a
+ * "Share the app's sound" switch (on by default, like Linux's Share audio):
+ * a shared window then carries its app's sound, which Chromium's picker never
+ * offers for a window.
  *
  * Built on `createModal`, so it carries the shared dialog contract (role,
  * modal, focus trap, Escape, focus restore). All copy lives in the `voice`
@@ -32,6 +38,7 @@ import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
 import { voiceText as t } from "../i18n/voice";
+import { desktop } from "../platform/desktop";
 import { getEffectiveScreenShareFps, type StreamQuality } from "@lib/screenShare";
 
 export interface ScreenSharePick {
@@ -39,6 +46,8 @@ export interface ScreenSharePick {
   source: string;
   quality: StreamQuality;
   fps: number;
+  /** Present only when the Share audio switch was offered: whether it was on. */
+  audio?: boolean;
 }
 
 export interface ScreenSharePickerOptions {
@@ -52,6 +61,9 @@ export interface ScreenSharePickerOptions {
   /** True for Change source on a live share: its quality and audio stay as
    *  they are, so only the source is picked. */
   readonly sourceOnly?: boolean;
+  /** True on Linux when the host can capture other applications' sound
+   *  (`NativeVoiceScreenSources.audio`): the Audio option is a switch. */
+  readonly audioAvailable?: boolean;
   readonly defaultQuality: StreamQuality;
   readonly defaultFps: number;
 }
@@ -63,17 +75,76 @@ interface QualityOption {
 
 const FPS_OPTIONS: readonly number[] = [60, 120];
 
-/** Linux native capture is video-only, so the Audio option is a note. */
-function buildAudioOption(): HTMLElement {
+/** Without a sound server to capture from, the Audio option is a note. */
+function buildAudioNote(): HTMLElement {
   const wrap = createElement("div", { class: "ssp-opt" });
   wrap.appendChild(createElement("div", { class: "ssp-opt-label" }, t("picker.audio")));
   wrap.appendChild(createElement("div", { class: "ssp-opt-text" }, t("picker.audioUnavailable")));
   return wrap;
 }
 
-/** Resolve the source to share, or null when the user closed the dialog. */
+/** The Share audio switch (on by default, as the Windows picker's); `onChange`
+ *  hears every flip. */
+function buildAudioSwitch(
+  onChange: (on: boolean) => void,
+  copy: { label: string; hint: string } = {
+    label: t("picker.shareAudio"),
+    hint: t("picker.shareAudioHint"),
+  },
+): HTMLElement {
+  const wrap = createElement("div", { class: "ssp-opt" });
+  const row = createElement("div", { class: "ssp-opt-row" });
+  row.appendChild(
+    createElement("div", { class: "ssp-opt-label", id: "ssp-audio-label" }, copy.label),
+  );
+  const toggle = createElement("div", {
+    class: "toggle on",
+    role: "switch",
+    tabindex: "0",
+    "aria-checked": "true",
+    "aria-labelledby": "ssp-audio-label",
+    "aria-describedby": "ssp-audio-hint",
+    "data-testid": "ssp-share-audio",
+  });
+  const flip = (): void => {
+    const on = !toggle.classList.contains("on");
+    toggle.classList.toggle("on", on);
+    toggle.setAttribute("aria-checked", String(on));
+    onChange(on);
+  };
+  toggle.addEventListener("click", flip);
+  toggle.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    flip();
+  });
+  row.appendChild(toggle);
+  wrap.appendChild(row);
+  wrap.appendChild(createElement("div", { class: "ssp-hint", id: "ssp-audio-hint" }, copy.hint));
+  return wrap;
+}
+
+/** Resolve the source to share, or null when the user closed the dialog. On
+ *  the Windows web path the dialog waits for the host to say whether it can
+ *  capture one app's sound (a host that cannot say counts as no); everywhere
+ *  else it opens at once. */
 export function showScreenSharePicker(
   opts: ScreenSharePickerOptions,
+): Promise<ScreenSharePick | null> {
+  if (
+    opts.osPicker !== true ||
+    opts.sourceOnly === true ||
+    !/\bWindows\b/.test(navigator.userAgent)
+  ) {
+    return openPicker(opts, false);
+  }
+  return desktop.appAudio.available().then((appAudio) => openPicker(opts, appAudio));
+}
+
+/** `appAudio`: offer the "Share the app's sound" switch (Windows web path). */
+function openPicker(
+  opts: ScreenSharePickerOptions,
+  appAudio: boolean,
 ): Promise<ScreenSharePick | null> {
   return new Promise((resolve) => {
     let picked: ScreenSharePick | null = null;
@@ -94,6 +165,9 @@ export function showScreenSharePicker(
     let selectedSource: string | null = null;
     let selectedQuality: StreamQuality = opts.defaultQuality;
     let selectedFps: number = opts.defaultFps;
+    /** Re-applies the frame-rate gates; set once the Quality step is built. */
+    let syncFpsGates: (() => void) | null = null;
+    let selectedAudio = true;
     /** Set once the footer is built; the source list is built first, so a
      *  source pre-selection before then is a safe no-op. */
     let goLive: HTMLButtonElement | null = null;
@@ -175,6 +249,7 @@ export function showScreenSharePicker(
         function selectSource(id: string): void {
           selectedSource = id;
           tabSelection.set(activeTab, id);
+          syncFpsGates?.();
           for (const card of panel.querySelectorAll<HTMLButtonElement>(".ssp-source")) {
             const on = card.dataset["sourceId"] === id;
             card.setAttribute("aria-checked", String(on));
@@ -287,7 +362,23 @@ export function showScreenSharePicker(
     // ---- Options: audio note + quality -------------------------------------
     if (opts.sourceOnly !== true) {
       const options = createElement("div", { class: "ssp-options" });
-      if (opts.osPicker !== true) options.appendChild(buildAudioOption());
+      if (appAudio)
+        options.appendChild(
+          buildAudioSwitch(
+            (on) => {
+              selectedAudio = on;
+            },
+            { label: t("picker.shareAppAudio"), hint: t("picker.shareAppAudioHint") },
+          ),
+        );
+      if (opts.osPicker !== true)
+        options.appendChild(
+          opts.audioAvailable === true
+            ? buildAudioSwitch((on) => {
+                selectedAudio = on;
+              })
+            : buildAudioNote(),
+        );
       options.appendChild(buildQualityOption());
       body.appendChild(options);
     }
@@ -323,24 +414,66 @@ export function showScreenSharePicker(
       // The portal's PipeWire stream is negotiated at 60 fps at most, and the
       // native capturer cannot ask for more.
       const maxFps = opts.portal ? 60 : Infinity;
+      const fpsOptions = new Map<number, HTMLOptionElement>();
       for (const fps of FPS_OPTIONS) {
         const option = createElement("option", { value: String(fps) }, t("picker.fps", { fps }));
-        if (fps > maxFps) {
-          option.disabled = true;
-          option.title = t("picker.fpsWaylandLimit");
-        }
+        fpsOptions.set(fps, option);
         fpsSelect.appendChild(option);
       }
       if (!FPS_OPTIONS.includes(selectedFps)) selectedFps = 30;
-      else if (selectedFps > maxFps) selectedFps = maxFps;
-      fpsSelect.value = String(selectedFps);
+      /** The rate the user asked for; a gate lowers selectedFps but keeps this,
+       *  so picking a faster screen again restores it. */
+      let requestedFps = selectedFps;
+      /** The rate the chosen source's monitor cannot reach, or null. An unknown
+       *  rate (a window, or XRandR unreadable) never gates. */
+      const monitorHz = (): number | null => {
+        const hz = opts.sources.find((s) => s.id === selectedSource)?.refreshHz;
+        return hz !== undefined && hz !== null && hz > 0 ? hz : null;
+      };
+      // Greys out what the capture cannot deliver, showing 60 in place of a
+      // requested rate that is unavailable on this source.
+      syncFpsGates = (): void => {
+        const hz = monitorHz();
+        for (const [fps, option] of fpsOptions) {
+          option.disabled = false;
+          option.title = "";
+          if (fps > maxFps) {
+            option.disabled = true;
+            option.title = t("picker.fpsWaylandLimit");
+          } else if (fps === 120 && hz !== null && hz < 120) {
+            option.disabled = true;
+            option.title = t("picker.fpsMonitorLimit", { hz });
+          }
+        }
+        selectedFps =
+          fpsOptions.get(requestedFps)?.disabled === true ? Math.min(60, maxFps) : requestedFps;
+        fpsSelect.value = String(selectedFps);
+        syncFpsHint();
+      };
+      // Windows (M-2): what 120 fps needs, while it is chosen.
+      const fps120Hint =
+        opts.osPicker === true
+          ? createElement(
+              "div",
+              { class: "ssp-hint", id: "ssp-fps120-hint", "data-testid": "ssp-fps120-hint" },
+              t("picker.fps120Hint"),
+            )
+          : null;
+      if (fps120Hint !== null) fpsSelect.setAttribute("aria-describedby", fps120Hint.id);
+      const syncFpsHint = (): void => {
+        if (fps120Hint !== null) fps120Hint.hidden = selectedFps !== 120;
+      };
+      syncFpsGates();
       fpsSelect.addEventListener("change", () => {
         selectedFps = Number(fpsSelect.value);
+        requestedFps = selectedFps;
+        syncFpsHint();
       });
 
       appendChildren(row, qualitySelect, fpsSelect);
       wrap.appendChild(row);
       wrap.appendChild(createElement("div", { class: "ssp-hint" }, t("picker.qualityHint")));
+      if (fps120Hint !== null) wrap.appendChild(fps120Hint);
       return wrap;
     }
 
@@ -372,6 +505,11 @@ export function showScreenSharePicker(
         source: selectedSource,
         quality: selectedQuality,
         fps: selectedFps,
+        // Only when the switch was offered (a Change source offers none).
+        ...((opts.audioAvailable === true && opts.sourceOnly !== true && opts.osPicker !== true) ||
+        appAudio
+          ? { audio: selectedAudio }
+          : {}),
       };
       close();
     });

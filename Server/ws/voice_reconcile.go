@@ -39,7 +39,7 @@ const voiceReconcileGraceTicks = 2
 // from its room. Keyed by identity so a rejoin (a new joinedAt) starts a fresh
 // count, and a member who left voice has its entry pruned.
 type voiceReconcileState struct {
-	mu      syncutil.Mutex
+	mu      syncutil.Ranked[lockRankLeaf]
 	missing map[string]int
 }
 
@@ -199,20 +199,21 @@ func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, ident
 // the row, broadcasts voice_leave with the leaver included, and re-elects the
 // key holder.
 func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, joinedAt string) {
-	defer h.voiceLock(userID)()
-	c := h.GetClient(userID)
-	if c != nil && h.clearExactJoin(c, channelID, joinedAt) {
-		tailCtx, cancelTail := h.sweepTailCtx(ctx)
-		defer cancelTail()
-		h.finishVoiceLeave(tailCtx, c, channelID, joinedAt, voiceLeaveReasonReconciled)
-		return
+	txn := h.begin(userID)
+	defer txn.end()
+	if c := h.GetClient(userID); c != nil {
+		if txn.clearExact(c, channelID, joinedAt) {
+			tailCtx, cancelTail := h.sweepTailCtx(ctx)
+			defer cancelTail()
+			h.finishVoiceLeave(tailCtx, txn, c, channelID, joinedAt, voiceLeaveReasonReconciled)
+			return
+		}
 	}
 	// No client holds this exact instance (it left, reconnected, or moved).
 	// Delete the row if it still matches, then broadcast the leave for any
 	// bystander and re-elect the key holder. Mirrors the webhook's stale-row
 	// cleanup (webhookLeftCleanupClient's else branch).
-	h.voiceGrace.takeJoin(userID, channelID, joinedAt)
-	deleted, err := h.voice.LeaveIfMatch(ctx, userID, channelID, joinedAt)
+	deleted, err := txn.deleteRow(ctx, channelID, joinedAt)
 	if err != nil {
 		slog.Error("voice reconcile: LeaveIfMatch failed", "err", err,
 			"user_id", userID, "channel_id", channelID)
@@ -228,26 +229,4 @@ func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, 
 	h.removeLiveKitParticipantAsync(tailCtx, channelID, userID, joinedAt, "reconcileReap")
 	slog.Warn("voice reconcile: reaped voice membership with no SFU participant",
 		"user_id", userID, "channel_id", channelID)
-}
-
-// clearExactJoin clears c's voice state only while it still names this exact
-// join instance (channel AND token), reporting whether it did. Token-scoped
-// unlike clearVoiceStateIfMatch: a same-channel rejoin between the reconcile
-// snapshot and this call has a new token, and its membership must survive.
-// Inlined under voiceMu the same way webhookLeftCleanupClient does.
-func (h *Hub) clearExactJoin(c *Client, channelID int64, joinedAt string) bool {
-	c.voiceMu.Lock()
-	matched := c.voiceChID == channelID && c.voiceJoinToken == joinedAt
-	if matched {
-		c.voiceChID = 0
-		c.voiceJoinToken = ""
-		c.voiceJoinCompleted = false
-		c.e2eePubKey = ""
-		c.e2eeSignature = ""
-	}
-	c.voiceMu.Unlock()
-	if matched {
-		h.pubsub.Unsubscribe(c, VoiceTopic(channelID))
-	}
-	return matched
 }

@@ -74,6 +74,8 @@ const test = base.extend<{ alice: Page }>({
 async function relogin(page: Page, server: TestServer): Promise<void> {
   await openSettings(page);
   await page.locator(".settings-nav-item.danger").click();
+  // Log Out asks first.
+  await page.locator("[data-testid='logout-confirm']").click();
   await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
   await login(page, server, "alice");
   await expect(page.locator(".channel-item:not(.voice)", { hasText: "general" })).toBeVisible();
@@ -126,19 +128,19 @@ async function runCycle(
   await expect(ownRow).not.toHaveClass(/pending/);
   await expect(ownRow.locator(".msg-actions-bar")).toBeAttached();
   await ownRow.hover();
-  await ownRow.locator("[data-testid^='msg-edit-']").click();
+  await ownRow
+    .locator(
+      "[data-testid^='msg-edit-']:not([data-testid^='msg-edit-input-']):not([data-testid^='msg-edit-cancel-']):not([data-testid^='msg-edit-save-'])",
+    )
+    .click();
   const edited = `${own}-edited`;
-  await input.fill(edited);
-  // The composer drops a submit within SEND_DEBOUNCE_MS (200 ms) of the last
-  // send, its double-send guard, and a fast echo puts this edit inside it.
-  // Enter again until the edit lands; once it has, the composer is empty and
-  // Enter is a no-op.
-  await expect(async () => {
-    await input.press("Enter");
-    await expect(page.locator(".msg-text", { hasText: edited })).toHaveCount(1, {
-      timeout: 2_000,
-    });
-  }).toPass({ timeout: 30_000 });
+  // The edit happens in the row itself (WP 3A-8): the inline editor has no
+  // double-send guard, so one Enter saves it.
+  // The row no longer has its text, so find it by its editor.
+  const editInput = page.locator(".message.editing .msg-inline-edit-input");
+  await editInput.fill(edited);
+  await editInput.press("Enter");
+  await expect(page.locator(".msg-text", { hasText: edited })).toHaveCount(1);
 
   const editedRow = rowWithText(page, edited);
   await editedRow.hover();
@@ -192,7 +194,8 @@ async function runCycle(
   await page.locator(".emoji-btn").click();
   await expect(page.locator(".emoji-picker.open")).toBeVisible();
   // The composer's picker closes on an outside mousedown, not Escape.
-  await page.locator(".chat-header").click();
+  // The name, not the header centre: the topic there opens its full-text modal.
+  await page.locator(".chat-header .ch-name").click();
   await expect(page.locator(".emoji-picker.open")).not.toBeVisible();
 
   await page.locator(".member-item").first().click();
@@ -203,7 +206,8 @@ async function runCycle(
   await textChannels.first().click({ button: "right" });
   await expect(page.locator("[data-testid='channel-context-menu']")).toBeVisible();
   // The context menu dismisses on an outside mousedown, not Escape.
-  await page.locator(".chat-header").click();
+  // The name, not the header centre: the topic there opens its full-text modal.
+  await page.locator(".chat-header .ch-name").click();
   await expect(page.locator("[data-testid='channel-context-menu']")).not.toBeVisible();
 
   // 4. Open the DM with Bob, send one message, close it.

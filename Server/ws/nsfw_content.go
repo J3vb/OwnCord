@@ -98,14 +98,29 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeChatMessage:     true,
 	MsgTypeChatEdited:      true,
 	MsgTypeReactionUpdate:  true,
+	MsgTypePollUpdate:      true, // names a message and carries its tallies, as reaction_update does
 	MsgTypePluginBroadcast: true, // plugin-authored content posted into a channel
+	MsgTypeThreadChanged:   true, // a thread's name, discloses what the parent's unacknowledged members may not read (WP 6.9c)
 
 	// ── metadata: no message body ──
-	MsgTypeAuthOK:              false,
-	MsgTypeAuthError:           false,
-	MsgTypeReady:               false, // buildReady carries channel/member/voice state only, never message content
-	MsgTypeChatSendOK:          false, // direct to the sender, who already knows their own content
-	MsgTypeChatDeleted:         false, // ids only
+	MsgTypeAuthOK:            false,
+	MsgTypeAuthError:         false,
+	MsgTypeReady:             false, // buildReady carries channel/member/voice state only, never message content
+	MsgTypeChatSendOK:        false, // direct to the sender, who already knows their own content
+	MsgTypeChatForwardOK:     false, // direct to the sender; ids only
+	MsgTypePollCreateOK:      false, // direct to the sender; ids only
+	MsgTypeForumPostCreateOK: false, // direct to the sender, who already knows their own content
+	MsgTypePollVoteOK:        false, // direct to the sender; ids only
+	MsgTypePollEndOK:         false, // direct to the sender; ids only
+	MsgTypeChatDeleted:       false, // ids only
+	MsgTypeThreadCreateOK:    false, // direct to the sender, who just named the thread
+	MsgTypeThreadUpdateOK:    false, // direct to the sender; the thread id only
+	MsgTypeThreadFollowOK:    false, // direct to the sender; the thread id and a flag only
+	// thread_follow_update names the thread, but it is never published to a topic:
+	// it goes to one user, only after the follower and read-access checks, so the
+	// broadcast gate has nothing to add.
+	MsgTypeThreadFollowUpdate:  false,
+	MsgTypeThreadDeleted:       false, // ids only
 	MsgTypeChatBulkDeleted:     false, // ids only
 	MsgTypeChatPinned:          false, // ids + flag only, no message body
 	MsgTypeTyping:              false,
@@ -137,12 +152,17 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeCallDeclined:        false,
 	MsgTypeVoiceE2EEAnnounceBC: false,
 	MsgTypeVoiceE2EEOfferRelay: false,
+	MsgTypeVoiceWatching:       false,
 	MsgTypeCommandReply:        false, // ephemeral, direct to the invoking client
 	MsgTypeNSFWAck:             false, // the gate's own signal, not gated content
 	MsgTypeModQueue:            false, // a report's public id and state only (B5-8); never message content
 	MsgTypeModAction:           false, // a warning/timeout notice to its own subject (B5-9); never message content
+	MsgTypeMemberTimeouts:      false, // active-timeout ids and expiries to moderators and the target (WP 3C-7c); never message content
+	MsgTypeChannelCategories:   false, // category ids, names and positions to MANAGE_CHANNELS holders only (WP 6.5a); never message content
 	MsgTypeAppealStatus:        false, // an appeal's state to its own appellant only (B5-10); never message content
 	MsgTypeMentionCount:        false, // a channel id and this user's own mention total only (DP-27); never message content
+	MsgTypeReadState:           false, // a channel id and this user's own read pointer and counts only (3D-5c); never message content
+	MsgTypeChannelActivity:     false, // ids and flags only (2B-2); the author id is withheld from an unacknowledged reader of a labelled channel
 }
 
 // reconnectFrameReadableRaceHook, when non-nil, runs once per content-bearing
@@ -162,44 +182,52 @@ var reconnectFrameReadableRaceHook func(userID, channelID int64)
 // revoke or unlabel landing between two frames of one replay is honoured by
 // the very next frame it affects, not just the next reconnect. A lookup
 // failure fails closed (not readable) — the whole point of re-checking live
-// is to distrust a stale "yes", so an error must not fall back to one.
-func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) bool {
+// is to distrust a stale "yes", so an error must not fall back to one — and
+// reports confirmed=false, so the caller can mark the frame as lost.
+func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) (readable, confirmed bool) {
 	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
 	if err != nil {
 		slog.Warn("ws: frameReadableNow GetChannel failed, dropping frame",
 			"channel_id", channelID, "err", err)
-		return false
+		return false, false
 	}
 	if ch == nil {
 		// A missing channel is UNKNOWN, not "not labelled" — same posture as
 		// a lookup error (round 2 P1's channelNSFWFilter fix): fail closed
 		// rather than trust a frame whose channel this read cannot even
-		// confirm exists any more.
+		// confirm exists any more. A deleted channel's frame is not owed.
 		slog.Warn("ws: frameReadableNow found no such channel, dropping frame", "channel_id", channelID)
-		return false
+		return false, true
 	}
 	if !ch.NSFW {
-		return true
+		return true, true
 	}
 	ok, ackErr := h.readers.Visibility.HasNSFWAcknowledgement(ctx, userID, channelID)
 	if ackErr != nil {
 		slog.Warn("ws: frameReadableNow HasNSFWAcknowledgement failed, dropping frame",
 			"channel_id", channelID, "err", ackErr)
-		return false
+		return false, false
 	}
-	return ok
+	return ok, true
 }
 
 // payloadChannelID extracts payload.channel_id from a wrapped wire frame, or
-// 0 if absent/unparseable.
+// 0 if absent/unparseable. thread_changed carries no channel_id: its channel
+// is the thread's parent, payload.thread.parent_id (WP 6.9c).
 func payloadChannelID(data []byte) int64 {
 	var frame struct {
 		Payload struct {
 			ChannelID int64 `json:"channel_id"`
+			Thread    *struct {
+				ParentID int64 `json:"parent_id"`
+			} `json:"thread"`
 		} `json:"payload"`
 	}
 	if json.Unmarshal(data, &frame) != nil {
 		return 0
+	}
+	if frame.Payload.ChannelID == 0 && frame.Payload.Thread != nil {
+		return frame.Payload.Thread.ParentID
 	}
 	return frame.Payload.ChannelID
 }

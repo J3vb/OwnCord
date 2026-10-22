@@ -22,6 +22,7 @@ func fullV2Registry() *HandlerRegistry {
 	r.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{})
 	registerVoiceControlsV2(r, VoiceDeps{})
 	registerCallHandlers(r, CallDeps{})
+	registerThreadHandlers(r, ThreadDeps{})
 	return r
 }
 
@@ -117,9 +118,14 @@ func TestHandlerRegistry_AllExpectedTypesRegistered(t *testing.T) {
 		"presence_update",
 		"channel_focus",
 		"mark_read",
+		"mark_unread",
 		"reaction_add",
 		"reaction_remove",
 		"chat_send",
+		"chat_forward",
+		"poll_create",
+		"poll_vote",
+		"poll_end",
 		"chat_edit",
 		"chat_delete",
 		"chat_command",
@@ -135,9 +141,16 @@ func TestHandlerRegistry_AllExpectedTypesRegistered(t *testing.T) {
 		"voice_mod_kick",
 		"voice_e2ee_announce",
 		"voice_e2ee_offer",
+		"voice_watch",
 		"voice_token_refresh",
 		"call_ring",
 		"call_decline",
+		"thread_create",
+		"thread_update",
+		"thread_delete",
+		"thread_focus",
+		"forum_post_create",
+		"thread_follow",
 	}
 
 	registered := r.RegisteredV2Types()
@@ -200,6 +213,10 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 	cmds := map[string]Command{
 		MsgTypePing:              PingCmd{userID: 1},
 		MsgTypeChatSend:          ChatSendCmd{userID: 1, ChannelID: 1},
+		MsgTypeChatForward:       ChatForwardCmd{userID: 1, ChannelID: 1, MessageID: 1},
+		MsgTypePollCreate:        PollCreateCmd{userID: 1, ChannelID: 1},
+		MsgTypePollVote:          PollVoteCmd{userID: 1, MessageID: 1},
+		MsgTypePollEnd:           PollEndCmd{userID: 1, MessageID: 1},
 		MsgTypeChatEdit:          ChatEditCmd{userID: 1, MessageID: 1},
 		MsgTypeChatDelete:        ChatDeleteCmd{userID: 1, MessageID: 1},
 		MsgTypeChatCommand:       ChatCommandCmd{userID: 1, ChannelID: 1, Command: "/x"},
@@ -207,6 +224,7 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 		MsgTypePresenceUpdate:    PresenceUpdateCmd{userID: 1, Status: "online"},
 		MsgTypeChannelFocus:      ChannelFocusCmd{userID: 1, ChannelID: 1},
 		MsgTypeMarkRead:          MarkReadCmd{userID: 1, ChannelID: 1},
+		MsgTypeMarkUnread:        MarkUnreadCmd{userID: 1, ChannelID: 1, MessageID: 1},
 		MsgTypeReactionAdd:       ReactionAddCmd{userID: 1, MessageID: 1, Emoji: "👍"},
 		MsgTypeReactionRemove:    ReactionRemoveCmd{userID: 1, MessageID: 1, Emoji: "👍"},
 		MsgTypeVoiceJoin:         VoiceJoinCmd{userID: 1, ChannelID: 1},
@@ -221,9 +239,16 @@ func TestAllV2Types_SmokeDispatch(t *testing.T) {
 		MsgTypeVoiceModKick:      VoiceModKickCmd{userID: 1, TargetID: 2},
 		MsgTypeVoiceE2EEAnnounce: VoiceE2EEAnnounceCmd{userID: 1},
 		MsgTypeVoiceE2EEOffer:    VoiceE2EEOfferCmd{userID: 1},
+		MsgTypeVoiceWatch:        VoiceWatchCmd{userID: 1},
 		MsgTypeVoiceTokenRefresh: VoiceTokenRefreshCmd{userID: 1},
 		MsgTypeCallRing:          CallRingCmd{userID: 1, ChannelID: 1},
 		MsgTypeCallDecline:       CallDeclineCmd{userID: 1, ChannelID: 1},
+		MsgTypeThreadCreate:      ThreadCreateCmd{userID: 1, ChannelID: 1, MessageID: 1, Name: "t"},
+		MsgTypeThreadUpdate:      ThreadUpdateCmd{userID: 1, ThreadID: 1},
+		MsgTypeThreadDelete:      ThreadDeleteCmd{userID: 1, ThreadID: 1},
+		MsgTypeThreadFocus:       ThreadFocusCmd{userID: 1, ThreadID: 1},
+		MsgTypeForumPostCreate:   ForumPostCreateCmd{userID: 1, ChannelID: 1, Name: "p"},
+		MsgTypeThreadFollow:      ThreadFollowCmd{userID: 1, ThreadID: 1, Follow: true},
 	}
 
 	for _, typ := range r.RegisteredV2Types() {

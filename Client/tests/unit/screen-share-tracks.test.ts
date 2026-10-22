@@ -52,7 +52,7 @@ const {
   enableScreenshare,
   getLocalCameraStream,
   getLocalScreenshareStream,
-  getLocalScreenshareFps,
+  getLocalScreenshareStats,
   stopManualCameraTrack,
   stopManualScreenTracks,
   rollbackPendingVideo,
@@ -907,8 +907,30 @@ describe("enableScreenshare", () => {
     expect(videoOpts).toMatchObject({
       simulcast: false,
       screenShareEncoding: { maxBitrate: 12_000_000, maxFramerate: 120 },
+      // M-2: lower the resolution a little before halving the frame rate.
+      degradationPreference: "balanced",
     });
     expect(videoOpts).not.toHaveProperty("screenShareSimulcastLayers");
+  });
+
+  it("publishes 30 and 60 fps shares keeping their resolution", async () => {
+    for (const fps of [30, 60]) {
+      loadPref.mockImplementation((key: string) =>
+        key === "screenShareQuality" ? "high" : key === "screenShareFps" ? fps : "",
+      );
+      const rig = fakeRoom();
+      const audio = fakeAudioTrack();
+      createLocalScreenTracks.mockResolvedValue([fakeVideoTrack(), audio]);
+
+      // oxlint-disable-next-line no-await-in-loop -- one frame rate at a time
+      await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+      expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
+        degradationPreference: "maintain-resolution",
+      });
+      const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
+      expect(audioOpts).not.toHaveProperty("degradationPreference");
+    }
   });
 
   it("keeps the source share as a single full-resolution layer", async () => {
@@ -1374,7 +1396,7 @@ describe("stream getters", () => {
     expect(getLocalScreenshareStream(fakeRoom().room)).toBeNull();
   });
 
-  it("getLocalScreenshareFps reads the top layer's sent frame rate", async () => {
+  it("getLocalScreenshareStats reads the top layer's sent frame rate", async () => {
     const room = roomWithLocalPub(Track.Source.ScreenShare, {
       mediaStreamTrack: {},
       getSenderStats: async () => [
@@ -1383,19 +1405,50 @@ describe("stream getters", () => {
         { rid: "f" },
       ],
     });
-    await expect(getLocalScreenshareFps(room)).resolves.toBe(58);
+    await expect(getLocalScreenshareStats(room)).resolves.toMatchObject({ sentFps: 58 });
   });
 
-  it("getLocalScreenshareFps is null before a layer reports a rate, or with no sender", async () => {
+  it("getLocalScreenshareStats reads the WebRTC sender: limit, encoder and codec", async () => {
+    const report = new Map<string, Record<string, unknown>>([
+      ["c1", { type: "codec", mimeType: "video/VP8" }],
+      [
+        "o1",
+        {
+          type: "outbound-rtp",
+          framesPerSecond: 61,
+          frameWidth: 1920,
+          frameHeight: 1080,
+          qualityLimitationReason: "cpu",
+          encoderImplementation: "libvpx",
+          codecId: "c1",
+        },
+      ],
+    ]);
+    const room = roomWithLocalPub(Track.Source.ScreenShare, {
+      mediaStreamTrack: { getSettings: () => ({ frameRate: 120 }) },
+      sender: { getStats: async () => report },
+    });
+    await expect(getLocalScreenshareStats(room)).resolves.toEqual({
+      captureFps: 120,
+      sentFps: 61,
+      width: 1920,
+      height: 1080,
+      limitation: "cpu",
+      encoder: "libvpx",
+      codec: "video/VP8",
+    });
+  });
+
+  it("getLocalScreenshareStats has no rate before a layer reports one, and null with no sender", async () => {
     const unmeasured = roomWithLocalPub(Track.Source.ScreenShare, {
       mediaStreamTrack: {},
       getSenderStats: async () => [{ rid: "h" }],
     });
-    await expect(getLocalScreenshareFps(unmeasured)).resolves.toBeNull();
+    expect((await getLocalScreenshareStats(unmeasured))?.sentFps).toBeUndefined();
     // The Linux native track publishes in the backend: no WebRTC sender here.
     const native = roomWithLocalPub(Track.Source.ScreenShare, { mediaStreamTrack: {} });
-    await expect(getLocalScreenshareFps(native)).resolves.toBeNull();
-    await expect(getLocalScreenshareFps(null)).resolves.toBeNull();
+    await expect(getLocalScreenshareStats(native)).resolves.toBeNull();
+    await expect(getLocalScreenshareStats(null)).resolves.toBeNull();
   });
 });
 
@@ -1580,6 +1633,46 @@ describe("video codec", () => {
     });
   });
 
+  /** A channel whose one other member reports it decodes VP8 only. */
+  function withVp8OnlyPeer(): () => void {
+    const before = voiceStore.getState();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      currentChannelId: 4,
+      voiceUsers: new Map([[4, new Map([[2, { userId: 2, username: "peer" } as never]])]]),
+      peerVideoDecode: new Map([[2, ["vp8"]]]),
+    }));
+    return () => voiceStore.setState(() => before);
+  }
+
+  it("downgrades a saved H.264 camera to VP8 for a VP8-only channel peer", async () => {
+    prefs({ videoCodec: "h264" });
+    const restore = withVp8OnlyPeer();
+    try {
+      const rig = fakeRoom();
+      createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+      await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+      expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({ videoCodec: "vp8" });
+    } finally {
+      restore();
+    }
+  });
+
+  it("downgrades a saved H.264 share to VP8 for a VP8-only channel peer", async () => {
+    prefs({ videoCodec: "h264" });
+    const restore = withVp8OnlyPeer();
+    try {
+      const rig = fakeRoom();
+      const video = fakeVideoTrack();
+      createLocalScreenTracks.mockResolvedValue([video, fakeAudioTrack()]);
+      await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+      const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+      expect(videoOpts).toMatchObject({ videoCodec: "vp8" });
+    } finally {
+      restore();
+    }
+  });
+
   it("publishes the camera with the saved codec", async () => {
     prefs({ videoCodec: "h264" });
     const rig = fakeRoom();
@@ -1590,6 +1683,30 @@ describe("video codec", () => {
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
       videoCodec: "h264",
     });
+  });
+
+  it("records the preferred and the published codec on the camera and the share, for the live switch", async () => {
+    prefs({ videoCodec: "h264" });
+    const restore = withVp8OnlyPeer();
+    try {
+      const rig = fakeRoom();
+      createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+      const camera: CameraTrackState = { manualCameraTrack: null };
+      await enableCamera(camera, fakeDeps(rig.room));
+      expect(camera).toMatchObject({ preferred: "h264", published: "vp8", quality: "medium" });
+
+      createLocalScreenTracks.mockResolvedValue([fakeVideoTrack(), fakeAudioTrack()]);
+      const screen: ScreenTrackState = { manualScreenTracks: [] };
+      await enableScreenshare(screen, fakeDeps(rig.room));
+      expect(screen).toMatchObject({ preferred: "h264", published: "vp8" });
+
+      stopManualCameraTrack(camera, rig.room);
+      stopManualScreenTracks(screen, rig.room);
+      expect(camera.published).toBeUndefined();
+      expect(screen.published).toBeUndefined();
+    } finally {
+      restore();
+    }
   });
 
   it("publishes the screen share's video with the saved codec, audio without", async () => {
@@ -1647,6 +1764,21 @@ describe("video codec", () => {
       }),
     });
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({ videoCodec: "vp8" });
+  });
+
+  it("at 120 fps a saved VP8 follows Auto's hardware rule (M-2)", async () => {
+    prefs({ videoCodec: "vp8", screenShareQuality: "high", screenShareFps: 120 });
+    encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([capturedVideoTrack()]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    expect(encodingInfo).toHaveBeenCalledTimes(1);
+    expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
+      videoCodec: "h264",
+      degradationPreference: "balanced",
+    });
   });
 
   it("does not publish a camera turned off while Auto's probe is pending", async () => {

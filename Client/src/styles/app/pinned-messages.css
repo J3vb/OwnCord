@@ -13,7 +13,9 @@
 
 .pinned-panel {
   position: absolute;
-  top: 0;
+  /* Drops down below the chat header, so the header's pin button stays
+     clickable to close it (the member column puts that button under it). */
+  top: calc(var(--header-height, 48px) + env(safe-area-inset-top));
   right: 0;
   z-index: 200;
   width: 420px;
@@ -229,4 +231,18 @@
   color: var(--text-muted);
   margin-top: 12px;
   line-height: 1.5;
+}
+
+/* Rendered message content inside a pin card: block children (paragraphs,
+   code, quotes) keep the card's 3-line clamp, and media cannot outgrow it. */
+.pinned-msg__content .msg-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.pinned-msg__content pre,
+.pinned-msg__content img,
+.pinned-msg__content video {
+  max-width: 100%;
+  max-height: 4.2em;
+  overflow: hidden;
 }

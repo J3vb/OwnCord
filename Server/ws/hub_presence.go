@@ -30,14 +30,19 @@ type presenceBatchEntry struct {
 
 // memberPayloadFor is the member_join user object: what a client's member
 // list needs to add the member.
-func memberPayloadFor(user *db.User, roleName string) memberUserPayload {
-	return memberUserPayload{
+func memberPayloadFor(user *db.User, roleName string, roleIDs []int64) memberJoinUser {
+	return memberJoinUser{
 		ID:                user.ID,
 		Username:          user.Username,
 		Avatar:            user.Avatar,
 		Role:              roleName,
 		DisplayName:       user.DisplayName,
 		IdentityPublicKey: user.IdentityPublicKey,
+		About:             user.About,
+		CreatedAt:         db.FormatMemberCreatedAt(user.CreatedAt),
+		RoleIDs:           roleIDs,
+		Banner:            user.BannerPath(),
+		BannerColor:       user.BannerColor,
 	}
 }
 
@@ -78,6 +83,7 @@ func (h *Hub) publishGlobal(bm broadcastMsg, msg []byte, seq uint64, private map
 type presenceRepairState struct {
 	drops    atomic.Uint64 // process-lifetime count (PresenceDropCount)
 	staleAny atomic.Bool   // some client owes a snapshot at the next flush
+	lostAll  atomic.Bool   // a presence frame was refused by the full dispatch queue
 	// users holds whoever dropped a presence frame since their last full
 	// ready; their next resume takes the full ready. joins holds the users
 	// owed a member_join: marked by a first-ever connect before its stamp
@@ -86,7 +92,7 @@ type presenceRepairState struct {
 	// announces on the next connect. A restart needs no copy: every client
 	// then takes a full ready listing every member. mu is a leaf lock:
 	// nothing is acquired while holding it.
-	mu    syncutil.Mutex
+	mu    syncutil.Ranked[lockRankLeaf]
 	users map[int64]struct{}
 	joins map[int64]struct{}
 }
@@ -123,7 +129,7 @@ func (s *presenceRepairState) marked(set *map[int64]struct{}, userID int64) bool
 type pendingPresence struct {
 	status       string
 	customStatus *string
-	member       *memberUserPayload
+	member       *memberJoinUser
 }
 
 // QueuePresence coalesces connect/disconnect presence: the latest state per
@@ -208,11 +214,18 @@ var presenceFlushRaceHook func(*Hub)
 func (h *Hub) dropQueuedPresenceAndBroadcast(userID int64, broadcast func()) {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
+	h.dropQueuedPresenceLocked(userID)
+	broadcast()
+}
+
+// dropQueuedPresenceLocked is dropQueuedPresenceAndBroadcast's drop half, for a
+// caller that already holds presenceMu and only broadcasts after a check of its
+// own passes.
+func (h *Hub) dropQueuedPresenceLocked(userID int64) {
 	if p, ok := h.presenceQueue[userID]; ok && p.member != nil {
 		h.announceMember(userID, p)
 	}
 	delete(h.presenceQueue, userID)
-	broadcast()
 }
 
 // announceMember enqueues the member_join for a member other clients' lists
@@ -260,6 +273,9 @@ func (h *Hub) flushPresenceQueue() {
 		lost = !h.enqueue(broadcastMsg{presence: queued, droppable: true}, "presence_batch")
 	}
 	h.presenceMu.Unlock()
+	if h.presenceRepair.lostAll.Swap(false) {
+		lost = true
+	}
 	if lost {
 		h.mu.RLock()
 		for _, c := range h.clients {
@@ -315,8 +331,15 @@ func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[
 // broadcastPresenceFrame enqueues one user's presence (the presence_update
 // path) as a sequenced global frame on the same dispatch FIFO as the batches,
 // in the presence class: a full queue drops it instead of kicking the client.
+// A refused frame reached nobody, so the next flush snapshots every client;
+// the callers may hold presenceMu, so the clients are marked there, not here.
 func (h *Hub) broadcastPresenceFrame(excludeUserID int64, msg []byte) {
-	h.enqueue(broadcastMsg{msg: msg, excludeUserID: excludeUserID, droppable: true}, "presence")
+	if h.enqueue(broadcastMsg{msg: msg, excludeUserID: excludeUserID, droppable: true}, "presence") {
+		return
+	}
+	if h.presenceRepair.lostAll.CompareAndSwap(false, true) {
+		time.AfterFunc(presenceCoalesceWindow, h.flushPresenceQueue)
+	}
 }
 
 func buildPresenceBatchMsg(updates []presenceBatchEntry, full bool) []byte {
@@ -327,7 +350,8 @@ func buildPresenceBatchMsg(updates []presenceBatchEntry, full bool) []byte {
 // (Client.sendPresenceMsg): the next flush sends that client a snapshot, and
 // the user's next resume takes the full ready, because the dropped seq sits
 // below later ones the client may still see and ack. Lock-free apart from the
-// leaf presenceResyncMu, since it runs under seqMu and the client's mu.
+// leaf presenceRepairState.mu. Client.sendPresenceMsg releases the client's mu
+// before it calls this, but its callers may hold seqMu, ps.mu or presenceMu.
 func (h *Hub) presenceDropped(userID int64) {
 	h.presenceRepair.drops.Add(1)
 	h.presenceRepair.mark(&h.presenceRepair.users, userID, true)

@@ -15,7 +15,7 @@ protocol/fixtures/
 # Dated point-in-time snapshots. scripts/check-doc-counts.mjs already treats
 # these as deliberately unmaintained and out of scope to edit; reformatting
 # them would churn frozen records for no reader.
-docs/audit-*.md
+docs/audits/2*.md
 
 # Carried forward from the client's own ignore file — a deliberate exclusion,
 # not an oversight.
@@ -38,6 +38,7 @@ Server/admin/static/
 # alone drops ~850 formattable files into src-tauri/target/.
 # Mirrors Client/.gitignore, .serena/.gitignore and .superpowers/sdd/.gitignore.
 Client/dist/
+Client/dist-web/
 Client/dist-budget/
 Client/coverage/
 Client/playwright-report/
@@ -45,6 +46,9 @@ Client/test-results/
 Client/.vite/
 Client/src-tauri/target/
 Client/src-tauri/gen/
+# The vendored livekit crate (WP LP-8d): upstream's tree plus a marked patch,
+# kept byte-identical to the crates.io package so a reviewer can diff it.
+Client/src-tauri/vendor/
 .serena/
 .superpowers/sdd/
 

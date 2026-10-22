@@ -1,0 +1,526 @@
+{
+  "journey": "chat-poll",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "allow_multiselect": false,
+            "answers": [
+              {
+                "emoji": "🍕",
+                "text": "Pizza"
+              },
+              {
+                "text": "Sushi"
+              }
+            ],
+            "channel_id": 1,
+            "client_message_id": "<id:string>",
+            "duration_hours": 24,
+            "question": "Lunch?"
+          },
+          "type": "poll_create"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "channel_id": 1,
+            "client_message_id": "<id:string>",
+            "deduplicated": false,
+            "message_id": "<id:number>"
+          },
+          "type": "poll_create_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 5,
+          "payload": {
+            "attachments": [],
+            "channel_id": 1,
+            "client_message_id": "<id:string>",
+            "content": "📊 Lunch?\n- 🍕 Pizza\n- Sushi",
+            "id": "<id:number>",
+            "mention_roles": [],
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "poll": {
+              "allow_multiselect": false,
+              "answers": [
+                {
+                  "answer_id": "<id:number>",
+                  "emoji": "🍕",
+                  "text": "Pizza"
+                },
+                {
+                  "answer_id": "<id:number>",
+                  "emoji": null,
+                  "text": "Sushi"
+                }
+              ],
+              "ended": false,
+              "ended_at": "<ts:null>",
+              "expires_at": "<ts:string>",
+              "question": "Lunch?",
+              "results": {
+                "counts": [
+                  {
+                    "answer_id": "<id:number>",
+                    "count": 0
+                  },
+                  {
+                    "answer_id": "<id:number>",
+                    "count": 0
+                  }
+                ],
+                "me": [],
+                "total_voters": 0,
+                "version": 0
+              }
+            },
+            "reactions": [],
+            "referenced_message": null,
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "role": "member",
+              "username": "alice"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 6,
+          "payload": {
+            "answer_ids": [
+              1
+            ],
+            "channel_id": 1,
+            "counts": [
+              {
+                "answer_id": "<id:number>",
+                "count": 1
+              },
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              }
+            ],
+            "ended": false,
+            "ended_at": "<ts:null>",
+            "message_id": "<id:number>",
+            "total_voters": 1,
+            "user_id": "<id:number>",
+            "version": 1
+          },
+          "seq": "<seq:number>",
+          "type": "poll_update"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 7,
+          "payload": {
+            "answer_ids": [],
+            "channel_id": 1,
+            "counts": [
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              },
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              }
+            ],
+            "ended": false,
+            "ended_at": "<ts:null>",
+            "message_id": "<id:number>",
+            "total_voters": 0,
+            "user_id": "<id:number>",
+            "version": 2
+          },
+          "seq": "<seq:number>",
+          "type": "poll_update"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 8,
+          "payload": {
+            "answer_ids": [
+              2
+            ],
+            "channel_id": 1,
+            "counts": [
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              },
+              {
+                "answer_id": "<id:number>",
+                "count": 1
+              }
+            ],
+            "ended": false,
+            "ended_at": "<ts:null>",
+            "message_id": "<id:number>",
+            "total_voters": 1,
+            "user_id": "<id:number>",
+            "version": 3
+          },
+          "seq": "<seq:number>",
+          "type": "poll_update"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "message_id": "<id:number>"
+          },
+          "type": "poll_end"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "message_id": "<id:number>"
+          },
+          "type": "poll_end_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 9,
+          "payload": {
+            "channel_id": 1,
+            "counts": [
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              },
+              {
+                "answer_id": "<id:number>",
+                "count": 1
+              }
+            ],
+            "ended": true,
+            "ended_at": "<ts:string>",
+            "message_id": "<id:number>",
+            "total_voters": 1,
+            "version": 4
+          },
+          "seq": "<seq:number>",
+          "type": "poll_update"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 3,
+          "payload": {
+            "attachments": [],
+            "channel_id": 1,
+            "client_message_id": "<id:string>",
+            "content": "📊 Lunch?\n- 🍕 Pizza\n- Sushi",
+            "id": "<id:number>",
+            "mention_roles": [],
+            "mentions": [],
+            "mentions_everyone": false,
+            "mentions_here": false,
+            "pinned": false,
+            "poll": {
+              "allow_multiselect": false,
+              "answers": [
+                {
+                  "answer_id": "<id:number>",
+                  "emoji": "🍕",
+                  "text": "Pizza"
+                },
+                {
+                  "answer_id": "<id:number>",
+                  "emoji": null,
+                  "text": "Sushi"
+                }
+              ],
+              "ended": false,
+              "ended_at": "<ts:null>",
+              "expires_at": "<ts:string>",
+              "question": "Lunch?",
+              "results": {
+                "counts": [
+                  {
+                    "answer_id": "<id:number>",
+                    "count": 0
+                  },
+                  {
+                    "answer_id": "<id:number>",
+                    "count": 0
+                  }
+                ],
+                "me": [],
+                "total_voters": 0,
+                "version": 0
+              }
+            },
+            "reactions": [],
+            "referenced_message": null,
+            "reply_to": null,
+            "timestamp": "<ts:string>",
+            "user": {
+              "avatar": "https://fixtures.invalid/alice-avatar.png",
+              "display_name": "Alice Fixture",
+              "id": "<id:number>",
+              "role": "member",
+              "username": "alice"
+            }
+          },
+          "seq": "<seq:number>",
+          "type": "chat_message"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "answer_ids": [
+              1
+            ],
+            "message_id": "<id:number>"
+          },
+          "type": "poll_vote"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "answer_ids": [
+              1
+            ],
+            "message_id": "<id:number>",
+            "version": 1
+          },
+          "type": "poll_vote_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 4,
+          "payload": {
+            "answer_ids": [
+              1
+            ],
+            "channel_id": 1,
+            "counts": [
+              {
+                "answer_id": "<id:number>",
+                "count": 1
+              },
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              }
+            ],
+            "ended": false,
+            "ended_at": "<ts:null>",
+            "message_id": "<id:number>",
+            "total_voters": 1,
+            "user_id": "<id:number>",
+            "version": 1
+          },
+          "seq": "<seq:number>",
+          "type": "poll_update"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "answer_ids": [],
+            "message_id": "<id:number>"
+          },
+          "type": "poll_vote"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "answer_ids": [],
+            "message_id": "<id:number>",
+            "version": 2
+          },
+          "type": "poll_vote_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 5,
+          "payload": {
+            "answer_ids": [],
+            "channel_id": 1,
+            "counts": [
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              },
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              }
+            ],
+            "ended": false,
+            "ended_at": "<ts:null>",
+            "message_id": "<id:number>",
+            "total_voters": 0,
+            "user_id": "<id:number>",
+            "version": 2
+          },
+          "seq": "<seq:number>",
+          "type": "poll_update"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "answer_ids": [
+              2
+            ],
+            "message_id": "<id:number>"
+          },
+          "type": "poll_vote"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "id": "<id:string>",
+          "payload": {
+            "answer_ids": [
+              2
+            ],
+            "message_id": "<id:number>",
+            "version": 3
+          },
+          "type": "poll_vote_ok"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 6,
+          "payload": {
+            "answer_ids": [
+              2
+            ],
+            "channel_id": 1,
+            "counts": [
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              },
+              {
+                "answer_id": "<id:number>",
+                "count": 1
+              }
+            ],
+            "ended": false,
+            "ended_at": "<ts:null>",
+            "message_id": "<id:number>",
+            "total_voters": 1,
+            "user_id": "<id:number>",
+            "version": 3
+          },
+          "seq": "<seq:number>",
+          "type": "poll_update"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "cseq": 7,
+          "payload": {
+            "channel_id": 1,
+            "counts": [
+              {
+                "answer_id": "<id:number>",
+                "count": 0
+              },
+              {
+                "answer_id": "<id:number>",
+                "count": 1
+              }
+            ],
+            "ended": true,
+            "ended_at": "<ts:string>",
+            "message_id": "<id:number>",
+            "total_voters": 1,
+            "version": 4
+          },
+          "seq": "<seq:number>",
+          "type": "poll_update"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

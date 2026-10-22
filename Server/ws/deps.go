@@ -158,9 +158,9 @@ func requirePerm(ctx context.Context, database DispatchReader, perms *permission
 		r := Result{Error: ClientError{Code: ErrCodeInternal, Message: "permission check unavailable"}}
 		return &r
 	}
-	role, err := database.GetRoleForUser(ctx, userID)
+	role, err := database.GetMemberRoles(ctx, userID)
 	if err != nil {
-		slog.Error("ws: requirePerm GetRoleForUser failed",
+		slog.Error("ws: requirePerm GetMemberRoles failed",
 			"user_id", userID, "channel_id", channelID, "err", err)
 		r := Result{Error: ClientError{Code: ErrCodeInternal, Message: "permission check failed"}}
 		return &r
@@ -170,7 +170,7 @@ func requirePerm(ctx context.Context, database DispatchReader, perms *permission
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
 		return &r
 	}
-	if !perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm) {
+	if !perms.HasChannelPerm(ctx, role.Held(), userID, channelID, perm) {
 		r := Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing " + label + " permission"}}
 		return &r
 	}
@@ -188,11 +188,11 @@ func hasPerm(ctx context.Context, database DispatchReader, perms *permissions.Ch
 	if database == nil || perms == nil {
 		return false
 	}
-	role, err := database.GetRoleForUser(ctx, userID)
+	role, err := database.GetMemberRoles(ctx, userID)
 	if err != nil || role == nil {
 		return false
 	}
-	return perms.HasChannelPerm(ctx, role.Permissions, role.ID, userID, channelID, perm)
+	return perms.HasChannelPerm(ctx, role.Held(), userID, channelID, perm)
 }
 
 // subjectFor resolves userID's role bits and both override layers for
@@ -212,14 +212,14 @@ func subjectFor(ctx context.Context, database DispatchReader, perms *permissions
 	if database == nil || perms == nil {
 		return permissions.Subject{}, nil
 	}
-	role, err := database.GetRoleForUser(ctx, userID)
+	role, err := database.GetMemberRoles(ctx, userID)
 	if err != nil {
 		return permissions.Subject{}, err
 	}
 	if role == nil {
 		return permissions.Subject{}, nil
 	}
-	return perms.Subject(ctx, role.Permissions, role.ID, userID, channelID)
+	return perms.Subject(ctx, role.Held(), userID, channelID)
 }
 
 // subjectFor is the hub-wired form of the package-level subjectFor.
@@ -248,7 +248,7 @@ func channelSubject(ctx context.Context, database DispatchReader, perms *permiss
 	}
 	sub.DMParticipant = ok
 	if ok && withBlock {
-		switch err := service.RequireDMNotBlocked(ctx, database, userID, ch.ID); {
+		switch err := service.RequireDMReachable(ctx, database, userID, ch.ID); {
 		case errors.Is(err, service.ErrBlocked):
 			sub.DMBlocked = true
 		case err != nil:
@@ -268,7 +268,7 @@ func joinDenial(err error) ClientError {
 	case errors.Is(err, permissions.ErrArchived):
 		return ClientError{Code: ErrCodeBadRequest, Message: "channel is archived"}
 	case errors.Is(err, permissions.ErrBlocked):
-		return ClientError{Code: ErrCodeForbidden, Message: "cannot join voice: blocked"}
+		return ClientError{Code: ErrCodeForbidden, Message: "cannot join this call"}
 	case errors.Is(err, permissions.ErrTimedOut):
 		return ClientError{Code: ErrCodeTimedOut, Message: "you are timed out"}
 	default:

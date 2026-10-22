@@ -1,0 +1,67 @@
+name: Protocol N-1 Compatibility
+
+# ARCH-027: run the previous release's client dispatcher against the current
+# server wire transcripts. The fixtures under protocol/fixtures/ are forced to
+# match what the server sends today (Server/ws/protocol_epoch1_contract_test.go),
+# so a change that an older client cannot process fails here, in the PR that
+# makes it. Local run and failure guidance: protocol/README.md, "N-1
+# compatibility". The script does the work; this job only gives it a checkout
+# with tags and a Node.
+#
+# Not a required check on dev: it is a separate workflow so it can path-filter
+# on the files that change the wire. The weekly run catches a previous release
+# that moved (a new tag) with no fixture change in flight.
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - "protocol/fixtures/**"
+      - "scripts/protocol-n1-compat.mjs"
+      - "Client/tests/compat/**"
+      - ".github/workflows/protocol-compat.yml"
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to test against (default: the newest release tag)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  n1-compat:
+    name: N-1 client compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The previous release is a tag; the script checks it out as a
+          # separate worktree, so every tag has to be present.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Same Node as ci.yml. The previous release's client declares the same
+      # `^26` engine; the script passes --engine-strict=false for older ones.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+
+      - name: Run the previous release's client against today's wire
+        env:
+          # A dispatch input reaches the shell only through the environment.
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            node scripts/protocol-n1-compat.mjs --tag "$INPUT_TAG"
+          else
+            node scripts/protocol-n1-compat.mjs
+          fi

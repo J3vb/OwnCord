@@ -1,5 +1,5 @@
 {
-  "nextId": 489,
+  "nextId": 493,
   "findings": [
     {
       "id": "OC-0001",
@@ -11314,6 +11314,84 @@
         "revertProof": "pass (before the fix the busy test got 200 instead of 409, and the load test found the -wal beside the restored file and 5 rows instead of 50)"
       },
       "note": "Roadmap phase 0, WP 0-3 (stop-gap). The staged restore is Phase 5."
+    },
+    {
+      "id": "OC-0489",
+      "title": "On Linux the connection diagnostics reported voice signaling as failed during a working call, and its microphone check opened a webview device instead of the one voice uses",
+      "file": "Client/src/lib/connectionDiagnostics.ts",
+      "line": 251,
+      "severity": "low",
+      "why": "Linux voice runs in the native backend through NativeRoom, which has no browser signaling socket (engine.client.ws is undefined), so the ws.readyState check always failed and the media step was skipped. The microphone step called the webview's getUserMedia with the saved native (cpal) device id, which the webview does not know.",
+      "repro": "Linux desktop client, join a voice channel, open Settings > Diagnostics and run the test: Voice signaling shows failed while the call works; the microphone step tests a different device from the one the call uses.",
+      "evidence": "connectionDiagnostics.ts read room.engine.client.ws?.readyState; NativeRoom sets engine = { pcManager: undefined, client: { ws: undefined } }. The mic step used getUserMedia({ deviceId: { exact: <native id> } }).",
+      "suggestedFix": "Ask the native room for its own signaling state, and check the saved microphone against the native device list on Linux.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-14",
+      "hunt": "roadmap-wp-lp-4-2026-10-15",
+      "lens": "platform-parity",
+      "finder": "phase-lp-audit",
+      "fixedDate": "2026-10-15",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/connection-diagnostics.test.ts (Linux native voice cases), Client/src/features/voice/native/nativeRoom.test.ts (maps native events onto livekit RoomEvents)",
+        "revertProof": "pass (before the fix the native signaling case reported failed and the native microphone cases called getUserMedia)"
+      },
+      "note": "Roadmap Phase LP, WP LP-4. Incoming media on Linux stays not-tested until LP-5 adds native stats."
+    },
+    {
+      "id": "OC-0490",
+      "title": "The scale profile's 500-login burst in 10 s is not served on the 2 vCPU reference: about one in five logins gives up, and the per-attempt login time is about 10 s against a 600 ms budget",
+      "file": "Server/auth/admission.go",
+      "line": 69,
+      "severity": "medium",
+      "why": "Affected property: the login-burst budgets (0 give-ups; first attempt to token at most 70 s; REST login p95 / p99 under 600 ms / 1 s) hold for 500 password logins over 10 s at 1,000 and 2,000 online. They do not. At 1,000 online 105 of 500 logins gave up and per-attempt auth_time p95 / p99 was 10,556 / 10,656 ms; at 2,000 (an invalid run for other reasons, see OC-0492) 106 of 500 gave up and p95 / p99 was 11,949 / 12,787 ms. The server averaged 1.35 of its 2 cores (peak 2.03) in the 1,000 run's login window against 0.14 in steady, consistent with a window bound by password hashing, which the admission budget (twice the core count, here 4 concurrent computations) bounds. A login-burst VU retries a refusal up to 12 attempts with a 1 + 0.5 x attempt second pause between them (ws-load.js, LOGIN_ATTEMPTS and authenticate()), 38.5 s of pauses plus the time of each attempt, which the docs call about 45 s; that is shorter than the 70 s budget for a token, so a VU can give up before the 70 s a user is allowed to wait. The longest login that did succeed took 53,727 ms at 1,000 online. The successful attempts' auth_time of about 10.1-10.6 s sits at the 10 s AdmissionWait (admission.go:55), which suggests most of it is queue wait.",
+      "repro": "`gh workflow run load-baseline.yml -f profile=scale -f scale_connections=1000 --ref dev` and read login_burst_giveups, login_burst_ok, login_burst_time and auth_time{phase:login} from k6-summary.json; the same at scale_connections=2000.",
+      "evidence": "Run 39069195764, job 117503072275 (scale_connections=1000, dev 59197a25, 2026-10-17): login window auth_time 10,125 / 10,556 / 10,656 ms (p50 / p95 / p99, 395 samples), login_burst_ok 395, login_burst_giveups 105, login_burst_time max 53,727 ms, server CPU 1.35 avg / 2.03 peak of 2. Run 39069193852, job 117503067669 (scale_connections=2000): 394 ok, 106 give-ups, auth_time p95 / p99 11,949 / 12,787 ms, login_burst_time max 77,270 ms, server CPU 1.80 / 2.09. Published in docs/capacity.md, Scale profile > Measured.",
+      "suggestedFix": "Do not loosen the budget. Options for the owner and the next work package to evaluate: the 4 vCPU tier (which doubles the admission budget and the hash throughput), a longer admission wait or a larger admission queue for a burst the server can finish inside the budget, or a login-burst budget derived from the measured bcrypt rate with the client retry schedule aligned to it.",
+      "confidence": "high",
+      "status": "open",
+      "found": "2026-10-17",
+      "hunt": "roadmap-wp-4.2-2026-10-17",
+      "lens": "perf",
+      "finder": "wp-4.2-scale-run",
+      "note": "Roadmap Phase 4, WP 4.2."
+    },
+    {
+      "id": "OC-0491",
+      "title": "At 1,000 online a full reconnect herd returns everyone to ready in time but misses the per-dial budgets: dial to ready p95 13.9 s against 5 s, connect p95 7.5 s against 2 s",
+      "file": "Server/ws/serve_ready_encode.go",
+      "line": 79,
+      "severity": "low",
+      "why": "Affected property: in the herd window every connection redials and receives a full ready within the per-dial budgets (dial to ready p95 at most 5 s; connect p95 under 2 s) as well as the all-ready budget (at most 30 s). At 1,000 online all 1,000 were ready again 29,523 ms after the herd started, inside the 30 s budget, but dial to ready p95 was 13,918 ms and ws_connect_time p95 was 7,535 ms. Population fell to 581 at the lowest poll. There were 0 backpressure queue disconnects. k6 peaked at 2.02 of 2 cores in the same window and the server averaged 0.22 of 2 (peak 0.47), so how much of the per-dial figure is generator time is not established. The file named is where the full ready payload is built for each redial (buildReady); that it is the dominant cost is a hypothesis, not a finding.",
+      "repro": "`gh workflow run load-baseline.yml -f profile=scale -f scale_connections=1000 --ref dev` and read ws_ready_time{phase:herd}, ws_connect_time{phase:herd} and herd_ready_at_ms from k6-summary.json.",
+      "evidence": "Run 39069195764, job 117503072275 (dev 59197a25, 2026-10-17): herd drops 1,000, readies 1,000, all ready 29,523 ms; ws_ready_time p50 / p95 / p99 9,049 / 13,918 / 15,071 ms; auth_ok 1,544 / 3,091 / 4,091 ms; ws_connect_time p95 7,535 ms; server CPU 0.22 avg / 0.47 peak, k6 0.91 / 2.02 of 2. Published in docs/capacity.md, Scale profile > Measured.",
+      "suggestedFix": "Do not loosen the budget. Establish first where the time goes (connect, auth_ok or ready build) with the generator off the critical path, then decide whether the work is in the server (ready payload cost, upgrade admission) or in a lighter driver; both are the owner's and the next work package's call.",
+      "confidence": "high",
+      "status": "open",
+      "found": "2026-10-17",
+      "hunt": "roadmap-wp-4.2-2026-10-17",
+      "lens": "perf",
+      "finder": "wp-4.2-scale-run",
+      "note": "Roadmap Phase 4, WP 4.2."
+    },
+    {
+      "id": "OC-0492",
+      "title": "The 2,000-online scale run is not a valid measurement: the steady population was not held (min 1,917 of 2,000) and steady latency was seconds, with the server mostly idle and the load generator saturated at its peaks; the cause is not established",
+      "file": "Server/scripts/k6/ws-load.js",
+      "line": 1128,
+      "severity": "medium",
+      "why": "Affected property: a scale run at 2,000 holds the whole population in steady (obs_population{phase:steady} min at least N) and measures the server. The 2,000 run failed that validity gate with a minimum of 1,917, so it did not measure what it claims and is published as invalid. In steady the acknowledgement and delivery p95 were 11,153 and 8,756 ms against 150 and 200 ms, with 132 reconnects inside the window. The server averaged 0.50 of its 2 cores (peak 0.67) while k6 peaked at 2.03 of its 2 and the server-side writer waited 4.83 s over the window. Latency is measured at k6 receipt, so a saturated event loop inflates it. The evidence points at the generator, and the run does not prove it. Burst and herd are marked GENERATOR-LIMITED. Until the cause is known there is no valid 2,000 result, and neither a server ceiling nor a generator ceiling may be claimed from this run.",
+      "repro": "`gh workflow run load-baseline.yml -f profile=scale -f scale_connections=2000 --ref dev` and read obs_population{phase:steady}, the per-window latency and windows-cpu.txt.",
+      "evidence": "Run 39069193852, job 117503067669 (scale_connections=2000, dev 59197a25, 2026-10-17): 18 of 220 threshold expressions failed including the population gate; steady population min 1,917, ack p50 / p95 / p99 55.5 / 11,153 / 25,921 ms, delivery 62 / 8,756 / 21,285 ms; CPU server / k6 avg and peak: steady 0.50 / 0.67 and 1.42 / 2.03, burst 0.82 / 0.87 and 1.99 / 2.05 (generator-limited), herd 0.50 / 0.90 and 1.98 / 2.05 (generator-limited). topic_sheds_total 0, obs_ws_conn_rejects 0, queue disconnects 0. Published in docs/capacity.md, Scale profile > Measured.",
+      "suggestedFix": "Do not make a 2,000 claim and do not change a budget. Establish whether the generator or the server is the limit before any 2,000 result is published: per the generator notes in docs/capacity.md (decision D6) a larger runner or a lighter driver is the owner's call, and the same constrained-server recipe must be kept.",
+      "confidence": "medium",
+      "status": "open",
+      "found": "2026-10-17",
+      "hunt": "roadmap-wp-4.2-2026-10-17",
+      "lens": "perf",
+      "finder": "wp-4.2-scale-run",
+      "note": "Roadmap Phase 4, WP 4.2."
     }
   ]
 }

@@ -18,7 +18,7 @@ use windows_core::{Interface, HSTRING};
 /// The origin tauri serves the main window from: the dev server in dev, the
 /// custom-protocol host in a release build. Taken from config rather than
 /// `window.url()`, which reads `about:blank` until the first navigation commits.
-fn app_origin(config: &tauri::Config, https: bool) -> Option<String> {
+pub(crate) fn app_origin(config: &tauri::Config, https: bool) -> Option<String> {
     let url = if tauri::is_dev() {
         config.build.dev_url.clone()?
     } else {

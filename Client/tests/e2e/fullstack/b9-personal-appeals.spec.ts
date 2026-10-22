@@ -23,7 +23,7 @@ async function bobId(server: TestServer): Promise<number> {
 
 async function openSafety(page: Page): Promise<Locator> {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("tab", { name: "Safety" }).click();
+  await page.getByRole("tab", { name: "Privacy & Safety" }).click();
   const pane = page.locator(".safety-tab");
   await expect(pane.getByRole("heading", { name: "Appeals" })).toBeVisible();
   return pane;

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
@@ -40,10 +39,10 @@ const (
 
 // EraseAccount hard-deletes every data class attributable to userID
 // (docs/architecture/data-lifecycle.md, classes 1–20; class 21, the audit
-// history, is B4-10's) in one transaction on the writer connection, with
-// PRAGMA secure_delete on for that transaction so the erased rows' bytes do
-// not survive in freed pages (HP-4 decision 2), and truncates the WAL after
-// commit. The last-admin guard and the OC-0294/OC-0293 mention-count
+// history, is B4-10's) in three stages on the writer connection — lock, drain
+// in chunks, finish (erasure_chunks.go) — each a short transaction with
+// PRAGMA secure_delete on, so the erased rows' bytes do not survive in freed
+// pages (HP-4 decision 2), and truncates the WAL after the last commit. The last-admin guard and the OC-0294/OC-0293 mention-count
 // reversal are kept from the anonymising deletion this replaces.
 //
 // Children are deleted before the users row: messages.user_id,
@@ -113,232 +112,13 @@ func (d *DB) CountAdminClassAccounts(ctx context.Context) (int, error) {
 	var n int
 	if err := d.reader.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM users
-		  WHERE role_id IN (SELECT id FROM roles WHERE id IN (?, ?) OR (permissions & ?) != 0)
-		    AND `+notBannedClause,
+		  WHERE EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role_id IN
+		        (SELECT id FROM roles WHERE id IN (?, ?) OR (permissions & ?) != 0))
+		    AND `+notBannedClause+underErasureClause,
 		permissions.OwnerRoleID, permissions.AdminRoleID, permissions.Administrator).Scan(&n); err != nil {
 		return 0, fmt.Errorf("CountAdminClassAccounts: %w", err)
 	}
 	return n, nil
-}
-
-// eraseAccount is EraseAccount and ReplayEraseAccount: guard selects the
-// last-admin guard.
-func (d *DB) eraseAccount(ctx context.Context, userID int64, subjectToken string, guard bool) (*ErasureJob, error) {
-	conn, err := d.writer.Conn(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("EraseAccount conn: %w", err)
-	}
-	defer conn.Close() //nolint:errcheck
-
-	// secure_delete is per connection. The writer pool is one connection, so
-	// this is the connection every later write uses too; restore it after.
-	var prevSecureDelete int
-	if err := conn.QueryRowContext(ctx, `PRAGMA secure_delete`).Scan(&prevSecureDelete); err != nil {
-		return nil, fmt.Errorf("EraseAccount read secure_delete: %w", err)
-	}
-	if _, err := conn.ExecContext(ctx, `PRAGMA secure_delete = ON`); err != nil {
-		return nil, fmt.Errorf("EraseAccount secure_delete: %w", err)
-	}
-	defer func() {
-		if _, err := conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf(`PRAGMA secure_delete = %d`, prevSecureDelete)); err != nil {
-			slog.Warn("erasure: could not restore secure_delete", "user_id", userID, "err", err)
-		}
-	}()
-
-	job, err := eraseAccountTx(ctx, conn, userID, subjectToken, guard)
-	if err != nil {
-		return nil, err
-	}
-	// B6-11 drill 9's crash seam: the transaction has committed and the
-	// checkpoint below has not run, which is the window a test needs to read
-	// the bytes as a crash leaves them. Nil in production.
-	if d.testEraseCommitHook != nil {
-		d.testEraseCommitHook()
-	}
-	// The audit writer's rule for the subject, now that the transaction has
-	// committed and while this connection is still held: an audit entry
-	// about the subject that a flush inserts after the UPDATE above is
-	// written unlinked (AuditWriter.Unlink), and a refused transaction has
-	// installed nothing.
-	d.unlinkAuditsFor(userID, subjectToken)
-
-	// The WAL still holds the transaction's frames, erased bytes included,
-	// until a checkpoint copies them into the main file and TRUNCATE drops
-	// the log. Best effort: a reader mid-transaction makes the checkpoint
-	// partial and the next one finishes it.
-	//
-	// "The next one" is not left to SQLite (B6-11 task 5). The autocheckpoint
-	// that follows is PASSIVE: it copies frames into the main file and never
-	// truncates the log, so the erased bytes stay in the -wal until something
-	// runs TRUNCATE again — and nothing does. So a checkpoint that comes back
-	// blocked or partial owes one, and CheckpointErasureWAL (start-up, and the
-	// runner tick behind FinishOwedErasureCheckpoint) is what pays it.
-	busy, logFrames, checkpointed, err := walCheckpointTRUNCATE(ctx, conn)
-	switch {
-	case err != nil:
-		// Whatever the error was, the log is very likely still full. Set the
-		// flag rather than work out which failures left frames behind: a
-		// retry that finds nothing to do costs one pragma.
-		d.checkpointOwed.Store(true)
-		slog.Warn("erasure: WAL checkpoint failed", "user_id", userID, "err", err)
-	case !walTruncated(busy, logFrames, checkpointed):
-		d.checkpointOwed.Store(true)
-		slog.Info("erasure: WAL checkpoint incomplete, a later checkpoint finishes it", "user_id", userID, "busy", busy, "log", logFrames, "checkpointed", checkpointed)
-	default:
-		d.checkpointOwed.Store(false)
-	}
-	return job, nil
-}
-
-// walCheckpointTRUNCATE runs one wal_checkpoint(TRUNCATE) on conn and reports
-// SQLite's own triple: whether the checkpoint was blocked, how many frames the
-// log held, and how many of them are in the main database.
-//
-// conn is the caller's because the caller that matters most — eraseAccount —
-// is already holding the sole writer connection. It runs under WithoutCancel:
-// the frames being copied are the erased ones, and a cancelled request context
-// must not be what leaves them in the log.
-func walCheckpointTRUNCATE(ctx context.Context, conn *sql.Conn) (busy, logFrames, checkpointed int, err error) {
-	err = conn.QueryRowContext(context.WithoutCancel(ctx), `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logFrames, &checkpointed)
-	return busy, logFrames, checkpointed, err
-}
-
-// walTruncated reports whether the triple says the log is now empty: the
-// checkpoint was not blocked, and every frame it held is in the main file. A
-// database that is not in WAL mode reports -1 for both counts, which this
-// reads as empty — there is no log to hold anything.
-func walTruncated(busy, logFrames, checkpointed int) bool {
-	return busy == 0 && checkpointed >= logFrames
-}
-
-// CheckpointErasureWAL runs one wal_checkpoint(TRUNCATE) on the writer and
-// reports whether the log is empty afterwards.
-//
-// It is called at start-up, before anything serves, and it is unconditional
-// for the window a crash leaves behind: an erasure whose transaction committed
-// and whose checkpoint never ran. The owed flag cannot cover that window,
-// because it is process-local and died with the process that set it — only a
-// pass that runs on every boot can finish what the last one could not. It also
-// runs over the frames the two marker replays write on their way here.
-//
-// Best effort in the same sense eraseAccount's checkpoint is: a reader
-// mid-transaction can block it again, which is the tick's to finish rather
-// than a reason to refuse a boot. Callers read the bool, not the error, to
-// decide whether anything is still owed.
-func (d *DB) CheckpointErasureWAL(ctx context.Context) (bool, error) {
-	conn, err := d.writer.Conn(ctx)
-	if err != nil {
-		d.checkpointOwed.Store(true)
-		return false, fmt.Errorf("erasure WAL checkpoint: %w", err)
-	}
-	defer conn.Close() //nolint:errcheck
-	return d.checkpointErasureWAL(ctx, conn)
-}
-
-// FinishOwedErasureCheckpoint is the runner tick's half of the same job: it
-// pays the debt an erasure left behind, and does nothing at all on a tick
-// where there is none — which is every tick but the ones right after a
-// checkpoint came back blocked.
-func (d *DB) FinishOwedErasureCheckpoint(ctx context.Context) (bool, error) {
-	if !d.checkpointOwed.Load() {
-		return false, nil
-	}
-	attempt := d.checkpointAttempts.Add(1)
-	done, err := d.CheckpointErasureWAL(ctx)
-	if err != nil {
-		slog.Warn("erasure: the retried WAL checkpoint failed; the next tick tries again", "attempt", attempt, "err", err)
-		return false, err
-	}
-	if !done {
-		slog.Info("erasure: the retried WAL checkpoint is still blocked; the next tick tries again", "attempt", attempt)
-		return false, nil
-	}
-	slog.Info("erasure: the retried WAL checkpoint finished; the erased frames are out of the log", "attempts", attempt)
-	return true, nil
-}
-
-// checkpointErasureWAL is the shared body of the two above: one TRUNCATE on
-// conn, with the outcome recorded in the owed flag — set when the log is not
-// empty afterwards, cleared when it is.
-func (d *DB) checkpointErasureWAL(ctx context.Context, conn *sql.Conn) (bool, error) {
-	busy, logFrames, checkpointed, err := walCheckpointTRUNCATE(ctx, conn)
-	if err != nil {
-		d.checkpointOwed.Store(true)
-		return false, fmt.Errorf("erasure WAL checkpoint: %w", err)
-	}
-	done := walTruncated(busy, logFrames, checkpointed)
-	d.checkpointOwed.Store(!done)
-	return done, nil
-}
-
-// eraseAccountTx is EraseAccount's transaction; guard selects the
-// last-admin guard (off for a marker replay).
-func eraseAccountTx(ctx context.Context, conn *sql.Conn, userID int64, subjectToken string, guard bool) (*ErasureJob, error) {
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("EraseAccount begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-
-	var username string
-	if err := tx.QueryRowContext(ctx, `SELECT username FROM users WHERE id = ?`, userID).Scan(&username); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("EraseAccount user %d: %w", userID, ErrNotFound)
-		}
-		return nil, fmt.Errorf("EraseAccount fetch user: %w", err)
-	}
-	if guard {
-		if err := deleteAccountAdminGuard(ctx, tx, userID); err != nil {
-			return nil, err
-		}
-	}
-	dmChannelIDs, err := deleteAccountDMChannels(ctx, tx, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	files, err := erasureCollectFiles(ctx, tx, userID)
-	if err != nil {
-		return nil, err
-	}
-	if err := erasureReverseMentionCounts(ctx, tx, userID); err != nil {
-		return nil, err
-	}
-	if err := erasureDeleteLockouts(ctx, tx, userID, username); err != nil {
-		return nil, err
-	}
-	for _, s := range erasureStatements {
-		if _, err := tx.ExecContext(ctx, s.query, userID); err != nil {
-			return nil, fmt.Errorf("EraseAccount %s: %w", s.label, err)
-		}
-	}
-	assetFiles, err := erasureReassignAssets(ctx, tx, userID)
-	if err != nil {
-		return nil, err
-	}
-	files = append(files, assetFiles...)
-	if err := deleteAccountCloseDMChannels(ctx, tx, userID, dmChannelIDs); err != nil {
-		return nil, err
-	}
-	if err := erasureUnlinkPrincipalRows(ctx, tx, userID, subjectToken); err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, userID); err != nil {
-		return nil, fmt.Errorf("EraseAccount users: %w", err)
-	}
-
-	encoded, err := json.Marshal(files)
-	if err != nil {
-		return nil, fmt.Errorf("EraseAccount encode files: %w", err)
-	}
-	jobID, err := dbgen.New(tx).InsertErasureJob(ctx, dbgen.InsertErasureJobParams{UserID: userID, Files: string(encoded)})
-	if err != nil {
-		return nil, fmt.Errorf("EraseAccount job: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("EraseAccount commit: %w", err)
-	}
-	return &ErasureJob{ID: jobID, UserID: userID, State: ErasureStateDBDone, Files: files}, nil
 }
 
 // erasureStatements are the per-class deletes, children before parents, all
@@ -360,9 +140,28 @@ var erasureStatements = []struct {
 	// The messages_ad trigger (migration 001) drops each row from the FTS
 	// index; message_mentions and reactions on these rows cascade.
 	{"messages", `DELETE FROM messages WHERE user_id = ?`},
+	// Group event rows naming the subject (migration 065, WP 3B-10). A row the
+	// subject authored went with the statement above. A row another member
+	// authored that names the subject as its target (added, removed) would
+	// survive the users delete below as a message with a dangling target.
+	{"group events naming the subject", `DELETE FROM messages WHERE id IN (SELECT message_id FROM message_group_events WHERE target_user_id = ?)`},
+	// Call log participation (migration 064). Call rows the subject authored cascade with messages.
+	{"message_call_participants", `DELETE FROM message_call_participants WHERE user_id = ?`},
 	{"message_delivery_receipts", `DELETE FROM message_delivery_receipts WHERE user_id = ?`},
 	{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
+	// Poll votes (migration 073, WP 6.9b). Votes on polls the subject authored
+	// went with those messages above. Counts are always recomputed, so the
+	// polls the subject voted in read exactly on the next update or read.
+	// The version bump comes first, in the same transaction, so a client that
+	// refetches after the votes went reads counts that are newer than any copy
+	// it holds, and a merge that keeps the higher version takes them.
+	{"poll versions", `UPDATE polls SET version = version + 1 WHERE message_id IN (SELECT DISTINCT message_id FROM poll_votes WHERE user_id = ?)`},
+	{"poll_votes", `DELETE FROM poll_votes WHERE user_id = ?`},
 	{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
+	// Mention ledger (migration 063): receipts naming the subject as the
+	// recipient. Receipts for the subject's own messages go with those messages
+	// through the cascade above.
+	{"mention_receipts", `DELETE FROM mention_receipts WHERE user_id = ?`},
 	{"sessions", `DELETE FROM sessions WHERE user_id = ?`},
 	// Web Push subscriptions (migration 045, B5-4, class 2a): the users
 	// delete below would cascade this too, but a surviving endpoint is a
@@ -384,8 +183,25 @@ var erasureStatements = []struct {
 	// otherwise outlives the erasure. The policy stays in effect — only the
 	// link to who set it is cut, as with the recovery_assists issuer above.
 	{"channel_retention setter", `UPDATE channel_retention SET updated_by = 0 WHERE updated_by = ?`},
+	// Private profile notes (migration 069, class 16a): notes the subject keeps
+	// and notes others keep about the subject. The users delete below would
+	// cascade both, but this is the explicit statement the inventory's zero is
+	// proved against.
+	{"user_notes", `DELETE FROM user_notes WHERE owner_id = ?1 OR target_id = ?1`},
+	// DM privacy settings (migration 070, class 16b): one row per user, keyed
+	// by the owner. The users delete below would cascade it, but this is the
+	// explicit statement the inventory's zero is proved against.
+	{"user_privacy", `DELETE FROM user_privacy WHERE user_id = ?1`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
+	// Category permission templates (migration 076, class 18c): the per-member
+	// rows of a category's template. The users delete below would cascade them,
+	// but this is the explicit statement the inventory's zero is proved against.
+	{"category_user_overrides", `DELETE FROM category_user_overrides WHERE user_id = ?`},
+	// Thread follows (migration 079, class 18d): the subject's membership rows.
+	// The users delete below would cascade them, but this is the explicit
+	// statement the inventory's zero is proved against.
+	{"thread_members", `DELETE FROM thread_members WHERE user_id = ?`},
 	// Message requests and trusted senders (migration 046, B5-6, classes 14c
 	// and 14d): both tables name a sender and a recipient, so an erasure of
 	// either party needs both columns — the users delete below would cascade
@@ -402,6 +218,11 @@ var erasureStatements = []struct {
 	{"nsfw_acknowledgements", `DELETE FROM nsfw_acknowledgements WHERE user_id = ?`},
 	{"gif_favorites", `DELETE FROM gif_favorites WHERE user_id = ?`},
 	{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
+	// Group DM owner (migration 065): hand the group to its lowest remaining
+	// member who is not banned, the same rule a leave applies (lowestMemberSQL),
+	// so dm_owner_id keeps naming a current member. A group with no member left
+	// gets NULL.
+	{"group DM owner", `UPDATE channels SET dm_owner_id = ` + lowestMemberSQL("channels.id") + ` WHERE dm_owner_id = ?`},
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},
 	{"invites redeemed", `UPDATE invites SET redeemed_by = NULL WHERE redeemed_by = ?`},
@@ -410,8 +231,10 @@ var erasureStatements = []struct {
 	// count, but the link to the erased account is cut. Rows for the subject's
 	// OWN invites are already gone via the invite_id cascade above.
 	{"invite redemptions", `UPDATE invite_redemptions SET user_id = NULL WHERE user_id = ?`},
-	// Replay events naming the subject (HP-4 decision 1).
-	{"events", `DELETE FROM events WHERE ` + EventNamesUserPredicate},
+	// Replay events naming the subject (HP-4 decision 1) are not here: the
+	// drain walks the whole table in key windows, and the finish stage sweeps
+	// only what was written since the lock (eraseSubjectRows), because a JSON
+	// predicate over every row is the slowest statement of the lot.
 }
 
 // EventNamesUserPredicate is the SQL that decides whether a persisted replay
@@ -420,7 +243,9 @@ var erasureStatements = []struct {
 // (ws.wrapWithSeq), so every lookup goes through $.payload: state frames
 // carry user_id (presence, typing, reactions, voice, member_ban), message
 // frames carry the author as user.id, chat frames list the mentioned ids
-// under mentions, a relayed E2EE offer names its sender as from_user_id, and
+// under mentions, a call log row lists the people who joined under
+// call.participants, a group add or remove row names its target as
+// group_event.target_user_id, a relayed E2EE offer names its sender as from_user_id, and
 // a presence_batch lists each user under updates[].user_id.
 // ws.eventNamesUser is the same rule over the bytes in the ring buffer; the
 // two must stay in step.
@@ -429,6 +254,8 @@ const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?
 	 OR json_extract(payload, '$.payload.from_user_id') = ?1
 	 OR json_extract(payload, '$.payload.referenced_message.user.id') = ?1
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.mentions') WHERE json_each.value = ?1)
+	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.call.participants') WHERE json_each.value = ?1)
+	 OR json_extract(payload, '$.payload.group_event.target_user_id') = ?1
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.updates') WHERE json_extract(json_each.value, '$.user_id') = ?1))`
 
 // DeleteEventsForUser removes every persisted replay event naming userID —
@@ -445,202 +272,6 @@ func (d *DB) DeleteEventsForUser(ctx context.Context, userID int64) (int64, erro
 		return 0, fmt.Errorf("DeleteEventsForUser RowsAffected: %w", err)
 	}
 	return n, nil
-}
-
-// erasureUnlinkPrincipalRows runs every "an erased user acted here" unlink in
-// one call — audit_log, reports, and moderation_actions — so eraseAccountTx
-// carries one branch for the group instead of one per table (kept under the
-// cyclop budget; the three are independent and each already reports its own
-// wrapped error).
-func erasureUnlinkPrincipalRows(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
-	if err := erasureUnlinkAudit(ctx, tx, userID, subjectToken); err != nil {
-		return err
-	}
-	if err := erasureUnlinkReports(ctx, tx, userID, subjectToken); err != nil {
-		return err
-	}
-	if err := erasureUnlinkModerationActions(ctx, tx, userID, subjectToken); err != nil {
-		return err
-	}
-	return erasureUnlinkAppeals(ctx, tx, userID, subjectToken)
-}
-
-// erasureUnlinkAudit is the unlinkable integrity history (B4-10, BPR-053):
-// every audit row the subject appears in — as actor, or as a user target —
-// keeps its action, time and position but loses the id and its free-text
-// detail, and carries the deletion marker's token instead (NULL when the
-// erasure ran without a marker store): in actor_token where the subject
-// acted, in subject_token where they were the target, so a row naming two
-// erased subjects keeps both (migration 041). "An erasure happened, by this
-// actor class, at this time" survives; "of whom" needs the erasure key.
-func erasureUnlinkAudit(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
-	var token any
-	if subjectToken != "" {
-		token = subjectToken
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE audit_log SET actor_id = 0, detail = '', actor_token = ? WHERE actor_id = ?`, token, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink audit actor: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE audit_log SET target_id = 0, detail = '', subject_token = ? WHERE target_type = 'user' AND target_id = ?`, token, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink audit target: %w", err)
-	}
-	return nil
-}
-
-// erasureUnlinkReports is B5-8's half of decision 7 (strengthened on
-// review): a report names two principals — the reporter and the subject —
-// each with its own bare-id-plus-token column, the same two-token shape
-// erasureUnlinkAudit applies to audit_log (migrations 038/041), for the same
-// reason: one erased principal must not overwrite the other's token.
-//
-// On the SUBJECT's erasure: every evidence row of every report about them,
-// and every evidence row they authored as context in someone else's report,
-// is hard-deleted — this is the half that keeps B4-9's signed exit condition
-// true, a restored backup cannot resurrect the content. The reports row
-// itself SURVIVES, rewritten to id 0 plus the token, detail and target_ref
-// cleared, and — if still open — closed as subject_erased: an unlinkable
-// outcome row, action/time/order and the token, nothing else of the
-// subject's (S5-d). Correction: "no identity" means no identity of the erased
-// SUBJECT; reporter_id and assignee_id stay, each unlinked by its own
-// principal's erasure, and channel_id stays as a plain reference (a channel has
-// no erasure right) (TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns). An
-// implementation that deletes the row instead of rewriting it passes a test
-// that only checks the content is gone and fails the negative control that
-// checks the row (and its state) survives — this is the abuse path decision
-// 7 was strengthened to close: report someone, they erase, no trace the
-// report ever existed.
-//
-// On the REPORTER's erasure: only reporter_id/reporter_token change. The
-// report and its outcome are not the reporter's content and must not be
-// touched otherwise (TestReport_ReporterErasureKeepsTheReport).
-//
-// Notes and evidence authored by an erased MODERATOR, and assignments to
-// them, are unlinked the same way everywhere else in this file unlinks an
-// actor: id to 0, token filled.
-func erasureUnlinkReports(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
-	var token any
-	if subjectToken != "" {
-		token = subjectToken
-	}
-	// 22c: evidence authored by the subject anywhere (their own reports' seq
-	// 0, or context rows in someone else's report) is content and is
-	// hard-deleted, not unlinked.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM report_evidence WHERE author_id = ?`, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink report evidence authored: %w", err)
-	}
-	// 22a: every evidence row of a report ABOUT the subject is content too.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM report_evidence WHERE report_id IN (SELECT id FROM reports WHERE subject_id = ?)`, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink report evidence about subject: %w", err)
-	}
-	// HP-5 review widening: the surviving outcome row must carry no content
-	// of any kind, and internal notes about the subject are content the
-	// subject never even saw — they do not get to keep the moderator's own
-	// account of them either.
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM report_notes WHERE report_id IN (SELECT id FROM reports WHERE subject_id = ?)`, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink report notes about subject: %w", err)
-	}
-	// 22a: the reports row about the subject survives, rewritten.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE reports
-		    SET subject_id = 0,
-		        subject_token = ?,
-		        detail = '',
-		        target_ref = '',
-		        state = CASE WHEN closed_at IS NULL THEN 'subject_erased' ELSE state END,
-		        outcome = CASE WHEN closed_at IS NULL THEN 'subject_erased' ELSE outcome END,
-		        closed_at = COALESCE(closed_at, datetime('now')),
-		        updated_at = datetime('now')
-		  WHERE subject_id = ?`, token, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink report subject: %w", err)
-	}
-	// 22b: the reporter's own reports are not their content, EXCEPT the
-	// free-text detail they personally wrote — that is the reporter's
-	// content just as much as the evidence snapshot is the subject's, so it
-	// is cleared alongside the principal columns (HP-5 review widening).
-	// The report and its outcome (state/outcome/closed_at) are untouched.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE reports SET reporter_id = 0, reporter_token = ?, detail = '' WHERE reporter_id = ?`, token, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink report reporter: %w", err)
-	}
-	// 22d: notes authored by an erased moderator.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE report_notes SET author_id = 0, author_token = ? WHERE author_id = ?`, token, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink report notes: %w", err)
-	}
-	// 22e: assignments to an erased moderator.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE reports SET assignee_id = 0 WHERE assignee_id = ?`, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink report assignment: %w", err)
-	}
-	// 22f: report_events (second Codex review) is metadata, not content — an
-	// action word, a time, an actor link — so unlinking the actor is the
-	// whole job, the same shape audit_log gets, and there is no row to
-	// delete or rewrite otherwise.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE report_events SET actor_id = 0, actor_token = ? WHERE actor_id = ?`, token, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink report events: %w", err)
-	}
-	return nil
-}
-
-// erasureUnlinkModerationActions is B5-9's half of erasure, beside
-// erasureUnlinkReports: the SUBJECT's own rows cascade with the users DELETE
-// below (moderation_actions.target_id is ON DELETE CASCADE — S6 says a
-// warning or timeout row is deleted, not kept, unlike a report's outcome),
-// so there is nothing for this function to do on that side. What it unlinks
-// is the erased user acting as a MODERATOR elsewhere: actor_id/actor_token
-// (the bare-id-plus-token pattern erasureUnlinkAudit and erasureUnlinkReports
-// both use) and lifted_by (a bare id with no token column, mirroring
-// reports.assignee_id — inventory classes 23a and 23b, SubjectInventory).
-func erasureUnlinkModerationActions(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
-	var token any
-	if subjectToken != "" {
-		token = subjectToken
-	}
-	// 23b: actions taken BY the subject as a moderator.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE moderation_actions SET actor_id = 0, actor_token = ? WHERE actor_id = ?`, token, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink moderation action actor: %w", err)
-	}
-	// A timeout lifted by the erased moderator.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE moderation_actions SET lifted_by = 0 WHERE lifted_by = ?`, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink moderation action lifter: %w", err)
-	}
-	return nil
-}
-
-// erasureUnlinkAppeals is B5-10's half of erasure, beside
-// erasureUnlinkModerationActions: the APPELLANT's own appeal rows cascade
-// with the users DELETE below (appeals.appellant_id is ON DELETE CASCADE —
-// S6-d says an appeal is deleted for the appellant, not kept, unlike a
-// report's outcome row: the UNIQUE(action_id) memory that forbids re-appeal
-// survives with the row gone, because the action itself still exists and a
-// fresh appeal against it would need a fresh appellant who no longer
-// exists either), so there is nothing for this function to do on that side.
-// What it unlinks is the erased user acting as a MODERATOR elsewhere:
-// decided_by/decided_by_token (the bare-id-plus-token pattern every other
-// unlinker in this file uses) and assignee_id (a bare id with no token
-// column, mirroring reports.assignee_id and moderation_actions.lifted_by —
-// inventory class 24b, SubjectInventory).
-func erasureUnlinkAppeals(ctx context.Context, tx *sql.Tx, userID int64, subjectToken string) error {
-	var token any
-	if subjectToken != "" {
-		token = subjectToken
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE appeals SET decided_by = 0, decided_by_token = ? WHERE decided_by = ?`, token, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink appeal decider: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE appeals SET assignee_id = 0 WHERE assignee_id = ?`, userID); err != nil {
-		return fmt.Errorf("EraseAccount unlink appeal assignment: %w", err)
-	}
-	return nil
 }
 
 // erasureCollectFiles lists the stored_as names of every attachment the
@@ -734,9 +365,11 @@ func erasureDeleteLockouts(ctx context.Context, tx *sql.Tx, userID int64, userna
 func erasureReassignAssets(ctx context.Context, tx *sql.Tx, userID int64) ([]string, error) {
 	var heir int64
 	err := tx.QueryRowContext(ctx,
-		`SELECT u.id FROM users u JOIN roles r ON r.id = u.role_id
+		`SELECT u.id FROM users u
 		  WHERE u.id != ?
-		  ORDER BY CASE WHEN r.id IN (?, ?) OR (r.permissions & ?) != 0 THEN 0 ELSE 1 END, u.id
+		  ORDER BY CASE WHEN EXISTS (
+		      SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+		       WHERE ur.user_id = u.id AND (r.id IN (?, ?) OR (r.permissions & ?) != 0)) THEN 0 ELSE 1 END, u.id
 		  LIMIT 1`,
 		userID, permissions.OwnerRoleID, permissions.AdminRoleID, permissions.Administrator,
 	).Scan(&heir)

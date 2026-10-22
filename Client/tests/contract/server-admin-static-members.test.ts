@@ -23,6 +23,7 @@ const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
 const ADMINISTRATOR = 0x40000000;
 const MANAGE_ROLES = 0x1000000;
 const BAN_MEMBERS = 0x80000;
+const MANAGE_NICKNAMES = 0x800000;
 
 type Responder = (path: string, method: string) => unknown;
 type Sent = { call: string; body: unknown };
@@ -47,9 +48,19 @@ async function boot(calls: string[], respond: Responder, sent: Sent[] = []) {
         calls.push(`${method} ${p}`);
         if (typeof opts.body === "string")
           sent.push({ call: `${method} ${p}`, body: JSON.parse(opts.body) });
-        const json =
+        const out =
           p === "/setup/status" ? { needs_setup: false } : ((await respond(p, method)) ?? {});
-        return { ok: true, status: 200, json: async () => json } as Response;
+        // A responder answers a refusal with { __status, body }.
+        const refusal = out as { __status?: number; body?: unknown } | null;
+        const refused = typeof refusal === "object" && refusal !== null && "__status" in refusal;
+        const json = refused ? refusal.body : out;
+        const status = refused ? Number(refusal.__status) : 200;
+        return {
+          ok: !refused,
+          status,
+          json: async () => json,
+          text: async () => JSON.stringify(json),
+        } as Response;
       }) as typeof fetch;
     },
   });
@@ -458,5 +469,283 @@ describe("Server/admin/static — Members (AO-4)", () => {
     await settle();
     expect(rows()).toHaveLength(50);
     expect(prev().disabled).toBe(true);
+  });
+
+  // WP 6.3g: a member can hold several roles. The row lists every one, and the
+  // Manage dialog adds and removes them one at a time (PUT/DELETE
+  // /users/{id}/roles/{roleId}) instead of replacing the whole set.
+  describe("role chips (WP 6.3g)", () => {
+    const ME = {
+      id: 1,
+      permissions: ADMINISTRATOR | MANAGE_ROLES,
+      role_position: 80,
+      is_owner: false,
+    };
+    const manage = async (
+      env: Awaited<ReturnType<typeof boot>>,
+      id: number,
+    ): Promise<HTMLElement> => {
+      (
+        env.doc.querySelector(`[data-action="openEditUser"][data-args^="[${id},"]`) as HTMLElement
+      ).click();
+      await env.settle();
+      return env.doc.getElementById("modalInner")!;
+    };
+    const chips = (el: Element) =>
+      [...el.querySelectorAll(".role-chip .role-chip-name")].map((c) => c.textContent);
+
+    it("lists every held role in the row and adds one with PUT", async () => {
+      const calls: string[] = [];
+      let held = [4];
+      const env = await boot(calls, (p, method) => {
+        if (p.startsWith("/users?"))
+          return [
+            { id: 4, username: "member", role_id: held[0], role_ids: held, role_position: 40 },
+          ];
+        if (p === "/roles") return ROLES;
+        if (method === "PUT") held = [3, 4];
+        return {};
+      });
+      await env.show(ME);
+      expect(env.doc.querySelector("tbody tr td.col-role")!.textContent).toBe("Member");
+
+      const body = await manage(env, 4);
+      expect(chips(body)).toEqual(["Member"]);
+      // Only roles below the actor's own (80) and not already held are offered.
+      const sel = body.querySelector("#editRoleSelect") as HTMLSelectElement;
+      expect([...sel.options].map((o) => o.textContent)).toEqual(["Moderator"]);
+      sel.value = "3";
+      (body.querySelector('[data-action="addMemberRole"]') as HTMLElement).click();
+      await env.settle();
+      expect(calls).toContain("PUT /users/4/roles/3");
+      expect(chips(env.doc.getElementById("modalInner")!)).toEqual(["Moderator", "Member"]);
+    });
+
+    it("names the top role from the list row on a fresh load with no role list", async () => {
+      const env = await boot([], (p) => {
+        if (p.startsWith("/users?"))
+          return [
+            {
+              id: 4,
+              username: "member",
+              role_id: 7,
+              role_name: "Helper",
+              role_ids: [7, 4],
+              role_position: 50,
+            },
+          ];
+        return {};
+      });
+      await env.show({ id: 1, permissions: BAN_MEMBERS, role_position: 80, is_owner: false });
+      expect(env.bridge.state.roleList?.length ?? 0).toBe(0);
+      expect(chips(env.doc.querySelector("tbody tr td.col-role")!)).toEqual(["Helper", "Member"]);
+    });
+
+    it("removes a chip with DELETE, and the last chip has no remove button", async () => {
+      const calls: string[] = [];
+      let held = [3, 4];
+      const env = await boot(calls, (p, method) => {
+        if (p.startsWith("/users?"))
+          return [
+            { id: 4, username: "member", role_id: held[0], role_ids: held, role_position: 40 },
+          ];
+        if (p === "/roles") return ROLES;
+        if (method === "DELETE") held = [4];
+        return {};
+      });
+      await env.show(ME);
+      expect(env.doc.querySelector("tbody tr td.col-role")!.textContent).toBe("ModeratorMember");
+
+      let body = await manage(env, 4);
+      expect(body.querySelectorAll('[data-action="removeMemberRole"]')).toHaveLength(2);
+      (
+        body.querySelector('[data-action="removeMemberRole"][data-args="[4,3]"]') as HTMLElement
+      ).click();
+      await env.settle();
+      expect(calls).toContain("DELETE /users/4/roles/3");
+
+      body = env.doc.getElementById("modalInner")!;
+      expect(chips(body)).toEqual(["Member"]);
+      // Edge case 2: the last role cannot be removed from the panel.
+      expect(body.querySelectorAll('[data-action="removeMemberRole"]')).toHaveLength(0);
+      expect(body.textContent).toContain("must keep at least one role");
+    });
+
+    it("shows a role the actor cannot assign but does not let it be removed", async () => {
+      // Edge case 1: Admin (80) sits at the actor's own rank, so it is shown
+      // as a chip with no remove button while the lower role stays removable.
+      const env = await boot([], (p) => {
+        if (p.startsWith("/users?"))
+          return [{ id: 4, username: "member", role_id: 4, role_ids: [2, 4], role_position: 40 }];
+        if (p === "/roles") return ROLES;
+        return {};
+      });
+      await env.show(ME);
+      const body = await manage(env, 4);
+      expect(chips(body)).toEqual(["Admin", "Member"]);
+      const removers = [...body.querySelectorAll('[data-action="removeMemberRole"]')];
+      expect(removers.map((b) => b.getAttribute("data-args"))).toEqual(["[4,4]"]);
+      expect(body.querySelector(".role-chip")!.getAttribute("title")).toMatch(/cannot/);
+    });
+  });
+  // WP 6.4d: the nickname (users.display_name) in the list and the Manage
+  // drawer, edited through PUT /api/v1/moderation/users/{id}/nickname.
+  describe("nickname (WP 6.4d)", () => {
+    const NICK_PATH = "/api/v1/moderation/users/4/nickname";
+    const ME = { id: 1, permissions: MANAGE_NICKNAMES, role_position: 80, is_owner: false };
+    const member = (extra: Record<string, unknown> = {}) => ({
+      id: 4,
+      username: "member",
+      role_id: 4,
+      role_position: 40,
+      ...extra,
+    });
+    const open = async (
+      env: Awaited<ReturnType<typeof boot>>,
+      id: number,
+    ): Promise<HTMLElement> => {
+      (
+        env.doc.querySelector(`[data-action="openEditUser"][data-args^="[${id},"]`) as HTMLElement
+      ).click();
+      await env.settle();
+      return env.doc.getElementById("modalInner")!;
+    };
+    const input = (body: HTMLElement) => body.querySelector("#memberNickInput") as HTMLInputElement;
+    const press = async (env: Awaited<ReturnType<typeof boot>>, id: string) => {
+      (env.doc.getElementById(id) as HTMLElement).click();
+      await env.settle();
+    };
+
+    it("shows the nickname under the username and escapes it", async () => {
+      const env = await boot([], (p) => {
+        if (p.startsWith("/users?"))
+          return [member({ display_name: "<b>Cap</b>" }), member({ id: 5, username: "plain" })];
+        return {};
+      });
+      await env.show(ME);
+      const rows = [...env.doc.querySelectorAll("#membersList tbody tr")];
+      expect(rows[0]!.querySelector(".member-nick")!.textContent).toBe("<b>Cap</b>");
+      expect(rows[0]!.querySelector(".member-nick b")).toBeNull();
+      expect(rows[1]!.querySelector(".member-nick")).toBeNull();
+    });
+
+    it("shows the nickname read-only, with no Save or Reset, without the bit", async () => {
+      const env = await boot([], (p) => {
+        if (p.startsWith("/users?")) return [member({ display_name: "Cap" })];
+        if (p === "/roles") return ROLES;
+        return {};
+      });
+      await env.show({ ...ME, permissions: MANAGE_ROLES });
+      const body = await open(env, 4);
+      expect(body.querySelector("#memberNickRo")!.textContent).toBe("Cap");
+      expect(body.querySelector("#memberNickInput")).toBeNull();
+      expect(body.querySelector('[data-action="saveMemberNickname"]')).toBeNull();
+      expect(body.querySelector('[data-action="resetMemberNickname"]')).toBeNull();
+    });
+
+    it("shows the nickname read-only for a peer even with the bit", async () => {
+      const env = await boot([], (p) => {
+        if (p.startsWith("/users?")) return [member({ role_position: 80, display_name: "Cap" })];
+        return {};
+      });
+      await env.show(ME);
+      const body = await open(env, 4);
+      expect(body.querySelector("#memberNickRo")!.textContent).toBe("Cap");
+      expect(body.querySelector('[data-action="saveMemberNickname"]')).toBeNull();
+    });
+
+    it("saves a collapsed, trimmed nickname with PUT and shows the result", async () => {
+      const calls: string[] = [];
+      const sent: Sent[] = [];
+      const env = await boot(
+        calls,
+        (p, method) => {
+          if (p.startsWith("/users?")) return [member()];
+          if (p === "/roles") return ROLES;
+          if (method === "PUT" && p === NICK_PATH) return { user_id: 4, display_name: "Cap Hook" };
+          return {};
+        },
+        sent,
+      );
+      await env.show(ME);
+      const body = await open(env, 4);
+      input(body).value = "  Cap \t  Hook  ";
+      await press(env, "memberNickSave");
+      expect(sent.filter((x) => x.call === `PUT ${NICK_PATH}`)).toEqual([
+        { call: `PUT ${NICK_PATH}`, body: { display_name: "Cap Hook" } },
+      ]);
+      expect(input(body).value).toBe("Cap Hook");
+      expect(body.querySelector("#memberNickMsg")!.textContent).toBe("Nickname saved");
+      expect(env.bridge.state.section).toBe("users");
+    });
+
+    it("sends null when Reset is pressed", async () => {
+      const sent: Sent[] = [];
+      const env = await boot(
+        [],
+        (p, method) => {
+          if (p.startsWith("/users?")) return [member({ display_name: "Cap" })];
+          if (p === "/roles") return ROLES;
+          if (method === "PUT" && p === NICK_PATH) return { user_id: 4, display_name: null };
+          return {};
+        },
+        sent,
+      );
+      await env.show(ME);
+      const body = await open(env, 4);
+      expect(input(body).value).toBe("Cap");
+      await press(env, "memberNickReset");
+      expect(sent.filter((x) => x.call === `PUT ${NICK_PATH}`)).toEqual([
+        { call: `PUT ${NICK_PATH}`, body: { display_name: null } },
+      ]);
+      expect(input(body).value).toBe("");
+      expect(body.querySelector("#memberNickMsg")!.textContent).toBe("Nickname reset");
+    });
+
+    it("blocks more than 32 code points before sending, counting astral characters once", async () => {
+      const sent: Sent[] = [];
+      const env = await boot(
+        [],
+        (p, method) => {
+          if (p.startsWith("/users?")) return [member()];
+          if (p === "/roles") return ROLES;
+          if (method === "PUT") return { user_id: 4, display_name: "x" };
+          return {};
+        },
+        sent,
+      );
+      await env.show(ME);
+      const body = await open(env, 4);
+      // 33 astral characters: 66 UTF-16 units, 33 code points.
+      input(body).value = "\u{1F600}".repeat(33);
+      await press(env, "memberNickSave");
+      expect(sent.filter((x) => x.call.startsWith("PUT"))).toHaveLength(0);
+      expect(body.querySelector("#memberNickMsg")!.textContent).toMatch(/at most 32/);
+      // Exactly 32 code points (64 units) goes through.
+      input(body).value = "\u{1F600}".repeat(32);
+      await press(env, "memberNickSave");
+      expect(sent.filter((x) => x.call.startsWith("PUT"))).toHaveLength(1);
+    });
+
+    it("shows the server's message inline on a refusal and keeps the drawer open", async () => {
+      const env = await boot([], (p, method) => {
+        if (p.startsWith("/users?")) return [member()];
+        if (p === "/roles") return ROLES;
+        if (method === "PUT" && p === NICK_PATH)
+          return {
+            __status: 400,
+            body: { error: "INVALID_INPUT", message: "display_name contains invalid characters" },
+          };
+        return {};
+      });
+      await env.show(ME);
+      const body = await open(env, 4);
+      input(body).value = "bad";
+      await press(env, "memberNickSave");
+      const msg = body.querySelector("#memberNickMsg") as HTMLElement;
+      expect(msg.textContent).toBe("display_name contains invalid characters");
+      expect(env.doc.getElementById("modalInner")).toBe(body);
+      expect((env.doc.getElementById("memberNickSave") as HTMLButtonElement).disabled).toBe(false);
+    });
   });
 });

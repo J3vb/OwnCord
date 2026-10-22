@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Room } from "livekit-client";
 import { SessionScope } from "@lib/sessionScope";
+import { isLinuxDesktop } from "../../src/features/voice/native/platform";
 import {
   runConnectionDiagnostics,
   type DiagnosticResult,
   type DiagnosticServices,
 } from "@lib/connectionDiagnostics";
+
+vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+  isLinuxDesktop: vi.fn(() => false),
+}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -45,6 +51,8 @@ describe("connection diagnostics", () => {
       ws: { ping: vi.fn().mockResolvedValue(undefined) },
       getRoom: vi.fn().mockReturnValue(null),
       getUserMedia: vi.fn().mockResolvedValue(stream),
+      listNativeInputs: vi.fn().mockResolvedValue(null),
+      probeNativeInput: vi.fn().mockResolvedValue("levels"),
     };
   });
   afterEach(() => {
@@ -248,6 +256,147 @@ describe("connection diagnostics", () => {
     expect(final("media")).toMatchObject({
       status: "failed",
       detail: expect.stringContaining("call changed"),
+    });
+  });
+
+  describe("Linux native voice", () => {
+    afterEach(() => localStorage.removeItem("owncord:settings:audioInputDevice"));
+    function nativeRoom(state = "connected", signaling = true): Room {
+      const room = {
+        state,
+        remoteParticipants: new Map([["other", {}]]),
+        // The native room has no browser transports or signaling socket.
+        engine: { pcManager: undefined, client: { ws: undefined } },
+        isSignalingConnected: vi.fn().mockReturnValue(signaling),
+      } as unknown as Room;
+      services.getRoom = vi.fn().mockReturnValue(room);
+      return room;
+    }
+
+    it("passes signaling on a connected native call and does not claim media was checked", async () => {
+      nativeRoom();
+      await run(false);
+      expect(final("signaling")?.status).toBe("passed");
+      expect(final("media")).toMatchObject({
+        status: "not-tested",
+        detail: expect.stringContaining("Linux"),
+      });
+    });
+
+    it("fails signaling while the native backend is reconnecting", async () => {
+      nativeRoom("reconnecting", false);
+      await run(false);
+      expect(final("signaling")?.status).toBe("failed");
+    });
+
+    it("checks the saved microphone against the native list without opening a webview device", async () => {
+      localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("alsa:usb-mic"));
+      services.listNativeInputs = vi.fn().mockResolvedValue([
+        { deviceId: "alsa:default", label: "Default", kind: "audioinput" },
+        { deviceId: "alsa:usb-mic", label: "USB mic", kind: "audioinput" },
+      ]);
+      await run();
+      expect(services.getUserMedia).not.toHaveBeenCalled();
+      expect(services.probeNativeInput).toHaveBeenCalledWith(
+        "alsa:usb-mic",
+        expect.any(AbortSignal),
+      );
+      expect(final("microphone")).toMatchObject({
+        status: "passed",
+        detail: expect.stringContaining("microphone opened and reported audio"),
+      });
+    });
+
+    it("says calls will use the default when the saved native microphone is gone", async () => {
+      localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("alsa:gone"));
+      services.listNativeInputs = vi
+        .fn()
+        .mockResolvedValue([{ deviceId: "alsa:default", label: "Default", kind: "audioinput" }]);
+      await run();
+      expect(final("microphone")).toMatchObject({
+        status: "passed",
+        detail: expect.stringContaining("system default"),
+      });
+      expect(services.probeNativeInput).toHaveBeenCalledWith("", expect.any(AbortSignal));
+    });
+
+    it("fails the microphone check when the native backend lists no microphone", async () => {
+      services.listNativeInputs = vi.fn().mockResolvedValue([]);
+      await run();
+      expect(services.getUserMedia).not.toHaveBeenCalled();
+      expect(final("microphone")?.status).toBe("failed");
+    });
+
+    describe("microphone capture", () => {
+      beforeEach(() => {
+        services.listNativeInputs = vi
+          .fn()
+          .mockResolvedValue([{ deviceId: "alsa:default", label: "Default", kind: "audioinput" }]);
+      });
+
+      it("fails with the microphone wording when the opened device reports nothing", async () => {
+        services.probeNativeInput = vi.fn().mockResolvedValue("silent");
+        await run();
+        expect(final("microphone")).toMatchObject({
+          status: "failed",
+          detail: expect.stringContaining("no audio arrived"),
+        });
+      });
+
+      it("fails when the capture cannot open", async () => {
+        services.probeNativeInput = vi.fn().mockRejectedValue(new Error("no device"));
+        await run();
+        expect(final("microphone")).toMatchObject({
+          status: "failed",
+          detail: expect.stringContaining("could not open"),
+        });
+      });
+
+      it("does not call it a pass when a call already holds the capture", async () => {
+        services.probeNativeInput = vi.fn().mockResolvedValue("in-call");
+        await run();
+        expect(final("microphone")).toMatchObject({
+          status: "not-tested",
+          detail: expect.stringContaining("You are in a call"),
+        });
+      });
+
+      it("hands the probe a signal that cancelling the run aborts", async () => {
+        let seen!: AbortSignal;
+        services.probeNativeInput = vi.fn().mockImplementation((_input, signal: AbortSignal) => {
+          seen = signal;
+          return new Promise(() => {});
+        });
+        const work = run().catch((e: unknown) => e);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(seen.aborted).toBe(false);
+        ac.abort();
+        await work;
+        expect(seen.aborted).toBe(true);
+      });
+
+      it("skips the capture when the microphone check is unchecked", async () => {
+        await run(false);
+        expect(services.probeNativeInput).not.toHaveBeenCalled();
+      });
+    });
+
+    it("says why incoming media was not tested when no call is joined", async () => {
+      vi.mocked(isLinuxDesktop).mockReturnValue(true);
+      try {
+        await run(false);
+        expect(final("media")).toMatchObject({
+          status: "not-tested",
+          detail: expect.stringContaining("no WebRTC"),
+        });
+      } finally {
+        vi.mocked(isLinuxDesktop).mockReturnValue(false);
+      }
+    });
+
+    it("keeps asking for a call elsewhere when no call is joined", async () => {
+      await run(false);
+      expect(final("media")?.detail).toContain("Join a call");
     });
   });
 });

@@ -7,7 +7,8 @@ import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { ApiClientError } from "@lib/api";
 import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
-import type { GifApi, GifFavoritesApi, GifResult } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/gifProvider";
+import { createGifPager } from "@lib/gifPager";
 import { gifFavoritesStore, isGifFavorite, toggleGifFavorite } from "@stores/gifFavorites.store";
 import {
   fetchExternalImage,
@@ -48,6 +49,8 @@ export interface GifPickerOptions {
 
 const DEBOUNCE_MS = 300;
 const GIF_LIMIT = 20;
+/** Start the next page this far before the sentinel scrolls into view. */
+const LOAD_MORE_MARGIN = "0px 0px 160px 0px";
 
 // ---------------------------------------------------------------------------
 // GifPicker
@@ -71,6 +74,46 @@ async function toggleCell(cell: HTMLElement): Promise<void> {
   });
 }
 
+function appendCells(grid: HTMLElement, gifs: readonly GifResult[]): void {
+  for (const gif of gifs) {
+    const item = createElement("div", {
+      class: "gp-item",
+      role: "option",
+      // Same fallback as the img alt below — an untitled GIF still needs a
+      // pronounceable accessible name.
+      "aria-label": gif.title || messagingText("gif.itemLabel"),
+      // Read by the delegated click handler on gridArea (see mount-time
+      // listener above) instead of a per-cell listener.
+      "data-full-url": gif.fullUrl,
+      "data-preview-url": gif.url,
+      "data-title": gif.title,
+      "aria-keyshortcuts": "F",
+    });
+    // Klipy's CDN is still an external host: the thumbnail arrives through
+    // the external-content broker, not as a URL the webview loads itself.
+    const img = createElement("img", {
+      class: "gp-img",
+      alt: gif.title || messagingText("gif.itemLabel"),
+      loading: "lazy",
+    });
+    admitDerived(GIF_PICKER_ITEM, `url:${gif.url}`);
+    recoverEvictedImage(img, { url: gif.url });
+    void fetchExternalImage({ url: gif.url }).then((src) => {
+      if (src !== null) img.src = src;
+    });
+    item.appendChild(img);
+    const star = createElement("button", {
+      type: "button",
+      class: "gp-star",
+      tabindex: "-1",
+    });
+    setStarState(star, isGifFavorite(gif.fullUrl));
+    item.appendChild(star);
+
+    grid.appendChild(item);
+  }
+}
+
 export function createGifPicker(options: GifPickerOptions): {
   readonly element: HTMLDivElement;
   destroy(): void;
@@ -80,6 +123,12 @@ export function createGifPicker(options: GifPickerOptions): {
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let currentRequestId = 0;
+  // Load-more-on-scroll (browse tab only). `activeQuery` is the query whose
+  // first page the grid shows; the pager's generation token drops a page that
+  // resolves after the query changed.
+  const pager = createGifPager();
+  let activeQuery = "";
+  const sentinel = createElement("div", { class: "gp-sentinel", "aria-hidden": "true" });
 
   // ── DOM structure ──
   const root = createElement("div", { class: "gif-picker open" });
@@ -220,6 +269,7 @@ export function createGifPicker(options: GifPickerOptions): {
     }
     searchInput.hidden = favorites;
     ++currentRequestId; // drop any in-flight search render
+    stopPaging();
     if (debounceTimer !== null) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
@@ -272,50 +322,89 @@ export function createGifPicker(options: GifPickerOptions): {
     }
 
     const grid = createElement("div", { class: "gp-grid" });
-
-    for (const gif of gifs) {
-      const item = createElement("div", {
-        class: "gp-item",
-        role: "option",
-        // Same fallback as the img alt below — an untitled GIF still needs a
-        // pronounceable accessible name.
-        "aria-label": gif.title || messagingText("gif.itemLabel"),
-        // Read by the delegated click handler on gridArea (see mount-time
-        // listener above) instead of a per-cell listener.
-        "data-full-url": gif.fullUrl,
-        "data-preview-url": gif.url,
-        "data-title": gif.title,
-        "aria-keyshortcuts": "F",
-      });
-      // Klipy's CDN is still an external host: the thumbnail arrives through
-      // the external-content broker, not as a URL the webview loads itself.
-      const img = createElement("img", {
-        class: "gp-img",
-        alt: gif.title || messagingText("gif.itemLabel"),
-        loading: "lazy",
-      });
-      admitDerived(GIF_PICKER_ITEM, `url:${gif.url}`);
-      recoverEvictedImage(img, { url: gif.url });
-      void fetchExternalImage({ url: gif.url }).then((src) => {
-        if (src !== null) img.src = src;
-      });
-      item.appendChild(img);
-      const star = createElement("button", {
-        type: "button",
-        class: "gp-star",
-        tabindex: "-1",
-      });
-      setStarState(star, isGifFavorite(gif.fullUrl));
-      item.appendChild(star);
-
-      grid.appendChild(item);
-    }
-
+    appendCells(grid, gifs);
     gridArea.appendChild(grid);
 
     // Each render replaces the cell set, so re-establish the single Tab stop.
     setRovingTabindex(gridArea, ".gp-item");
   }
+
+  // ── Load more on scroll ──
+
+  const sentinelObserver =
+    typeof IntersectionObserver === "undefined"
+      ? null
+      : new IntersectionObserver(
+          (entries) => {
+            if (entries.some((e) => e.isIntersecting)) void loadMoreGifs();
+          },
+          { root: gridArea, rootMargin: LOAD_MORE_MARGIN },
+        );
+  signal.addEventListener("abort", () => sentinelObserver?.disconnect(), { once: true });
+
+  function stopPaging(): void {
+    pager.reset();
+    sentinelObserver?.unobserve(sentinel);
+    sentinel.remove();
+  }
+
+  /** (Re)observe the sentinel: observe() reports the current state at once, so
+   *  a page that still leaves the sentinel in view asks for the next one. */
+  function observeSentinel(): void {
+    if (sentinelObserver === null) return;
+    sentinelObserver.unobserve(sentinel);
+    if (showingFavorites || !pager.hasMore()) {
+      sentinel.remove();
+      return;
+    }
+    if (!sentinel.isConnected) gridArea.appendChild(sentinel);
+    sentinelObserver.observe(sentinel);
+  }
+
+  async function loadMoreGifs(): Promise<void> {
+    if (showingFavorites) return;
+    const query = activeQuery;
+    const generation = pager.generation();
+    const fresh = await pager.loadMore((pos): Promise<GifPage> =>
+      query.length > 0
+        ? searchGifs(options.api, query, GIF_LIMIT, pos)
+        : getTrendingGifs(options.api, GIF_LIMIT, pos),
+    );
+    // A newer query, the favorites tab or destroy() owns the grid now.
+    if (signal.aborted || showingFavorites || generation !== pager.generation()) return;
+    const grid = gridArea.querySelector<HTMLElement>(".gp-grid");
+    if (fresh !== null && grid !== null && fresh.length > 0) {
+      const hadTabStop = grid.querySelector(".gp-item[tabindex='0']") !== null;
+      appendCells(grid, fresh);
+      // Only the new cells: the user's current Tab stop stays where it is.
+      const added = [...grid.querySelectorAll<HTMLElement>(".gp-item")].slice(-fresh.length);
+      added.forEach((cell, i) =>
+        cell.setAttribute("tabindex", !hadTabStop && i === 0 ? "0" : "-1"),
+      );
+    }
+    if (grid !== null && grid.querySelector(".gp-item") === null) {
+      if (pager.failed()) {
+        // Nothing to scroll, so a scroll can never retry: offer the button.
+        showLoadError(contentText("gif.failed"), () => {
+          searchInput.focus();
+          void loadGifs(searchInput.value.trim());
+        });
+        return;
+      }
+      if (!pager.hasMore()) renderGifs([]);
+    }
+    // After a failure stay quiet; the next scroll (below) retries.
+    if (!pager.failed()) observeSentinel();
+  }
+
+  // A failed page is retried by scrolling again, not by a timer or a banner.
+  gridArea.addEventListener(
+    "scroll",
+    () => {
+      if (pager.failed() && pager.hasMore()) observeSentinel();
+    },
+    { signal, passive: true },
+  );
 
   function showLoading(): void {
     clearChildren(gridArea);
@@ -359,17 +448,28 @@ export function createGifPicker(options: GifPickerOptions): {
       return;
     }
     const requestId = ++currentRequestId;
+    stopPaging();
     showLoading();
 
     try {
-      const gifs =
+      const page =
         query.length > 0
           ? await searchGifs(options.api, query, GIF_LIMIT)
           : await getTrendingGifs(options.api, GIF_LIMIT);
 
       // Only render if this is still the latest request
       if (requestId === currentRequestId) {
-        renderGifs(gifs);
+        activeQuery = query;
+        const first = pager.begin(page);
+        if (first.length === 0 && pager.hasMore()) {
+          // An empty page that still has a cursor: keep an empty grid so the
+          // next page has somewhere to land.
+          clearChildren(gridArea);
+          gridArea.appendChild(createElement("div", { class: "gp-grid" }));
+        } else {
+          renderGifs(first);
+        }
+        observeSentinel();
       }
     } catch (err) {
       // The server has no GIF key configured — degrade calmly and tell the
@@ -419,6 +519,7 @@ export function createGifPicker(options: GifPickerOptions): {
     "keydown",
     (e) => {
       if (e.key === "Escape") {
+        e.preventDefault();
         options.onClose();
       }
     },

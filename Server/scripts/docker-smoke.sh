@@ -9,13 +9,25 @@
 #      and running as uid 65532, and the image declares a HEALTHCHECK;
 #   4. drain — `docker stop` exits 0 inside the drain budget;
 #   5. replace — a NEW container on the SAME volume reaches healthy and finds
-#      the data the first one left behind.
+#      the data the first one left behind;
+#   6. wizard persists — on a fresh volume the first-run setup wizard is driven
+#      over its HTTP API, the container it restarts is replaced, and the chosen
+#      settings are still in force (WP 4.7c);
+#   7. recovery — the documented `config reset-overrides` command, run against
+#      the same volume: refused while the server runs (exit 1, file untouched),
+#      and with it stopped, drops the lockout-capable keys, keeps the tuning
+#      values, and the server comes back healthy (WP 4.7c);
+#   8. compose — the shipped Server/docker-compose.yml, run by
+#      compose-smoke.sh with this image: exactly three published ports, the
+#      one LiveKit secret in .env works (and a wrong one fails), and an old
+#      livekit.yaml cannot bring the port range back (WP 4.8b).
 #
 # Used by ci.yml, release.yml (before anything is signed or pushed) and
 # nightly-docker-smoke.yml, so a regression is caught pre-merge instead of at
 # tag time. Usage: docker-smoke.sh <image>
 #
-# No config mount and no env: that is the contract being tested. The image
+# Phases 1-7: no config mount and no env, that is the contract being tested
+# (phase 8 boots the compose stack, which mounts its config). The image
 # boots on its own, as uid 65532, writing its default config.yaml into the
 # /app skeleton the Dockerfile ships owned by that uid. The first
 # v1.2.0-alpha.3 release run died exactly there ("writing default config:
@@ -36,6 +48,7 @@ export MSYS_NO_PATHCONV=1
 
 image="${1:?usage: docker-smoke.sh <image>}"
 vol="owncord-smoke-vol-$$"
+wiz_vol="owncord-smoke-wiz-vol-$$"
 work="$(mktemp -d)"
 containers=()
 
@@ -44,6 +57,15 @@ containers=()
 # Server/cmd/smoke/main.go's drainBudget, so both assets are held to one number.
 readonly boot_timeout=90
 readonly drain_budget=20
+# Phases 6 and 7 speak HTTP, so one container publishes its port. 18443, never
+# 8443: cmd/smoke -docker (upgrade-rehearsal.yml) binds 8443 on the same
+# runner. Loopback only, as cmd/smoke/docker.go does: the owner created below
+# is a throwaway and must not be reachable from the LAN.
+readonly smoke_port=18443
+readonly smoke_url="https://127.0.0.1:${smoke_port}"
+# The wizard's restart exits the container (there is no restart policy), so
+# this bounds the wait for that exit rather than assuming a restart happens.
+readonly restart_timeout=60
 
 cleanup() {
   local c
@@ -54,7 +76,7 @@ cleanup() {
       docker rm -f "$c" >/dev/null 2>&1 || true
     fi
   done
-  docker volume rm -f "$vol" >/dev/null 2>&1 || true
+  docker volume rm -f "$vol" "$wiz_vol" >/dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -65,19 +87,38 @@ fail() {
   local c=$1
   shift
   echo "::error::$*"
-  docker logs "$c" 2>&1 || true
+  show_logs "$c" || true
   exit 1
 }
 
-# start <container> — the flags are the minimal-privilege posture
-# docs/deployment.md tells owners to use, so the smoke tests what is documented.
+# show_logs <container> — the container's log with the one-time setup token
+# masked. The server prints that token on the console, never through slog, and
+# phases 6 and 7 hold it long enough to matter if a CI log is public.
+show_logs() {
+  docker logs "$1" 2>&1 |
+    sed -E 's/(Setup token[[:space:]]+)[^[:space:]]+/\1[redacted]/'
+}
+
+# start <container> [<volume> [<publish>]] — the flags are the minimal-privilege
+# posture docs/deployment.md tells owners to use, so the smoke tests what is
+# documented. The volume defaults to the one phases 1-5 share; <publish>, when
+# given, is a docker -p mapping.
 start() {
-  containers+=("$1")
-  docker run -d --name "$1" \
-    -v "$vol:/app/data" \
-    --cap-drop=ALL \
-    --security-opt=no-new-privileges:true \
-    "$image" >/dev/null
+  local c=$1 v=${2:-$vol} publish=${3:-}
+  # Never empty, so no empty-array expansion is needed under `set -u`.
+  local -a args=(-v "$v:/app/data" --cap-drop=ALL --security-opt=no-new-privileges:true)
+  containers+=("$c")
+  if [ -n "$publish" ]; then
+    args+=(-p "$publish")
+  fi
+  local out
+  if ! out=$(docker run -d --name "$c" "${args[@]}" "$image" 2>&1); then
+    if [ -n "$publish" ]; then
+      echo "::error::could not start $c with -p $publish: is the host port in ${publish} already in use? (docker-smoke needs it free)"
+    fi
+    echo "$out"
+    exit 1
+  fi
 }
 
 # wait_healthy <phase> <container> — polls the binary's own healthcheck
@@ -195,7 +236,193 @@ echo "replace: reused the existing data volume and database"
 
 # The replacement must drain as cleanly as the first boot did; a lock the first
 # drain failed to release surfaces here, not on phase 4.
-docker logs "$replacement"
+show_logs "$replacement"
 drain "replace drain" "$replacement"
 
-echo "docker smoke passed: boot, migrate, healthy, minimal privilege, drain, replace"
+echo "phases 1-5 passed: boot, migrate, healthy, minimal privilege, drain, replace"
+
+# --- Phase 6: the wizard's settings survive a container recreate (WP 4.7c) ---
+# A container's config.yaml is not the place settings persist (it lives in the
+# image layer, or is a read-only mount), so the wizard writes
+# config-overrides.json into the data volume instead. A fresh volume keeps
+# this independent of phases 1-5, and the setup token only exists while no
+# user does.
+wiz="${name}-wizard"
+docker volume create "$wiz_vol" >/dev/null
+start "$wiz" "$wiz_vol" "127.0.0.1:${smoke_port}:8443"
+wait_healthy "wizard" "$wiz"
+
+# The token is printed on the console only. Read it from the container's log
+# into a variable; it is never echoed.
+setup_token=""
+for ((i = 0; i < boot_timeout; i++)); do
+  setup_token=$(docker logs "$wiz" 2>&1 |
+    sed -n 's/.*Setup token[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*/\1/p' | tail -n 1) || true
+  [ -n "$setup_token" ] && break
+  sleep 1
+done
+[ -n "$setup_token" ] ||
+  fail "$wiz" "wizard: the server printed no setup token, so first-run setup is not open"
+
+# The request is written to a file, not an argument, so the password and token
+# are not in the process list. JSON is parsed with grep -o: the script also runs
+# under Git Bash, which has no jq. -k because the certificate is self-signed
+# and the peer is this host's own loopback publish.
+wiz_pass="smoke-${$}-${RANDOM}-Ab1"
+cat >"$work/setup.json" <<EOF
+{"username":"smokeowner","password":"${wiz_pass}","setup_token":"${setup_token}","wizard":{"port":8443,"tls_mode":"self_signed","upload_max_size_mb":123,"voice_quality":"high"}}
+EOF
+# The curls run from inside $work with relative names: MSYS_NO_PATHCONV=1
+# stops Git Bash converting a host path handed to a native curl.exe. Only a
+# refused connection is retried (the published port can lag the healthcheck by
+# a moment); any HTTP answer, including an error, is final.
+status=""
+for ((i = 0; i < 10; i++)); do
+  rc=0
+  status=$(cd "$work" && curl -ksS --max-time 30 -o setup.out -w '%{http_code}' \
+    -X POST -H 'Content-Type: application/json' \
+    --data-binary @setup.json "$smoke_url/admin/api/setup" 2>/dev/null) || rc=$?
+  [ "$rc" = "7" ] || break
+  sleep 1
+done
+[ "$rc" = "0" ] ||
+  fail "$wiz" "wizard: POST /admin/api/setup did not complete (curl exit $rc)"
+[ "$status" = "201" ] ||
+  fail "$wiz" "wizard: POST /admin/api/setup returned HTTP $status, want 201"
+tr -d ' \n' <"$work/setup.out" | grep -q '"restart_required":true' ||
+  fail "$wiz" "wizard: setup did not report restart_required (the wizard changed startup-only values)"
+session_token=$(tr -d ' \n' <"$work/setup.out" | grep -o '"token":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+[ -n "$session_token" ] ||
+  fail "$wiz" "wizard: setup returned no session token"
+printf 'Authorization: Bearer %s\n' "$session_token" >"$work/auth.hdr"
+
+# admin_get <outfile> — GET the settings list with the session token. Relative
+# names from inside $work, as above.
+admin_get() {
+  (cd "$work" && curl -ksS --max-time 30 --fail -o "$1" -H @auth.hdr \
+    "$smoke_url/admin/api/config/settings")
+}
+echo "wizard: setup accepted (201, restart_required)"
+
+# The restart exits the container and nothing brings it back, so wait for the
+# exit with a bound instead of assuming a restart. Only then is the volume
+# quiescent and safe to hand to a replacement.
+for ((i = 0; i < restart_timeout; i++)); do
+  [ "$(docker inspect -f '{{.State.Running}}' "$wiz")" = "false" ] && break
+  sleep 1
+done
+[ "$(docker inspect -f '{{.State.Running}}' "$wiz")" = "false" ] ||
+  fail "$wiz" "wizard: the container did not exit within ${restart_timeout}s of the wizard's restart"
+echo "wizard: container exited ($(docker inspect -f '{{.State.ExitCode}}' "$wiz")) for its restart"
+
+# read_overrides <container> — print the overrides file with whitespace removed.
+read_overrides() {
+  docker cp "$1:/app/data/config-overrides.json" - 2>/dev/null | tar -xO | tr -d ' \n'
+}
+
+read_overrides "$wiz" | grep -q '"upload.max_size_mb":123' ||
+  fail "$wiz" "wizard: config-overrides.json in the volume lacks upload.max_size_mb"
+
+docker rm "$wiz" >/dev/null
+wiz="${name}-wizard-replacement"
+start "$wiz" "$wiz_vol" "127.0.0.1:${smoke_port}:8443"
+wait_healthy "wizard replace" "$wiz"
+
+admin_get settings.json ||
+  fail "$wiz" "wizard replace: GET /admin/api/config/settings failed"
+tr -d ' \n' <"$work/settings.json" >"$work/settings.flat"
+grep -Eq '"key":"upload\.max_size_mb","type":"[a-z]+","value":123[,}]' "$work/settings.flat" ||
+  fail "$wiz" "wizard replace: upload.max_size_mb is not 123 after the recreate"
+grep -Eq '"key":"voice\.quality","type":"[a-z]+","value":"high"[,}]' "$work/settings.flat" ||
+  fail "$wiz" "wizard replace: voice.quality is not high after the recreate"
+echo "wizard replace: upload.max_size_mb=123 and voice.quality=high held across the recreate"
+
+# --- Phase 7: the documented recovery command (WP 4.7c) --------------------
+# The command is the one docs/server-configuration.md gives under "If a panel
+# change locks you out", run the way a bare `docker run` owner runs it: same
+# image, same volume, same minimal-privilege flags, no extra -e.
+reset_overrides() {
+  docker run --rm -v "$wiz_vol:/app/data" \
+    --cap-drop=ALL --security-opt=no-new-privileges:true \
+    "$image" config reset-overrides
+}
+
+# Leave the lockout-capable key in the file the way a real panel save does: a
+# PATCH with the session token and the confirmation header the server expects.
+# The allowlist still admits the address this request arrives from (the docker
+# bridge, or loopback through the port relay), so the server's lockout guard
+# accepts it, plus a TEST-NET-3 range. Both are values the reset must never
+# print.
+cat >"$work/patch.json" <<'EOF'
+{"server.admin_allowed_cidrs":["127.0.0.0/8","10.0.0.0/8","172.16.0.0/12","192.168.0.0/16","203.0.113.0/24"]}
+EOF
+status=$(cd "$work" && curl -ksS --max-time 30 -o patch.out -w '%{http_code}' \
+  -X PATCH -H 'Content-Type: application/json' -H @auth.hdr \
+  -H 'X-OwnCord-Confirm: server.admin_allowed_cidrs' \
+  --data-binary @patch.json "$smoke_url/admin/api/config/settings") ||
+  fail "$wiz" "recovery: PATCH /admin/api/config/settings did not complete"
+[ "$status" = "200" ] ||
+  fail "$wiz" "recovery: PATCH /admin/api/config/settings returned HTTP $status, want 200"
+read_overrides "$wiz" | grep -q '"server.admin_allowed_cidrs"' ||
+  fail "$wiz" "recovery: the panel save did not reach config-overrides.json"
+
+# Refused while the server runs: it holds the database's process lock. The file
+# now holds the key, so "unchanged" has something to protect.
+read_overrides "$wiz" >"$work/overrides.before"
+code=0
+reset_overrides >"$work/reset.running" 2>&1 || code=$?
+if [ "$code" != "1" ]; then
+  echo "reset-overrides output (key names only):"
+  cat "$work/reset.running"
+  fail "$wiz" "recovery: reset-overrides exited $code against a running server, want 1 (refused)"
+fi
+grep -q 'in use by another process' "$work/reset.running" ||
+  { cat "$work/reset.running"; fail "$wiz" "recovery: the refusal was not the process lock"; }
+read_overrides "$wiz" >"$work/overrides.after"
+cmp -s "$work/overrides.before" "$work/overrides.after" ||
+  fail "$wiz" "recovery: a refused reset still changed config-overrides.json"
+grep -q '"server.admin_allowed_cidrs"' "$work/overrides.after" ||
+  fail "$wiz" "recovery: the refused reset removed the lockout key"
+echo "recovery: reset-overrides refused while the server runs (exit 1, process lock), file unchanged"
+
+drain "recovery drain" "$wiz"
+
+code=0
+reset_overrides >"$work/reset.stopped" 2>&1 || code=$?
+if [ "$code" != "0" ]; then
+  echo "reset-overrides output (key names only):"
+  cat "$work/reset.stopped"
+  fail "$wiz" "recovery: reset-overrides exited $code with the server stopped, want 0"
+fi
+# Key names are printed; values never are.
+grep -q 'server.admin_allowed_cidrs' "$work/reset.stopped" ||
+  fail "$wiz" "recovery: reset-overrides did not name the key it removed"
+if grep -Eq '203\.0\.113|172\.16\.0\.0|192\.168\.0\.0' "$work/reset.stopped"; then
+  fail "$wiz" "recovery: reset-overrides printed a setting's value"
+fi
+read_overrides "$wiz" >"$work/overrides.reset"
+if grep -q '"server.admin_allowed_cidrs"' "$work/overrides.reset"; then
+  fail "$wiz" "recovery: the lockout key is still in config-overrides.json after the reset"
+fi
+grep -q '"upload.max_size_mb":123' "$work/overrides.reset" ||
+  fail "$wiz" "recovery: the reset removed upload.max_size_mb, which is not lockout-capable"
+echo "recovery: reset-overrides removed server.admin_allowed_cidrs and kept upload.max_size_mb"
+
+# The server must come back on the recovered volume.
+docker start "$wiz" >/dev/null
+wait_healthy "recovery restart" "$wiz"
+# The admin surface answers again with the same session, under the default
+# allowlist the reset fell back to.
+admin_get settings.recovered.json ||
+  fail "$wiz" "recovery restart: GET /admin/api/config/settings failed after the reset"
+echo "recovery restart: the admin settings API answers"
+show_logs "$wiz"
+drain "recovery final drain" "$wiz"
+
+# --- Phase 8: the compose stack (WP 4.8b) -----------------------------------
+# Last, because it is the slowest and needs the host ports and images the
+# phases above do not. It tears its own project down; its own failure output
+# names the phase. Run as a child so its trap and `set -e` stay its own.
+bash "$(dirname "${BASH_SOURCE[0]}")/compose-smoke.sh" "$image"
+
+echo "docker smoke passed: boot, migrate, healthy, minimal privilege, drain, replace, wizard persists across a recreate, reset-overrides recovers, compose stack"

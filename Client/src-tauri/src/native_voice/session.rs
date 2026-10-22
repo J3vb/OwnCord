@@ -12,12 +12,16 @@ use std::sync::{Arc, Mutex};
 
 use livekit::e2ee::EncryptionType;
 use livekit::e2ee::{key_provider::KeyProvider, key_provider::KeyProviderOptions, E2eeOptions};
-use livekit::options::{AudioEncoding, TrackPublishOptions, VideoEncoding, VideoPreset};
+use livekit::options::{
+    AudioEncoding, DegradationPreference, TrackPublishOptions, VideoCodec, VideoEncoding,
+    VideoPreset,
+};
 use livekit::prelude::*;
 use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
+use livekit::webrtc::stats::RtcStats;
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use serde::Serialize;
@@ -27,9 +31,10 @@ use super::camera::{
     self, CameraCapture, CameraDevice, CaptureOptions as CameraCaptureOptions,
     Target as CameraTarget,
 };
-use super::capture::{self, Apm, Capture};
+use super::capture::{self, Apm, Capture, GateSink, LevelSink, Sink};
 use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
+use super::share_audio::ShareAudio;
 use super::video::{FrameServer, Observer};
 
 /// The only key index OwnCord ever uses. livekit-client's
@@ -47,6 +52,25 @@ pub const KEY_INDEX: i32 = 0;
 /// derives from.
 pub fn shared_key_material(base64_room_key: &str) -> Vec<u8> {
     base64_room_key.as_bytes().to_vec()
+}
+
+/// The `RoomOptions` every native session connects with: dynacast on, so a
+/// video layer nobody subscribes to is paused (the SDK re-applies the
+/// paused layers after every publisher renegotiation, so starting or stopping
+/// another track does not resume them), and GCM e2ee.
+fn room_options(key_provider: KeyProvider) -> RoomOptions {
+    let mut options = RoomOptions::default();
+    options.dynacast = true;
+    // The report's proven configuration. `encryption` would also enable
+    // data-track encryption, which livekit-client's `e2ee` path lacks.
+    #[allow(deprecated)]
+    {
+        options.e2ee = Some(E2eeOptions {
+            encryption_type: EncryptionType::Gcm,
+            key_provider,
+        });
+    }
+    options
 }
 
 /// Mirror of `ExternalE2EEKeyProvider`'s fixed options: no ratcheting, no
@@ -76,7 +100,7 @@ pub fn video_quality(name: &str) -> Result<VideoQuality, String> {
 /// Layer control for one remote video (P3-07, the web path's
 /// `setEnabled`/`setVideoQuality`): a stream no one sees stops, a shown one
 /// comes at `quality`. The webview maps a tile's size to a quality
-/// (`video_quality`) by choice; livekit 0.9.3's `update_video_dimensions` is
+/// (`video_quality`) by choice; livekit 0.9.5's `update_video_dimensions` is
 /// not used. Runs without the session lock;
 /// the webview sends a publication's next view only once this returns.
 pub async fn set_video_view(
@@ -170,6 +194,14 @@ pub enum Event {
     /// The input-sensitivity gate opened (speech) or closed (silence). It
     /// lights the local speaking ring, as the web path's detector does.
     VoiceGate {
+        open: bool,
+    },
+    /// A level report from the capture, every ~50 ms while it runs: the
+    /// loudest ~10 ms RMS after the input volume, and whether the voice gate
+    /// is open. It drives the settings meter and automatic sensitivity, as
+    /// the web path's detector reports do.
+    InputLevel {
+        rms: f32,
         open: bool,
     },
     EncryptionStatus {
@@ -335,7 +367,7 @@ fn map_event(ev: RoomEvent) -> Option<Event> {
 
 /// Microphone audio processing, from the same preferences the web path feeds
 /// `audioCaptureDefaults`, plus its Enhanced Noise Suppression (RNNoise).
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioOptions {
     pub echo_cancellation: bool,
@@ -343,6 +375,52 @@ pub struct AudioOptions {
     pub auto_gain_control: bool,
     #[serde(default)]
     pub enhanced_noise_suppression: bool,
+}
+
+/// Keep `old` until nothing but this list holds it. A lagging audio
+/// callback can still hold an older generation after a second rebuild, so
+/// drop only the entries every follower has let go of, here on the caller's
+/// thread.
+pub(super) fn retire<T>(retired: &mut Vec<Arc<T>>, old: Option<Arc<T>>) {
+    retired.retain(|r| Arc::strong_count(r) > 1);
+    retired.extend(old);
+}
+
+/// What a request to change the audio processing asks of a session.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ProcessingChange {
+    /// Audio is not enabled yet: only remember the options.
+    Remember,
+    /// The options are what the running processing already has.
+    Unchanged,
+    /// Only Enhanced Noise Suppression changed: RNNoise runs outside
+    /// libwebrtc, so keep the processing (and the echo canceller's
+    /// adaptation) and only switch the denoiser.
+    Reroute,
+    /// Build the processing again (libwebrtc's flags are fixed at
+    /// construction) and swap it in.
+    Rebuild,
+}
+
+pub(super) fn processing_change(
+    enabled: bool,
+    current: Option<AudioOptions>,
+    next: AudioOptions,
+) -> ProcessingChange {
+    if !enabled {
+        ProcessingChange::Remember
+    } else if current == Some(next) {
+        ProcessingChange::Unchanged
+    } else if current.is_some_and(|c| {
+        AudioOptions {
+            enhanced_noise_suppression: next.enhanced_noise_suppression,
+            ..c
+        } == next
+    }) {
+        ProcessingChange::Reroute
+    } else {
+        ProcessingChange::Rebuild
+    }
 }
 
 /// Rust-side resource counts for the facade's debug surface (B7-11: the
@@ -432,6 +510,40 @@ impl DeviceKind {
     }
 }
 
+/// The video codec a publish asks for (WP LP-7c). VP8 is the default and what
+/// a webview that sends no `codec` gets; H.264 is sent only when
+/// `native_voice_video_codecs` says the engine can encode it; so is VP9 (WP
+/// M-11b), which goes out as one SVC layer and never simulcast.
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PublishCodec {
+    #[default]
+    Vp8,
+    H264,
+    Vp9,
+}
+
+impl PublishCodec {
+    fn video_codec(self) -> VideoCodec {
+        match self {
+            PublishCodec::Vp8 => VideoCodec::VP8,
+            PublishCodec::H264 => VideoCodec::H264,
+            PublishCodec::Vp9 => VideoCodec::VP9,
+        }
+    }
+
+    /// The RTP scalability mode this codec publishes with. VP9 is one spatial
+    /// layer with three temporal layers (`L1T3`): the SFU can drop temporal
+    /// layers for a slow viewer, and it is what browsers decode. Simulcast is
+    /// off for it, because the SDK builds one encoding when a mode is set.
+    fn svc(self) -> Option<String> {
+        match self {
+            PublishCodec::Vp9 => Some("L1T3".to_string()),
+            PublishCodec::Vp8 | PublishCodec::H264 => None,
+        }
+    }
+}
+
 /// How the screen share is published: the capture's size and the web
 /// path's `publishTrack` options for it (`getScreenShareMaxBitrate`, the
 /// effective frame rate, `isScreenShareSimulcast`).
@@ -443,18 +555,25 @@ pub struct ScreenOptions {
     pub max_bitrate: u64,
     pub max_framerate: f64,
     pub simulcast: bool,
+    #[serde(default)]
+    pub codec: PublishCodec,
 }
 
 /// The screen share's publish options. With simulcast it adds the web path's
 /// one lower layer (`SCREENSHARE_SIMULCAST_LAYERS`): 720p at 15 fps and at
 /// most 1.2 Mbps, so a viewer who cannot take the full stream still gets
 /// readable text instead of a frozen frame, and the top layer keeps most of
-/// the budget.
+/// the budget. Like the web path's `screenShareDegradation`, a 120 fps share
+/// degrades `Balanced` (resolution before frame rate); lower rates keep
+/// resolution.
 fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
+    let scalability_mode = opts.codec.svc();
+    let simulcast = opts.simulcast && scalability_mode.is_none();
     TrackPublishOptions {
         source: TrackSource::Screenshare,
-        simulcast: opts.simulcast,
-        simulcast_layers: opts.simulcast.then(|| {
+        simulcast,
+        scalability_mode,
+        simulcast_layers: simulcast.then(|| {
             vec![VideoPreset {
                 width: 1280,
                 height: 720,
@@ -467,6 +586,12 @@ fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
         video_encoding: Some(VideoEncoding {
             max_bitrate: opts.max_bitrate,
             max_framerate: opts.max_framerate,
+        }),
+        video_codec: opts.codec.video_codec(),
+        degradation_preference: Some(if opts.max_framerate >= 120.0 {
+            DegradationPreference::Balanced
+        } else {
+            DegradationPreference::MaintainResolution
         }),
         ..Default::default()
     }
@@ -482,12 +607,16 @@ pub struct CameraOptions {
     pub max_bitrate: u64,
     pub max_framerate: f64,
     pub simulcast: bool,
+    #[serde(default)]
+    pub codec: PublishCodec,
 }
 
 /// The camera's publish options. A 1080p camera adds the web path's
 /// `cameraSimulcastLayers` (360p and 720p) so a viewer on a 1-3 Mbps link gets
 /// 720p rather than the SDK default's 360p; 720p and below keep the defaults.
 fn camera_publish_options(opts: &CameraOptions) -> TrackPublishOptions {
+    let scalability_mode = opts.codec.svc();
+    let simulcast = opts.simulcast && scalability_mode.is_none();
     let layer = |width, height, max_bitrate, max_framerate| VideoPreset {
         width,
         height,
@@ -498,8 +627,9 @@ fn camera_publish_options(opts: &CameraOptions) -> TrackPublishOptions {
     };
     TrackPublishOptions {
         source: TrackSource::Camera,
-        simulcast: opts.simulcast,
-        simulcast_layers: (opts.simulcast && opts.height > 720).then(|| {
+        simulcast,
+        scalability_mode,
+        simulcast_layers: (simulcast && opts.height > 720).then(|| {
             vec![
                 layer(640, 360, 450_000, 20.0),
                 layer(1280, 720, 1_700_000, 30.0),
@@ -509,6 +639,7 @@ fn camera_publish_options(opts: &CameraOptions) -> TrackPublishOptions {
             max_bitrate: opts.max_bitrate,
             max_framerate: opts.max_framerate,
         }),
+        video_codec: opts.codec.video_codec(),
         ..Default::default()
     }
 }
@@ -522,6 +653,33 @@ pub fn process_threads() -> usize {
                 .and_then(|v| v.trim().parse().ok())
         })
         .unwrap_or(0)
+}
+
+/// The screen share's audio publish options, the web path's
+/// `SCREENSHARE_AUDIO_PUBLISH` (screenShare.ts): no DTX, 128 kbps
+/// (`musicHighQualityStereo`) and no RED, which livekit-client leaves off for
+/// a stereo track and the Rust SDK forces off under E2EE anyway.
+///
+/// `stereo` (LP-8d) is the flag of the vendored livekit crate
+/// (`vendor/livekit/OWNCORD-PATCH.md`): it makes the SFU's publisher answer
+/// carry `stereo=1`, so the encoder is built with two channels instead of
+/// downmixing the share to mono. The mic, camera and screen video options
+/// leave it off.
+fn screen_audio_publish_options() -> TrackPublishOptions {
+    TrackPublishOptions {
+        source: TrackSource::ScreenshareAudio,
+        dtx: false,
+        red: false,
+        audio_encoding: Some(livekit::options::audio::MUSIC_HIGH_QUALITY_STEREO.encoding),
+        stereo: true,
+        ..Default::default()
+    }
+}
+
+/// The source the share audio feeds: 48 kHz stereo, unbuffered (the capture
+/// thread paces it).
+pub fn screen_audio_source() -> NativeAudioSource {
+    NativeAudioSource::new(AudioSourceOptions::default(), 48_000, 2, 0)
 }
 
 /// A published camera or screen share. `issued` is the sid the webview was
@@ -559,6 +717,39 @@ impl VideoPublication {
 
 type VideoSlot = Arc<Mutex<Option<VideoPublication>>>;
 
+/// Why `set_screen_quality` did not apply. `Refused` changed nothing and the
+/// share goes on; after `Publish` only the screen video is unpublished: the
+/// capture (running at the new size) and the share audio stay up, so the
+/// caller must stop the screen or retry the publish.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "stage", content = "message", rename_all = "camelCase")]
+pub enum QualityError {
+    Refused(String),
+    Publish(String),
+}
+
+/// Whether a quality change for `capture` may go ahead: it must be the live,
+/// published share, with no source change pending (that change's new capture
+/// would otherwise carry the old options over the new quality).
+fn quality_gate(
+    live: Option<u64>,
+    published: bool,
+    change_pending: bool,
+    capture: u64,
+) -> Result<(), QualityError> {
+    if live != Some(capture) || !published {
+        return Err(QualityError::Refused(format!(
+            "screen capture {capture} is not the published screen share"
+        )));
+    }
+    if change_pending {
+        return Err(QualityError::Refused(
+            "the screen source is being changed".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// The running screen capture: its id (what the webview names to publish or
 /// stop it) and the capturer thread.
 struct ScreenShare {
@@ -579,6 +770,13 @@ pub struct NativeSession {
     key_provider: KeyProvider,
     /// Set by `enable_audio`: the processing capture and playout share.
     apm: Option<Arc<Apm>>,
+    /// The options `apm` was built from, or the latest asked for before
+    /// `enable_audio` ran.
+    audio: Option<AudioOptions>,
+    /// Processing that rebuilds replaced, each kept until the capture and
+    /// playout have both moved past it, so its last reference is never
+    /// dropped on an audio thread.
+    retired: Vec<Arc<Apm>>,
     /// The published microphone track — not its publication: a full
     /// reconnect republishes the same track under a new publication and
     /// detaches the old one, so muting through a stored publication would
@@ -594,12 +792,26 @@ pub struct NativeSession {
     /// The running native camera capture, independent of publication: the
     /// self-view preview reads it back over the frame socket's `camera` route.
     camera_capture: Option<CameraShare>,
+    /// A capture started to replace the published camera's device; it takes
+    /// over the publication once its first frame arrives
+    /// (`finish_camera_change`), until then the live camera is untouched.
+    camera_change: Option<CameraShare>,
     screen: Option<ScreenShare>,
     /// A capture started to replace the published share's source; it takes
     /// over the publication once its first frame arrives
     /// (`finish_screen_change`), until then the live share is untouched.
     screen_change: Option<ScreenShare>,
     screen_publication: VideoSlot,
+    /// The screen share's audio publication. Its `capture` is the screen
+    /// capture it belongs to, like the video slot's.
+    ///
+    /// Lock order: the session's tokio `inner` mutex is outermost. Below it
+    /// the slots (camera, screen, screen audio) are each locked alone, never
+    /// two at once, by the session and by `forward_events`.
+    screen_audio: VideoSlot,
+    /// The capture feeding the published screen audio (none for the interop
+    /// example's synthetic source). Lives and dies with `screen_audio`.
+    share_audio: Option<ShareAudio>,
     next_capture: u64,
     next_camera: u64,
     on_event: EventSink,
@@ -607,6 +819,36 @@ pub struct NativeSession {
     playout: Playout,
     capture: Capture,
     forwarder: tokio::task::JoinHandle<()>,
+    /// Emits the capture's reports (`enable_audio`), off the audio thread.
+    capture_reports: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// Capture reports (gate edges and level reports, ~20 a second) waiting for
+/// the webview: about three seconds of them.
+const CAPTURE_REPORT_QUEUE: usize = 64;
+
+/// The capture's report sinks and the task that emits what they queue. The
+/// capture reports from the audio callback thread, which must never wait on
+/// an emit (it serializes and takes the webviews' lock): the sinks only
+/// queue, dropping a report when the queue is full, and the task emits, in
+/// order. It ends when the sinks are dropped with the capture.
+pub(super) fn capture_report_sinks(
+    on_event: EventSink,
+) -> (GateSink, LevelSink, tokio::task::JoinHandle<()>) {
+    let (reports, mut queue) = tokio::sync::mpsc::channel(CAPTURE_REPORT_QUEUE);
+    let emitter = tokio::spawn(async move {
+        while let Some(event) = queue.recv().await {
+            on_event(event);
+        }
+    });
+    let gate_reports = reports.clone();
+    let on_gate: GateSink = Arc::new(move |open| {
+        let _ = gate_reports.try_send(Event::VoiceGate { open });
+    });
+    let on_level: LevelSink = Arc::new(move |rms, open| {
+        let _ = reports.try_send(Event::InputLevel { rms, open });
+    });
+    (on_gate, on_level, emitter)
 }
 
 /// The microphone's publish options: the channel's configured bitrate
@@ -620,6 +862,10 @@ fn mic_publish_options(bitrate: Option<u64>) -> TrackPublishOptions {
     }
 }
 
+/// The local (by source key) and remote (by publication sid) video tracks
+/// whose stats the webview reads.
+pub type StatsTracks = (Vec<(&'static str, LocalTrack)>, Vec<(String, RemoteTrack)>);
+
 impl NativeSession {
     /// Connect with the room key already installed: the TS key exchange
     /// finishes before `room.connect()` on every platform, so a session with
@@ -631,21 +877,25 @@ impl NativeSession {
         on_event: EventSink,
     ) -> Result<Self, String> {
         let key_provider = KeyProvider::with_shared_key(key_provider_options(), key_material);
-        let mut options = RoomOptions::default();
-        // The report's proven configuration. `encryption` would also enable
-        // data-track encryption, which livekit-client's `e2ee` path lacks.
-        #[allow(deprecated)]
-        {
-            options.e2ee = Some(E2eeOptions {
-                encryption_type: EncryptionType::Gcm,
-                key_provider: key_provider.clone(),
-            });
-        }
+        let options = room_options(key_provider.clone());
         let frames = FrameServer::bind().await?;
+        log::info!(
+            "[native_voice] video encoder backends: {:?}",
+            livekit::webrtc::rtp_sender::VideoEncoderBackend::list_available()
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
         let (room, events) = Room::connect(url, token, options)
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
+        // LP-8d: the share audio's stereo comes from the publish options (the
+        // server's answer), not from this mode; the log records which mode the
+        // server granted, which decides whether a native viewer decodes it.
+        log::info!(
+            "[native_voice] single peer connection active: {}",
+            room.is_single_peer_connection_active()
+        );
         // The join's grant raises no change event, so the webview hears it
         // here, before any event the forwarder sends.
         if let Some(permission) = room.local_participant().permission() {
@@ -653,6 +903,7 @@ impl NativeSession {
         }
         let camera = VideoSlot::default();
         let screen_publication = VideoSlot::default();
+        let screen_audio = VideoSlot::default();
         let playout = Playout::default();
         let mic_withdrawn = MicWithdrawn::default();
         let forwarder = tokio::spawn(forward_events(
@@ -660,21 +911,30 @@ impl NativeSession {
             on_event.clone(),
             frames.observer(),
             playout.listener(),
-            [camera.clone(), screen_publication.clone()],
+            [
+                camera.clone(),
+                screen_publication.clone(),
+                screen_audio.clone(),
+            ],
             mic_withdrawn.clone(),
         ));
         Ok(Self {
             room,
             key_provider,
             apm: None,
+            retired: Vec::new(),
+            audio: None,
             mic: None,
             mic_source: None,
             mic_withdrawn,
             camera,
             camera_capture: None,
             screen: None,
+            camera_change: None,
             screen_change: None,
             screen_publication,
+            screen_audio,
+            share_audio: None,
             next_capture: 0,
             next_camera: 0,
             on_event,
@@ -682,6 +942,7 @@ impl NativeSession {
             playout,
             capture: Capture::default(),
             forwarder,
+            capture_reports: None,
         })
     }
 
@@ -737,17 +998,50 @@ impl NativeSession {
         if self.apm.is_some() {
             return;
         }
+        // Options asked for before this ran win over the connect-time ones.
+        let opts = self.audio.unwrap_or(opts);
+        self.audio = Some(opts);
         let apm = Apm::new(&opts);
         self.playout.set_reference(apm.clone());
-        let on_event = self.on_event.clone();
+        let (on_gate, on_level, emitter) = capture_report_sinks(self.on_event.clone());
+        self.capture_reports = Some(emitter);
         self.capture.configure(
             apm.clone(),
             opts.enhanced_noise_suppression,
-            Arc::new(move |open| on_event(Event::VoiceGate { open })),
+            on_gate,
+            on_level,
         );
         self.apm = Some(apm);
         if let Err(e) = self.playout.set_device("") {
             log::warn!("[native_voice] playout unavailable: {e}");
+        }
+    }
+
+    /// Apply new audio processing options in a running call: libwebrtc's
+    /// processing takes its flags at construction, so build a new one and
+    /// hand it to both the capture (forward stream) and the playout (the
+    /// echo canceller's reverse stream). Both follow it on a later audio
+    /// frame, whether or not the microphone is unmuted. Before
+    /// `enable_audio` the options are only remembered.
+    pub fn set_audio_processing(&mut self, audio: AudioOptions) {
+        match processing_change(self.apm.is_some(), self.audio, audio) {
+            ProcessingChange::Unchanged => {}
+            ProcessingChange::Remember => self.audio = Some(audio),
+            ProcessingChange::Reroute => {
+                if let Some(apm) = &self.apm {
+                    self.capture
+                        .set_processing(apm.clone(), audio.enhanced_noise_suppression);
+                }
+                self.audio = Some(audio);
+            }
+            ProcessingChange::Rebuild => {
+                let apm = Apm::new(&audio);
+                self.playout.set_reference(apm.clone());
+                self.capture
+                    .set_processing(apm.clone(), audio.enhanced_noise_suppression);
+                retire(&mut self.retired, self.apm.replace(apm));
+                self.audio = Some(audio);
+            }
         }
     }
 
@@ -783,7 +1077,7 @@ impl NativeSession {
             // 10 ms frames and never waits.
             let source =
                 NativeAudioSource::new(AudioSourceOptions::default(), capture::SAMPLE_RATE, 1, 0);
-            self.capture.start(source.clone())?;
+            self.capture.start(Sink::Track(source.clone()))?;
             self.mic_source = Some(source.clone());
             let published = self
                 .publish_audio(RtcAudioSource::Native(source), bitrate)
@@ -800,7 +1094,7 @@ impl NativeSession {
         if enabled {
             // The interop example publishes its own source and captures nothing.
             if let Some(source) = &self.mic_source {
-                self.capture.start(source.clone())?;
+                self.capture.start(Sink::Track(source.clone()))?;
             }
             track.unmute();
         } else {
@@ -816,9 +1110,15 @@ impl NativeSession {
         self.capture.set_ptt_gated(gated);
     }
 
-    /// Set the input-sensitivity gate's threshold (0: no gate).
-    pub fn set_voice_gate(&self, threshold: f32) {
-        self.capture.set_voice_gate(threshold);
+    /// Set the input-sensitivity gate's threshold (0: no gate); `retune`
+    /// moves it without restarting the detector.
+    pub fn set_voice_gate(&self, threshold: f32, retune: bool) {
+        self.capture.set_voice_gate(threshold, retune);
+    }
+
+    /// Set the input volume as a linear gain (0 to 2).
+    pub fn set_input_gain(&self, gain: f32) {
+        self.capture.set_input_gain(gain);
     }
 
     /// Publish any audio source as the microphone track. The app passes its
@@ -908,6 +1208,72 @@ impl NativeSession {
         Ok(sid.to_string())
     }
 
+    /// Start capturing `target` to replace the published camera's device,
+    /// leaving the live capture and its publication running. Returns the new
+    /// capture's id and its first-frame receiver, as `start_camera`; the
+    /// caller awaits it without holding the session, then calls
+    /// `finish_camera_change` (or `stop_camera` to give up).
+    pub fn start_camera_change(
+        &mut self,
+        target: CameraTarget,
+        options: CameraCaptureOptions,
+    ) -> Result<(u64, Started), String> {
+        if !self.camera_published() {
+            return Err("no published camera to change".into());
+        }
+        self.camera_change.take();
+        self.next_camera += 1;
+        let id = self.next_camera;
+        let on_event = self.on_event.clone();
+        let (capture, started) = CameraCapture::start(target, options, move || {
+            on_event(Event::CameraCaptureEnded { capture: id })
+        })?;
+        self.camera_change = Some(CameraShare { id, capture });
+        Ok((id, started))
+    }
+
+    /// Move the published camera onto capture `capture` (started by
+    /// `start_camera_change`): same publication and sid, same preview socket,
+    /// and the old capture is released. Fails, changing nothing, when a stop,
+    /// a new camera or another change came first.
+    pub fn finish_camera_change(&mut self, capture: u64) -> Result<(), String> {
+        let next = self
+            .camera_change
+            .take_if(|c| c.id == capture)
+            .ok_or("the camera change was superseded")?;
+        let Some(live) = self.camera_capture.as_mut() else {
+            return Err("the camera stopped during the change".into());
+        };
+        {
+            // One guard for the published check and the write: a release
+            // clearing the slot in between must not be written over.
+            let mut slot = self.camera.lock().unwrap();
+            let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
+                return Err("the camera stopped during the change".into());
+            };
+            // The source keeps the size it was published at: the encoder follows
+            // each frame's own size (as on the web path's replaceTrack).
+            next.capture.take_over(&live.capture);
+            publication.capture = Some(next.id);
+        }
+        // Dropping the old capture joins its thread and frees its device; the
+        // preview lives on in `next`.
+        drop(std::mem::replace(live, next));
+        Ok(())
+    }
+
+    /// Whether the running capture is the one published as the camera.
+    fn camera_published(&self) -> bool {
+        let live = self.camera_capture.as_ref().map(|c| c.id);
+        live.is_some()
+            && self
+                .camera
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|p| p.capture == live)
+    }
+
     /// Unpublish camera `sid` (the web path unpublishes rather than mutes, so
     /// remote tiles close the same way). A stale sid, one a later publish
     /// already replaced, is a no-op: it must not remove the newer camera. The
@@ -941,8 +1307,12 @@ impl NativeSession {
     }
 
     /// Stop capture `capture` if it is still the running one (a stale id is a
-    /// no-op): unpublish it and release the pipeline and the device.
+    /// no-op): unpublish it and release the pipeline and the device. A
+    /// pending change's capture is only dropped.
     pub async fn stop_camera(&mut self, capture: u64) {
+        if self.camera_change.as_ref().is_some_and(|c| c.id == capture) {
+            self.camera_change.take();
+        }
         if self
             .camera_capture
             .as_ref()
@@ -955,6 +1325,7 @@ impl NativeSession {
     /// Unpublish whatever camera is published and stop its capture: the
     /// preview socket ends with it.
     async fn release_camera(&mut self) {
+        self.camera_change.take();
         self.release_camera_publication().await;
         self.frames.set_camera(None);
         // Dropping joins the capture thread and tears down the pipeline.
@@ -1026,6 +1397,122 @@ impl NativeSession {
         Ok(sid.to_string())
     }
 
+    /// Publish the other applications' sound as the screen share's audio,
+    /// alongside running capture `capture` (replacing an earlier one). The
+    /// capture (`share_audio.rs`) starts here and ends with the publication.
+    /// Returns the publication's sid.
+    pub async fn publish_screen_audio(&mut self, capture: u64) -> Result<String, String> {
+        if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            return Err(format!("screen capture {capture} is not running"));
+        }
+        let source = screen_audio_source();
+        self.publish_screen_audio_from(capture, source.clone(), Some(ShareAudio::start(source)))
+            .await
+    }
+
+    /// As `publish_screen_audio`, but fed by the caller: the interop example's
+    /// synthetic stereo tone (CI has no sound server).
+    pub async fn publish_screen_audio_source(
+        &mut self,
+        capture: u64,
+        source: NativeAudioSource,
+    ) -> Result<String, String> {
+        self.publish_screen_audio_from(capture, source, None).await
+    }
+
+    async fn publish_screen_audio_from(
+        &mut self,
+        capture: u64,
+        source: NativeAudioSource,
+        feed: Option<ShareAudio>,
+    ) -> Result<String, String> {
+        if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            return Err(format!("screen capture {capture} is not running"));
+        }
+        // Replace semantics. On any error below `feed` drops with this frame,
+        // leaving the slot empty and no capture thread behind.
+        self.release_screen_audio().await;
+        let track = LocalAudioTrack::create_audio_track(
+            "screen_share_audio",
+            RtcAudioSource::Native(source),
+        );
+        let publication = self
+            .room
+            .local_participant()
+            .publish_track(LocalTrack::Audio(track), screen_audio_publish_options())
+            .await
+            .map_err(|e| e.to_string())?;
+        self.require_encrypted(&publication).await?;
+        let sid = publication.sid();
+        *self.screen_audio.lock().unwrap() =
+            Some(VideoPublication::of_capture(sid.clone(), Some(capture)));
+        self.share_audio = feed;
+        Ok(sid.to_string())
+    }
+
+    /// The opus codec the published screen-share audio `sid` was negotiated
+    /// with, as the sender's stats report it: `(channels, sdp_fmtp_line)`.
+    /// The LP-8d interop example prints it to prove the publisher is stereo.
+    pub async fn screen_audio_codec(&self, sid: &str) -> Result<(u32, String), String> {
+        let publication = self
+            .room
+            .local_participant()
+            .track_publications()
+            .into_values()
+            .find(|p| p.sid().as_str() == sid)
+            .ok_or_else(|| format!("screen audio {sid} is not published"))?;
+        let Some(LocalTrack::Audio(track)) = publication.track() else {
+            return Err(format!("screen audio {sid} has no audio track"));
+        };
+        let stats = track
+            .get_stats()
+            .await
+            .map_err(|e| format!("screen audio stats: {e}"))?;
+        stats
+            .into_iter()
+            .find_map(|s| match s {
+                RtcStats::Codec(c) if c.codec.mime_type.to_ascii_lowercase().contains("opus") => {
+                    Some((c.codec.channels, c.codec.sdp_fmtp_line))
+                }
+                _ => None,
+            })
+            .ok_or_else(|| "screen audio stats carry no opus codec".to_string())
+    }
+
+    /// Unpublish screen audio `sid` if it is still the published one; a stale
+    /// sid, one a later publish replaced, is a no-op.
+    pub async fn unpublish_screen_audio(&mut self, sid: &str) {
+        let issued = self
+            .screen_audio
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|a| a.issued == sid);
+        if issued {
+            self.release_screen_audio().await;
+        }
+    }
+
+    /// Unpublish the screen audio and stop its capture thread (joined on
+    /// drop). Called by `release_screen` (stop, close, a new share) and not by
+    /// `unpublish_screen`, so a codec republish keeps the audio, as the web
+    /// path does (screenShare.ts: "Screen audio stays published"); the
+    /// interop example's `--republish-screen` and stop cover both.
+    async fn release_screen_audio(&mut self) {
+        let publication = self.screen_audio.lock().unwrap().take();
+        self.share_audio.take();
+        if let Some(publication) = publication {
+            if let Err(e) = self
+                .room
+                .local_participant()
+                .unpublish_track(&publication.live)
+                .await
+            {
+                log::warn!("[native_voice] screen audio unpublish: {e}");
+            }
+        }
+    }
+
     /// Start capturing `target` to replace the published share's source,
     /// leaving the live capture and its publication running. Returns the
     /// new capture's id and its first-frame receiver, as `start_screen`;
@@ -1059,23 +1546,72 @@ impl NativeSession {
             .screen_change
             .take_if(|c| c.id == capture)
             .ok_or("the screen source change was superseded")?;
-        if !self.screen_published() {
-            return Err("the screen share stopped during the source change".into());
-        }
         let Some(live) = self.screen.as_mut() else {
             return Err("the screen share stopped during the source change".into());
         };
-        // The source keeps the size it was published at: the encoder follows
-        // each frame's own size, but the layer sizes the server was told stay
-        // (as on the web path's replaceTrack).
-        next.capture.take_over(&live.capture);
-        if let Some(publication) = self.screen_publication.lock().unwrap().as_mut() {
+        {
+            // One guard for the published check and the write: a release
+            // clearing the slot in between must not be written over.
+            let mut slot = self.screen_publication.lock().unwrap();
+            let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
+                return Err("the screen share stopped during the source change".into());
+            };
+            // The source keeps the size it was published at: the encoder follows
+            // each frame's own size, but the layer sizes the server was told stay
+            // (as on the web path's replaceTrack).
+            next.capture.take_over(&live.capture);
             publication.capture = Some(next.id);
+        }
+        {
+            // The share audio follows the capture that is live, so a
+            // withdrawal ends that one. A short lock of its own, taken after
+            // the video slot's guard is released.
+            let mut slot = self.screen_audio.lock().unwrap();
+            if let Some(audio) = slot.as_mut().filter(|a| a.capture == Some(live.id)) {
+                audio.capture = Some(next.id);
+            }
         }
         // Dropping the old share joins its capture thread (and, on Wayland,
         // closes its portal session); the preview lives on in `next`.
         drop(std::mem::replace(live, next));
         Ok(())
+    }
+
+    /// Change the live share's quality: re-size and re-pace the running
+    /// capture, then publish it again with `publish` at the new size (the
+    /// SDK cannot change a sender's encoding). One `&mut self` hold covers
+    /// both steps, so a stop, source change or leave queued behind it runs
+    /// after the new publication exists and releases it, and one that came
+    /// first makes the gate refuse. Returns the new sid and the size.
+    pub async fn set_screen_quality(
+        &mut self,
+        capture: u64,
+        options: CaptureOptions,
+        publish: ScreenOptions,
+    ) -> Result<(String, u32, u32), QualityError> {
+        quality_gate(
+            self.screen.as_ref().map(|s| s.id),
+            self.screen_published(),
+            self.screen_change.is_some(),
+            capture,
+        )?;
+        let size = self
+            .screen
+            .as_ref()
+            .and_then(|s| s.capture.set_options(options));
+        let (width, height) = size.unwrap_or((publish.width, publish.height));
+        let sid = self
+            .publish_screen(
+                capture,
+                ScreenOptions {
+                    width,
+                    height,
+                    ..publish
+                },
+            )
+            .await
+            .map_err(QualityError::Publish)?;
+        Ok((sid, width, height))
     }
 
     /// Whether the running capture is the one published as the screen share.
@@ -1102,6 +1638,15 @@ impl NativeSession {
         }
     }
 
+    /// Unpublish the screen share if `capture` is the running one, keeping the
+    /// capture alive (a codec republish publishes it again). A stale id is a
+    /// no-op.
+    pub async fn unpublish_screen_keep_capture(&mut self, capture: u64) {
+        if self.screen.as_ref().is_some_and(|s| s.id == capture) {
+            self.unpublish_screen().await;
+        }
+    }
+
     async fn unpublish_screen(&mut self) {
         if let Some(screen) = &self.screen {
             screen.capture.set_source(None);
@@ -1121,10 +1666,52 @@ impl NativeSession {
 
     async fn release_screen(&mut self) {
         self.screen_change.take();
+        self.release_screen_audio().await;
         self.unpublish_screen().await;
         self.frames.set_screen(None);
         // Dropping joins the capture thread.
         self.screen.take();
+    }
+
+    /// The publisher and subscriber transports' raw stats.
+    pub async fn transport_stats(&self) -> Result<(Vec<RtcStats>, Vec<RtcStats>), String> {
+        let s = self
+            .room
+            .get_stats()
+            .await
+            .map_err(|e| format!("native voice stats: {e}"))?;
+        Ok((s.publisher_stats, s.subscriber_stats))
+    }
+
+    /// Handles (Arc clones) of the video tracks whose stats the webview
+    /// reads. Local tracks are keyed by source, not sid, so the lookup is
+    /// immune to the issued/live sid split after a full reconnect; remote
+    /// ones by publication sid (what `remote_pub_info` sends). Unsubscribed
+    /// publications have no track and are skipped.
+    pub fn stats_tracks(&self) -> StatsTracks {
+        let local = self
+            .room
+            .local_participant()
+            .track_publications()
+            .values()
+            .filter_map(|p| {
+                let key = match p.source() {
+                    TrackSource::Camera => "camera",
+                    TrackSource::Screenshare => "screen_share",
+                    _ => return None,
+                };
+                p.track().map(|t| (key, t))
+            })
+            .collect();
+        let remote = self
+            .room
+            .remote_participants()
+            .values()
+            .flat_map(|participant| participant.track_publications().into_values())
+            .filter(|p| p.kind() == TrackKind::Video)
+            .filter_map(|p| p.track().map(|t| (p.sid().to_string(), t)))
+            .collect();
+        (local, remote)
     }
 
     pub fn remote_publication(
@@ -1181,11 +1768,13 @@ impl NativeSession {
     }
 
     pub fn resources(&self) -> Resources {
+        // One slot lock at a time (see the lock order at `screen_audio`).
+        let camera = usize::from(self.camera.lock().unwrap().is_some());
+        let screen = usize::from(self.screen_publication.lock().unwrap().is_some());
+        let screen_audio = usize::from(self.screen_audio.lock().unwrap().is_some());
         Resources {
             rooms: 1,
-            local_tracks: usize::from(self.mic.is_some())
-                + usize::from(self.camera.lock().unwrap().is_some())
-                + usize::from(self.screen_publication.lock().unwrap().is_some()),
+            local_tracks: usize::from(self.mic.is_some()) + camera + screen + screen_audio,
             capture_streams: self.capture.streams(),
             audio_streams: self.playout.readers(),
             video_sockets: self.frames.sockets(),
@@ -1214,6 +1803,9 @@ impl NativeSession {
             log::warn!("[native_voice] room close: {e}");
         }
         self.forwarder.abort();
+        if let Some(reports) = &self.capture_reports {
+            reports.abort();
+        }
     }
 }
 
@@ -1222,7 +1814,7 @@ async fn forward_events(
     on_event: EventSink,
     frames: Observer,
     playout: playout::Listener,
-    published: [VideoSlot; 2],
+    published: [VideoSlot; 3],
     mic_withdrawn: MicWithdrawn,
 ) {
     while let Some(ev) = events.recv().await {
@@ -1237,6 +1829,7 @@ async fn forward_events(
             let slot = match source {
                 TrackSource::Camera => Some(&published[0]),
                 TrackSource::Screenshare => Some(&published[1]),
+                TrackSource::ScreenshareAudio => Some(&published[2]),
                 _ => None,
             };
             let orphan = slot.and_then(|slot| {
@@ -1284,6 +1877,12 @@ async fn forward_events(
                         .map(|capture| Event::CameraCaptureEnded { capture }),
                     TrackSource::Screenshare => {
                         release_slot(&mut published[1].lock().unwrap(), &sid)
+                            .map(|capture| Event::ScreenCaptureEnded { capture })
+                    }
+                    // The share ends the way a stopped capture does; the
+                    // webview's stop releases the capture thread.
+                    TrackSource::ScreenshareAudio => {
+                        release_slot(&mut published[2].lock().unwrap(), &sid)
                             .map(|capture| Event::ScreenCaptureEnded { capture })
                     }
                     _ => None,
@@ -1393,7 +1992,7 @@ impl MicWithdrawn {
     }
 }
 
-/// A video slot's (camera or screen share) response to a local track's
+/// A video slot's (camera, screen share or its audio) response to a local track's
 /// `LocalTrackRepublished`: adopt the new sid when the event continues the
 /// slot's live publication, or return the sid to unpublish when it does not —
 /// the video was stopped (slot emptied) or a newer one replaced it while the
@@ -1406,7 +2005,10 @@ fn apply_republish(
     previous_sid: &TrackSid,
     sid: &TrackSid,
 ) -> Option<TrackSid> {
-    if !matches!(source, TrackSource::Camera | TrackSource::Screenshare) {
+    if !matches!(
+        source,
+        TrackSource::Camera | TrackSource::Screenshare | TrackSource::ScreenshareAudio
+    ) {
         return None;
     }
     match slot.as_mut() {
@@ -1423,6 +2025,30 @@ mod tests {
     use super::*;
     use livekit::e2ee::key_provider::KeyDerivationAlgorithm;
     use livekit_protocol as proto;
+
+    #[test]
+    fn room_options_enable_dynacast_and_gcm_e2ee() {
+        let key_provider = KeyProvider::with_shared_key(key_provider_options(), vec![7; 32]);
+        let options = room_options(key_provider.clone());
+        assert!(options.dynacast);
+        #[allow(deprecated)]
+        let e2ee = options.e2ee;
+        let e2ee = e2ee.expect("e2ee is configured");
+        assert!(matches!(e2ee.encryption_type, EncryptionType::Gcm));
+    }
+
+    #[test]
+    fn retire_keeps_every_generation_a_follower_still_holds() {
+        let mut retired = Vec::new();
+        let first = Arc::new(1);
+        let held_by_lagging_callback = first.clone();
+        retire(&mut retired, Some(first));
+        retire(&mut retired, Some(Arc::new(2)));
+        assert_eq!(retired.len(), 2, "the first generation is still held");
+        drop(held_by_lagging_callback);
+        retire(&mut retired, None);
+        assert!(retired.is_empty(), "unheld generations are freed here");
+    }
 
     fn permission(
         can_publish: bool,
@@ -1442,6 +2068,7 @@ mod tests {
             max_bitrate: 6_000_000,
             max_framerate: 30.0,
             simulcast,
+            codec: PublishCodec::default(),
         }
     }
 
@@ -1461,10 +2088,56 @@ mod tests {
     }
 
     #[test]
+    fn screen_quality_is_refused_without_a_published_share() {
+        let refused = |r: Result<(), QualityError>| matches!(r, Err(QualityError::Refused(_)));
+        assert!(quality_gate(Some(4), true, false, 4).is_ok());
+        // No capture, an unpublished one (a failed republish or a codec
+        // switch in flight), or a stale id (a source change or stop came
+        // first).
+        assert!(refused(quality_gate(None, false, false, 4)));
+        assert!(refused(quality_gate(Some(4), false, false, 4)));
+        assert!(refused(quality_gate(Some(5), true, false, 4)));
+        // A pending source change keeps the options it started with.
+        assert!(refused(quality_gate(Some(4), true, true, 4)));
+    }
+
+    #[test]
+    fn a_quality_error_names_its_stage_for_the_webview() {
+        let json = |e| serde_json::to_value(e).unwrap();
+        assert_eq!(
+            json(QualityError::Refused("x".into())),
+            serde_json::json!({"stage": "refused", "message": "x"})
+        );
+        assert_eq!(
+            json(QualityError::Publish("y".into())),
+            serde_json::json!({"stage": "publish", "message": "y"})
+        );
+    }
+
+    #[test]
     fn screen_share_without_simulcast_is_one_layer() {
         let opts = screen_publish_options(&screen(false));
         assert!(!opts.simulcast);
         assert!(opts.simulcast_layers.is_none());
+    }
+
+    #[test]
+    fn a_120_fps_screen_share_degrades_balanced_and_lower_rates_keep_resolution() {
+        let mut opts = screen(false);
+        assert_eq!(
+            screen_publish_options(&opts).degradation_preference,
+            Some(DegradationPreference::MaintainResolution)
+        );
+        opts.max_framerate = 60.0;
+        assert_eq!(
+            screen_publish_options(&opts).degradation_preference,
+            Some(DegradationPreference::MaintainResolution)
+        );
+        opts.max_framerate = 120.0;
+        assert_eq!(
+            screen_publish_options(&opts).degradation_preference,
+            Some(DegradationPreference::Balanced)
+        );
     }
 
     fn camera(height: u32, simulcast: bool) -> CameraOptions {
@@ -1474,7 +2147,79 @@ mod tests {
             max_bitrate: 4_000_000,
             max_framerate: 30.0,
             simulcast,
+            codec: PublishCodec::default(),
         }
+    }
+
+    #[test]
+    fn camera_publish_options_carry_the_codec() {
+        let mut opts = camera(720, false);
+        assert_eq!(camera_publish_options(&opts).video_codec, VideoCodec::VP8);
+        opts.codec = PublishCodec::H264;
+        assert_eq!(camera_publish_options(&opts).video_codec, VideoCodec::H264);
+    }
+
+    #[test]
+    fn screen_publish_options_carry_the_codec() {
+        let mut opts = screen(false);
+        assert_eq!(screen_publish_options(&opts).video_codec, VideoCodec::VP8);
+        opts.codec = PublishCodec::H264;
+        assert_eq!(screen_publish_options(&opts).video_codec, VideoCodec::H264);
+    }
+
+    #[test]
+    fn vp9_publish_is_one_svc_layer_without_simulcast() {
+        // Camera: a 1080p simulcast request, which would add two layers for
+        // VP8, is one L1T3 encoding for VP9.
+        let mut cam = camera(1080, true);
+        cam.codec = PublishCodec::Vp9;
+        let opts = camera_publish_options(&cam);
+        assert_eq!(opts.video_codec, VideoCodec::VP9);
+        assert_eq!(opts.scalability_mode.as_deref(), Some("L1T3"));
+        assert!(!opts.simulcast);
+        assert!(opts.simulcast_layers.is_none());
+
+        // Screen share, the same.
+        let mut share = screen(true);
+        share.codec = PublishCodec::Vp9;
+        let opts = screen_publish_options(&share);
+        assert_eq!(opts.video_codec, VideoCodec::VP9);
+        assert_eq!(opts.scalability_mode.as_deref(), Some("L1T3"));
+        assert!(!opts.simulcast);
+        assert!(opts.simulcast_layers.is_none());
+
+        // VP8 and H.264 keep their simulcast and set no scalability mode.
+        assert!(camera_publish_options(&camera(1080, true))
+            .scalability_mode
+            .is_none());
+        assert!(screen_publish_options(&screen(true))
+            .scalability_mode
+            .is_none());
+        assert!(PublishCodec::H264.svc().is_none());
+    }
+
+    #[test]
+    fn codec_defaults_to_vp8_when_absent() {
+        let camera: CameraOptions = serde_json::from_str(
+            r#"{"width":1280,"height":720,"maxBitrate":1,"maxFramerate":30.0,"simulcast":false}"#,
+        )
+        .expect("camera options without codec");
+        assert_eq!(camera.codec, PublishCodec::Vp8);
+        let screen: ScreenOptions = serde_json::from_str(
+            r#"{"width":1280,"height":720,"maxBitrate":1,"maxFramerate":30.0,"simulcast":false}"#,
+        )
+        .expect("screen options without codec");
+        assert_eq!(screen.codec, PublishCodec::Vp8);
+        let h264: CameraOptions = serde_json::from_str(
+            r#"{"width":1,"height":1,"maxBitrate":1,"maxFramerate":1.0,"simulcast":false,"codec":"h264"}"#,
+        )
+        .expect("camera options with h264");
+        assert_eq!(h264.codec, PublishCodec::H264);
+        let vp9: CameraOptions = serde_json::from_str(
+            r#"{"width":1,"height":1,"maxBitrate":1,"maxFramerate":1.0,"simulcast":false,"codec":"vp9"}"#,
+        )
+        .expect("camera options with vp9");
+        assert_eq!(vp9.codec, PublishCodec::Vp9);
     }
 
     #[test]
@@ -1627,6 +2372,30 @@ mod tests {
         ));
     }
 
+    /// The audio thread's report sinks only queue: with the emitter not yet
+    /// run they return at once, past a full queue, and the emitter then
+    /// delivers what fit, in order.
+    #[tokio::test]
+    async fn capture_reports_queue_without_blocking_and_arrive_in_order() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let (on_gate, on_level, emitter) = capture_report_sinks(Arc::new(move |event| {
+            sink.lock()
+                .unwrap()
+                .push(serde_json::to_string(&event).unwrap());
+        }));
+        on_gate(false);
+        for _ in 0..CAPTURE_REPORT_QUEUE * 2 {
+            on_level(0.5, false);
+        }
+        drop((on_gate, on_level));
+        emitter.await.unwrap();
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), CAPTURE_REPORT_QUEUE, "the overflow is dropped");
+        assert_eq!(seen[0], r#"{"type":"voiceGate","open":false}"#);
+        assert_eq!(seen[1], r#"{"type":"inputLevel","rms":0.5,"open":false}"#);
+    }
+
     #[test]
     fn events_serialize_with_a_type_tag() {
         let json = serde_json::to_string(&Event::ActiveSpeakers {
@@ -1639,6 +2408,12 @@ mod tests {
         })
         .unwrap();
         assert!(json.contains(r#""type":"disconnected""#));
+        let json = serde_json::to_string(&Event::InputLevel {
+            rms: 0.25,
+            open: false,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"type":"inputLevel","rms":0.25,"open":false}"#);
     }
 
     #[test]
@@ -1757,6 +2532,76 @@ mod tests {
     }
 
     #[test]
+    fn screen_audio_publish_options_match_the_web_path() {
+        let opts = screen_audio_publish_options();
+        assert_eq!(opts.source, TrackSource::ScreenshareAudio);
+        assert!(!opts.dtx);
+        assert!(!opts.red);
+        assert_eq!(
+            opts.audio_encoding.map(|e| e.max_bitrate),
+            Some(128_000),
+            "musicHighQualityStereo"
+        );
+        assert!(opts.stereo, "the share audio asks the SFU for stereo opus");
+    }
+
+    #[test]
+    fn mic_and_video_publish_options_stay_mono() {
+        // TF_STEREO would double the mic's bitrate and switch opus out of
+        // VoIP mode; only the share audio asks for it.
+        assert!(!TrackPublishOptions::default().stereo);
+        assert!(!mic_publish_options(None).stereo);
+        assert!(!mic_publish_options(Some(96_000)).stereo);
+        assert!(!camera_publish_options(&camera(720, true)).stereo);
+        assert!(!camera_publish_options(&camera(1080, false)).stereo);
+        assert!(!screen_publish_options(&screen(true)).stereo);
+        assert!(!screen_publish_options(&screen(false)).stereo);
+    }
+
+    #[test]
+    fn a_republished_share_audio_follows_its_new_sid() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot = Some(VideoPublication::of_capture(sid("TR_a"), Some(3)));
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::ScreenshareAudio,
+                &sid("TR_a"),
+                &sid("TR_b")
+            ),
+            None
+        );
+        let audio = slot.expect("still published");
+        assert_eq!(audio.live, sid("TR_b"));
+        assert_eq!(audio.issued, "TR_a", "the webview still names TR_a");
+        assert_eq!(audio.capture, Some(3));
+    }
+
+    #[test]
+    fn a_share_audio_republished_after_a_stop_is_orphaned() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot: Option<VideoPublication> = None;
+        assert_eq!(
+            apply_republish(
+                &mut slot,
+                TrackSource::ScreenshareAudio,
+                &sid("TR_a"),
+                &sid("TR_b")
+            ),
+            Some(sid("TR_b"))
+        );
+        assert!(slot.is_none(), "the orphan must not occupy the slot");
+    }
+
+    #[test]
+    fn an_unencrypted_share_audio_republish_ends_the_share() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let mut slot = Some(VideoPublication::of_capture(sid("TR_a"), Some(9)));
+        assert_eq!(release_slot(&mut slot, &sid("TR_a")), Some(9));
+        assert!(slot.is_none());
+    }
+
+    #[test]
     fn a_non_camera_republish_is_never_orphaned() {
         let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
         // The microphone is tracked by the session, not the camera slot; an
@@ -1776,5 +2621,47 @@ mod tests {
     #[test]
     fn process_threads_reads_procfs() {
         assert!(process_threads() >= 1);
+    }
+
+    fn audio(ec: bool, enhanced: bool) -> AudioOptions {
+        AudioOptions {
+            echo_cancellation: ec,
+            noise_suppression: true,
+            auto_gain_control: true,
+            enhanced_noise_suppression: enhanced,
+        }
+    }
+
+    /// A toggle that changes nothing must not replace the processing (and
+    /// reset the echo canceller's adaptation); an Enhanced Noise Suppression
+    /// change only switches the denoiser; any other change rebuilds it, and
+    /// before audio is enabled it is only remembered.
+    #[test]
+    fn set_audio_processing_rebuilds_only_on_a_change() {
+        let on = audio(true, false);
+        assert_eq!(
+            processing_change(true, Some(on), on),
+            ProcessingChange::Unchanged
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(false, false)),
+            ProcessingChange::Rebuild
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(true, true)),
+            ProcessingChange::Reroute
+        );
+        assert_eq!(
+            processing_change(true, Some(on), audio(false, true)),
+            ProcessingChange::Rebuild
+        );
+        assert_eq!(
+            processing_change(false, None, on),
+            ProcessingChange::Remember
+        );
+        assert_eq!(
+            processing_change(false, Some(on), audio(false, false)),
+            ProcessingChange::Remember
+        );
     }
 }

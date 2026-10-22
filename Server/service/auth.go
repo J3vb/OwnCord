@@ -587,7 +587,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 	token, err := issueSession(ctx, s.st, user.ID, in.Device, in.IP)
 	if err != nil {
 		slog.Error("login: session issue failed", "err", err, "user_id", user.ID)
-		return nil, ErrSessionIssue
+		return nil, sessionIssueError(err)
 	}
 
 	// Don't set status to "online" here — the WebSocket connection in
@@ -822,7 +822,7 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		}
 		s.partial.Restore(ctx, partialToken, claimed)
 		slog.Error("verify-totp: session issue failed", "err", err, "user_id", user.ID)
-		return nil, ErrSessionIssue
+		return nil, sessionIssueError(err)
 	}
 
 	detail := "two-factor verification completed from " + challenge.IP
@@ -1021,6 +1021,10 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 		case errors.Is(err, ErrErasureFilesPending):
 			// The account is gone; the journal finishes the files.
 			slog.Warn("DeleteAccount: files pending", "user_id", user.ID, "err", err)
+		case errors.Is(err, ErrErasureInProgress):
+			// The account is locked and the erasure is committed to; the
+			// maintenance loop finishes it.
+			slog.Info("DeleteAccount: erasure in progress", "user_id", user.ID)
 		default:
 			slog.Error("DeleteAccount failed", "err", err, "user_id", user.ID)
 			return ErrDeleteAccountFailed
@@ -1237,6 +1241,15 @@ func newSessionToken(persist func(tokenHash string) error) (string, error) {
 		return "", err
 	}
 	return token, nil
+}
+
+// sessionIssueError is the error a failed session issue reports. Sign-in is
+// refused while an account deletion is being completed.
+func sessionIssueError(err error) error {
+	if errors.Is(err, db.ErrAccountErasing) {
+		return ErrBanned
+	}
+	return ErrSessionIssue
 }
 
 func issueSession(ctx context.Context, st Store, userID int64, device, ip string) (string, error) {

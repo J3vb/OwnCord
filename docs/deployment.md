@@ -45,6 +45,7 @@ Ports the server uses:
 - `8443/TCP` for chat, the API and the admin panel. Always needed.
 - `7881/TCP` plus UDP media ports for voice and video. The media ports are
   `50000-60000/UDP` by default, or one UDP port if you set `voice.udp_port`.
+  The Docker image and the compose stack use `7882/UDP`.
 - `80/TCP` only if you use the built-in Let's Encrypt mode (`tls.mode: acme`).
 
 You do **not** need to open `7880/TCP`. That is LiveKit's own API port.
@@ -127,8 +128,8 @@ About the image `ghcr.io/j3vb/owncord-server`:
 - Docker Engine 24 or later, and Docker Compose v2.
 - A `linux/amd64` or `linux/arm64` host.
 - Free ports: `8443/TCP` for chat, `7881/TCP`, and the voice media UDP
-  port(s). The single-container image uses `7882/UDP` by default. The compose
-  stack uses the range `50000-60000/UDP`. See
+  port. Both the single-container image and the compose stack use `7882/UDP`.
+  See
   [LiveKit in Docker](#livekit-in-docker).
 
 ### Quick Start
@@ -147,16 +148,22 @@ the source snapshot attached to each release, or from the repository's
    ```
 
 2. Create your secrets file, then edit `.env`. Set `LIVEKIT_API_KEY` and
-   `LIVEKIT_API_SECRET`. The secret must be at least 32 characters.
+   `LIVEKIT_API_SECRET`. The secret must be at least 32 characters. Never use
+   a `'` in either value: LiveKit reads the pair as YAML, and a `'` stops it
+   from starting. Letters and digits, for example the output of
+   `openssl rand -hex 32`, are safest. This is the only place you type them: compose passes the pair to
+   both containers. `docker compose` refuses to run any command, even `down`
+   or `logs`, while either value is missing from `.env`.
 
    ```bash
    cp .env.example .env
    ```
 
-3. Create your LiveKit config, then edit `livekit.yaml`. Paste in the same key
-   and secret. Leave `use_external_ip: true` as it is, so LiveKit finds your
+3. Create your LiveKit config. It has no key or secret in it: those come from
+   `.env`. Leave `use_external_ip: true` as it is, so LiveKit finds your
    public address. Only on a host reached through Tailscale alone do you
-   replace it with `node_ip`.
+   replace it with `node_ip`. Media uses the single UDP port `7882`, which
+   compose sets itself, so do not add a port range.
 
    ```bash
    cp livekit.yaml.example livekit.yaml
@@ -210,7 +217,9 @@ The compose file already sets some values for you, through environment
 variables:
 
 - `OWNCORD_VOICE_LIVEKIT_API_KEY` and `OWNCORD_VOICE_LIVEKIT_API_SECRET`, taken
-  from your `.env`.
+  from your `.env`. LiveKit gets the same pair as `LIVEKIT_KEYS`.
+- `OWNCORD_VOICE_UDP_PORT` set to `7882`, the one UDP media port compose
+  publishes.
 - `OWNCORD_VOICE_LIVEKIT_URL` set to `ws://livekit:7880`, the LiveKit
   container.
 - `OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT` set to `false`, because LiveKit runs in
@@ -239,10 +248,18 @@ tls:
 ```
 
 **Compose mounts `config.yaml` read-only.** Nothing inside the container can
-change it. The admin panel and the setup wizard cannot save a startup setting
-to it. If they try, you see a warning and an `ERROR` line in the container log.
-To change a startup setting, edit the file on the host and recreate the
-container.
+change it. In a container, the admin panel and the setup wizard save startup
+settings into `config-overrides.json` in the data volume instead, so they
+survive a recreate. `config.yaml` stays as you wrote it, and a saved setting
+overrides it only for the keys you changed there. The panel's **Reset**
+button returns a key to what `config.yaml` says. The wizard cannot change the
+port in a container, because the published port mapping fixes it; change the
+mapping in your compose file or `docker run` command. To change any other
+startup setting from the file, edit it on the host and recreate the container.
+
+If a setting saved from the admin panel keeps you out of the panel, stop the
+server and run `docker compose run --rm --no-deps owncord config reset-overrides`
+(see [If a panel change locks you out](server-configuration.md#if-a-panel-change-locks-you-out)).
 
 ### Health and privilege
 
@@ -326,13 +343,18 @@ docker run -d -v owncord-data:/app/data \
 The image also sets `OWNCORD_VOICE_UDP_PORT=7882`. All voice media then uses
 that one UDP port instead of the `50000-60000` range. Override either variable
 to change this. LiveKit's credentials and its `livekit.yaml` are kept in
-`/app/data`, the volume.
+`/app/data`, the volume. Credentials the setup wizard generates are saved there
+too (in `config-overrides.json`). The pair is saved only when neither half is
+supplied by `config.yaml` or the environment, so they persist once the wizard
+has run.
 
 **Two containers (the compose stack).** The shipped `docker-compose.yml` runs
 `livekit/livekit-server:v1.13.7` as its own container. For the server it
-clears `OWNCORD_VOICE_LIVEKIT_BINARY` and sets `OWNCORD_VOICE_UDP_PORT` to
-`0`, so the bundled copy never starts. Choose this when you want to size,
-restart or upgrade LiveKit separately. See
+clears `OWNCORD_VOICE_LIVEKIT_BINARY`, so the bundled copy never starts, and
+sets `OWNCORD_VOICE_UDP_PORT` to `7882`, so the admin connectivity report
+names the right port. It publishes `8443/TCP`, `7881/TCP`
+and `7882/UDP`, and takes the LiveKit key and secret from `.env` only. Choose
+this when you want to size, restart or upgrade LiveKit separately. See
 [LiveKit Setup — Docker](livekit-setup.md#docker).
 
 ### Unraid
@@ -430,7 +452,9 @@ re-open setup ([security.md](security.md#first-run-setup)).
 - It asks for the basics: server name, port, TLS mode, upload limit, voice,
   registration, welcome message, and the Owner's recovery kit.
 - It saves your choices. Live settings go into the database. Startup settings
-  go into `config.yaml`. Comments and your own edits in the file are kept.
+  go into `config.yaml`, with comments and your own edits kept. In a Docker
+  container they go into `config-overrides.json` in the data volume instead,
+  and only the ones you changed.
 - It saves the generated LiveKit credentials, so voice keeps working across
   restarts.
 - If you changed the port or TLS mode, the server restarts once. The wizard
@@ -478,14 +502,21 @@ A ready-made unit file ships in the repository:
 
 **To install it:**
 
-1. Create a service user and the install folder:
+1. Create a service user. Its home is the state folder, which systemd creates
+   and owns (`StateDirectory=owncord`, `/var/lib/owncord`):
 
    ```bash
-   sudo useradd --system --home /opt/owncord --shell /usr/sbin/nologin owncord
-   sudo mkdir -p /opt/owncord && sudo chown owncord:owncord /opt/owncord
+   sudo useradd --system --home /var/lib/owncord --shell /usr/sbin/nologin owncord
    ```
 
-2. Put the `chatserver` binary in `/opt/owncord/`.
+2. Install the `chatserver` binary, owned by root, so the service can run it
+   but not change it:
+
+   ```bash
+   sudo install -d -o root -g root -m 0755 /opt/owncord
+   sudo install -o root -g root -m 0755 ./chatserver /opt/owncord/chatserver
+   ```
+
 3. Copy the unit file and start the service:
 
    ```bash
@@ -494,6 +525,17 @@ A ready-made unit file ships in the repository:
    ```
 
 4. Read the log with `journalctl -u owncord -f`.
+
+The program lives in `/opt/owncord`. Everything the server writes lives in
+`/var/lib/owncord`: `config.yaml`, `data/` (the database, uploads,
+certificates, backups) and the bundled LiveKit. The unit sets
+`WorkingDirectory=/var/lib/owncord`, so the relative `data_dir` default
+(`data`) lands there with no configuration.
+
+**Upgrading from the old layout?** Earlier unit files kept both the program
+and its state in `/opt/owncord`. Your installed copy keeps working until you
+re-copy the unit. Before you do, follow
+[Migrating from the /opt/owncord data layout](#migrating-from-the-optowncord-data-layout).
 
 **What the unit file sets, and why:**
 
@@ -521,10 +563,12 @@ A ready-made unit file ships in the repository:
   shutdown is stuck, and then it kills the process. For other supervisors, the
   server has its own 90-second restart backstop.
 
-- **`ReadWritePaths=/opt/owncord` with `ProtectSystem=strict`.**
-  `ProtectSystem=strict` makes the rest of the filesystem read-only for the
-  service. The install folder must stay writable, because self-update puts the
-  new binary there.
+- **`StateDirectory=owncord` with `ProtectSystem=strict`.**
+  `ProtectSystem=strict` makes the filesystem read-only for the service,
+  except the state folder `/var/lib/owncord`, which systemd creates (mode
+  `0750`) and keeps writable. The program folder `/opt/owncord` stays
+  read-only to the service. Do not add `NoExecPaths=` for the state folder:
+  the bundled LiveKit runs from `data/livekit/`.
 
   **Add every other folder the server writes to.** The usual ones are an
   off-disk `backup.dir` or `upload.storage_dir`. Without that, writes fail with
@@ -534,14 +578,132 @@ A ready-made unit file ships in the repository:
   ReadWritePaths=/mnt/backup-disk/owncord
   ```
 
-- **`AmbientCapabilities=CAP_NET_BIND_SERVICE`.** Only needed for
-  `tls.mode: acme`, which listens on port 80 as a non-root user.
+- **`AssertPathExists=!/opt/owncord/data`.** The unit refuses to start while
+  the old layout's data folder still exists. Without it, a re-copied unit would
+  start the server in an empty `/var/lib/owncord` and it would look like your
+  data was gone. A new install never has that folder, so this costs nothing.
+
+- **`#AmbientCapabilities=CAP_NET_BIND_SERVICE` (commented out).** Only needed
+  for `tls.mode: acme`, which listens on port 80 as a non-root user. If you use
+  `acme`, uncomment the line. Without it the server logs
+  `ACME HTTP server error`, with the bind error, and certificate challenges
+  and renewal fail until you fix it and restart.
 
 - **`LimitNOFILE=65536`.** The open-file limit. Each WebSocket connection uses
   one file descriptor, so this caps how many people can be online. 65,536 is
   far more than 2,000 people need (about 4,256). Raise it only past about
   30,000 connections. An old systemd default of 1,024 would stop you at a few
   hundred people. See [Open-file limit](#open-file-limit-file-descriptors).
+
+### Migrating from the /opt/owncord data layout
+
+Do this before you copy the new unit file over an old one. Follow every step;
+the signs of a missed one are at the end.
+
+1. Stop the service:
+
+   ```bash
+   sudo systemctl stop owncord
+   ```
+
+2. Create the state folder, or skip this and let systemd create it on the first
+   start. Then move your state into it:
+
+   ```bash
+   sudo mkdir -p /var/lib/owncord
+   sudo mv /opt/owncord/data /opt/owncord/config.yaml /var/lib/owncord/
+   ```
+
+3. Check the moved config for absolute `/opt/owncord` paths:
+
+   ```bash
+   sudo grep -n '/opt/owncord' /var/lib/owncord/config.yaml
+   ```
+
+   Read the list before you change anything. Relative paths (the default
+   `data_dir: data`) need no change.
+   - Paths into the data you just moved (`data_dir`, `backup.dir`,
+     `upload.storage_dir` under `/opt/owncord/data`) now live under
+     `/var/lib/owncord/data`. Edit those keys by hand, or rewrite only that
+     tree:
+
+     ```bash
+     sudo sed -i 's#/opt/owncord/data#/var/lib/owncord/data#g' /var/lib/owncord/config.yaml
+     ```
+
+   - TLS certificate and key files kept elsewhere under `/opt/owncord`: move
+     them into `/var/lib/owncord` first, then edit their paths.
+   - `voice.livekit_binary` and anything else that stays beside the program
+     keeps its `/opt/owncord` path. The program folder is read-only to the
+     service, which is fine for files it only reads.
+   - A `data_dir`, `backup.dir` or `upload.storage_dir` outside both folders
+     (for example `/srv/owncord`) stays where it is, but add it to
+     `ReadWritePaths=` in the unit (step 5), or writes there fail.
+
+   If a move is interrupted, do not start the service: delete the partial copy
+   under `/var/lib/owncord` and redo the move.
+
+4. Hand the state to the service and the program to root, and point the
+   service user's home at the state folder:
+
+   ```bash
+   sudo chown -R owncord:owncord /var/lib/owncord
+   sudo chmod 0750 /var/lib/owncord
+   sudo chown -R root:root /opt/owncord
+   sudo usermod -d /var/lib/owncord owncord
+   ```
+
+5. Edit the new unit before you install it, if you need to:
+   - `tls.mode: acme`: uncomment `AmbientCapabilities=CAP_NET_BIND_SERVICE`.
+   - A data, backup or upload folder outside `/var/lib/owncord`: add it to
+     `ReadWritePaths=`.
+   - Admin-panel updates: follow
+     [Opt in to admin-panel updates](#opt-in-to-admin-panel-updates) after the
+     next step.
+
+6. Copy the new unit and start the service:
+
+   ```bash
+   sudo cp deploy/owncord.service /etc/systemd/system/owncord.service
+   sudo systemctl daemon-reload && sudo systemctl start owncord
+   ```
+
+**Signs of a missed step:**
+
+- The unit fails with `Assertion failed ... /opt/owncord/data` and the service
+  does not start: the data folder is still under `/opt/owncord`. Do step 2.
+- Backups or uploads fail with `EROFS` (read-only file system): a path in
+  `config.yaml` still points under `/opt/owncord`, or at a folder not listed in
+  `ReadWritePaths`. Do step 3.
+
+### Opt in to admin-panel updates
+
+By default the service cannot write to `/opt/owncord`, so the admin panel
+cannot replace the binary: the Updates page says the server cannot replace its
+own program file, and the apply request answers `503 INSTALL_READ_ONLY` before
+it downloads anything. You then install new releases by hand, as in
+[Performing the upgrade](#performing-the-upgrade).
+
+To let the admin panel update the server, give the service write access to the
+program folder with a drop-in:
+
+```bash
+sudo systemctl edit owncord
+```
+
+```ini
+[Service]
+ReadWritePaths=/opt/owncord
+```
+
+```bash
+sudo chown owncord /opt/owncord
+sudo systemctl restart owncord
+```
+
+The service can then rewrite its own program file. Remove the drop-in
+(`sudo systemctl revert owncord`) and `sudo chown root /opt/owncord` to go back
+to the default.
 
 Pair the service with scheduled backups from the admin panel. Or drive backups
 from cron instead: see
@@ -869,8 +1031,8 @@ prompt. A self-signed or private-CA proxy certificate prompts on every change
    signalling**, which the server already forwards at `/livekit/*`. You do
    **not** need to expose LiveKit's port 7880 through the proxy.
 2. **What the proxy cannot carry.** Voice and video media. That is UDP
-   `50000-60000` (or the single UDP port if you set one) plus the `7881/TCP`
-   fallback. These must stay directly reachable on the host that runs
+   `50000-60000` (or the single UDP port if you set one, as the compose stack
+   does with `7882`) plus the `7881/TCP` fallback. These must stay directly reachable on the host that runs
    LiveKit. An HTTP proxy never carries this traffic.
 3. **Tell OwnCord about the proxy.** Set `server.trusted_proxies` to the
    proxy's own address or addresses, for example `["10.0.0.2/32"]`. OwnCord
@@ -1015,6 +1177,13 @@ The database runs in SQLite's WAL (write-ahead log) mode. **Do not copy the
 `.db` file while the server is running.** The copy may be inconsistent. Use
 the backup endpoint instead, or stop the server first.
 
+The size of the write-ahead log file is `db_wal_mb` in `GET /api/v1/metrics`
+(`owncord_db_wal_bytes` in the Prometheus output). It rises under heavy writes
+and falls when SQLite checkpoints; a value that keeps climbing is worth a look.
+On every start the server also logs one `db: migration applied` line per
+migration it ran, with the time in milliseconds, then a `db: migrations
+applied` summary, so a slow upgrade can be traced to the migration behind it.
+
 ### Admin Backup Endpoint
 
 All of these are Owner-only.
@@ -1073,8 +1242,10 @@ loop applies them, checking every 15 minutes:
   A manual backup resets the clock too.
 - Old backups are deleted after the number of days you set. The newest backup
   is always kept, so a schedule that stopped can never delete your last copy.
-- Safety copies named `pre_restore_*` and `pre_migrate_*` are never deleted
-  automatically. Delete them by hand.
+- Safety copies (`pre_restore_*`, `pre_migrate_*`) are not affected by the days
+  setting. The server keeps the newest 3 of each kind and deletes older ones
+  after it writes a new one. It never deletes the copy it just wrote or the
+  backup being restored. Copy one elsewhere if you need to keep it longer.
 
 ### The full archive
 
@@ -1131,7 +1302,7 @@ backup.
   that name is taken, it adds `_2`, `_3` and so on, so an earlier copy is never
   overwritten.
 - It is checked with `integrity_check`.
-- It is never deleted by the retention setting, like `pre_restore_*` copies.
+- It is not removed by the days setting; the newest 3 `pre_migrate_*` copies are kept.
 - If the server cannot write it, it refuses to start rather than migrate
   without it.
 - If the database has not changed since the last copy for that migration (for
@@ -1185,8 +1356,31 @@ What happens, in order:
 2. It writes a `backup_restore` audit entry.
 3. It takes a `pre_restore_<time>.db` safety copy. If that fails, it stops
    before changing anything.
-4. It tells connected clients to reconnect.
-5. It replaces the database and restarts.
+4. It copies the backup next to the database as `<database>.restore-staged`,
+   checks the copy, and writes `<database>.restore-pending.json` last. If the
+   copy cannot be written (the volume is full, say) it stops and the server
+   keeps running unchanged.
+5. It restarts through the normal shutdown, which tells connected clients to
+   reconnect. The running database is not written to.
+6. On the next start, before the database opens, the server moves the old
+   database aside, puts the staged copy in its place and checks it. If the
+   check fails, it puts the old database back and carries on with it. Either
+   way the Dashboard's attention panel shows the outcome and the audit log
+   records it. A power
+   cut or crash in the middle of the swap is finished at the next start.
+
+If the restart never comes (the server is stopped by hand, or no supervisor
+restarts it), the staged restore waits and is applied at the next start. To
+cancel it before then, delete `<database>.restore-pending.json`.
+
+While a staged restore is pending, command-line tools that open the database
+(`chatserver token`, `chatserver restore`) refuse to run and tell you to start
+the server so it can finish the restore.
+
+The check at the swap covers the file's integrity only. If the restored database
+then fails to migrate, the server does not start, and the way back is the
+`pre_restore_<time>.db` safety copy in the backups folder, not the automatic
+rollback.
 
 How it restarts depends on `server.restart_mode`. With `supervised`, which
 `auto` chooses under systemd, NSSM and containers, the server exits cleanly
@@ -1268,7 +1462,9 @@ Before it touches the live database, the command checks that:
 - its `-wal` file holds no unsaved changes, because only the main file is
   copied
 
-It also keeps the message-retry cutoff, and uses the same `database.path` and
+It also keeps the message-retry cutoff and the event sequence floor
+(`chatserver.db.ws-seq-floor`, a file beside the database: carry it along if you
+move a data folder by hand, or restore another machine's backup to move a server), and uses the same `database.path` and
 `backup.dir` from `config.yaml` as the server.
 
 If the live database is too broken to copy, the command moves it aside with
@@ -1323,7 +1519,7 @@ old data:
 | ------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `chatserver.db` + `chatserver.db-wal`       | every feature                                                             | messages: the server's or a channel's retention window (`0` = keep forever); stored events: 24 hours  | the retention sweep (up to 5,000 messages per run); the event pruner, every 60 minutes; the WAL after an erasure  |
 | `uploads/`                                  | attachments, avatars, emoji, and a preview of large images (`thumbs/`)    | `upload.max_size_mb` per file (default 100); `upload.user_quota_mb` per user (default `0` = no limit) | the orphan sweep (files unlinked for over 1 hour), retention, erasure, and reconciliation (up to 500 files a run) |
-| `backups/`                                  | manual and scheduled backups, and `pre_restore_*.db` / `pre_migrate_*.db` | **Keep backups for (days)** on the **Backups & restore** page                                         | retention; it always keeps the newest backup and never deletes `pre_restore_*` or `pre_migrate_*` copies          |
+| `backups/`                                  | manual and scheduled backups, and `pre_restore_*.db` / `pre_migrate_*.db` | **Keep backups for (days)** on the **Backups & restore** page                                         | retention; it always keeps the newest backup and keeps the newest 3 `pre_restore_*` and 3 `pre_migrate_*` copies  |
 | `acme_certs/`                               | `tls.mode: acme` only                                                     | one certificate for your domain                                                                       | the ACME client handles renewal                                                                                   |
 | `livekit/`                                  | `voice.auto_download_livekit`                                             | one pinned LiveKit release                                                                            | never; delete the file to force a fresh download                                                                  |
 | `plugins/`                                  | plugins, in builds made with `-tags wazero`                               | whatever the plugins write                                                                            | never                                                                                                             |
@@ -1392,7 +1588,7 @@ sudo systemctl stop owncord          # or: nssm stop OwnCord
 # 3. Copy the state to another disk, not into the folder you are upgrading.
 #    The destination must exist: cp with two sources will not create it.
 sudo mkdir -p /mnt/backup-disk/owncord-pre-upgrade
-sudo cp -a /opt/owncord/data /opt/owncord/config.yaml \
+sudo cp -a /var/lib/owncord/data /var/lib/owncord/config.yaml \
   /mnt/backup-disk/owncord-pre-upgrade/
 
 # 4. Keep the binary you are upgrading FROM. Without it, step 3 is only half a
@@ -1443,7 +1639,7 @@ migrates the database on its first start.
 
 ```bash
 sudo systemctl stop owncord
-sudo install -m 0755 ./chatserver /opt/owncord/chatserver
+sudo install -o root -g root -m 0755 ./chatserver /opt/owncord/chatserver
 sudo systemctl start owncord
 ```
 
@@ -1489,10 +1685,11 @@ that copy.
 
 ```bash
 sudo systemctl stop owncord
-sudo rm -rf /opt/owncord/data
-sudo cp -a /mnt/backup-disk/owncord-pre-upgrade/data /opt/owncord/data
-sudo cp /mnt/backup-disk/owncord-pre-upgrade/config.yaml /opt/owncord/config.yaml
-sudo install -m 0755 /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous \
+sudo rm -rf /var/lib/owncord/data
+sudo cp -a /mnt/backup-disk/owncord-pre-upgrade/data /var/lib/owncord/data
+sudo cp /mnt/backup-disk/owncord-pre-upgrade/config.yaml /var/lib/owncord/config.yaml
+sudo chown -R owncord:owncord /var/lib/owncord
+sudo install -o root -g root -m 0755 /mnt/backup-disk/owncord-pre-upgrade/chatserver-previous \
   /opt/owncord/chatserver
 sudo systemctl start owncord
 ```
@@ -1574,7 +1771,9 @@ Two things it does **not** cover:
 
 What one server can carry on which hardware is in
 [Capacity](capacity.md#sizing-for-10002000-online). That page also has an
-estimate, not yet measured, for 1,000 to 2,000 people online.
+measured 1,000-online result (steady chat holds; a login burst and a
+full reconnect herd miss some of their budgets) and an estimate, not measured,
+for 2,000 people online.
 
 The tested profile is **250 registered users, 100 connections at once and 25
 voice sessions at once, on 2 vCPU and 4 GB RAM**. See
@@ -1767,15 +1966,18 @@ the third stage as normal.
   "reconnect_tier_buffer": 120,
   "reconnect_tier_db": 4,
   "reconnect_tier_full": 1,
+  "reconnect_ring_misses": 3,
   "backpressure_queue_disconnects": 0,
   "backpressure_high_fallbacks": 0,
   "backpressure_low_drops": 17,
   "backpressure_presence_drops": 0,
+  "delivery_loss_marks": 0,
   "ws_conn_rejects": 0,
   "disk_free_mb": 51200.5,
   "disk_min_free_mb": 256,
   "disk_low": false,
   "upload_storage_used_mb": 3072.25,
+  "db_wal_mb": 4.2,
   "db_writer_wait_count": 3,
   "db_writer_wait_seconds": 0.021,
   "db_reader_wait_count": 11,
@@ -1789,6 +1991,11 @@ the third stage as normal.
 }
 ```
 
+The response also carries a `windows` block with the latency, worst-hold and
+counter figures for the last minute (`1m`) and fifteen minutes (`15m`), updated
+every 10 seconds. It is described in `docs/api.md`. It is left out until the
+server has taken two samples.
+
 Signals worth watching as your community grows. Every field is described in
 `docs/api.md`.
 
@@ -1798,21 +2005,52 @@ Signals worth watching as your community grows. Every field is described in
   and messages were dropped before delivery. They cannot be replayed, so alert
   on any growth too. A client that missed a message this way reloads it from
   the database on its next reconnect.
-- **`ws_dispatch_lag_ms.p95` climbing.** The single delivery loop is falling
-  behind. `hub_broadcast_queue_depth` getting close to 1024 is the same signal
-  from the other side.
-- **`hub_seqmu_max_hold_ms` above about 100 ms.** Something that blocks every
-  broadcast is holding things up. A replay purge's full scan is the known
-  cause.
-- **`db_writer_wait_seconds` climbing faster than uptime.** Requests are
-  queuing for SQLite's single write connection. Writes are near their limit.
-- **`db_reader_wait_seconds` growing.** Read queries are waiting for a free
+- **`windows.1m.ws_dispatch_lag_ms.p95` climbing.** The single delivery loop
+  is falling behind. `hub_broadcast_queue_depth` getting close to 1024 is the
+  same signal from the other side. The top-level `ws_dispatch_lag_ms` covers
+  the whole time since boot, so on a long-running server it moves slowly; read
+  the `windows` copy for what is happening now.
+- **`windows.1m.hub_seqmu_max_hold_ms` above about 100 ms.** Something that
+  blocks every broadcast is holding things up. A replay purge's full scan is
+  the known cause. The top-level figure is the worst hold since boot and never
+  falls.
+- **`windows.1m.db_writer_wait_seconds` growing.** Requests are queuing for
+  SQLite's single write connection, so writes are near their limit. Over a
+  minute it is the time spent queuing in that minute; the top-level figure is a
+  total since boot, so watch its growth, not its size.
+- **`windows.1m.db_reader_wait_seconds` growing.** Read queries are waiting for a free
   read connection (`database.max_readers`). Raise it, or look for slow reads.
   For an in-memory database this pair just repeats the writer's numbers.
 - **`reconnect_tier_full` becoming a large share of reconnects.** The replay
   buffer is too small for real disconnect gaps.
+- **A high `reconnect_ring_misses` count with a low `reconnect_tier_db` share.**
+  The replay ring, not the event log, is doing the work: the log rescues few of
+  the resumes the ring cannot serve.
 - **`backpressure_queue_disconnects` growing.** Clients are being disconnected
   because they read too slowly. Causes are slow links or an overloaded server.
+
+#### Scraping with Prometheus
+
+`GET /api/v1/metrics/prometheus` serves the same figures in Prometheus text
+format, in every build and with no setting to turn on. It sits behind the same
+`server.metrics_allowed_cidrs` limit, so a scraper that is not on loopback or a
+private network needs that key set to its address (see the config reference).
+
+```yaml
+scrape_configs:
+  - job_name: owncord
+    metrics_path: /api/v1/metrics/prometheus
+    scheme: https
+    tls_config:
+      insecure_skip_verify: true # a self-signed certificate; use ca_file if you can
+    static_configs:
+      - targets: ["owncord.example.net:8443"]
+```
+
+Prometheus computes its own windows, so alert on `rate()` and
+`histogram_quantile()` over `owncord_ws_dispatch_lag_seconds`, and on
+`owncord_latency_max_seconds{metric="hub_seqmu_hold",window="1m"}` for the worst single hold. Every
+family is listed in `docs/api.md`.
 
 ### LiveKit Health
 
@@ -1946,7 +2184,8 @@ There are three named reasons, each with one fix:
 
 Usually one of these:
 
-- The UDP media port(s) are not forwarded. That is the `50000-60000` range by
+- The UDP media port(s) are not forwarded. With the compose stack or the Docker
+  image that is `7882/UDP`. Otherwise it is the `50000-60000` range by
   default, or your single `voice.udp_port`.
 - `voice.node_ip` is pinned to an old public address. Leave it empty so
   LiveKit finds the address itself, and restart after your address changes.
@@ -2094,6 +2333,13 @@ The audit log tells you which stage failed. Every update writes
 - **Docker refuses the whole thing.** The panel answers
   `503 CONTAINER_DEPLOYMENT`, because the binary is part of the image. Upgrade
   with the image instead: `docker compose pull && docker compose up -d`.
+- **The install folder is read-only to the service.** The panel answers
+  `503 INSTALL_READ_ONLY` before it downloads anything, and the Updates page
+  says the server cannot replace its own program file. Install the release by
+  hand ([Upgrade and Rollback](#upgrade-and-rollback)), or give the service
+  write access to the folder that holds the binary. Under the shipped systemd
+  unit this is the default; see
+  [Opt in to admin-panel updates](#opt-in-to-admin-panel-updates).
 
 To make failures rare:
 
@@ -2110,8 +2356,15 @@ The desktop client also updates itself. The server passes on client update
 files from GitHub Releases:
 
 - **Windows:** NSIS installer updates.
-- **Linux:** AppImage updates. A client installed from the `.deb` package does
-  not update itself; install the new `.deb` by hand.
+- **Linux:** AppImage updates, and `.deb` updates. A `.deb` install asks for
+  the administrator password once per update (a system dialog) and installs
+  the signed package through apt. It needs `pkexec` (the `pkexec` package, or
+  `policykit-1` on older releases; the `.deb` recommends it) and a running
+  polkit agent, which every desktop session has. Without either, the client
+  keeps the old banner and the new `.deb` is installed by hand. A release that
+  adds a hard dependency makes the in-app update need the network. The first
+  update onto a version that carries this feature is manual; an RPM install
+  still updates by hand.
 
 Each update is checked with an Ed25519 signature before it is applied.
 
@@ -2232,6 +2485,14 @@ point here.
 | `80`          | TCP      | ACME HTTP-01 challenge (only with `tls.mode: acme`) |
 | `7881`        | TCP      | LiveKit media over TCP (fallback)                   |
 | `50000-60000` | UDP      | LiveKit voice and video media                       |
+
+**Docker.** The compose stack publishes exactly `8443/TCP`, `7881/TCP` and
+`7882/UDP`, so for it the last row is `7882` instead of the range. The single
+image only exposes those ports: you publish them with `-p`, and ACME adds
+`80/TCP`. On compose the UDP port is set in `docker-compose.yml` (the
+`command`, the `ports:` entry and `OWNCORD_VOICE_UDP_PORT` together), and an
+`rtc.udp_port` in `livekit.yaml` is overridden there. An old `livekit.yaml`
+cannot bring the range back.
 
 **Single UDP port.** If LiveKit uses one UDP port, the last row is that port
 instead of the range. You set it with `voice.udp_port` when OwnCord runs

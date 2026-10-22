@@ -20,6 +20,13 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
+  Q1,
+  findUnnamedControls,
+  focusIndicator,
+  keyboardReachable,
+  textContrast,
+} from "./support/b9-accessibility";
+import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
@@ -187,6 +194,8 @@ interface BootOptions {
   readonly roles?: readonly unknown[];
   /** Overrides the `ready.members` list. */
   readonly members?: unknown[];
+  /** Run in the page after the Tauri mock installs (see buildTauriMockScript). */
+  readonly wrappers?: Array<() => void>;
 }
 
 async function bootComposer(page: Page, options: BootOptions = {}): Promise<void> {
@@ -201,6 +210,7 @@ async function bootComposer(page: Page, options: BootOptions = {}): Promise<void
         ...(options.routes ?? []),
       ],
       simulateWsFlow: true,
+      ...(options.wrappers === undefined ? {} : { wrappers: options.wrappers }),
       // `readyOverrides.roles` is honoured by buildReadyPayload but missing from
       // buildTauriMockScript's public option type; the cast bridges that (same
       // pattern as emoji-voicemod.parity.spec.ts).
@@ -456,6 +466,182 @@ test.describe("Composer — attachment preview and remove", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Send while uploading (WP 3A-9)
+// ---------------------------------------------------------------------------
+
+/** A `wrappers` entry: holds every upload's response until `__releaseUploads()`. */
+function holdUploads(): void {
+  const w = window as unknown as {
+    __TAURI_INTERNALS__: { invoke: (cmd: string, args: unknown) => Promise<unknown> };
+    __releaseUploads: () => void;
+  };
+  const internals = w.__TAURI_INTERNALS__;
+  const orig = internals.invoke;
+  const uploadRids = new Set<unknown>();
+  const gates: (() => void)[] = [];
+  let released = false;
+  w.__releaseUploads = () => {
+    released = true;
+    for (const open of gates.splice(0)) open();
+  };
+  internals.invoke = async (cmd: string, args: unknown) => {
+    const a = args as
+      { clientConfig?: { method?: string; url?: string }; rid?: unknown } | undefined;
+    if (cmd === "plugin:http|fetch") {
+      const rid = await orig(cmd, args);
+      const cfg = a?.clientConfig;
+      if (cfg?.method === "POST" && String(cfg.url).includes("/api/v1/uploads"))
+        uploadRids.add(rid);
+      return rid;
+    }
+    if (cmd === "plugin:http|fetch_send" && uploadRids.has(a?.rid) && !released) {
+      await new Promise<void>((open) => gates.push(open));
+    }
+    return orig(cmd, args);
+  };
+}
+
+const releaseUploads = (page: Page): Promise<void> =>
+  page.evaluate(() => (window as unknown as { __releaseUploads: () => void }).__releaseUploads());
+
+const chatSends = async (page: Page): Promise<Record<string, unknown>[]> =>
+  (await wsSends(page)).filter((m) => m.type === "chat_send");
+
+test.describe("Composer — send while uploading", () => {
+  test.beforeEach(async ({ page }) => {
+    await bootComposer(page, { wrappers: [holdUploads] });
+    await fileInput(page).setInputFiles({
+      name: "report.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.4 a small report"),
+    });
+    await expect(previewItem(page)).toHaveClass(/uploading/);
+  });
+
+  test("Enter during a held upload shows a pending row with progress, then posts", async ({
+    page,
+  }) => {
+    await textarea(page).fill("here is the report");
+    await textarea(page).press("Enter");
+
+    // The composer is empty at once and the message is a row of its own.
+    await expect(textarea(page)).toHaveValue("");
+    await expect(previewItem(page)).toHaveCount(0);
+    const row = page.locator(".message.pending", { hasText: "here is the report" });
+    await expect(row).toBeVisible();
+    const bar = row.locator(".msg-upload-chip progress");
+    await expect(bar).toBeVisible();
+    await expect(row.locator(".msg-upload-chip span")).toHaveText("report.pdf");
+    // Indeterminate until the transport reports a byte, then it follows it.
+    expect(await bar.evaluate((el: HTMLProgressElement) => el.hasAttribute("value"))).toBe(false);
+    const upload = await waitForFetch(
+      page,
+      (c) => c.method === "POST" && c.url.includes("/api/v1/uploads"),
+    );
+    const uploadId = upload.headers.find(([name]) => name.toLowerCase() === "x-upload-id")![1];
+    await page.evaluate(
+      (p) =>
+        (
+          window as unknown as { __tauriEmitEvent: (event: string, payload: unknown) => void }
+        ).__tauriEmitEvent("upload-progress", p),
+      { id: uploadId, sent: 50, total: 100 },
+    );
+    await expect.poll(() => bar.evaluate((el: HTMLProgressElement) => el.value)).toBeCloseTo(0.5);
+
+    // Nothing reaches the socket while the upload is held: the row and its
+    // progress above prove the queued send is waiting, and a send would have
+    // gone out when Enter was pressed.
+    expect(await chatSends(page)).toHaveLength(0);
+
+    await releaseUploads(page);
+
+    const send = await waitForWsSend(page, (m) => m.type === "chat_send");
+    const payload = send.payload as Record<string, unknown>;
+    expect(payload.content).toBe("here is the report");
+    expect(payload.attachments).toEqual(["upload-1"]);
+    await expect(page.locator(".msg-upload-strip")).toHaveCount(0);
+    expect(await chatSends(page)).toHaveLength(1);
+  });
+
+  test("the uploading row names its controls, is reachable by keyboard and keeps contrast", async ({
+    page,
+  }) => {
+    await textarea(page).fill("a11y report");
+    await textarea(page).press("Enter");
+    const row = page.locator(".message.pending", { hasText: "a11y report" });
+    const cancel = row.locator("[data-testid^='msg-upload-cancel-']");
+    await expect(cancel).toBeVisible();
+
+    expect(await findUnnamedControls(row)).toEqual([]);
+    await expect(row.locator(".msg-upload-strip")).toHaveAttribute(
+      "aria-label",
+      "Uploading 1 file",
+    );
+    await expect(row.locator("progress")).toHaveAttribute("aria-label", "report.pdf");
+
+    expect(await keyboardReachable(page, cancel)).toBe(true);
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    expect((await textContrast(cancel)).ratio).toBeGreaterThanOrEqual(Q1.text);
+    expect((await textContrast(row.locator(".msg-upload-chip span"))).ratio).toBeGreaterThanOrEqual(
+      Q1.text,
+    );
+  });
+
+  test("Cancel turns the row into a failed one that offers Retry and Delete", async ({ page }) => {
+    await textarea(page).fill("cancel this one");
+    await textarea(page).press("Enter");
+    const row = page.locator(".message", { hasText: "cancel this one" });
+
+    // Keyboard Cancel: focus must land on the Retry that replaces it.
+    const cancelButton = row.locator("[data-testid^='msg-upload-cancel-']");
+    await expect(cancelButton).toHaveAttribute("aria-describedby", /msg-body-/);
+    await cancelButton.focus();
+    await page.keyboard.press("Enter");
+
+    await expect(row).toHaveClass(/failed/);
+    await expect(row.locator("[data-testid^='msg-retry-']")).toBeFocused();
+    await expect(row.locator(".msg-send-failed-text")).toHaveText("Upload cancelled");
+    await expect(row.locator(".msg-upload-chip span")).toHaveText("report.pdf");
+    await expect(row.locator("progress")).toHaveCount(0);
+    await expect(row.locator("[data-testid^='msg-upload-cancel-']")).toHaveCount(0);
+    expect(await findUnnamedControls(row)).toEqual([]);
+    expect(await chatSends(page)).toHaveLength(0);
+
+    await row.locator("[data-testid^='msg-discard-']").click();
+    await expect(page.locator(".message", { hasText: "cancel this one" })).toHaveCount(0);
+  });
+
+  test("a text sent while the file uploads posts at once, above the uploading row", async ({
+    page,
+  }) => {
+    await textarea(page).fill("the file");
+    await textarea(page).press("Enter");
+    await expect(page.locator(".message.pending", { hasText: "the file" })).toBeVisible();
+
+    // The composer's 200 ms double-send debounce can swallow an Enter this soon after the last.
+    await expect(async () => {
+      await textarea(page).fill("just words");
+      await textarea(page).press("Enter");
+      expect(await chatSends(page)).toHaveLength(1);
+    }).toPass();
+    const first = await waitForWsSend(page, (m) => m.type === "chat_send");
+    expect((first.payload as Record<string, unknown>).content).toBe("just words");
+
+    const order = await page
+      .locator(".message", { hasText: /just words|the file/ })
+      .evaluateAll((els) => els.map((el) => (el.textContent ?? "").includes("the file")));
+    expect(order).toEqual([false, true]);
+
+    await releaseUploads(page);
+    await waitForWsSend(
+      page,
+      (m) =>
+        m.type === "chat_send" && (m.payload as Record<string, unknown>).content === "the file",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Clipboard paste-upload
 // ---------------------------------------------------------------------------
 
@@ -579,5 +765,33 @@ test.describe("Composer — per-channel drafts (UX-1)", () => {
     // disabled, so focus never falls to <body>).
     await expect(textarea(page)).toHaveValue("mid-sentence");
     await expect(textarea(page)).toHaveAttribute("aria-disabled", "true");
+  });
+});
+
+// ---------------------------------------------------------------------------
+test.describe("Composer — slash commands (3A-10a)", () => {
+  test.beforeEach(async ({ page }) => {
+    await bootComposer(page);
+  });
+
+  test("/shrug hi sends the rewritten text and renders the shrug literally", async ({ page }) => {
+    await textarea(page).fill("/shrug hi");
+    await textarea(page).press("Enter");
+
+    const send = await waitForWsSend(page, (m) => m.type === "chat_send");
+    expect((send.payload as Record<string, unknown>).content).toBe("hi ¯\\\\\\_(ツ)\\_/¯");
+    await expect(page.locator(".message", { hasText: "hi ¯\\_(ツ)_/¯" }).first()).toBeVisible();
+  });
+
+  test('typing "/" lists the commands and Enter inserts the picked one', async ({ page }) => {
+    await textarea(page).fill("/sp");
+    const popup = page.locator("[data-testid='slash-autocomplete']");
+    await expect(popup).toBeVisible();
+    await expect(page.getByRole("listbox", { name: "Commands" })).toBeVisible();
+    await expect(textarea(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("[data-testid='slash-option-spoiler']")).toBeVisible();
+    await textarea(page).press("Enter");
+    await expect(textarea(page)).toHaveValue("/spoiler ");
+    await expect(popup).not.toBeVisible();
   });
 });

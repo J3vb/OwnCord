@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -37,6 +38,9 @@ var parityOverrideCases = []struct {
 	{"user deny MUTE", 0, 0, 0, permissions.MuteMembers},
 	{"user allow MANAGE", 0, 0, permissions.ManageMessages, 0},
 	{"user allow beats role deny", 0, permissions.SendMessages, permissions.SendMessages, 0},
+	{"role deny MANAGE", 0, permissions.ManageMessages, 0, 0},
+	{"user deny MANAGE", 0, 0, 0, permissions.ManageMessages},
+	{"role deny REACT", 0, permissions.AddReactions, 0, 0},
 }
 
 // setParityOverrides installs one case's layers for (role, user) on the
@@ -65,11 +69,11 @@ func setParityOverrides(t *testing.T, database *db.DB, permSvc *service.Permissi
 func paritySubject(t *testing.T, database *db.DB, userID int64, ch *db.Channel) permissions.Subject {
 	t.Helper()
 	ctx := context.Background()
-	role, err := database.GetRoleForUser(ctx, userID)
+	role, err := database.GetMemberRoles(ctx, userID)
 	if err != nil || role == nil {
-		t.Fatalf("GetRoleForUser(%d): %v", userID, err)
+		t.Fatalf("GetMemberRoles(%d): %v", userID, err)
 	}
-	sub, err := permissions.NewChecker(database).Subject(ctx, role.Permissions, role.ID, userID, ch.ID)
+	sub, err := permissions.NewChecker(database).Subject(ctx, role.Held(), userID, ch.ID)
 	if err != nil {
 		t.Fatalf("Checker.Subject: %v", err)
 	}
@@ -78,15 +82,17 @@ func paritySubject(t *testing.T, database *db.DB, userID int64, ch *db.Channel) 
 }
 
 // TestRefreshChannelVisibilityAffordances_Parity: the targeted channel_create
-// verdicts are CanSendMessage and AuthorizeVoiceModerator in both branches,
-// for text, announcement and voice channels. The role holds MUTE_MEMBERS so
-// the override cases flip can_moderate_voice both ways.
+// verdicts are CanSendMessage, AuthorizeVoiceModerator, CanDeleteMessage (as a
+// moderation action), CanPinMessage and CanAddReaction in both branches, for
+// text, announcement and voice channels. The role holds MUTE_MEMBERS,
+// MANAGE_MESSAGES and ADD_REACTIONS so the override cases flip
+// can_moderate_voice, can_pin, can_delete_others and can_react both ways.
 func TestRefreshChannelVisibilityAffordances_Parity(t *testing.T) {
 	ctx := context.Background()
 	database := newHarvestVoiceDB(t)
 	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions | ? WHERE id = ?`,
-		permissions.MuteMembers, harvestVoiceRoleID); err != nil {
-		t.Fatalf("grant MUTE_MEMBERS: %v", err)
+		permissions.MuteMembers|permissions.ManageMessages|permissions.AddReactions, harvestVoiceRoleID); err != nil {
+		t.Fatalf("grant MUTE_MEMBERS, MANAGE_MESSAGES and ADD_REACTIONS: %v", err)
 	}
 	uid := seedHarvestVoiceUser(t, database, "refresh-parity-user")
 	textID := mustCreateVoiceChannel(t, database, "refresh-parity-text")
@@ -103,6 +109,8 @@ func TestRefreshChannelVisibilityAffordances_Parity(t *testing.T) {
 	permSvc := service.NewPermissionService(database, h.permChecker)
 
 	sawModAllowed, sawModDenied := false, false
+	sawPinAllowed, sawPinDenied := false, false
+	sawReactAllowed, sawReactDenied := false, false
 	for _, chID := range []int64{textID, newsID, voiceID} {
 		ch, err := database.GetChannel(ctx, chID)
 		if err != nil || ch == nil {
@@ -111,31 +119,37 @@ func TestRefreshChannelVisibilityAffordances_Parity(t *testing.T) {
 		for _, c := range parityOverrideCases {
 			setParityOverrides(t, database, permSvc, chID, harvestVoiceRoleID, uid, c)
 			sub := paritySubject(t, database, uid, ch)
-			wantSend := permissions.CanSendMessage(sub) == nil
-			wantMod := permissions.AuthorizeVoiceModerator(sub) == nil
-			if wantMod {
-				sawModAllowed = true
-			} else {
-				sawModDenied = true
+			asMod, delErr := permissions.CanDeleteMessage(sub, false)
+			want := channelAffordances{
+				CanSend:          permissions.CanSendMessage(sub) == nil,
+				CanModerateVoice: permissions.AuthorizeVoiceModerator(sub) == nil,
+				CanDeleteOthers:  delErr == nil && asMod,
+				CanPin:           permissions.CanPinMessage(sub) == nil,
+				CanReact:         permissions.CanAddReaction(sub) == nil,
 			}
+			sawModAllowed, sawModDenied = sawModAllowed || want.CanModerateVoice, sawModDenied || !want.CanModerateVoice
+			sawPinAllowed, sawPinDenied = sawPinAllowed || want.CanPin, sawPinDenied || !want.CanPin
+			sawReactAllowed, sawReactDenied = sawReactAllowed || want.CanReact, sawReactDenied || !want.CanReact
 
 			for _, branch := range []struct {
 				name  string
 				perms *service.PermissionService
 			}{{"bare hub", nil}, {"service", permSvc}} {
 				h.perms = branch.perms
-				gotSend, gotMod := h.refreshChannelVisibilityAffordances(ctx, ch, uid)
-				if gotSend != wantSend {
-					t.Errorf("%s/%s %s: can_send = %v, CanSendMessage = %v", ch.Type, c.name, branch.name, gotSend, wantSend)
-				}
-				if gotMod != wantMod {
-					t.Errorf("%s/%s %s: can_moderate_voice = %v, AuthorizeVoiceModerator = %v", ch.Type, c.name, branch.name, gotMod, wantMod)
+				if got := h.refreshChannelVisibilityAffordances(ctx, ch, uid); got != want {
+					t.Errorf("%s/%s %s: affordances = %+v, predicates say %+v", ch.Type, c.name, branch.name, got, want)
 				}
 			}
 		}
 	}
 	if !sawModAllowed || !sawModDenied {
 		t.Fatalf("fixture never flipped can_moderate_voice (allowed=%v denied=%v)", sawModAllowed, sawModDenied)
+	}
+	if !sawPinAllowed || !sawPinDenied {
+		t.Fatalf("fixture never flipped can_pin (allowed=%v denied=%v)", sawPinAllowed, sawPinDenied)
+	}
+	if !sawReactAllowed || !sawReactDenied {
+		t.Fatalf("fixture never flipped can_react (allowed=%v denied=%v)", sawReactAllowed, sawReactDenied)
 	}
 }
 
@@ -323,7 +337,7 @@ func TestChannelSubject_Parity(t *testing.T) {
 					if err != nil {
 						t.Fatalf("chan=%d/%s/%s: channelSubject: %v", chID, c.name, branch, err)
 					}
-					if got != want {
+					if !reflect.DeepEqual(got, want) {
 						t.Errorf("chan=%d/blocked=%v/%s/%s: channelSubject = %+v, want %+v", chID, blocked, c.name, branch, got, want)
 					}
 				})

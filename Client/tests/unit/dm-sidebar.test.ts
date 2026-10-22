@@ -14,6 +14,8 @@ vi.mock("@components/message-list/attachments", () => ({
 
 import { createDmSidebar } from "../../src/components/DmSidebar";
 import type { DmConversation } from "../../src/components/DmSidebar";
+import { resetBlocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
+import { setConnectionStatus } from "../../src/stores/ui.store";
 
 const makeConvo = (overrides: Partial<DmConversation> = {}): DmConversation => ({
   channelId: 100,
@@ -901,5 +903,177 @@ describe("DmSidebar — unread and mention badges", () => {
     expect(container.querySelector(".dm-unread")).toBeNull();
     expect(container.querySelector('[data-testid="dm-unread-7"]')).toBeNull();
     expect(container.querySelector('[data-testid="dm-mentions-7"]')).toBeNull();
+  });
+
+  describe("empty state (WP 3B-3)", () => {
+    const empty = (): HTMLElement | null =>
+      container.querySelector<HTMLElement>("[data-testid='dm-empty-state']");
+
+    it("shows 'No direct messages yet' with a Start one button that calls onNewDm", () => {
+      const onNewDm = vi.fn();
+      const sidebar = createDmSidebar({
+        conversations: [],
+        onSelectConversation: vi.fn(),
+        onNewDm,
+      });
+      sidebar.mount(container);
+
+      expect(empty()?.hidden).toBe(false);
+      expect(empty()?.textContent).toContain("No direct messages yet");
+      const start = container.querySelector<HTMLButtonElement>("[data-testid='dm-empty-start']");
+      expect(start?.textContent).toBe("Start one");
+      start?.click();
+      expect(onNewDm).toHaveBeenCalledOnce();
+      sidebar.destroy?.();
+    });
+
+    it("hides once a DM is added and returns when the list empties again", () => {
+      const sidebar = createDmSidebar({
+        conversations: [],
+        onSelectConversation: vi.fn(),
+        onNewDm: vi.fn(),
+      });
+      sidebar.mount(container);
+      expect(empty()?.hidden).toBe(false);
+
+      sidebar.update([makeConvo()]);
+      expect(empty()?.hidden).toBe(true);
+
+      sidebar.update([]);
+      expect(empty()?.hidden).toBe(false);
+      sidebar.destroy?.();
+    });
+
+    it("is not shown when conversations exist at mount", () => {
+      const sidebar = createDmSidebar({
+        conversations: [makeConvo()],
+        onSelectConversation: vi.fn(),
+        onNewDm: vi.fn(),
+      });
+      sidebar.mount(container);
+      expect(empty()?.hidden).toBe(true);
+      sidebar.destroy?.();
+    });
+  });
+
+  describe("row menu items (WP 3B-2)", () => {
+    const labels = (): string[] =>
+      [...document.querySelectorAll(".dm-context-menu .context-menu-item")].map(
+        (el) => el.textContent ?? "",
+      );
+    const openMenu = (
+      convo: DmConversation,
+      extra: Partial<Parameters<typeof createDmSidebar>[0]> = {},
+    ) => {
+      const handlers = {
+        onMarkRead: vi.fn(),
+        onOpenProfile: vi.fn(),
+        onCall: vi.fn(),
+        onToggleBlock: vi.fn(),
+        onToggleMute: vi.fn(),
+        onCloseDm: vi.fn(),
+        onRenameGroup: vi.fn(),
+        ...extra,
+      };
+      const sidebar = createDmSidebar({
+        conversations: [convo],
+        onSelectConversation: vi.fn(),
+        onNewDm: vi.fn(),
+        ...handlers,
+      });
+      sidebar.mount(container);
+      container
+        .querySelector(".dm-item")
+        ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+      return { sidebar, handlers };
+    };
+    const item = (id: string): HTMLElement | null =>
+      document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+
+    beforeEach(() => {
+      resetBlocksStore();
+      setConnectionStatus("connected");
+    });
+    afterEach(() => document.querySelectorAll(".context-menu").forEach((m) => m.remove()));
+
+    it("1:1 unread offers Mark As Read, Profile, Call, Block, Mute and Close", () => {
+      const { sidebar } = openMenu(makeConvo({ unread: true, unreadCount: 2 }));
+      expect(labels()).toEqual([
+        "Mark As Read",
+        "Profile",
+        "Call",
+        "Mute Conversation",
+        "Block",
+        "Close DM",
+      ]);
+      sidebar.destroy?.();
+    });
+
+    it("1:1 read hides Mark As Read", () => {
+      const { sidebar } = openMenu(makeConvo());
+      expect(labels()).not.toContain("Mark As Read");
+      expect(labels()).toContain("Profile");
+      sidebar.destroy?.();
+    });
+
+    it("a group has neither Profile, Call nor Block", () => {
+      const { sidebar } = openMenu(makeConvo({ isGroup: true, unread: true, unreadCount: 1 }));
+      expect(labels()).toEqual([
+        "Mark As Read",
+        "Mute Conversation",
+        "Rename Group",
+        "Leave Group",
+      ]);
+      sidebar.destroy?.();
+    });
+
+    it("each item calls its handler with the row", () => {
+      const { sidebar, handlers } = openMenu(makeConvo({ unread: true, unreadCount: 1 }));
+      item("dm-mark-read-100")?.click();
+      expect(handlers.onMarkRead).toHaveBeenCalledExactlyOnceWith(100);
+      sidebar.destroy?.();
+      document.querySelectorAll(".context-menu").forEach((m) => m.remove());
+      const second = openMenu(makeConvo());
+      item("dm-profile-100")?.click();
+      expect(second.handlers.onOpenProfile).toHaveBeenCalledExactlyOnceWith(100);
+      second.sidebar.destroy?.();
+      document.querySelectorAll(".context-menu").forEach((m) => m.remove());
+      const third = openMenu(makeConvo());
+      item("dm-call-100")?.click();
+      expect(third.handlers.onCall).toHaveBeenCalledExactlyOnceWith(100);
+      third.sidebar.destroy?.();
+    });
+
+    it("Block, or Unblock from blocksStore, reports the user", () => {
+      const a = openMenu(makeConvo({ userId: 9, username: "Bob" }));
+      expect(item("dm-block-100")?.textContent).toBe("Block");
+      item("dm-block-100")?.click();
+      expect(a.handlers.onToggleBlock).toHaveBeenCalledExactlyOnceWith(9, "Bob", true);
+      a.sidebar.destroy?.();
+      document.querySelectorAll(".context-menu").forEach((m) => m.remove());
+
+      setUserBlockedByMe(9, true);
+      const b = openMenu(makeConvo({ userId: 9, username: "Bob" }));
+      expect(item("dm-block-100")?.textContent).toBe("Unblock");
+      item("dm-block-100")?.click();
+      expect(b.handlers.onToggleBlock).toHaveBeenCalledExactlyOnceWith(9, "Bob", false);
+      b.sidebar.destroy?.();
+    });
+
+    it("Call is disabled while offline or blocked", () => {
+      setConnectionStatus("disconnected");
+      const a = openMenu(makeConvo());
+      expect(item("dm-call-100")?.getAttribute("aria-disabled")).toBe("true");
+      item("dm-call-100")?.click();
+      expect(a.handlers.onCall).not.toHaveBeenCalled();
+      a.sidebar.destroy?.();
+      document.querySelectorAll(".context-menu").forEach((m) => m.remove());
+
+      setConnectionStatus("connected");
+      setUserBlockedByMe(1, true);
+      const b = openMenu(makeConvo());
+      expect(item("dm-call-100")?.getAttribute("aria-disabled")).toBe("true");
+      b.sidebar.destroy?.();
+    });
   });
 });

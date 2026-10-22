@@ -92,6 +92,9 @@ type ProfilePatch struct {
 	Avatar      *string
 	DisplayName *string
 	About       *string
+	// BannerID (upload handler only) and BannerColor (#rgb or #rrggbb): "" clears.
+	BannerID    *string
+	BannerColor *string
 }
 
 // nullable turns a sanitized, trimmed patch value into the column value:
@@ -172,18 +175,27 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	// legitimate UTF-8 value at the rune bound. UpdateProfile is the one
 	// function every transport reaches (see ProfilePatch's doc comment), so
 	// the guard belongs here rather than only in the REST handler.
-	if patch.DisplayName != nil && len(*patch.DisplayName) > MaxDisplayNameLen*4 {
-		return nil, fmt.Errorf("%w: display_name must be at most %d characters", ErrBadRequest, MaxDisplayNameLen)
-	}
-	if patch.About != nil && len(*patch.About) > MaxAboutLen*4 {
-		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
+	if err := checkProfileByteBounds(patch); err != nil {
+		return nil, err
 	}
 
-	if patch.DisplayName != nil && utf8.RuneCountInString(cleanText(*patch.DisplayName)) > MaxDisplayNameLen {
-		return nil, fmt.Errorf("%w: display_name must be at most %d characters", ErrBadRequest, MaxDisplayNameLen)
+	// Display name is single-line visible text: collapse, character-check and
+	// cap it the same way the custom status is (cleanVisibleBounded).
+	var cleanDisplayName *string
+	if patch.DisplayName != nil {
+		cleaned, err := cleanVisibleBounded(*patch.DisplayName, MaxDisplayNameLen, "display_name")
+		if err != nil {
+			return nil, err
+		}
+		cleanDisplayName = &cleaned
 	}
 	if patch.About != nil && utf8.RuneCountInString(cleanText(*patch.About)) > MaxAboutLen {
 		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
+	}
+
+	cleanBannerColor, err := cleanBannerPatch(patch.BannerColor)
+	if err != nil {
+		return nil, err
 	}
 
 	// The update writes every column, so a partial patch has to be merged
@@ -201,6 +213,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	if err != nil || current == nil {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
+	if err := s.checkTimedOutProfileEdit(ctx, userID, current, cleanDisplayName, patch.Username); err != nil {
+		return nil, err
+	}
 	// An empty Username means "unspecified", the same as a nil
 	// DisplayName/About pointer — merged against the current row rather
 	// than written verbatim. This is what lets an avatar-only caller
@@ -216,10 +231,14 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	if patch.Avatar != nil {
 		avatar = nullable(*patch.Avatar)
 	}
-	displayName := resolveOptional(patch.DisplayName, current.DisplayName)
+	displayName := current.DisplayName
+	if cleanDisplayName != nil {
+		displayName = nullable(*cleanDisplayName)
+	}
 	about := resolveOptional(patch.About, current.About)
+	bannerID, bannerColor := mergeBanner(current, patch.BannerID, cleanBannerColor)
 
-	if err := s.st.UpdateUserProfile(ctx, userID, username, avatar, displayName, about); err != nil {
+	if err := s.st.UpdateUserProfile(ctx, userID, username, avatar, displayName, about, bannerID, bannerColor); err != nil {
 		if db.IsUniqueConstraintError(err) {
 			return nil, fmt.Errorf("%w: username is already taken", ErrConflict)
 		}
@@ -241,8 +260,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		// file it just stored on that assumption — would otherwise delete a
 		// file the committed avatar column now points at, permanently
 		// breaking it with no user_update ever broadcast. UpdateUserProfile
-		// only ever writes username/avatar/display_name/about, so merging
-		// those four onto the pre-write snapshot (current) reconstructs the
+		// only ever writes username/avatar/display_name/about and the
+		// banner, so merging those onto the pre-write snapshot (current) reconstructs the
 		// row that is now actually in the database without needing the read
 		// to succeed.
 		slog.Error("UpdateProfile post-commit re-read failed; returning locally merged row",
@@ -252,11 +271,12 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		merged.Avatar = avatar
 		merged.DisplayName = displayName
 		merged.About = about
+		merged.BannerID, merged.BannerColor = bannerID, bannerColor
 		user = &merged
 	}
 	// Audit rows must survive a request canceled after the write committed.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "profile_update", "user", userID,
-		fmt.Sprintf("username=%s", username))
+		fmt.Sprintf("username=%s", username)+displayNameAuditSuffix(current.DisplayName, displayName))
 	slog.Info("profile updated", "user_id", userID, "username", username)
 	return user, nil
 }
@@ -266,7 +286,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 // value persists across reconnects and is cleared explicitly on logout, which
 // is why it is stored rather than held on the connection.
 func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text string) error {
-	cleaned, err := cleanTextBounded(text, MaxCustomStatusLen, "custom_status")
+	cleaned, err := cleanVisibleBounded(text, MaxCustomStatusLen, "custom_status")
 	if err != nil {
 		return err
 	}

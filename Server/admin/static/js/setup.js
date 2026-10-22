@@ -17,7 +17,7 @@ const TLS_LABELS={self_signed:'Self-signed certificate',acme:'Let’s Encrypt',m
 const VOICE_QUALITY_LABELS={low:'Low',medium:'Medium',high:'High'};
 
 function wizInit(defaults){
-  wiz.defaults=defaults||null;wiz.step=0;wiz.skip=false;wiz.busy=false;
+  wiz.defaults=defaults||null;wiz.portLocked=!!(defaults&&defaults.port_locked);wiz.step=0;wiz.skip=false;wiz.busy=false;
   const d=defaults||{};
   wiz.data={setup_token:'',username:'',password:'',confirm:'',
     server_name:d.server_name||'OwnCord Server',
@@ -87,8 +87,9 @@ function renderWizard(){
       h+=title('Server basics')
         +'<p class="wiz-sub">How your server introduces itself, and how people connect to it.</p>'
         +wizField('wizName','Server name','<input class="form-input" id="wizName" maxlength="100" required value="'+esc(d.server_name)+'">')
-        +wizField('wizPort','Port','<input class="form-input" id="wizPort" type="number" inputmode="numeric" min="1" max="65535" required data-input-action="wizTLSChanged" value="'+esc(d.port)+'">',
-          'The port the desktop app and this panel connect to. Keep the default unless it clashes with something else on this machine.')
+        +wizField('wizPort','Port','<input class="form-input" id="wizPort" type="number" inputmode="numeric" min="1" max="65535" required data-input-action="wizTLSChanged" value="'+esc(d.port)+'"'+(wiz.portLocked?' disabled':'')+'>',
+          wiz.portLocked?'The port is fixed by this container&#39;s published port mapping. To use a different one, change the mapping in your Docker or compose configuration.'
+            :'The port the desktop app and this panel connect to. Keep the default unless it clashes with something else on this machine.')
         +wizField('wizTLS','Security (TLS)','<select class="form-input" id="wizTLS" data-change-action="wizTLSChanged">'
           +Object.keys(TLS_OPTIONS).map(m=>'<option value="'+m+'"'+(d.tls_mode===m?' selected':'')+'>'+TLS_OPTIONS[m]+'</option>').join('')
           +'</select>',' ')

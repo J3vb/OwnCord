@@ -8,7 +8,7 @@
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
-import { isTextLikeChannel } from "@lib/types";
+import { isTextLikeChannel, type ChannelType } from "@lib/types";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import { type ApiClient, errorText } from "@lib/api";
@@ -17,12 +17,18 @@ import type { PresenceSender } from "@lib/presence";
 import type { ToastContainer } from "@components/Toast";
 import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
+import { withThreadsStore } from "@stores/threadsLoader";
+import { requestOpenThread, requestOpenThreadList } from "../../features/threads/threadNavigation";
 import { createDmSidebar } from "@components/DmSidebar";
 import type { DmConversation, DmSidebar } from "@components/DmSidebar";
-import { createCreateChannelModal } from "@components/CreateChannelModal";
+import type { DmMenuActions } from "@components/dmContextMenu";
+import { createLazyScreen } from "@components/lazyScreen";
+import { createCategoryDialogs } from "./categoryDialogs";
+import { migrateCollapsedToCategoryIds } from "../../features/channels/collapsedMigration";
+import type { VoiceWidgetOptions } from "@components/VoiceWidget";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
+import { logout } from "@lib/logout";
 import { createUserBar } from "@components/UserBar";
-import { createVoiceWidget } from "@components/VoiceWidget";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
 import type { QuickSwitchProfile } from "@components/QuickSwitchOverlay";
 import {
@@ -30,26 +36,46 @@ import {
   createSidebarVoiceCallbacks,
   createVoiceModerationCallbacks,
 } from "./VoiceCallbacks";
-import { createSidebarMemberSection } from "./SidebarMemberSection";
+import {
+  createSidebarMemberSection,
+  memberPanelUi,
+  type SidebarMemberSectionResult,
+} from "./SidebarMemberSection";
+import { loadMemberLayout } from "../../features/members/memberLayout";
+import { createMemberPanel, type MemberPanel } from "../../features/members/memberPanel";
+import { attachServerMenu } from "./ServerMenu";
 import { createInviteManagerController } from "./OverlayManagers";
 import {
   selectDmConversation,
   handleCreateDm,
   handleCreateGroupDm,
   buildDmConversations,
+  isDmInCall,
   findDirectDm,
   type DmHelperDeps,
 } from "./SidebarDmHelpers";
-import { createMemberPickerModal } from "./MemberPickerModal";
 import { createPromptModal } from "@lib/modalFactory";
 import type { ModalInstance } from "@lib/modalFactory";
-import { CHANNEL_MUTE_CHANGED, toggleChannelMute } from "@lib/channel-mutes";
-import { markAllRead, unreadChannelIds } from "@lib/read-state";
+import {
+  CHANNEL_MUTE_CHANGED,
+  muteChannel,
+  toggleChannelMute,
+  unmuteChannel,
+} from "@lib/channel-mutes";
+import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/read-state";
 import { createSidebarDmSection } from "./SidebarDmSection";
-import { uiStore, setSidebarMode, loadCollapsedCategories } from "@stores/ui.store";
+import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
-import { channelsStore, setActiveChannel, updateChannelPosition } from "@stores/channels.store";
+import {
+  channelsStore,
+  setActiveChannel,
+  updateChannel,
+  updateChannelPosition,
+  NO_CATEGORY,
+  type CategoryRef,
+} from "@stores/channels.store";
+import { keepDmForCall, releaseKeptDm } from "../../features/direct-messages/keptCallDms";
 import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
@@ -60,6 +86,13 @@ import type { ContentViewId, NavigationDestinations } from "../../features/navig
 import { trackCurrentView } from "../../features/navigation/contentView";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
+import { connectText } from "../../i18n/connect";
+import {
+  collapseSpaces,
+  lineHintText,
+  visibleLength,
+  MAX_GROUP_DM_NAME_LEN,
+} from "@lib/nameLimits";
 
 const log = createLogger("SidebarArea");
 
@@ -107,7 +140,17 @@ export interface SidebarAreaOptions {
   /** Start a call in the currently active DM (MainPage's `startCall`). Used by
    *  the member list's profile popup Call action, which first opens the DM. */
   readonly onStartCall?: () => void;
+  /** Open the profile panel for the active 1:1 DM (the DM row menu's Profile,
+   *  after it has selected that DM). */
+  readonly onOpenDmProfile?: () => void;
 }
+
+// Both modals load on first use, so their code stays out of the main-page chunk.
+const createChannelModalScreen = createLazyScreen(
+  "create-channel-modal",
+  () => import("@components/CreateChannelModal"),
+);
+const memberPickerScreen = createLazyScreen("member-picker", () => import("./MemberPickerModal"));
 
 export interface SidebarAreaResult {
   /** The composed sidebar wrapper element. */
@@ -126,6 +169,15 @@ export interface SidebarAreaResult {
   readonly returnToChannel: () => void;
   /** Open (or start) the 1:1 DM with a user, as the member list's Message. */
   readonly messageUser: (userId: number) => void;
+  /** Build one member panel with the shared callback wiring (Message, Call and
+   *  voice moderation). The one factory every host uses; the caller owns the
+   *  result and must destroy it before another host builds one. */
+  readonly buildMemberPanel: () => MemberPanel;
+  /** Add or remove the left member section to match the stored layout, in
+   *  place: the channel list is not remounted. Idempotent. */
+  readonly syncMemberSection: () => void;
+  /** Rename a group DM through the sidebar's prompt (the header's name click). */
+  readonly renameGroup: (channelId: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -134,10 +186,9 @@ export interface SidebarAreaResult {
 
 /** The DM rows, each marked when someone is in that DM's call. */
 function dmConversations(activeChannelId: number | null): DmConversation[] {
-  const voiceUsers = voiceStore.getState().voiceUsers;
   return buildDmConversations(activeChannelId).map((c) => ({
     ...c,
-    inCall: (voiceUsers.get(c.channelId)?.size ?? 0) > 0,
+    inCall: isDmInCall(c.channelId),
   }));
 }
 
@@ -149,6 +200,17 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   // Track active modal for channel create/edit/delete
   let activeModal: MountableComponent | null = null;
+  // Create / rename / delete category share the one modal slot with the channel dialogs.
+  const categoryDialogs = createCategoryDialogs({
+    api,
+    getToast,
+    slot: {
+      current: () => activeModal,
+      set: (modal) => {
+        activeModal = modal;
+      },
+    },
+  });
 
   // Remember the channel the user was on before entering DM mode
   let channelBeforeDm: number | null = null;
@@ -162,6 +224,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // Track extra channel-mode components (member list) for cleanup on mode switch
   let channelModeExtras: MountableComponent[] = [];
   let channelModeUnsubs: Array<() => void> = [];
+  // The left member section: present only in channels mode with the "left"
+  // layout. Owned by syncMemberSection, never by channelModeUnsubs.
+  let memberSection: SidebarMemberSectionResult | null = null;
 
   // Profile manager for quick-switch overlay
   let profileManager: ProfileManager | null = null;
@@ -209,11 +274,24 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const serverHeader = createElement("div", { class: "unified-sidebar-header" });
   const serverIcon = createElement("div", { class: "server-icon-sm" }, "OC"); // i18n-exempt: logo monogram, not copy
   const serverInfoCol = createElement("div", { class: "server-info" });
-  const serverNameEl = createElement(
+  // The server name is the menu's button (Discord's server menu). The text sits
+  // in its own span so a rename replaces only the text, never the chevron.
+  const serverNameEl = createElement("button", {
+    type: "button",
+    class: "server-name",
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    "data-testid": "server-name",
+  });
+  const serverNameText = createElement(
     "span",
-    { class: "server-name" },
+    { class: "server-name-text" },
     authStore.getState().serverName ?? shellText("common.serverFallback"),
   );
+  const serverNameChevron = createIcon("chevron-down", 14);
+  serverNameChevron.classList.add("server-name-chevron");
+  serverNameEl.appendChild(serverNameText);
+  serverNameEl.appendChild(serverNameChevron);
   const onlineCount = getOnlineMembers().length;
   const serverOnlineEl = createElement(
     "span",
@@ -293,16 +371,18 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     "scroll-text",
     "audit-log-btn",
   );
-  auditBtn.addEventListener("click", () => {
+  // The Audit Log button and the server menu's Server Settings share this.
+  const openAdmin = (section?: string): void => {
     const host = api.getConfig().host ?? "";
     if (host === "") {
       getToast()?.show(shellText("audit.notConnected"), "error");
       return;
     }
-    void openAdminPanel(host, "audit").catch(() => {
+    void openAdminPanel(host, section).catch(() => {
       getToast()?.show(shellText("audit.openFailed"), "error");
     });
-  });
+  };
+  auditBtn.addEventListener("click", () => openAdmin("audit"));
 
   // The Moderation Center entry (B9-4, Q2): beside Audit Log, only with
   // MODERATE_MEMBERS, and only once the Moderation Center ships.
@@ -334,7 +414,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // list, so both have to be watched.
   unsubscribers.push(
     authStore.subscribeSelector(
-      (s) => s.user?.role ?? null,
+      (s) => `${s.user?.role ?? ""}|${s.user?.role_ids?.join(",") ?? ""}`,
       () => syncAuditBtn(),
     ),
   );
@@ -347,18 +427,48 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   sidebarWrapper.appendChild(serverHeader);
 
+  // The server menu. Its rows are decided each time it opens (ServerMenu.ts).
+  const serverMenuOwner = new Disposable();
+  unsubscribers.push(() => serverMenuOwner.destroy());
+  attachServerMenu(
+    serverNameEl,
+    {
+      onInvite: () => {
+        void headerInviteCtrl.open();
+      },
+      onMarkRead: () => markAllRead({ includeDms: false }),
+      onNotificationSettings: () => openSettings("Notifications"), // i18n-exempt: settings tab id, not copy
+      onCreateChannel: () => openCreateChannelModal(NO_CATEGORY),
+      onCreateCategory: () => categoryDialogs.create(),
+      onServerSettings: () => openAdmin(),
+    },
+    serverMenuOwner.signal,
+  );
+
   // Load per-server collapsed category state from localStorage, scoped to
   // the connected host (not the display name) — the same convention as
   // setChannelMutesHost/setAudioVolumeHost. The display name
   // defaults to "OwnCord Server" on every unmodified install, so keying on
   // it would collapse two different servers' saved state onto one entry.
   loadCollapsedCategories(api.getConfig().host);
+  // Collapsed state saved under a category NAME (before 6.5b) moves to the id
+  // key once the channel list says which name is which id. Done at once when
+  // the list is already here, else on the first channels write that fills it.
+  if (!migrateCollapsedToCategoryIds()) {
+    const unsubscribeTranslate = channelsStore.subscribeSelector(
+      (s) => s.channels,
+      () => {
+        if (migrateCollapsedToCategoryIds()) unsubscribeTranslate();
+      },
+    );
+    unsubscribers.push(unsubscribeTranslate);
+  }
 
   // Keep server name in sync with auth store
   const unsubServerName = authStore.subscribeSelector(
     (s) => s.serverName,
     (name) => {
-      setText(serverNameEl, name ?? shellText("common.serverFallback"));
+      setText(serverNameText, name ?? shellText("common.serverFallback"));
     },
   );
   unsubscribers.push(unsubServerName);
@@ -380,21 +490,25 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const contentSlot = createElement("div", { class: "sidebar-content" });
   sidebarWrapper.appendChild(contentSlot);
 
-  // ---------------------------------------------------------------------------
-  // Channel sidebar builder (channels mode)
-  // ---------------------------------------------------------------------------
-
-  function buildChannelSidebar(): MountableComponent {
-    const sidebarVoice = createSidebarVoiceCallbacks(ws);
-    return createChannelSidebar({
-      onVoiceJoin: sidebarVoice.onVoiceJoin,
-      onOpenCall: () => opts.onOpenCall?.(),
-      onVoiceModerate: createVoiceModerationCallbacks(ws),
-      onWatchStream: opts.onWatchStream,
-      onCreateChannel: (category) => {
-        if (activeModal !== null) return;
-        const modal = createCreateChannelModal({
+  // The category "+", the empty-state button and the server menu share this.
+  function openCreateChannelModal(category: CategoryRef, type?: ChannelType): void {
+    if (activeModal !== null) return;
+    // The placeholder holds the modal slot while the dialog loads: a second
+    // click is refused, and a teardown or another modal in between drops the
+    // late one (the same shape as the edit dialog below).
+    const pending: MountableComponent = { mount: () => {} };
+    activeModal = pending;
+    void createChannelModalScreen
+      .load(() => activeModal === pending)
+      .then((screen) => {
+        if (screen === null) {
+          if (activeModal === pending) activeModal = null;
+          return;
+        }
+        if (activeModal !== pending) return;
+        const modal = screen.createCreateChannelModal({
           category,
+          type,
           onCreate: async (data) => {
             try {
               await api.adminCreateChannel(data);
@@ -415,7 +529,42 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         });
         activeModal = modal;
         modal.mount(document.body);
+      });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Channel sidebar builder (channels mode)
+  // ---------------------------------------------------------------------------
+
+  function buildChannelSidebar(): MountableComponent {
+    const sidebarVoice = createSidebarVoiceCallbacks(ws);
+    return createChannelSidebar({
+      onVoiceJoin: sidebarVoice.onVoiceJoin,
+      onOpenCall: () => opts.onOpenCall?.(),
+      onVoiceModerate: createVoiceModerationCallbacks(ws),
+      onWatchStream: opts.onWatchStream,
+      onOpenThread: requestOpenThread,
+      onOpenThreadList: requestOpenThreadList,
+      onUnfollowThread: (threadId) => {
+        // Dropped while the socket is down: a lost frame would leave the row until the next ready.
+        if (uiStore.getState().connectionStatus !== "connected") return;
+        ws.send({ type: "thread_follow", payload: { thread_id: threadId, follow: false } });
       },
+      onMarkThreadRead: (threadId) => {
+        // Dropped while the socket is down, like Unfollow: a lost mark_read would clear the row for nothing.
+        if (uiStore.getState().connectionStatus !== "connected") return;
+        // mark_read accepts a thread id; the same path as a channel's Mark as Read.
+        markChannelRead(threadId);
+        withThreadsStore((m) => m.clearFollowedCounts(threadId));
+      },
+      onInviteFromChannel: () => {
+        void headerInviteCtrl.open();
+      },
+      onCreateChannel: openCreateChannelModal,
+      onCreateCategory: categoryDialogs.create,
+      onRenameCategory: categoryDialogs.rename,
+      onDeleteCategory: categoryDialogs.remove,
+      onMoveCategory: categoryDialogs.move,
       onEditChannel: (channel) => {
         if (activeModal !== null) return;
         // The editor is admin-only and never on first paint, so it loads on
@@ -432,14 +581,19 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
             const stored = channelsStore.getState().channels.get(channel.id);
             const modal = createEditChannelModal({
               channelId: channel.id,
-              channelName: channel.name,
+              channelName: stored?.name ?? channel.name,
               channelType: channel.type,
               channelTopic: stored?.topic ?? "",
               channelCategory: stored?.category ?? "",
+              channelCategoryId: stored?.categoryId ?? 0,
               channelSlowMode: stored?.slowMode ?? 0,
               channelNsfw: stored?.nsfw ?? false,
               channelVoiceMaxUsers: stored?.voiceMaxUsers ?? 0,
               channelVoiceMaxVideo: stored?.voiceMaxVideo ?? 0,
+              // The editor's own write: the live channel_update reaches the store.
+              onSaveForum: async (body) => {
+                await api.adminUpdateForumSettings(channel.id, body);
+              },
               onSave: async (data) => {
                 try {
                   await api.adminUpdateChannel(channel.id, data);
@@ -492,11 +646,14 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         activeModal = modal;
         modal.mount(document.body);
       },
+      onReorderCategory: categoryDialogs.place,
       onReorderChannel: (reorders) => {
         // The store already applied the optimistic order (drag-reorder.ts,
         // on mouseup). Aggregate the per-channel PATCHes and surface a single
         // failure toast — same try/catch+toast contract as onSave/onDelete
-        // above. A rejected PATCH is rolled back to its previous position only
+        // above. A drop into another category sends the moved channel's
+        // `category_id` with its position (WP 6.5c). A rejected PATCH is rolled
+        // back to its previous position, and previous category, only
         // if no channel_update broadcast arrived for that channel since the
         // request started (the server broadcasts before it answers, so a
         // broadcast means the write landed) and it still shows the optimistic
@@ -504,28 +661,63 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // replace the channel object but confirm nothing. A request that failed
         // only because its response was lost is covered by the reconnect
         // resync, so it needs no reconciliation here.
+        // The moved channel's category PATCH and its peers' position PATCHes run
+        // concurrently. That is safe only because the server does not enforce
+        // unique positions: no ordering between them can make one collide.
         const touched = new Set<number>();
         const unsubscribe = ws.on("channel_update", (payload) => {
           touched.add(payload.id);
         });
         void Promise.allSettled(
-          reorders.map((r) => api.adminUpdateChannel(r.channelId, { position: r.newPosition })),
+          reorders.map((r) =>
+            api.adminUpdateChannel(
+              r.channelId,
+              r.category === undefined
+                ? { position: r.newPosition }
+                : { category_id: r.category.next.categoryId ?? 0, position: r.newPosition },
+            ),
+          ),
         ).then((results) => {
           unsubscribe();
-          if (results.some((r) => r.status === "rejected")) {
-            results.forEach((result, i) => {
-              const entry = reorders[i];
-              if (
-                result.status === "rejected" &&
-                entry !== undefined &&
-                !touched.has(entry.channelId) &&
-                channelsStore.getState().channels.get(entry.channelId)?.position ===
-                  entry.newPosition
-              ) {
-                updateChannelPosition(entry.channelId, entry.previousPosition);
-              }
+          let failure: unknown;
+          let movedFailed = false;
+          let failed = false;
+          results.forEach((result, i) => {
+            const entry = reorders[i];
+            if (result.status !== "rejected" || entry === undefined) return;
+            if (!failed) failure = result.reason;
+            failed = true;
+            movedFailed = movedFailed || entry.category !== undefined;
+            const stored = channelsStore.getState().channels.get(entry.channelId);
+            if (
+              touched.has(entry.channelId) ||
+              stored === undefined ||
+              stored.position !== entry.newPosition ||
+              (entry.category !== undefined &&
+                (stored.categoryId ?? 0) !== (entry.category.next.categoryId ?? 0))
+            ) {
+              return;
+            }
+            if (entry.category === undefined) {
+              updateChannelPosition(entry.channelId, entry.previousPosition);
+              return;
+            }
+            const prev = entry.category.previous;
+            updateChannel({
+              id: entry.channelId,
+              position: entry.previousPosition,
+              category_id: prev.categoryId ?? 0,
+              category: prev.category ?? "",
+              category_position: prev.categoryPosition ?? 0,
             });
-            getToast()?.show(shellText("channel.reorderFailed"), "error");
+          });
+          if (failed) {
+            getToast()?.show(
+              movedFailed
+                ? errorText(failure, shellText("channel.moveFailed"))
+                : shellText("channel.reorderFailed"),
+              "error",
+            );
           }
         });
       },
@@ -568,22 +760,32 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
    */
   function showMemberPicker(): void {
     if (activeModal !== null) return;
-
-    const picker = createMemberPickerModal({
-      onSelect: (userId) => {
-        closePickerModal();
-        void handleCreateDm(userId, dmDeps);
-      },
-      onSelectGroup: (userIds, name) => {
-        closePickerModal();
-        void handleCreateGroupDm(userIds, name, dmDeps);
-      },
-      onClose: () => {
-        activeModal = null;
-      },
-    });
-    activeModal = picker;
-    picker.mount(document.body);
+    const pending: MountableComponent = { mount: () => {} };
+    activeModal = pending;
+    void memberPickerScreen
+      .load(() => activeModal === pending)
+      .then((screen) => {
+        if (screen === null) {
+          if (activeModal === pending) activeModal = null;
+          return;
+        }
+        if (activeModal !== pending) return;
+        const picker = screen.createMemberPickerModal({
+          onSelect: (userId) => {
+            closePickerModal();
+            void handleCreateDm(userId, dmDeps);
+          },
+          onSelectGroup: (userIds, name) => {
+            closePickerModal();
+            void handleCreateGroupDm(userIds, name, dmDeps);
+          },
+          onClose: () => {
+            activeModal = null;
+          },
+        });
+        activeModal = picker;
+        picker.mount(document.body);
+      });
   }
 
   function closePickerModal(): void {
@@ -637,8 +839,12 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     const channels = dmStore.getState().channels;
     const index = channels.findIndex((c) => c.channelId === channelId);
     const removed = channels[index];
+    // A closed 1:1 keeps its live call through a network blip; a group leave
+    // does not (the server removes the leaver from the call).
+    if (removed !== undefined && !removed.isGroup) keepDmForCall(channelId);
     closeDmLocally(channelId, fallBackFromDm);
     void api.closeDm(channelId).catch(() => {
+      releaseKeptDm(channelId);
       if (removed !== undefined) restoreDmChannel(removed, index);
       getToast()?.show(shellText("dm.leaveFailed"), "error");
     });
@@ -653,21 +859,68 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       label: shellText("dm.renameGroupHint"),
       initialValue: dm.name,
       placeholder: shellText("dm.groupNamePlaceholder"),
-      maxLength: 100,
+      maxLength: MAX_GROUP_DM_NAME_LEN,
+      hint: lineHintText(MAX_GROUP_DM_NAME_LEN),
       testId: "dm-rename-input",
-      onSubmit: (name) => {
-        // The store is updated by the dm_channel_open the server fans out to
-        // every participant, so the response is only used for the error path.
-        void api.renameGroupDm(channelId, name).catch((err: unknown) => {
-          const msg = errorText(err, shellText("dm.renameFailed"));
-          getToast()?.show(msg, "error");
-        });
-      },
+      validate: (name) =>
+        visibleLength(name) > MAX_GROUP_DM_NAME_LEN
+          ? connectText("limits.groupNameTooLong", { max: MAX_GROUP_DM_NAME_LEN })
+          : null,
+      // The store is updated by the dm_channel_open the server fans out to
+      // every participant, so the response is only used for the error path:
+      // the server's refusal shows under the field and the typed name stays.
+      onSubmit: (name) =>
+        api
+          .renameGroupDm(channelId, collapseSpaces(name))
+          .then(() => null)
+          .catch((err: unknown) => errorText(err, shellText("dm.renameFailed"))),
       onClose: () => {
         activePrompt = null;
       },
     });
     activePrompt = prompt;
+  }
+
+  /** Show a group icon failure; null means it worked and the dm_channel_open does the rest. */
+  function showGroupIconResult(error: string | null): void {
+    if (error !== null) getToast()?.show(error, "error");
+  }
+
+  /**
+   * Pick, crop and upload a group's icon. The picker opens synchronously from
+   * the menu click (WebKit refuses one opened after an await), on an input
+   * that is attached to the page and removed on change or cancel; the crop and
+   * upload code is imported only once a file is chosen. The store updates from
+   * the dm_channel_open that follows.
+   */
+  function changeGroupIcon(channelId: number): void {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/webp";
+    input.style.display = "none";
+    document.body.appendChild(input);
+    input.addEventListener(
+      "change",
+      () => {
+        const file = input.files?.[0];
+        input.remove();
+        if (file === undefined) return;
+        void import("../../features/direct-messages/groupIcon").then(
+          async (icon) => showGroupIconResult(await icon.uploadGroupIcon(api, channelId, file)),
+          () => showGroupIconResult(shellText("dm.iconFailed")),
+        );
+      },
+      { once: true },
+    );
+    input.addEventListener("cancel", () => input.remove(), { once: true });
+    input.click();
+  }
+
+  function removeGroupIconFor(channelId: number): void {
+    void import("../../features/direct-messages/groupIcon").then(
+      async (icon) => showGroupIconResult(await icon.removeGroupIcon(api, channelId)),
+      () => showGroupIconResult(shellText("dm.iconFailed")),
+    );
   }
 
   /**
@@ -706,6 +959,61 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     if (current !== undefined && current.type !== "dm") channelBeforeDm = current.id;
   }
 
+  /** Make `channelId` the active DM; false when it is no longer in the list. */
+  function selectDm(channelId: number): boolean {
+    const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    if (dmChannel === undefined) return false;
+    selectDmConversation(dmChannel, dmDeps);
+    return true;
+  }
+
+  /** The DM row menu's actions, shared by the full list and the compact preview. */
+  function dmMenuActions(): DmMenuActions {
+    return {
+      onCloseDm: (channelId) => closeOrLeaveDm(channelId),
+      onToggleMute: (channelId) => {
+        toggleChannelMute(channelId);
+        // Mute state is not in a store, so nothing re-renders on its own.
+        refreshDmSidebarRef?.();
+      },
+      onSetMute: (channelId, muted) => {
+        if (muted) muteChannel(channelId);
+        else unmuteChannel(channelId);
+        refreshDmSidebarRef?.();
+      },
+      onMuteFor: (channelId, durationMs) => {
+        muteChannel(channelId, durationMs);
+        refreshDmSidebarRef?.();
+      },
+      onMarkRead: markChannelRead,
+      onOpenProfile: (channelId) => {
+        if (selectDm(channelId)) opts.onOpenDmProfile?.();
+      },
+      onCall: (channelId) => {
+        if (selectDm(channelId)) opts.onStartCall?.();
+      },
+      onToggleBlock: (userId, username, block) => {
+        void import("../../features/blocks/blockActions").then(
+          ({ confirmAndToggleBlock }) =>
+            confirmAndToggleBlock(
+              { api, notify: (msg, type) => getToast()?.show(msg, type) },
+              userId,
+              username,
+              block,
+            ),
+          () =>
+            getToast()?.show(
+              shellText(block ? "members.blockFailed" : "members.unblockFailed"),
+              "error",
+            ),
+        );
+      },
+      onRenameGroup: (channelId) => renameGroup(channelId),
+      onChangeGroupIcon: (channelId) => changeGroupIcon(channelId),
+      onRemoveGroupIcon: (channelId) => removeGroupIconFor(channelId),
+    };
+  }
+
   function buildDmSidebar(): DmSidebar {
     const serverName = authStore.getState().serverName ?? shellText("common.serverFallback");
     const activeChannelId = channelsStore.getState().activeChannelId;
@@ -719,19 +1027,67 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           selectDmConversation(dmChannel, dmDeps);
         }
       },
-      onCloseDm: (channelId) => closeOrLeaveDm(channelId),
-      onToggleMute: (channelId) => {
-        toggleChannelMute(channelId);
-        // Mute state is not in a store, so nothing re-renders on its own.
-        refreshDmSidebarRef?.();
-      },
-      onRenameGroup: (channelId) => renameGroup(channelId),
+      ...dmMenuActions(),
       onNewDm: () => {
         showMemberPicker();
       },
       onBack: returnToChannel,
       serverName,
     });
+  }
+
+  /** Call a user: open the DM first, then start the call in it (BUG-05). An
+   *  existing DM is selected at once; a new one starts the call in
+   *  `handleCreateDm`'s onReady, once it is the active channel `startCall`
+   *  reads. */
+  function callUser(userId: number): void {
+    const existing = findDirectDm(userId);
+    if (existing !== undefined) {
+      selectDmConversation(existing, dmDeps);
+      opts.onStartCall?.();
+      return;
+    }
+    void handleCreateDm(userId, dmDeps, () => opts.onStartCall?.());
+  }
+
+  function buildMemberPanel(): MemberPanel {
+    return createMemberPanel({
+      ui: memberPanelUi,
+      api,
+      getToast,
+      onMessageUser: (userId) => {
+        void handleCreateDm(userId, dmDeps);
+      },
+      onCallUser: callUser,
+      onVoiceModerate: createVoiceModerationCallbacks(ws),
+    });
+  }
+
+  /** Create or destroy the left member section so it matches the mode and the
+   *  stored layout. It appends to `contentSlot`, so the channel list above it
+   *  keeps its DOM. */
+  function syncMemberSection(): void {
+    const wanted = uiStore.getState().sidebarMode === "channels" && loadMemberLayout() === "left";
+    if (wanted && memberSection === null) {
+      // The panel comes from the one factory every host shares, so the
+      // callback wiring exists once.
+      memberSection = createSidebarMemberSection({
+        api,
+        getToast,
+        buildPanel: buildMemberPanel,
+      });
+      contentSlot.appendChild(memberSection.element);
+    } else if (!wanted && memberSection !== null) {
+      destroyMemberSection();
+    }
+  }
+
+  function destroyMemberSection(): void {
+    if (memberSection === null) return;
+    const section = memberSection;
+    memberSection = null;
+    section.destroy();
+    section.element.remove();
   }
 
   // ---------------------------------------------------------------------------
@@ -758,6 +1114,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       unsub();
     }
     channelModeUnsubs = [];
+    destroyMemberSection();
 
     clearChildren(contentSlot);
 
@@ -775,6 +1132,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         onNewDm: () => {
           showMemberPicker();
         },
+        menu: dmMenuActions(),
       });
       channelModeUnsubs.push(() => {
         dmSectionResult.destroy();
@@ -790,32 +1148,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // Inject the channel sidebar content into contentSlot.
       contentSlot.appendChild(innerSlot);
 
-      // --- Member list (below DM section) ---
-      // Same wiring lives in SidebarMemberSection; this used to be a private
-      // copy of it, and a fix to one silently missed the other.
-      const memberSection = createSidebarMemberSection({
-        api,
-        getToast,
-        onMessageUser: (userId) => {
-          void handleCreateDm(userId, dmDeps);
-        },
-        onCallUser: (userId) => {
-          // A call lives in the DM's voice channel, so open the 1:1 first and
-          // start the call there (BUG-05). An existing DM is selected at once;
-          // a new one starts the call in `handleCreateDm`'s onReady, once it is
-          // the active channel `startCall` reads.
-          const existing = findDirectDm(userId);
-          if (existing !== undefined) {
-            selectDmConversation(existing, dmDeps);
-            opts.onStartCall?.();
-            return;
-          }
-          void handleCreateDm(userId, dmDeps, () => opts.onStartCall?.());
-        },
-      });
-      contentSlot.appendChild(memberSection.element);
-      channelModeExtras.push(memberSection.memberListComponent);
-      channelModeUnsubs.push(memberSection.destroy);
+      // --- Member list (below channels), only in the "left" layout ---
+      syncMemberSection();
     } else {
       // "Message Requests (N)" at the top of DM mode (B9-4, Q2). N is the
       // pending-request count and is never folded into unread.
@@ -941,7 +1275,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     ws,
     limiters,
   );
-  const voiceWidget = createVoiceWidget({
+  const voiceWidgetOptions: VoiceWidgetOptions = {
     onDisconnect,
     onCameraToggle,
     onScreenshareToggle,
@@ -962,10 +1296,48 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // channel's chat and would close a call view opened before it.
       queueMicrotask(() => opts.onOpenCall?.());
     },
-  });
-  voiceWidget.mount(voiceWidgetSlot);
-  children.push(voiceWidget);
+  };
   sidebarWrapper.appendChild(voiceWidgetSlot);
+
+  // The widget subscribes to the store when it mounts and renders the current
+  // state, so a late mount shows a session that is already under way. It stays
+  // mounted once loaded: it hides itself when the user is not in voice.
+  // One loader per sidebar; the browser's module cache shares the code itself.
+  const voiceWidgetScreen = createLazyScreen(
+    "voice-widget",
+    () => import("@components/VoiceWidget"),
+  );
+  let voiceWidgetRequested = false;
+  // Not in `children`: the page copies that list at build, before this loads.
+  let voiceWidget: MountableComponent | null = null;
+  function loadVoiceWidget(): void {
+    if (voiceWidgetRequested || tornDown) return;
+    voiceWidgetRequested = true;
+    void voiceWidgetScreen
+      .load(() => !tornDown)
+      .then((mod) => {
+        if (mod === null) {
+          // Failed (toasted once by the loader): the next voice change retries.
+          voiceWidgetRequested = false;
+          return;
+        }
+        if (tornDown) return;
+        voiceWidget = mod.createVoiceWidget(voiceWidgetOptions);
+        voiceWidget.mount(voiceWidgetSlot);
+        return;
+      });
+  }
+  unsubscribers.push(
+    voiceStore.subscribeSelector(
+      (state) => state.currentChannelId,
+      (channelId) => {
+        // A channel switch retries a failed load too.
+        if (channelId !== null) loadVoiceWidget();
+      },
+    ),
+  );
+  // autoJoin can set the channel before this sidebar is built.
+  if (voiceStore.getState().currentChannelId !== null) loadVoiceWidget();
 
   // ---------------------------------------------------------------------------
   // Quick-switch overlay
@@ -1039,7 +1411,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const userBarSlot = createElement("div", {});
   const selfVoiceCallbacks = createVoiceWidgetCallbacks(ws, limiters);
   const userBar = createUserBar({
-    onDisconnect: openQuickSwitch,
+    // The portal serves one server: the button signs out, nothing to switch to.
+    onDisconnect: __OWNCORD_WEB__ ? () => logout(api) : openQuickSwitch,
     ws,
     presenceSender,
     onMuteToggle: selfVoiceCallbacks.onMuteToggle,
@@ -1084,10 +1457,13 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       unsub();
     }
     channelModeUnsubs = [];
+    destroyMemberSection();
   });
 
   unsubscribers.push(() => {
     tornDown = true;
+    voiceWidget?.destroy?.();
+    voiceWidget = null;
     closeQuickSwitch();
   });
 
@@ -1102,5 +1478,8 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     },
     returnToChannel,
     messageUser: (userId) => void handleCreateDm(userId, dmDeps),
+    buildMemberPanel,
+    syncMemberSection,
+    renameGroup,
   };
 }

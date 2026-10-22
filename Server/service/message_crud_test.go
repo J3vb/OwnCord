@@ -32,8 +32,8 @@ type disconnectAfterWriteStore struct {
 	cancel context.CancelFunc
 }
 
-func (s disconnectAfterWriteStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error) {
-	msg, err := s.Store.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, mentionsEveryone)
+func (s disconnectAfterWriteStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool, mentionedRoleIDs []int64) (*db.Message, error) {
+	msg, err := s.Store.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, replyPingUserID, mentionsEveryone, mentionedRoleIDs)
 	s.cancel()
 	return msg, err
 }
@@ -421,7 +421,7 @@ type disconnectAfterLinkStore struct {
 	cancel context.CancelFunc
 }
 
-func (s disconnectAfterLinkStore) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error) {
+func (s disconnectAfterLinkStore) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) ([]string, error) {
 	n, err := s.Store.LinkAttachmentsToMessage(ctx, messageID, uploaderID, attachmentIDs)
 	s.cancel()
 	return n, err
@@ -520,7 +520,7 @@ func TestSendMessage_GroupDMLookupFailureDoesNotMisfireFirstContactGate(t *testi
 // participant-ID reads, the per-recipient trust read, the DMAudience
 // re-reads, and an OpenDM write for a recipient whose DM row is already open.
 // Counting starts once the message row is written, so the pre-insert block
-// check (RequireDMNotBlocked's own IsGroupDM) is not counted.
+// check (RequireDMReachable's own IsGroupDM) is not counted.
 type dmSendSpyStore struct {
 	*db.DB
 	armed                                    atomic.Bool
@@ -533,8 +533,8 @@ func (s *dmSendSpyStore) count(n *atomic.Int32) {
 	}
 }
 
-func (s *dmSendSpyStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error) {
-	msg, err := s.DB.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, mentionsEveryone)
+func (s *dmSendSpyStore) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool, mentionedRoleIDs []int64) (*db.Message, error) {
+	msg, err := s.DB.CreateMessageWithMentions(ctx, channelID, userID, content, replyTo, mentionedUserIDs, replyPingUserID, mentionsEveryone, mentionedRoleIDs)
 	s.armed.Store(true)
 	return msg, err
 }
@@ -621,4 +621,19 @@ func TestSendMessage_GroupDMSkipsOpenDMForOpenMembers(t *testing.T) {
 	if !slices.Equal(result.OpenedDMFor, []int64{3}) {
 		t.Errorf("OpenedDMFor = %v, want [3] — a closed member must still get dm_channel_open", result.OpenedDMFor)
 	}
+}
+
+// The wrappers below embed the Store interface, which does not carry the DM
+// privacy read; forward it so the reachability gate sees the real database.
+func (s disconnectAfterWriteStore) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
+	return s.Store.(DMPrivacyReader).DMRefusesSender(ctx, recipientID, senderID)
+}
+func (s erroringDMAudienceStore) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
+	return s.Store.(DMPrivacyReader).DMRefusesSender(ctx, recipientID, senderID)
+}
+func (s erroringGetChannelStore) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
+	return s.Store.(DMPrivacyReader).DMRefusesSender(ctx, recipientID, senderID)
+}
+func (s disconnectAfterLinkStore) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
+	return s.Store.(DMPrivacyReader).DMRefusesSender(ctx, recipientID, senderID)
 }

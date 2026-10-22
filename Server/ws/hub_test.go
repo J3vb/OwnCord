@@ -1598,17 +1598,21 @@ func TestBroadcastMemberUpdate_ClosesSocketWhenVisibilityUnresolved(t *testing.T
 }
 
 // hubTestSchema is the minimal schema needed for hub tests.
-// hubTestSchema ends with the real member-generation migration, so the ready
+// The slice is clipped so the `append(hubTestSchema, ...)` extensions in sibling files copy it
+// instead of writing into spare capacity they would share.
+// hubTestSchema ends with the real member-generation migrations (057, 061), 062 (the custom status expiry column), 064 (call log) 065 (group DM owner) and 066 (group DM icon), so the ready
 // path's shared member read (serve_ready_members_cache.go) runs against the
 // same triggers production does.
-var hubTestSchema = append([]byte(`
+var hubTestSchema = slices.Clip(slices.Concat([]byte(`
 CREATE TABLE IF NOT EXISTS roles (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL UNIQUE,
     color       TEXT,
     permissions INTEGER NOT NULL DEFAULT 0,
     position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    hoist       INTEGER NOT NULL DEFAULT 0,
+    mentionable INTEGER NOT NULL DEFAULT 0
 );
 
 INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
@@ -1637,6 +1641,23 @@ CREATE TABLE IF NOT EXISTS users (
     custom_status TEXT
 );
 
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+) WITHOUT ROWID;
+
+CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
+BEGIN
+    INSERT OR IGNORE INTO user_roles (user_id, role_id)
+    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
+END;
+
+CREATE TABLE IF NOT EXISTS erasure_jobs (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    state   TEXT    NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1663,11 +1684,34 @@ CREATE TABLE IF NOT EXISTS recovery_assists (
     expires_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS category_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS category_user_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
-    category         TEXT,
+    category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
+    permissions_synced INTEGER NOT NULL DEFAULT 0,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -1678,6 +1722,16 @@ CREATE TABLE IF NOT EXISTS channels (
     mixing_threshold INTEGER,
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
     nsfw             INTEGER NOT NULL DEFAULT 0,
+    afk             INTEGER NOT NULL DEFAULT 0,
+    parent_channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    thread_starter_message_id INTEGER,
+    thread_owner_id INTEGER,
+    thread_archived INTEGER NOT NULL DEFAULT 0,
+    thread_locked INTEGER NOT NULL DEFAULT 0,
+    thread_auto_archive_minutes INTEGER NOT NULL DEFAULT 1440,
+    thread_last_activity_at TEXT,
+    forum_require_tag INTEGER NOT NULL DEFAULT 0,
+    forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
     is_group         INTEGER NOT NULL DEFAULT 0
 );
 
@@ -1715,6 +1769,11 @@ CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     PRIMARY KEY (message_id, mentioned_user_id)
+);
+CREATE TABLE IF NOT EXISTS message_role_mentions (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL,
+    PRIMARY KEY (message_id, role_id)
 );
 
 
@@ -1795,6 +1854,14 @@ CREATE TABLE IF NOT EXISTS trusted_senders (
     PRIMARY KEY (recipient_id, sender_id)
 );
 
+-- Per-user DM privacy (migration 070, WP 6.8b).
+CREATE TABLE IF NOT EXISTS user_privacy (
+    user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+    message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS message_requests (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1834,7 +1901,20 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
     lifted_by       INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
-`), mustMigration("057_member_generation.sql")...)
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id          TEXT    PRIMARY KEY,
+    message_id  INTEGER,
+    filename    TEXT    NOT NULL,
+    stored_as   TEXT    NOT NULL,
+    mime_type   TEXT    NOT NULL,
+    size        INTEGER NOT NULL,
+    uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    uploader_id INTEGER,
+    width       INTEGER,
+    height      INTEGER
+);
+`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"), mustMigration("064_call_log.sql"), mustMigration("065_group_dm_owner.sql"), mustMigration("066_group_dm_icon.sql"), mustMigration("069_profile_notes_banners.sql"), mustMigration("071_message_forwards.sql"), mustMigration("073_polls.sql")))
 
 // mustMigration returns a shipped migration file's SQL.
 func mustMigration(name string) []byte {

@@ -45,6 +45,11 @@ type Rule struct {
 	// Check inspects one parsed file. rel is the slash-separated path relative
 	// to the tree root, and is what the returned Violation.File must carry.
 	Check func(f *ast.File, fset *token.FileSet, rel string) []Violation
+	// Tree, when set, inspects the whole tree once after the per-file walk
+	// and returns the violations. A rule that compares two files (a table in
+	// one against declarations in the others) uses it instead of Check.
+	// //invariant:allow does not apply to it.
+	Tree func(fsys fs.FS) []Violation
 }
 
 // inScope reports whether dir falls under the rule's Scope. dir is
@@ -62,7 +67,7 @@ func (r Rule) inScope(dir string) bool {
 }
 
 // Rules is the registry every gate runs.
-var Rules = []Rule{syncutilLocks, dbImportBoundary, authzChokepoint, egressSites, fileSizes}
+var Rules = []Rule{syncutilLocks, dbImportBoundary, authzChokepoint, egressSites, fileSizes, voiceMembershipWrites, requestPathGo, lockInventory, lockRank, roleMirrorReads}
 
 // importNames returns the local identifiers this file binds to the import
 // path, and separately every dot-import of it (import . "p"), which binds no
@@ -214,6 +219,9 @@ func checkSourceWith(rules []Rule, fset *token.FileSet, rel string, src []byte) 
 		if !r.inScope(dir) {
 			continue
 		}
+		if r.Check == nil {
+			continue
+		}
 		for _, v := range r.Check(f, fset, rel) {
 			// Keyed on v.Rule (what the rule actually emits), not r.ID: a
 			// rule that reports a sub-id would otherwise require an allow
@@ -293,6 +301,12 @@ func runWith(rules []Rule, root string) ([]Violation, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	for _, r := range rules {
+		if r.Tree != nil {
+			out = append(out, r.Tree(rfs)...)
+		}
 	}
 
 	// Stable: two violations can share a file:line (an allow comment with no

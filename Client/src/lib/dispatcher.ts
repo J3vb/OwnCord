@@ -34,7 +34,13 @@ import {
   handleChannelCreate,
   handleChannelDelete,
   handleChannelUpdate,
+  handleChannelCategories,
   handleMentionCount,
+  handleReadState,
+  handleMarkUnreadError,
+  applyReadyReadPointer,
+  handleChannelActivity,
+  resetChannelActivity,
   handleEmojiUpdate,
   handleMemberBan,
   handleMemberJoin,
@@ -57,9 +63,16 @@ import {
   handleChatMessage,
   handleChatSendOk,
   handleMessagingError,
+  handlePollUpdate,
+  handlePollVoteOk,
   handleReactionUpdate,
   handleSendFailure,
+  applyReadyThreads,
+  handleThreadDeleted,
+  handleThreadFollow,
+  handleThreadState,
   handleTyping,
+  resumeThreadFocus,
 } from "../features/messaging/wsHandlers";
 import {
   applyReadyBlocks,
@@ -72,6 +85,8 @@ import {
   handleVoiceConfig,
   handleVoiceDisconnected,
   handleVoiceE2eeAnnounce,
+  handleVoiceWatching,
+  handleVoiceWatchError,
   handleVoiceE2eeOffer,
   handleVoiceError,
   handleVoiceJoinRollback,
@@ -84,6 +99,8 @@ import {
   snapshotReadyVoice,
 } from "../features/voice/wsHandlers";
 import { createReconnectClock, log } from "../features/connection/dispatchContext";
+import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "./read-state";
+import { resetServerCapabilities } from "./serverCapabilities";
 import {
   applyReadySafety,
   handleAppealStatus,
@@ -91,7 +108,11 @@ import {
   handleTimedOutRefusal,
   refreshSafetyOnResume,
 } from "../features/safety/wsHandlers";
-import { handleModQueue } from "../features/moderation/wsHandlers";
+import {
+  applyReadyMemberTimeouts,
+  handleMemberTimeouts,
+  handleModQueue,
+} from "../features/moderation/wsHandlers";
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
@@ -166,6 +187,9 @@ export function wireDispatcher(
     ws.on(S.AUTH_OK, (payload) => {
       handleAuthOk(ws, clock, payload);
       refreshSafetyOnResume(api, payload);
+      // thread_focus is not carried across a connection: say it again, and
+      // refetch the open panel's history (it missed frames while down).
+      resumeThreadFocus(ws, api);
       // A resumed connection gets no ready, so refetch Message Requests here;
       // a full flow ("none") refetches them from ready instead.
       if (payload.replay_source === "buffer" || payload.replay_source === "db") {
@@ -185,9 +209,11 @@ export function wireDispatcher(
       // restate + reconcile -> identity publish -> active channel -> message
       // resync (reads the active channel just chosen) -> DMs -> mark read ->
       // blocks -> Message Requests -> emoji.
+      applyReadyReadPointer(payload);
       activateReadyPendingMessages(api, payload);
       const applyReadyVoice = snapshotReadyVoice();
       applyReadyChannels(payload);
+      applyReadyThreads(payload);
       applyReadyVoice(ws, payload);
       publishReadyIdentity(api, payload);
       const readyActive = applyReadyActiveChannel(payload);
@@ -199,6 +225,7 @@ export function wireDispatcher(
       applyReadyDmRequests(api);
       applyReadyEmoji(api);
       applyReadySafety(api, payload);
+      applyReadyMemberTimeouts(payload);
       // RT-12: if a planned restart took us out of a voice channel, put us
       // back once ready confirms the post-restart world.
       rejoinVoiceAfterRestart(clock, ws, payload);
@@ -224,6 +251,19 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.CHAT_MESSAGE, (payload) => handleChatMessage(clock, payload)));
 
+  // ── Threads (WP 6.9c) ───────────────────────────────────
+
+  // thread_create_ok answers this socket's own create; thread_changed is the
+  // thread's whole state, sequenced on its parent. Both replace what we hold.
+  unsubs.push(ws.on(S.THREAD_CREATE_OK, handleThreadState));
+  unsubs.push(ws.on(S.THREAD_CHANGED, handleThreadState));
+  // A forum post's create ack carries the post's whole state, like thread_create_ok.
+  unsubs.push(ws.on(S.FORUM_POST_CREATE_OK, handleThreadState));
+  unsubs.push(ws.on(S.THREAD_DELETED, handleThreadDeleted));
+  // Following (c2): the ack and the update both state where the follow was left.
+  unsubs.push(ws.on(S.THREAD_FOLLOW_OK, handleThreadFollow));
+  unsubs.push(ws.on(S.THREAD_FOLLOW_UPDATE, handleThreadFollow));
+
   unsubs.push(ws.on(S.CHAT_EDITED, (payload) => handleChatEdited(api, payload)));
 
   unsubs.push(ws.on(S.CHAT_DELETED, (payload) => handleChatDeleted(api, payload)));
@@ -237,6 +277,11 @@ export function wireDispatcher(
   // ── Reactions ───────────────────────────────────────────
 
   unsubs.push(ws.on(S.REACTION_UPDATE, handleReactionUpdate));
+
+  // ── Polls ───────────────────────────────────────────────
+
+  unsubs.push(ws.on(S.POLL_UPDATE, handlePollUpdate));
+  unsubs.push(ws.on(S.POLL_VOTE_OK, handlePollVoteOk));
 
   // ── Typing ────────────────────────────────────────────
 
@@ -253,6 +298,9 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.CHANNEL_UPDATE, handleChannelUpdate));
 
+  // channel_categories: the manager's category list, replaced wholesale (WP 6.5a).
+  unsubs.push(ws.on(S.CHANNEL_CATEGORIES, handleChannelCategories));
+
   unsubs.push(ws.on(S.CHANNEL_DELETE, handleChannelDelete));
 
   unsubs.push(ws.on(S.NSFW_ACK, handleNsfwAck));
@@ -260,6 +308,19 @@ export function wireDispatcher(
   // mention_count: a mention raised this user's badge in a channel they may not
   // be viewing (DP-27).
   unsubs.push(ws.on(S.MENTION_COUNT, handleMentionCount));
+
+  // read_state: this user's read pointer moved in a channel or DM (WP 3D-5).
+  unsubs.push(ws.on(S.READ_STATE, handleReadState));
+  // A Mark Unread still waiting for its answer cannot get one across a change
+  // of connection state; forget it rather than restore against the next.
+  unsubs.push(ws.onStateChange(forgetPendingMarkUnread));
+  // The capabilities and the seen/pending state belong to this session.
+  unsubs.push(resetServerCapabilities, resetReadPointerState);
+
+  // channel_activity: new messages in readable channels this user is not
+  // viewing, for their unread dot and alerts (WP 2B-2).
+  unsubs.push(ws.on(S.CHANNEL_ACTIVITY, handleChannelActivity));
+  unsubs.push(resetChannelActivity);
 
   // ── Members ───────────────────────────────────────────
 
@@ -273,6 +334,8 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.APPEAL_STATUS, (payload) => handleAppealStatus(api, payload)));
   // mod_queue: a report changed; an open Moderation Center re-reads (B9-11).
   unsubs.push(ws.on(S.MOD_QUEUE, handleModQueue));
+  // member_timeouts: the active-timeout list, replaced wholesale (3C-7c).
+  unsubs.push(ws.on(S.MEMBER_TIMEOUTS, handleMemberTimeouts));
 
   unsubs.push(ws.on(S.MEMBER_UPDATE, handleMemberUpdate));
 
@@ -304,6 +367,8 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.VOICE_E2EE_OFFER, handleVoiceE2eeOffer));
 
+  unsubs.push(ws.on(S.VOICE_WATCHING, handleVoiceWatching));
+
   // ── Server Events ─────────────────────────────────────
 
   unsubs.push(ws.on(S.SERVER_RESTART, (payload) => handleServerRestart(clock, payload)));
@@ -320,6 +385,8 @@ export function wireDispatcher(
   unsubs.push(ws.onStateChange(failPendingOnDisconnect));
 
   unsubs.push(ws.onSendFailure(handleSendFailure));
+  // A mark_unread that never left: put the pointer back and say so.
+  unsubs.push(ws.onSendFailure((id) => failMarkUnread(id, "failed")));
 
   unsubs.push(
     ws.on(S.ERROR, (payload, id) => {
@@ -334,14 +401,29 @@ export function wireDispatcher(
       // code-specific branch and never consumes the frame -> capacity
       // refusals -> the generic toast -> the video rollback.
       if (handleConnectionError(ws, payload)) return;
+      // A server that does not know voice_watch answers with an error: ignore it.
+      if (handleVoiceWatchError(payload, id)) return;
       // A timeout refuses a custom status without writing or broadcasting
       // anything, so the PresenceSender's optimistic apply would leave the
       // user seeing and saving a status nobody else has. This is the one
       // writer for server events, so the rollback (a store write) lives here;
       // a no-op for any frame the sender did not put on the wire.
-      if (payload.code === "TIMED_OUT") getActivePresenceSender()?.rollbackTimedOut(id);
+      // A BAD_REQUEST (a custom status the server's character or length rules
+      // refuse, WP 3C-9) leaves the same unaccepted optimistic value behind, so
+      // it takes the same rollback; the toast below carries the server's text.
+      // A REQUEST_TIMEOUT (the server's per-frame deadline, WP 4.1b) means the
+      // frame was not applied, which leaves the same unaccepted value behind.
+      if (
+        payload.code === "TIMED_OUT" ||
+        payload.code === "BAD_REQUEST" ||
+        payload.code === "REQUEST_TIMEOUT"
+      ) {
+        getActivePresenceSender()?.rollbackRefused(id);
+      }
       // Never consumes the frame: the refused send/reaction/join still rolls back below.
       handleTimedOutRefusal(api, payload);
+      // A refused Mark Unread restores the pointer and says so.
+      if (handleMarkUnreadError(payload, id)) return;
       if (handleMessagingError(payload, id)) return;
       handleVoiceJoinRollback(payload, id);
       if (handleVoiceError(payload, id)) return;
@@ -368,8 +450,14 @@ export function wireDispatcher(
   );
 
   return () => {
+    // Each entry is isolated: one that throws must not leave the rest of the
+    // socket handlers subscribed to a connection that is being torn down.
     for (const unsub of unsubs) {
-      unsub();
+      try {
+        unsub();
+      } catch (err) {
+        log.error("Dispatcher cleanup step failed", err);
+      }
     }
   };
 }

@@ -43,7 +43,8 @@ describe("AppearanceTab — Accessibility", () => {
     container.appendChild(section);
 
     const tiles = container.querySelectorAll(".theme-opt");
-    expect(tiles.length).toBe(4);
+    // Four palettes plus Sync with computer.
+    expect(tiles.length).toBe(5);
 
     for (const tile of tiles) {
       expect(tile.tagName).toBe("BUTTON");
@@ -498,5 +499,138 @@ describe("AppearanceTab — Accessibility", () => {
       .querySelector('[data-testid="time-format"]')!
       .querySelector("[aria-checked='true']") as HTMLElement;
     expect(selected.dataset["value"]).toBe("24h");
+  });
+});
+
+describe("AppearanceTab - member list position (3C-6b)", () => {
+  let container: HTMLDivElement;
+  const ac = new AbortController();
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  it("member layout radiogroup saves memberListLayout", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const group = container.querySelector('[data-testid="member-layout"]')!;
+    expect(group.getAttribute("role")).toBe("radiogroup");
+    expect(group.getAttribute("aria-label")).toBe("Member list position");
+    const checked = () =>
+      group.querySelector<HTMLElement>("[aria-checked='true']")!.dataset["value"];
+    // No stored layout: the default is the right column (3C-6c).
+    expect(checked()).toBe("right");
+
+    const events: string[] = [];
+    const onPref = (e: Event): void => {
+      events.push((e as CustomEvent<{ key: string }>).detail.key);
+    };
+    window.addEventListener("owncord:pref-change", onPref);
+    container.querySelector<HTMLElement>('[data-testid="member-layout-left"]')!.click();
+    window.removeEventListener("owncord:pref-change", onPref);
+
+    expect(localStorage.getItem("owncord:settings:memberListLayout")).toBe('"left"');
+    expect(events).toContain("memberListLayout");
+    expect(checked()).toBe("left");
+
+    container.querySelector<HTMLElement>('[data-testid="member-layout-right"]')!.click();
+    expect(localStorage.getItem("owncord:settings:memberListLayout")).toBe('"right"');
+    expect(checked()).toBe("right");
+  });
+
+  it("loads a stored left layout as the active option", () => {
+    localStorage.setItem("owncord:settings:memberListLayout", '"left"');
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const selected = container
+      .querySelector('[data-testid="member-layout"]')!
+      .querySelector<HTMLElement>("[aria-checked='true']")!;
+    expect(selected.dataset["value"]).toBe("left");
+  });
+
+  it("loads a stored right layout as the active option", () => {
+    localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const selected = container
+      .querySelector('[data-testid="member-layout"]')!
+      .querySelector<HTMLElement>("[aria-checked='true']")!;
+    expect(selected.dataset["value"]).toBe("right");
+  });
+});
+
+describe("AppearanceTab - system theme", () => {
+  let container: HTMLDivElement;
+  let ac: AbortController;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    localStorage.clear();
+    document.documentElement.removeAttribute("style");
+    document.body.removeAttribute("style");
+    vi.clearAllMocks();
+    mockGetActiveThemeName.mockReturnValue("neon-glow");
+    ac = new AbortController();
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      matches: true,
+      media,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    ac.abort();
+    container.remove();
+    vi.unstubAllGlobals();
+    document.documentElement.removeAttribute("style");
+  });
+
+  it("adds a Sync with computer tile that stores the system choice", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const tile = container.querySelector<HTMLElement>(".theme-opt.system")!;
+    expect(tile.textContent).toBe("Sync with computer");
+    tile.click();
+    expect(localStorage.getItem("owncord:theme:active")).toBe("system");
+    expect(tile.getAttribute("aria-checked")).toBe("true");
+    expect(document.body.classList.contains("theme-dark")).toBe(true);
+  });
+
+  it("marks the system tile active when system is the stored choice", () => {
+    mockGetActiveThemeName.mockReturnValue("system");
+    container.appendChild(buildAppearanceTab(ac.signal));
+    expect(container.querySelector(".theme-opt.active")?.classList.contains("system")).toBe(true);
+  });
+
+  it("refreshes the default accent when the OS flips light/dark under system", () => {
+    mockGetActiveThemeName.mockReturnValue("system");
+    let dark = true;
+    let onChange: (() => void) | null = null;
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      get matches() {
+        return dark;
+      },
+      media,
+      addEventListener: (_t: string, cb: () => void) => {
+        onChange = cb;
+      },
+      removeEventListener: vi.fn(),
+    }));
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const hex = container.querySelector<HTMLInputElement>(".accent-hex-row input")!;
+    expect(hex.value).toBe("5865f2");
+    expect(container.querySelectorAll(".accent-swatch.active")).toHaveLength(1);
+
+    dark = false;
+    onChange!();
+
+    expect(hex.value).toBe("4f5bd5");
+    expect(hex.placeholder).toBe("4f5bd5");
+    // Light's default accent is not a preset, so no swatch stays selected.
+    expect(container.querySelectorAll(".accent-swatch.active")).toHaveLength(0);
   });
 });

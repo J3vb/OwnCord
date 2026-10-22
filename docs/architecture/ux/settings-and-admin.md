@@ -14,17 +14,28 @@ between what the desktop client does and what lives only on the server web panel
 
 A tabbed overlay (`SettingsOverlay`) available both authenticated (in Main) and
 unauthenticated (on Connect, for appearance/advanced). Tabs: Account,
-Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds,
-Advanced, Diagnostics & logs, About. About shows the client version, the update
+Appearance, Accessibility, Voice & Video, Text & Images, Notifications, Keybinds,
+Advanced, Diagnostics & logs, About (Discord's app-settings order, then the
+OwnCord-only tabs). The app version sits under Log Out, and Log Out asks "Are
+you sure you want to log out?" first. About shows the client version, the update
 check, the release notes of this version and every earlier one (the
 repository's `CHANGELOG.md`, built into a lazy chunk, never fetched) and a
 GitHub link. The first start on a new version shows that version's notes once
 in a "What's new" dialog (`features/whats-new/`); a fresh install does not.
 
+The Safety tab (labelled "Privacy & Safety") lists, top to bottom: Direct messages (two
+switches stored on the server: "Allow direct messages from server members" and
+"Message requests", the second disabled while the first is off; shown only when
+`ready.capabilities.dm_privacy`), Blocked users, moderation notices and
+restrictions, appeals and My reports. A failed save puts the switch back and
+shows an inline error.
+
 **Target rules:**
 
-- Every save is confirmed: a toast on success, an inline error on failure. No
-  silent saves.
+- A failed save shows an inline error. A successful one is silent: Discord
+  saves toggles and selects without a toast, so OwnCord does not confirm each
+  one. Actions that do something beyond storing a value (copy, reset, revoke)
+  still say what happened.
 - Preference writes are immediate and local (localStorage `owncord:settings:*`),
   broadcast via the `owncord:pref-change` event so open views re-read live (e.g.
   theme, message density) without a restart.

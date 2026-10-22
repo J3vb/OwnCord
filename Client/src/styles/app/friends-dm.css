@@ -82,6 +82,32 @@
   min-height: 0;
   overflow-y: auto;
 }
+/* The no-conversations state under the (empty) list. */
+.dm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.dm-empty[hidden] {
+  display: none;
+}
+.dm-empty-text {
+  margin: 0;
+}
+.dm-empty-start {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-fill);
+  cursor: pointer;
+}
+.dm-empty-start:hover {
+  filter: brightness(1.1);
+}
 .dm-item {
   display: flex;
   align-items: center;
@@ -216,4 +242,10 @@
 }
 .dm-item .dm-mention-badge {
   background: var(--danger-fill);
+}
+
+@media (pointer: coarse) {
+  .dm-item {
+    min-height: 44px;
+  }
 }

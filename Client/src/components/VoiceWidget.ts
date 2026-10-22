@@ -28,8 +28,8 @@ import {
   retryMicPermission,
 } from "@lib/livekitSession";
 import { loadPref, savePref } from "@lib/preferences";
-import { isLinuxDesktop } from "../features/voice/native/platform";
 import { voiceText as t } from "../i18n/voice";
+import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";
 import { shareBlockReason } from "../features/voice/shareGate";
 import type { StreamCard } from "./voice-widget/streamCard";
 
@@ -58,29 +58,6 @@ const QUALITY_BARS: Record<QualityLevel, number> = {
   poor: 2,
   bad: 1,
 };
-
-/** Header status text per voice-session lifecycle state
- *  (docs/architecture/ux/voice-and-e2ee.md §2). */
-export function headerStatusText(status: VoiceStatus): string {
-  // i18n-exempt: catalog key assembled from the VoiceStatus wire value
-  return t(`status.${status}`);
-}
-
-/** The join has not reached the room yet: camera and share have nothing to attach to. */
-export function isConnecting(status: VoiceStatus): boolean {
-  return status === "joining" || status === "securing";
-}
-
-/** Format milliseconds elapsed into HH:MM:SS or MM:SS. */
-export function formatElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`;
-}
 
 function swapIcon(btn: HTMLButtonElement, name: IconName): void {
   const existing = btn.querySelector("svg");
@@ -191,9 +168,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (oldSvg) oldSvg.remove();
     signalWrap.insertBefore(createSignalIcon(bars, color, 14), pingLabel);
 
-    // Update ping text. No transport to measure (native Linux voice, the
-    // SDK's internals changed, or the first sample has not landed yet) reads
-    // as unavailable, not a false 4-green-bars "excellent".
+    // Update ping text. No transport to measure (the native host returned no
+    // sample, the SDK's internals changed, or the first sample has not landed
+    // yet) reads as unavailable, not a false 4-green-bars "excellent".
     const rttText = stats.available && stats.rtt > 0 ? `${Math.round(stats.rtt)}ms` : "—";
     setText(pingLabel, rttText);
     pingLabel.style.color = color;
@@ -239,8 +216,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     // bars via onUpdate, but never expands the pane on its own (DP-41).
     statsPoller.start();
     // Paint the initial state now. updateSignalIcon only runs on a sample;
-    // where none ever arrives (native Linux voice has no peer connection)
-    // the widget would otherwise keep its constructed 4-green-bars default.
+    // where none arrives (the first poll is 2 s out, or the native host has
+    // no sample) the widget would otherwise keep its constructed
+    // 4-green-bars default.
     updateSignalIcon(statsPoller.getStats());
   }
 
@@ -550,10 +528,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     const headerMain = createElement("div", { class: "vw-header-main" });
     appendChildren(headerMain, statusLabel, timerEl);
-    // The native engine reads it at connect, not live.
-    const nsLabel = t(
-      isLinuxDesktop() ? "widget.control.nextJoin" : "widget.control.noiseSuppression",
-    );
+    const nsLabel = t("widget.control.noiseSuppression");
     nsBtn = createElement("button", {
       type: "button",
       class: "vw-ns",
@@ -641,7 +616,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       options.onDisconnect,
       "disconnect",
     );
-    appendChildren(controls, cameraBtn, shareBtn, disconnectBtn);
+    // A browser without getDisplayMedia (phones) offers no screen share.
+    if (__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
+      appendChildren(controls, cameraBtn, disconnectBtn);
+    } else {
+      appendChildren(controls, cameraBtn, shareBtn, disconnectBtn);
+    }
 
     // "Grant Microphone" button for listen-only mode
     grantMicBtn = createElement(

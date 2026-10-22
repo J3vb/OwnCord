@@ -7,8 +7,9 @@ import { defineCatalog } from "./format";
  */
 export const reportEntryText = defineCatalog("reportEntry", {
   report: "Report",
-  reportMessage: "Report message",
   safetyLoadFailed: "Couldn't load your reports. Close Settings and try again.",
+  dmPrivacyLoadFailed: "Couldn't load your direct message settings. Close Settings and try again.",
+  blockedLoadFailed: "Couldn't load your blocked users. Close Settings and try again.",
   reportLoadFailed: "Couldn't open the report form. Try again.",
   profileLoadFailed: "Couldn't open the profile. Try again.",
 });

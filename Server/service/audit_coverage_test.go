@@ -17,7 +17,7 @@ import (
 // service-owned security-sensitive mutations: each row performs one mutation
 // against a fake db.AuditStore and asserts the expected action arrives. The
 // closing subtest runs the detail denylist over everything the rows recorded
-// (plan docs/plans/b2-protocol-trust-compat-2026-08-28.md § B2-6).
+// (plan docs/archive/plans/b2-protocol-trust-compat-2026-08-28.md § B2-6).
 func TestAuditCoverage_ServiceMutations(t *testing.T) {
 	rows := []struct {
 		name   string
@@ -179,6 +179,27 @@ func TestAuditCoverage_ServiceMutations(t *testing.T) {
 			rec := audittest.Install(t, database)
 			if _, err := svc.ChangeUserRole(context.Background(), 1, 4, 3); err != nil {
 				t.Fatalf("ChangeUserRole: %v", err)
+			}
+			return rec, nil
+		}},
+		{"role add", "role_add", func(t *testing.T) (*audittest.Recorder, []string) {
+			svc, database := newTestRoleService(t)
+			seedRole(t, database, &db.Role{ID: 7, Name: "helper", Position: 50, Permissions: permissions.ReadMessages})
+			rec := audittest.Install(t, database)
+			if _, err := svc.AddUserRole(context.Background(), 1, 4, 7); err != nil {
+				t.Fatalf("AddUserRole: %v", err)
+			}
+			return rec, nil
+		}},
+		{"role remove", "role_remove", func(t *testing.T) (*audittest.Recorder, []string) {
+			svc, database := newTestRoleService(t)
+			seedRole(t, database, &db.Role{ID: 7, Name: "helper", Position: 50, Permissions: permissions.ReadMessages})
+			if _, err := svc.AddUserRole(context.Background(), 1, 4, 7); err != nil {
+				t.Fatalf("AddUserRole: %v", err)
+			}
+			rec := audittest.Install(t, database)
+			if _, err := svc.RemoveUserRole(context.Background(), 1, 4, 7); err != nil {
+				t.Fatalf("RemoveUserRole: %v", err)
 			}
 			return rec, nil
 		}},

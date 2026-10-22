@@ -36,46 +36,61 @@ name. You do not need to forward any port between the two containers.
 ### Setup
 
 1. **Edit `.env`** (in `Server/`). Set `LIVEKIT_API_KEY` and
-   `LIVEKIT_API_SECRET`:
+   `LIVEKIT_API_SECRET`. This is the only place you type them: compose passes
+   the same pair to both containers.
 
    ```
    LIVEKIT_API_KEY=my-unique-key
-   LIVEKIT_API_SECRET=my-secret-at-least-32-characters-long
+   LIVEKIT_API_SECRET=<output of: openssl rand -hex 32>
    ```
 
-   The server refuses the placeholder values that `.env.example` ships
-   (anything starting with `change-me`), and the `devkey` development
-   defaults. If you leave them, voice stays off and a start-up warning says
-   why.
+   Never use a `'` in either value: LiveKit reads the pair as YAML, and a `'`
+   stops it from starting. Letters and digits, for example the output of
+   `openssl rand -hex 32`, are safest. Hyphens work. The server refuses the placeholder
+   values that `.env.example` ships (anything starting with `change-me`), and
+   the `devkey` development defaults. If you leave them, voice stays off and a
+   start-up warning says why.
 
-2. **Create and edit `livekit.yaml`.** Copy it from `livekit.yaml.example`,
-   then use the same key and secret:
+   `docker compose` refuses to run any command (even `down` or `logs`) while
+   `.env` is missing either value, and the message names the variable.
+
+2. **Create `livekit.yaml`.** Copy it from `livekit.yaml.example`. This step
+   is required: compose mounts `./livekit.yaml`, and if the file is missing
+   Docker creates a folder of that name and LiveKit keeps restarting. Editing
+   it is optional (for example to set `node_ip`). It holds no key or secret:
+   those come from `.env`.
 
    ```yaml
    port: 7880
    rtc:
      tcp_port: 7881
-     port_range_start: 50000
-     port_range_end: 60000
+     udp_port: 7882
      use_external_ip: true # LiveKit detects the public IP on every start
-   keys:
-     my-unique-key: my-secret-at-least-32-characters-long
    logging:
      level: info
    ```
 
-   **Optional: use one UDP port instead of a range.** This is easier with a
-   strict firewall, or a router with a small port-forwarding table.
-   1. In `livekit.yaml`, replace `port_range_start` and `port_range_end` with
-      `udp_port: 7882` (or any free UDP port).
-   2. In `docker-compose.yml`, publish that same port in place of the range.
-   3. On the `owncord` service, set `OWNCORD_VOICE_UDP_PORT` to the same port.
-      It ships as `"0"`. This makes the admin connectivity report and the
-      start-up warning name your port instead of the range.
+   **Media uses one UDP port, `7882`.** `docker-compose.yml` pins it with
+   `--udp-port 7882` and publishes it, so there is nothing to change to get a
+   single-port setup. It also passes `--rtc.port_range_start 0
+--rtc.port_range_end 0`. LiveKit v1.13.7 prefers a `port_range_start/end`
+   in the YAML over `udp_port`, so those flags clear any range an older
+   `livekit.yaml` still has. Do not add a range to `livekit.yaml`.
 
-   LiveKit ignores the range once `udp_port` is set. When OwnCord runs LiveKit
-   itself (see [Companion Process](#companion-process-windows--bare-metal-linux)),
-   setting `voice.udp_port` in `config.yaml` does all this for you.
+   **An older `livekit.yaml` keeps working.** Its range is overridden, and its
+   `keys:` are replaced by the `.env` pair. Two things in it can still get in
+   the way:
+   - A `webhook:` block whose `api_key` is not your `LIVEKIT_API_KEY` makes
+     LiveKit fail to start. Change it to the `.env` key.
+   - A `key_file:` overrides the `.env` pair. Remove it.
+
+   When OwnCord runs LiveKit itself (see
+   [Companion Process](#companion-process-windows--bare-metal-linux)), none of
+   this applies: setting `voice.udp_port` in `config.yaml` makes OwnCord write
+   `udp_port` into the `livekit.yaml` it generates. If you write `livekit.yaml`
+   for a bare LiveKit yourself, note that LiveKit prefers a
+   `port_range_start/end` to `udp_port`: delete the range when you set
+   `udp_port`.
 
 3. **`config.yaml` needs no voice changes.** Copy it from
    `config.yaml.example`. The compose file already points the server at
@@ -85,13 +100,13 @@ name. You do not need to forward any port between the two containers.
 
 4. **Open these ports** on your host firewall:
 
-   | Port          | Protocol | Purpose                 |
-   | ------------- | -------- | ----------------------- |
-   | `7881`        | TCP      | TCP fallback for WebRTC |
-   | `50000-60000` | UDP      | WebRTC media            |
+   | Port   | Protocol | Purpose                 |
+   | ------ | -------- | ----------------------- |
+   | `7881` | TCP      | TCP fallback for WebRTC |
+   | `7882` | UDP      | WebRTC media            |
 
-   With a single UDP port, the second row is that port (for example
-   `7882/UDP`) instead of the range.
+   If you used to forward `50000-60000/UDP`, forward `7882/UDP` instead and
+   close the old range.
 
    You do not need to open `7880/TCP`. That is LiveKit's own API port. OwnCord
    passes signalling to clients through `/livekit` on its own port `8443`.
@@ -186,8 +201,9 @@ Every key can also be set with an environment variable that starts with
 | **50000-60000** | UDP      | Voice and video media (RTP)       |
 
 With `voice.udp_port` set, the media row is that one UDP port instead of the
-range. See the single-port option above and
-[port-forwarding.md](port-forwarding.md).
+range. The Docker Compose stack always uses `7882/UDP` (see
+[Docker](#docker)), and so does the single image. The range is the default for
+the companion process on bare metal and for bare LiveKit. See [port-forwarding.md](port-forwarding.md).
 
 `7880/TCP`, LiveKit's own API port, stays internal. OwnCord reaches it on the
 same machine or Docker network, and passes client signalling through
@@ -310,11 +326,12 @@ self-signed certificate fails LiveKit's check, so the managed LiveKit is never
 set up this way.
 
 Add this block to your `livekit.yaml`. A commented copy is in
-`Server/livekit.yaml.example`.
+`Server/livekit.yaml.example`. On compose the key comes from `.env`, and a
+webhook that names another key stops LiveKit from starting.
 
 ```yaml
 webhook:
-  api_key: YOUR_API_KEY # the key from the keys block
+  api_key: YOUR_API_KEY # your LIVEKIT_API_KEY from .env (compose), or your voice.livekit_api_key / keys: entry when you run LiveKit yourself
   urls:
     - https://chat.example.com/api/v1/livekit/webhook
 ```
@@ -338,7 +355,7 @@ What the endpoint does:
 | ----------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | "voice not configured" error                    | LiveKit client failed to start                | Check that `livekit_api_key` and `livekit_api_secret` are set, and the secret is at least 32 characters                                                      |
 | "failed to generate voice token"                | API key or secret mismatch                    | Make sure the key and secret in `config.yaml` match what LiveKit uses                                                                                        |
-| Voice connects but no audio                     | Firewall blocks the UDP media ports           | Open UDP `50000-60000` (or your single UDP port) in your firewall, and forward it on your router                                                             |
+| Voice connects but no audio                     | Firewall blocks the UDP media ports           | Open UDP `50000-60000` (or your single UDP port, `7882/UDP` on Docker) in your firewall, and forward it on your router                                       |
 | "backend unavailable" from the `/livekit` proxy | LiveKit is not running on port 7880           | Check the `livekit_binary` path, or start LiveKit by hand                                                                                                    |
 | "too many rapid failures, giving up" in the log | LiveKit crashes at start-up                   | Read the `livekit companion output` entries (`component=livekit`, text in `line`) just before it. Or run `livekit-server --config data/livekit.yaml` by hand |
 | Mixed content or insecure WebSocket error       | Client uses the direct URL from an HTTPS page | The client should use the `/livekit` proxy path                                                                                                              |
@@ -349,12 +366,12 @@ What the endpoint does:
 
 ## 8. Production Checklist
 
-- [ ] Set `livekit_api_key` and `livekit_api_secret` to your own random
-      values. The setup wizard generates and saves them for you. A random key
+- [ ] Set `livekit_api_key` and `livekit_api_secret` (in `.env` on compose)
+      to your own random values. The setup wizard generates and saves them for you. A random key
       made fresh at every start is only for development: fixed values keep
       voice tokens valid across restarts.
 - [ ] Open the firewall ports: `7881/TCP` and `50000-60000/UDP` (or your single
-      UDP port).
+      UDP port, `7882/UDP` on Docker).
 - [ ] If you use ACME or manual TLS, check that the `/livekit` proxy works.
 - [ ] Test voice by joining a voice channel from two clients.
 - [ ] Check that `/api/v1/livekit/health` returns `{"status": "ok"}`.

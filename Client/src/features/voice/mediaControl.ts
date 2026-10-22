@@ -18,6 +18,8 @@ import type { AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
 import { voiceText } from "../../i18n/voice";
+import { CodecSwitchController } from "./codecSwitch";
+import { CameraSwitchUnavailable } from "./cameraSwitch";
 import { savePref } from "../../lib/preferences";
 import {
   type VideoTrackDeps,
@@ -30,6 +32,7 @@ import {
   disableScreenshare as doDisableScreenshare,
   reconcileVideoFlags as doReconcileVideoFlags,
   inPlaceSourceChange,
+  getLocalScreenshareStats,
 } from "../../lib/screenShare";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
@@ -61,6 +64,14 @@ export class MediaControl {
   /** Camera switches run one at a time; a queued one that is no longer the
    *  latest pick is skipped, so the last pick wins. */
   private videoSwitch: Promise<void> = Promise.resolve();
+  /** Keeps a live camera or share on a codec every viewer plays (WP M-5b). */
+  private readonly codecSwitch = new CodecSwitchController({
+    getCameraState: () => this._cameraState,
+    getScreenState: () => this._screenState,
+    getDeps: () => this._videoTrackDeps,
+    readScreenSenderSample: () => getLocalScreenshareStats(this._room),
+    onSwitchError: (err) => log.warn("Codec switch failed", err),
+  });
   private latestVideoDevice: string | null = null;
 
   // --- Host views, named as the pre-extraction fields so the bodies read the same ---
@@ -122,6 +133,8 @@ export class MediaControl {
   async retryMicPermission(): Promise<void> {
     const room = this._room;
     if (room === null) return;
+    // Nothing to retry in the AFK channel: it grants no microphone.
+    if (voiceStore.getState().inAfkChannel === true) return;
     try {
       await this.enableMicrophone(room, true);
       if (this._room !== room) return;
@@ -156,6 +169,11 @@ export class MediaControl {
     // Muting is always permitted.
     if (!muted && voiceStore.getState().localServerMuted === true) {
       log.debug("Ignoring unmute: server-muted by a moderator");
+      return;
+    }
+    // The AFK channel is listen-only; the mic control is locked muted there.
+    if (!muted && voiceStore.getState().inAfkChannel === true) {
+      log.debug("Ignoring unmute: AFK channel is listen-only");
       return;
     }
     setLocalMuted(muted);
@@ -268,7 +286,9 @@ export class MediaControl {
   }
 
   async enableCamera(): Promise<void> {
-    return doEnableCamera(this._cameraState, this._videoTrackDeps);
+    await doEnableCamera(this._cameraState, this._videoTrackDeps);
+    // A viewer may have joined while the enable was in flight.
+    this.codecSwitch.kick();
   }
 
   async disableCamera(): Promise<void> {
@@ -276,7 +296,13 @@ export class MediaControl {
   }
 
   async enableScreenshare(): Promise<void> {
-    return doEnableScreenshare(this._screenState, this._videoTrackDeps);
+    await doEnableScreenshare(this._screenState, this._videoTrackDeps);
+    this.codecSwitch.kick();
+  }
+
+  /** The session ended or is reconnecting: stop the live codec switch. */
+  stopCodecSwitch(): void {
+    this.codecSwitch.stop();
   }
 
   async disableScreenshare(): Promise<void> {
@@ -301,19 +327,21 @@ export class MediaControl {
       void this.disableScreenshare();
   }
 
-  /** Share another window or screen without stopping (web path). */
+  /** Share another window or screen without stopping (the web path swaps the
+   *  browser capture; Linux asks the host to swap its own). */
   async changeScreenshareSource(): Promise<void> {
     const { changeScreenshareSource } = await import("./screenshareChange");
     return changeScreenshareSource(this._screenState, this._videoTrackDeps);
   }
 
-  /** The live share's quality for this share only (web path). */
+  /** The live share's quality for this share only (the web path re-sizes the
+   *  browser capture; Linux has the host re-size and republish its own). */
   async setScreenshareQuality(quality: StreamQuality): Promise<void> {
     const { setScreenshareQuality } = await import("./screenshareChange");
     return setScreenshareQuality(this._screenState, this._videoTrackDeps, quality);
   }
 
-  /** The live share's quality, or null where it cannot be changed. */
+  /** The live share's quality, or null while it is not published. */
   getScreenshareQuality(): StreamQuality | null {
     return this._screenState.quality ?? null;
   }
@@ -345,26 +373,41 @@ export class MediaControl {
     // An enable that read the choice just before this pick starts on the old
     // device; picking again moves it.
     if (track === null) return;
+    // The restart path: stop, start on the saved device, republish.
+    const restartCameraOn = async (): Promise<boolean> => {
+      const generation = state.generation ?? 0;
+      await this.enableCamera();
+      // A failed restart already said so, but the server still has the
+      // camera on: tell it the camera is off.
+      if (state.manualCameraTrack === null && (state.generation ?? 0) === generation) {
+        await this.disableCamera();
+        return false;
+      }
+      return true;
+    };
     try {
       if ("setDeviceId" in track) {
         const before = track.mediaStreamTrack;
-        if (!(await track.setDeviceId(deviceId))) {
-          log.warn("Camera restarted on another device than the one picked");
+        try {
+          if (!(await track.setDeviceId(deviceId))) {
+            log.warn("Camera restarted on another device than the one picked");
+          }
+        } catch (err) {
+          if (!(err instanceof CameraSwitchUnavailable)) throw err;
+          // The in-place switch could not run and the old camera still
+          // publishes: restart on the new device instead.
+          log.info("In-place camera switch unavailable, restarting", err);
+          if (!(await restartCameraOn())) return;
+          log.info("Camera device switched");
+          return;
         }
         // The restart swaps the capture: unplug detection moves with it.
         const now = track.mediaStreamTrack;
         if (now !== before && state.manualCameraTrack === track && state.onCameraEnded) {
           now.addEventListener("ended", state.onCameraEnded, { once: true });
         }
-      } else {
-        const generation = state.generation ?? 0;
-        await this.enableCamera();
-        // A failed restart already said so, but the server still has the
-        // camera on: tell it the camera is off.
-        if (state.manualCameraTrack === null && (state.generation ?? 0) === generation) {
-          await this.disableCamera();
-          return;
-        }
+      } else if (!(await restartCameraOn())) {
+        return;
       }
       log.info("Camera device switched");
     } catch (err) {

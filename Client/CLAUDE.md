@@ -15,6 +15,11 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   reducers and message model — the store stays the facade, so import its
   mutators from `@stores/messages.store`, never from the reducer modules; new
   or extracted code uses `src/features/`, relative imports
+- `src/app/` is the composition layer above `pages/` (`main.ts`'s siblings, the
+  only code besides `main.ts` that may import `pages/`; enforced from 7.4b:
+  `local/layer-direction`): modules export functions or types, with no
+  top-level side effects, and `main.ts` calls the `install*`/`create*`
+  functions at its boot-order position. Relative imports, no `@app` alias
 - `src/styles/app.css` is an `@import` manifest over `src/styles/app/*.css`;
   its import order is the cascade, so add rules to the owning fragment and
   never reorder imports or move rules between fragments in a visual PR.
@@ -72,13 +77,24 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   writer by hand. Every custom rule has a canary in
   `tests/unit/eslint-rules-canary.test.ts` that fails if its scope stops
   covering the module it guards (ARCH-06).
+- **Layers import downward or sideways only** (`local/layer-direction`, an
+  error on `src/**/*.ts` except tests): `main.ts` and `app/`, then `pages/`,
+  then `components/` and `features/`, then `stores/`, then `lib/`, `platform/`
+  and `i18n/`, then `styles/` and `assets/`. A static import, `export … from`
+  or dynamic `import()` of a higher layer fails lint; `import type` does not
+  count. The imports that predate the rule are listed in
+  `scripts/layer-baseline.json`, which only shrinks
+  (`tests/unit/layer-baseline.test.ts` fails on a stale entry): when you remove
+  one, delete its entry and lower the cap in that test. The rank list and the
+  alias map are in the rule's header in `eslint-rules.js`.
 - `src/` has **no import cycles**: `npm run lint:cycles` (oxlint `import/no-cycle`)
   runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
   lower-level module has to trigger a higher one, invert the edge rather than
   import upward: `stores/auth.store.ts` imports neither `voice.store` nor
   `lib/notifications` — `voice.store.ts` registers its logout teardown through
-  `registerVoiceLogoutTeardown` at load, and `main.ts` registers the
-  notification-audio cleanup through `onAuthCleared`. In
+  `registerVoiceLogoutTeardown` at load, and `lib/notifications.ts` registers the
+  notification-audio cleanup through `registerSessionReset`
+  (`lib/sessionRegistry.ts`, the leaf every per-server reset registers with). In
   `components/message-list/`, `attachments.ts` is the leaf every renderer
   imports (it also owns the image lightbox, which `media.ts` re-exports), so it
   must not import a sibling renderer. `madge` still lists cycles that close only
@@ -91,55 +107,15 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `livekitE2EE.ts`, its `features/voice/e2ee*.ts` modules or `identity.ts`
   must preserve the epoch/keypair staleness guards and must never report an
   unverified peer as verified.
-- On Linux the client links **livekit** (the Rust SDK) as a Linux-only
-  dependency: the system WebKitGTK ships no WebRTC, so voice/video must run in
-  this backend rather than the webview. `webrtc-sys` then needs **clang >= 21**
-  and downloads a prebuilt **libwebrtc** (~148 MB, ~800 MB extracted); GCC is
-  refused (Chromium's hermetic libc++ relies on `trivial_abi`).
-  `Client/scripts/linux-webrtc-toolchain.sh` fetches libwebrtc and uses
-  `CC`/`CXX`, an installed clang >= 21, or (Debian/Ubuntu only) apt.llvm.org's
-  clang-21, in that order. Every Linux leg that builds the crate runs it (see
-  the root CLAUDE.md for the local invocation). A non-Linux build is
-  unaffected: the dependency is behind
-  `[target.'cfg(target_os = "linux")'.dependencies]`. Design:
-  [docs/architecture/voice-e2ee.md](../docs/architecture/voice-e2ee.md).
-- Linux voice runs in that backend (`src-tauri/src/native_voice/`) behind the
-  `livekitSession` facade: `features/voice/native/platform.ts`'s
-  `isLinuxDesktop()` (the Tauri host on a Linux, non-Android user agent) is the
-  only switch, `RoomLifecycle.createRoom` builds a `NativeRoom` adapter there,
-  `E2EEWorker.applyRoomKey` sends the key over the `NativeVoice` platform
-  contract, and audio device lists come from `native/devices.ts` (`cpal`'s
-  device ids, not the webview's). Audio I/O is the session's own `cpal`
-  streams, not the SDK's device module: `native_voice/capture.rs` (APM, then
-  RNNoise) and `native_voice/playout.rs` (per-user volume mixer, which also
-  feeds the echo canceller its reference). Video frames never cross IPC:
-  each native session serves them on a token-authenticated `127.0.0.1`
-  WebSocket (`src-tauri/src/native_voice/video.rs`); remote tracks render
-  through `native/videoRenderer.ts` (WebGL, exposed as a canvas
-  `MediaStreamTrack` so the grid stays MediaStream-based) and camera capture
-  runs in the backend (`src-tauri/src/native_voice/camera.rs`, GStreamer:
-  `GstDeviceMonitor`/`v4l2src`/`pipewiresrc` → `decodebin` → I420 `appsink`),
-  so the camera keeps working while the window is hidden; the
-  `NativeCameraTrack` (`native/nativeCameraTrack.ts`) is its preview, read
-  back over the frame socket. Screen share captures in the backend
-  (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
-  `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
-  on Wayland, and `lib/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
-  `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; it is
-  video only (no screen-share audio on Linux). Change source there is the
-  track's own (`NativeScreenTrack.changeSource`, the host's
-  `native_voice_change_screen`), reached through `lib/screenShare.ts`'s
-  capability check `inPlaceSourceChange`, never an `isLinuxDesktop()` branch.
-  Keep the state machine platform-blind: a Linux-only behaviour belongs in
-  the adapter or the Rust session, never as a branch in
-  `joinOrchestration`/`mediaControl`. The interop proof is
-  `npm run test:e2e:native-voice` with `OWNCORD_E2E_LIVEKIT_BINARY` and
-  `OWNCORD_NATIVE_VOICE_PEER=src-tauri/target/debug/examples/native_voice_interop`
-  (built with `cargo build --example native_voice_interop`); it covers audio,
-  video and a synthetic-source screen share, each with a wrong-key control.
-  CI has no display: the X11 capturer runs only under
-  `xvfb-run cargo test -- --ignored x11`, and the Wayland portal only on a
-  real desktop.
+- **Linux voice/video runs in the Rust backend** (`src-tauri/src/native_voice/`,
+  LiveKit's Rust SDK; WebKitGTK has no WebRTC) behind the `livekitSession`
+  facade. `isLinuxDesktop()` (`features/voice/native/platform.ts`) is the only
+  switch; keep `joinOrchestration`/`mediaControl` platform-blind and choose by
+  capability (`inPlaceSourceChange`, `globalShortcuts.status().backend`), never
+  a new `isLinuxDesktop()` branch. Building it needs clang >= 21 (root
+  CLAUDE.md). Read
+  [docs/architecture/linux-native-voice.md](../docs/architecture/linux-native-voice.md)
+  before touching native voice, camera, screen share, codecs or global keys.
 - **Lifecycle ownership is enforced, not assumed (B7-11).** `Disposable`
   (`src/lib/disposable.ts`) owns component, overlay and render lifetimes;
   `SessionScope` (`src/lib/sessionScope.ts`) owns session-bound async work.

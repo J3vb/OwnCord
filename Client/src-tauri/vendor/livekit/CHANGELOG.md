@@ -1,0 +1,929 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.7.32](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.31...rust-sdks/livekit@0.7.32) - 2026-02-16
+
+### Fixed
+
+- fix full_reconnect downgrade & don't ignore Leave messages ([#893](https://github.com/livekit/rust-sdks/pull/893))
+
+### Other
+
+- turn single peerconnection off by default ([#897](https://github.com/livekit/rust-sdks/pull/897))
+- ensure signal connections times out properly and retries ([#895](https://github.com/livekit/rust-sdks/pull/895))
+- added Single Peer Connection support to Rust ([#888](https://github.com/livekit/rust-sdks/pull/888))
+- set the simulcast codec & layers ([#891](https://github.com/livekit/rust-sdks/pull/891))
+
+## [0.7.31](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.30...rust-sdks/livekit@0.7.31) - 2026-02-10
+
+### Other
+
+- don't use clamp as the ultimate_kbps can be lower than 300 ([#886](https://github.com/livekit/rust-sdks/pull/886))
+- pre-connect the publisher PC when an RPC handler is registered ([#880](https://github.com/livekit/rust-sdks/pull/880))
+
+## [0.7.30](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.29...rust-sdks/livekit@0.7.30) - 2026-02-09
+
+### Fixed
+
+- fix the RPC race condition ([#865](https://github.com/livekit/rust-sdks/pull/865))
+
+### Other
+
+- update proto & fix CI ([#871](https://github.com/livekit/rust-sdks/pull/871))
+- Use workspace dependencies & settings ([#856](https://github.com/livekit/rust-sdks/pull/856))
+- Upgrade protocol to v1.44.0 ([#857](https://github.com/livekit/rust-sdks/pull/857))
+- Expose participant's permission to ffi layer ([#824](https://github.com/livekit/rust-sdks/pull/824))
+
+## [0.7.29](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.28...rust-sdks/livekit@0.7.29) - 2026-01-15
+
+### Fixed
+
+- ensure Room.creation_time is ms ([#822](https://github.com/livekit/rust-sdks/pull/822))
+
+### Other
+
+- try setting x-google-start-bitrate for vp9 ([#820](https://github.com/livekit/rust-sdks/pull/820))
+
+## [0.7.28](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.27...rust-sdks/livekit@0.7.28) - 2025-12-19
+
+### Added
+
+- *(ParticipantInfo)* export kind details ([#813](https://github.com/livekit/rust-sdks/pull/813))
+
+## [0.7.27](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.26...rust-sdks/livekit@0.7.27) - 2025-12-17
+
+### Other
+
+- Handle server initiated mute request ([#812](https://github.com/livekit/rust-sdks/pull/812))
+
+## [0.7.26](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.25...rust-sdks/livekit@0.7.26) - 2025-12-04
+
+### Added
+
+- *(connector)* initial service impl ([#790](https://github.com/livekit/rust-sdks/pull/790))
+
+### Fixed
+
+- fix mute/unmute events for LocalTrack. ([#799](https://github.com/livekit/rust-sdks/pull/799))
+
+### Other
+
+- Add RoomEvent::TokenRefreshed ([#803](https://github.com/livekit/rust-sdks/pull/803))
+
+## [0.7.25](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.24...rust-sdks/livekit@0.7.25) - 2025-11-20
+
+### Other
+
+- perform full reconnect if resume fails ([#792](https://github.com/livekit/rust-sdks/pull/792))
+- E2E RPC tests ([#769](https://github.com/livekit/rust-sdks/pull/769))
+- Remove unused dependencies ([#761](https://github.com/livekit/rust-sdks/pull/761))
+
+## [0.7.24](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.23...rust-sdks/livekit@0.7.24) - 2025-10-27
+
+### Other
+
+- Expose set video quality ([#759](https://github.com/livekit/rust-sdks/pull/759))
+
+## [0.7.23](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.22...rust-sdks/livekit@0.7.23) - 2025-10-23
+
+### Other
+
+- add h265 codec support ([#762](https://github.com/livekit/rust-sdks/pull/762))
+
+## [0.7.22](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.21...rust-sdks/livekit@0.7.22) - 2025-10-22
+
+### Other
+
+- License check ([#746](https://github.com/livekit/rust-sdks/pull/746))
+- Remove participant check for data packets ([#757](https://github.com/livekit/rust-sdks/pull/757))
+- clamp connection timeout and fixed the comment ([#748](https://github.com/livekit/rust-sdks/pull/748))
+- put examples in root Cargo workspace ([#731](https://github.com/livekit/rust-sdks/pull/731))
+
+## [0.7.21](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.20...rust-sdks/livekit@0.7.21) - 2025-10-13
+
+### Added
+
+- *(e2ee)* add data channel encryption ([#708](https://github.com/livekit/rust-sdks/pull/708))
+
+### Fixed
+
+- fix some potential audio issues, clean up the code a bit, and suppress some warnings  ([#737](https://github.com/livekit/rust-sdks/pull/737))
+- do not log 'signal client closed: "stream closed"' on disconnect ([#727](https://github.com/livekit/rust-sdks/pull/727))
+
+### Other
+
+- Test participant disconnect ([#732](https://github.com/livekit/rust-sdks/pull/732))
+- Increase RPC max RT time to 7s ([#729](https://github.com/livekit/rust-sdks/pull/729))
+- E2E audio test ([#724](https://github.com/livekit/rust-sdks/pull/724))
+
+## [0.7.20](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.19...rust-sdks/livekit@0.7.20) - 2025-10-03
+
+### Other
+
+- updated the following local packages: libwebrtc
+
+## [0.7.19](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.18...rust-sdks/livekit@0.7.19) - 2025-09-29
+
+### Fixed
+
+- apply original participant fields in data messages ([#709](https://github.com/livekit/rust-sdks/pull/709))
+
+### Other
+
+- Implement Display and Error for RpcError ([#719](https://github.com/livekit/rust-sdks/pull/719))
+- Fix intermittently failing E2E reliability test ([#718](https://github.com/livekit/rust-sdks/pull/718))
+- Do not modify raw packets ([#714](https://github.com/livekit/rust-sdks/pull/714))
+- Add send_bytes method ([#691](https://github.com/livekit/rust-sdks/pull/691))
+- Disable opus red for e2ee enabled clients ([#706](https://github.com/livekit/rust-sdks/pull/706))
+- Upgrade protocol to v1.41.0 ([#703](https://github.com/livekit/rust-sdks/pull/703))
+
+## [0.7.18](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.17...rust-sdks/livekit@0.7.18) - 2025-09-09
+
+### Other
+
+- Add option to enable audio preconnect buffer in SDK & FFI ([#700](https://github.com/livekit/rust-sdks/pull/700))
+- Data channel reliability ([#688](https://github.com/livekit/rust-sdks/pull/688))
+
+## [0.7.17](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.16...rust-sdks/livekit@0.7.17) - 2025-09-03
+
+### Other
+
+- updated the following local packages: livekit-api, libwebrtc
+
+## [0.7.16](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.15...rust-sdks/livekit@0.7.16) - 2025-07-31
+
+### Other
+
+- updated the following local packages: livekit-api
+# Changelog
+
+## [0.7.15](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.14...rust-sdks/livekit@0.7.15) - 2025-07-16
+
+### Other
+
+- remove published tracks when the room is closed ([#677](https://github.com/livekit/rust-sdks/pull/677))
+
+## [0.7.14](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.13...rust-sdks/livekit@0.7.14) - 2025-06-23
+
+### Fixed
+
+- `audio_frame_ms` didn't work expectedly ([#671](https://github.com/livekit/rust-sdks/pull/671))
+
+## [0.7.13](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.12...rust-sdks/livekit@0.7.13) - 2025-06-17
+
+### Other
+
+- Expose room updates, support MoveParticipant (protocol 15) ([#662](https://github.com/livekit/rust-sdks/pull/662))
+
+## [0.7.12](https://github.com/livekit/rust-sdks/compare/rust-sdks/livekit@0.7.11...rust-sdks/livekit@0.7.12) - 2025-06-11
+
+### Fixed
+
+- fix duration overflow ([#654](https://github.com/livekit/rust-sdks/pull/654))
+
+### Other
+
+- Remove debouncer when fast_publish is enabled ([#649](https://github.com/livekit/rust-sdks/pull/649))
+
+## [0.7.9] - 2025-04-08
+
+### Added
+
+- High-level data streams API
+
+### Deprecated
+
+- Low-level data stream packet events
+
+## [0.7.8] - 2025-03-21
+
+### Fixed
+
+- Revert the RPC change, need more robust way
+
+## [0.7.7] - 2025-03-18
+
+### Fixed
+
+- Move RPC handlers to room
+
+## [0.7.6] - 2025-02-28
+
+### Added
+
+- Add audio filter support
+
+## [0.7.5] - 2025-02-06
+
+### Fixed
+
+- Fix a dependency issue with an older version of the libwebrtc crate
+
+## [0.7.4] - 2025-02-03
+
+### Added
+
+- Support for track subscription permissions
+
+## [0.7.3] - 2025-01-17
+
+### Added
+
+- Add an API to set buffer_amount_low_threshold for DataChannel
+- Update RoomInfo to contain buffer_amount_low_threshold for DataChannel
+
+### Fixed
+
+- Wait for the buffered amount to become low before sending data during publish_data for Reliable Data Channel
+
+## [0.7.2] - 2025-01-04
+
+### Added
+
+- bump
+
+### Fixed
+
+- Fixed deadlock with nested RPC calls
+
+## [0.7.1] - 2024-12-14
+
+### Added
+
+- bump libwebrtc to m125
+## 0.9.5 (2026-10-12)
+
+### Fixes
+
+- In-flight incoming data streams now error with `AbnormalEnd` when the room closes. Before, the stream readers ended cleanly, so `read_all()` returned truncated content as if it were complete.
+- Keep pre-encoded video decodable when WebRTC drops frames: the passthrough encoder disables WebRTC's frame dropper, and after a frame is dropped before it, holds delta frames and requests a keyframe until the next keyframe arrives.
+- Add `PeerConnection::set_bitrate` to set the send bitrate limits of a peer connection.
+- Public API tokens minted from an API key and secret now grant every thread action (list, create, read, write, delete) across the project. Before, they carried only `all`, so creating or reading a thread was refused.
+- Re-apply dynacast publishing layers after every publisher answer, so that layers paused by dynacast stay paused after a renegotiation.
+- `Room::close` now leaves the room `Disconnected` and emits `RoomEvent::Disconnected` before it returns, and `Disconnected` is final: a reconnect still finishing in the background (a queued resume, or the republish after a full reconnect) can no longer bring a closed room back to `Connected` or emit `Reconnected` after `Disconnected`. Before, the room's event task could drop the engine's `Disconnected` event when the close signal won the race, so a closed room kept reporting `Connected` (or `Reconnecting`) about half the time.
+
+#### `VideoGrants` gains the `agent` grant and `Claims` the `kind` claim (with
+
+`AccessToken::with_kind`), which the Go, Python and JS SDKs already carry. An
+agent worker's token is `VideoGrants { agent: true }` and a simulated job's
+participant token is `kind: "agent"`; neither could be minted from Rust before.
+`livekit-uniffi` exposes both: `TokenOptions.kind`, `Claims.kind`, and `agent`
+on its `VideoGrants` record.
+
+**Breaking:** the four grants the server infers when absent -- `can_publish`,
+`can_subscribe`, `can_publish_data`, `can_update_own_metadata` -- are now
+`Option<bool>`, as in the Go and JS SDKs. `None` leaves the decision to the
+server, and the new getters (`can_publish()`, `can_subscribe()`,
+`can_publish_data()`, `can_update_own_metadata()`) read a token the way the
+server does, `can_publish_data` falling back to `can_publish` included. Code
+that set these fields writes `Some(..)`; code that read them uses the getters.
+The same fields are optional on the `livekit-uniffi` record, and
+`livekit-api` re-exports the crate as `livekit_api::access_token`, so both
+carry the change.
+
+Nothing at its default is written into the token any more: unset claims and
+grants are omitted, as the server's own `omitempty` grants are. Verification
+of existing tokens is unchanged.
+
+## 0.9.4 (2026-10-07)
+
+### Fixes
+
+- Scale the `x-google-start-bitrate` hint by connection setup time: the 1 Mbps camera cap now applies to connections that set up within 1.5 s and ramps linearly down to 300 kbps at 3.5 s or slower; screen share stays uncapped.
+- Increase the local and remote data track event buffers so a burst of track lifecycle events cannot fill the channel and deadlock room disconnect.
+- Manage VAAPI displays across capability probes and encoder lifecycles so driver resources and threads are released without invalidating active encoders.
+- Release local published tracks when a server-initiated room closure has already closed the peer connection.
+- RoomClient::send_data now returns a Send future by dropping its RNG before awaiting.
+- Never wait on the peer when closing a signal stream: a half-open socket (no FIN/RST) left the reader parked in `recv()` forever, so the resume never dialled and `Room::close` hung. `SignalStream::close` now aborts the parked reader and bounds the writer's Close flush.
+
+## 0.9.3 (2026-09-24)
+
+### Fixes
+
+- Avoid panics when malformed RTC error headers contain non-ASCII text.
+- Java version in libwebrtc was bumped by Google, downgrade it again for Unity 2022 build compatibility - #1456 (@MaxHeimbrock)
+- refactor(signaling): explicit signal lifecycle state machine - #1402 (@lukasIO)
+- Upgrade to prost 0.14 across the whole project - #1447 (@1egoman)
+
+## 0.9.2 (2026-09-22)
+
+### Fixes
+
+- Correct the AppKit framework name so macOS linking works with case-sensitive SDK filesystems.
+- Cleanup unused dependencies
+- Fix reliable data channel replay: keep the full retry buffer across resumes, drop duplicate reliable packets, and ignore replayed chunks on uncompressed streams instead of failing with `MissedChunk`.
+- Stop answering a server-initiated Leave (room deleted, duplicate identity) with a client Leave. The server has already ended the session and is closing the signalling socket, so the reply only ever produced the warning "dropping pass-through signal — no stream available" on every such disconnect.
+
+#### Fix the RTC engine leaking when a room is dropped without being closed.
+
+The engine's event task held a strong reference to the engine, while the signal that stops
+that task lives inside the engine itself, so the two kept each other alive. An engine
+dropped without an explicit `close()` released nothing: the session, both peer connections,
+the WebRTC runtime, and the signal client with its open websocket all stayed resident for
+the lifetime of the process, and the server kept its half of the session because the socket
+was never closed. The task now holds a weak reference and stops on its own once the engine
+is gone.
+
+#### `EncryptionError::Failed` and `DecryptionError::Failed` carry a `reason` string and are no longer `flat_error`,
+
+so a foreign `EncryptionProvider` or `DecryptionProvider` returning an error no longer aborts the process with
+"Can't lift flat errors" -- a failed data track decrypt (no E2EE manager, key mismatch, corrupt frame) now 
+drops the frame and leaves the room connected.
+
+#### Report the reconnect reason to the server when resuming.
+
+Resumes previously sent no reason, so server-side telemetry could not attribute why Rust
+clients reconnect — every resume looked like `RR_UNKNOWN`. The engine now records what caused
+the episode (signal disconnected, publisher failed, subscriber failed) and reports it on each
+resume attempt. The v0 signalling path was also missing the `reconnect_reason` query parameter
+entirely, so it would not have been reported even if a reason had been supplied.
+
+#### Fix resume reporting success for a PeerConnection that had not recovered.
+
+A resume decided recovery from `PeerConnectionState`, which keeps reading `Connected` for tens
+of seconds after the far end goes away. A resume could therefore emit `Resumed` — and so
+`RoomEvent::Reconnected` with `ConnectionState::Connected` — for a session whose subscriber
+transport was dead, leaving applications with no signal that they had stopped receiving media.
+A resume now requires each transport to have entered `Connected` since the resume began, or to
+have held it throughout, rather than trusting the state it currently reports.
+
+#### `VideoGrants` gains the `agent` grant and `Claims` the `kind` claim (with
+
+`AccessToken::with_kind`), which the Go, Python and JS SDKs already carry. An
+agent worker's token is `VideoGrants { agent: true }` and a simulated job's
+participant token is `kind: "agent"`; neither could be minted from Rust before.
+`livekit-uniffi` exposes both: `TokenOptions.kind`, `Claims.kind`, and `agent`
+on its `VideoGrants` record.
+
+**Breaking:** the four grants the server infers when absent -- `can_publish`,
+`can_subscribe`, `can_publish_data`, `can_update_own_metadata` -- are now
+`Option<bool>`, as in the Go and JS SDKs. `None` leaves the decision to the
+server, and the new getters (`can_publish()`, `can_subscribe()`,
+`can_publish_data()`, `can_update_own_metadata()`) read a token the way the
+server does, `can_publish_data` falling back to `can_publish` included. Code
+that set these fields writes `Some(..)`; code that read them uses the getters.
+The same fields are optional on the `livekit-uniffi` record, and
+`livekit-api` re-exports the crate as `livekit_api::access_token`, so both
+carry the change.
+
+Nothing at its default is written into the token any more: unset claims and
+grants are omitted, as the server's own `omitempty` grants are. Verification
+of existing tokens is unchanged.
+
+#### Write the `x-google-start-bitrate` hint once per publisher connection, and exempt screen share from the 1 Mbps cap.
+
+libwebrtc reads this fmtp parameter per m-section but applies it to the shared `Call` (`WebRtcVideoSendChannel::ApplyChangedParams` -> `SetSdpBitrateParameters`), where `RtpBitrateConfigurator` holds one config for the whole peer connection. It retains `start_bitrate_bps` and re-applies it on network route changes (`RtpTransportControllerSend::OnNetworkRouteChanged`), so a WiFi-to-cellular handover re-seeds the estimator from the original hint with no renegotiation. Rewriting the value on later offers was therefore at best a no-op and at worst a restart of a converged bandwidth estimator; it is now written only on the first offer that carries local video, and only once that offer is accepted locally. A full reconnect builds a new peer connection and seeds the new estimator again. The initial offer sent with the JoinRequest in single PC mode never carries the hint: it is created before any track is published, so no target bitrate exists yet.
+
+Screen share is no longer capped at 1 Mbps, matching client-sdk-js and client-sdk-android: unlike camera content, a screen share is published at a high bitrate so text stays legible, and a conservative start costs more than a brief overshoot.
+
+## 0.9.1 (2026-09-09)
+
+### Features
+
+#### Moves the RPC implementation into a new `livekit-rpc` crate, alongside the existing
+
+`livekit-data-stream` and `livekit-datatrack` crates.
+
+**Breaking:** the `livekit::rpc` module is gone. The RPC types it held are unchanged and
+still re-exported from `livekit::participant` and the prelude, so most code needs no edit;
+code that spelled the module out (`use livekit::rpc::RpcError;`) should import from
+`livekit::participant` or the prelude instead. `RpcClientManager`, `RpcServerManager` and
+`HandleRequestOptions` remain reachable under `livekit::participant` but are now
+`#[doc(hidden)]`: they are internal SDK API and were never usable without the (private)
+transport trait.
+
+Within the `livekit` crate itself, RPC types are now imported from `livekit-rpc` directly
+rather than through those re-exports.
+
+The new crate does not depend on `libwebrtc`, so its unit tests run without building WebRTC.
+The transport seam that made this possible was already in place; the only change to it is
+that `RpcTransport::publish_data` now returns a message-only `RpcTransportError` instead of
+`livekit::RoomError`, mirroring `livekit_data_stream::api::SendError`.
+
+Also fixes four latent bugs found while moving the code:
+
+- An RPC call to a participant who disconnects mid-call now fails promptly with
+  `RecipientDisconnected`. Pending calls were never purged on disconnect, so the caller
+  waited out its full response timeout (15s by default) and got `ResponseTimeout` instead.
+- A server reporting a version that is not valid semver no longer panics the calling task.
+  An unparseable version is no longer treated as evidence that the server is too old.
+- A v1 `RpcResponse` carrying a compressed payload, or no value at all, now fails with an
+  `ApplicationError` instead of resolving the caller with an empty successful response.
+- Removed an unguarded `unwrap` when building a v1 response packet, by giving the function
+  a signature that cannot represent the invalid state.
+
+Also drops the `semver` dependency from `livekit`, which was only used by the RPC client.
+
+### Fixes
+
+- Load the Jetson MMAPI encoder's runtime libraries (libnvbufsurface, libv4l2/libnvv4l2) lazily via dlopen instead of linking them, so an aarch64 binary built with Jetson support also loads on non-Jetson ARM systems and falls back to other encoders there.
+- log warning if signal messages get dropped during reconnect - #1391 (@lukasIO)
+
+#### Own the add_ice_candidate completion state
+
+`PeerConnection::add_ice_candidate` captured `ctx` and `on_complete` by reference in the
+completion lambda it hands to libwebrtc. That completion runs asynchronously on the signaling
+thread and is deferred behind the operations chain whenever it is busy, for example while a
+`SetRemoteDescription` is in flight, so it could execute after the calling frame had returned
+and dereference freed stack memory (a crash on the signaling thread on the first ICE candidate
+in practice). The lambda now owns its state through a `shared_ptr`.
+
+## 0.9.0 (2026-09-08)
+
+### Breaking Changes
+
+- Removes livekit-runtime and converts this package to be tokio only again - #1375 (@1egoman)
+
+### Fixes
+
+- Add data streams v2 to exposed uniffi interface - #1286 (@1egoman)
+- Add the `PASSTHROUGH` encoding preset and remove the unused `UpdateEgressRequest` from the generated protocol
+- Fix pre-encoded frame segfault on macOS
+- Handle capture of dmabuf using existing capture path
+- Add `self_test_http_get` / `self_test_ws_echo` / `has_http_client` / `has_ws_client` UniFFI exports so foreign hosts can exercise the transport seam end-to-end.
+
+#### Make AdmProxy worker-thread-affine: all platform ADM access now happens on the WebRTC worker thread, matching the ADM threading contract.
+
+- The platform ADM is now created lazily on the first PlatformAudio acquire on all platforms, so apps that never use platform audio never construct it.
+- Fixes Android platform recording delivering no audio: the audio transport was never registered on the lazily created ADM.
+- Fixes a shutdown race by keeping the runtime threads alive as long as Rust can reach the audio device controller.
+- Adds a `platform_audio` example exercising the PlatformAudio API and the worker-thread marshaling.
+
+#### Add agent guidance for detecting and preventing memory-lifecycle regressions in
+
+Rust, FFI, and native WebRTC code.
+
+#### Close peer connections before awaiting signal teardown
+
+`SessionInner::close` released the peer connections only after two awaits that can block
+indefinitely, so cancelling `close()` — for example by wrapping it in a timeout — left the
+transports open and their ICE UDP sockets bound for the lifetime of the process. Long-lived
+clients eventually exhausted their file descriptors. The transports are now closed before
+the first await, which makes the teardown safe to cancel.
+
+#### Moves the internal region-discovery cache into a new `livekit-region` crate. No
+
+public API or behaviour change.
+
+#### Moves the signalling client into a new `livekit-signaling` crate. livekit-api
+
+re-exports it under the historical `livekit_api::signal_client` path, now marked
+deprecated: it is internal SDK API, and dependents should use livekit-signaling
+directly. livekit-api no longer depends on livekit-net.
+
+Also drops two dependencies that were declared but never used: `scopeguard` and
+`bytes`.
+
+#### Fix CUDA and FFI resource cleanup during SDK shutdown.
+
+NVIDIA encoder and decoder factories now share a reference-counted CUDA context
+and destroy it when the final factory is dropped. FFI shutdown now releases
+leftover handles one at a time so nested `drop_handle` calls do not re-enter
+`DashMap::clear()`. Adds regression coverage for FFI-handle, watcher, and
+configuration cleanup during disposal.
+
+#### Expose network_type on IceCandidateStats
+
+Chromium's local `RTCIceCandidateStats` carries a non-standard `networkType` field (WiFi,
+cellular, ethernet, etc.), but `IceCandidateStats` had no place to put it, so it was silently
+dropped during `get_stats()` deserialization. Adds `network_type: Option<String>` to the struct;
+non-breaking since it already derives `#[serde(default)]`.
+
+#### Fix room-session and data-channel leaks across connect/disconnect cycles.
+
+The E2EE manager callback now captures `RoomSession` weakly so the session can
+drop after disconnect. Data-channel observer callbacks are cleared during RTC
+teardown so the observer/callback cycle cannot keep peer connections alive.
+Adds regression coverage for room-session destruction and data-channel callback
+cleanup.
+
+#### Fix native video-source lifecycle and NVENC initialization failure handling.
+
+The raw-video keepalive task now uses a weak liveness check and defers its
+black I420 buffer allocation until source liveness is confirmed, so dropping
+an unused source releases its resources. `nvEncInitializeEncoder` failures now
+propagate instead of leaving the encoder half-initialized.
+
+## 0.8.4 (2026-08-25)
+
+### Features
+
+#### feat: enable WARP (SPED + SNAP) by default, gated by the server
+
+WARP is now always enabled on the client and negotiated with the SFU: SPED
+(DTLS-in-STUN) via the `WebRTC-IceHandshakeDtls` field trial, and SNAP
+(SCTP-INIT-in-SDP) via the `RtcConfiguration.enable_sctp_snap` field. When the
+server does not enable WARP it is not advertised and the connection falls back to
+plain DTLS/SCTP, so there is no client-side toggle.
+
+BREAKING CHANGE: `libwebrtc::RtcConfiguration` is now `#[non_exhaustive]` and has a
+new `enable_sctp_snap` field. Construct it from `RtcConfiguration::default()` and set
+the fields you need instead of a struct literal.
+
+### Fixes
+
+- differentiate signal connection errors correctly from timeouts - #1234 (@lukasIO)
+- Automatically retry webrtc build downloads
+- feat: upgrade libwebrtc to m150. - #1284 (@cloudwebrtc)
+- fix(uniffi): register the Bytes custom type once, in livekit-common - #1343 (@pblazej)
+
+#### fix: bump libwebrtc to webrtc-b9233c3-2 so TURN/TLS can use the OS trust store
+
+WebRTC validates TURN/TLS against a small set of anchors compiled into
+`rtc_base/ssl_roots.h`, generated in 2023 from Google's own PKI list. It has no
+Amazon, Starfield Services or ISRG roots, so a relay-only connection to a TURN
+server fronted by AWS ACM or Let's Encrypt times out with `unknown_ca` even
+though the host OS trusts the chain.
+
+This build picks up webrtc-sdk/webrtc#277, which falls back to the operating
+system's trust store when the built-in anchors yield no path. It sits in
+`rtc_base` below every SDK, so the C++ API that webrtc-sys binds is covered
+without any Rust-side change.
+
+#### Moves access-token generation and verification into a new `livekit-token` crate.
+
+`livekit_api::access_token::*` continues to resolve to the same types via a
+re-export, so no consumer changes are needed.
+
+Also fixes the `services-tokio` and `services-async` features, which used the
+access-token types without declaring the `access-token` feature. Building with
+`--no-default-features --features services-tokio` previously failed to compile.
+
+## 0.8.3 (2026-08-10)
+
+### Features
+
+- Add `other_sdks` field to propagate additional SDK metadata to the server.
+
+### Fixes
+
+- Only advertise internal H264 decode formats if the decoder works - #1313 (@MaxHeimbrock)
+
+## 0.8.2 (2026-08-03)
+
+### Fixes
+
+- Add a unified `EgressClient::start_egress` that calls the v2 `Egress.StartEgress` RPC with a `StartEgressRequest`, alongside the existing per-type helpers.
+- Fix a publisher-transport deadlock during renegotiation. When another negotiation was requested while an offer was awaiting its answer, `set_remote_description` re-entered `create_and_send_offer` while holding the transport's non-reentrant inner mutex, permanently wedging publishing.
+- Move the concept of "internal" data streams into `livekit` crate from `livekit-data-stream` - #1304 (@1egoman)
+
+#### Fix H.264, H.265, and AV1 NVENC sessions so live bitrate and frame rate updates
+
+reconfigure the hardware without restarting the encoder.
+
+## 0.8.1 (2026-07-29)
+
+### Fixes
+
+- allow for audio filters to be registered after initial room connection - #1273 (@lukasIO)
+- Caching of tokio backend reqwest http client - #1285 (@MaxHeimbrock)
+- Add data streams v2 - #1192 (@1egoman)
+- Ensure participant disconnects are synthesized after connection resume - #1250 (@lukasIO)
+
+## 0.8.0 (2026-07-27)
+
+### Breaking Changes
+
+#### Route LiveKit signalling through a pluggable transport (new `livekit-net` crate).
+
+The signalling WebSocket and the two pre-connect HTTP GETs (validate, region discovery) now go through pluggable transport traits (`WsClient` for the WebSocket, `HttpClient` for request/response) resolved from a process-global registry with independent slots — a consumer can bring only HTTP, or only WebSocket. The new `livekit-net` crate owns the WebSocket/HTTP/TLS stack behind those traits and ships native (tokio / async-std) backends. Native builds are unchanged in behavior.
+
+**Breaking (`livekit-api`, and `livekit` via `EngineError::Signal`):**
+
+- `SignalError::WsError` is removed — `tungstenite` is no longer part of the public API. A failed WebSocket handshake now surfaces its HTTP status as `SignalError::Client`/`Server`; transport connection and close failures surface as the new `SignalError::Connection(String)` / `SignalError::Closed` variants (previously all collapsed into `Timeout`).
+- `SignalError` is now `#[non_exhaustive]`, and gains a `SignalError::TransportNotConfigured` variant — returned when no transport is registered (host/foreign builds must call `livekit_net::set_ws_client` / `set_http_client` before connecting). This is a permanent configuration error; callers must not retry.
+- The signalling WebSocket/HTTP/TLS crates are no longer transitive dependencies of `livekit-api`; TLS features delegate to `livekit-net`. Existing `signal-client-tokio` / `-async` / `-dispatcher` and TLS feature names are unchanged.
+
+### Fixes
+
+- Address typo in parsing rpc server version - #1268 (@1egoman)
+- Data tracks schema metadata support.
+- Emit black keepalive frames from NativeVideoSource instead of uninitialized memory. webrtc::I420Buffer::Create leaves the pixel planes uninitialized, so the pre-capture keepalive frames could leak recycled heap contents (often fragments of earlier frames from the same process) to subscribers as the first keyframes - #1271 (@eh-steve)
+- Add NVIDIA NVENC AV1 encoding when the GPU reports AV1 encode support.
+
+## 0.7.53 (2026-07-17)
+
+### Features
+
+- Add a pre-encoded video publish path: a passthrough video encoder and encoded video frame buffer in webrtc-sys, and `EncodedVideoFrame`/`EncodedVideoCodec`/`EncodedFrameType` publish APIs with a `VideoEncoderBackend::PreEncoded` backend in libwebrtc. WebRTC rate-control targets and keyframe requests are forwarded to encoded sources, and pre-encoded AV1 and H265 access units are validated on ingest.
+
+### Fixes
+
+- Emit room EOS when the underlying LiveKit room event channel closes after a server-initiated disconnect, and ignore duplicate disconnect events during teardown.
+- Don't log an expected publisher data channel close as unexpected - #1224 (@longcw)
+
+#### Simplify x-google-start-bitrate logic and update degradation preference defaults
+
+- Start bitrate: use min(90% of target, 1 Mbps) instead of adaptive network hints
+- Remove slow connection detection and network quality hints on reconnect
+- Default degradation preference by track source:
+  - Camera: MaintainFramerate (smoother video)
+  - Screenshare: MaintainResolution (clarity for text/UI)
+  - Other: Balanced
+
+## 0.7.52 (2026-07-14)
+
+### Fixes
+
+- Make some fields public for data track types
+- Refactor data tracks E2EE interface
+- refactor: extract data-stream logic and shared types into new `livekit-common` and `livekit-data-stream` crates (public API unchanged; types are re-exported from `livekit`)
+- Use concrete type for data track manager output events
+- Add an opt-in zero-playout-delay mode for native video subscribers, expose it through the `local_video` subscriber's `--low-latency` flag, and isolate subscriber diagnostics from frame-driven video rendering.
+
+## 0.7.51 (2026-07-09)
+
+### Fixes
+
+- feat: auto failover APIs with LK Cloud - #1196 (@davidzhao)
+- Fix for dynacast error - #1213 (@MaxHeimbrock)
+- Fix malformed RTC error handling
+- Handle data track SID reassignment
+- introduce LiveKitAPI construct, added smoke tests - #1220 (@davidzhao)
+- Turn single peerconnection off by default - #1206 (@cnderrauber)
+
+## 0.7.50 (2026-06-30)
+
+### Features
+
+- Add `user_data` support to frame metadata, allowing arbitrary application-supplied bytes to be attached to a video frame via the `PTF_USER_DATA` packet trailer feature.
+
+#### Improve initial video quality by setting `x-google-start-bitrate` SDP hint for all video codecs (VP8, VP9, AV1, H264, H265) and defaulting to `MaintainResolution` degradation preference.
+
+This addresses the issue where video starts blurry for several seconds before improving, by:
+1. Telling WebRTC's bandwidth estimator to start at 70% of target bitrate instead of ramping up from ~300kbps
+2. Preferring frame drops over resolution reduction when bandwidth is constrained
+
+The `DegradationPreference` option is now exposed via FFI for Python, C++, Unity, and Node SDKs.
+
+#### Add `MaintainFramerateAndResolution` to `DegradationPreference` enum to align with WebRTC M144.
+
+- `MAINTAIN_FRAMERATE_AND_RESOLUTION` is now the recommended value (replaces deprecated `DISABLED`)
+- `DISABLED` is deprecated but still supported for backwards compatibility
+- Both values map to the same behavior: maintain framerate and resolution, dropping frames if needed
+
+### Fixes
+
+- Fix AV1 subscriber decode when packet trailers are enabled.
+- Improve log messages around plugin loading - #1186 (@lukasIO)
+
+## 0.7.49 (2026-06-24)
+
+### Fixes
+
+- harden reconnect behaviour - #1148 (@lukasIO)
+
+## 0.7.48 (2026-06-23)
+
+### Features
+
+- Rename user facing APIs for Packet Trailer to Frame Metadata.
+
+### Fixes
+
+- Upgrade protocol to v1.48.0
+
+## 0.7.47 (2026-06-19)
+
+### Fixes
+
+- fix: escalate to full reconnect if connection failed during a resume - #1175 (@davidzhao)
+
+## 0.7.46 (2026-06-17)
+
+### Features
+
+#### Make GLib an opt-in dependency
+
+`webrtc-sys` no longer links against `glib-2.0`/`gobject-2.0`/`gio-2.0` by default.
+
+Breaking: Wayland screen sharing now requires the `glib-main-loop` feature on `livekit` (or `libwebrtc`).
+
+### Fixes
+
+- Add track publishing doc example
+- Fix silent subscription failures in single-pc mode when the SFU reuses an existing empty transceiver for a new remote track. Also make `RtpTransceiver::mid()` safe to call on transceivers that haven't been negotiated yet — libwebrtc is built with `-fno-exceptions`, so `std::optional::value()` aborted the process instead of throwing.
+- Add `LK_DISABLE_NVDEC` to bypass NVIDIA NVDEC decoder registration when the environment variable is set.
+- return DeviceNotFound when device is not there for set_recording_devi… - #1155 (@xianshijing-lk)
+
+#### Add dynacast support - #1003 (@chenosaurus, @stephen-derosa)
+
+This includes a minor breaking change for `libwebrtc`: `RtpParameters` now
+contains additional RTP sender state that must be preserved when round-tripping
+through `set_parameters()`.
+
+## 0.7.45 (2026-06-09)
+
+### Fixes
+
+- Fix NVIDIA encoder I420 uploads to copy each plane using its actual source stride, avoiding chroma corruption when source frames use padded YUV planes. Also fix the `local_video` publisher reusing mutable I420 frame storage after handing frames to WebRTC.
+- Reject oversized data messages before they break the data channel.
+- Add per-publication video encoder backend selection. Add a video encoder backend availability query. Remove `LIVEKIT_PREFERRED_HW_ENCODER` in favor of per-publication backend selection.
+
+## 0.7.44 (2026-06-03)
+
+### Features
+
+- Add rpc max_round_trip_latency and move to builder pattern - #1127 (@1egoman)
+
+### Fixes
+
+- [allow(dead_code)] for dead function in room module - #1128 (@stephen-derosa)
+- Send publisher offer with join request to accelerate connection - #996 (@cnderrauber)
+
+## 0.7.43 (2026-05-29)
+
+### Fixes
+
+- bump protocol to v1.46.4 - #1121 (@lukasIO)
+- Add native video pipeline timing instrumentation for local video measurements, exposing local publish and subscribe timing through async streams and subscriber overlay GPU upload and receive-to-GPU latency metrics through explicit timing observers.
+
+## 0.7.42 (2026-05-21)
+
+### Features
+
+- Introduce pipeline options for remote data tracks, support multiple in-flight frames.
+
+### Fixes
+
+- Filter internal data streams out of livekit-ffi interface - #1112 (@1egoman)
+
+#### feat: add Android application context initialization for PlatformAudio support.
+
+Android requires `ContextUtils.initialize(applicationContext)` before WebRTC audio components can be created. This change:
+
+- Adds `livekit_ffi_initialize_android_context()` C FFI function for Unity and other FFI consumers
+- Uses `CreateAndroidAudioDeviceModule()` instead of generic `CreateAudioDeviceModule()` on Android
+- Handles empty device GUIDs on Android (falls back to index 0)
+- Documents Android-specific limitations: single default device, no app-level device selection
+
+Platform notes:
+- Android device enumeration returns only one "default" device with empty name/GUID
+- Audio routing (speaker/earpiece/Bluetooth) is controlled by Android's AudioManager, not WebRTC
+
+## 0.7.41 (2026-05-20)
+
+### Fixes
+
+- Bugfix: Always emit Disconnected on engine close - #1096 (@MaxHeimbrock)
+- Support for large RPC messages using data streams - #1013 (@1egoman)
+
+## 0.7.40 (2026-05-14)
+
+### Fixes
+
+- feat: add scalability mode for AV1/VP9. - #1076 (@cloudwebrtc)
+- Add `LIVEKIT_PREFERRED_HW_ENCODER` to prefer `nvenc` or `vaapi` hardware video encoding when both are available.
+- Relocate unrelated types out of `livekit-protocol`
+
+#### Get WebRTC ADM into Rust - #1037 (@xianshijing-lk)
+
+This PR introduces platform audio device management via WebRTC's Audio Device Module (ADM).
+
+#### Features
+- **ADM Proxy**: New `AdmProxy` class that switches between Dummy ADM (synthetic mode) and Platform ADM (real audio I/O)
+- **PlatformAudio API**: High-level Rust API for microphone capture and speaker playout with AEC/AGC/NS
+- **Device enumeration**: List and select recording/playout devices by index or GUID
+- **Mode switching**: Seamlessly switch between synthetic mode (FFI callbacks) and platform mode (native speakers) while audio is active
+- **FFI platform audio support**: Expose platform audio device enumeration and selection through `livekit-ffi`
+- **Audio processing**: Configure echo cancellation, noise suppression, and auto gain control with platform-specific defaults (hardware on iOS, software elsewhere)
+
+#### Audio Modes
+| Mode | Recording | Playout | Use Case |
+|------|-----------|---------|----------|
+| Synthetic | NativeAudioSource | Dummy ADM + FFI | Unity audio, agents |
+| Platform | Platform ADM mic | Platform ADM speakers | VoIP with AEC |
+
+#### API
+```rust
+// Create PlatformAudio for microphone/speaker access
+let audio = PlatformAudio::new()?;
+
+// Enumerate and select devices
+for i in 0..audio.recording_devices() as u16 {
+    println!("Mic {}: {}", i, audio.recording_device_name(i));
+}
+audio.set_recording_device(0)?;
+
+// Create audio track for publishing
+let track = LocalAudioTrack::create_audio_track("mic", audio.rtc_source());
+```
+
+## 0.7.39 (2026-05-11)
+
+### Fixes
+
+- fix: Sync inner.enabled state for E2EE manager. - #1073 (@cloudwebrtc)
+- Upgrade protocol to v1.45.8
+
+## 0.7.38 (2026-05-10)
+
+### Fixes
+
+- Bump `rustls-webpki` to 0.103.13, addressing [GHSA-82j2-j2ch-gfr8](https://github.com/advisories/GHSA-82j2-j2ch-gfr8)
+- Fix missing `libwebrtc.jar` for Android builds, harden build scripts
+- fix: derive `simulcasted` from non-deprecated TrackInfo fields - #1052 (@cloudwebrtc)
+- fix race in download_webrtc to reduce flaky build - #1047 (@hechen-eng)
+- Improve WebRTC build scripts and add external_audio_source patch - #1053 (@xianshijing-lk)
+- support SimulateScenario through FFI to improve testing - #1069 (@davidzhao)
+- TEL-464: reduce redundant resampling in audio filter - #1019 (@hechen-eng)
+
+## 0.7.37 (2026-04-23)
+
+### Features
+
+#### Add support for frame level packet trailer
+
+##890 by @chenosaurus
+
+- Add support to attach/parse frame level timestamps & frame ID to VideoTracks as a custom payload trailer.
+- Breaking change in VideoFrame API, must include `frame_metadata` or use VideoFrame::new().
+
+### Fixes
+
+- Add device-info crate and send device_info to telemetry - #982 (@maxheimbrock)
+- Fix data track packet format issue breaking E2EE
+- Fix unbound send queue that can cause latency in data track messages - #1032 (@chenosaurus)
+- Fix for raw stream drop called from non tokio thread like Unity .NET GC - #1016 (@MaxHeimbrock)
+
+## 0.7.36 (2026-04-02)
+
+### Features
+
+- Initial support for data tracks
+
+### Fixes
+
+#### use the bounded buffer for video stream
+
+##956 by @xianshijing-lk
+
+Before this PR, it uses an unbounded buffer for video stream, that will cause multiple problems:
+1, video will be lagged behind if rendering is slow or just wake up from background
+2, it will be out of sync with audio
+
+This PRs provides options to set a bounded buffer for video stream, and use 1 buffer as the default option.
+
+## 0.7.35 (2026-03-31)
+
+### Features
+
+- Expose participant active event, state, and joined at
+
+### Fixes
+
+- Upgrade to thiserror 2
+
+## 0.7.34 (2026-03-22)
+
+### Features
+
+#### E2EE: allow setting key_ring_size and key_derivation_algorithm, update webrtc to m144
+
+##921 by @onestacked
+
+This PR uses [this webrtc-sdk PR](https://github.com/webrtc-sdk/webrtc/pull/224) to configure the KDF.
+
+I've tested this with https://codeberg.org/esoteric_programmer/matrix-jukebox and it is compatible with Element Call.
+
+Fixed: https://github.com/livekit/rust-sdks/issues/796
+
+### Fixes
+
+- Add disconnectReason to Room::close
+- End-to-end testing for video streams
+- Fix H.264 codec matching
+
+#### add bounded buffer to audio_stream, and use 10 frames as the default
+
+##945 by @xianshijing-lk
+
+#### fix PC timeout when connecting with can_subscribe=false
+
+##955 by @s-hamdananwar
+
+When a participant connects with `canSubscribe=false` in their token, the server sends `subscriber_primary=false` in the JoinResponse and does not send a subscriber offer.  This results in `wait_pc_connection` timing out as it is expecting a subscriber PC even when the publisher PC is primary. This PR will skip waiting for subscriber PC when `subscriber_primary=false`.
+
+#### Send client os and os_version from rust
+
+##952 by @MaxHeimbrock
+
+Adds [os_info](https://crates.io/crates/os_info) crate as dependency and sends the data for client connections.
+
+## 0.7.33 (2026-03-13)
+
+### Fixes
+
+#### enhanced build configuration to support macOS and iOS platforms with proper system library linking
+
+##847 by @SchmErik
+
+#### fix video track subscription in single peer connection mode
+
+##914 by @xianshijing-lk

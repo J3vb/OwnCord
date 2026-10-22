@@ -105,3 +105,16 @@ func TestClientPermissionEnumHasModerateMembers(t *testing.T) {
 		t.Error("Client/src/lib/types.ts's Permission enum has no `MODERATE_MEMBERS = 0x400000` line")
 	}
 }
+
+// TestClientPermissionEnumHasManageNicknames is the client half of the
+// MANAGE_NICKNAMES bit (WP 6.4a): the Permission enum must carry the same
+// value the server defines.
+func TestClientPermissionEnumHasManageNicknames(t *testing.T) {
+	raw, err := os.ReadFile("../../Client/src/lib/types.ts")
+	if err != nil {
+		t.Fatalf("read Client/src/lib/types.ts: %v", err)
+	}
+	if !regexp.MustCompile(`(?m)^\s*MANAGE_NICKNAMES\s*=\s*0x800000\s*,?\s*$`).Match(raw) {
+		t.Error("Client/src/lib/types.ts's Permission enum has no `MANAGE_NICKNAMES = 0x800000` line")
+	}
+}

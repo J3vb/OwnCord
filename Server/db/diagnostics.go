@@ -26,15 +26,15 @@ type DiagnosticSnapshot struct {
 }
 
 var diagnosticTables = []string{
-	"api_tokens", "appeals", "attachments", "audit_log", "channel_overrides",
+	"api_tokens", "appeals", "attachments", "audit_log", "category_overrides", "category_user_overrides", "channel_overrides",
 	"channel_retention", "channel_user_overrides", "channels", "dm_open_state",
 	"dm_participants", "emoji", "erasure_jobs", "events", "gif_favorites", "invites",
-	"login_attempts", "message_delivery_receipts", "message_mentions", "message_requests",
+	"login_attempts", "mention_receipts", "message_call_participants", "message_calls", "message_delivery_receipts", "message_group_events", "message_mentions", "message_requests",
 	"messages", "moderation_actions", "nsfw_acknowledgements", "partial_auth_challenges",
 	"pending_totp_enrollments", "push_subscriptions",
 	"rate_lockouts", "reactions", "read_states", "recovery_assists", "recovery_kits",
 	"report_events", "report_evidence", "report_notes", "reports", "retention_runs",
-	"roles", "schema_versions", "sessions", "settings", "sounds", "totp_recovery_codes",
+	"roles", "schema_versions", "sessions", "settings", "sounds", "thread_members", "totp_recovery_codes",
 	"totp_used_codes", "trusted_senders", "user_blocks", "user_storage", "users", "voice_states",
 }
 

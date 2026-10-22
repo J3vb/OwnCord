@@ -1,16 +1,75 @@
 /* ── Member List ── */
 .member-list {
-  width: 240px;
   background: var(--bg-secondary);
   flex-shrink: 0;
   overflow-y: auto;
   padding: 8px 0;
-  transition: width 0.2s;
 }
-.member-list.hidden {
-  width: 0;
-  padding: 0;
-  overflow: hidden;
+/* The right-hand column (3C-6b). MainPage always builds the <aside>; it is
+   hidden until MemberColumn shows it, and holds the panel only while shown. */
+.member-column {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  width: 240px;
+  /* Keeps the chat usable whatever width is stored (MemberColumn sets it). */
+  max-width: max(200px, calc(100vw - 640px));
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-glow, var(--border));
+}
+.member-column-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.member-column-resize:hover,
+.member-column-resize:focus-visible {
+  background: var(--accent-primary, var(--accent));
+}
+/* Below 900px the column is an overlay on the drawer's layer, opened by the
+   header toggle (MemberColumn tracks the same query). */
+@media (max-width: 899px) {
+  .member-column {
+    position: fixed;
+    /* Below the chat header, so its Member List toggle stays clickable. */
+    top: calc(var(--header-height, 48px) + env(safe-area-inset-top));
+    bottom: 0;
+    right: 0;
+    /* Beats the width MemberColumn sets inline for the in-flow column. */
+    width: min(280px, 85vw) !important;
+    max-width: none;
+    z-index: 100;
+    box-shadow: var(--shadow-lg);
+  }
+  .member-column-resize {
+    display: none;
+  }
+}
+.member-column[hidden] {
+  display: none;
+}
+.member-column-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scroll-padding-top: 30px;
+}
+.member-column .member-list {
+  width: auto;
+}
+/* The search row lines up with the 48px chat header beside it. */
+.member-column .member-search-wrap {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  margin-top: -8px;
+  box-shadow: var(--elevation-low);
 }
 .sidebar-members-section {
   border-top: 1px solid var(--border-glow, var(--border));
@@ -19,9 +78,10 @@
   flex-direction: column;
   /* Fills whatever the channel list above leaves, instead of claiming its full
      content height and starving that list (P1-01). The min-height keeps about
-     three member rows in view; past that, the channel list scrolls instead. */
+     three member rows in view; past that, the channel list scrolls instead.
+     The 1.5em over the old 11em is the member search box above the rows. */
   flex: 1 1 0;
-  min-height: calc(var(--font-size, 16px) * 11);
+  min-height: calc(var(--font-size, 16px) * 12.5);
 }
 /* A definite height — restored from storage, dragged, or collapsed — is not a
    share of the column: the section keeps that size and the channel list above
@@ -41,6 +101,17 @@
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  scroll-padding-top: 30px;
+}
+.member-search-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 2px 8px;
+  background: var(--bg-secondary);
+}
+.member-search-wrap .member-search {
+  padding: 2px 8px;
 }
 .sidebar-resize-handle {
   height: 4px;
@@ -242,4 +313,23 @@
 }
 .member-item.offline .mi-avatar {
   filter: saturate(0.3);
+}
+
+@media (max-width: 899px) {
+  .member-column {
+    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) 0;
+  }
+}
+/* Phones: the overlay takes the whole width. */
+@media (max-width: 600px) {
+  .member-column {
+    width: 100% !important;
+  }
+}
+
+@media (pointer: coarse) {
+  .member-item {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
 }

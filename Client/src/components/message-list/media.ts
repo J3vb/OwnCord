@@ -10,6 +10,7 @@ import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
 import { loadPref } from "@lib/preferences";
 import {
+  bindImageMenu,
   clearExternalImageCache,
   fetchExternalImage,
   isSafeUrl,
@@ -18,6 +19,7 @@ import {
   previewExternal,
   recoverEvictedImage,
   renderFailureStatus,
+  saveImageBytes,
 } from "./attachments";
 import {
   admitDerived,
@@ -34,10 +36,21 @@ import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
   MASKED_LINK_REGEX,
+  ANGLE_URL_REGEX,
   SPOILER_REGEX,
   stripUrlTrailingPunctuation,
   URL_REGEX,
 } from "./content-parser";
+import { registerSessionReset } from "@lib/sessionRegistry";
+import {
+  blobImageSize,
+  clearImageSizes,
+  fitImageBox,
+  getImageBox,
+  imageSizeGeneration,
+  setImageBox,
+  type ImageBox,
+} from "./image-sizes";
 import { clearEmbedCaches, focusMessageLink, renderGenericLinkPreview } from "./embeds";
 import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
 
@@ -85,24 +98,7 @@ window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>
   }
 }) as EventListener);
 
-/**
- * Cache of rendered image heights keyed by URL. When virtual scroll rebuilds
- * DOM elements, new images use the cached height as min-height instead of the
- * generic 200px estimate. This prevents height oscillation (200px → actual →
- * 200px → actual …) that causes infinite DOM rebuild loops.
- */
-const imageHeightCache = new Map<string, number>();
-const MAX_IMAGE_HEIGHT_CACHE = 500;
 let mediaCacheGeneration = 0;
-
-function cacheImageHeight(url: string, h: number): void {
-  if (imageHeightCache.size >= MAX_IMAGE_HEIGHT_CACHE) {
-    // Evict oldest entry (first inserted key)
-    const firstKey = imageHeightCache.keys().next().value;
-    if (firstKey !== undefined) imageHeightCache.delete(firstKey);
-  }
-  imageHeightCache.set(url, h);
-}
 
 /** Check if a URL originates from the Klipy CDN. */
 function isKlipyUrl(url: string): boolean {
@@ -126,37 +122,41 @@ function isGifUrl(url: string): boolean {
 
 // -- YouTube ------------------------------------------------------------------
 
-/** Extract YouTube video ID from various YouTube URL formats. */
+/** Hosts whose URLs name a YouTube video; every one embeds through the
+ *  existing www.youtube.com player, so the CSP needs no new origin. */
+const YOUTUBE_HOSTS: ReadonlySet<string> = new Set([
+  "www.youtube.com",
+  "youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+  "www.youtube-nocookie.com",
+  "youtube-nocookie.com",
+]);
+
+/** Path prefixes that carry the video ID as the next segment. */
+const YOUTUBE_ID_PREFIXES: readonly string[] = ["/embed/", "/shorts/", "/live/"];
+
+/** Extract YouTube video ID from various YouTube URL formats. A `t=`/`start=`
+ *  time offset is a query parameter and never part of the ID. */
 export function extractYouTubeId(url: string): string | null {
   try {
     const parsed = new URL(url);
-    // youtube.com/watch?v=ID
-    if (
-      (parsed.hostname === "www.youtube.com" || parsed.hostname === "youtube.com") &&
-      parsed.pathname === "/watch"
-    ) {
-      return parsed.searchParams.get("v");
-    }
     // youtu.be/ID
     if (parsed.hostname === "youtu.be") {
       const id = parsed.pathname.slice(1);
       return id.length > 0 ? id : null;
     }
-    // youtube.com/embed/ID
-    if (
-      (parsed.hostname === "www.youtube.com" || parsed.hostname === "youtube.com") &&
-      parsed.pathname.startsWith("/embed/")
-    ) {
-      const id = parsed.pathname.slice(7);
-      return id.length > 0 ? id : null;
+    if (!YOUTUBE_HOSTS.has(parsed.hostname)) return null;
+    // youtube.com/watch?v=ID
+    if (parsed.pathname === "/watch") {
+      return parsed.searchParams.get("v");
     }
-    // youtube.com/shorts/ID
-    if (
-      (parsed.hostname === "www.youtube.com" || parsed.hostname === "youtube.com") &&
-      parsed.pathname.startsWith("/shorts/")
-    ) {
-      const id = parsed.pathname.slice(8);
-      return id.length > 0 ? id : null;
+    // youtube.com/embed/ID, /shorts/ID, /live/ID
+    for (const prefix of YOUTUBE_ID_PREFIXES) {
+      if (parsed.pathname.startsWith(prefix)) {
+        const id = parsed.pathname.slice(prefix.length).split("/")[0] ?? "";
+        return id.length > 0 ? id : null;
+      }
     }
   } catch {
     // Invalid URL
@@ -172,9 +172,10 @@ const YT_TITLE_CACHE_MAX = 200;
 
 export function clearMediaCaches(): void {
   mediaCacheGeneration += 1;
-  imageHeightCache.clear();
+  clearImageSizes();
   ytTitleCache.clear();
 }
+void registerSessionReset("media:caches", clearMediaCaches, { phase: "cache" }); // app-lifetime
 
 /** Strict pattern for YouTube video IDs (alphanumeric, hyphens, underscores). */
 const YOUTUBE_ID_RE = /^[\w-]{1,20}$/;
@@ -322,21 +323,29 @@ export function setInlineImageDecorator(fn: ((url: string) => HTMLElement | null
 
 /** Render a direct image/GIF URL as an inline image with lightbox. */
 export function renderInlineImage(url: string): HTMLDivElement {
-  // Use cached height from a previous render if available, otherwise 200px.
-  // This prevents height oscillation when virtual scroll rebuilds DOM.
-  const cachedH = imageHeightCache.get(url);
-  const minH = cachedH ?? 200;
+  // Reserve the box a previous render (this session or an earlier one) or a
+  // header sniff measured; otherwise 200px until the bytes say. Either way a
+  // virtual-scroll rebuild starts at the right height and nothing shifts on load.
   const host = displayHost(url);
 
-  const wrap = createElement("div", {
-    class: "msg-image",
-    style: `max-width: 400px; min-height: ${minH}px;`,
-  });
+  const wrap = createElement("div", { class: "msg-image" });
+  const reserveFallback = (): void => {
+    wrap.style.cssText = "max-width: 400px; min-height: 200px;";
+  };
+  const reserve = (box: ImageBox): void => {
+    wrap.style.cssText = `width: ${box.w}px; max-width: 100%; aspect-ratio: ${box.w} / ${box.h};`;
+  };
+  // A reset between mount and load must not write this URL into the new session.
+  const generation = imageSizeGeneration();
+  const cachedBox = getImageBox(url);
+  if (cachedBox !== undefined) reserve(cachedBox);
+  else reserveFallback();
 
   // No src yet: the bytes come from the external-content broker as a
   // same-origin blob: URL, never from the webview loading `url` itself.
   const img = createElement("img", {
     alt: contentText("image.alt", { host }),
+    decoding: "async",
     style: "max-width: 100%; max-height: 350px; border-radius: 4px; cursor: pointer;",
   });
   // Hidden until its bytes load: a loading or refused image is neither shown
@@ -374,7 +383,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // holding a 200px empty reservation that can oscillate with virtual scroll.
   const showFailure = (kind: ExternalContentFailure): void => {
     log.error("Image failed to load", { url, failure: kind });
-    wrap.style.minHeight = "";
+    wrap.style.cssText = "max-width: 400px;";
     // A refusal (blocked destination, wrong type, oversized, expired) is kept
     // distinct from a loaded image; the failure line never reads as success.
     wrap.dataset.mediaState = "failed";
@@ -389,22 +398,38 @@ export function renderInlineImage(url: string): HTMLDivElement {
   // re-fetch, land in the same typed failed state.
   img.addEventListener("error", () => showFailure("unavailable"));
 
-  // On load: clear min-height reservation and cache the natural rendered
-  // height so future virtual-scroll rebuilds start at the correct size.
-  // Measure synchronously — deferring to rAF loses the race with
-  // ResizeObserver which can rebuild the DOM before the rAF fires.
-  // Once per load: a GIF freeze/unfreeze changes src and would re-run it (a
-  // forced layout each time). load() re-arms it for a retry.
+  // On load: the reserved box already holds the image, so nothing is measured
+  // (no forced layout) unless the file disagrees with it, which happens for a
+  // header the sniffer could not read or an EXIF-rotated JPEG; then the real
+  // size replaces the box. Once per load: a GIF freeze/unfreeze changes src and
+  // would re-run it. load() re-arms it for a retry.
   const onLoad = (): void => {
     log.debug("Image loaded", { url: url.slice(0, 80), naturalH: img.naturalHeight });
     // A retry that succeeds hands keyboard focus from the retry to the image.
     const refocus = failure.contains(document.activeElement);
-    wrap.style.minHeight = "";
     wrap.dataset.mediaState = "loaded";
     img.hidden = false;
     failure.hidden = true;
-    const h = wrap.offsetHeight;
-    if (h > 0) cacheImageHeight(url, h);
+    const actual = fitImageBox(img.naturalWidth, img.naturalHeight);
+    const reserved = getImageBox(url);
+    if (actual !== null) {
+      // The decoded size is oriented by the browser: it is the measured box,
+      // and replaces a sniffed one (an EXIF-rotated header reads swapped).
+      if (
+        reserved === undefined ||
+        reserved.measured !== true ||
+        reserved.w !== actual.w ||
+        reserved.h !== actual.h
+      ) {
+        reserve(actual);
+        setImageBox(url, { ...actual, measured: true }, generation);
+      }
+    } else if (reserved === undefined) {
+      // No intrinsic size (a host that does not report one): measure the box.
+      wrap.style.minHeight = "";
+      const measured = fitImageBox(wrap.offsetWidth, wrap.offsetHeight);
+      if (measured !== null) setImageBox(url, { ...measured, measured: true }, generation);
+    }
     if (refocus) img.focus();
   };
   img.addEventListener("load", onLoad, { once: true });
@@ -436,20 +461,39 @@ export function renderInlineImage(url: string): HTMLDivElement {
   img.addEventListener("click", () => {
     openImageLightbox(img.src, contentText("image.alt", { host }), { url });
   });
+  // Save asks the broker for the bytes again rather than reading img.src: a
+  // frozen GIF shows a one-frame data: URL there, and the save keeps the
+  // animation.
+  bindImageMenu({
+    img,
+    link: url,
+    full: () => fetchExternalImage({ url }),
+    save: () => fetchExternalImage({ url }).then((src) => saveImageBytes(src ?? img.src, url)),
+  });
 
   function load(): void {
     // A retry rechecks consent and the current partition: a revoked grant
     // makes loadExternalImage refuse again with nothing fetched.
     // A visible retry stays mounted (and focused) while it re-asks.
     wrap.dataset.mediaState = "loading";
-    wrap.style.minHeight = `${cachedH ?? 200}px`;
+    const box = getImageBox(url);
+    if (box !== undefined) reserve(box);
+    else reserveFallback();
     retry.setAttribute("aria-disabled", "true");
     if (img.hasAttribute("src")) img.removeAttribute("src");
     img.addEventListener("load", onLoad, { once: true });
-    void loadExternalImage({ url }).then((result) => {
+    void loadExternalImage({ url }, { sniff: true }).then((result) => {
       if (!result.ok) {
         showFailure(result.failure);
         return;
+      }
+      // The sniffed size reserves the exact box before the first byte decodes.
+      const sniffed = blobImageSize(result.value);
+      const exact = sniffed === undefined ? null : fitImageBox(sniffed.width, sniffed.height);
+      if (exact !== null) {
+        // A measured box from an earlier load wins over the header's reading.
+        const held = setImageBox(url, exact, generation);
+        reserve(held ?? exact);
       }
       img.src = result.value;
     });
@@ -466,12 +510,14 @@ export function renderInlineImage(url: string): HTMLDivElement {
 export function extractUrls(content: string): string[] {
   // Skip URLs inside code blocks, and inside masked links: `[text](url)` is a
   // deliberate act of hiding the address, so it gets no embed either. The
-  // same goes for `||spoilers||`: a hidden address must not be previewed.
+  // same goes for `||spoilers||`: a hidden address must not be previewed, and
+  // for `<https://…>`, which is how an author asks for no embed.
   const withoutCodeBlocks = content
     .replace(CODE_BLOCK_REGEX, "")
     .replace(INLINE_CODE_REGEX, "")
     .replace(MASKED_LINK_REGEX, "")
-    .replace(SPOILER_REGEX, "");
+    .replace(SPOILER_REGEX, "")
+    .replace(ANGLE_URL_REGEX, "");
   const matches = withoutCodeBlocks.match(URL_REGEX);
   // Strip the same trailing sentence punctuation the linkifier strips (see
   // stripUrlTrailingPunctuation), so the embed pipeline and the rendered

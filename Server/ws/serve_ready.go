@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"slices"
+	"time"
 
 	"github.com/coder/websocket"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
-	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // buildAuthOK constructs the auth_ok server→client message.
@@ -20,13 +21,22 @@ import (
 //   - "none"   — fresh connection or full re-sync (no resume)
 //   - "buffer" — resume served from the in-memory ring buffer
 //   - "db"     — resume served from the persistent EventStore (Phase B Step 7)
-func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, replaySource string) []byte {
+func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, roleIDs []int64, replaySource string) []byte {
 	var avatarVal any
 	if user.Avatar != nil {
 		avatarVal = *user.Avatar
 	}
 
 	serverName, motd := h.getCachedSettings(ctx)
+
+	// Only the user's own auth_ok carries the expiry instant; everyone else is
+	// told the status went to null. Both fields are guarded together, so an
+	// expired status the expirer has not cleared yet is not handed back.
+	customStatus, expiresAt := storedCustomStatus(user.CustomStatus, user.CustomStatusExpiresAt, time.Now())
+	var expiresAtVal any
+	if expiresAt != "" {
+		expiresAtVal = expiresAt
+	}
 
 	return buildJSON(map[string]any{
 		"type": MsgTypeAuthOK,
@@ -36,12 +46,18 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				"username": user.Username,
 				"avatar":   avatarVal,
 				"role":     roleName,
+				// Every held role, top first (WP 6.3c); role is the top's name.
+				"role_ids": roleIDsOrEmpty(roleIDs),
 				// The signed-in user's own profile fields. Null when unset;
 				// display_name falls back to username client-side, and about
 				// is what the "edit my profile" form pre-fills from.
 				"display_name":  user.DisplayName,
 				"about":         user.About,
-				"custom_status": user.CustomStatus,
+				"banner":        user.BannerPath(),
+				"banner_color":  user.BannerColor,
+				"custom_status": customStatus,
+				// RFC 3339 instant the custom status clears itself, or null.
+				"custom_status_expires_at": expiresAtVal,
 				// The user's own true status — invisible included. Only their
 				// own auth_ok ever carries it, which is the whole point: the
 				// picker has to render what they chose, while every other
@@ -69,7 +85,13 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 //     (readyMembers), which may predate that write, since users.status does
 //     not move the member generation. A connection that has not stamped one
 //     yet shows as offline, like no connection; its connect presence is
-//     announced after the stamp, so the viewer still converges.
+//     announced after the stamp, so the viewer still converges. The live
+//     custom status is a second guard: when the connection stamped a presence
+//     with no custom status, the row's text is stale (a reconnect, resume or
+//     bare status flip cleared it live up to a second before the expirer
+//     clears the row, and the expirer then sends no null frame because the
+//     live text is already nil), so it is blanked here. A live status past
+//     its expiry is blanked too, for the second before the expirer clears it.
 //  3. An invisible member is offline to everyone but themselves
 //     (db.StatusForViewer). The owner keeps their true state so their own
 //     picker renders the status they actually chose.
@@ -80,10 +102,16 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 // ready payloads: each element is copied, never changed in place.
 func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) iter.Seq2[int, db.MemberSummary] {
 	live := h.livePresences()
+	now := time.Now()
 	return func(yield func(int, db.MemberSummary) bool) {
 		for i, m := range members {
-			if status := live[m.ID].status; status != "" {
-				m.Status = status
+			if lp := live[m.ID]; lp.status != "" {
+				m.Status = lp.status
+				if visibleCustomStatus(lp.customStatus, lp.customStatusExpiresAt, now) == nil {
+					// Only ever to nil: the splice contract, and the shared
+					// encoded roster is untouched (m is this iteration's copy).
+					m.CustomStatus = nil
+				}
 			} else {
 				m.Status = db.StatusOffline
 				m.CustomStatus = nil
@@ -137,94 +165,67 @@ func presentDMStatuses(dmChannels []db.DMChannelInfo, viewerID int64, liveStatus
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	refs := make([]permissions.ChannelRef, len(channels))
 	for i := range channels {
-		refs[i] = permissions.ChannelRef{ID: channels[i].ID, Type: channels[i].Type, Archived: channels[i].Archived}
+		refs[i] = channelRef(&channels[i])
 	}
 	return refs
 }
 
-// permOverrides maps a db override map to the checker's override map, carrying
-// BOTH layers — the role override and the per-user override — so the checker
-// resolves the full order (base -> role -> user) rather than half of it.
-func permOverrides(overrides map[int64]db.ChannelOverride) map[int64]permissions.ChannelOverride {
-	out := make(map[int64]permissions.ChannelOverride, len(overrides))
-	for id, o := range overrides {
-		out[id] = permOverride(o)
-	}
-	return out
+// readyAffordances resolves one ready channel's subject from the member's
+// grants (the OR of their held roles, every held role's override in that
+// channel and the member layer) and the caller's timeout verdict (resolved
+// once per payload via subjectFor, administrators exempt), then asks
+// affordancesFor. Zero grants fail closed to all false.
+func readyAffordances(grants permissions.MemberGrants, ch *db.Channel, timedOut bool) channelAffordances {
+	sub := grants.Subject(ch.AuthorityID())
+	sub.Channel = channelRef(ch)
+	sub.TimedOut = timedOut
+	return affordancesFor(sub)
 }
 
-// channelCanSend reports whether a user with the given role and per-channel
-// override may post in a channel of chanType — the ready payload's can_send
-// affordance, so the client can pre-disable the composer without a
-// round-trip. It is permissions.CanSendMessage, the same predicate the send
-// path enforces, so the affordance cannot drift from the rule (S-12).
-//
-// timedOut is the caller's current timeout verdict (via subjectFor),
-// threaded through as a plain bool so the lookup happens once per ready
-// payload instead of once per channel — a timed-out user must not see
-// can_send: true anywhere (OC-0434).
-func channelCanSend(role *db.Role, o db.ChannelOverride, chanType string, timedOut bool) bool {
-	if role == nil {
-		return false
-	}
-	return permissions.CanSendMessage(permissions.Subject{
-		RolePerms: role.Permissions,
-		Override:  permOverride(o),
-		Channel:   permissions.ChannelRef{Type: chanType},
-		TimedOut:  timedOut,
-	}) == nil
+// channelCanSend is the ready payload's can_send verdict for a member's grants
+// and channel type; a one-line delegation to affordancesFor (S-12, OC-0434).
+func channelCanSend(grants permissions.MemberGrants, chanType string, timedOut bool) bool {
+	return readyAffordances(grants, &db.Channel{Type: chanType}, timedOut).CanSend
 }
 
-// channelCanModerateVoice is the ready payload's can_moderate_voice
-// affordance (B9 Q5): whether the caller may mute, deafen, move or
-// disconnect voice participants in this channel. It is
-// permissions.AuthorizeVoiceModerator — the one authorizer voiceModTarget
-// enforces in the target's channel (base MUTE_MEMBERS, then effective
-// READ|MUTE_MEMBERS after both override layers, i.e. CanModerateVoice) — so
-// the client's controls follow the effective permission, not the base bit.
-// Target rank and move capacity are per-target and stay server-side refusals.
-func channelCanModerateVoice(role *db.Role, o db.ChannelOverride, chanType string) bool {
-	if role == nil {
-		return false
-	}
-	return permissions.AuthorizeVoiceModerator(permissions.Subject{
-		RolePerms: role.Permissions,
-		Override:  permOverride(o),
-		Channel:   permissions.ChannelRef{Type: chanType},
-	}) == nil
+// channelCanModerateVoice is the ready payload's can_moderate_voice verdict
+// (B9 Q5); a one-line delegation to affordancesFor.
+func channelCanModerateVoice(grants permissions.MemberGrants, chanType string) bool {
+	return readyAffordances(grants, &db.Channel{Type: chanType}, false).CanModerateVoice
 }
 
 // channelRef maps one db channel to the predicates' db-agnostic ChannelRef.
 func channelRef(ch *db.Channel) permissions.ChannelRef {
-	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW}
-}
-
-// permOverride maps one db override (both layers) to the checker's type.
-func permOverride(o db.ChannelOverride) permissions.ChannelOverride {
-	return permissions.ChannelOverride{Allow: o.Allow, Deny: o.Deny, UserAllow: o.UserAllow, UserDeny: o.UserDeny}
+	return permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived, NSFW: ch.NSFW,
+		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 }
 
 // readyVisibleChannels resolves the channels the user may see for the ready
-// payload, returning the per-channel override map it fetched alongside them so
-// buildReady can reuse it for the can_send affordance without a second query.
-func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, map[int64]db.ChannelOverride, error) {
+// payload, returning the member grants it fetched alongside them so buildReady
+// can reuse them for the can_send affordance without a second query. role is
+// the member's effective role (top role identity, OR of every held mask).
+func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, channels []db.Channel) ([]db.Channel, permissions.MemberGrants, error) {
 	// Filter channels by READ_MESSAGES through the single permissions.Checker
 	// predicate shared with REST ListVisibleChannels and reconnect replay
-	// filtering (computeAllowedChannels). The overrides map is fetched once and
+	// filtering (computeAllowedChannels). The grants are fetched once and
 	// reused below for the per-channel can_send affordance. DM channels are
 	// excluded by the checker — they are delivered via the dm_channels field.
-	overrides := map[int64]db.ChannelOverride{}
-	if role != nil && !permissions.HasAdmin(role.Permissions) {
-		var oErr error
-		overrides, oErr = database.GetChannelOverridesFor(ctx, role.ID, userID)
-		if oErr != nil {
-			return nil, nil, fmt.Errorf("buildReady GetChannelOverridesFor: %w", oErr)
+	var grants permissions.MemberGrants
+	if role != nil {
+		grants.Perms = role.Permissions
+		if !permissions.HasAdmin(role.Permissions) {
+			var oErr error
+			grants, oErr = database.GetMemberGrants(ctx, userID)
+			if oErr != nil {
+				return nil, permissions.MemberGrants{}, fmt.Errorf("buildReady GetMemberGrants: %w", oErr)
+			}
+			grants.Perms = role.Permissions
 		}
 	}
 	var visibleChannels []db.Channel
 	if role != nil {
 		// Nil role = zero access (fail closed), handled by skipping the filter.
-		visibleIDs := h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
+		visibleIDs := h.permChecker.VisibleChannelIDs(grants, channelRefs(channels))
 		for i := range channels {
 			if visibleIDs[channels[i].ID] {
 				visibleChannels = append(visibleChannels, channels[i])
@@ -234,68 +235,45 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 	if visibleChannels == nil {
 		visibleChannels = []db.Channel{}
 	}
-	return visibleChannels, overrides, nil
+	return visibleChannels, grants, nil
 }
 
-// readyChannelPayloads builds the ready payload's channel objects — one entry
-// per visible channel, with the per-user unread fields folded in. ackMap
-// carries the caller's own acknowledgement per NSFW-labelled channel id
-// (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
-// gets one) reads as false, which is correct either way — nothing needs
-// acknowledging there. timedOut is the caller's current timeout verdict,
-// fed into every channel's can_send — see channelCanSend (OC-0434).
-func readyChannelPayloads(visibleChannels []db.Channel, overrides map[int64]db.ChannelOverride, unreadMap map[int64]db.ChannelUnread, role *db.Role, ackMap map[int64]bool, timedOut bool) []map[string]any {
-	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
-	for i := range visibleChannels {
-		entry := map[string]any{
-			"id":       visibleChannels[i].ID,
-			"name":     visibleChannels[i].Name,
-			"type":     visibleChannels[i].Type,
-			"category": visibleChannels[i].Category,
-			"topic":    visibleChannels[i].Topic,
-			"position": visibleChannels[i].Position,
-			// can_send drives the client's composer affordance. It mirrors
-			// MessageService.checkSendPermission for non-DM channels: base role
-			// ± channel overrides must grant READ|SEND, and announcement
-			// channels additionally require MANAGE_MESSAGES; admins bypass. The
-			// server remains the authority — this only pre-disables the UI.
-			"can_send": channelCanSend(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type, timedOut),
-			// Voice-moderation affordance (B9 Q5), same shape and refresh
-			// path as can_send — see channelCanModerateVoice.
-			"can_moderate_voice": channelCanModerateVoice(role, overrides[visibleChannels[i].ID], visibleChannels[i].Type),
-			// Cooldown in seconds (0 = off). Lets the composer disable itself
-			// for the window instead of accepting a send the server refuses
-			// with SLOW_MODE. The server still enforces.
-			"slow_mode": visibleChannels[i].SlowMode,
-			// Age-gate flag. The server enforces content behaviour on a
-			// flagged channel now (B5-7, permissions.CanReadContent); see
-			// nsfw_acknowledged below for the caller's own consent state.
-			"nsfw": visibleChannels[i].NSFW,
-			// Whether THIS caller has acknowledged the label (B5-7). Always
-			// present, like nsfw itself — false for an unlabelled channel,
-			// where it means nothing but must not be omitted (two different
-			// meanings for "absent" is exactly what B5-7's other always-shipped
-			// fields avoid).
-			"nsfw_acknowledged": ackMap[visibleChannels[i].ID],
-			// Voice capacity limits (0 = unlimited) — the same values the
-			// voice-join path enforces with CHANNEL_FULL / VIDEO_LIMIT.
-			"voice_max_users": visibleChannels[i].VoiceMaxUsers,
-			"voice_max_video": visibleChannels[i].VoiceMaxVideo,
-		}
-		if visibleChannels[i].Type == "text" || visibleChannels[i].Type == "announcement" {
-			if u, ok := unreadMap[visibleChannels[i].ID]; ok {
-				entry["unread_count"] = u.UnreadCount
-				entry["last_message_id"] = u.LastMessageID
-				entry["mention_count"] = u.MentionCount
-			} else {
-				entry["unread_count"] = 0
-				entry["last_message_id"] = 0
-				entry["mention_count"] = 0
-			}
-		}
-		channelPayloads = append(channelPayloads, entry)
+// readyThreads is ready.threads (WP 6.9c): the viewer's followed open threads
+// whose parent is in visibleChannels (an NSFW parent only once acknowledged), newest activity first, capped at
+// service.MaxFollowedThreads. A follow row for a parent the viewer can no
+// longer read stays in the table and is simply left out here, so regaining the
+// parent brings the thread back. nil (the key is omitted) when the hub has no
+// thread service, and also on a failed read: the client keeps what it had
+// instead of being told it follows nothing.
+func (h *Hub) readyThreads(ctx context.Context, userID int64, visibleChannels []db.Channel, nsfwAck map[int64]bool) *[]readyThreadPayload {
+	svc := h.threadHub.svc
+	if svc == nil {
+		return nil
 	}
-	return channelPayloads
+	readable := make(map[int64]struct{}, len(visibleChannels))
+	for i := range visibleChannels {
+		// A thread's name discloses its starter, so an NSFW parent the viewer
+		// has not acknowledged lists none of its threads, as thread_changed
+		// withholds them.
+		if visibleChannels[i].NSFW && !nsfwAck[visibleChannels[i].ID] {
+			continue
+		}
+		readable[visibleChannels[i].ID] = struct{}{}
+	}
+	followed, err := svc.Followed(ctx, userID, readable)
+	if err != nil {
+		slog.Warn("ws: ready followed threads read failed, omitting", "user_id", userID, "err", err)
+		return nil
+	}
+	out := make([]readyThreadPayload, 0, len(followed))
+	for i := range followed {
+		f := &followed[i]
+		out = append(out, readyThreadPayload{
+			Thread: &f.Thread, LastMessageID: f.LastMessageID, LastReadMessageID: f.LastReadMessageID,
+			UnreadCount: f.UnreadCount, MentionCount: f.MentionCount,
+		})
+	}
+	return &out
 }
 
 // readyDMChannels loads the user's open DM channels and reconciles them with
@@ -384,7 +362,7 @@ func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, u
 // Per docs/protocol.md, channels include unread_count and last_message_id per
 // user plus the channelPayloadFrom fields (slow_mode, nsfw, voice_* caps);
 // archived is the one stored field deliberately not shipped.
-func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role) (*readyFields, error) {
+func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userID int64, role *db.Role, feat clientFeatures) (*readyFields, error) {
 	channels, err := database.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("buildReady ListChannels: %w", err)
@@ -399,7 +377,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, fmt.Errorf("buildReady ListMembers: %w", err)
 	}
 
-	visibleChannels, overrides, err := h.readyVisibleChannels(ctx, database, userID, role, channels)
+	visibleChannels, grants, err := h.readyVisibleChannels(ctx, database, userID, role, channels)
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +388,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
 	}
 
-	// Current timeout verdict (OC-0434): channelCanSend's Subject must
+	// Current timeout verdict (OC-0434): readyAffordances' Subject must
 	// carry the same TimedOut refreshChannelVisibilityAffordances resolves for a
 	// live socket (via the identical subjectFor), or a just-timed-out user's
 	// fresh-connect ready payload ships can_send: true on every channel right
@@ -423,9 +401,22 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, fmt.Errorf("buildReady subjectFor: %w", err)
 	}
 
+	timeouts, err := h.readyMemberTimeouts(ctx, userID, sub)
+	if err != nil {
+		return nil, err
+	}
+
+	categories, err := h.readyCategories(ctx, database, sub)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build protocol-compliant channel objects (strip extra fields).
 	ackMap := readyNSFWAcknowledgements(ctx, database, userID, visibleChannels)
-	channelPayloads := readyChannelPayloads(visibleChannels, overrides, unreadMap, role, ackMap, sub.TimedOut)
+	// The lock is cosmetic: a failed read must not fail ready (nothing is
+	// private then, as on the single-channel frames).
+	privacy := h.privacySnapshot(ctx)
+	channelPayloads := readyChannelPayloads(feat.filterChannels(visibleChannels), grants, unreadMap, ackMap, sub.TimedOut, privacy)
 
 	// Load open DM channels for this user. Hoisted above the voice-state
 	// filter below so DM channel IDs can seed visibleSet — permissions.Checker
@@ -438,7 +429,6 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	}
 
 	voiceStates := h.readyVoiceStates(ctx, database, visibleChannels, dmChannels, userID)
-
 	serverName, motd := h.getCachedSettings(ctx)
 
 	notices, err := readyNotices(ctx, database, userID)
@@ -449,51 +439,28 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	if h.db != nil {
 		retryFloorMS = h.readers.Ready.MessageDeliveryFloorMS()
 	}
-
+	threads := h.readyThreads(ctx, userID, visibleChannels, ackMap)
 	return &readyFields{
 		head: readyHead{
-			Capabilities: map[string]any{
-				"message_deduplication":        true,
-				"message_retry_window_seconds": int64(service.MessageRetryWindow.Seconds()),
-				"message_retry_floor_ms":       retryFloorMS,
-			},
-			Channels:   channelPayloads,
-			DMChannels: dmChannels,
+			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil),
+			Categories:   categories,
+			Channels:     channelPayloads,
+			DMChannels:   dmChannels,
+
+			MemberTimeouts: timeouts.entries,
 		},
 		tail: readyTail{
 			MOTD:        motd,
 			Notices:     notices,
 			Roles:       roles,
 			ServerName:  serverName,
+			Threads:     threads,
 			VoiceStates: voiceStates,
 		},
-		roster:   roster,
-		viewerID: userID,
+		roster:       roster,
+		viewerID:     userID,
+		timeoutsFull: timeouts.full,
 	}, nil
-}
-
-// readyNoticePayload is one row of ready's notices slot (B5-9): an
-// unacknowledged warning. Never the actor, never the report link.
-type readyNoticePayload struct {
-	ID        int64  `json:"id"`
-	Kind      string `json:"kind"`
-	Reason    string `json:"reason"`
-	CreatedAt string `json:"created_at"`
-}
-
-// readyNotices resolves the connecting user's unacknowledged warnings for
-// ready's notices slot, always as a non-nil (possibly empty) slice so the
-// wire payload never carries a bare `null`.
-func readyNotices(ctx context.Context, database ReadySnapshotReader, userID int64) ([]readyNoticePayload, error) {
-	rows, err := database.ListUnacknowledgedWarnings(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]readyNoticePayload, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, readyNoticePayload{ID: r.ID, Kind: r.Kind, Reason: r.Reason, CreatedAt: r.CreatedAt})
-	}
-	return out, nil
 }
 
 func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {
@@ -535,12 +502,17 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// Look up role for permission-filtered ready payload.
 	// Fail closed: if the role lookup fails, disconnect rather than serving
 	// a permissive ready payload with nil role (BUG-094).
-	userRole, roleErr := database.GetRoleByID(ctx, c.user.RoleID)
-	if roleErr != nil || userRole == nil {
-		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID, "err", roleErr)
+	// The same read refreshUserSnapshot just made, so auth_ok.role_ids and the
+	// ready permissions come from one snapshot.
+	heldRoles := c.held
+	if heldRoles == nil {
+		slog.Error("ws: role lookup failed, disconnecting", "user_id", c.userID, "role_id", c.user.RoleID)
 		_ = conn.Close(websocket.StatusInternalError, "role lookup failed")
-		return fmt.Errorf("role lookup failed for user %d: %w", c.userID, roleErr)
+		return fmt.Errorf("role lookup failed for user %d", c.userID)
 	}
+	// Top role identity with the OR of every held mask: what the ready
+	// payload's permission-filtered fields resolve from.
+	userRole := heldRoles.Effective()
 
 	// Register BEFORE writing auth_ok + ready so broadcasts that arrive during
 	// the write window are queued in the client's send buffer instead of
@@ -552,9 +524,9 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	}
 	// U4: an atomic re-check under h.mu. A device connecting between the check
 	// above and here would otherwise be displaced; refuse instead.
-	unlockVoice := h.voiceLock(c.userID)
-	refused := h.registerNow(c, allowedChannelIDs)
-	unlockVoice()
+	txn := h.begin(c.userID)
+	refused := h.registerNow(c, allowedChannelIDs, txn)
+	txn.end()
 	if refused {
 		refuseWake(ctx, conn, c)
 		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
@@ -581,7 +553,10 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// Scoped to the resume-fallback path — a pure fresh connect (lastSeq==0)
 	// inherits no subscriptions; channel_focus and voice_join re-check live.
 	if c.lastSeq > 0 {
-		if fresh, err := database.GetUserByID(ctx, c.userID); err != nil || fresh == nil || fresh.RoleID != c.user.RoleID {
+		// Compared by the held-role SET: adding or removing a role that is not
+		// the member's top role changes what they may read without moving the
+		// users.role_id mirror (WP 6.3c).
+		if fresh, err := database.GetMemberRoles(ctx, c.userID); err != nil || fresh == nil || !sameRoleSet(fresh.IDs, heldRoles.IDs) {
 			//nolint:contextcheck // revokeUnreadableChannels takes no context by design (admin HubBroadcaster interface).
 			h.revokeUnreadableChannels(c.userID)
 		}
@@ -593,7 +568,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 
 	// Fresh connection or replay fallback: full auth_ok + ready flow.
 	slog.Info("ws sending auth_ok", "user_id", c.userID, "username", c.user.Username, "role", c.roleName)
-	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, "none")); err != nil {
+	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, c.roleIDs, "none")); err != nil {
 		slog.Warn("ws: failed to send auth_ok", "user_id", c.userID, "err", err)
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")
@@ -602,8 +577,8 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// This ready carries every member's status, so it settles any presence
 	// resync owed (P5-S03). Cleared before the build, so a drop after it
 	// marks the user again; restored if the ready never reaches the client.
-	owedResync := h.setPresenceResync(c.userID, false)
-	ready, readyErr := h.buildReady(ctx, database, c.userID, userRole)
+	owedResync := h.takeOwedResync(c)
+	ready, readyErr := h.buildFreshReady(ctx, database, c, userRole)
 	release() // the write below is the peer's pace, not the database's
 	if err := h.sendFreshReady(ctx, conn, c, ready, readyErr, owedResync); err != nil {
 		return err
@@ -619,12 +594,13 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 // taken again for registerNow; every row deleter also drops the grace entry,
 // so the gap is safe.
 func (h *Hub) freshConnectSettleVoice(ctx context.Context, c *Client) {
-	defer h.voiceLock(c.userID)()
+	txn := h.begin(c.userID)
+	defer txn.end()
 	// RT-8: a fresh connect ends any parked grace window (registerNow drops
 	// it); a replay-failure fallback may inherit one only while its row
 	// still exists.
 	if c.lastSeq == 0 {
-		h.voiceGrace.take(c.userID)
+		txn.takeParked(0)
 	} else {
 		h.dropOrphanVoiceGrace(ctx, c.userID)
 	}
@@ -633,14 +609,14 @@ func (h *Hub) freshConnectSettleVoice(ctx context.Context, c *Client) {
 	// session must be removed so the ready payload doesn't include it and
 	// other clients see a voice_leave broadcast.
 	if vs, err := h.voice.State(ctx, c.userID); err == nil && vs != nil {
-		h.freshConnectCleanStaleVoice(ctx, c, vs)
+		h.freshConnectCleanStaleVoice(ctx, txn, c, vs)
 	}
 }
 
 // freshConnectCleanStaleVoice removes the voice state left behind by this
 // user's previous session, unless that session is the still-registered
 // connection this one is about to inherit from.
-func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db.VoiceState) {
+func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c *Client, vs *db.VoiceState) {
 	// Replay-failure fallback (lastSeq > 0): registerNow below transfers
 	// the still-registered old connection's live voice state into this
 	// client. Deleting the DB row here — and the LiveKit participant,
@@ -650,7 +626,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	// memory-without-row. Keep the row so ready stays consistent. If the
 	// old client unregisters before registerNow runs, the transfer is
 	// skipped and the next sweep reaps the then-truly-stale row.
-	if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.getVoiceChID() == vs.ChannelID {
+	if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.voice.channel() == vs.ChannelID {
 		slog.Info("ws fresh connect: keeping voice state for replay-failure fallback",
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
@@ -661,15 +637,15 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	// OC-0270 closes for the still-registered case). Any other fresh connect or
 	// mismatched grace entry means the call is over: stop the window so its
 	// timer cannot later re-run finishVoiceLeave over a cleaned row.
-	if c.lastSeq > 0 && h.voiceGrace.has(c.userID, vs.ChannelID) {
+	if c.lastSeq > 0 && h.voiceReg.voiceGrace.has(c.userID, vs.ChannelID) {
 		slog.Info("ws fresh connect: keeping graced voice state",
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
 	}
-	h.voiceGrace.take(c.userID)
+	txn.takeParked(0)
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)
-	if _, delErr := h.voice.LeaveIfMatch(ctx, c.userID, vs.ChannelID, vs.JoinedAt); delErr != nil {
+	if _, delErr := txn.deleteRow(ctx, vs.ChannelID, vs.JoinedAt); delErr != nil {
 		slog.Warn("ws fresh connect: LeaveVoiceChannelIfMatch failed", "err", delErr)
 	}
 	// The DB row is gone, but the still-registered OLD *Client (if any) is
@@ -684,9 +660,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	// own replacedVoiceChID re-election later becomes a redundant no-op
 	// (clearVoiceState finds nothing left to clear), not a conflict.
 	if old := h.GetClient(c.userID); old != nil {
-		if _, cleared := old.clearVoiceStateIfMatch(vs.ChannelID); cleared {
-			h.pubsub.Unsubscribe(old, VoiceTopic(vs.ChannelID))
-		}
+		txn.clearIfChannel(old, vs.ChannelID)
 	}
 	h.updateKeyHolder(vs.ChannelID)
 	h.broadcastVoiceEvent(ctx, vs.ChannelID, c.userID, buildVoiceLeave(vs.ChannelID, c.userID))
@@ -694,4 +668,19 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, c *Client, vs *db
 	// stale participant — the identity includes joinedAt, so a quick rejoin's
 	// new session has a different identity and won't be removed.
 	h.removeLiveKitParticipantAsync(ctx, vs.ChannelID, c.userID, vs.JoinedAt, "ws fresh connect:")
+}
+
+// roleIDsOrEmpty is ids as a non-nil slice, so auth_ok.user.role_ids is always
+// an array.
+func roleIDsOrEmpty(ids []int64) []int64 {
+	if ids == nil {
+		return []int64{}
+	}
+	return ids
+}
+
+// sameRoleSet reports whether a and b name the same roles, whatever their
+// order (a position change reorders a member's roles without changing them).
+func sameRoleSet(a, b []int64) bool {
+	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
 }

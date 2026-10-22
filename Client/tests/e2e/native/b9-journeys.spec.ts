@@ -98,6 +98,10 @@ test("native privacy journey: consent gates the broker, a warm re-entry does not
         await nativeLoginAndReady(page);
         await waitForMessages(page);
         await expect(channelItem(page, "privacy-other")).toBeVisible();
+        // An uncategorized channel sorts above the seeded categories, so it is
+        // the one selected on login; the journey starts in "general".
+        await channelItem(page, "general").click();
+        await waitForMessages(page);
         // REST rides the Rust TOFU tunnel pinned to the server, so the
         // renderer's only first-party destination is that tunnel's loopback
         // host. start_http_proxy reuses a live tunnel, returning its port.
@@ -178,6 +182,8 @@ test("native privacy journey: consent gates the broker, a warm re-entry does not
         await page.locator("button[aria-label='Settings']").click();
         await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
         await page.locator(".settings-nav-item.danger").click();
+        // Log Out asks first.
+        await page.locator("[data-testid='logout-confirm']").click();
         await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
         await page.waitForTimeout(1_500);
         const afterLogout = await state(page);

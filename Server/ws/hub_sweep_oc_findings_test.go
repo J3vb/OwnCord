@@ -20,7 +20,7 @@ import (
 // voice_join.go commits the voice_states row (JoinVoiceChannelIfCapacity)
 // before it calls c.setVoiceState (BUG-088's ordering). If the stale-voice
 // sweep's h.clients scan runs in that exact window, it snapshots the joiner
-// as a ghost (c.getVoiceChID() is still 0, the row already says otherwise).
+// as a ghost (c.voice.channel() is still 0, the row already says otherwise).
 // The joiner's c.setVoiceState can then land — narrowing the client's state
 // to agree with the very row about to be deleted — before the sweep's delete
 // loop reaches that entry. sweepStaleVoiceJoinRaceHook reproduces that
@@ -49,21 +49,21 @@ func TestSweepStaleVoiceStates_JoinCatchesUpDuringDeleteWindow(t *testing.T) {
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	h.clients[uid] = c
-	// c.voiceChID is still 0 here — exactly like the joiner's client at the
+	// c.voice.voiceChID is still 0 here — exactly like the joiner's client at the
 	// instant between JoinVoiceChannelIfCapacity's commit and setVoiceState.
 
 	sweepStaleVoiceJoinRaceHook = func(userID, channelID int64, joinedAt string) {
 		if userID == uid {
 			// Simulates voiceJoinPersist's c.setVoiceState landing inside
 			// the sweep's snapshot-to-delete window.
-			c.setVoiceState(channelID, joinedAt)
+			c.voice.setState(channelID, joinedAt)
 		}
 	}
 	defer func() { sweepStaleVoiceJoinRaceHook = nil }()
 
 	h.sweepStaleVoiceStates(context.Background())
 
-	gotChID, gotToken := c.getVoiceState()
+	gotChID, gotToken := c.voice.state()
 	if gotChID != chID || gotToken != vs.JoinedAt {
 		t.Fatalf("client voice state = (%d, %q) after the sweep raced a catching-up join, want (%d, %q) untouched",
 			gotChID, gotToken, chID, vs.JoinedAt)
@@ -114,8 +114,8 @@ func TestCleanupVoiceForChannel_NotifiesReadAudienceOfArchivedChannel(t *testing
 	h.clients[userA] = cA
 	h.clients[userB] = cB
 	h.clients[bystander] = cBystander
-	cA.setVoiceState(chID, "tok-a")
-	cB.setVoiceState(chID, "tok-b")
+	cA.voice.setState(chID, "tok-a")
+	cB.voice.setState(chID, "tok-b")
 
 	// Mirrors both production callers: archive before evicting.
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET archived = 1 WHERE id = ?`, chID); err != nil {

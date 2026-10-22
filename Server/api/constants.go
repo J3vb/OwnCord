@@ -1,10 +1,12 @@
 package api
 
 import (
+	"regexp"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // ─── Rate limits ────────────────────────────────────────────────────────────
@@ -98,15 +100,6 @@ const (
 // ─── Timeouts & TTLs ────────────────────────────────────────────────────────
 
 const (
-	// rateLimiterCleanupInterval is how often stale rate-limiter entries are
-	// reaped. Cleanup is per-key-window-aware since item 6 (round 3 review;
-	// see auth/ratelimit.go's entry.window doc comment) — a single sweep
-	// correctly retires a short-window key (login attempts, minutes) and a
-	// long one (service/appeal.go's 24h-per-user cap) alike, so there is no
-	// longer a single server-wide horizon constant to keep in sync with the
-	// longest caller.
-	rateLimiterCleanupInterval = 5 * time.Minute
-
 	// hstsMaxAgeSeconds is the max-age value for the Strict-Transport-Security header.
 	hstsMaxAgeSeconds = 31536000
 )
@@ -124,6 +117,13 @@ var bodyCapExemptPrefixes = []string{
 	// plus the handler's re-wrap enforce it.
 	"/api/v1/users/me/avatar",
 }
+
+// bodyCapExemptPattern names the upload route that carries an id in the middle
+// of its path, so a prefix cannot: POST /api/v1/dms/{id}/icon. The exemption
+// covers only that route (POST, the escaped path), which enforces the avatar
+// envelope itself (route-scoped MaxBodySize(avatarMaxBodySize) plus the
+// handler's re-wrap). The WAF rules 1004 and 900006 in waf.go mirror it.
+var bodyCapExemptPattern = regexp.MustCompile(`^/api/v1/dms/[0-9]+/icon$`)
 
 // ─── Size limits ────────────────────────────────────────────────────────────
 
@@ -216,6 +216,32 @@ const (
 	// minute. Lower than the attachment limit: every accepted upload fans a
 	// user_update out to every connected session and orphans the previous file.
 	avatarUploadRateLimitPerMinute = 5
+
+	// maxBannerFileBytes is the largest profile banner image accepted (1 MiB),
+	// and maxBannerWidth by maxBannerHeight the largest it may measure (WP
+	// 6.11b). The client crops to 5:2 and scales down before uploading.
+	maxBannerFileBytes = 1 << 20
+	maxBannerWidth     = 1920
+	maxBannerHeight    = 960
+
+	// maxBannerColorLen is the longest valid banner colour (#rrggbb).
+	maxBannerColorLen = 7
+
+	// bannerUploadRateLimitPerMinute is the avatar's rate: every accepted banner
+	// fans a user_update out to every connected session.
+	bannerUploadRateLimitPerMinute = avatarUploadRateLimitPerMinute
+
+	// maxUserNoteLen is the rune cap on a private profile note (migration 069).
+	maxUserNoteLen = service.MaxUserNoteRunes
+
+	// userNoteMaxBody bounds a note PUT body. maxUserNoteLen*4 bytes is the raw
+	// bound the service enforces; JSON escaping can take up to six bytes per
+	// raw byte (\u00XX), plus room for the JSON envelope.
+	userNoteMaxBody = maxUserNoteLen*4*6 + 512
+
+	// userNoteRateLimitPerMinute is the maximum note writes per client per
+	// minute. The client debounces at 600 ms, so steady typing stays under it.
+	userNoteRateLimitPerMinute = 30
 
 	// maxRequestIDLen bounds a client-supplied X-Request-Id. chi's
 	// middleware.RequestID adopts that header verbatim, and the value then

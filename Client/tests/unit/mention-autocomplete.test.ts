@@ -26,6 +26,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { resetMessagesStore, setMessages } from "../../src/stores/messages.store";
+import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
 import type { MessageResponse } from "../../src/lib/types";
 import { Permission } from "../../src/lib/types";
 
@@ -58,7 +59,12 @@ function signInAs(role: string, permissions: number): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   setRoles([{ id: 1, name: role, color: null, permissions }]);
   channelsStore.flush();
 }
@@ -79,6 +85,10 @@ function historyRow(id: number, userId: number, channelId = 1): MessageResponse 
     timestamp: "2026-03-15T09:00:00Z",
   };
 }
+
+afterEach(() => {
+  resetServerCapabilities();
+});
 
 beforeEach(() => {
   seedMembers();
@@ -498,7 +508,6 @@ describe("composer integration", () => {
       channelName: "general",
       onSend,
       onTyping: vi.fn(),
-      onEditMessage: vi.fn(),
     });
     input.mount(container);
   });
@@ -587,7 +596,7 @@ describe("composer integration", () => {
     press("Escape");
     expect(popupEl()).toBeNull();
     press("Enter");
-    expect(onSend).toHaveBeenCalledWith("hey @al", null, []);
+    expect(onSend).toHaveBeenCalledWith("hey @al", null, [], [], false);
   });
 
   it("navigates with the arrow keys before inserting", () => {
@@ -622,7 +631,7 @@ describe("composer integration", () => {
 
     expect(popupEl()).toBeNull();
     press("Enter");
-    expect(onSend).toHaveBeenCalledWith("@ali", null, []);
+    expect(onSend).toHaveBeenCalledWith("@ali", null, [], [], false);
   });
 
   // The caret-move resync must skip the keys the popup owns: a real browser
@@ -635,7 +644,7 @@ describe("composer integration", () => {
 
     expect(popupEl()).toBeNull();
     press("Enter");
-    expect(onSend).toHaveBeenCalledWith("hey @al", null, []);
+    expect(onSend).toHaveBeenCalledWith("hey @al", null, [], [], false);
   });
 
   // Likewise for the arrows: setQuery resets the highlight to row 0, so a
@@ -684,5 +693,168 @@ describe("composer integration", () => {
     expect(ta.hasAttribute("aria-expanded")).toBe(false);
     expect(ta.hasAttribute("aria-controls")).toBe(false);
     expect(ta.hasAttribute("aria-activedescendant")).toBe(false);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Role mentions and id tokens (WP 6.3e)
+// -----------------------------------------------------------------------------
+
+/** The signed-in role plus two others: one pingable by anyone, one not. */
+function seedRoleRoster(permissions: number): void {
+  signInAs("member", permissions);
+  setRoles([
+    { id: 1, name: "member", color: null, permissions },
+    { id: 2, name: "Mods", color: "#ff0000", permissions: 0, mentionable: true },
+    { id: 3, name: "Staff", color: null, permissions: 0, mentionable: false },
+    { id: 4, name: "Legacy", color: null, permissions: 0 },
+  ]);
+  channelsStore.flush();
+}
+
+describe("role suggestions", () => {
+  it("offers mentionable roles", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    const got = filterMentionSuggestions("");
+    // Roles come after every user.
+    expect(got.map((s) => s.token)).toEqual(["Alan", "alice", "Bob", "carol", "Mods"]);
+    const mods = got[4]!;
+    expect(mods.kind).toBe("role");
+    expect(mods.roleId).toBe(2);
+    expect(mods.userId).toBeNull();
+    expect(mods.detail).toBe("Role");
+    expect(filterMentionSuggestions("mo").map((s) => s.token)).toEqual(["Mods"]);
+    expect(filterMentionSuggestions("ods").map((s) => s.token)).toEqual(["Mods"]);
+  });
+
+  it("hides others without MENTION_EVERYONE", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    expect(filterMentionSuggestions("st")).toEqual([]);
+    expect(filterMentionSuggestions("leg")).toEqual([]);
+    seedRoleRoster(Permission.SEND_MESSAGES | Permission.MENTION_EVERYONE);
+    expect(filterMentionSuggestions("st").map((s) => s.token)).toEqual(["Staff"]);
+    expect(filterMentionSuggestions("leg").map((s) => s.token)).toEqual(["Legacy"]);
+  });
+
+  it("offers no role on a server without id mentions", () => {
+    seedRoleRoster(Permission.SEND_MESSAGES | Permission.MENTION_EVERYONE);
+    expect(filterMentionSuggestions("").map((s) => s.kind)).not.toContain("role");
+  });
+
+  it("does not offer a role named like a broadcast word", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    signInAs("member", Permission.SEND_MESSAGES);
+    setRoles([
+      { id: 1, name: "member", color: null, permissions: Permission.SEND_MESSAGES },
+      { id: 8, name: "Everyone", color: null, permissions: 0, mentionable: true },
+    ]);
+    channelsStore.flush();
+    expect(filterMentionSuggestions("every")).toEqual([]);
+  });
+});
+
+describe("composer id tokens", () => {
+  let container: HTMLDivElement;
+  let input: ReturnType<typeof createMessageInput>;
+  let onSend: Mock<MessageInputOptions["onSend"]>;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    onSend = vi.fn<MessageInputOptions["onSend"]>();
+    input = createMessageInput({ channelId: 1, channelName: "general", onSend, onTyping: vi.fn() });
+    input.mount(container);
+  });
+
+  afterEach(() => {
+    input.destroy?.();
+    container.remove();
+  });
+
+  const ta = (): HTMLTextAreaElement => container.querySelector("textarea")!;
+
+  function type(value: string): void {
+    ta().value = value;
+    ta().selectionStart = value.length;
+    ta().selectionEnd = value.length;
+    ta().dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function press(k: string): void {
+    ta().dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+  }
+
+  it("sends id tokens only with the capability", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    type("hey @al");
+    press("Enter"); // picks Alan (id 2)
+    expect(ta().value).toBe("hey @Alan ");
+    type("hey @Alan  and @mo");
+    // typing replaced the draft text; the pick is still tracked by its span
+    press("Enter"); // picks Mods
+    press("Enter"); // sends
+    expect(onSend).toHaveBeenCalledWith("hey <@2>  and <@&2>", null, [], [], false);
+  });
+
+  it("sends plain @name without the capability", () => {
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    type("hey @al");
+    press("Enter");
+    press("Enter");
+    expect(onSend).toHaveBeenCalledWith("hey @Alan", null, [], [], false);
+  });
+
+  it("sends an edited picked span as plain text", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    type("hey @al");
+    press("Enter");
+    expect(ta().value).toBe("hey @Alan ");
+    type("hey @Alana ");
+    press("Enter");
+    expect(onSend).toHaveBeenCalledWith("hey @Alana", null, [], [], false);
+  });
+
+  it("forgets the picks once the message is sent", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    type("@al");
+    press("Enter");
+    press("Enter");
+    expect(onSend).toHaveBeenLastCalledWith("<@2>", null, [], [], false);
+    // Past the double-send debounce.
+    const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000);
+    type("@Alan typed by hand");
+    press("Enter");
+    later.mockRestore();
+    expect(onSend).toHaveBeenLastCalledWith("@Alan typed by hand", null, [], [], false);
+  });
+
+  it("carries the picks through a draft capture and restore", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    type("@al");
+    press("Enter");
+    const draft = input.getDraft();
+    const other = document.createElement("div");
+    document.body.appendChild(other);
+    const second = createMessageInput({
+      channelId: 2,
+      channelName: "x",
+      onSend,
+      onTyping: vi.fn(),
+    });
+    second.mount(other);
+    second.restoreDraft(draft);
+    const box = other.querySelector("textarea")!;
+    box.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    expect(onSend).toHaveBeenCalledWith("<@2>", null, [], [], false);
+    second.destroy?.();
+    other.remove();
   });
 });

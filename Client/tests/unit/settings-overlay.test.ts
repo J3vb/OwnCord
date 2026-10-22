@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { ApiClientError } from "../../src/lib/api";
 // The modules in SettingsOverlay's graph that install an app-lifetime window
 // listener at load. The re-import below reuses these instances, so the
 // vi.resetModules() does not install a second copy of each listener.
@@ -15,6 +16,11 @@ const APP_LIFETIME_MODULES = [
   ["@components/message-list/media", media],
   ["@lib/channel-mutes", channelMutes],
 ] as const;
+
+const mockAppVersion = vi.hoisted(() => vi.fn());
+vi.mock("../../src/features/whats-new/appVersion", () => ({
+  readAppVersion: mockAppVersion,
+}));
 
 // Mock logger
 vi.mock("@lib/logger", () => ({
@@ -34,13 +40,22 @@ vi.mock("@lib/logger", () => ({
 const mockSetTheme = vi.fn();
 const mockUiState = vi.hoisted(() => ({
   settingsOpen: false,
-  settingsTab: null as "Safety" | null,
+  settingsTab: null as "Safety" | "Notifications" | null,
+  settingsTabSeq: 0,
+}));
+const uiSubscriptions = vi.hoisted(() => ({
+  all: [] as Array<{ sel: (s: Record<string, unknown>) => unknown; listener: () => void }>,
 }));
 vi.mock("@stores/ui.store", () => ({
   uiStore: {
     getState: () => mockUiState,
     subscribe: () => () => {},
-    subscribeSelector: vi.fn((_sel: unknown, _listener: unknown) => () => {}),
+    subscribeSelector: vi.fn(
+      (sel: (s: Record<string, unknown>) => unknown, listener: () => void) => {
+        uiSubscriptions.all.push({ sel, listener });
+        return () => {};
+      },
+    ),
   },
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
@@ -95,6 +110,7 @@ describe("SettingsOverlay", () => {
     onChangePassword: vi.fn().mockResolvedValue(undefined),
     onUpdateProfile: vi.fn().mockResolvedValue(undefined),
     onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
+    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
     onLogout: vi.fn(),
     onDeleteAccount: vi.fn().mockResolvedValue(undefined),
     onStatusChange: vi.fn(),
@@ -117,9 +133,12 @@ describe("SettingsOverlay", () => {
     document.body.appendChild(container);
     localStorage.clear();
     vi.clearAllMocks();
+    mockAppVersion.mockResolvedValue("1.2.3-test");
     mockAuthState.user = { id: 1, username: "testuser", totp_enabled: false, display_name: null };
     mockUiState.settingsOpen = false;
     mockUiState.settingsTab = null;
+    mockUiState.settingsTabSeq = 0;
+    uiSubscriptions.all.length = 0;
   });
 
   afterEach(() => {
@@ -147,10 +166,10 @@ describe("SettingsOverlay", () => {
     expect(tabNames).toEqual([
       "Account",
       "Appearance",
-      "Notifications",
-      "Text & Images",
       "Accessibility",
       "Voice & Video",
+      "Text & Images",
+      "Notifications",
       "Keybinds",
       "Advanced",
       "Diagnostics & logs",
@@ -300,7 +319,8 @@ describe("SettingsOverlay", () => {
     getTab(container, 1).click();
 
     const themeOptions = container.querySelectorAll(".theme-opt");
-    expect(themeOptions.length).toBe(4);
+    // Four palettes plus Sync with computer.
+    expect(themeOptions.length).toBe(5);
 
     const midnight = themeOptions[2] as HTMLElement;
     midnight.click();
@@ -364,12 +384,12 @@ describe("SettingsOverlay", () => {
   it("renders notification toggles", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 2).click();
+    getTab(container, 5).click();
 
-    // Desktop, flash, @everyone, message sounds, the call sound (D2) and the
-    // voice UI sounds (DP-40).
+    // Desktop, flash, @everyone, the unread badge, message sounds, the call sound (D2) and the
+    // voice UI sounds (DP-40), plus the seven per-sound switches (WP M-8).
     const toggles = container.querySelectorAll(".toggle");
-    expect(toggles.length).toBe(6);
+    expect(toggles.length).toBe(14);
 
     overlay.destroy?.();
   });
@@ -377,7 +397,7 @@ describe("SettingsOverlay", () => {
   it("persists notification toggle state", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 2).click();
+    getTab(container, 5).click();
 
     const toggles = container.querySelectorAll(".toggle");
     const suppressToggle = toggles[2] as HTMLElement;
@@ -394,7 +414,7 @@ describe("SettingsOverlay", () => {
   it("renders Voice & Video tab with device selectors", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 5).click();
+    getTab(container, 3).click();
 
     const selects = container.querySelectorAll("select.form-input");
     // input device, output device, camera quality, screen share quality,
@@ -416,7 +436,7 @@ describe("SettingsOverlay", () => {
   it("renders voice sensitivity meter bar", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 5).click();
+    getTab(container, 3).click();
 
     // Sensitivity is now a draggable meter bar, not a slider.
     const meterBar = container.querySelector(".mic-meter-bar") as HTMLElement;
@@ -430,7 +450,7 @@ describe("SettingsOverlay", () => {
   it("persists audio device selection on change", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 5).click();
+    getTab(container, 3).click();
 
     const selects = container.querySelectorAll("select.form-input");
     const inputSelect = selects[0] as HTMLSelectElement;
@@ -444,7 +464,7 @@ describe("SettingsOverlay", () => {
   it("toggles echo cancellation", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
-    getTab(container, 5).click();
+    getTab(container, 3).click();
 
     const echoToggle = container.querySelector(
       ".toggle[aria-label='Echo Cancellation']",
@@ -472,13 +492,99 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("calls onLogout when logout button clicked", () => {
+  it("asks before logging out: one click only opens the prompt, confirming logs out", () => {
     const overlay = createSettingsOverlay(defaultOptions);
     overlay.mount(container);
 
     clickEl(container.querySelector(".settings-nav-item.danger"));
-    expect(defaultOptions.onLogout).toHaveBeenCalled();
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+    const dialog = document.querySelector("[data-testid='logout-confirm-dialog']");
+    expect(dialog?.textContent).toContain("Are you sure you want to log out?");
 
+    clickEl(document.querySelector("[data-testid='logout-confirm']"));
+    expect(defaultOptions.onLogout).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).toBeNull();
+
+    overlay.destroy?.();
+  });
+
+  it("mounts the Log Out prompt inside the settings overlay so it stacks above it", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    overlay.open();
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    const dialog = document.querySelector("[data-testid='logout-confirm-dialog']");
+    expect(dialog?.closest(".settings-overlay")).not.toBeNull();
+
+    overlay.destroy?.();
+  });
+
+  it("Escape with the Log Out prompt open closes only the prompt", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    overlay.open();
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).toBeNull();
+    expect(defaultOptions.onClose).not.toHaveBeenCalled();
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(defaultOptions.onClose).toHaveBeenCalled();
+
+    overlay.destroy?.();
+  });
+
+  it("cancelling the Log Out prompt does not log out", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    clickEl(document.querySelector("[data-testid='logout-cancel']"));
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).toBeNull();
+
+    overlay.destroy?.();
+  });
+
+  it("destroying the overlay with the Log Out prompt open removes it and does not log out", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+
+    clickEl(container.querySelector(".settings-nav-item.danger"));
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).not.toBeNull();
+    overlay.destroy?.();
+
+    expect(document.querySelector("[data-testid='logout-confirm-dialog']")).toBeNull();
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+    // Nothing left to answer: a later Escape or click has no handler to run.
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(defaultOptions.onLogout).not.toHaveBeenCalled();
+  });
+
+  it("shows the app version in small text under Log Out", async () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    await vi.waitFor(() => {
+      expect(container.querySelector(".settings-sidebar-version")?.textContent).toBe(
+        "Version 1.2.3-test",
+      );
+    });
+    const sidebar = container.querySelector(".settings-sidebar")!;
+    const logout = sidebar.querySelector(".settings-sidebar-logout")!;
+    expect(logout.nextElementSibling?.className).toContain("settings-sidebar-version");
+    overlay.destroy?.();
+  });
+
+  it("leaves the nav without a version when the host reports none", async () => {
+    mockAppVersion.mockResolvedValueOnce(null);
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(container.querySelector(".settings-sidebar-version")).toBeNull();
     overlay.destroy?.();
   });
 
@@ -703,6 +809,130 @@ describe("SettingsOverlay", () => {
       expect(nameError?.getAttribute("role")).toBe("alert");
     });
 
+    overlay.destroy?.();
+  });
+
+  // WP 3C-9: the rename and display-name inputs carry the new limits.
+  function openUsernameEditor(onUpdateProfile = defaultOptions.onUpdateProfile) {
+    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
+    overlay.mount(container);
+    overlay.open();
+    (container.querySelector(".account-field-edit") as HTMLElement).click();
+    const editInput = container.querySelector<HTMLInputElement>(
+      '[data-testid="username-edit-input"]',
+    )!;
+    const saveBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === "Save",
+    ) as HTMLElement;
+    const error = container.querySelector<HTMLElement>("#username-edit-error")!;
+    return { overlay, editInput, saveBtn, error };
+  }
+
+  it("bounds the rename input and shows the rule", () => {
+    const { overlay, editInput } = openUsernameEditor();
+    expect(editInput.maxLength).toBe(32);
+    const hintId = editInput.getAttribute("aria-describedby")!.split(" ").at(-1)!;
+    const hint = container.querySelector<HTMLElement>(`#${hintId}`)!;
+    expect(hint.textContent).toContain("2–32 characters");
+    overlay.destroy?.();
+  });
+
+  it("does not send a rename the server's rules refuse (over the limit, reserved, bad character)", () => {
+    const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
+    const { overlay, editInput, saveBtn, error } = openUsernameEditor(onUpdateProfile);
+    for (const [typed, message] of [
+      ["x".repeat(40), "Username must be 2–32 characters."],
+      ["Here", "Username is reserved."],
+      ["has space", "Username may only contain letters, digits, '_', '.' and '-'."],
+    ] as const) {
+      editInput.value = typed;
+      saveBtn.click();
+      expect(error.textContent).toBe(message);
+      expect(editInput.value).toBe(typed);
+    }
+    expect(onUpdateProfile).not.toHaveBeenCalled();
+    overlay.destroy?.();
+  });
+
+  it("shows the server's refusal of a rename inline and keeps the typed name", async () => {
+    const onUpdateProfile = vi
+      .fn()
+      .mockRejectedValue(new ApiClientError(400, "INVALID_INPUT", "username is reserved"));
+    const { overlay, editInput, saveBtn, error } = openUsernameEditor(onUpdateProfile);
+    editInput.value = "passes-client";
+    saveBtn.click();
+    await vi.waitFor(() => expect(error.textContent).toBe("Username is reserved"));
+    expect(editInput.value).toBe("passes-client");
+    expect(editInput.getAttribute("aria-invalid")).toBe("true");
+    overlay.destroy?.();
+  });
+
+  it("bounds the display name and does not send one over the limit", async () => {
+    const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
+    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
+    overlay.mount(container);
+    overlay.open();
+    const nameInput = container.querySelector<HTMLInputElement>(
+      '[data-testid="display-name-input"]',
+    )!;
+    expect(nameInput.maxLength).toBe(64); // 2 units per character; the 32-character cap is by count
+    const hint = nameInput.nextElementSibling as HTMLElement;
+    expect(hint.textContent).toBe("Up to 32 characters, on one line.");
+
+    const over = "n".repeat(50);
+    nameInput.value = over;
+    container.querySelector<HTMLElement>('[data-testid="profile-save-btn"]')!.click();
+    expect(onUpdateProfile).not.toHaveBeenCalled();
+    expect(hint.textContent).toBe("Display name must be at most 32 characters.");
+    expect(container.querySelector('[data-testid="profile-error"]')?.textContent).toBe(
+      "Check the highlighted field.",
+    );
+    expect(nameInput.value).toBe(over);
+    overlay.destroy?.();
+  });
+
+  it("sends the display name with runs of spaces collapsed, as the server stores it", async () => {
+    const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
+    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
+    overlay.mount(container);
+    overlay.open();
+    container.querySelector<HTMLInputElement>('[data-testid="display-name-input"]')!.value =
+      "  Ada    Lovelace ";
+    container.querySelector<HTMLElement>('[data-testid="profile-save-btn"]')!.click();
+    await vi.waitFor(() => expect(onUpdateProfile).toHaveBeenCalled());
+    expect(onUpdateProfile.mock.calls[0]![0].display_name).toBe("Ada Lovelace");
+    overlay.destroy?.();
+  });
+
+  it("shows the server's display-name refusal under the field and keeps the typed name", async () => {
+    const onUpdateProfile = vi
+      .fn()
+      .mockRejectedValue(
+        new ApiClientError(
+          400,
+          "INVALID_INPUT",
+          "display_name must not contain control characters or line breaks",
+        ),
+      );
+    const overlay = createSettingsOverlay({ ...defaultOptions, onUpdateProfile });
+    overlay.mount(container);
+    overlay.open();
+    const nameInput = container.querySelector<HTMLInputElement>(
+      '[data-testid="display-name-input"]',
+    )!;
+    const hint = nameInput.nextElementSibling as HTMLElement;
+    nameInput.value = "Ada";
+    container.querySelector<HTMLElement>('[data-testid="profile-save-btn"]')!.click();
+    await vi.waitFor(() =>
+      expect(hint.textContent).toBe(
+        "Display_name must not contain control characters or line breaks",
+      ),
+    );
+    // Said once, under the field; the status line points at it.
+    expect(container.querySelector('[data-testid="profile-error"]')?.textContent).toBe(
+      "Check the highlighted field.",
+    );
+    expect(nameInput.value).toBe("Ada");
     overlay.destroy?.();
   });
 
@@ -1052,7 +1282,7 @@ describe("SettingsOverlay", () => {
     expect(content.getAttribute("aria-labelledby")).toBe("settings-tab-account");
 
     // "Text & Images" — the slugged id drops the ampersand
-    getTab(container, 3).click();
+    getTab(container, 4).click();
     expect(content.getAttribute("aria-labelledby")).toBe("settings-tab-text-images");
 
     overlay.destroy?.();
@@ -1383,7 +1613,7 @@ describe("SettingsOverlay", () => {
     const fontSlider = container.querySelector(".settings-slider") as HTMLInputElement;
     expect(fontSlider).not.toBeNull();
 
-    getTab(container, 2).click(); // Notifications — discards the Appearance pane
+    getTab(container, 5).click(); // Notifications — discards the Appearance pane
     expect(container.contains(fontSlider)).toBe(false);
 
     document.documentElement.style.removeProperty("--font-size");
@@ -1444,13 +1674,13 @@ describe("SettingsOverlay", () => {
         },
       });
       overlay.mount(container);
-      expect(tabNames().slice(0, 3)).toEqual(["Account", "Safety", "Appearance"]);
+      expect(tabNames().slice(0, 3)).toEqual(["Account", "Privacy & Safety", "Appearance"]);
 
       const tab = container.querySelector<HTMLButtonElement>("#settings-tab-safety")!;
       tab.click();
 
       expect(tab.getAttribute("aria-selected")).toBe("true");
-      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Safety");
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Privacy & Safety");
       expect(container.querySelector("[data-testid='inert-safety']")).not.toBeNull();
       expect(container.querySelector(".settings-content")?.getAttribute("aria-labelledby")).toBe(
         "settings-tab-safety",
@@ -1490,6 +1720,68 @@ describe("SettingsOverlay", () => {
       overlay.mount(container);
       expect(container.querySelector(".settings-nav-item.active")?.id).toBe("settings-tab-safety");
       expect(container.querySelector("[data-testid='inert-safety']")).not.toBeNull();
+      overlay.destroy?.();
+    });
+
+    describe("a tab requested while Settings is already open", () => {
+      /** Fire the tab-request subscription: the one selecting `settingsTabSeq`. */
+      function requestTab(tab: "Notifications" | "Safety"): void {
+        mockUiState.settingsTab = tab;
+        mockUiState.settingsTabSeq += 1;
+        const sub = uiSubscriptions.all.find(
+          ({ sel }) => sel({ settingsTabSeq: 7, settingsOpen: false, settingsTab: null }) === 7,
+        );
+        expect(sub).toBeDefined();
+        sub!.listener();
+      }
+      const active = (): string | null =>
+        container.querySelector(".settings-nav-item.active")?.id ?? null;
+
+      it("switches to Notifications", () => {
+        mockUiState.settingsOpen = true;
+        const overlay = createSettingsOverlay(defaultOptions);
+        overlay.mount(container);
+        expect(active()).toBe("settings-tab-account");
+
+        requestTab("Notifications");
+
+        expect(active()).toBe("settings-tab-notifications");
+        overlay.destroy?.();
+      });
+
+      it("switches again when the user has tabbed away since the same request", () => {
+        mockUiState.settingsOpen = true;
+        const overlay = createSettingsOverlay(defaultOptions);
+        overlay.mount(container);
+        requestTab("Notifications");
+        clickEl(container.querySelector("#settings-tab-appearance"));
+        expect(active()).toBe("settings-tab-appearance");
+
+        requestTab("Notifications");
+
+        expect(active()).toBe("settings-tab-notifications");
+        overlay.destroy?.();
+      });
+
+      it("ignores a request while the panel is closed (show() reads it on open)", () => {
+        const overlay = createSettingsOverlay(defaultOptions);
+        overlay.mount(container);
+
+        requestTab("Notifications");
+
+        expect(active()).toBe("settings-tab-account");
+        overlay.destroy?.();
+      });
+    });
+
+    it("opens straight onto Notifications when asked", () => {
+      mockUiState.settingsOpen = true;
+      mockUiState.settingsTab = "Notifications";
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      expect(container.querySelector(".settings-nav-item.active")?.id).toBe(
+        "settings-tab-notifications",
+      );
       overlay.destroy?.();
     });
 
@@ -1555,6 +1847,7 @@ describe("SettingsOverlay - mount() with settingsOpen already true", () => {
       onChangePassword: vi.fn().mockResolvedValue(undefined),
       onUpdateProfile: vi.fn().mockResolvedValue(undefined),
       onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
+      onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
       onLogout: vi.fn(),
       onDeleteAccount: vi.fn().mockResolvedValue(undefined),
       onStatusChange: vi.fn(),

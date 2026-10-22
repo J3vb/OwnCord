@@ -101,6 +101,37 @@ func TestMessageRequest_BannedRecipientGetsNoRequest(t *testing.T) {
 	}
 }
 
+// TestFirstContact_NonActiveRecipientNoRequest: a recipient who is not an
+// active account gets no request row, no trust row and no frame, and the send
+// itself still succeeds for the sender.
+func TestFirstContact_NonActiveRecipientNoRequest(t *testing.T) {
+	for _, status := range []string{db.RegistrationPending, db.RegistrationDenied} {
+		t.Run(status, func(t *testing.T) {
+			database, svc := newMessageRequestFixture(t)
+			setRegistrationStatus(t, database, 2, status)
+
+			result, err := svc.Messages.SendMessage(context.Background(), SendMessageParams{
+				ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
+			})
+			if err != nil {
+				t.Fatalf("SendMessage: %v", err)
+			}
+			if len(result.RequestCreatedFor) != 0 || len(result.OpenedDMFor) != 0 {
+				t.Errorf("RequestCreatedFor = %v, OpenedDMFor = %v, want none", result.RequestCreatedFor, result.OpenedDMFor)
+			}
+			if n := countRows(t, database, `SELECT COUNT(*) FROM message_requests`); n != 0 {
+				t.Errorf("message_requests rows = %d, want 0", n)
+			}
+			if n := countRows(t, database, `SELECT COUNT(*) FROM trusted_senders`); n != 0 {
+				t.Errorf("trusted_senders rows = %d, want 0", n)
+			}
+			if slices.Contains(result.ParticipantIDs, 2) {
+				t.Error("non-active recipient is in the live-delivery audience")
+			}
+		})
+	}
+}
+
 // TestMessageRequest_AcceptDoesNotResurrectDeletedContent: the sender deletes
 // the held message before the recipient ever accepts; acceptance opens the
 // channel but must not touch the messages table at all.

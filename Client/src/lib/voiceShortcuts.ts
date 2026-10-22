@@ -23,9 +23,6 @@ export const GLOBAL_DEAFEN_VK_PREF = "globalDeafenVk";
 export const DEFAULT_GLOBAL_MUTE_VK = 0x4d; // M
 export const DEFAULT_GLOBAL_DEAFEN_VK = 0x44; // D
 
-/** The in-app camera shortcut (Ctrl+Shift+V); a global binding may not claim it. */
-const RESERVED_CAMERA_VK = 0x56; // V
-
 export interface GlobalShortcutVks {
   mute: number;
   deafen: number;
@@ -81,6 +78,11 @@ const VK_BY_CODE: ReadonlyMap<string, number> = (() => {
 
 const BINDABLE_VKS: ReadonlySet<number> = new Set(VK_BY_CODE.values());
 
+/** Whether `vk` is a key a shortcut may bind. */
+export function isBindableVk(vk: number): boolean {
+  return BINDABLE_VKS.has(vk);
+}
+
 /** The VK for a captured keydown, or null when the key is not bindable. */
 export function keyEventToVk(event: KeyboardEvent): number | null {
   if (event.code.startsWith("Numpad")) return null;
@@ -88,14 +90,19 @@ export function keyEventToVk(event: KeyboardEvent): number | null {
   return vk !== undefined && BINDABLE_VKS.has(vk) ? vk : null;
 }
 
-/** Why `vk` cannot be bound to `action`, or null when it is free. */
+/**
+ * Why `vk` cannot be bound to `action`, or null when it is free. `inAppVks` is
+ * the VK of every in-app binding that is exactly Ctrl+Shift+key
+ * (`lib/keybinds.ts` `inAppCtrlShiftVks`), which a global binding may not claim.
+ */
 export function shortcutConflict(
   vk: number,
   action: GlobalShortcutAction,
   current: GlobalShortcutVks,
+  inAppVks: ReadonlySet<number>,
 ): "duplicate" | "reserved" | null {
   const other = action === "mute" ? current.deafen : current.mute;
   if (vk === other) return "duplicate";
-  if (vk === RESERVED_CAMERA_VK) return "reserved";
+  if (inAppVks.has(vk)) return "reserved";
   return null;
 }

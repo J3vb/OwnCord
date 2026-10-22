@@ -131,6 +131,10 @@ pub struct Source {
     /// A `data:image/png` URL of the source as it looks now, when it could
     /// be captured.
     pub thumbnail: Option<String>,
+    /// The refresh rate in Hz of the monitor a `screen` source is, when XRandR
+    /// reports it. `None` for windows and whenever it cannot be read; the
+    /// webview never gates on an unknown rate. Always serialised (`null`).
+    pub refresh_hz: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -139,6 +143,9 @@ pub struct Sources {
     /// The desktop portal picks (Wayland): `sources` is empty.
     pub portal: bool,
     pub sources: Vec<Source>,
+    /// Other applications' sound can be shared with the screen (a PulseAudio
+    /// protocol server answers): `share_audio::available()`.
+    pub audio: bool,
 }
 
 /// Enumerate what can be shared. Blocking: one capture per source for its
@@ -148,9 +155,11 @@ pub fn list_sources() -> Sources {
         return Sources {
             portal: true,
             sources: Vec::new(),
+            audio: super::share_audio::available(),
         };
     }
     let mut sources = Vec::new();
+    let rates = x11_refresh::monitor_rates();
     for (kind, ty) in [
         ("screen", DesktopCaptureSourceType::Screen),
         ("window", DesktopCaptureSourceType::Window),
@@ -167,6 +176,9 @@ pub fn list_sources() -> Sources {
                 id: format!("{kind}:{}", source.id()),
                 kind,
                 title,
+                refresh_hz: (kind == "screen")
+                    .then(|| rates.get(&source.id()).copied())
+                    .flatten(),
                 thumbnail: thumbnail(ty, source),
             });
         }
@@ -174,6 +186,179 @@ pub fn list_sources() -> Sources {
     Sources {
         portal: false,
         sources,
+        audio: super::share_audio::available(),
+    }
+}
+
+/// Refresh rates of the X11 monitors, read through XRandR.
+///
+/// libwebrtc's `ScreenCapturerX11` (RandR monitor mode) lists one source per
+/// `XRRGetMonitors` entry and uses the monitor's `name` atom as the source id,
+/// so the rate is looked up by that atom. Xlib and libXrandr are loaded at
+/// runtime (`x11-dl`), like `mouse_buttons`; any failure yields no rates.
+mod x11_refresh {
+    use std::collections::HashMap;
+    use std::os::raw::c_int;
+    use std::ptr;
+
+    use x11_dl::xlib::Xlib;
+    use x11_dl::xrandr::{RR_DoubleScan, RR_Interlace, Xrandr};
+
+    /// The refresh rate in Hz of an XRandR mode, rounded to the nearest
+    /// integer. `None` for a mode with no timing (zero clock or totals).
+    /// Double-scan modes draw each line twice and interlaced modes draw half
+    /// the lines per field, the same correction `xrandr` makes.
+    pub(super) fn mode_refresh_hz(
+        dot_clock: u64,
+        h_total: u32,
+        v_total: u32,
+        flags: u64,
+    ) -> Option<u32> {
+        if dot_clock == 0 || h_total == 0 || v_total == 0 {
+            return None;
+        }
+        let mut v = f64::from(v_total);
+        if flags & RR_DoubleScan as u64 != 0 {
+            v *= 2.0;
+        }
+        if flags & RR_Interlace as u64 != 0 {
+            v /= 2.0;
+        }
+        let hz = (dot_clock as f64 / (f64::from(h_total) * v)).round();
+        (hz >= 1.0 && hz <= f64::from(u32::MAX)).then_some(hz as u32)
+    }
+
+    /// Monitor `name` atom -> refresh rate of its fastest output. Empty when
+    /// Xlib/XRandR cannot be loaded or no display is reachable.
+    pub(super) fn monitor_rates() -> HashMap<u64, u32> {
+        read_rates().unwrap_or_default()
+    }
+
+    fn read_rates() -> Option<HashMap<u64, u32>> {
+        let xlib = Xlib::open().ok()?;
+        let xr = Xrandr::open().ok()?;
+        // SAFETY: a null name opens $DISPLAY; a null result is handled.
+        let display = unsafe { (xlib.XOpenDisplay)(ptr::null()) };
+        if display.is_null() {
+            return None;
+        }
+        // SAFETY: display is a live connection until the XCloseDisplay below,
+        // and every XRR allocation is freed before it.
+        let rates = unsafe {
+            let root = (xlib.XDefaultRootWindow)(display);
+            let mut rates = HashMap::new();
+            let res = (xr.XRRGetScreenResourcesCurrent)(display, root);
+            if !res.is_null() {
+                let mut n: c_int = 0;
+                let monitors = (xr.XRRGetMonitors)(display, root, 1, &mut n);
+                if !monitors.is_null() {
+                    for i in 0..usize::try_from(n).unwrap_or(0) {
+                        let m = &*monitors.add(i);
+                        if m.noutput < 1 || m.outputs.is_null() {
+                            continue;
+                        }
+                        // A user-defined monitor can span several outputs:
+                        // take the fastest, so a slow one never gates it.
+                        let outputs = std::slice::from_raw_parts(
+                            m.outputs,
+                            usize::try_from(m.noutput).unwrap_or(0),
+                        );
+                        if let Some(hz) = outputs
+                            .iter()
+                            .filter_map(|&o| output_hz(&xr, display, res, o))
+                            .max()
+                        {
+                            rates.insert(m.name as u64, hz);
+                        }
+                    }
+                    (xr.XRRFreeMonitors)(monitors);
+                }
+                (xr.XRRFreeScreenResources)(res);
+            }
+            rates
+        };
+        // SAFETY: display came from XOpenDisplay and is closed once.
+        unsafe { (xlib.XCloseDisplay)(display) };
+        Some(rates)
+    }
+
+    /// # Safety
+    /// `display` and `res` must be live; `output` an id from them.
+    unsafe fn output_hz(
+        xr: &Xrandr,
+        display: *mut x11_dl::xlib::Display,
+        res: *mut x11_dl::xrandr::XRRScreenResources,
+        output: x11_dl::xlib::XID,
+    ) -> Option<u32> {
+        // SAFETY: the caller guarantees display, res and output are live;
+        // each XRR allocation is read, then freed before return.
+        unsafe {
+            let info = (xr.XRRGetOutputInfo)(display, res, output);
+            if info.is_null() {
+                return None;
+            }
+            let crtc = (*info).crtc;
+            (xr.XRRFreeOutputInfo)(info);
+            if crtc == 0 {
+                return None;
+            }
+            let crtc_info = (xr.XRRGetCrtcInfo)(display, res, crtc);
+            if crtc_info.is_null() {
+                return None;
+            }
+            let mode = (*crtc_info).mode;
+            (xr.XRRFreeCrtcInfo)(crtc_info);
+            if (*res).modes.is_null() {
+                return None;
+            }
+            let modes =
+                std::slice::from_raw_parts((*res).modes, usize::try_from((*res).nmode).ok()?);
+            let m = modes.iter().find(|m| m.id == mode)?;
+            mode_refresh_hz(m.dotClock, m.hTotal, m.vTotal, m.modeFlags as u64)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn standard_1080p60() {
+            assert_eq!(mode_refresh_hz(148_500_000, 2200, 1125, 0), Some(60));
+        }
+
+        #[test]
+        fn mode_144hz() {
+            // 1080p144 CVT-RB: 332.4 MHz, 2080 x 1111.
+            assert_eq!(mode_refresh_hz(332_400_000, 2080, 1111, 0), Some(144));
+        }
+
+        #[test]
+        fn ntsc_rate_rounds_up() {
+            // 119.88 Hz rounds to 120, so it is not gated.
+            assert_eq!(mode_refresh_hz(296_703_000, 2200, 1125, 0), Some(120));
+        }
+
+        #[test]
+        fn zero_timing_is_none() {
+            assert_eq!(mode_refresh_hz(0, 2200, 1125, 0), None);
+            assert_eq!(mode_refresh_hz(148_500_000, 0, 1125, 0), None);
+            assert_eq!(mode_refresh_hz(148_500_000, 2200, 0, 0), None);
+        }
+
+        #[test]
+        fn interlace_and_doublescan() {
+            // 1080i: 74.25 MHz, 2200 x 1125 is 60 fields per second.
+            assert_eq!(
+                mode_refresh_hz(74_250_000, 2200, 1125, RR_Interlace as u64),
+                Some(60)
+            );
+            // A double-scanned mode halves the rate.
+            assert_eq!(
+                mode_refresh_hz(148_500_000, 2200, 1125, RR_DoubleScan as u64),
+                Some(30)
+            );
+        }
     }
 }
 
@@ -258,6 +443,12 @@ pub type Preview = watch::Sender<Option<Arc<I420Buffer>>>;
 pub type Started = oneshot::Receiver<Result<(u32, u32), String>>;
 
 struct Shared {
+    /// Read at the top of every capture tick, so `set_options` takes effect
+    /// on the next frame.
+    options: Mutex<CaptureOptions>,
+    /// The size of the latest frame before the size cap, for `set_options`;
+    /// `None` until the first frame.
+    raw: Mutex<Option<(u32, u32)>>,
     /// The published screen share's source; `None` while not published.
     source: Mutex<Option<NativeVideoSource>>,
     /// Swapped by `take_over`, so the frame socket's `screen` route keeps
@@ -297,6 +488,8 @@ impl ScreenCapture {
         let (stop, stopped) = mpsc::channel();
         let (ready, started) = oneshot::channel();
         let shared = Arc::new(Shared {
+            options: Mutex::new(options),
+            raw: Mutex::new(None),
             source: Mutex::new(None),
             preview: Mutex::new(Arc::new(watch::channel(None).0)),
         });
@@ -306,7 +499,7 @@ impl ScreenCapture {
             .name("owncord-screen".into())
             .spawn(move || {
                 let _counted = counted;
-                run(target, options, &thread_shared, &stopped, ready, on_end);
+                run(target, &thread_shared, &stopped, ready, on_end);
             })
             .map_err(|e| format!("screen capture thread: {e}"))?;
         Ok((
@@ -325,6 +518,21 @@ impl ScreenCapture {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone()
+    }
+
+    /// Re-pace and re-cap the running capture. The size applies from the
+    /// next frame; the pacing from the next tick after the current wait
+    /// ends (a slow rate's wait is not cut short). Returns the size those
+    /// frames will have (`fit` of the latest raw frame, or that frame's own
+    /// size), `None` before the first frame.
+    pub fn set_options(&self, options: CaptureOptions) -> Option<(u32, u32)> {
+        *self
+            .shared
+            .options
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = options;
+        let raw = (*self.shared.raw.lock().unwrap_or_else(|p| p.into_inner()))?;
+        Some(sized(raw, options))
     }
 
     pub fn set_source(&self, source: Option<NativeVideoSource>) {
@@ -480,9 +688,13 @@ fn fit(w: u32, h: u32, max_w: u32, max_h: u32) -> Option<(u32, u32)> {
     Some((even(w as f64 * scale), even(h as f64 * scale)))
 }
 
+/// The size frames of raw size `raw` leave the capture at under `options`.
+fn sized(raw: (u32, u32), options: CaptureOptions) -> (u32, u32) {
+    fit(raw.0, raw.1, options.max_width, options.max_height).unwrap_or(raw)
+}
+
 fn run(
     target: Target,
-    options: CaptureOptions,
     shared: &Shared,
     stopped: &mpsc::Receiver<()>,
     ready: oneshot::Sender<Result<(u32, u32), String>>,
@@ -501,7 +713,6 @@ fn run(
     };
     run_loop(
         &mut || producer.grab(),
-        options,
         shared,
         stopped,
         &mut ready,
@@ -516,7 +727,6 @@ fn run(
 #[allow(clippy::too_many_arguments)]
 fn run_loop(
     grab: &mut dyn FnMut() -> Grab,
-    options: CaptureOptions,
     shared: &Shared,
     stopped: &mpsc::Receiver<()>,
     ready: &mut Option<oneshot::Sender<Result<(u32, u32), String>>>,
@@ -524,10 +734,20 @@ fn run_loop(
     failed: &str,
     on_end: impl FnOnce(),
 ) {
-    let interval = Duration::from_secs_f64(1.0 / options.fps.clamp(1.0, 120.0));
     let started = Instant::now();
+    // Frames are due on a fixed grid, so a late wake-up or a slow grab does
+    // not push every later frame back by the same amount.
+    let mut due = started;
+    let mut last_fps = f64::NAN;
     loop {
-        let tick = Instant::now();
+        let options = *shared.options.lock().unwrap_or_else(|p| p.into_inner());
+        // A rate change re-anchors the grid, so frames are not owed (or
+        // withheld) against the old rate.
+        if options.fps != last_fps {
+            due = Instant::now();
+            last_fps = options.fps;
+        }
+        let interval = Duration::from_secs_f64(1.0 / options.fps.clamp(1.0, 120.0));
         // Bound the pre-first-frame phase (voice #9): a picked source whose
         // capturer never produces a first frame (a transient error that
         // loops) used to spin here forever while the shared
@@ -541,12 +761,10 @@ fn run_loop(
         }
         match grab() {
             Grab::Frame(mut buffer) => {
-                if let Some((w, h)) = fit(
-                    buffer.width(),
-                    buffer.height(),
-                    options.max_width,
-                    options.max_height,
-                ) {
+                let raw = (buffer.width(), buffer.height());
+                *shared.raw.lock().unwrap_or_else(|p| p.into_inner()) = Some(raw);
+                let (w, h) = sized(raw, options);
+                if (w, h) != raw {
                     buffer = buffer.scale(w as i32, h as i32);
                 }
                 if let Some(r) = ready.take() {
@@ -566,7 +784,12 @@ fn run_loop(
             }
         }
         // A stop (or the owner dropping) wakes this immediately.
-        match stopped.recv_timeout(interval.saturating_sub(tick.elapsed())) {
+        due += interval;
+        let now = Instant::now();
+        if due < now {
+            due = now;
+        }
+        match stopped.recv_timeout(due - now) {
             Err(RecvTimeoutError::Timeout) => {}
             _ => return,
         }
@@ -615,6 +838,12 @@ mod tests {
         failed: &str,
     ) -> Option<Result<(u32, u32), String>> {
         let shared = Shared {
+            options: Mutex::new(CaptureOptions {
+                fps: 30.0,
+                max_width: 0,
+                max_height: 0,
+            }),
+            raw: Mutex::new(None),
             source: Mutex::new(None),
             preview: Mutex::new(Arc::new(watch::channel(None).0)),
         };
@@ -629,11 +858,6 @@ mod tests {
             .unwrap();
         run_loop(
             &mut grab,
-            CaptureOptions {
-                fps: 30.0,
-                max_width: 0,
-                max_height: 0,
-            },
             &shared,
             &stop_rx,
             &mut Some(ready_tx),
@@ -643,6 +867,51 @@ mod tests {
         );
         stopper.join().unwrap();
         rt.block_on(&mut ready_rx).ok()
+    }
+
+    /// 120 fps is the share's top rate: the loop must keep the 8.3 ms grid
+    /// rather than drift to a slower rate. The bound is loose enough for a
+    /// busy CI runner.
+    #[test]
+    fn a_120_fps_capture_paces_near_one_frame_per_8_ms() {
+        let shared = Shared {
+            options: Mutex::new(CaptureOptions {
+                fps: 120.0,
+                max_width: 0,
+                max_height: 0,
+            }),
+            raw: Mutex::new(None),
+            source: Mutex::new(None),
+            preview: Mutex::new(Arc::new(watch::channel(None).0)),
+        };
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        let stopper = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(1));
+            let _ = stop_tx.send(());
+        });
+        let mut frames = 0usize;
+        let mut grab = || {
+            frames += 1;
+            Grab::Frame(bars(64, 36, frames))
+        };
+        let (ready_tx, _ready_rx) = oneshot::channel();
+        let began = Instant::now();
+        run_loop(
+            &mut grab,
+            &shared,
+            &stop_rx,
+            &mut Some(ready_tx),
+            None,
+            FAILED,
+            || {},
+        );
+        let elapsed = began.elapsed().as_secs_f64();
+        stopper.join().unwrap();
+        let rate = frames as f64 / elapsed;
+        assert!(
+            (90.0..=125.0).contains(&rate),
+            "{frames} frames in {elapsed:.3}s is {rate:.1} fps"
+        );
     }
 
     /// voice #9: a picked source that never yields a first frame must not
@@ -796,6 +1065,115 @@ mod tests {
         assert_eq!(active_captures(), base);
         // The preview ends with the capture.
         assert!(rt.block_on(preview.changed()).is_err());
+    }
+
+    fn idle_capture() -> ScreenCapture {
+        ScreenCapture {
+            shared: Arc::new(Shared {
+                options: Mutex::new(CaptureOptions {
+                    fps: 30.0,
+                    max_width: 0,
+                    max_height: 0,
+                }),
+                raw: Mutex::new(None),
+                source: Mutex::new(None),
+                preview: Mutex::new(Arc::new(watch::channel(None).0)),
+            }),
+            stop: None,
+            thread: None,
+        }
+    }
+
+    #[test]
+    fn set_options_before_the_first_frame_returns_none() {
+        let capture = idle_capture();
+        let options = CaptureOptions {
+            fps: 15.0,
+            max_width: 1280,
+            max_height: 720,
+        };
+        assert_eq!(capture.set_options(options), None);
+        // The loop still picks the options up on its first tick.
+        let held = *capture.shared.options.lock().unwrap();
+        assert_eq!(
+            (held.fps, held.max_width, held.max_height),
+            (15.0, 1280, 720)
+        );
+    }
+
+    #[test]
+    fn set_options_sizes_the_latest_raw_frame_under_the_new_cap() {
+        let capture = idle_capture();
+        *capture.shared.raw.lock().unwrap() = Some((1920, 1080));
+        let capped = |w, h| CaptureOptions {
+            fps: 30.0,
+            max_width: w,
+            max_height: h,
+        };
+        assert_eq!(capture.set_options(capped(1280, 720)), Some((1280, 720)));
+        assert_eq!(capture.set_options(capped(0, 0)), Some((1920, 1080)));
+        assert_eq!(capture.set_options(capped(4000, 3000)), Some((1920, 1080)));
+        assert_eq!(capture.set_options(capped(640, 640)), Some((640, 360)));
+    }
+
+    #[test]
+    fn set_options_changes_size_and_pace_of_a_running_capture() {
+        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let (capture, started) = ScreenCapture::start(
+            Target::Synthetic {
+                width: 1280,
+                height: 720,
+            },
+            CaptureOptions {
+                fps: 1.0,
+                max_width: 0,
+                max_height: 0,
+            },
+            || {},
+        )
+        .unwrap();
+        assert_eq!(rt.block_on(started).unwrap(), Ok((1280, 720)));
+        let mut preview = capture.preview().subscribe();
+        let size = |frame: &I420Buffer| (frame.width(), frame.height());
+        // A stall fails the test instead of hanging it.
+        let next = |preview: &mut watch::Receiver<Option<Arc<I420Buffer>>>| {
+            // The timer must be created inside the runtime.
+            rt.block_on(async {
+                tokio::time::timeout(Duration::from_secs(3), preview.changed()).await
+            })
+            .expect("no preview frame within 3 s")
+            .unwrap();
+            preview.borrow_and_update().as_deref().map(size)
+        };
+        assert_eq!(next(&mut preview), Some((1280, 720)));
+
+        let resized = capture.set_options(CaptureOptions {
+            fps: 100.0,
+            max_width: 640,
+            max_height: 360,
+        });
+        assert_eq!(resized, Some((640, 360)));
+        let begun = Instant::now();
+        // At most one frame already in flight at the old size.
+        let mut last = None;
+        for _ in 0..3 {
+            last = next(&mut preview);
+            if last == Some((640, 360)) {
+                break;
+            }
+        }
+        assert_eq!(last, Some((640, 360)));
+        for _ in 0..10 {
+            assert_eq!(next(&mut preview), Some((640, 360)));
+        }
+        // The current 1 s wait ends first; ten frames at the old 1 s
+        // interval would take another ten seconds.
+        assert!(begun.elapsed() < Duration::from_secs(4));
+        drop(capture);
     }
 
     #[test]

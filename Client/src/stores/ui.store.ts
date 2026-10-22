@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { ContentViewId } from "../features/navigation/destinations";
 
 export interface UiState {
@@ -40,10 +41,17 @@ export interface UiState {
   readonly activeView: ContentViewId | null;
   /** The Settings tab the next open should land on (a Q4 notice links to Safety). */
   readonly settingsTab: SettingsTabRequest | null;
+  /**
+   * Counts the `openSettings(tab)` calls that named a tab. `settingsTab` alone
+   * cannot say "asked again": a second request for the same tab leaves it
+   * unchanged, so an already-open panel the user has since tabbed away from
+   * would never hear it. Absent until the first request.
+   */
+  readonly settingsTabSeq?: number;
 }
 
 /** Settings tabs another surface may open directly. */
-export type SettingsTabRequest = "Safety" | "About";
+export type SettingsTabRequest = "Account" | "Safety" | "About" | "Notifications";
 
 /**
  * The one `ui.store` fact a protocol-epoch refusal leaves behind (Decision 2):
@@ -80,6 +88,7 @@ export function openSettings(tab?: SettingsTabRequest): void {
     ...prev,
     settingsOpen: true,
     settingsTab: tab ?? null,
+    ...(tab !== undefined ? { settingsTabSeq: (prev.settingsTabSeq ?? 0) + 1 } : {}),
   }));
 }
 
@@ -179,6 +188,43 @@ export function toggleCategory(category: string): void {
   });
 }
 
+/** Collapse every one of `categories`. Persists to localStorage for the current server. */
+export function collapseCategories(categories: readonly string[]): void {
+  uiStore.setState((prev) => {
+    const next = new Set(prev.collapsedCategories);
+    for (const category of categories) next.add(category);
+    saveCollapsedCategories(next);
+    return { ...prev, collapsedCategories: next };
+  });
+}
+
+/**
+ * Translate collapsed entries saved under a category NAME (before WP 6.5b) to
+ * the category's id key, once the channel list says which name is which id, and
+ * rewrite the saved list. `keysByName` maps a category name to its group key.
+ * An entry that matches no known name stays untouched (the synthetic Voice
+ * group's key, or a category not loaded yet), and a set with nothing to
+ * translate is left as it is without a write. After this the collapsed state
+ * survives a rename, because the id does not change with it.
+ */
+export function migrateCollapsedCategoryNames(keysByName: ReadonlyMap<string, string>): void {
+  const current = uiStore.getState().collapsedCategories;
+  let changed = false;
+  const next = new Set<string>();
+  for (const entry of current) {
+    const key = keysByName.get(entry);
+    if (key !== undefined && key !== entry) {
+      next.add(key);
+      changed = true;
+    } else {
+      next.add(entry);
+    }
+  }
+  if (!changed) return;
+  saveCollapsedCategories(next);
+  uiStore.setState((prev) => ({ ...prev, collapsedCategories: next }));
+}
+
 /** Selector: check if a category is collapsed. */
 export function isCategoryCollapsed(category: string): boolean {
   return uiStore.select((s) => s.collapsedCategories.has(category));
@@ -206,3 +252,15 @@ export function setActiveDmUser(userId: number | null): void {
 export function setActiveView(view: ContentViewId | null): void {
   uiStore.setState((prev) => ({ ...prev, activeView: view }));
 }
+
+/** Sign-out or server switch: nothing in `ready` restates the sidebar mode, so
+ *  a "dms" mode (and its peer id) would otherwise mount on the next server. The
+ *  collapsed categories and their persistence host belong to the old server
+ *  too; `loadCollapsedCategories` sets both again on the next mount. */
+function resetUiSessionState(): void {
+  setSidebarMode("channels");
+  currentServerHost = null;
+  uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+}
+
+void registerSessionReset("ui:session", resetUiSessionState); // app-lifetime

@@ -1,4 +1,6 @@
+import { muteChannel, unmuteChannel } from "@lib/channel-mutes";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ApiClientError } from "@lib/api";
 import {
   selectDmConversation,
   handleCreateDm,
@@ -17,6 +19,7 @@ import type { DmChannel } from "../../src/stores/dm.store";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],
@@ -134,6 +137,7 @@ describe("SidebarDmHelpers", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -165,6 +169,7 @@ describe("SidebarDmHelpers", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -202,6 +207,7 @@ describe("SidebarDmHelpers", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -232,6 +238,7 @@ describe("SidebarDmHelpers", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -368,6 +375,59 @@ describe("SidebarDmHelpers", () => {
       expect(mockShow).toHaveBeenCalledWith("Network error", "error");
     });
 
+    it("shows the app's neutral text for a 403, never the server's", async () => {
+      const mockShow = vi.fn();
+      const mockApi = {
+        createDm: vi
+          .fn()
+          .mockRejectedValue(
+            new ApiClientError(403, "FORBIDDEN", "cannot create DM: server words"),
+          ),
+      };
+      const deps = makeDeps({
+        api: mockApi as unknown as DmHelperDeps["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+
+      await handleCreateDm(20, deps);
+
+      expect(mockShow).toHaveBeenCalledWith("You can't message this user right now.", "error");
+    });
+
+    it("keeps the server's own text for a 403 that is not FORBIDDEN", async () => {
+      const mockShow = vi.fn();
+      const mockApi = {
+        createDm: vi
+          .fn()
+          .mockRejectedValue(new ApiClientError(403, "TIMED_OUT", "You are timed out")),
+      };
+      const deps = makeDeps({
+        api: mockApi as unknown as DmHelperDeps["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+
+      await handleCreateDm(20, deps);
+
+      expect(mockShow).toHaveBeenCalledTimes(1);
+      expect(mockShow.mock.calls[0]![0]).toBe("You are timed out");
+    });
+
+    it("keeps the normal error copy for a 404", async () => {
+      const mockShow = vi.fn();
+      const mockApi = {
+        createDm: vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "user not found")),
+      };
+      const deps = makeDeps({
+        api: mockApi as unknown as DmHelperDeps["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+
+      await handleCreateDm(20, deps);
+
+      expect(mockShow).toHaveBeenCalledTimes(1);
+      expect(mockShow.mock.calls[0]![0]).toBe("That item no longer exists.");
+    });
+
     it("shows generic error toast for non-Error exceptions", async () => {
       const mockShow = vi.fn();
       const mockApi = {
@@ -405,6 +465,25 @@ describe("SidebarDmHelpers", () => {
     it("returns empty array when no DM channels exist", () => {
       const result = buildDmConversations(null);
       expect(result).toEqual([]);
+    });
+
+    it("carries the end of a timed mute and nothing for a plain one", () => {
+      addDmChannel(makeDmChannel({ channelId: 100 }));
+      addDmChannel(makeDmChannel({ channelId: 101 }));
+      muteChannel(100, 3_600_000);
+      muteChannel(101);
+      try {
+        const rows = buildDmConversations(null);
+        const timed = rows.find((r) => r.channelId === 100);
+        const plain = rows.find((r) => r.channelId === 101);
+        expect(timed!.muted).toBe(true);
+        expect(timed!.mutedUntil).toBeGreaterThan(Date.now());
+        expect(plain!.muted).toBe(true);
+        expect("mutedUntil" in plain!).toBe(false);
+      } finally {
+        unmuteChannel(100);
+        unmuteChannel(101);
+      }
     });
 
     it("maps DM channels to DmConversation objects", () => {

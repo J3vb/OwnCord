@@ -33,7 +33,14 @@ type DMChannelInfo struct {
 	// IsGroup is channels.is_group: decided once when the DM is created and
 	// never recomputed from the live participant count, so a group that people
 	// have left stays a group (see migration 028).
-	IsGroup       bool   `json:"is_group"`
+	IsGroup bool `json:"is_group"`
+	// OwnerID is the group's owner (channels.dm_owner_id), a current member.
+	// Set for groups only and omitted for a 1:1 DM, so a client can read its
+	// presence as "this server has group owners".
+	OwnerID int64 `json:"owner_id,omitempty"`
+	// Icon is the group's icon as a file URL (/api/v1/files/{id}), "" when it
+	// has none and for a 1:1 DM. Always present on the wire.
+	Icon          string `json:"icon"`
 	LastMessageID *int64 `json:"last_message_id"`
 	LastMessage   string `json:"last_message"`
 	LastMessageAt string `json:"last_message_at"`
@@ -42,6 +49,12 @@ type DMChannelInfo struct {
 	// GetUserDMChannels query so every path that builds a DM summary (GET
 	// /dms and the ready payload) reports the same badge.
 	MentionCount int `json:"mention_count"`
+	// LastReadMessageID is the viewer's read pointer (read_states
+	// .last_message_id), 0 when they have never read the DM. Only
+	// GetUserDMChannels fills it; a frame built without that query (the
+	// dm_channel_open event, NewDMChannelInfo) leaves it nil so the field is
+	// omitted instead of claiming 0.
+	LastReadMessageID *int64 `json:"last_read_message_id,omitempty"`
 }
 
 // DMUser is the public-facing shape for a DM participant.
@@ -57,13 +70,15 @@ type DMUser struct {
 
 // NewDMChannelInfo assembles the payload shape for one DM from its channel id,
 // optional group name, group flag and full participant list (the viewer
-// included), as seen by viewerID.
+// included), as seen by viewerID. ownerID is the group owner, 0 for a 1:1 DM
+// and for a group whose owner is unknown. iconID is the attachment id of the
+// group's icon, "" for none and for a 1:1 DM.
 //
 // It is the single place that answers "which of these is the recipient", so
 // the REST list, the ready payload and the dm_channel_open event cannot
 // disagree about a channel — a disagreement that would show up as a DM whose
 // name changes depending on which event drew it.
-func NewDMChannelInfo(channelID int64, name string, isGroup bool, participants []DMUser, viewerID int64) DMChannelInfo {
+func NewDMChannelInfo(channelID int64, name string, isGroup bool, ownerID int64, iconID string, participants []DMUser, viewerID int64) DMChannelInfo {
 	others := make([]DMUser, 0, len(participants))
 	for i := range participants {
 		if participants[i].ID == viewerID {
@@ -76,6 +91,10 @@ func NewDMChannelInfo(channelID int64, name string, isGroup bool, participants [
 		Recipients: others,
 		Name:       name,
 		IsGroup:    isGroup,
+	}
+	if isGroup {
+		info.OwnerID = ownerID
+		info.Icon = GroupIconURL(iconID)
 	}
 	if len(others) > 0 {
 		info.Recipient = others[0]
@@ -369,16 +388,20 @@ func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelIn
 		if recipients == nil {
 			recipients = []DMUser{}
 		}
+		lastRead := rows[i].LastReadMessageID
 		info := DMChannelInfo{
-			ChannelID:     rows[i].ChannelID,
-			Recipients:    recipients,
-			Name:          rows[i].Name,
-			IsGroup:       rows[i].IsGroup != 0,
-			LastMessageID: rows[i].LastMessageID,
-			LastMessage:   rows[i].LastMessage,
-			LastMessageAt: rows[i].LastMessageAt,
-			UnreadCount:   int(rows[i].UnreadCount),
-			MentionCount:  int(rows[i].MentionCount),
+			ChannelID:         rows[i].ChannelID,
+			Recipients:        recipients,
+			Name:              rows[i].Name,
+			IsGroup:           rows[i].IsGroup != 0,
+			OwnerID:           rows[i].OwnerID,
+			Icon:              GroupIconURL(rows[i].IconID),
+			LastMessageID:     rows[i].LastMessageID,
+			LastMessage:       rows[i].LastMessage,
+			LastMessageAt:     rows[i].LastMessageAt,
+			UnreadCount:       int(rows[i].UnreadCount),
+			MentionCount:      int(rows[i].MentionCount),
+			LastReadMessageID: &lastRead,
 		}
 		if len(recipients) > 0 {
 			info.Recipient = recipients[0]
@@ -407,19 +430,6 @@ func (d *DB) IsGroupDM(ctx context.Context, channelID int64) (bool, error) {
 		return false, fmt.Errorf("IsGroupDM: %w", err)
 	}
 	return flag != 0, nil
-}
-
-// SetDMChannelName sets the optional group name on a DM channel. The type
-// predicate lives in the SQL so a stray channel id cannot rename a guild
-// channel through the DM route.
-func (d *DB) SetDMChannelName(ctx context.Context, channelID int64, name string) error {
-	if err := d.q.SetDMChannelName(ctx, dbgen.SetDMChannelNameParams{
-		Name: name,
-		ID:   channelID,
-	}); err != nil {
-		return fmt.Errorf("SetDMChannelName: %w", err)
-	}
-	return nil
 }
 
 // GetDMParticipants returns every participant of a DM channel, viewer-adjusted

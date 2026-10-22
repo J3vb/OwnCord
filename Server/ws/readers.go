@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -23,7 +24,8 @@ import (
 type VisibilityReader interface {
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 	ListChannels(ctx context.Context) ([]db.Channel, error)
-	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
+	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
@@ -35,6 +37,9 @@ type VisibilityReader interface {
 	// only when a channel is actually labelled.
 	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
 	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
+	// ListBlockersOf backs the channel_activity flush (channel_activity.go):
+	// the users who blocked a message's author get no mention flag from it.
+	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
 	// IsGroupDM and IsTrustedSender back the B5-6 sender-aware DM voice
 	// audience (voice_broadcast.go's filterDMAudience): a one-to-one DM's
 	// voice_state/voice_leave fan-out must not reach a recipient who does
@@ -50,6 +55,9 @@ type ReadySnapshotReader interface {
 	VisibilityReader
 	ListRoles(ctx context.Context) ([]*db.Role, error)
 	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
+	// ListChannelCategories backs ready's categories (WP 6.5a), read only for
+	// a MANAGE_CHANNELS holder.
+	ListChannelCategories(ctx context.Context) ([]db.ChannelCategory, error)
 	// MemberGeneration and NextMemberBanLapse decide when the shared
 	// ListMembers result (serve_ready_members_cache.go) must be read again.
 	MemberGeneration(ctx context.Context) (int64, error)
@@ -72,23 +80,28 @@ type ReadySnapshotReader interface {
 // may read: the user and role they announce.
 type MemberPayloadReader interface {
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
-	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 }
 
 // DispatchReader is what command dispatch (deps.go's permission helpers and
 // handlers.go's session/membership checks) may read.
 type DispatchReader interface {
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
-	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 	// The bare-hub fallback in voice_join.go's publish-permission derivation
-	// resolves overrides here when no PermissionService cache is wired.
-	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
+	// resolves every held role's overrides here when no PermissionService
+	// cache is wired.
+	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 	GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*db.SessionWithBanStatus, error)
 	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
-	// The three reads service.RequireDMNotBlocked makes through this seam.
+	// GetAFKChannel backs the AFK sweep (voice_afk.go): the one channel
+	// flagged AFK, nil when there is none.
+	GetAFKChannel(ctx context.Context) (*db.Channel, error)
+	// The four reads service.RequireDMReachable makes through this seam.
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)
 	IsEitherBlocked(ctx context.Context, a, b int64) (bool, error)
+	DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 	// GetReport and GetAppeal back the mod_queue and appeal_mod_queue
 	// broadcasts (moderation_queue.go), which resolve the frame's audience:
 	// audience resolution for queue broadcasts: no actor, so the
@@ -152,6 +165,8 @@ type VoiceStore interface {
 	// Membership.
 	Join(ctx context.Context, userID, channelID int64, maxUsers int) error
 	LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error)
+	// NoteJoinCompleted tells the DM call log that a join finished (WP 3B-9).
+	NoteJoinCompleted(channelID, userID int64)
 
 	// The member's own flags.
 	SetSelfMute(ctx context.Context, userID int64, muted bool) error
@@ -219,4 +234,15 @@ type SocketAuthenticator interface {
 	SweepSessions(ctx context.Context, tokenHashes []string) (map[string]service.SessionVerdict, error)
 	RecordSocketConnect(ctx context.Context, userID int64, remoteAddr string)
 	TouchSession(ctx context.Context, tokenHash string) error
+}
+
+// ChannelPrivacy is the channel-level private flag (3D-6) the hub's channel
+// frames carry. service.ChannelPrivacyService satisfies it; a nil one means
+// nothing is private. The service owns the reads and the permission math.
+type ChannelPrivacy interface {
+	// Snapshot is one default-role read plus one bulk override read, for the
+	// ready payload and the timeout refresh.
+	Snapshot(ctx context.Context) (service.ChannelPrivacySnapshot, error)
+	// ChannelIsPrivate answers for a single-channel frame.
+	ChannelIsPrivate(ctx context.Context, channelID int64) (bool, error)
 }

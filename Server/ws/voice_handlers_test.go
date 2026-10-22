@@ -689,8 +689,7 @@ func TestVoice_Camera_DisableAllowedAfterPermissionRevoked(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed novideo role: %v", err)
 	}
-	if _, err := database.ExecContext(context.Background(),
-		`UPDATE users SET role_id = 101 WHERE id = ?`, user.ID); err != nil {
+	if err := database.UpdateUserRole(context.Background(), user.ID, 101); err != nil {
 		t.Fatalf("reassign user role: %v", err)
 	}
 
@@ -896,8 +895,7 @@ func TestVoice_Screenshare_DisableAllowedAfterPermissionRevoked(t *testing.T) {
 	); err != nil {
 		t.Fatalf("seed noscreenshare role: %v", err)
 	}
-	if _, err := database.ExecContext(context.Background(),
-		`UPDATE users SET role_id = 102 WHERE id = ?`, user.ID); err != nil {
+	if err := database.UpdateUserRole(context.Background(), user.ID, 102); err != nil {
 		t.Fatalf("reassign user role: %v", err)
 	}
 

@@ -4,6 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
+import { registerSessionReset } from "@lib/sessionRegistry";
 import type { ReadyMember, MemberJoinPayload, PresenceBatchEntry, UserStatus } from "@lib/types";
 
 export interface Member {
@@ -11,6 +12,9 @@ export interface Member {
   readonly username: string;
   readonly avatar: string | null;
   readonly role: string;
+  /** Every role the member holds, top first (WP 6.3c). Undefined = an older
+   *  server that sends none, where `role` is the only role. */
+  readonly roleIds?: readonly number[];
   readonly status: UserStatus;
   /** Nickname to render instead of `username`. Null = unset. Optional only so
    *  the many inline Member test fixtures need not restate it. Mentions still
@@ -18,6 +22,18 @@ export interface Member {
   readonly displayName?: string | null;
   /** Free-text status line shown under the name. Null = unset. */
   readonly customStatus?: string | null;
+  /** RFC 3339 instant the custom status clears itself. Only the owner is ever
+   *  told it, so it is set on your own entry alone. Null = no expiry,
+   *  undefined = not known (use auth_ok's). */
+  readonly customStatusExpiresAt?: string | null;
+  /** Profile text. Null = unset, undefined = never sent (older server). */
+  readonly about?: string | null;
+  /** Banner image path. Null = none, undefined = none or never sent. */
+  readonly banner?: string | null;
+  /** Banner colour. Null = none, undefined = none or never sent. */
+  readonly banner_color?: string | null;
+  /** Account creation time (RFC3339) for "Member since"; undefined = older server. */
+  readonly createdAt?: string;
   /** Long-term E2EE identity public key (base64) for voice TOFU (F3). The store
    *  always sets it (null when the user has not published one); optional only so
    *  the many inline Member test fixtures need not restate it. */
@@ -35,12 +51,17 @@ export interface MembersState {
    *  presence/typing update. Optional only so the many inline test fixtures
    *  need not restate it. */
   readonly roleRevision?: number;
+  /** Bumped only by setMembers (a ready snapshot replacing the roster), so a
+   *  watcher can tell "the roster was replaced" from "someone's presence
+   *  changed" even when other updates land in the same store flush. */
+  readonly snapshotRevision?: number;
 }
 
 const INITIAL_STATE: MembersState = {
   members: new Map(),
   typingUsers: new Map(),
   roleRevision: 0,
+  snapshotRevision: 0,
 };
 
 export const membersStore = createStore<MembersState>(INITIAL_STATE);
@@ -63,10 +84,15 @@ export function setMembers(members: readonly ReadyMember[]): void {
       username: m.username,
       avatar: m.avatar,
       role: m.role,
+      ...(m.role_ids === undefined ? {} : { roleIds: m.role_ids }),
       status: m.status,
       displayName: m.display_name ?? null,
       customStatus: m.custom_status ?? null,
       identityPublicKey: m.identity_public_key ?? null,
+      ...(m.about === undefined ? {} : { about: m.about }),
+      ...(m.banner === undefined ? {} : { banner: m.banner }),
+      ...(m.banner_color === undefined ? {} : { banner_color: m.banner_color }),
+      ...(m.created_at === undefined ? {} : { createdAt: m.created_at }),
     });
   }
   // Clear all outstanding typing timers
@@ -78,6 +104,7 @@ export function setMembers(members: readonly ReadyMember[]): void {
     members: map,
     typingUsers: new Map(),
     roleRevision: (prev.roleRevision ?? 0) + 1,
+    snapshotRevision: (prev.snapshotRevision ?? 0) + 1,
   }));
 }
 
@@ -94,12 +121,19 @@ export function addMember(payload: MemberJoinPayload): void {
       username: payload.user.username,
       avatar: payload.user.avatar,
       role: payload.user.role,
+      ...(payload.user.role_ids === undefined ? {} : { roleIds: payload.user.role_ids }),
       status: payload.status ?? "offline",
       displayName: payload.user.display_name ?? null,
       // member_join carries no custom status; a presence event follows it and
       // is what fills this in.
       customStatus: prev.members.get(payload.user.id)?.customStatus ?? null,
       identityPublicKey: payload.user.identity_public_key ?? null,
+      ...(payload.user.about === undefined ? {} : { about: payload.user.about }),
+      ...(payload.user.banner === undefined ? {} : { banner: payload.user.banner }),
+      ...(payload.user.banner_color === undefined
+        ? {}
+        : { banner_color: payload.user.banner_color }),
+      ...(payload.user.created_at === undefined ? {} : { createdAt: payload.user.created_at }),
     });
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
@@ -114,13 +148,17 @@ export function removeMember(userId: number): void {
   });
 }
 
-/** Update a member's role from a member_update event. */
-export function updateMemberRole(userId: number, role: string): void {
+/** Update a member's role from a member_update event. `roleIds` is every held
+ *  role (WP 6.3c); omitted by an older server, which also drops any stale list. */
+export function updateMemberRole(userId: number, role: string, roleIds?: readonly number[]): void {
   membersStore.setState((prev) => {
     const existing = prev.members.get(userId);
     if (!existing) return prev;
     const next = new Map(prev.members);
-    next.set(userId, { ...existing, role });
+    const updated: Member = { ...existing, role };
+    // Rebuilt without the old list so an absent field cannot keep a stale one.
+    const { roleIds: _old, ...withoutIds } = updated;
+    next.set(userId, roleIds === undefined ? withoutIds : { ...withoutIds, roleIds });
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
 }
@@ -133,6 +171,11 @@ export interface MemberProfilePatch {
   readonly avatar: string | null;
   readonly displayName?: string | null;
   readonly identityPublicKey?: string | null;
+  /** Only applied when provided; null clears it. */
+  readonly about?: string | null;
+  /** Only applied when provided (an old server sends neither); null clears. */
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
 }
 
 /** Update a member's profile from a user_update event. */
@@ -150,18 +193,39 @@ export function updateMemberProfile(userId: number, patch: MemberProfilePatch): 
         patch.identityPublicKey === undefined
           ? existing.identityPublicKey
           : patch.identityPublicKey,
+      ...(patch.about === undefined ? {} : { about: patch.about }),
+      ...(patch.banner === undefined ? {} : { banner: patch.banner }),
+      ...(patch.banner_color === undefined ? {} : { banner_color: patch.banner_color }),
     });
     return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
   });
 }
 
+/** The expiry that goes with a member's custom status after an update. A new
+ *  text drops the old expiry (the server does the same), unless the caller
+ *  states one; the same text, or no text in the event, keeps it. */
+function nextCustomStatusExpiry(
+  existing: Member,
+  customStatus: string | null | undefined,
+  provided: string | null | undefined,
+): { customStatusExpiresAt?: string | null } {
+  if (provided !== undefined) return { customStatusExpiresAt: provided };
+  if (customStatus === undefined) return {};
+  const same = (existing.customStatus ?? "") === (customStatus ?? "");
+  return same || existing.customStatusExpiresAt === undefined
+    ? {}
+    : { customStatusExpiresAt: null };
+}
+
 /** Update a member's presence status, and the custom status line that rides
  *  along with it. `customStatus` is only applied when the event carried the
- *  field — a bare status flip must not blank the text. */
+ *  field — a bare status flip must not blank the text. `customStatusExpiresAt`
+ *  is passed only for your own optimistic send, where the client knows it. */
 export function updatePresence(
   userId: number,
   status: UserStatus,
   customStatus?: string | null,
+  customStatusExpiresAt?: string | null,
 ): void {
   membersStore.setState((prev) => {
     const existing = prev.members.get(userId);
@@ -171,6 +235,7 @@ export function updatePresence(
       ...existing,
       status,
       customStatus: customStatus === undefined ? existing.customStatus : customStatus,
+      ...nextCustomStatusExpiry(existing, customStatus, customStatusExpiresAt),
     });
     return { ...prev, members: next };
   });
@@ -192,7 +257,12 @@ export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full:
     for (const u of updates) {
       const existing = next.get(u.user_id);
       if (existing === undefined) continue;
-      next.set(u.user_id, { ...existing, status: u.status, customStatus: u.custom_status });
+      next.set(u.user_id, {
+        ...existing,
+        status: u.status,
+        customStatus: u.custom_status,
+        ...nextCustomStatusExpiry(existing, u.custom_status, undefined),
+      });
     }
     return { ...prev, members: next };
   });
@@ -294,3 +364,21 @@ export function getTypingUsers(channelId: number): readonly Member[] {
     return result;
   });
 }
+
+/** Forget the previous server's roster, presence and typing (with live timers)
+ *  on sign-out or server switch. The revisions bump rather than reset, as
+ *  emoji's `rev` does, so a watcher cannot mistake the next snapshot for the
+ *  one it already saw. */
+export function resetMembersStore(): void {
+  for (const timer of typingTimers.values()) {
+    clearTimeout(timer);
+  }
+  typingTimers.clear();
+  membersStore.setState((prev) => ({
+    ...INITIAL_STATE,
+    roleRevision: (prev.roleRevision ?? 0) + 1,
+    snapshotRevision: (prev.snapshotRevision ?? 0) + 1,
+  }));
+}
+
+void registerSessionReset("members:store", resetMembersStore); // app-lifetime

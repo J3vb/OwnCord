@@ -1,6 +1,7 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
 import { Room, Track } from "livekit-client";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
+import type { ShareSenderSample } from "../features/voice/shareSenderStats";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -40,10 +41,12 @@ import type {
   SessionState,
 } from "../features/voice/sessionState";
 import { JoinOrchestration } from "../features/voice/joinOrchestration";
+import { isDmKeptForCall } from "../features/direct-messages/keptCallDms";
 import { noteJoinSent } from "../features/voice/joinRequest";
 import { RoomLifecycle } from "../features/voice/roomLifecycle";
 import { MediaControl, syncShareGrant } from "../features/voice/mediaControl";
 import { RemoteTracks } from "../features/voice/remoteTracks";
+import { noteWatchSent } from "./watchRequest";
 import {
   dismissMediaLostNotice,
   restoreLostMedia,
@@ -61,6 +64,12 @@ import { authStore } from "@stores/auth.store";
 export type { StreamQuality } from "@lib/screenShare";
 
 const log = createLogger("livekitSession");
+
+/** Most ids one voice_watch carries (the server's cap). */
+const MAX_WATCH_IDS = 16;
+
+/** How long to wait before re-sending a rate-limited voice_watch. */
+const WATCH_RETRY_MS = 1000;
 
 /** P2-T5: how long a reconnect attempt waits for its voice_token_refresh
  *  reply before trying with the token it has. */
@@ -111,7 +120,14 @@ export class LiveKitSession {
   private onErrorCallback: ((message: string) => void) | null = null;
   private serverHost: string | null = null;
   /** Remote-video callbacks and the video stream lookups. */
-  private _remoteTracks = new RemoteTracks(() => this._room);
+  private _remoteTracks = this.createRemoteTracks();
+  /** True while leaveVoice clears the watch set: the server clears on leave,
+   *  so the clear must not send a voice_watch of its own. */
+  private _leavingVoice = false;
+  /** The pending retry after a rate-limited voice_watch. */
+  private _watchRetry: ReturnType<typeof setTimeout> | null = null;
+  /** Your screen share's last sender sample, for the support bundle. */
+  private _shareSender: ShareSenderSample | null = null;
   // Test-visibility proxies: the callbacks live on RemoteTracks.
   private get onRemoteVideoCallback(): RemoteVideoCallback | null {
     return this._remoteTracks.onRemoteVideoCallback;
@@ -280,6 +296,8 @@ export class LiveKitSession {
     reapplyMuteGain: () => this.reapplyMuteGain(),
     restateSelfVoiceState: () => {
       if (this.ws !== null) restateSelfVoiceState(this.ws);
+      // The server holds no watch set for a fresh join: tell it ours.
+      this.sendWatching(undefined, true);
     },
     startTokenRefreshTimer: () => this.startTokenRefreshTimer(),
     syncModuleRooms: () => this.syncModuleRooms(),
@@ -432,6 +450,7 @@ export class LiveKitSession {
         // torn down for auto-reconnect.
         bumpGeneration(this._cameraState);
         bumpGeneration(this._screenState);
+        this._media.stopCodecSwitch();
         // BUG-098: Stop leaked camera/screen tracks before room is nulled.
         stopManualCameraTrack(this._cameraState, this._room);
         stopManualScreenTracks(this._screenState, this._room);
@@ -497,7 +516,8 @@ export class LiveKitSession {
         this.ws !== null &&
         this.ws.getState() !== "disconnected" &&
         (channelsStore.getState().channels.has(channelId) ||
-          dmStore.getState().channels.some((dm) => dm.channelId === channelId)),
+          dmStore.getState().channels.some((dm) => dm.channelId === channelId) ||
+          isDmKeptForCall(channelId)),
       serverMembership: () => {
         if (this.ws?.getState() !== "connected") return "unknown";
         const self = authStore.getState().user?.id ?? 0;
@@ -508,7 +528,7 @@ export class LiveKitSession {
       rejoinVoice: () => {
         // The rejoin's join brings back what the drop stopped, as a reconnect does.
         const lost = this._lostOnReconnect;
-        this.leaveVoice(false, true);
+        void this.leaveVoice(false, true);
         this._lostOnReconnect = lost;
         this._rejoinPending = true;
         setVoiceStatus("joining");
@@ -528,8 +548,51 @@ export class LiveKitSession {
     });
   }
 
+  private createRemoteTracks(): RemoteTracks {
+    const tracks = new RemoteTracks(() => this._room);
+    tracks.onWatchingChange = (ids) => {
+      if (!this._leavingVoice) this.sendWatching(ids);
+    };
+    return tracks;
+  }
+
+  /** Tell the server whose screen shares we watch (voice_watch), while we are
+   *  in a voice channel with the socket up. A re-send (no `ids`) always sends
+   *  the current set, empty included, because the server keeps the old set
+   *  across a resume; `skipEmpty` is for a fresh join, where the server just
+   *  cleared it. A refusal (a server from before 6.6) is ignored by the
+   *  dispatcher via watchRequest. */
+  private sendWatching(ids?: readonly number[], skipEmpty = false): void {
+    // Deduped, sorted and within the server's cap of 16 (it counts the raw list).
+    const current = [...new Set(ids ?? this._remoteTracks.watchedScreenshares())]
+      .toSorted((a, b) => a - b)
+      .slice(0, MAX_WATCH_IDS);
+    if (skipEmpty && current.length === 0) return;
+    if (this.ws === null || this.ws.getState() !== "connected") return;
+    if (voiceStore.getState().currentChannelId === null) return;
+    noteWatchSent(this.ws.send({ type: "voice_watch", payload: { user_ids: [...current] } }));
+  }
+
+  /** The socket resumed while in voice: re-send our own set (the server keeps
+   *  it across a resume, but a change made while the socket was down was
+   *  never sent). */
+  resendWatching(): void {
+    this.sendWatching();
+  }
+
+  /** The server rate-limited a voice_watch: send the current set once more
+   *  after a second. leaveVoice clears the timer. */
+  retryWatching(): void {
+    if (this._watchRetry !== null) return;
+    this._watchRetry = setTimeout(() => {
+      this._watchRetry = null;
+      this.sendWatching();
+    }, WATCH_RETRY_MS);
+  }
+
   /** Once a reconnect (or its rejoin) lands: bring back what the drop stopped. */
   private restoreLostMedia(): void {
+    this.sendWatching();
     const lost = this._lostOnReconnect;
     this._lostOnReconnect = null;
     const room = this._room;
@@ -646,7 +709,7 @@ export class LiveKitSession {
     // Only arm this when the poller is confirmed live (setPttPollingLive) —
     // gating on the stored key alone would close the mic permanently on
     // platforms where PTT can never actually report state (macOS's
-    // is_key_down stub, pure-Wayland Linux with no XWayland).
+    // is_key_down stub, Wayland Linux while the portal backend is not live).
     // Record the gate in pttGated, NEVER in localMuted: localMuted means "the
     // user muted themselves". The microphone is enabled either way, behind
     // the gate (AudioPipeline.setPttGated), and a press only opens the gate.
@@ -665,7 +728,10 @@ export class LiveKitSession {
     this._audioPipeline.setPttGated(pttArmed);
     const muted = state.localMuted || state.localDeafened;
     const deafened = state.localDeafened;
-    const shouldEnableMicrophone = !muted;
+    // The AFK channel is listen-only: publish nothing there, and do not read
+    // the empty mic as a failure (no listen-only notice, nothing to retry).
+    // enableMicrophone(false) is a no-op publish, so nothing can be refused.
+    const shouldEnableMicrophone = !muted && state.inAfkChannel !== true;
 
     try {
       await this._media.enableMicrophone(room, shouldEnableMicrophone);
@@ -849,18 +915,30 @@ export class LiveKitSession {
     this._remoteTracks.dropUnpublishedWatches();
   }
 
-  leaveVoice(sendWs = true, keepWatched = false): void {
+  /** Resolves once the room's disconnect has completed (the native room's,
+   *  once the host acknowledged it); never rejects. */
+  leaveVoice(sendWs = true, keepWatched = false): Promise<void> {
     this._rejoinPending = false;
     this._lostOnReconnect = null;
+    if (this._watchRetry !== null) clearTimeout(this._watchRetry);
+    this._watchRetry = null;
     dismissMediaLostNotice();
-    if (!keepWatched) this._remoteTracks.clearWatched();
-    this._lifecycle.leaveVoice(sendWs);
+    if (!keepWatched) {
+      this._leavingVoice = true;
+      try {
+        this._remoteTracks.clearWatched();
+      } finally {
+        this._leavingVoice = false;
+      }
+    }
+    this._media.stopCodecSwitch();
+    return this._lifecycle.leaveVoice(sendWs);
   }
 
   /** Stays on the facade: past leaveVoice(false) it only clears the session's
    *  own configuration fields, which the room lifecycle does not own. */
   cleanupAll(): void {
-    this.leaveVoice(false);
+    void this.leaveVoice(false);
     // leaveVoice() already transitions state to "idle".
     // Clear non-connection fields (config / callbacks / infrastructure).
     this.onErrorCallback = null;
@@ -976,6 +1054,12 @@ export class LiveKitSession {
     this._media.setInputVolume(volume);
   }
 
+  /** Hear the call capture's level reports where the room captures on its
+   *  own (Linux native engine). Returns the unsubscribe. */
+  onNativeInputLevel(listener: (rms: number | null, open: boolean) => void): () => void {
+    return this._audioPipeline.onRoomInputLevel(listener);
+  }
+
   setOutputVolume(volume: number): void {
     this._media.setOutputVolume(volume);
   }
@@ -1017,8 +1101,12 @@ export class LiveKitSession {
     return this._remoteTracks.getLocalScreenshareStream();
   }
 
-  getLocalScreenshareFps(): Promise<number | null> {
-    return this._remoteTracks.getLocalScreenshareFps();
+  /** What your screen share is sending; the last sample also goes into the
+   *  support bundle's voice diagnostics. */
+  async getLocalScreenshareStats(): Promise<ShareSenderSample | null> {
+    const sample = await this._remoteTracks.getLocalScreenshareStats();
+    this._shareSender = sample;
+    return sample;
   }
 
   /** Your screen share is publishing its audio too. */
@@ -1070,13 +1158,25 @@ export class LiveKitSession {
   }
 
   getSessionDebugInfo(): Record<string, unknown> {
-    const info = buildSessionDebugInfo({
+    const debug = buildSessionDebugInfo({
       room: this._room,
       currentChannelId: this._currentChannelId,
       outputVolumeMultiplier: this._audioElements.getOutputVolumeMultiplier(),
       audioPipeline: this._audioPipeline,
       audioElements: this._audioElements,
     });
+    // Your share's sender stats (M-1), as the share's own tile last read them
+    // (it polls while you share); each read also asks for a fresh sample.
+    // Nothing from a share that has ended.
+    const sharing =
+      this._room?.localParticipant.getTrackPublication(Track.Source.ScreenShare) !== undefined;
+    if (sharing) {
+      this.getLocalScreenshareStats().catch((err: unknown) =>
+        log.debug("share sender stats failed", err),
+      );
+    }
+    if (!sharing) this._shareSender = null;
+    const info = { ...debug, screenShareSender: this._shareSender };
     if (!isLinuxDesktop()) return info;
     // B7-11 rule 3: native resources are countable through the facade. Each
     // read asks the backend for a fresh snapshot, which the next read reports.
@@ -1108,6 +1208,8 @@ owncordNs.voiceStatus = () => voiceStore.getState().voiceStatus;
 owncordNs.setVoiceStatus = setVoiceStatus;
 
 export const setWsClient = session.setWsClient.bind(session);
+export const resendWatching = session.resendWatching.bind(session);
+export const retryWatching = session.retryWatching.bind(session);
 export const setServerHost = session.setServerHost.bind(session);
 export const setOnError = session.setOnError.bind(session);
 export const setOnRemoteVideo = session.setOnRemoteVideo.bind(session);
@@ -1142,6 +1244,7 @@ export const getUserVolume = session.getUserVolume.bind(session);
 export const setUserLocalMute = session.setUserLocalMute.bind(session);
 export const getUserLocalMute = session.getUserLocalMute.bind(session);
 export const setInputVolume = session.setInputVolume.bind(session);
+export const onNativeInputLevel = session.onNativeInputLevel.bind(session);
 export const setOutputVolume = session.setOutputVolume.bind(session);
 export const setVoiceSensitivity = session.setVoiceSensitivity.bind(session);
 export const applyInputMode = session.applyInputMode.bind(session);
@@ -1153,7 +1256,7 @@ export const reapplyEnhancedNoiseSuppression =
   session.reapplyEnhancedNoiseSuppression.bind(session);
 export const getLocalCameraStream = session.getLocalCameraStream.bind(session);
 export const getLocalScreenshareStream = session.getLocalScreenshareStream.bind(session);
-export const getLocalScreenshareFps = session.getLocalScreenshareFps.bind(session);
+export const getLocalScreenshareStats = session.getLocalScreenshareStats.bind(session);
 export const hasLocalScreenshareAudio = session.hasLocalScreenshareAudio.bind(session);
 export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);

@@ -6,7 +6,7 @@
 // one. These files are what that operator runs, against a database no server
 // is holding open, after taking a backup. The reversals were written with the
 // migrations (the B4 data contracts drafted theirs in
-// docs/plans/hp-4-drafts/) rather than improvised during an incident.
+// docs/archive/plans/hp-4-drafts/) rather than improvised during an incident.
 //
 // Each file reverses exactly one migration and ends by deleting that
 // migration's row from schema_versions, so the next server start applies the
@@ -40,6 +40,26 @@ var FS embed.FS
 
 // Order is every migration reversal, newest first — the order to run them in.
 var Order = []string{
+	"079_thread_members.down.sql",
+	"078_manage_nicknames.down.sql",
+	"077_user_roles_reconcile.down.sql",
+	"075_forums.down.sql",
+	"076_category_permissions.down.sql",
+	"074_threads.down.sql",
+	"073_polls.down.sql",
+	"072_channel_categories.down.sql",
+	"071_message_forwards.down.sql",
+	"070_user_privacy.down.sql",
+	"069_profile_notes_banners.down.sql",
+	"068_channel_afk.down.sql",
+	"067_user_roles.down.sql",
+	"066_group_dm_icon.down.sql",
+	"065_group_dm_owner.down.sql",
+	"064_call_log.down.sql",
+	"063_mention_receipts.down.sql",
+	"062_custom_status_expiry.down.sql",
+	"061_member_generation_about.down.sql",
+	"060_message_mentions_reply_ping.down.sql",
 	"059_gif_favorites.down.sql",
 	"058_revoke_trust_for_blocked_pairs.down.sql",
 	"057_member_generation.down.sql",

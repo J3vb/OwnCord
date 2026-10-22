@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.3.0-beta.1"
+version = "2.4.0-beta.1"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -66,17 +66,18 @@ tauri-plugin-updater = "2.13"
 minisign-verify = "0.2"
 tauri-plugin-process = "2"
 url = "2"
-tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
+# ws_proxy.rs always passes its own rustls Connector, so tungstenite needs the
+# rustls backend but not a bundled root store of its own.
+tokio-tungstenite = { version = "0.30.0", features = ["__rustls-tls"] }
 futures-util = "0.3.32"
-tokio = { version = "1", features = ["sync", "net", "io-util", "rt", "macros"] }
+tokio = { version = "1", features = ["sync", "net", "io-util", "rt", "macros", "time"] }
 tokio-rustls = { version = "0.26", default-features = false }
 # TCP keepalive on the REST tunnel's pooled upstream sockets (http_pool.rs);
 # tokio exposes none. Already in the dependency tree through tokio.
 socket2 = { version = "0.6", features = ["all"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 # Mozilla root bundle for the updater's HostScopedVerifier: non-pinned hosts
-# (the GitHub installer download) get web-PKI validation. Already in the
-# dependency tree via tokio-tungstenite's rustls-tls-webpki-roots feature.
+# (the GitHub installer download) get web-PKI validation.
 webpki-roots = "1"
 ring = "0.17"
 log = "0.4"
@@ -112,8 +113,9 @@ keyring = { version = "3", default-features = false, features = [
 # Encodes the DPAPI ciphertext for the JSON fallback store. Already in the tree
 # via the tauri/rustls stack, so this costs no extra build.
 base64 = "0.22"
-# Native message box for the fatal-startup path in lib.rs, where the Tauri app
-# never built and tauri-plugin-dialog has no AppHandle to run through. Already
+# Native message box for the fatal-startup path in lib.rs on Windows and macOS,
+# where the Tauri app never built and tauri-plugin-dialog has no AppHandle to
+# run through (Linux shows that dialog with gtk instead, see below). Already
 # in the tree via that same plugin, so this costs no extra build -- but only
 # while the versions match: the plugin pins ^0.16, and Cargo unifies features
 # only within a semver-compatible group. Moving this to 0.17 forks rfd into two
@@ -130,10 +132,11 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-deep-link = "2"
-# Message notifications that open their message on click (message_notification.rs).
-# The notification plugin's desktop backend drops the click/action callback, so
-# this calls notify-rust — already in the tree as the plugin's own desktop
-# backend — directly to wait for the activation.
+# Message notifications that open their message on click on macOS
+# (message_notification.rs). The notification plugin's desktop backend drops
+# the click/action callback, so this calls notify-rust — already in the tree as
+# the plugin's own desktop backend — directly to wait for the activation. Linux
+# uses the session bus directly (notification_bus.rs, the `dbus` crate below).
 notify-rust = "4"
 
 [target.'cfg(windows)'.dependencies]
@@ -148,15 +151,32 @@ notify-rust = "4"
 windows = { version = "0.58", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_SystemInformation",
+    # Per-app share audio (windows_app_audio.rs): WASAPI process loopback
+    # activation, its COM apartment and completion event, and the blob
+    # PROPVARIANT that carries the target process id.
+    "Win32_Media_Audio",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_Foundation",
     "Data_Xml_Dom",
     "UI_Notifications",
 ] }
 # DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
-# fallback in secret_store. Version tracks keyring's own windows-sys dep so the
-# two share one build of the crate.
+# fallback in secret_store, and the window lookup that hides WebView2's
+# screen-sharing bar (windows_share_bar.rs). Version tracks keyring's own
+# windows-sys dep so the two share one build of the crate.
 windows-sys = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
+    "Win32_UI_WindowsAndMessaging",
+    # windows_app_audio.rs: the build number (RtlGetVersion) and the parent
+    # map that keeps OwnCord's own process tree out of a capture.
+    "Wdk_System_SystemServices",
+    "Win32_System_SystemInformation",
+    "Win32_System_Diagnostics_ToolHelp",
 ] }
 # WebView2 profile permission state (windows_media.rs). Both match the
 # versions tauri/wry already build, so no new crate enters the tree.
@@ -168,13 +188,27 @@ zeroize = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 device_query = "2"
+# XInput2 pointer query for Mouse 4/5 push to talk (mouse_buttons.rs):
+# device_query's core XQueryPointer stops at Button5. Loads Xlib and libXi at
+# runtime; already in the tree under tao, so no new crate or build.
+x11-dl = "2.21"
 # sigaction/prctl/dlsym for crash_log.rs, the last log line of a native
 # crash. Already in the tree under most of the dependency graph.
 libc = "0.2"
 # Session-bus idle queries for auto-idle (idle.rs): GNOME's Mutter
-# IdleMonitor and the freedesktop ScreenSaver interface. Already in the tree
-# as keyring's sync-secret-service transport, same libdbus, no new build.
+# IdleMonitor and the freedesktop ScreenSaver interface; also the launcher
+# count (unread_badge.rs) and message notifications (notification_bus.rs).
+# Already in the tree as keyring's sync-secret-service transport, same
+# libdbus, no new build.
 dbus = "0.9"
+# System-wide input idle on Wayland compositors without a Mutter or
+# ScreenSaver idle source (KDE Plasma, wlroots): the ext-idle-notify-v1
+# protocol (idle.rs). Pure-Rust wire backend, so no libwayland link; Smithay
+# crates, exact-pinned like the other Linux deps.
+wayland-client = "=0.31.15"
+wayland-protocols = { version = "=0.32.13", features = ["client", "staging"] }
+# Desktop id of an integrated AppImage's launcher entry (unread_badge.rs).
+md-5 = "=0.10.6"
 # Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships
 # WebRTC (the system webview's RTCPeerConnection is undefined on every distro),
 # so on Linux the LiveKit SDK runs in this Rust backend instead of the webview
@@ -185,18 +219,24 @@ dbus = "0.9"
 # Exact-pinned on purpose: the SDK is 0.x, its API churns, and webrtc-sys
 # downloads a prebuilt libwebrtc (webrtc-89d790b) whose C++ ABI is tied to the
 # crate version, so a patch bump must be a deliberate, re-verified change.
-# 0.9.1 -> 0.9.3, NOT the 0.9.2 Dependabot proposed: 0.9.2 pairs an older
+# 0.9.3 -> 0.9.5 (WP LP-7d: dynacast re-applies paused layers after every
+# publisher renegotiation, via LocalVideoTrack::refresh_publishing_layers).
+# History: 0.9.1 -> 0.9.3, NOT the 0.9.2 Dependabot proposed: 0.9.2 pairs an older
 # livekit-protocol 0.7.13/pbjson 0.6 (prost 0.12) with its newer sub-crates,
 # splitting prost into a 0.12/0.14 pair and breaking livekit-data-stream's
 # build ("no method named encoded_len" — rust-sdks #1447). 0.9.3 resolves the
 # whole family on prost 0.14 uniformly, which is why it compiles.
+# WP LP-8d: the crate itself comes from vendor/livekit through the
+# [patch.crates-io] table at the end of this file (upstream 0.9.5 plus a
+# `stereo` flag on TrackPublishOptions); the pin stays `=0.9.5` so the patch
+# only applies while the version matches, and webrtc-sys/libwebrtc do not move.
 # Default features only — no TLS backend, because the native room dials the
 # plain ws:// loopback that livekit_proxy already exposes.
-livekit = "=0.9.3"
+livekit = "=0.9.5"
 # Names the SDK's permission/track-source protobuf types (its `proto` module
-# does not re-export them). Same version livekit 0.9.3 already resolves, so no
+# does not re-export them). Same version livekit 0.9.5 resolves, so no
 # new crate enters the tree.
-livekit-protocol = "=0.8.0"
+livekit-protocol = "=0.8.1"
 # Encodes the screen picker's thumbnails (native_voice/screen.rs). Already in
 # the tree via tauri's tray-icon, so this costs no extra build.
 png = "0.18"
@@ -207,6 +247,14 @@ png = "0.18"
 # `pulseaudio` host is a pure-Rust client (no libpulse link) that lists the
 # same device descriptions the device module showed; plain ALSA is the fallback.
 cpal = { version = "0.18", features = ["pulseaudio"] }
+# The same pure-Rust PulseAudio protocol crate cpal's host uses, taken directly
+# for the screen-share audio capture (native_voice/share_audio.rs): it records
+# other applications' sink inputs over its public `protocol` module. Pinned to
+# the version cpal resolves, so no new crate enters the tree. share_audio.rs
+# recognises OwnCord's own playback by the client name cpal gives its
+# connections (`cpal-pulseaudio-<pid>`, cpal src/host/pulseaudio/mod.rs): a
+# cpal bump has to re-check that name.
+pulseaudio = "=0.3.1"
 # RNNoise for the Enhanced Noise Suppression setting on the native capture
 # path (native_voice/capture.rs): a pure-Rust port of the RNNoise model the web
 # path runs as WASM. Default features only add its command-line tool.
@@ -219,6 +267,10 @@ nnnoiseless = { version = "0.5", default-features = false }
 # wry's own `=2.0.2` pin so both link the same crate build; v2_38 gates the
 # enable-webrtc setting.
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+# The startup error dialog (lib.rs): shown with GTK directly on the main
+# thread, since rfd's GTK dialog never appears once tao has started GTK. Same
+# 0.18 line tao, wry and webkit2gtk already build, so no new crate.
+gtk = "0.18"
 # Native Linux camera capture (native_voice/camera.rs). WebKitGTK freezes a
 # hidden page's <video> element and stops requestVideoFrameCallback, so the
 # webview camera pump (features/voice/native/cameraUplink.ts) stalls whenever
@@ -242,3 +294,12 @@ tokio = { version = "1", features = ["test-util"] }
 # Mock runtime, so the updater plugin runs against the shipped tauri.conf.json
 # in update_commands tests without a window.
 tauri = { version = "2.12", features = ["test"] }
+
+# WP LP-8d: livekit 0.9.5 has no way to ask the SFU for a stereo publisher, so
+# the Linux share-audio track was encoded mono. vendor/livekit is the crates.io
+# package verbatim plus a ~15-line `stereo` option; see
+# vendor/livekit/OWNCORD-PATCH.md. Drop this table (and the directory) on the
+# first upstream release that ships the option; that is an SDK bump, so
+# re-verify the libwebrtc pin above.
+[patch.crates-io]
+livekit = { path = "vendor/livekit" }

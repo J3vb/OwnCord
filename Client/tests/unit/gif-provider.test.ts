@@ -45,8 +45,8 @@ function gifResult(
   return { id, title, media_formats };
 }
 
-function response(results: unknown[]): GifSearchResponse {
-  return { results } as GifSearchResponse;
+function response(results: unknown[], next?: string): GifSearchResponse {
+  return (next === undefined ? { results } : { results, next }) as GifSearchResponse;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,12 +95,12 @@ describe("searchGifs", () => {
   describe("result parsing", () => {
     it("returns an empty array when results are empty", async () => {
       gifSearch.mockResolvedValue(response([]));
-      expect(await searchGifs(api, "nothing")).toEqual([]);
+      expect((await searchGifs(api, "nothing")).gifs).toEqual([]);
     });
 
     it("maps id, title, url (tinygif), and fullUrl (gif) correctly", async () => {
       gifSearch.mockResolvedValue(response([gifResult("abc123")]));
-      const gifs = await searchGifs(api, "cats");
+      const { gifs } = await searchGifs(api, "cats");
       expect(gifs).toHaveLength(1);
       expect(gifs[0]).toEqual({
         id: "abc123",
@@ -112,7 +112,7 @@ describe("searchGifs", () => {
 
     it("maps multiple results in order", async () => {
       gifSearch.mockResolvedValue(response([gifResult("a"), gifResult("b"), gifResult("c")]));
-      const gifs = await searchGifs(api, "cats");
+      const { gifs } = await searchGifs(api, "cats");
       expect(gifs.map((g) => g.id)).toEqual(["a", "b", "c"]);
     });
 
@@ -120,13 +120,13 @@ describe("searchGifs", () => {
       gifSearch.mockResolvedValue(
         response([gifResult("keep"), gifResult("drop", { tinygif: null })]),
       );
-      const gifs = await searchGifs(api, "cats");
+      const { gifs } = await searchGifs(api, "cats");
       expect(gifs.map((g) => g.id)).toEqual(["keep"]);
     });
 
     it("filters out results with no gif format", async () => {
       gifSearch.mockResolvedValue(response([gifResult("keep"), gifResult("drop", { gif: null })]));
-      const gifs = await searchGifs(api, "cats");
+      const { gifs } = await searchGifs(api, "cats");
       expect(gifs.map((g) => g.id)).toEqual(["keep"]);
     });
 
@@ -134,7 +134,7 @@ describe("searchGifs", () => {
       gifSearch.mockResolvedValue(
         response([gifResult("x", { tinygif: null }), gifResult("y", { gif: null })]),
       );
-      expect(await searchGifs(api, "cats")).toEqual([]);
+      expect((await searchGifs(api, "cats")).gifs).toEqual([]);
     });
   });
 
@@ -154,7 +154,7 @@ describe("searchGifs", () => {
           }),
         ]),
       );
-      const gifs = await searchGifs(api, "cats");
+      const { gifs } = await searchGifs(api, "cats");
       expect(gifs.map((g) => g.id)).toEqual(["keep"]);
     });
 
@@ -167,7 +167,7 @@ describe("searchGifs", () => {
           }),
         ]),
       );
-      expect(await searchGifs(api, "cats")).toEqual([]);
+      expect((await searchGifs(api, "cats")).gifs).toEqual([]);
     });
 
     it("rejects lookalike hosts that merely end in the allowed name", async () => {
@@ -179,7 +179,7 @@ describe("searchGifs", () => {
           }),
         ]),
       );
-      expect(await searchGifs(api, "cats")).toEqual([]);
+      expect((await searchGifs(api, "cats")).gifs).toEqual([]);
     });
 
     it("rejects a klipy.com path on an attacker host", async () => {
@@ -191,14 +191,14 @@ describe("searchGifs", () => {
           }),
         ]),
       );
-      expect(await searchGifs(api, "cats")).toEqual([]);
+      expect((await searchGifs(api, "cats")).gifs).toEqual([]);
     });
 
     it("rejects malformed URLs", async () => {
       gifSearch.mockResolvedValue(
         response([gifResult("drop", { tinygif: "not a url", gif: "also not a url" })]),
       );
-      expect(await searchGifs(api, "cats")).toEqual([]);
+      expect((await searchGifs(api, "cats")).gifs).toEqual([]);
     });
   });
 
@@ -250,12 +250,12 @@ describe("getTrendingGifs", () => {
   describe("result parsing", () => {
     it("returns an empty array when results are empty", async () => {
       gifTrending.mockResolvedValue(response([]));
-      expect(await getTrendingGifs(api)).toEqual([]);
+      expect((await getTrendingGifs(api)).gifs).toEqual([]);
     });
 
     it("maps fields correctly", async () => {
       gifTrending.mockResolvedValue(response([gifResult("trend1")]));
-      const gifs = await getTrendingGifs(api);
+      const { gifs } = await getTrendingGifs(api);
       expect(gifs[0]).toEqual({
         id: "trend1",
         title: "Title trend1",
@@ -268,14 +268,14 @@ describe("getTrendingGifs", () => {
       gifTrending.mockResolvedValue(
         response([gifResult("keep"), gifResult("drop", { tinygif: null })]),
       );
-      expect((await getTrendingGifs(api)).map((g) => g.id)).toEqual(["keep"]);
+      expect((await getTrendingGifs(api)).gifs.map((g) => g.id)).toEqual(["keep"]);
     });
 
     it("filters out results with missing gif", async () => {
       gifTrending.mockResolvedValue(
         response([gifResult("keep"), gifResult("drop", { gif: null })]),
       );
-      expect((await getTrendingGifs(api)).map((g) => g.id)).toEqual(["keep"]);
+      expect((await getTrendingGifs(api)).gifs.map((g) => g.id)).toEqual(["keep"]);
     });
 
     it("enforces the CDN allowlist on trending results too", async () => {
@@ -287,7 +287,7 @@ describe("getTrendingGifs", () => {
           }),
         ]),
       );
-      expect(await getTrendingGifs(api)).toEqual([]);
+      expect((await getTrendingGifs(api)).gifs).toEqual([]);
     });
   });
 
@@ -296,5 +296,27 @@ describe("getTrendingGifs", () => {
       gifTrending.mockRejectedValue(new Error("DNS lookup failed"));
       await expect(getTrendingGifs(api)).rejects.toThrow("DNS lookup failed");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Paging cursor
+// ---------------------------------------------------------------------------
+
+describe("paging cursor", () => {
+  it("returns the response's next cursor, or an empty string when absent", async () => {
+    gifSearch.mockResolvedValue(response([gifResult("a")], "CURSOR-1"));
+    expect((await searchGifs(api, "cats")).next).toBe("CURSOR-1");
+    gifTrending.mockResolvedValue(response([gifResult("a")]));
+    expect((await getTrendingGifs(api)).next).toBe("");
+  });
+
+  it("forwards pos to the api client only when given", async () => {
+    gifSearch.mockResolvedValue(response([]));
+    gifTrending.mockResolvedValue(response([]));
+    await searchGifs(api, "cats", 20, "P1");
+    await getTrendingGifs(api, 20, "P2");
+    expect(gifSearch).toHaveBeenCalledWith("cats", 20, "P1");
+    expect(gifTrending).toHaveBeenCalledWith(20, "P2");
   });
 });

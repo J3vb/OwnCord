@@ -162,7 +162,8 @@ import { uiStore, setSidebarMode } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
 import { Permission } from "../../src/lib/types";
 import { membersStore } from "../../src/stores/members.store";
-import { voiceStore } from "../../src/stores/voice.store";
+import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
+import { isDmKeptForCall, resetKeptCallDms } from "../../src/features/direct-messages/keptCallDms";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
@@ -170,6 +171,9 @@ import { createMemberList } from "@components/MemberList";
 import { createUserBar } from "@components/UserBar";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
+// The member picker now loads on first use. Load it up front so its module-level
+// listeners register before each test, as they did when it was a static import.
+import "../../src/pages/main-page/MemberPickerModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
@@ -202,6 +206,7 @@ function getMockUpdate(factory: MockedFn): MockedFn {
 
 function resetStores(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],
@@ -250,6 +255,8 @@ function resetStores(): void {
   }));
   localStorage.removeItem("owncord:member-list-height");
   localStorage.removeItem("owncord:member-list-collapsed");
+  // The default layout is "right" (3C-6c); these tests exercise the left section.
+  localStorage.setItem("owncord:settings:memberListLayout", '"left"');
 }
 
 function resetMocks(): void {
@@ -275,6 +282,14 @@ function resetMocks(): void {
   (createCreateChannelModal as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
   (createEditChannelModal as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
   (createDeleteChannelModal as MockedFn).mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
+}
+
+/** The voice widget loads when the user is first in voice (O-6b): put the user
+ *  in a voice channel and wait for the widget's code to arrive. */
+async function enterVoiceAndAwaitWidget(): Promise<void> {
+  joinVoiceChannel(1);
+  voiceStore.flush();
+  await vi.dynamicImportSettled();
 }
 
 // ---------------------------------------------------------------------------
@@ -331,7 +346,7 @@ function defaultOpts(): SidebarAreaOptions {
     } as unknown as SidebarAreaOptions["limiters"],
     presenceSender: {
       send: vi.fn(),
-      rollbackTimedOut: vi.fn(),
+      rollbackRefused: vi.fn(),
       destroy: vi.fn(),
     },
     getRoot: vi.fn().mockReturnValue(document.createElement("div")),
@@ -377,10 +392,14 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("returns children array with mounted components", () => {
+    it("returns children array with mounted components", async () => {
       const result = createSidebarArea(defaultOpts());
-      expect(result.children.length).toBeGreaterThanOrEqual(2);
+      await enterVoiceAndAwaitWidget();
+      // The lazy voice widget is torn down by an unsubscriber, not `children`
+      // (the page copies `children` before it loads).
+      expect(result.children.length).toBeGreaterThanOrEqual(1);
       cleanup(result);
+      leaveVoiceChannel();
     });
 
     it("returns unsubscribers for cleanup", () => {
@@ -709,6 +728,80 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    it("right layout mounts no sidebar member section", () => {
+      localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      expect(container.querySelector("[data-testid='sidebar-members']")).toBeNull();
+      expect(createMemberList).not.toHaveBeenCalled();
+      expect(container.querySelector(".sidebar-content-inner")).not.toBeNull();
+
+      cleanup(result);
+    });
+
+    it("syncMemberSection adds and removes the section without remounting the channel list", () => {
+      localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+      const inner = container.querySelector(".sidebar-content-inner");
+      expect(inner).not.toBeNull();
+      expect(createChannelSidebar).toHaveBeenCalledTimes(1);
+
+      // right -> left: the section appears under the channel list.
+      localStorage.setItem("owncord:settings:memberListLayout", '"left"');
+      result.syncMemberSection();
+      result.syncMemberSection(); // idempotent
+      expect(container.querySelectorAll("[data-testid='sidebar-members']").length).toBe(1);
+      expect(container.querySelector(".sidebar-content-inner")).toBe(inner);
+      expect(createMemberList).toHaveBeenCalledTimes(1);
+
+      // left -> right: the section goes and its list is destroyed.
+      const memberDestroy = getMockDestroy(createMemberList as MockedFn);
+      localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+      result.syncMemberSection();
+      expect(container.querySelector("[data-testid='sidebar-members']")).toBeNull();
+      expect(memberDestroy).toHaveBeenCalled();
+      expect(container.querySelector(".sidebar-content-inner")).toBe(inner);
+      expect(createChannelSidebar).toHaveBeenCalledTimes(1);
+
+      cleanup(result);
+    });
+
+    it("syncMemberSection builds nothing in DMs mode, in either layout", () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      localStorage.setItem("owncord:settings:memberListLayout", '"left"');
+      result.syncMemberSection();
+      expect(container.querySelector("[data-testid='sidebar-members']")).toBeNull();
+      expect(createMemberList).not.toHaveBeenCalled();
+
+      cleanup(result);
+    });
+
+    it("returning to channels mode follows the stored layout", () => {
+      localStorage.setItem("owncord:settings:memberListLayout", '"right"');
+      const result = createSidebarArea(defaultOpts());
+      container.appendChild(result.sidebarWrapper);
+
+      setSidebarMode("dms");
+      uiStore.flush();
+      setSidebarMode("channels");
+      uiStore.flush();
+      expect(container.querySelector("[data-testid='sidebar-members']")).toBeNull();
+
+      localStorage.setItem("owncord:settings:memberListLayout", '"left"');
+      setSidebarMode("dms");
+      uiStore.flush();
+      setSidebarMode("channels");
+      uiStore.flush();
+      expect(container.querySelectorAll("[data-testid='sidebar-members']").length).toBe(1);
+
+      cleanup(result);
+    });
+
     it("renders DM list with up to 3 entries", () => {
       for (let i = 0; i < 5; i++) {
         addDmChannel(
@@ -848,12 +941,13 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("add DM button opens member picker", () => {
+    it("add DM button opens member picker", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const modal = document.querySelector(".dm-member-picker-modal");
       expect(modal).not.toBeNull();
@@ -1183,7 +1277,7 @@ describe("SidebarArea", () => {
   // -------------------------------------------------------------------------
 
   describe("member picker modal", () => {
-    it("shows member picker with non-current-user members", () => {
+    it("shows member picker with non-current-user members", async () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
@@ -1204,6 +1298,7 @@ describe("SidebarArea", () => {
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const items = document.querySelectorAll(".dm-member-picker-item");
       expect(items.length).toBe(2);
@@ -1211,13 +1306,15 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("does not open a second picker if one is already open", () => {
+    it("does not open a second picker if one is already open", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const modals = document.querySelectorAll(".modal-overlay");
       expect(modals.length).toBe(1);
@@ -1225,12 +1322,13 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("closes picker on cancel button click", () => {
+    it("closes picker on cancel button click", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const cancelBtn = document.querySelector(".btn-secondary") as HTMLElement;
       cancelBtn.click();
@@ -1240,12 +1338,13 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("closes picker when clicking the overlay background", () => {
+    it("closes picker when clicking the overlay background", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const overlay = document.querySelector(".modal-overlay") as HTMLElement;
       overlay.click();
@@ -1276,6 +1375,7 @@ describe("SidebarArea", () => {
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       // The picker is multi-select since group DMs: a click selects, and the
       // confirm button (labelled for the selection size) commits.
@@ -1294,7 +1394,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("shows member avatar initial and status in picker", () => {
+    it("shows member avatar initial and status in picker", async () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
@@ -1311,6 +1411,7 @@ describe("SidebarArea", () => {
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
 
       const avatar = document.querySelector(".dm-avatar");
       expect(avatar!.textContent).toBe("A");
@@ -1356,6 +1457,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1391,6 +1493,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1407,6 +1510,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1444,14 +1548,16 @@ describe("SidebarArea", () => {
   // -------------------------------------------------------------------------
 
   describe("voice widget and user bar", () => {
-    it("mounts voice widget", () => {
+    it("mounts voice widget", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
+      await enterVoiceAndAwaitWidget();
 
       expect(createVoiceWidget).toHaveBeenCalled();
       expect(getMockMount(createVoiceWidget as MockedFn)).toHaveBeenCalled();
 
       cleanup(result);
+      leaveVoiceChannel();
     });
 
     it("mounts user bar", () => {
@@ -1476,10 +1582,17 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("voice widget and user bar are included in children", () => {
+    it("the user bar is in children and the voice widget is destroyed by the unsubscribers", async () => {
       const result = createSidebarArea(defaultOpts());
-      expect(result.children.length).toBe(2);
+      await enterVoiceAndAwaitWidget();
+      expect(result.children.length).toBe(1);
+      const widget = (createVoiceWidget as MockedFn).mock.results.at(-1)!.value as {
+        destroy: ReturnType<typeof vi.fn>;
+      };
+      for (const unsub of result.unsubscribers) unsub();
+      expect(widget.destroy).toHaveBeenCalledOnce();
       cleanup(result);
+      leaveVoiceChannel();
     });
   });
 
@@ -1663,6 +1776,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1706,6 +1820,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1722,6 +1837,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1759,6 +1875,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1797,6 +1914,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1813,6 +1931,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1892,6 +2011,71 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
+    // WP 3B-5 (D14): a local close must not end the DM's live call on a network blip.
+    describe("closing a DM while in its call", () => {
+      const closeFromSidebar = (channelId: number, opts = defaultOpts()) => {
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        const calls = (createDmSidebar as MockedFn).mock.calls;
+        calls[calls.length - 1]![0].onCloseDm(channelId);
+        return result;
+      };
+
+      afterEach(() => {
+        resetKeptCallDms();
+      });
+
+      it("keeps a closed 1:1's call eligible for reconnect retries", () => {
+        addDmChannel(makeDm({ channelId: 100 }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        joinVoiceChannel(100);
+
+        const result = closeFromSidebar(100);
+
+        expect(dmStore.getState().channels).toHaveLength(0);
+        expect(isDmKeptForCall(100)).toBe(true);
+        cleanup(result);
+      });
+
+      it("does not keep a group the user leaves, so its call still ends", () => {
+        addDmChannel(makeDm({ channelId: 100, isGroup: true, name: "Crew" }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        joinVoiceChannel(100);
+
+        const result = closeFromSidebar(100);
+
+        expect(isDmKeptForCall(100)).toBe(false);
+        cleanup(result);
+      });
+
+      it("does not keep a 1:1 closed while the user is in a different call", () => {
+        addDmChannel(makeDm({ channelId: 100 }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        joinVoiceChannel(55);
+
+        const result = closeFromSidebar(100);
+
+        expect(isDmKeptForCall(100)).toBe(false);
+        cleanup(result);
+      });
+
+      it("forgets the DM when the server refuses the close and the row returns", async () => {
+        addDmChannel(makeDm({ channelId: 100 }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        joinVoiceChannel(100);
+        const opts = defaultOpts();
+        (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
+
+        const result = closeFromSidebar(100, opts);
+
+        await vi.waitFor(() => {
+          expect(dmStore.getState().channels.map((c) => c.channelId)).toContain(100);
+        });
+        expect(isDmKeptForCall(100)).toBe(false);
+        cleanup(result);
+      });
+    });
+
     it("restores a rejected closeDm row at its old place, not the top", async () => {
       addDmChannel(makeDm({ channelId: 103 }));
       addDmChannel(makeDm({ channelId: 102 }));
@@ -1962,6 +2146,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -2004,6 +2189,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -2048,7 +2234,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onNewDm opens member picker from DMs mode", () => {
+    it("onNewDm opens member picker from DMs mode", async () => {
       uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
 
       const result = createSidebarArea(defaultOpts());
@@ -2057,6 +2243,7 @@ describe("SidebarArea", () => {
       const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
       const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
       lastCall.onNewDm();
+      await vi.dynamicImportSettled();
 
       const modal = document.querySelector(".dm-member-picker-modal");
       expect(modal).not.toBeNull();
@@ -2093,6 +2280,7 @@ describe("SidebarArea", () => {
       const onOpenCall = vi.fn();
       const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
       container.appendChild(result.sidebarWrapper);
+      await enterVoiceAndAwaitWidget();
 
       // The page's channel subscriber shows that channel's chat; the call
       // view must open after it, not before.
@@ -2128,25 +2316,28 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onCreateChannel opens create channel modal", () => {
+    it("onCreateChannel opens create channel modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       callArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       expect(createCreateChannelModal).toHaveBeenCalled();
 
       cleanup(result);
     });
 
-    it("onCreateChannel does not open a second modal if one is active", () => {
+    it("onCreateChannel does not open a second modal if one is active", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       callArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
       callArgs.onCreateChannel("Another");
+      await vi.dynamicImportSettled();
 
       expect(createCreateChannelModal).toHaveBeenCalledTimes(1);
 
@@ -2307,6 +2498,7 @@ describe("SidebarArea", () => {
               topic: "",
               slowMode: 0,
               nsfw: false,
+              isPrivate: false,
               voiceMaxUsers: 0,
               voiceMaxVideo: 0,
             });
@@ -2464,6 +2656,163 @@ describe("SidebarArea", () => {
         cleanup(result);
       });
     });
+
+    describe("onReorderChannel across categories", () => {
+      /** Channel 1 sat at position 0 in category 10 "A" (position 0) and the drop
+       *  moved it to category 11 "B" (position 1) at position 6; channel 2 in B was
+       *  re-slotted from 6 to 7. The store already shows the optimistic result. */
+      function seedMoved(): void {
+        const base = {
+          type: "text" as const,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          isPrivate: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        };
+        channelsStore.setState((prev) => ({
+          ...prev,
+          channels: new Map([
+            [
+              1,
+              {
+                ...base,
+                id: 1,
+                name: "one",
+                category: "B",
+                categoryId: 11,
+                categoryPosition: 1,
+                position: 6,
+              },
+            ],
+            [
+              2,
+              {
+                ...base,
+                id: 2,
+                name: "two",
+                category: "B",
+                categoryId: 11,
+                categoryPosition: 1,
+                position: 7,
+              },
+            ],
+          ]),
+        }));
+      }
+      const moved = {
+        channelId: 1,
+        newPosition: 6,
+        previousPosition: 0,
+        category: {
+          previous: { categoryId: 10, category: "A", categoryPosition: 0 },
+          next: { categoryId: 11, category: "B", categoryPosition: 1 },
+        },
+      };
+      const reslotted = { channelId: 2, newPosition: 7, previousPosition: 6 };
+      const stored = (id: number) => channelsStore.getState().channels.get(id);
+      const flush = async (): Promise<void> => {
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+      };
+
+      it("PATCHes category_id and position for the moved channel and position alone for the rest", () => {
+        const opts = defaultOpts();
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedMoved();
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel([moved, reslotted]);
+
+        expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(1, {
+          category_id: 11,
+          position: 6,
+        });
+        expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(2, { position: 7 });
+
+        cleanup(result);
+      });
+
+      it("a failed PATCH rolls back both the category and the position, with one error toast", async () => {
+        const opts = defaultOpts();
+        const toast = { show: vi.fn() };
+        (opts.getToast as MockedFn).mockReturnValue(toast);
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockRejectedValueOnce(new Error("forbidden"))
+          .mockResolvedValueOnce(undefined);
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedMoved();
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel([moved, reslotted]);
+        await flush();
+
+        expect(stored(1)).toMatchObject({
+          categoryId: 10,
+          category: "A",
+          categoryPosition: 0,
+          position: 0,
+        });
+        // The re-slotted row's write landed, so it keeps its new slot.
+        expect(stored(2)?.position).toBe(7);
+        expect(toast.show).toHaveBeenCalledTimes(1);
+        expect(toast.show).toHaveBeenCalledWith("forbidden", "error");
+
+        cleanup(result);
+      });
+
+      it("does not roll the category back once a channel_update confirmed the write", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockRejectedValueOnce(new Error("response lost"))
+          .mockResolvedValueOnce(undefined);
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedMoved();
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel([moved, reslotted]);
+        const onUpdate = (opts.ws.on as MockedFn).mock.calls.find(
+          (c: unknown[]) => c[0] === "channel_update",
+        )![1] as (payload: { id: number }) => void;
+        onUpdate({ id: 1 });
+        await flush();
+
+        expect(stored(1)).toMatchObject({ categoryId: 11, position: 6 });
+
+        cleanup(result);
+      });
+
+      it("does not overwrite a newer category that arrived while the failed write was in flight", async () => {
+        const opts = defaultOpts();
+        (opts.api.adminUpdateChannel as MockedFn)
+          .mockRejectedValueOnce(new Error("response lost"))
+          .mockResolvedValueOnce(undefined);
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        seedMoved();
+
+        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+        callArgs.onReorderChannel([moved, reslotted]);
+        // Another move put the channel in category 12 before the failure surfaced.
+        channelsStore.setState((prev) => {
+          const channels = new Map(prev.channels);
+          channels.set(1, { ...channels.get(1)!, categoryId: 12, category: "C" });
+          return { ...prev, channels };
+        });
+        await flush();
+
+        expect(stored(1)).toMatchObject({ categoryId: 12, category: "C", position: 6 });
+
+        cleanup(result);
+      });
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -2478,6 +2827,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       // Get the createCreateChannelModal call args
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
@@ -2502,6 +2852,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
       await expect(modalCallArgs.onCreate({ name: "test", type: "text" })).rejects.toThrow(
@@ -2526,6 +2877,7 @@ describe("SidebarArea", () => {
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
       await expect(modalCallArgs.onCreate({ name: "test", type: "text" })).rejects.toBe(
@@ -2537,18 +2889,20 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onClose callback destroys create modal", () => {
+    it("onClose callback destroys create modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       channelCallArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
       modalCallArgs.onClose();
 
       // After close, should be able to open another modal
       channelCallArgs.onCreateChannel("Another");
+      await vi.dynamicImportSettled();
       expect(createCreateChannelModal).toHaveBeenCalledTimes(2);
 
       cleanup(result);
@@ -2747,6 +3101,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -2893,12 +3248,7 @@ describe("SidebarArea", () => {
     /** Extract callbacks passed to createMemberList */
     function getMemberListCallbacks(): {
       onKick: (userId: number, username: string) => Promise<void>;
-      onBan: (
-        userId: number,
-        username: string,
-        reason: string,
-        durationHours: number,
-      ) => Promise<void>;
+      onBan: (userId: number, username: string, displayName: string) => void;
       onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
     } {
       const calls = (createMemberList as MockedFn).mock.calls;
@@ -2956,7 +3306,24 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onBan calls API and shows success toast", async () => {
+    /** Open the Ban dialog the member menu asks for and return its controls. */
+    async function openBanDialogFor(
+      callbacks: ReturnType<typeof getMemberListCallbacks>,
+    ): Promise<{ reason: HTMLInputElement; confirm: HTMLButtonElement; status: HTMLElement }> {
+      callbacks.onBan(3, "Bob", "Bob");
+      const dialog = await vi.waitFor(() => {
+        const el = document.querySelector('[data-testid="ban-dialog"]');
+        if (el === null) throw new Error("ban dialog not open yet");
+        return el;
+      });
+      return {
+        reason: dialog.querySelector('[data-testid="ban-reason-input"]') as HTMLInputElement,
+        confirm: dialog.querySelector('[data-testid="ban-confirm"]') as HTMLButtonElement,
+        status: dialog.querySelector('[data-testid="ban-status"]') as HTMLElement,
+      };
+    }
+
+    it("onBan opens the dialog, calls the API and shows the success toast", async () => {
       const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
@@ -2964,47 +3331,46 @@ describe("SidebarArea", () => {
       const result = createSidebarArea(opts);
       container.appendChild(result.sidebarWrapper);
 
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob", "spamming", 0);
+      const { reason, confirm } = await openBanDialogFor(getMemberListCallbacks());
+      reason.value = "spamming";
+      confirm.click();
+      await vi.waitFor(() => expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success"));
 
-      expect(opts.api.adminBanMember).toHaveBeenCalledWith(3, "spamming", 0);
-      expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success");
+      expect(opts.api.adminBanMember).toHaveBeenCalledWith(3, "spamming", 0, undefined, 0);
 
       cleanup(result);
     });
 
-    it("onBan shows error toast on failure", async () => {
-      const mockShow = vi.fn();
+    it("onBan shows the error in the dialog on failure", async () => {
       const opts = defaultOpts();
       (opts.api.adminBanMember as MockedFn).mockRejectedValue(new Error("Ban denied"));
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+      (opts.getToast as MockedFn).mockReturnValue({ show: vi.fn() });
 
       const result = createSidebarArea(opts);
       container.appendChild(result.sidebarWrapper);
 
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob", "", 0);
-
-      expect(mockShow).toHaveBeenCalledWith("Ban denied", "error");
+      const { confirm, status } = await openBanDialogFor(getMemberListCallbacks());
+      confirm.click();
+      await vi.waitFor(() => expect(status.textContent).toBe("Ban denied"));
 
       cleanup(result);
+      document.querySelector('[data-testid="ban-dialog"]')?.remove();
     });
 
     it("onBan shows generic error for non-Error exceptions", async () => {
-      const mockShow = vi.fn();
       const opts = defaultOpts();
       (opts.api.adminBanMember as MockedFn).mockRejectedValue("string");
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+      (opts.getToast as MockedFn).mockReturnValue({ show: vi.fn() });
 
       const result = createSidebarArea(opts);
       container.appendChild(result.sidebarWrapper);
 
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onBan(3, "Bob", "", 0);
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to ban member", "error");
+      const { confirm, status } = await openBanDialogFor(getMemberListCallbacks());
+      confirm.click();
+      await vi.waitFor(() => expect(status.textContent).toBe("Failed to ban member"));
 
       cleanup(result);
+      document.querySelector('[data-testid="ban-dialog"]')?.remove();
     });
 
     it("onChangeRole calls API with correct role ID", async () => {
@@ -3170,6 +3536,32 @@ describe("SidebarArea", () => {
     });
   });
 
+  describe("buildMemberPanel", () => {
+    it("Call opens an existing DM and starts the call (BUG-05)", () => {
+      addDmChannel(
+        makeDm({
+          channelId: 100,
+          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        }),
+      );
+      const onStartCall = vi.fn();
+      const opts = defaultOpts();
+      const result = createSidebarArea({ ...opts, onStartCall });
+      container.appendChild(result.sidebarWrapper);
+
+      const panel = result.buildMemberPanel();
+      const calls = (createMemberList as MockedFn).mock.calls;
+      calls[calls.length - 1]![0].onCallUser(10);
+
+      expect(opts.api.createDm).not.toHaveBeenCalled();
+      expect(onStartCall).toHaveBeenCalledTimes(1);
+      expect(channelsStore.getState().activeChannelId).toBe(100);
+
+      panel.destroy();
+      cleanup(result);
+    });
+  });
+
   // -------------------------------------------------------------------------
   // Create DM error handling
   // -------------------------------------------------------------------------
@@ -3200,6 +3592,7 @@ describe("SidebarArea", () => {
 
       const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
       addBtn.click();
+      await vi.dynamicImportSettled();
       const item = document.querySelector(".dm-member-picker-item") as HTMLElement;
       item.click();
       (document.querySelector('[data-testid="dm-picker-create"]') as HTMLElement).click();
@@ -3217,13 +3610,14 @@ describe("SidebarArea", () => {
   // -------------------------------------------------------------------------
 
   describe("cleanup", () => {
-    it("calling all unsubscribers cleans up active modal", () => {
+    it("calling all unsubscribers cleans up active modal", async () => {
       const result = createSidebarArea(defaultOpts());
       container.appendChild(result.sidebarWrapper);
 
       // Open a modal
       const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
       callArgs.onCreateChannel("General");
+      await vi.dynamicImportSettled();
 
       const destroyFn = getMockDestroy(createCreateChannelModal as MockedFn);
 
@@ -3719,6 +4113,7 @@ describe("SidebarArea", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });

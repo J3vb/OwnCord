@@ -81,7 +81,7 @@ function opts(): SidebarAreaOptions {
       voice: { tryConsume: vi.fn().mockReturnValue(true) },
       voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
     } as never,
-    presenceSender: { send: vi.fn(), rollbackTimedOut: vi.fn(), destroy: vi.fn() },
+    presenceSender: { send: vi.fn(), rollbackRefused: vi.fn(), destroy: vi.fn() },
     getRoot: vi.fn().mockReturnValue(document.createElement("div")),
     getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
   };
@@ -95,7 +95,12 @@ describe("SidebarArea — Mark All as Read", () => {
   beforeEach(() => {
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
     uiStore.setState((prev) => ({

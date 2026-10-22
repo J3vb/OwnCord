@@ -51,6 +51,7 @@ function makeCh(id: number, position: number, name = `ch-${id}`): Channel {
     topic: "",
     slowMode: 0,
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
   };
@@ -184,7 +185,12 @@ beforeEach(() => {
     motd: null,
     isAuthenticated: false,
   }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
   document.body.className = "";
   document.body.innerHTML = "";
 });
@@ -268,6 +274,38 @@ describe("attachDragHandlers permission gate", () => {
     const rig = buildRig([makeCh(7, 0)]);
 
     expect(rig.items.get(7)?.dataset.dragChannelId).toBe("7");
+  });
+
+  it("an injected canManage overrides the store gate", () => {
+    const attach = (canManage: boolean): HTMLElement => {
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      const el = document.createElement("div");
+      container.appendChild(el);
+      const ac = new AbortController();
+      rigAborts.push(ac);
+      const channels = [makeCh(1, 0)];
+      attachDragHandlers(
+        el,
+        channels[0]!,
+        container,
+        channels,
+        ac.signal,
+        ac.signal,
+        vi.fn(),
+        canManage,
+      );
+      return el;
+    };
+
+    // The store says owner, the caller says no: not draggable.
+    signIn("owner");
+    expect(attach(false).classList.contains("channel-draggable")).toBe(false);
+    // The store says a plain member, the caller says yes: draggable.
+    signIn("member");
+    const yes = attach(true);
+    expect(yes.classList.contains("channel-draggable")).toBe(true);
+    expect(yes.dataset.dragChannelId).toBe("1");
   });
 });
 
@@ -405,6 +443,7 @@ describe("reorder index arithmetic", () => {
     signIn("owner");
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
     channelsStore.setState(() => ({
+      categories: [],
       channels: new Map([
         [1, makeCh(1, 0)],
         [2, makeCh(2, 1)],
@@ -565,6 +604,7 @@ describe("drop indicator", () => {
 describe("mid-drag sidebar re-render", () => {
   function setStoreChannels(channels: Channel[]): void {
     channelsStore.setState(() => ({
+      categories: [],
       channels: new Map(channels.map((c) => [c.id, c])),
       activeChannelId: null,
       roles: [],

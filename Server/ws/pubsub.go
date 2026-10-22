@@ -62,7 +62,7 @@ func UserTopic(userID int64) Topic {
 //
 // Thread-safe: all methods may be called from any goroutine.
 type PubSub struct {
-	mu syncutil.RWMutex
+	mu syncutil.RankedRW[lockRankPubSub]
 
 	// Forward index: topic → (userID → *Client)
 	topics map[Topic]map[int64]*Client
@@ -235,6 +235,19 @@ func (ps *PubSub) publishWithPriority(topic Topic, msg []byte, excludeUserID int
 		}
 	}
 	return delivered
+}
+
+// subscribers snapshots topic's subscribers, minus excludeUserID.
+func (ps *PubSub) subscribers(topic Topic, excludeUserID int64) []*Client {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	clients := make([]*Client, 0, len(ps.topics[topic]))
+	for uid, c := range ps.topics[topic] {
+		if uid != excludeUserID {
+			clients = append(clients, c)
+		}
+	}
+	return clients
 }
 
 // SubscriberCount returns the number of subscribers for a topic.

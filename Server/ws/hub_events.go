@@ -23,6 +23,9 @@ func (h *Hub) ReplayBuffer() *EventRingBuffer {
 	return h.replayBuf
 }
 
+// CurrentSeq returns the hub's monotonic sequence counter (atomic).
+func (h *Hub) CurrentSeq() uint64 { return atomic.LoadUint64(&h.seq) }
+
 // SeedSeq sets the hub's monotonic sequence counter to seed (atomic). Used
 // at startup to align in-memory seqs with the persisted MAX(events.seq) so
 // wrapped-payload seqs stay monotonic across restarts. Calling SeedSeq with
@@ -71,11 +74,49 @@ func (h *Hub) SetPluginEventSink(s *plugin.EventSink) {
 	h.pluginSink.Store(s)
 }
 
+// dispatchToPlugins hands one sequenced frame to the plugin sink, if any.
+func (h *Hub) dispatchToPlugins(msg []byte) {
+	sink := h.pluginSink.Load()
+	if sink == nil {
+		return
+	}
+	eventType := extractEventType(msg)
+	if eventType == "" {
+		eventType = "broadcast"
+	}
+	if hook := pluginDispatchHook.Load(); hook != nil {
+		(*hook)(h, msg)
+	}
+	sink.Dispatch(context.Background(), eventType, msg)
+}
+
+// pluginDispatchHook is a test seam called right before the plugin sink.
+var pluginDispatchHook atomic.Pointer[func(h *Hub, msg []byte)]
+
 // ReconnectTierStats returns the per-tier resume hit counters in the order
 // (buffer, db, full). Phase B Step 7 metrics surface; OpenTelemetry meters
 // (Step 8) read from the same atomics.
 func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 	return h.reconnectTierBuf.Load(), h.reconnectTierDB.Load(), h.reconnectTierFull.Load()
+}
+
+// noteRingMiss counts a resume the ring just failed to serve, but only when the
+// client is behind the ring's oldest entry: the ring also returns nil for an
+// empty ring and for a client ahead of it, and the events table serves neither.
+// One atomic, no hub lock, no I/O, so it is safe outside seqMu on the handshake path
+// (WP 4.6a). The re-read of the ring can race a push, which is harmless here.
+func (h *Hub) noteRingMiss(lastSeq uint64) {
+	if oldest := h.ReplayBuffer().OldestSeq(); oldest != 0 && lastSeq <= oldest {
+		h.reconnectRingMiss.Add(1)
+	}
+}
+
+// ReconnectRingMissCount returns the lifetime number of resumes that passed the
+// resync checks but fell behind the in-memory replay ring (WP 4.6a). The hit
+// rate of the events table is ReconnectTierStats' db / this. It is a separate
+// method so ReconnectTierStats keeps its admin-interface signature.
+func (h *Hub) ReconnectRingMissCount() uint64 {
+	return h.reconnectRingMiss.Load()
 }
 
 // mustFullResync reports whether a client resuming from lastSeq predates the
@@ -126,6 +167,7 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
+	h.activity.forget(nil, ids)
 	set := make(map[int64]struct{}, len(ids))
 	for _, id := range ids {
 		set[id] = struct{}{}
@@ -150,6 +192,7 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 // deletes the persisted rows after releasing it. Idempotent and retried
 // from the erasure journal on failure.
 func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
+	h.activity.forget([]int64{userID}, nil)
 	dropped, rows, err := h.purgeReplay(ctx, &h.tombstones.unfinishedUsers, []int64{userID},
 		func(seq uint64) {
 			h.tombstones.add(&h.tombstones.users, seq, userID)
@@ -263,6 +306,7 @@ var messageFamily = map[string]struct{}{
 	MsgTypeChatDeleted:     {},
 	MsgTypeChatBulkDeleted: {},
 	MsgTypeReactionUpdate:  {},
+	MsgTypePollUpdate:      {},
 }
 
 // eventNamesMessage reports whether a wrapped broadcast frame is a
@@ -324,6 +368,12 @@ func extractEventType(payload []byte) string {
 	return string(t)
 }
 
+// sequenceable reports whether wrapWithSeq stamps msg: a non-empty JSON object
+// no larger than config.MaxMessageBytes. Anything else passes through as is.
+func sequenceable(msg []byte) bool {
+	return len(msg) >= 2 && len(msg) <= config.MaxMessageBytes && msg[0] == '{'
+}
+
 // wrapWithSeq injects a "seq" field into a JSON message without re-serializing.
 func wrapWithSeq(msg []byte, seq uint64) []byte {
 	// Fast path: inject seq after the opening brace.
@@ -332,7 +382,7 @@ func wrapWithSeq(msg []byte, seq uint64) []byte {
 	// Frames above config.MaxMessageBytes pass through unsequenced, like a
 	// non-object frame: every server-built envelope is far smaller, and the
 	// bound keeps the capacity arithmetic below provably overflow-free.
-	if len(msg) < 2 || len(msg) > config.MaxMessageBytes || msg[0] != '{' {
+	if !sequenceable(msg) {
 		return msg
 	}
 	// `{"seq":` + up-to-20-digit uint64 + `,` = at most 28 extra bytes; the

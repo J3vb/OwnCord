@@ -24,6 +24,8 @@ async function bobId(server: TestServer): Promise<number> {
 async function relogin(page: Page, server: TestServer): Promise<void> {
   await page.getByRole("button", { name: "Settings" }).click();
   await page.locator(".settings-nav-item.danger").click();
+  // Log Out asks first.
+  await page.locator("[data-testid='logout-confirm']").click();
   await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
   await login(page, server, "bob");
 }
@@ -146,7 +148,7 @@ test.describe("B9-15 moderation notices (real server)", () => {
     await expect(composer(bob)).toHaveAttribute("placeholder", /^You can't send messages until /);
 
     await bob.getByRole("button", { name: "Settings" }).click();
-    await bob.getByRole("tab", { name: "Safety" }).click();
+    await bob.getByRole("tab", { name: "Privacy & Safety" }).click();
     const pane = bob.locator(".safety-tab");
     await expect(pane).toContainText(/You're timed out until .+ You can't send messages/);
     await expect(pane.locator(".safety-history-row")).toHaveCount(1);

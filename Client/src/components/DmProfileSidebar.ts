@@ -4,13 +4,15 @@
  * 340px wide, slides in from the right with a 170ms animation.
  *
  * Content: 80px avatar, username, status dot + label, about section,
- * "Member Since" date, and a local-only editable Note field.
+ * "Member Since" date, and an editable private Note field (kept on the
+ * server with the `user_notes` capability, else in localStorage).
  *
  * A11y: role="complementary", aria-label="User profile", Esc to close,
  * focus first focusable on open.
  */
 
 import { Disposable } from "@lib/disposable";
+import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
@@ -21,9 +23,16 @@ import {
   recoverEvictedImage,
   resolveServerUrl,
 } from "./message-list/attachments";
-import { migrateLegacyValue } from "@lib/legacyKeyMigration";
-import { shellText } from "../i18n/shell";
+import { blocksStore } from "@stores/blocks.store";
+import { paintBanner } from "../features/profiles/banner";
+import { bannerImages } from "./bannerImages";
+import { shellText, statusLabel } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";
+import {
+  NOTE_MAX_LENGTH,
+  createNoteBinding,
+  type NotesContext,
+} from "../features/profiles/userNotes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,11 +49,17 @@ export interface DmProfileData {
   readonly status: UserStatus;
   readonly about?: string | null;
   readonly joinDate?: string | null;
+  /** Banner image path and colour; absent or null = no strip (WP 6.11d). */
+  readonly banner?: string | null;
+  readonly banner_color?: string | null;
 }
 
 export interface DmProfileSidebarOptions {
   readonly user: DmProfileData;
   readonly onClose: () => void;
+  /** Block (`block` true) or Unblock this user (WP 3B-2). The owner confirms a
+   *  Block; the label follows `blocksStore`. Omitted: no button. */
+  readonly onToggleBlock?: (userId: number, block: boolean) => void;
   /**
    * The connected server's host, used to scope the note's localStorage key.
    * User ids are per-server, so without this a note about user 5 on one
@@ -55,6 +70,18 @@ export interface DmProfileSidebarOptions {
    * exactly (including any note already saved under the old key).
    */
   readonly host?: string;
+  /**
+   * Where the note is kept: the session that opened the panel, captured at open
+   * so a flush on close or on a DM switch uses its API client. Omitted: the note
+   * stays in localStorage under `host`, as before the server kept notes.
+   */
+  readonly notes?: NotesContext;
+  /**
+   * Move focus to the panel on mount. True (the default) when the user opened
+   * it; false when it opened by itself with the conversation, so it never takes
+   * focus from the composer or whatever the user was typing in.
+   */
+  readonly focus?: boolean;
 }
 
 export type DmProfileSidebarComponent = MountableComponent & {
@@ -78,7 +105,6 @@ export type DmProfileSidebarComponent = MountableComponent & {
 // ---------------------------------------------------------------------------
 
 const SIDEBAR_WIDTH = 340;
-const NOTE_STORAGE_PREFIX = "owncord:dm-note:";
 
 const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
   online: "var(--green)",
@@ -90,62 +116,12 @@ const STATUS_COLORS: Readonly<Record<UserStatus, string>> = {
   offline: "var(--text-micro)",
 };
 
-const STATUS_LABELS: Readonly<
-  Record<
-    UserStatus,
-    "status.online" | "status.idle" | "status.dnd" | "status.invisible" | "status.offline"
-  >
-> = {
-  online: "status.online",
-  idle: "status.idle",
-  dnd: "status.dnd",
-  invisible: "status.invisible",
-  offline: "status.offline",
-};
-
-const statusLabel = (status: UserStatus): string => shellText(STATUS_LABELS[status]);
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** The legacy unscoped key, from before per-server notes (or when the caller
- *  has not yet been updated to pass a host). */
-function legacyNoteKey(userId: number): string {
-  return NOTE_STORAGE_PREFIX + String(userId);
-}
-
-function scopedNoteKey(userId: number, host: string): string {
-  return `${NOTE_STORAGE_PREFIX}${host}:${userId}`;
-}
-
-function loadNote(userId: number, host: string): string {
-  try {
-    if (host === "") return localStorage.getItem(legacyNoteKey(userId)) ?? "";
-
-    const scoped = localStorage.getItem(scopedNoteKey(userId, host));
-    if (scoped !== null) return scoped;
-
-    // Miss at the scoped key: migrate the pre-scoping legacy note through
-    // `migrateLegacyValue`, which moves it under the key of the FIRST host
-    // opened post-upgrade and no other. User ids are per-server autoincrement
-    // integers, so a legacy note left readable would show server A's private
-    // note about user N for the unrelated user N on every other server
-    // (OC-0329) — the same shape channel-mutes.ts fixed for OC-0288.
-    return migrateLegacyValue(legacyNoteKey(userId), scopedNoteKey(userId, host)) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-function saveNote(userId: number, host: string, text: string): void {
-  try {
-    const key = host !== "" ? scopedNoteKey(userId, host) : legacyNoteKey(userId);
-    localStorage.setItem(key, text);
-  } catch {
-    // localStorage may be unavailable or full -- silently ignore
-  }
-}
+/** What the strip is painted from; "|" means no banner at all. */
+const bannerKeyOf = (u: DmProfileData): string => `${u.banner ?? ""}|${u.banner_color ?? ""}`;
 
 // ---------------------------------------------------------------------------
 // Component factory
@@ -169,7 +145,17 @@ export function createDmProfileSidebar(
   // -- see the `update()` doc comment on DmProfileSidebarComponent for why
   // these are repainted in place instead of the whole panel being rebuilt.
   let nameNode: HTMLDivElement | null = null;
+  let contentNode: HTMLDivElement | null = null;
+  let contentOwner: Disposable | null = null;
   let avatarLetterNode: HTMLSpanElement | null = null;
+  let avatarWrapperNode: HTMLDivElement | null = null;
+  // The avatar value the face was last painted from, and a counter that drops a
+  // stale fetch when a newer paint has started.
+  let avatarSource: string | null | undefined;
+  let avatarGen = 0;
+  let bannerNode: HTMLDivElement | null = null;
+  // What the strip was last painted from, so a presence change does not refetch.
+  let bannerKey = "";
   let statusDotNode: HTMLDivElement | null = null;
   let statusDotInlineNode: HTMLSpanElement | null = null;
   let statusTextNode: HTMLSpanElement | null = null;
@@ -178,27 +164,33 @@ export function createDmProfileSidebar(
     return open;
   }
 
-  function buildAvatar(): HTMLDivElement {
-    const wrapper = createElement("div", {
-      class: "dps-avatar",
-      "data-testid": "dps-avatar",
-    });
-    // The letter draws immediately; the picture (if any) is fetched through
-    // the same cert-pinned, bearer-token path attachments use and swapped in
-    // once the bytes arrive. `<img src>` cannot carry the auth header an
-    // `/api/v1/files/{id}` avatar needs, so the URL is never assigned raw.
-    const initial = avatarInitial(user);
-    const letter = createElement("span", {}, initial);
+  /**
+   * Draw the avatar face (letter, then the fetched picture) at the front of
+   * `wrapper`, replacing whatever face it held. The letter draws immediately;
+   * the picture (if any) is fetched through the same cert-pinned, bearer-token
+   * path attachments use and swapped in once the bytes arrive. `<img src>`
+   * cannot carry the auth header an `/api/v1/files/{id}` avatar needs, so the
+   * URL is never assigned raw. A fetch that resolves after the avatar changed
+   * again is dropped (`avatarGen`).
+   */
+  function paintAvatarFace(wrapper: HTMLDivElement): void {
+    const gen = ++avatarGen;
+    avatarSource = user.avatar;
+    wrapper.querySelector(":scope > img.dps-avatar-img")?.remove();
+    avatarLetterNode?.remove();
+    wrapper.style.background = "";
+    const letter = createElement("span", {}, avatarInitial(user));
     avatarLetterNode = letter;
-    wrapper.appendChild(letter);
+    wrapper.insertBefore(letter, wrapper.firstChild);
 
     if (isRenderableAvatar(user.avatar)) {
       const resolved = resolveServerUrl(user.avatar);
+      const name = resolveDisplayName(user);
       void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
-        if (objectUrl === null || !wrapper.isConnected) return;
+        if (objectUrl === null || !wrapper.isConnected || gen !== avatarGen) return;
         const img = createElement("img", {
           src: objectUrl,
-          alt: resolveDisplayName(user),
+          alt: name,
           class: "dps-avatar-img",
         });
         recoverEvictedImage(img, { url: resolved });
@@ -207,6 +199,32 @@ export function createDmProfileSidebar(
         wrapper.insertBefore(img, wrapper.firstChild);
       });
     }
+  }
+
+  /** Put the strip in front of the avatar when the member has a banner, or take
+   *  it away when they no longer do. `content` holds the avatar as a child. */
+  function paintBannerStrip(content: HTMLElement): void {
+    bannerKey = bannerKeyOf(user);
+    const has = bannerKey !== "|";
+    if (!has) {
+      bannerNode?.remove();
+      bannerNode = null;
+      return;
+    }
+    if (bannerNode === null) {
+      bannerNode = createElement("div", { class: "dps-banner", "data-testid": "dps-banner" });
+      content.insertBefore(bannerNode, content.firstChild);
+    }
+    paintBanner(bannerNode, user, content, bannerImages);
+  }
+
+  function buildAvatar(): HTMLDivElement {
+    const wrapper = createElement("div", {
+      class: "dps-avatar",
+      "data-testid": "dps-avatar",
+    });
+    avatarWrapperNode = wrapper;
+    paintAvatarFace(wrapper);
 
     // Status dot overlay
     const statusDot = createElement("div", { class: "dps-status-dot" });
@@ -218,44 +236,17 @@ export function createDmProfileSidebar(
     return wrapper;
   }
 
-  function mount(container: Element): void {
-    open = true;
-
-    panel = createElement("div", {
-      class: "dm-profile-sidebar",
-      role: "complementary",
-      "aria-label": requestsText("profile.label"),
-      tabindex: "-1",
-      "data-testid": "dm-profile-sidebar",
-    });
-
-    // Slide-in animation: start offscreen then animate. Width and the
-    // transition duration are static (see .dm-profile-sidebar in app.css);
-    // the margin itself is the one genuinely animated value, kept in sync
-    // with the CSS width via the same SIDEBAR_WIDTH constant.
-    panel.style.marginRight = `-${SIDEBAR_WIDTH}px`;
-
-    // --- Close button ---
-    const closeBtn = createElement("button", {
-      class: "dps-close",
-      "aria-label": requestsText("profile.close"),
-      "data-testid": "dps-close",
-    });
-    closeBtn.textContent = "\u2715";
-    closeBtn.addEventListener(
-      "click",
-      () => {
-        onClose();
-      },
-      { signal },
-    );
-    panel.appendChild(closeBtn);
-
-    // --- Scrollable content ---
+  /** The scrollable body for the current `user`. Its listeners die with `contentOwner`. */
+  function buildContent(): HTMLDivElement {
+    contentOwner?.destroy();
+    contentOwner = new Disposable();
+    const contentSignal = contentOwner.signal;
     const content = createElement("div", { class: "dps-content" });
 
-    // Avatar
+    // Banner strip, only for a member who has one; the avatar overlaps it.
+    bannerNode = null;
     content.appendChild(buildAvatar());
+    paintBannerStrip(content);
 
     // Username
     const nameEl = createElement("div", {
@@ -317,7 +308,7 @@ export function createDmProfileSidebar(
       appendChildren(content, joinTitle, joinText);
     }
 
-    // Note section (local-only, persisted to localStorage)
+    // Note section (private; on the server when it keeps notes, else localStorage)
     content.appendChild(makeDivider());
     const noteTitle = createElement(
       "div",
@@ -330,20 +321,113 @@ export function createDmProfileSidebar(
       placeholder: requestsText("profile.notePlaceholder"),
       "data-testid": "dps-note",
       rows: "3",
+      maxlength: String(NOTE_MAX_LENGTH),
     });
-    noteInput.value = loadNote(user.id, host);
+    const binding = createNoteBinding(
+      options.notes ?? { api: null, host, sessionSignal: signal },
+      user.id,
+    );
+    // Flush an edit still waiting on its debounce when the body goes away: the
+    // panel closing, or a switch to another DM.
+    contentSignal.addEventListener("abort", () => binding.destroy(), { once: true });
+    let noteDirty = false;
+    if (binding.remote) {
+      void binding.load(contentSignal).then(
+        (text) => {
+          if (!noteDirty && !contentSignal.aborted) noteInput.value = text;
+        },
+        () => undefined,
+      );
+    } else {
+      noteInput.value = binding.readLocal();
+    }
+    const noteError = createElement("div", {
+      class: "dps-note-error",
+      role: "status",
+      "data-testid": "dps-note-error",
+    });
+    binding.onFailedChange((failed) => {
+      setText(noteError, failed ? requestsText("profile.noteNotSaved") : "");
+    });
 
     noteInput.addEventListener(
       "input",
       () => {
-        saveNote(user.id, host, noteInput.value);
+        noteDirty = true;
+        binding.change(noteInput.value);
+      },
+      { signal: contentSignal },
+    );
+    noteInput.addEventListener("blur", () => binding.flush(), { signal: contentSignal });
+
+    appendChildren(content, noteTitle, noteInput, noteError);
+
+    // Block / Unblock. The label follows blocksStore, so it flips when the
+    // owner's request lands and stays put when it fails.
+    if (options.onToggleBlock !== undefined) {
+      const onToggleBlock = options.onToggleBlock;
+      const blockBtn = createElement("button", {
+        class: "dps-block-btn",
+        type: "button",
+        "data-testid": "dps-block-btn",
+      });
+      const paint = (): void => {
+        setText(
+          blockBtn,
+          shellText(
+            blocksStore.getState().blockedByMe.has(user.id) ? "member.unblock" : "member.block",
+          ),
+        );
+      };
+      paint();
+      blockBtn.addEventListener(
+        "click",
+        () => onToggleBlock(user.id, !blocksStore.getState().blockedByMe.has(user.id)),
+        { signal: contentSignal },
+      );
+      const unsub = blocksStore.subscribe(paint);
+      contentSignal.addEventListener("abort", unsub, { once: true });
+      content.append(makeDivider(), blockBtn);
+    }
+
+    return content;
+  }
+
+  function mount(container: Element): void {
+    open = true;
+
+    panel = createElement("div", {
+      class: "dm-profile-sidebar",
+      role: "complementary",
+      "aria-label": requestsText("profile.label"),
+      tabindex: "-1",
+      "data-testid": "dm-profile-sidebar",
+    });
+
+    // Slide-in animation: start offscreen then animate. Width and the
+    // transition duration are static (see .dm-profile-sidebar in app.css);
+    // the margin itself is the one genuinely animated value, kept in sync
+    // with the CSS width via the same SIDEBAR_WIDTH constant.
+    panel.style.marginRight = `-${SIDEBAR_WIDTH}px`;
+
+    // --- Close button ---
+    const closeBtn = createElement("button", {
+      class: "dps-close",
+      "aria-label": requestsText("profile.close"),
+      "data-testid": "dps-close",
+    });
+    closeBtn.textContent = "\u2715";
+    closeBtn.addEventListener(
+      "click",
+      () => {
+        onClose();
       },
       { signal },
     );
+    panel.appendChild(closeBtn);
 
-    appendChildren(content, noteTitle, noteInput);
-
-    panel.appendChild(content);
+    contentNode = buildContent();
+    panel.appendChild(contentNode);
     container.appendChild(panel);
 
     // Trigger slide-in animation
@@ -353,16 +437,32 @@ export function createDmProfileSidebar(
       }
     });
 
-    // Focus panel for a11y
-    panel.focus();
+    // Focus panel for a11y, when the user asked for it
+    if (options.focus !== false) panel.focus();
 
-    // Close on Escape
+    // Close on Escape, only for a key meant for the panel. A dialog on top, or
+    // a field that already used the key (preventDefault), owns it; and with
+    // focus outside the panel (the composer, say) Escape is not this panel's.
+    // What was open is read in the capture phase, before any listener closes
+    // it, so the decision does not depend on listener order.
+    let escapeTaken = false;
+    window.addEventListener(
+      "keydown",
+      (e: KeyboardEvent) => {
+        if (e.key === "Escape") escapeTaken = dialogOpen();
+      },
+      { capture: true, signal },
+    );
+    // The bubble listener sits on `document`, ahead of the window-level global
+    // Escape (mark channel read), which skips a key already handled here.
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && open) {
-          onClose();
-        }
+        if (e.key !== "Escape" || !open) return;
+        if (escapeTaken || e.defaultPrevented) return;
+        if (panel === null || !panel.contains(document.activeElement)) return;
+        e.preventDefault();
+        onClose();
       },
       { signal },
     );
@@ -377,18 +477,38 @@ export function createDmProfileSidebar(
     }
     nameNode = null;
     avatarLetterNode = null;
+    avatarWrapperNode = null;
+    contentNode = null;
+    contentOwner?.destroy();
+    contentOwner = null;
+    avatarGen++;
+    bannerNode = null;
     statusDotNode = null;
     statusDotInlineNode = null;
     statusTextNode = null;
   }
 
   function update(nextUser: DmProfileData): void {
+    const identityChanged = nextUser.id !== user.id;
     user = nextUser;
     // Not mounted (or already torn down) -- nothing to repaint. mount() will
     // paint the fresh `user` from scratch if it is called afterwards.
     if (panel === null) return;
 
+    // A different person (a DM-to-DM switch): swap the body -- avatar, about,
+    // join date, this person's note, Block -- but keep the panel element, so
+    // it does not slide in again and an outside focus is left alone.
+    if (identityChanged && contentNode !== null) {
+      const hadFocus = contentNode.contains(document.activeElement);
+      const next = buildContent();
+      contentNode.replaceWith(next);
+      contentNode = next;
+      if (hadFocus) panel.focus();
+      return;
+    }
+
     if (nameNode !== null) setText(nameNode, resolveDisplayName(user));
+    if (contentNode !== null && bannerKeyOf(user) !== bannerKey) paintBannerStrip(contentNode);
 
     const color = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
     const label = statusLabel(user.status);
@@ -402,11 +522,12 @@ export function createDmProfileSidebar(
     }
     if (statusTextNode !== null) setText(statusTextNode, label);
 
-    // Only repaint the fallback letter if it is still showing -- once the
-    // fetched avatar image swaps in, buildAvatar() removes the letter node
-    // from the DOM (see above), and a stale identity's initial no longer
-    // matters (or exists) to update.
-    if (avatarLetterNode !== null && avatarLetterNode.isConnected) {
+    // A changed avatar swaps the face (letter or picture); an unchanged one
+    // only refreshes the fallback letter, if it is still showing, since the
+    // name it comes from may have changed.
+    if (avatarWrapperNode !== null && user.avatar !== avatarSource) {
+      paintAvatarFace(avatarWrapperNode);
+    } else if (avatarLetterNode !== null && avatarLetterNode.isConnected) {
       setText(avatarLetterNode, avatarInitial(user));
     }
   }

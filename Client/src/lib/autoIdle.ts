@@ -17,6 +17,12 @@
  *  - Only a manual Online becomes an automatic Idle, and only an automatic
  *    Idle becomes Online again. A manual Idle is a statement, not a timeout.
  *
+ * Activity the DOM and the OS cannot see (speaking in a voice call, with
+ * hands off the keyboard) reaches the watcher through `notifyActivity`. Joining
+ * or rejoining a call, whether by hand or after an automatic move or reconnect,
+ * never touches the status: an automatic Idle survives it, so an AFK move does
+ * not flip the user back to Online.
+ *
  * Input listening is throttled to one bookkeeping call per second: mousemove
  * fires hundreds of times a second and the timer's resolution is minutes, so
  * anything finer is pure cost.
@@ -26,10 +32,6 @@
  * being away. The DOM listeners stay: they are the fallback whenever the OS
  * cannot say, and they still bring the status back the instant the user
  * touches the window rather than at the next poll.
- *
- * Sitting in a voice call without touching anything is not being away
- * (Discord's rule), so while the caller reports a call the timer never goes
- * idle, and leaving the call starts a fresh full delay.
  */
 
 import { Disposable } from "./disposable";
@@ -62,16 +64,11 @@ export interface AutoIdleOptions {
    *  system, or null where the OS cannot say. Omitted, or answering null,
    *  leaves the DOM listeners in sole charge. */
   readonly systemIdleMs?: () => Promise<number | null>;
-  /** Whether the user is in a voice call when the watcher starts. */
-  readonly inCall?: boolean;
 }
 
 export interface AutoIdleController {
   /** Report activity explicitly (e.g. after sending a message). */
   notifyActivity(): void;
-  /** Report joining or leaving a voice call. No idle while in one; leaving
-   *  restarts the full delay. */
-  setInCall(inCall: boolean): void;
   /** Stop listening and cancel the pending timer. */
   destroy(): void;
 }
@@ -112,10 +109,11 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
    *  DOM timer, then decides when the status goes idle. */
   let osKnowsIdle = false;
   let lastActivityRun = 0;
+  /** When the caller last reported activity through `notifyActivity` (own
+   *  speaking in a call, a sent message): input the OS cannot see. The OS poll
+   *  must not read a quiet keyboard as idle while this is recent. */
+  let lastNotified = Number.NEGATIVE_INFINITY;
   let destroyed = false;
-  let inCall = options.inCall === true;
-  /** When the last call ended: OS idle time from before it does not count. */
-  let callEndedAt = 0;
   /** True while the timer is the reason the status is idle. Kept in memory so
    *  the hot path (one mousemove per pixel) is a boolean check rather than a
    *  preference read. Seeded from the persisted status/origin so a session
@@ -141,7 +139,7 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
       if (destroyed) return;
       // The DOM only sees input to this window; while the OS can see all of
       // it, ten quiet minutes here may just mean the user is in another app.
-      if (!osKnowsIdle && !inCall) apply(true);
+      if (!osKnowsIdle) apply(true);
       // Re-check: apply() invokes options.onStatusChange synchronously, and a
       // caller reacting to that (e.g. tearing down the page) may call
       // destroy() from inside it. `timer` is already null at this point, so
@@ -204,11 +202,11 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     // stream of polls cannot flap the status. Coming back goes through the
     // same onStatusChange as the DOM path, and so through the caller's
     // shared presence limiter.
-    if (idleMs < delayMs) {
-      apply(false);
-    } else if (!inCall && Date.now() - callEndedAt >= delayMs) {
-      apply(true);
-    }
+    // Idle is the shorter of the OS's input idle time and the time since
+    // the caller last reported activity: a user talking in a call with
+    // hands off the keyboard has an old OS idle time but is not away.
+    // Without this every poll would flip them back to idle.
+    apply(Math.min(idleMs, Date.now() - lastNotified) >= delayMs);
   }
 
   if (options.systemIdleMs !== undefined) {
@@ -219,25 +217,12 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   for (const evt of ACTIVITY_EVENTS) {
     target.addEventListener(evt, onActivity, { passive: true, signal: disposable.signal });
   }
-  if (inCall && idleByTimer) apply(false);
   arm();
 
   return {
     notifyActivity(): void {
+      lastNotified = Date.now();
       onActivity();
-    },
-    setInCall(next: boolean): void {
-      if (next === inCall) return;
-      inCall = next;
-      if (destroyed) return;
-      if (next) {
-        // Joining a call (even an automatic rejoin with no input) undoes an
-        // Idle the timer set.
-        if (idleByTimer) apply(false);
-        return;
-      }
-      callEndedAt = Date.now();
-      arm();
     },
     destroy(): void {
       destroyed = true;

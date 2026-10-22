@@ -12,7 +12,7 @@ import (
 const createMessageForDelivery = `-- name: CreateMessageForDelivery :one
 INSERT INTO messages (channel_id, user_id, content, reply_to, mentions_everyone)
 VALUES (?, ?, ?, ?, ?)
-RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp, mentions_everyone, pinned_at
+RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp, mentions_everyone, pinned_at, kind
 `
 
 type CreateMessageForDeliveryParams struct {
@@ -44,6 +44,7 @@ func (q *Queries) CreateMessageForDelivery(ctx context.Context, arg CreateMessag
 		&i.Timestamp,
 		&i.MentionsEveryone,
 		&i.PinnedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -61,7 +62,10 @@ const getMessageDeliveryReceipt = `-- name: GetMessageDeliveryReceipt :one
 SELECT r.user_id, r.client_message_id, r.channel_id, r.payload_hash,
        r.message_id, r.timestamp, r.expires_at_ms,
        EXISTS(SELECT 1 FROM messages m WHERE m.id = r.message_id
-              AND m.user_id = r.user_id AND m.channel_id = r.channel_id AND m.deleted = 0) AS available
+              AND m.user_id = r.user_id AND m.deleted = 0
+              AND (m.channel_id = r.channel_id
+                   OR m.channel_id IN (SELECT t.id FROM channels t
+                                       WHERE t.parent_channel_id = r.channel_id AND t.type = 'thread'))) AS available
 FROM message_delivery_receipts r WHERE r.user_id = ? AND r.client_message_id = ?
 `
 

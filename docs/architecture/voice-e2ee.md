@@ -102,8 +102,11 @@ Supporting pieces:
   `src/lib/identity.ts` (OS-keyring identity key + peer identity pins),
   `src/lib/audioPipeline.ts` + `src/lib/noise-suppression.ts` (RNNoise WASM),
   `src/lib/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
-  screen-share codec: VP8 by default, H.264 or Auto by choice on Windows;
-  Linux native always publishes VP8), `src/lib/audioElements.ts` (per-user
+  screen-share codec: VP8 by default, H.264, VP9, H.265 (hardware encoder, non-Intel GPU) or Auto by choice on Windows;
+  Linux native publishes VP8 or, by choice when its encoder has it, H.264; Auto is VP8), `src/features/voice/codecSwitch.ts`
+  (republishes a live VP9 or H.265 camera or share on a codec every viewer decodes when
+  a peer that cannot decode it joins, and back once they leave),
+  `src/lib/audioElements.ts` (per-user
   volume up to 200% and a local Mute per user), `src-tauri/src/livekit_proxy.rs`
   (tunnel), `src-tauri/src/ptt.rs` (push-to-talk key polling).
 
@@ -143,7 +146,7 @@ the frame socket, `mod.rs` the Tauri commands and state). The Linux build
 prerequisites — clang >= 21, a prebuilt libwebrtc, and, for the camera, the
 GStreamer `-dev` headers — are documented in
 [contributing.md](../contributing.md#client-tauri-v2); `Client/scripts/linux-webrtc-toolchain.sh`
-installs clang and fetches libwebrtc.
+installs clang and fetches libwebrtc and the CUDA headers.
 
 ### Phase 1: audio
 
@@ -274,7 +277,9 @@ settings tab hides the Input Volume control there with a note pointing at the
 system mixer. The sensitivity gate has since landed on that stage (below), so
 the Input Sensitivity slider shows on Linux too, without a live level in its
 bar; the processing toggles, Enhanced Noise Suppression included,
-apply at the next join. The automatic input sensitivity option and the mic
+apply live: the session rebuilds its audio processing module and the capture
+and the echo canceller's reference swap to it within a few frames, muted or
+not (`native_voice_set_audio_processing`). The automatic input sensitivity option and the mic
 test in Voice & Audio settings are web-path features and are not offered on
 Linux (`components/settings/VoiceAudioTab.ts`). Per-user and output volume
 came later (Audio parity, below); camera and remote video are phase 2 (below),
@@ -547,7 +552,7 @@ visible and in front the whole time.
     (`libgstreamer1.0-dev` and `libgstreamer-plugins-base1.0-dev`): the CI and
     release jobs install them in their Linux system-dependency step, and a
     local Linux build installs them by hand (`linux-webrtc-toolchain.sh`
-    fetches only clang and libwebrtc). The crate tree got a cargo-deny/osv
+    fetches only clang, libwebrtc and the CUDA headers). The crate tree got a cargo-deny/osv
     review.
   - Capture no longer depends on the window being visible, and the camera
     frames' second trip through WebKit's network process (about 10% of a
@@ -618,11 +623,9 @@ without holding the session, so a leave or a stop while the portal dialog is
 open ends the wait instead of queueing behind it.
 
 **E2EE covers screen share exactly as the camera**: the same room, key
-provider and `KEY_INDEX` 0. **Screen-share audio is not shipped on Linux:**
-the desktop capturer has no audio, and capturing the system mix would need a
-separate PipeWire/Pulse monitor capture that the SDK does not provide, so a
-Linux share is video only. Remote screen shares (video and their audio) play
-on Linux through the phase 1 and 2 paths already.
+provider and `KEY_INDEX` 0. **Screen-share audio** is a separate capture,
+described under "Screen-share audio" below (WP LP-8). Remote screen shares
+(video and their audio) play on Linux through the phase 1 and 2 paths already.
 
 **Releasing it.** Each capture runs on its own thread, polling the capturer at
 the capture frame rate. Stopping (or leaving) joins that thread, which drops
@@ -687,11 +690,73 @@ Unstripped, x64 grew 35,109,848 → 35,977,288 (+867,440) and arm64 33,693,744 �
 reports a highest strong requirement of GLIBC_2.34 on both architectures,
 within the Ubuntu 22.04 floor of 2.35.
 
+### Screen-share audio
+
+**Shipped in WP LP-8 (a: capture, b: publish, c: the webview).** When the
+picker's Share audio switch is on, the session captures the sound of the other
+applications and publishes it as `ScreenShareAudio` beside the share's video.
+
+**What is captured.** `src-tauri/src/native_voice/share_audio.rs` records each
+playing stream on the default output through the PulseAudio protocol (a
+"record directly on a sink input" request per stream), so it works on
+PulseAudio and on pipewire-pulse alike, and mixes the streams to 48 kHz
+stereo with `playout::Mixer`. A monitor of the output would carry OwnCord's own
+call and cannot be subtracted, which is why the capture is per stream. The
+stream list is polled every second, so an application that starts playing is
+picked up within about a second.
+
+**What is left out.**
+
+- **OwnCord's own sound.** A stream is OwnCord's when its client is named
+  `cpal-pulseaudio-<our pid>` (how cpal names every host connection; a cpal
+  upgrade that renames it must be re-checked), or when the sink input's, else
+  its client's, `application.process.id`, else its client's
+  `pipewire.sec.pid`, is in our process tree. **Any OwnCord descendant process
+  is excluded**, such as the webview's web process, which is the same rule as
+  Windows' process-tree exclusion of the browser. The call, app sounds, the mic
+  test and a video playing in OwnCord's own window are therefore not shared.
+- **Streams off the default sink**, and muted ones. Filter outputs such as
+  echo-cancel or combine sinks sit on the hardware sink and already contain
+  every application, OwnCord included. This matches Windows, which loops back
+  the default render endpoint.
+
+**Lifetime.** The audio belongs to the share's capture. A codec republish and
+a Change source keep it; Stop, leave and a replaced share release it, and a
+full reconnect republishes it under its new sid. In the webview a
+`NativeScreenAudioTrack` (`features/voice/native/screenAudioTrack.ts`) rides
+the shared screen-share code beside the video: `NativeRoom` routes
+`screen_share_audio` to `native_voice_publish_screen_audio` and
+`native_voice_unpublish_screen_audio`, and a stop that lands while the host is
+still publishing unpublishes the sid when it arrives. The picker keeps the
+switch with the pick, so a restart after a reconnect shares audio again. When
+no PulseAudio-protocol server answers (`Sources.audio` is false) the picker
+shows a note instead of the switch.
+
+**Published as the web path does**, minus stereo signalling: `dtx` off, `red`
+off, 128 kbps (`musicHighQualityStereo`), under the room key like every track.
+
+**Viewers hear mono until LP-8d.** The web path asks for stereo in its
+publish request and in the session answer; livekit 0.9.5 sends neither, so
+libwebrtc's Opus encoder most likely runs with one channel. The 2-channel
+source is published anyway. Upstreaming a stereo publish option to the Rust
+SDK is the follow-up (LP-8d).
+
+**Not exercised here.** No sound server exists in CI, so the webview side is
+proved with fakes (the track, the room routing, the picker) and the capture by
+the fake-server tests in LP-8a. **Known limits:** ALSA-only, JACK-only and
+PipeWire without pipewire-pulse setups have no PulseAudio-protocol server, so
+the picker shows no switch; Flatpak and Snap packages see only some streams
+(pipewire-pulse limits what a sandboxed client may list), so the share is
+partial there. Not exercised on real hardware: PulseAudio 15 and 16 on
+Ubuntu 22.04, whether the captured data is taken before or after an application's
+own stream volume, and the viewer's channel count. Playing the shared audio on
+speakers lets the microphone hear it, as on Windows; headphones avoid it.
+
 ### Audio parity: per-user volume
 
 **Why an own mixer.** Per-user volume on the web path is livekit-client's
-`RemoteParticipant.setVolume` (a gain node). The Rust SDK (livekit 0.9.3,
-libwebrtc 0.3.50) exposes no per-track gain: the
+`RemoteParticipant.setVolume` (a gain node). The Rust SDK (livekit 0.9.5,
+libwebrtc 0.3.52) exposes no per-track gain: the
 device module mixes every remote track itself, and libwebrtc's own per-receiver
 `AudioSourceInterface::SetVolume` is not bound. So the device module's playout
 stays in its synthetic mode (the module is never acquired since the capture

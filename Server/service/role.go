@@ -24,6 +24,9 @@ import (
 type RoleService struct {
 	st    Store
 	perms *PermissionService
+	// notifier receives each committed mutation's fan-out (WP 5.1a). Set once
+	// before the server serves; nil is a no-op. Always called outside mu.
+	notifier PermissionChangeNotifier
 	// mu serializes the read-check-write mutations: position uniqueness and
 	// the role cap are enforced against a ListRoles snapshot, not by a DB
 	// constraint, so two interleaved mutations can both see the same free
@@ -60,6 +63,25 @@ type RoleInput struct {
 	Color       *string // points at "" to clear the color
 	Permissions *int64
 	Position    *int
+	// Hoist and Mentionable are nil to leave unchanged (false on create).
+	Hoist       *bool
+	Mentionable *bool
+	// ExpectedPermissions is the mask the caller loaded before editing. Only
+	// UpdateRole reads it: when set and the stored mask differs, the edit is
+	// refused with ErrConflict and nothing is written. Nil skips the check.
+	ExpectedPermissions *int64
+}
+
+// flagsOver returns the hoist and mentionable flags the input asks for, each
+// falling back to the given current value when the input leaves it unset.
+func (in RoleInput) flagsOver(hoist, mentionable bool) (bool, bool) {
+	if in.Hoist != nil {
+		hoist = *in.Hoist
+	}
+	if in.Mentionable != nil {
+		mentionable = *in.Mentionable
+	}
+	return hoist, mentionable
 }
 
 // RoleWithMembers is a role plus how many users currently hold it. The count
@@ -80,10 +102,11 @@ func (s *RoleService) actorRole(ctx context.Context, actorID int64) (*db.Role, e
 	if err != nil || role == nil {
 		return nil, fmt.Errorf("%w: failed to load actor role", ErrForbidden)
 	}
-	if !permissions.HasServerPerm(role.Permissions, permissions.ManageRoles) {
+	if !permissions.HasServerPerm(role.Perms, permissions.ManageRoles) {
 		return nil, fmt.Errorf("%w: missing %s permission", ErrForbidden, permissions.Name(permissions.ManageRoles))
 	}
-	return role, nil
+	// Top role identity (rank) with the OR of every held mask.
+	return role.Effective(), nil
 }
 
 // requireBelowActor enforces the hierarchy rule shared by edit, delete and
@@ -183,8 +206,8 @@ func (s *RoleService) ListRoles(ctx context.Context, actorID int64) ([]RoleWithM
 	return out, nil
 }
 
-// CreateRole creates a role strictly below the actor's own rank.
-func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInput) (*db.Role, error) {
+// createRoleLocked creates a role strictly below the actor's own rank.
+func (s *RoleService) createRoleLocked(ctx context.Context, actorID int64, in RoleInput) (*db.Role, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
@@ -258,13 +281,14 @@ func (s *RoleService) CreateRole(ctx context.Context, actorID int64, in RoleInpu
 		}
 	}
 
-	role, err := s.st.CreateRole(ctx, name, color, perms, position)
+	hoist, mentionable := in.flagsOver(false, false)
+	role, err := s.st.CreateRole(ctx, name, color, perms, position, hoist, mentionable)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to create role: %w", ErrInternal, err)
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_create", "role", role.ID,
-		fmt.Sprintf("created role %s (permissions=%#x position=%d)", role.Name, role.Permissions, role.Position))
+		fmt.Sprintf("created role %s (permissions=%#x position=%d hoist=%t mentionable=%t)", role.Name, role.Permissions, role.Position, role.Hoist, role.Mentionable))
 	slog.Info("role created", "actor_id", actorID, "role_id", role.ID, "name", role.Name)
 	return role, nil
 }
@@ -284,11 +308,24 @@ type RoleUpdateResult struct {
 	// group and permission-gated affordances until they reconnect, unless the
 	// caller re-keys them with one member_update each.
 	Renamed bool
+	// ResyncedMembers lists the members holding the role next to another one
+	// whose top role was re-derived because the position moved (WP 6.3c): their
+	// displayed role and role order may have changed.
+	ResyncedMembers []int64
 }
 
-// UpdateRole applies a partial change to a role below the actor's rank.
+// checkExpectedPermissions refuses an edit made from a stale copy: nil skips
+// the check, anything else must equal the stored mask.
+func checkExpectedPermissions(expected *int64, role *db.Role) error {
+	if expected != nil && *expected != role.Permissions {
+		return fmt.Errorf("%w: role permissions changed since it was loaded", ErrConflict)
+	}
+	return nil
+}
+
+// updateRoleLocked applies a partial change to a role below the actor's rank.
 // Returns the updated role and what the change actually moved.
-func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in RoleInput) (updated *db.Role, res RoleUpdateResult, err error) {
+func (s *RoleService) updateRoleLocked(ctx context.Context, actorID, roleID int64, in RoleInput) (updated *db.Role, res RoleUpdateResult, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
@@ -303,6 +340,11 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 		return nil, RoleUpdateResult{}, fmt.Errorf("%w: role not found", ErrNotFound)
 	}
 	if err := requireBelowActor(actor, role); err != nil {
+		return nil, RoleUpdateResult{}, err
+	}
+	// Compared under s.mu against the row just read, so two editors holding
+	// the same copy cannot both win: the second sees the first's mask.
+	if err := checkExpectedPermissions(in.ExpectedPermissions, role); err != nil {
 		return nil, RoleUpdateResult{}, err
 	}
 
@@ -347,25 +389,33 @@ func (s *RoleService) UpdateRole(ctx context.Context, actorID, roleID int64, in 
 		}
 	}
 
-	if err := s.st.UpdateRole(ctx, role.ID, name, color, perms, position); err != nil {
+	hoist, mentionable := in.flagsOver(role.Hoist, role.Mentionable)
+
+	resynced, err := s.st.UpdateRole(ctx, role.ID, name, color, perms, position, hoist, mentionable)
+	if err != nil {
 		return nil, RoleUpdateResult{}, fmt.Errorf("%w: failed to update role: %w", ErrInternal, err)
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_update", "role", role.ID,
-		fmt.Sprintf("updated role %s (permissions=%#x position=%d)", name, perms, position))
+		fmt.Sprintf("updated role %s (permissions=%#x position=%d hoist=%t mentionable=%t)", name, perms, position, hoist, mentionable))
 	slog.Info("role updated", "actor_id", actorID, "role_id", role.ID, "name", name)
 
-	return &db.Role{
+	updated = &db.Role{
 		ID:          role.ID,
 		Name:        name,
 		Color:       color,
 		Permissions: perms,
 		Position:    position,
 		IsDefault:   role.IsDefault,
-	}, RoleUpdateResult{
-		PermsChanged: perms != role.Permissions,
-		Renamed:      name != role.Name,
-	}, nil
+		Hoist:       hoist,
+		Mentionable: mentionable,
+	}
+	res = RoleUpdateResult{
+		PermsChanged:    perms != role.Permissions,
+		Renamed:         name != role.Name,
+		ResyncedMembers: resynced,
+	}
+	return updated, res, nil
 }
 
 // AllRoles is the unscoped role list — every role, highest position first, with
@@ -381,10 +431,10 @@ func (s *RoleService) AllRoles(ctx context.Context) ([]*db.Role, error) {
 	return roles, nil
 }
 
-// DeleteRole removes a role below the actor's rank, moving its members onto the
+// deleteRoleLocked removes a role below the actor's rank, moving its members onto the
 // default role. Returns the deleted role, the fallback its members landed on,
 // and the ids of those members so the caller can invalidate and re-sync them.
-func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (deleted, fallback *db.Role, movedUserIDs []int64, err error) {
+func (s *RoleService) deleteRoleLocked(ctx context.Context, actorID, roleID int64) (deleted, fallback *db.Role, movedUserIDs []int64, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
@@ -434,13 +484,13 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_delete", "role", role.ID,
-		fmt.Sprintf("deleted role %s (%d members reassigned to %s)", role.Name, len(movedUserIDs), fallback.Name))
+		fmt.Sprintf("deleted role %s (%d members held it; those left with no role now have %s)", role.Name, len(movedUserIDs), fallback.Name))
 	slog.Warn("role deleted", "actor_id", actorID, "role_id", role.ID, "name", role.Name,
-		"members_reassigned", len(movedUserIDs))
+		"members_affected", len(movedUserIDs))
 	return role, fallback, movedUserIDs, nil
 }
 
-// ReorderRoles rewrites the positions of every role the actor may manage.
+// reorderRolesLocked rewrites the positions of every role the actor may manage.
 // orderedIDs is highest-rank-first and must name exactly the set of roles
 // strictly below the actor — a partial list is refused rather than silently
 // leaving the omitted roles wherever they were, which is how positions
@@ -449,16 +499,16 @@ func (s *RoleService) DeleteRole(ctx context.Context, actorID, roleID int64) (de
 // Positions are normalized to N..1, so they stay unique, stay strictly below
 // the actor (N < actor.Position, enforced by maxRoles), and never collide with
 // the untouched roles above the actor.
-func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedIDs []int64) ([]*db.Role, error) {
+func (s *RoleService) reorderRolesLocked(ctx context.Context, actorID int64, orderedIDs []int64) (updated []*db.Role, resynced []int64, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	actor, err := s.actorRole(ctx, actorID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	roles, err := s.st.ListRoles(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
+		return nil, nil, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
 	}
 
 	manageable := make(map[int64]*db.Role, len(roles))
@@ -468,22 +518,22 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 		}
 	}
 	if len(orderedIDs) != len(manageable) {
-		return nil, fmt.Errorf("%w: the order must list all %d roles below your own rank", ErrBadRequest, len(manageable))
+		return nil, nil, fmt.Errorf("%w: the order must list all %d roles below your own rank", ErrBadRequest, len(manageable))
 	}
 	seen := make(map[int64]bool, len(orderedIDs))
 	for _, id := range orderedIDs {
 		if seen[id] {
-			return nil, fmt.Errorf("%w: role %d listed twice", ErrBadRequest, id)
+			return nil, nil, fmt.Errorf("%w: role %d listed twice", ErrBadRequest, id)
 		}
 		seen[id] = true
 		if _, ok := manageable[id]; !ok {
 			// Covers both "unknown role" and "role at or above your rank"; the
 			// two are deliberately indistinguishable to the caller.
-			return nil, fmt.Errorf("%w: role %d is not yours to reorder", ErrForbidden, id)
+			return nil, nil, fmt.Errorf("%w: role %d is not yours to reorder", ErrForbidden, id)
 		}
 	}
 	if len(orderedIDs) >= actor.Position {
-		return nil, fmt.Errorf("%w: too many roles to place below your own rank", ErrBadRequest)
+		return nil, nil, fmt.Errorf("%w: too many roles to place below your own rank", ErrBadRequest)
 	}
 
 	// Spread the roles evenly through the whole range below the actor rather
@@ -512,19 +562,20 @@ func (s *RoleService) ReorderRoles(ctx context.Context, actorID int64, orderedID
 	for i, id := range orderedIDs {
 		positions[id] = actor.Position * (len(orderedIDs) - i) / (len(orderedIDs) + 1)
 	}
-	if err := s.st.SetRolePositions(ctx, positions); err != nil {
-		return nil, fmt.Errorf("%w: failed to reorder roles: %w", ErrInternal, err)
+	resynced, err = s.st.SetRolePositions(ctx, positions)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: failed to reorder roles: %w", ErrInternal, err)
 	}
 
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "role_reorder", "role", 0,
 		fmt.Sprintf("reordered %d roles", len(orderedIDs)))
 	slog.Info("roles reordered", "actor_id", actorID, "count", len(orderedIDs))
 
-	updated, err := s.st.ListRoles(ctx)
+	updated, err = s.st.ListRoles(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
+		return nil, nil, fmt.Errorf("%w: failed to list roles: %w", ErrInternal, err)
 	}
-	return updated, nil
+	return updated, resynced, nil
 }
 
 // AffectedUserIDs returns the ids of the users holding roleID, and whether the

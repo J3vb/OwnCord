@@ -2,7 +2,7 @@ package admin_test
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -40,8 +40,6 @@ func newFileRestoreFixture(t *testing.T) fileRestoreFixture {
 		t.Fatalf("MkdirAll backups: %v", err)
 	}
 	dbPath := filepath.Join(tmpDir, "data", "chatserver.db")
-	admin.SetDatabasePath(dbPath)
-	t.Cleanup(func() { admin.SetDatabasePath(filepath.Join("data", "chatserver.db")) })
 
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -56,7 +54,8 @@ func newFileRestoreFixture(t *testing.T) fileRestoreFixture {
 		t.Fatalf("MigrateFS: %v", err)
 	}
 	hub := &mockHub{}
-	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{DatabasePath: dbPath})
 	token := createAdminUser(t, database)
 
 	ctx := context.Background()
@@ -75,69 +74,6 @@ func newFileRestoreFixture(t *testing.T) fileRestoreFixture {
 	return fileRestoreFixture{database: database, hub: hub, handler: handler, token: token, dbPath: dbPath, backupName: backupName}
 }
 
-// holdReadTx opens a read transaction on the reader pool after at least one
-// frame is in the log and leaves the log longer than the reader's snapshot,
-// so a wal_checkpoint(TRUNCATE) cannot finish while it is held.
-func holdReadTx(t *testing.T, database *db.DB) (release func()) {
-	t.Helper()
-	ctx := context.Background()
-	if _, err := database.ExecContext(ctx, `INSERT INTO restore_rows (v) VALUES ('before-reader')`); err != nil {
-		t.Fatalf("insert before reader: %v", err)
-	}
-	conn, err := database.SQLReaderDB().Conn(ctx)
-	if err != nil {
-		t.Fatalf("reader conn: %v", err)
-	}
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("reader begin: %v", err)
-	}
-	var n int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM restore_rows`).Scan(&n); err != nil {
-		t.Fatalf("reader select: %v", err)
-	}
-	if _, err := database.ExecContext(ctx, `INSERT INTO restore_rows (v) VALUES ('after-reader')`); err != nil {
-		t.Fatalf("insert after reader: %v", err)
-	}
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			_ = tx.Rollback()
-			_ = conn.Close()
-		})
-	}
-}
-
-// staleWAL returns the bytes of a valid write-ahead log from another database
-// with the same table, as a crashed or uncheckpointed close leaves one behind.
-// SQLite replays a log like this onto whatever main file sits beside it.
-func staleWAL(t *testing.T) []byte {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "other.db")
-	other, err := db.Open(path)
-	if err != nil {
-		t.Fatalf("db.Open other: %v", err)
-	}
-	defer other.Close() //nolint:errcheck
-	ctx := context.Background()
-	if _, err := other.ExecContext(ctx, `CREATE TABLE restore_rows (id INTEGER PRIMARY KEY, v TEXT NOT NULL)`); err != nil {
-		t.Fatalf("create other table: %v", err)
-	}
-	for i := range 5 {
-		if _, err := other.ExecContext(ctx, `INSERT INTO restore_rows (v) VALUES (?)`, fmt.Sprintf("stale-%d", i)); err != nil {
-			t.Fatalf("insert other row: %v", err)
-		}
-	}
-	wal, err := os.ReadFile(path + "-wal")
-	if err != nil {
-		t.Fatalf("read other WAL: %v", err)
-	}
-	if len(wal) == 0 {
-		t.Fatal("other database left an empty WAL; the fixture needs frames in it")
-	}
-	return wal
-}
-
 func waitRestarted(t *testing.T, restarted func() bool) bool {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -147,73 +83,88 @@ func waitRestarted(t *testing.T, restarted func() bool) bool {
 	return restarted()
 }
 
-// TestHandleRestoreBackup_RefusesWhenCheckpointBusy: a reader that keeps the
-// write-ahead log from being emptied makes the restore refuse before anything
-// is closed, broadcast or restarted.
-func TestHandleRestoreBackup_RefusesWhenCheckpointBusy(t *testing.T) {
+// TestHandleRestoreBackup_CarriesTheLiveSeqFloor: the live settings.ws_seq_floor
+// reaches the sidecar before the restore is staged (the backup was taken before
+// the floor was set).
+func TestHandleRestoreBackup_CarriesTheLiveSeqFloor(t *testing.T) {
 	f := newFileRestoreFixture(t)
-	// The writer's busy wait bounds how long the checkpoint waits for the
-	// reader; keep it short so the refusal does not take the default 5s.
-	if _, err := f.database.SQLDb().Exec(`PRAGMA busy_timeout=200`); err != nil {
-		t.Fatalf("busy_timeout: %v", err)
+	if err := f.database.SetSetting(context.Background(), db.WSSeqFloorSettingKey, "5000000000"); err != nil {
+		t.Fatal(err)
 	}
-	release := holdReadTx(t, f.database)
-	defer release()
-
-	restarted, restoreHook := admin.StubRestart()
+	_, restoreHook := admin.StubRestart()
 	defer restoreHook()
 
 	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", w.Code, w.Body.String())
 	}
-	release()
-
-	if f.database.Closed() {
-		t.Error("a refused restore closed the live database")
-	}
-	if len(f.hub.restartCalls) != 0 {
-		t.Errorf("a refused restore broadcast %d restart notice(s); clients would wait for a restart that never comes", len(f.hub.restartCalls))
-	}
-	time.Sleep(50 * time.Millisecond)
-	if restarted() {
-		t.Error("a refused restore requested a process restart")
-	}
-	var n int
-	if err := f.database.QueryRowContext(context.Background(), `SELECT count(*) FROM restore_rows`).Scan(&n); err != nil {
-		t.Fatalf("count after refusal: %v", err)
-	}
-	if want := restoreFixtureRows + 2; n != want {
-		t.Errorf("rows after a refused restore = %d, want %d (the live data must be untouched)", n, want)
-	}
-	entries, err := os.ReadDir(filepath.Join(filepath.Dir(f.dbPath), "backups"))
-	if err != nil {
-		t.Fatalf("ReadDir backups: %v", err)
-	}
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "pre_restore_") {
-			t.Errorf("a refused restore left its safety copy %s behind; retries would pile them up", e.Name())
+	read := func() string {
+		b, err := os.ReadFile(f.dbPath + ".ws-seq-floor")
+		if err != nil {
+			t.Fatalf("sidecar: %v", err)
 		}
+		return string(b)
+	}
+	if got := read(); got != "5000000000\n" {
+		t.Fatalf("sidecar = %q, want the live floor", got)
 	}
 }
 
-// TestHandleRestoreBackup_UnderLoadLeavesNoStaleWAL restores while writers
-// keep writing and a reader briefly holds a snapshot, with a stale log left
-// beside the file after the pools close. The reopened database must be the
-// backup: integrity ok, the backup's rows, and no sidecar left to replay.
-func TestHandleRestoreBackup_UnderLoadLeavesNoStaleWAL(t *testing.T) {
+// TestHandleRestoreBackup_RefusesWhenTheSeqFloorCannotBeStored: with the live
+// floor unable to reach the sidecar, the backup must not replace the database.
+func TestHandleRestoreBackup_RefusesWhenTheSeqFloorCannotBeStored(t *testing.T) {
 	f := newFileRestoreFixture(t)
-	stale := staleWAL(t)
+	if err := f.database.SetSetting(context.Background(), db.WSSeqFloorSettingKey, "5000000000"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(f.dbPath+".ws-seq-floor", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, restoreHook := admin.StubRestart()
+	defer restoreHook()
 
-	release := holdReadTx(t, f.database)
-	defer release()
-	releaseTimer := time.AfterFunc(300*time.Millisecond, release)
-	defer releaseTimer.Stop()
+	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(f.dbPath + ".restore-pending.json"); err == nil {
+		t.Error("a refused restore left a marker")
+	}
+	got, err := f.database.GetSetting(context.Background(), db.WSSeqFloorSettingKey)
+	if err != nil || got != "5000000000" {
+		t.Errorf("live floor = %q, %v; the refused restore must leave the live database in place", got, err)
+	}
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func countRestoreRows(t *testing.T, database *db.DB) int {
+	t.Helper()
+	var n int
+	if err := database.QueryRowContext(context.Background(), `SELECT count(*) FROM restore_rows`).Scan(&n); err != nil {
+		t.Fatalf("count restore_rows: %v", err)
+	}
+	return n
+}
+
+// TestHandleRestoreBackup_StagesInsteadOfOverwriting: the request stages a
+// verified copy and a marker beside the database and restarts. The open
+// database is neither closed nor written, and the one server_restart notice
+// is the restart coordinator's, not the handler's. The next boot's apply
+// then serves the backup's rows with no sidecar left to replay.
+func TestHandleRestoreBackup_StagesInsteadOfOverwriting(t *testing.T) {
+	f := newFileRestoreFixture(t)
+	ctx := context.Background()
+	for i := range 5 {
+		if _, err := f.database.ExecContext(ctx, `INSERT INTO restore_rows (v) VALUES (?)`, fmt.Sprintf("after-backup-%d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restarted, restoreHook := admin.StubRestart()
+	defer restoreHook()
+
+	// Writers keep running across the request, as they would on a busy server.
+	wctx, cancel := context.WithCancel(ctx)
 	var writers sync.WaitGroup
-	for w := range 4 {
+	for w := range 3 {
 		writers.Add(1)
 		go func(ctx context.Context) {
 			defer writers.Done()
@@ -221,28 +172,10 @@ func TestHandleRestoreBackup_UnderLoadLeavesNoStaleWAL(t *testing.T) {
 				if _, err := f.database.ExecContext(ctx, `INSERT INTO restore_rows (v) VALUES (?)`, fmt.Sprintf("w%d-%d", w, i)); err != nil {
 					return
 				}
+				time.Sleep(time.Millisecond)
 			}
-		}(ctx)
+		}(wctx)
 	}
-
-	closeHook := admin.StubCloser(func(database *db.DB) error {
-		err := admin.CloseDatabaseForTest(database)
-		// Plant the log once no connection is left that could checkpoint
-		// or delete it on its way out, as a close that could not finish
-		// its own checkpoint leaves one.
-		waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if werr := database.WaitConnsClosed(waitCtx); werr != nil {
-			t.Errorf("connections did not close: %v", werr)
-		}
-		if werr := os.WriteFile(f.dbPath+"-wal", stale, 0o600); werr != nil {
-			t.Errorf("plant stale WAL: %v", werr)
-		}
-		return err
-	})
-	defer closeHook()
-	restarted, restoreHook := admin.StubRestart()
-	defer restoreHook()
 
 	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
 	cancel()
@@ -250,62 +183,96 @@ func TestHandleRestoreBackup_UnderLoadLeavesNoStaleWAL(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["backup"] != f.backupName || resp["message"] != "restore staged — server restarting" {
+		t.Errorf("response = %v", resp)
+	}
 	if !waitRestarted(t, restarted) {
 		t.Error("restore did not request a restart")
 	}
-
-	for _, suffix := range []string{"-wal", "-shm"} {
-		if _, err := os.Stat(f.dbPath + suffix); !errors.Is(err, os.ErrNotExist) {
-			t.Errorf("%s is still beside the restored file (stat err %v); the next open would replay it", filepath.Base(f.dbPath+suffix), err)
+	if len(f.hub.restartCalls) != 0 {
+		t.Errorf("handler broadcast %d restart notice(s); the restart coordinator sends the only one", len(f.hub.restartCalls))
+	}
+	if f.database.Closed() {
+		t.Fatal("the handler closed the live database")
+	}
+	if n := countRestoreRows(t, f.database); n < restoreFixtureRows+5 {
+		t.Errorf("live rows = %d; the request must not have touched the live data", n)
+	}
+	for _, suffix := range []string{".restore-staged", ".restore-pending.json"} {
+		if _, err := os.Stat(f.dbPath + suffix); err != nil {
+			t.Errorf("%s was not written: %v", suffix, err)
 		}
 	}
 
-	if err := db.CheckBackupIntegrity(context.Background(), f.dbPath); err != nil {
-		t.Fatalf("restored database integrity: %v", err)
+	// The next boot: close, apply, reopen.
+	if err := f.database.Close(); err != nil {
+		t.Fatal(err)
 	}
 	reopened, err := db.Open(f.dbPath)
 	if err != nil {
-		t.Fatalf("reopen restored database: %v", err)
+		t.Fatalf("reopen: %v", err)
 	}
 	defer reopened.Close() //nolint:errcheck
-	var n int
-	if err := reopened.QueryRowContext(context.Background(), `SELECT count(*) FROM restore_rows`).Scan(&n); err != nil {
-		t.Fatalf("count restored rows: %v", err)
+	if n := countRestoreRows(t, reopened); n != restoreFixtureRows {
+		t.Errorf("rows after the boot-time apply = %d, want the backup's %d", n, restoreFixtureRows)
 	}
-	if n != restoreFixtureRows {
-		t.Errorf("restored rows = %d, want the backup's %d", n, restoreFixtureRows)
+	res, found, err := db.ReadRestoreResult(f.dbPath)
+	if err != nil || !found || res.Status != db.RestoreStatusApplied || res.Backup != f.backupName {
+		t.Errorf("restore result = %+v, %v, %v", res, found, err)
+	}
+	for _, suffix := range []string{".restore-staged", ".restore-pending.json", ".restore-rollback"} {
+		if _, err := os.Stat(f.dbPath + suffix); err == nil {
+			t.Errorf("%s survived the apply", suffix)
+		}
 	}
 }
 
-// TestHandleRestoreBackup_CopiesOnlyAfterEveryConnectionCloses: Close leaves a
-// connection that is in use open until it is released, and the last SQLite
-// connection to close checkpoints into the main file. The copy must wait for it.
-func TestHandleRestoreBackup_CopiesOnlyAfterEveryConnectionCloses(t *testing.T) {
+// TestHandleRestoreBackup_StageFailureLeavesDatabaseAndNoRestart: a copy that
+// cannot be staged (here the staged name is occupied by a directory) answers
+// 500, leaves the database serving, and does not restart.
+func TestHandleRestoreBackup_StageFailureLeavesDatabaseAndNoRestart(t *testing.T) {
 	f := newFileRestoreFixture(t)
-	conn, err := f.database.SQLReaderDB().Conn(context.Background())
-	if err != nil {
-		t.Fatalf("reader conn: %v", err)
+	blocker := filepath.Join(f.dbPath+".restore-staged", "keep")
+	if err := os.MkdirAll(filepath.Dir(blocker), 0o750); err != nil {
+		t.Fatal(err)
 	}
-	releaseTimer := time.AfterFunc(300*time.Millisecond, func() { _ = conn.Close() })
-	defer releaseTimer.Stop()
-
-	openAtCopy := -1
-	copyHook := admin.StubCopyBackup(func(src, dst string) error {
-		openAtCopy = f.database.SQLDb().Stats().OpenConnections + f.database.SQLReaderDB().Stats().OpenConnections
-		return admin.CopyBackupForTest(src, dst)
-	})
-	defer copyHook()
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	restarted, restoreHook := admin.StubRestart()
 	defer restoreHook()
 
 	w := doRequest(t, f.handler, http.MethodPost, "/backups/"+f.backupName+"/restore", f.token, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", w.Code, w.Body.String())
 	}
-	if openAtCopy != 0 {
-		t.Errorf("%d database connection(s) were still open when the backup was copied in", openAtCopy)
+	if !strings.Contains(w.Body.String(), "could not stage the backup") {
+		t.Errorf("body = %s", w.Body.String())
 	}
-	if !waitRestarted(t, restarted) {
-		t.Error("restore did not request a restart")
+	time.Sleep(50 * time.Millisecond)
+	if restarted() {
+		t.Error("a failed stage requested a restart")
+	}
+	if f.database.Closed() || countRestoreRows(t, f.database) != restoreFixtureRows {
+		t.Error("a failed stage disturbed the live database")
+	}
+	if _, err := os.Stat(f.dbPath + ".restore-pending.json"); err == nil {
+		t.Error("a marker was written for a failed stage")
+	}
+	entries, err := os.ReadDir(filepath.Join(filepath.Dir(f.dbPath), "backups"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "pre_restore_") {
+			t.Errorf("a refused restore left its safety copy %s behind", e.Name())
+		}
+	}
+	if admin.CurrentRestartState() == "pending" {
+		t.Error("a failed stage left the restart guard pending")
 	}
 }

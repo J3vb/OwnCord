@@ -4,8 +4,10 @@
 // that must NOT be flagged, `invalid` cases are the historical bug shape
 // each rule exists to catch (see eslint-rules.js for the git-history context
 // on each one).
+import path from "node:path";
 import { describe, it } from "vitest";
 import { RuleTester } from "eslint";
+import tseslint from "typescript-eslint";
 // eslint-rules.js is plain JS with no type declarations; the import below is
 // only used to drive RuleTester, not type-checked against a `.d.ts`.
 // @ts-expect-error -- no type declarations for the plain-JS rules module
@@ -628,6 +630,302 @@ describe("eslint-rules", () => {
         {
           code: `const service = { clearRoomKey: () => invoke("native_voice_clear_key") };`,
           errors: [{ messageId: "bareInvoke" }],
+        },
+      ],
+    });
+  });
+
+  it("no-raw-html-sink", () => {
+    ruleTester.run("no-raw-html-sink", localRules.rules["no-raw-html-sink"], {
+      valid: [
+        `el.textContent = text;`,
+        `el.replaceChildren();`,
+        `el.setAttribute("class", "x");`,
+        `el.setAttribute(name, html);`,
+        `const html = el.innerHTML;`,
+        `logger.write("x");`,
+        `el.srcdoc;`,
+      ],
+      invalid: [
+        { code: `el.innerHTML = "";`, errors: [{ messageId: "htmlSink" }] },
+        { code: `el.innerHTML += html;`, errors: [{ messageId: "htmlSink" }] },
+        { code: `el["innerHTML"] = html;`, errors: [{ messageId: "htmlSink" }] },
+        { code: `this.root.outerHTML = html;`, errors: [{ messageId: "htmlSink" }] },
+        { code: `frame.srcdoc = html;`, errors: [{ messageId: "htmlSink" }] },
+        { code: `el.insertAdjacentHTML("beforeend", html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: `document.write(html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: `document.writeln(html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: `frame.setAttribute("srcdoc", html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: `frame.setAttribute("SrcDoc", html);`, errors: [{ messageId: "htmlSink" }] },
+        { code: "el[`innerHTML`] = html;", errors: [{ messageId: "htmlSink" }] },
+        { code: "frame.setAttribute(`srcdoc`, html);", errors: [{ messageId: "htmlSink" }] },
+      ],
+    });
+  });
+
+  it("subscription-result-kept", () => {
+    ruleTester.run("subscription-result-kept", localRules.rules["subscription-result-kept"], {
+      valid: [
+        `const off = store.subscribe(fn);`,
+        `const stop = authStore.subscribeSelector(sel, fn);`,
+        `unsubs.push(ws.on("x", fn));`,
+        `unsubs.push(onAuthCleared(reset));`,
+        `function f() { return store.subscribe(fn); }`,
+        `const f = () => onAuthCleared(reset);`,
+        `register(store.subscribe(fn));`,
+        `this.off = this.ws.on("x", fn);`,
+        `appZoom.subscribe(paint, signal);`,
+        `appZoom.subscribe(paint, this.abort.signal);`,
+        `emitter.on("x", fn);`,
+        `button.addEventListener("click", fn);`,
+        `void store.subscribe(fn); // app-lifetime`,
+        `// app-lifetime hook\nvoid onAuthCleared(reset);`,
+      ],
+      invalid: [
+        { code: `store.subscribe(fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `subscribe(fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `authStore.subscribeSelector(sel, fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `ws.on("x", fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `this.ws.on("x", fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `onAuthCleared(reset);`, errors: [{ messageId: "discarded" }] },
+        { code: `store?.subscribe(fn);`, errors: [{ messageId: "discarded" }] },
+        { code: `store.subscribe?.(fn);`, errors: [{ messageId: "discarded" }] },
+        {
+          code: `async function f() { await store.subscribe(fn); }`,
+          errors: [{ messageId: "discarded" }],
+        },
+        { code: `void onAuthCleared(reset);`, errors: [{ messageId: "voidNeedsReason" }] },
+        {
+          code: `// unrelated\n\nvoid store.subscribe(fn);`,
+          errors: [{ messageId: "voidNeedsReason" }],
+        },
+      ],
+    });
+  });
+
+  it("layer-direction", () => {
+    // Type syntax needs the TypeScript parser. Filenames are real src/ paths:
+    // the rule keys on the importer's layer, never on type information.
+    const tsTester = new RuleTester({
+      languageOptions: { parser: tseslint.parser, ecmaVersion: 2022, sourceType: "module" },
+    });
+    const src = (rel: string) => path.resolve(__dirname, "../../src", rel);
+    const lib = src("lib/fixture.ts");
+    const error = (importer: string, target: string, fromLayer: string, toLayer: string) => ({
+      messageId: "upwardImport",
+      data: { importer, target, fromLayer, toLayer },
+    });
+
+    tsTester.run("layer-direction", localRules.rules["layer-direction"], {
+      valid: [
+        // Same rank (lib and platform are peers), lower rank, and within a layer.
+        { code: `import { a } from "../platform/desktop";`, filename: lib },
+        { code: `import { a } from "./logger";`, filename: lib },
+        { code: `import "@styles/app.css";`, filename: src("components/Foo.ts") },
+        { code: `import { a } from "@lib/dom";`, filename: src("stores/auth.store.ts") },
+        {
+          code: `import { a } from "../components/Foo";`,
+          filename: src("features/voice/x.ts"),
+        },
+        // main.ts and app/ sit above everything, including platform/.
+        { code: `import { d } from "./platform/desktop";`, filename: src("main.ts") },
+        { code: `import { p } from "@pages/MainPage";`, filename: src("app/router.ts") },
+        // Type-only forms are not counted: emit drops them.
+        { code: `import type { X } from "@pages/MainPage";`, filename: lib },
+        { code: `import { type X, type Y } from "@pages/MainPage";`, filename: lib },
+        { code: `export type { X } from "@stores/auth.store";`, filename: lib },
+        { code: `export { type X } from "@stores/auth.store";`, filename: lib },
+        { code: `export type * from "@stores/auth.store";`, filename: lib },
+        { code: `export type T = typeof import("@pages/MainPage");`, filename: lib },
+        // Local declarations and package imports have no layer.
+        { code: `export const x = 1; export { x as y };`, filename: lib },
+        { code: `import { a } from "livekit-client";`, filename: lib },
+        { code: `const m = await import(name);`, filename: lib },
+        // A colocated test file is exempt.
+        { code: `import { p } from "@pages/MainPage";`, filename: src("lib/fixture.test.ts") },
+        // Outside src/ and a file with no layer.
+        {
+          code: `import { p } from "../../src/pages/MainPage";`,
+          filename: path.resolve(__dirname, "../helpers/fixture.ts"),
+        },
+        { code: `import { a } from "@stores/auth.store";`, filename: src("vite-env.d.ts") },
+        { code: `import "@lib/../../outside";`, filename: lib },
+        { code: "const m = import(`@pages/${name}`);", filename: lib },
+        // A relative specifier that leaves src/ is not a layer.
+        { code: `import { h } from "../../tests/helpers/x";`, filename: src("lib/fixture.ts") },
+        // Listed edges are not reported, by alias or by relative path (same key).
+        {
+          code: `import { a } from "@stores/auth.store";`,
+          filename: lib,
+          options: [{ baseline: { debt: { "lib/fixture.ts": { "stores/auth.store.ts": 1 } } } }],
+        },
+        {
+          code: `import { a } from "../stores/auth.store";`,
+          filename: lib,
+          options: [{ baseline: { debt: { "lib/fixture.ts": { "stores/auth.store.ts": 1 } } } }],
+        },
+        {
+          code: `import { a } from "@stores/auth.store"; export { b } from "../stores/auth.store";`,
+          filename: lib,
+          options: [
+            {
+              baseline: {
+                sanctioned: { "lib/fixture.ts": { "stores/auth.store.ts": 1 } },
+                debt: { "lib/fixture.ts": { "stores/auth.store.ts": 1 } },
+              },
+            },
+          ],
+        },
+      ],
+      invalid: [
+        {
+          code: `import { f } from "../features/voice/sessionState";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "features/voice/sessionState.ts", "lib", "features")],
+        },
+        {
+          code: `import { s } from "@stores/voice.store";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
+        },
+        {
+          code: `import { s } from "../stores/voice.store";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
+        },
+        {
+          code: `import { f } from "../features/voice/joinBackoff";`,
+          filename: src("stores/voice.store.ts"),
+          errors: [
+            error("stores/voice.store.ts", "features/voice/joinBackoff.ts", "stores", "features"),
+          ],
+        },
+        {
+          code: `import { f } from "../../stores/auth.store";`,
+          filename: src("platform/desktop/fixture.ts"),
+          errors: [
+            error("platform/desktop/fixture.ts", "stores/auth.store.ts", "platform", "stores"),
+          ],
+        },
+        {
+          code: `import { s } from "../features/safety/store";`,
+          filename: src("i18n/fixture.ts"),
+          errors: [error("i18n/fixture.ts", "features/safety/store.ts", "i18n", "features")],
+        },
+        // export ... from and export * are runtime edges.
+        {
+          code: `export { s } from "@stores/voice.store";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
+        },
+        {
+          code: `export * from "@stores/voice.store";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
+        },
+        // A mixed list is a value import.
+        {
+          code: `import { type X, y } from "@stores/voice.store";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
+        },
+        // A side-effect import is a runtime edge.
+        {
+          code: `import "@stores/voice.store";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
+        },
+        // A dynamic import() is a runtime edge too, in any position.
+        {
+          code: `const m = await import("@pages/MainPage");`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "pages/MainPage.ts", "lib", "pages")],
+        },
+        {
+          code: `const load = () => import("../features/voice/native/screenPicker");`,
+          filename: lib,
+          errors: [
+            error("lib/fixture.ts", "features/voice/native/screenPicker.ts", "lib", "features"),
+          ],
+        },
+        // features -> app, only reachable by a relative path (there is no @app alias).
+        {
+          code: `import { x } from "../../app/session";`,
+          filename: src("features/x/y.ts"),
+          errors: [error("features/x/y.ts", "app/session.ts", "features", "app")],
+        },
+        {
+          code: `import { x } from "../app/session";`,
+          filename: src("components/Foo.ts"),
+          errors: [error("components/Foo.ts", "app/session.ts", "components", "app")],
+        },
+        {
+          code: `import { p } from "@pages/MainPage";`,
+          filename: src("components/Foo.ts"),
+          errors: [error("components/Foo.ts", "pages/MainPage.ts", "components", "pages")],
+        },
+        // Count-keyed: a second site beyond the listed count is reported, the
+        // first is covered. The baseline never lists another importer's edge.
+        {
+          code: `import { a } from "@stores/auth.store"; export { b } from "../stores/auth.store";`,
+          filename: lib,
+          options: [{ baseline: { debt: { "lib/fixture.ts": { "stores/auth.store.ts": 1 } } } }],
+          errors: [
+            { ...error("lib/fixture.ts", "stores/auth.store.ts", "lib", "stores"), column: 41 },
+          ],
+        },
+        {
+          code: `import { a } from "@stores/auth.store";`,
+          filename: lib,
+          options: [{ baseline: { debt: { "lib/other.ts": { "stores/auth.store.ts": 1 } } } }],
+          errors: [error("lib/fixture.ts", "stores/auth.store.ts", "lib", "stores")],
+        },
+        // main.ts is rank 6: its extensionless specifier counts, static or dynamic.
+        {
+          code: `import "../main";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "main.ts", "lib", "main")],
+        },
+        {
+          code: `const m = import("../main");`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "main.ts", "lib", "main")],
+        },
+        // An alias that climbs out of its directory is judged by where it lands.
+        {
+          code: `import "@lib/../pages/MainPage";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "pages/MainPage.ts", "lib", "pages")],
+        },
+        // A dynamic import of a plain template literal is a literal specifier.
+        {
+          code: "const m = import(`@pages/MainPage`);",
+          filename: lib,
+          errors: [error("lib/fixture.ts", "pages/MainPage.ts", "lib", "pages")],
+        },
+        // A Vite query suffix is not part of the module path.
+        {
+          code: `import "@stores/voice.store?raw";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
+        },
+        // A bare layer directory is still that layer (no index on disk: fixture fallback).
+        {
+          code: `import "../pages";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "pages.ts", "lib", "pages")],
+        },
+        // A directory import resolves to its index.ts.
+        {
+          code: `import "../features/zoom";`,
+          filename: lib,
+          errors: [error("lib/fixture.ts", "features/zoom/index.ts", "lib", "features")],
+        },
+        // A relative filename resolves against Client/.
+        {
+          code: `import { s } from "@stores/voice.store";`,
+          filename: "src/lib/fixture.ts",
+          errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
         },
       ],
     });

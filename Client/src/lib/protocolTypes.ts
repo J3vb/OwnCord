@@ -21,11 +21,23 @@ export const ServerMessageType = {
   READY: "ready",
   CHAT_MESSAGE: "chat_message",
   CHAT_SEND_OK: "chat_send_ok",
+  CHAT_FORWARD_OK: "chat_forward_ok",
+  POLL_CREATE_OK: "poll_create_ok",
+  POLL_VOTE_OK: "poll_vote_ok",
+  POLL_END_OK: "poll_end_ok",
+  THREAD_CREATE_OK: "thread_create_ok",
+  THREAD_UPDATE_OK: "thread_update_ok",
+  THREAD_FOLLOW_OK: "thread_follow_ok",
+  THREAD_FOLLOW_UPDATE: "thread_follow_update", // WP 6.9c: your follow of a thread changed {thread_id, following, thread?}; unsequenced, low queue, never authoritative (ready.threads is)
+  FORUM_POST_CREATE_OK: "forum_post_create_ok", // WP 6.9d: the post exists; {thread, message_id, client_message_id, deduplicated}, to the sender only
+  THREAD_CHANGED: "thread_changed", // WP 6.9c: a thread was created, renamed, archived, locked or took a message; absolute ThreadInfo, sequenced on the parent channel, at most one per thread per 2 s
+  THREAD_DELETED: "thread_deleted", // WP 6.9c: a thread was deleted; {channel_id (parent), thread_id}, sequenced on the parent channel
   CHAT_EDITED: "chat_edited",
   CHAT_DELETED: "chat_deleted",
   CHAT_PINNED: "chat_pinned", // a message was pinned or unpinned in a channel the recipient can read
   CHAT_BULK_DELETED: "chat_bulk_deleted",
   REACTION_UPDATE: "reaction_update",
+  POLL_UPDATE: "poll_update", // a poll's full counts and version after a vote or its end (WP 6.9b)
   TYPING: "typing",
   PRESENCE: "presence",
   PRESENCE_BATCH: "presence_batch", // many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence
@@ -48,8 +60,12 @@ export const ServerMessageType = {
   SERVER_RESTART: "server_restart",
   MOD_QUEUE: "mod_queue", // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
   MOD_ACTION: "mod_action", // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
+  MEMBER_TIMEOUTS: "member_timeouts", // WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale
+  CHANNEL_CATEGORIES: "channel_categories", // WP 6.5a: the full channel category list {categories:[{id,name,position}]}, sent per connected client only to MANAGE_CHANNELS/Administrator holders after any category mutation (permission evaluated at send time); targeted, unsequenced, never replayed -- replaces the manager's list wholesale. Everyone else derives groups from the category fields on the channels they can see
   APPEAL_STATUS: "appeal_status", // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
   MENTION_COUNT: "mention_count", // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
+  READ_STATE: "read_state", // WP 3D-5c: the caller's read pointer moved in a channel (after every accepted mark_read and mark_unread); targeted to the caller and unsequenced -- not replayed
+  CHANNEL_ACTIVITY: "channel_activity", // 2B-2: unread hint for unfocused readable channels; batched, unsequenced, never replayed
   ERROR: "error",
   PONG: "pong",
   DM_CHANNEL_OPEN: "dm_channel_open",
@@ -57,6 +73,7 @@ export const ServerMessageType = {
   DM_REQUEST: "dm_request",
   CALL_INCOMING: "call_incoming",
   CALL_DECLINED: "call_declined",
+  VOICE_WATCHING: "voice_watching",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce", // broadcast (same string as client msg)
   VOICE_E2EE_OFFER: "voice_e2ee_offer", // relay (same string as client msg)
   COMMAND_REPLY: "command_reply", // ephemeral plugin reply, sent only to the invoking client
@@ -73,6 +90,16 @@ export type ServerMessageTypeValue = (typeof ServerMessageType)[keyof typeof Ser
 export const ClientMessageType = {
   AUTH: "auth",
   CHAT_SEND: "chat_send",
+  CHAT_FORWARD: "chat_forward", // forward one message to one target channel or DM (WP 6.9a)
+  POLL_CREATE: "poll_create", // post a poll as a message (WP 6.9b)
+  POLL_VOTE: "poll_vote", // set the sender's whole selection on a poll, [] removes the vote (WP 6.9b)
+  POLL_END: "poll_end", // end a poll now: its author, or anyone who may delete the message (WP 6.9b)
+  THREAD_CREATE: "thread_create", // start a thread on a text-channel message (WP 6.9c)
+  THREAD_UPDATE: "thread_update",
+  THREAD_DELETE: "thread_delete",
+  THREAD_FOCUS: "thread_focus", // the second subscription slot: the thread open beside the focused channel, or null to close it (WP 6.9c)
+  FORUM_POST_CREATE: "forum_post_create", // create a forum post and its opening message in one step, idempotent on client_message_id (WP 6.9d)
+  THREAD_FOLLOW: "thread_follow", // follow or unfollow a thread {thread_id, follow}; idempotent (WP 6.9c)
   CHAT_EDIT: "chat_edit",
   CHAT_DELETE: "chat_delete",
   REACTION_ADD: "reaction_add",
@@ -80,6 +107,7 @@ export const ClientMessageType = {
   TYPING_START: "typing_start",
   CHANNEL_FOCUS: "channel_focus",
   MARK_READ: "mark_read",
+  MARK_UNREAD: "mark_unread",
   PRESENCE_UPDATE: "presence_update",
   VOICE_JOIN: "voice_join",
   VOICE_LEAVE: "voice_leave",
@@ -95,6 +123,7 @@ export const ClientMessageType = {
   VOICE_TOKEN_REFRESH: "voice_token_refresh",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce",
   VOICE_E2EE_OFFER: "voice_e2ee_offer",
+  VOICE_WATCH: "voice_watch",
   CALL_RING: "call_ring",
   CALL_DECLINE: "call_decline",
   CHAT_COMMAND: "chat_command", // plugin slash-command dispatch (Phase C)
@@ -126,3 +155,19 @@ export const ServerRestartReason = {
 } as const;
 
 export type ServerRestartReasonValue = (typeof ServerRestartReason)[keyof typeof ServerRestartReason];
+
+// ---------------------------------------------------------------------------
+// chat_message.kind — the closed set of values
+// ---------------------------------------------------------------------------
+
+export const ChatMessageKind = {
+  CALL: "call", // a call log row in a DM, written and updated only by the server
+  GROUP_ADD: "group_add", // a group DM row: a member was added, written only by the server
+  GROUP_REMOVE: "group_remove", // a group DM row: a member was removed by the owner, written only by the server
+  GROUP_LEAVE: "group_leave", // a group DM row: a member left, written only by the server
+  GROUP_RENAME: "group_rename", // a group DM row: the group name changed or was cleared, written only by the server
+  GROUP_ICON: "group_icon", // a group DM row: the group icon changed or was removed, written only by the server
+  PIN_ADD: "pin_add", // a row saying a member pinned a message; reply_to names the pinned message; written only by the server
+} as const;
+
+export type ChatMessageKindValue = (typeof ChatMessageKind)[keyof typeof ChatMessageKind];

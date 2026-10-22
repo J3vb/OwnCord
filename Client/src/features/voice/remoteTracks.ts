@@ -6,12 +6,13 @@ import { VideoQuality, type Room } from "livekit-client";
 import {
   getLocalCameraStream as doGetLocalCameraStream,
   getLocalScreenshareStream as doGetLocalScreenshareStream,
-  getLocalScreenshareFps as doGetLocalScreenshareFps,
+  getLocalScreenshareStats as doGetLocalScreenshareStats,
 } from "../../lib/screenShare";
 import { parseUserId } from "./sessionState";
 import { isUnencryptedPublication } from "./mediaEncryption";
 import { autoPlayCameras } from "./autoPlayCameras";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
+import type { ShareSenderSample } from "./shareSenderStats";
 
 /** One receiver sample of a remote video track (getReceiverStats plus
  *  currentBitrate), for a video tile's quality chip. */
@@ -62,6 +63,12 @@ export class RemoteTracks {
    *  auto-play on, every other camera is watched. */
   private readonly stopped = new Set<string>();
 
+  /** Told the sorted user ids whose screen share is watched, whenever that
+   *  set changes (a camera never counts). */
+  onWatchingChange: ((userIds: number[]) => void) | null = null;
+  /** The last set reported, to fire only on a real change. */
+  private reportedWatching: readonly number[] = [];
+
   constructor(
     private readonly getRoom: () => Room | null,
     private readonly autoPlay: () => boolean = autoPlayCameras,
@@ -87,9 +94,9 @@ export class RemoteTracks {
     return doGetLocalScreenshareStream(this.getRoom());
   }
 
-  /** The frame rate your screen share is sending (its own tile's readout). */
-  getLocalScreenshareFps(): Promise<number | null> {
-    return doGetLocalScreenshareFps(this.getRoom());
+  /** What your screen share is sending (its own tile's readout). */
+  getLocalScreenshareStats(): Promise<ShareSenderSample | null> {
+    return doGetLocalScreenshareStats(this.getRoom());
   }
 
   /** One receiver sample of a user's camera or screen share, for the video
@@ -131,6 +138,26 @@ export class RemoteTracks {
   clearWatched(): void {
     this.watched.clear();
     this.stopped.clear();
+    this.reportWatching();
+  }
+
+  /** The user ids whose screen share is watched, sorted. */
+  watchedScreenshares(): number[] {
+    const ids: number[] = [];
+    for (const key of this.watched) {
+      const [userId, type] = key.split(":") as [string, string];
+      if (type === "screenshare") ids.push(Number(userId));
+    }
+    return ids.toSorted((a, b) => a - b);
+  }
+
+  /** Fire onWatchingChange when the watched screen-share set changed. */
+  private reportWatching(): void {
+    const now = this.watchedScreenshares();
+    const before = this.reportedWatching;
+    if (now.length === before.length && now.every((id, i) => id === before[i])) return;
+    this.reportedWatching = now;
+    this.onWatchingChange?.([...now]);
   }
 
   /** A screen share only once watched; a camera too while auto-play is off,
@@ -160,6 +187,7 @@ export class RemoteTracks {
       if (pub === undefined || (on && isUnencryptedPublication(pub))) continue;
       pub.setSubscribed(on);
     }
+    this.reportWatching();
   }
 
   /** The stream ended (unpublished, its user left, or a channel change):
@@ -170,6 +198,7 @@ export class RemoteTracks {
   forgetWatch(userId: number, type: "camera" | "screenshare"): void {
     if (type === "screenshare") this.watch(userId, type, false);
     else this.watched.delete(`${userId}:${type}`);
+    this.reportWatching();
   }
 
   /** Forget watches whose stream the room does not publish. */
@@ -178,6 +207,7 @@ export class RemoteTracks {
       const [userId, type] = key.split(":") as [string, "camera" | "screenshare"];
       if (this.publication(Number(userId), type) === undefined) this.watched.delete(key);
     }
+    this.reportWatching();
   }
 
   /** A user's publication of a source, or of the camera or screen share. */

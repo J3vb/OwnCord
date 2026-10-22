@@ -25,9 +25,9 @@ import (
 const OverridesFileName = "config-overrides.json"
 
 // ErrNotEditable is the sentinel for a key the panel may not set: it is either
-// not a config leaf or one of the protected groups (secrets, host paths, the
-// listener/TLS identity, the panel's own perimeter, the update source,
-// pprof, or a key a live settings row already owns).
+// not a config leaf or one of the three excluded keys, server.data_dir (the
+// overrides file and the server's own key files live inside it) and the two
+// upload-type lists, which the Settings page already owns live.
 var ErrNotEditable = errors.New("config key is not editable from the admin panel")
 
 // ErrInvalidValue is the sentinel for a value that fails its key's rule
@@ -195,6 +195,24 @@ func Preview(cfgPath, overridesPath string, changes map[string]any) (*Config, er
 		}
 	}
 	return loadBytesWith(raw, cfgPath, current)
+}
+
+// BaseConfig builds the configuration with the overrides layer left out: the
+// compiled defaults, then config.yaml, then the OWNCORD_* environment. A
+// missing config.yaml means defaults, and none is created. Nothing is written
+// and no LiveKit credential is generated. The offline recovery command uses it
+// to find data_dir (which the overrides file cannot move) without reading the
+// file it is about to change.
+func BaseConfig(cfgPath string) (*Config, error) {
+	raw, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path comes from trusted wiring, not request input
+	if errors.Is(err, os.ErrNotExist) {
+		raw = nil
+	} else if err != nil {
+		return nil, fmt.Errorf("reading config file %s: %w", cfgPath, err)
+	}
+	// An empty, non-nil map selects "no overrides layer" in loadBytesWith; a
+	// nil map would read the overrides file.
+	return loadBytesWith(raw, cfgPath, map[string]any{})
 }
 
 // Lookup returns the running value of a dotted config key from cfg, and

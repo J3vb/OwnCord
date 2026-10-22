@@ -8,7 +8,9 @@
 //
 // Plain JS, ESM, no build step — eslint.config.js imports this directly.
 
+import { statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** True when `node` calls `<methodName>(...)` through any of the receivers the
  *  reconnect code uses: `this.<methodName>()` (the class form in
@@ -676,6 +678,409 @@ const invokeNeedsTryCatch = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────────────────
+// Rule: no-raw-html-sink  (ARCH-038)
+//
+// Invariant (CLAUDE.md, src/lib/dom.ts): user-controlled text reaches the DOM
+// through textContent / @lib/dom helpers, never as parsed HTML. Every raw-HTML
+// sink is reported: assigning `innerHTML` / `outerHTML` / `srcdoc`, calling
+// `insertAdjacentHTML` / `document.write` / `document.writeln`, and
+// `setAttribute("srcdoc", ...)`. `el.innerHTML = ""` is still a sink here;
+// use `replaceChildren()`. Only src/lib/icons.ts (static Lucide path data) is
+// exempt, via eslint.config.js.
+// ─────────────────────────────────────────────────────────────────────────
+
+const HTML_SINK_PROPERTIES = new Set(["innerHTML", "outerHTML", "srcdoc"]);
+const HTML_SINK_METHODS = new Set(["insertAdjacentHTML"]);
+const DOCUMENT_WRITE_METHODS = new Set(["write", "writeln"]);
+
+/** The value of a string literal or a template literal with no `${}`, else null. */
+function staticString(node) {
+  if (node?.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node?.type === "TemplateLiteral" && node.expressions.length === 0) {
+    return node.quasis[0].value.cooked;
+  }
+  return null;
+}
+
+/** The static name of a member's property (`a.b`, `a["b"]`, ``a[`b`]``), else null. */
+function memberName(node) {
+  if (node.type !== "MemberExpression") return null;
+  if (!node.computed) return node.property.type === "Identifier" ? node.property.name : null;
+  return staticString(node.property);
+}
+
+const noRawHtmlSink = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Ban raw HTML sinks (innerHTML, outerHTML, srcdoc, insertAdjacentHTML, document.write) so " +
+        "user content cannot be parsed as markup. Build DOM nodes with @lib/dom or textContent.",
+    },
+    schema: [],
+    messages: {
+      htmlSink:
+        "Raw HTML sink '{{name}}' is banned: build nodes with @lib/dom / textContent (use " +
+        "replaceChildren() to clear). Only src/lib/icons.ts, which writes static icon paths, is exempt.",
+    },
+  },
+  create(context) {
+    const report = (node, name) => context.report({ node, messageId: "htmlSink", data: { name } });
+    return {
+      AssignmentExpression(node) {
+        const name = memberName(node.left);
+        if (name !== null && HTML_SINK_PROPERTIES.has(name)) report(node, name);
+      },
+      CallExpression(node) {
+        const name = memberName(node.callee);
+        if (name === null) return;
+        if (HTML_SINK_METHODS.has(name)) {
+          report(node, name);
+        } else if (
+          DOCUMENT_WRITE_METHODS.has(name) &&
+          node.callee.object.type === "Identifier" &&
+          node.callee.object.name === "document"
+        ) {
+          report(node, `document.${name}`);
+        } else if (name === "setAttribute") {
+          const attr = staticString(node.arguments[0]);
+          if (attr !== null && attr.toLowerCase() === "srcdoc") {
+            report(node, "setAttribute(srcdoc)");
+          }
+        }
+      },
+    };
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Rule: subscription-result-kept  (ARCH-038)
+//
+// Invariant (CLAUDE.md, lifecycle ownership): `subscribe(...)`,
+// `subscribeSelector(...)`, `<ws>.on(...)` and `onAuthCleared(...)` return the
+// function that removes the listener. A bare expression statement discards it,
+// so the listener can never be removed and leaks past its owner. The result
+// must be stored, returned, pushed, or passed on. An app-lifetime listener is
+// written `void subscribe(...); // why it lives forever`: the explicit `void`
+// is accepted only with a comment on the same line or the line above.
+// ─────────────────────────────────────────────────────────────────────────
+
+const SUBSCRIPTION_NAMES = new Set([
+  "subscribe",
+  "subscribeSelector",
+  "onAuthCleared",
+  "registerSessionReset",
+]);
+
+/** The name reported for a subscription call, else null. */
+function subscriptionName(call) {
+  const callee = call.callee;
+  if (callee.type === "Identifier") {
+    return SUBSCRIPTION_NAMES.has(callee.name) ? callee.name : null;
+  }
+  if (callee.type !== "MemberExpression" || callee.computed) return null;
+  if (callee.property.type !== "Identifier") return null;
+  const name = callee.property.name;
+  if (SUBSCRIPTION_NAMES.has(name)) return name;
+  return name === "on" && isWsReceiver(callee.object) ? "ws.on" : null;
+}
+
+/** `signal` or `<x>.signal`: an AbortSignal that owns the subscription. */
+function isAbortSignalArg(node) {
+  if (node.type === "Identifier") return node.name === "signal";
+  return (
+    node.type === "MemberExpression" &&
+    !node.computed &&
+    node.property.type === "Identifier" &&
+    node.property.name === "signal"
+  );
+}
+
+const subscriptionResultKept = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "Require the unsubscribe function returned by subscribe/subscribeSelector/ws.on/" +
+        "onAuthCleared to be stored, returned or passed on, or explicitly `void`-ed with a comment.",
+    },
+    schema: [],
+    messages: {
+      discarded:
+        "The unsubscribe function returned by {{name}}(...) is discarded. Store it and call it from " +
+        "the owner's teardown, or, for an app-lifetime listener, write `void {{name}}(...)` with a " +
+        "comment saying why it lives forever.",
+      voidNeedsReason:
+        "`void {{name}}(...)` must carry a comment (same line or the line above) saying why the " +
+        "listener lives for the app's lifetime.",
+    },
+  },
+  create(context) {
+    const sourceCode = context.sourceCode;
+    return {
+      ExpressionStatement(node) {
+        let expr = node.expression;
+        let isVoid = false;
+        if (expr.type === "UnaryExpression" && expr.operator === "void") {
+          isVoid = true;
+          expr = expr.argument;
+        }
+        // `await x.subscribe(fn)` and `x?.subscribe(fn)` discard it just the same.
+        if (expr.type === "AwaitExpression") expr = expr.argument;
+        if (expr.type === "ChainExpression") expr = expr.expression;
+        if (expr.type !== "CallExpression") return;
+        const name = subscriptionName(expr);
+        if (name === null) return;
+        if (!isVoid) {
+          // `store.subscribe(fn, signal)` is owned by the AbortSignal.
+          if (expr.arguments.some(isAbortSignalArg)) return;
+          context.report({ node, messageId: "discarded", data: { name } });
+          return;
+        }
+        const line = node.loc.start.line;
+        const commented = sourceCode
+          .getAllComments()
+          .some(
+            (c) =>
+              c.loc.end.line === line - 1 ||
+              c.loc.start.line === line ||
+              c.loc.end.line === node.loc.end.line,
+          );
+        if (!commented) context.report({ node, messageId: "voidNeedsReason", data: { name } });
+      },
+    };
+  },
+};
+
+// --- layer-direction -------------------------------------------------------
+// A lower layer never imports a higher one. The rank is the first path segment
+// under Client/src/; an importer of rank R may import targets of rank <= R, and
+// peers (same rank) may import each other.
+//
+//   6  main.ts, app/
+//   5  pages/
+//   4  components/, features/        (peers)
+//   3  stores/
+//   2  lib/, platform/, i18n/        (peers)
+//   1  styles/, assets/
+//
+// Counted: static `import`, `export ... from` (including `export *`), a
+// side-effect import and a dynamic `import("literal")`: each is a runtime edge.
+// Not counted: `import type`, `export type`, a list whose every specifier is
+// `type`, and `typeof import("x")` in a type position (emit drops all of them).
+// A plain `import { X }` used only as a type is a value import to the parser,
+// so it counts; write `import type`. Colocated `*.test.ts(x)` files are exempt.
+//
+// The rule is string and path based. An alias (`@lib`, `@stores`,
+// `@components`, `@pages`, `@styles`, as in tsconfig.json) and a relative
+// specifier that name the same module get the same verdict and the same
+// baseline key: the resolved file relative to src/ (a directory import
+// resolves to its index.ts). The filesystem is read only for a site that is
+// upward, to find that file.
+//
+// Option `baseline` is Client/scripts/layer-baseline.json:
+// `{ sanctioned, debt }`, each `{ "<importer>": { "<target>": <site count> } }`.
+// A site is reported only when its importer has more sites to that target than
+// the baseline lists, so a second upward import of a listed target is an
+// error. tests/unit/layer-baseline.test.ts keeps the baseline shrink-only.
+const SRC_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "src");
+
+/** Layer rank by first path segment under src/ (`main` is `main.ts`). */
+const LAYER_RANK = new Map([
+  ["main", 6],
+  ["app", 6],
+  ["pages", 5],
+  ["components", 4],
+  ["features", 4],
+  ["stores", 3],
+  ["lib", 2],
+  ["platform", 2],
+  ["i18n", 2],
+  ["styles", 1],
+  ["assets", 1],
+]);
+
+/** The five tsconfig `paths` aliases, as alias -> directory under src/. */
+const LAYER_ALIASES = new Map([
+  ["@lib", "lib"],
+  ["@stores", "stores"],
+  ["@components", "components"],
+  ["@pages", "pages"],
+  ["@styles", "styles"],
+]);
+
+const TEST_FILE = /\.test\.tsx?$/;
+const MAIN_MODULE = /^main(\.[jt]sx?)?$/;
+
+/** Layer name of a posix path relative to src/, or null when it has none. */
+function layerOfRel(rel) {
+  const parts = rel.split("/");
+  if (parts.length === 1) {
+    // `main.ts`, or `main` as an extensionless import specifier; a bare layer
+    // name is a directory import (it resolves to that layer's index).
+    if (MAIN_MODULE.test(parts[0])) return "main";
+    return LAYER_RANK.has(parts[0]) ? parts[0] : null;
+  }
+  return LAYER_RANK.has(parts[0]) ? parts[0] : null;
+}
+
+/** `file` as a posix path relative to src/, or null when it is outside src/. */
+function relToSrc(file) {
+  const rel = path.relative(SRC_ROOT, file).split(path.sep).join("/");
+  return rel === "" || rel.startsWith("..") || path.isAbsolute(rel) ? null : rel;
+}
+
+const resolvedTargets = new Map();
+
+/** The file a specifier base names, relative to src/: the extensionless or
+ *  `.js` form resolves to `.ts`/`.tsx`, a directory to its index. Falls back
+ *  to `<base>.ts` when nothing exists on disk (fixtures). */
+function resolveTargetFile(relBase) {
+  const cached = resolvedTargets.get(relBase);
+  if (cached !== undefined) return cached;
+  const candidates = [
+    relBase,
+    `${relBase}.ts`,
+    `${relBase}.tsx`,
+    `${relBase}/index.ts`,
+    `${relBase}/index.tsx`,
+    relBase.replace(/\.js$/, ".ts"),
+  ];
+  let found = `${relBase}.ts`;
+  for (const candidate of candidates) {
+    try {
+      if (statSync(path.join(SRC_ROOT, candidate)).isFile()) {
+        found = candidate;
+        break;
+      }
+    } catch {
+      // not a file; try the next form
+    }
+  }
+  resolvedTargets.set(relBase, found);
+  return found;
+}
+
+/** The target of `spec` as a posix path relative to src/ (extension and index
+ *  not yet resolved), or null for a bare package or a path outside src/. */
+function targetBase(rawSpec, importerRel) {
+  // A Vite suffix (`?raw`, `?url`, `#hash`) is not part of the module path.
+  const spec = rawSpec.replace(/[?#].*$/, "");
+  if (spec.startsWith(".")) {
+    return relToSrc(path.join(SRC_ROOT, path.posix.dirname(importerRel), spec));
+  }
+  for (const [alias, dir] of LAYER_ALIASES) {
+    if (spec.startsWith(`${alias}/`)) {
+      // Normalise so `@lib/../pages/x` is judged by where it lands.
+      const base = path.posix.normalize(`${dir}/${spec.slice(alias.length + 1)}`);
+      return base.startsWith("..") ? null : base.replace(/\/$/, "");
+    }
+  }
+  return null;
+}
+
+function baselineCount(baseline, importer, target) {
+  let total = 0;
+  for (const section of [baseline.sanctioned, baseline.debt]) {
+    const n = section?.[importer]?.[target];
+    if (typeof n === "number") total += n;
+  }
+  return total;
+}
+
+function allSpecifiersTypeOnly(specifiers, kindKey) {
+  return specifiers.length > 0 && specifiers.every((s) => s[kindKey] === "type");
+}
+
+const layerDirection = {
+  meta: {
+    type: "problem",
+    docs: {
+      description:
+        "A lower layer must not import a higher one (main/app > pages > components/features > stores > lib/platform/i18n > styles/assets). Existing upward imports are listed in scripts/layer-baseline.json and only shrink.",
+    },
+    schema: [
+      {
+        type: "object",
+        properties: { baseline: { type: "object" } },
+        additionalProperties: false,
+      },
+    ],
+    messages: {
+      upwardImport:
+        "{{importer}} -> {{target}}: {{fromLayer}}/ must not import {{toLayer}}/ (layers import downward or sideways only). Move the shared piece down, or invert the dependency. Listed edges live in scripts/layer-baseline.json and only shrink.",
+    },
+  },
+  create(context) {
+    const baseline = context.options[0]?.baseline ?? {};
+    const filename = path.isAbsolute(context.filename)
+      ? context.filename
+      : path.resolve(path.dirname(SRC_ROOT), context.filename);
+    const importerRel = relToSrc(filename);
+    if (importerRel === null || TEST_FILE.test(importerRel)) return {};
+    const fromLayer = layerOfRel(importerRel);
+    if (fromLayer === null) return {};
+    const fromRank = LAYER_RANK.get(fromLayer);
+
+    /** Upward sites in source order, grouped by resolved target file. */
+    const sites = new Map();
+    const check = (node, source) => {
+      if (typeof source !== "string") return;
+      const base = targetBase(source, importerRel);
+      if (base === null) return;
+      const toLayer = layerOfRel(base);
+      if (toLayer === null || LAYER_RANK.get(toLayer) <= fromRank) return;
+      const target = resolveTargetFile(base);
+      const list = sites.get(target) ?? [];
+      list.push({ node, toLayer });
+      sites.set(target, list);
+    };
+
+    return {
+      ImportDeclaration(node) {
+        if (node.importKind === "type" || allSpecifiersTypeOnly(node.specifiers, "importKind")) {
+          return;
+        }
+        check(node, node.source.value);
+      },
+      ExportNamedDeclaration(node) {
+        if (node.source === null || node.source === undefined) return;
+        if (node.exportKind === "type" || allSpecifiersTypeOnly(node.specifiers, "exportKind")) {
+          return;
+        }
+        check(node, node.source.value);
+      },
+      ExportAllDeclaration(node) {
+        if (node.exportKind === "type") return;
+        check(node, node.source.value);
+      },
+      ImportExpression(node) {
+        const { source } = node;
+        if (source.type === "Literal") check(node, source.value);
+        else if (source.type === "TemplateLiteral" && source.expressions.length === 0) {
+          check(node, source.quasis[0].value.cooked);
+        }
+      },
+      "Program:exit"() {
+        for (const [target, list] of sites) {
+          const allowed = baselineCount(baseline, importerRel, target);
+          for (const site of list.slice(allowed)) {
+            context.report({
+              node: site.node,
+              messageId: "upwardImport",
+              data: { importer: importerRel, target, fromLayer, toLayer: site.toLayer },
+            });
+          }
+        }
+      },
+    };
+  },
+};
+
+// Exported so tests/unit/layer-baseline.test.ts can pin the maps to the real tree.
+export { LAYER_ALIASES, LAYER_RANK };
+
 export default {
   rules: {
     "no-leave-voice-when-superseded": noLeaveVoiceWhenSuperseded,
@@ -684,5 +1089,8 @@ export default {
     "no-identity-scope-fallback": noIdentityScopeFallback,
     "no-store-write-in-ws-on": noStoreWriteInWsOn,
     "invoke-needs-try-catch": invokeNeedsTryCatch,
+    "no-raw-html-sink": noRawHtmlSink,
+    "subscription-result-kept": subscriptionResultKept,
+    "layer-direction": layerDirection,
   },
 };

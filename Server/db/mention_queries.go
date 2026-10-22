@@ -3,7 +3,9 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -40,13 +42,15 @@ const maxMentionsPerMessage = 20
 const notBannedClause = `(banned = 0 OR (ban_expires IS NOT NULL AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))`
 
 // MentionTarget is a candidate recipient of a mention fan-out: the user id, the
-// presence status @here filters on, and the role the user holds (so the caller
+// presence status @here filters on, and the roles the user holds (so the caller
 // can apply the ADMINISTRATOR bypass when a per-user channel override would
-// otherwise drop them).
+// otherwise drop them). RoleID is the top role (the users.role_id mirror),
+// RoleIDs every held role: the bypass applies when ANY held role has it.
 type MentionTarget struct {
-	UserID int64
-	Status string
-	RoleID int64
+	UserID  int64
+	Status  string
+	RoleID  int64
+	RoleIDs []int64
 }
 
 // CreateMessageWithMentions inserts a message and its resolved mentions in one
@@ -54,12 +58,18 @@ type MentionTarget struct {
 // is still half-written. mentionedUserIDs is truncated to
 // maxMentionsPerMessage and duplicates are ignored. The same transaction
 // advances the author's read state past the message (advanceAuthorReadState).
-func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*Message, error) {
+// replyPingUserID (0 = none) is the replied-to author a reply_ping adds on top
+// of the capped content mentions; see insertMentionRows. mentionedRoleIDs land
+// in message_role_mentions in the same transaction.
+func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool, mentionedRoleIDs []int64) (*Message, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if err := refuseWhileErasing(ctx, tx, userID); err != nil {
+		return nil, fmt.Errorf("CreateMessageWithMentions: %w", err)
+	}
 
 	var m Message
 	var deleted, pinned, everyone int64
@@ -77,28 +87,36 @@ func (d *DB) CreateMessageWithMentions(ctx context.Context, channelID, userID in
 	m.Pinned = pinned != 0
 	m.MentionsEveryone = everyone != 0
 
-	if err := insertMentionRows(ctx, tx, m.ID, mentionedUserIDs); err != nil {
+	if err := insertAllMentionRows(ctx, tx, m.ID, mentionedUserIDs, replyPingUserID, mentionedRoleIDs, false); err != nil {
 		return nil, err
 	}
 	advanceAuthorReadState(ctx, d.q.WithTx(tx), userID, channelID, m.ID)
+	joined, err := threadPostEffects(ctx, d.q.WithTx(tx), channelID, userID, mentionedUserIDs, replyPingUserID)
+	if err != nil {
+		return nil, fmt.Errorf("CreateMessageWithMentions: %w", err)
+	}
+	m.ThreadJoined = joined
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("CreateMessageWithMentions commit: %w", err)
 	}
 	return &m, nil
 }
 
-// ReplaceMessageMentions rewrites a message's mention set and its
-// mentions_everyone flag in one writer transaction. Used by edits, which
-// re-resolve mentions from the new content.
-func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) error {
+// ReplaceMessageMentions rewrites a message's content-derived mention set and
+// its mentions_everyone flag in one writer transaction. Used by edits, which
+// re-resolve mentions from the new content. A row flagged reply_ping is not
+// content-derived: it survives the rewrite (a content mention of the same user
+// leaves it in place) and its user id is returned, 0 when the message holds
+// none, so the edit broadcast keeps the highlight.
+func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool, mentionedRoleIDs []int64) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("ReplaceMessageMentions begin tx: %w", err)
+		return 0, fmt.Errorf("ReplaceMessageMentions begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM message_mentions WHERE message_id = ?`, messageID); err != nil {
-		return fmt.Errorf("ReplaceMessageMentions delete: %w", err)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM message_mentions WHERE message_id = ? AND reply_ping = 0`, messageID); err != nil {
+		return 0, fmt.Errorf("ReplaceMessageMentions delete: %w", err)
 	}
 	// Guarded so an edit that does not change the flag skips the write — an
 	// UPDATE on messages re-indexes the row through the messages_fts triggers.
@@ -106,30 +124,50 @@ func (d *DB) ReplaceMessageMentions(ctx context.Context, messageID int64, mentio
 		`UPDATE messages SET mentions_everyone = ? WHERE id = ? AND mentions_everyone != ?`,
 		b2i64(mentionsEveryone), messageID, b2i64(mentionsEveryone),
 	); err != nil {
-		return fmt.Errorf("ReplaceMessageMentions flag: %w", err)
+		return 0, fmt.Errorf("ReplaceMessageMentions flag: %w", err)
 	}
-	if err := insertMentionRows(ctx, tx, messageID, mentionedUserIDs); err != nil {
-		return err
+	var replyPingUserID int64
+	switch err := tx.QueryRowContext(ctx,
+		`SELECT mentioned_user_id FROM message_mentions WHERE message_id = ? AND reply_ping = 1`, messageID,
+	).Scan(&replyPingUserID); {
+	case errors.Is(err, sql.ErrNoRows):
+		replyPingUserID = 0
+	case err != nil:
+		return 0, fmt.Errorf("ReplaceMessageMentions reply row: %w", err)
+	}
+	// Passing the kept target lets the content cap skip it, the same as on send.
+	if err := insertAllMentionRows(ctx, tx, messageID, mentionedUserIDs, replyPingUserID, mentionedRoleIDs, true); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("ReplaceMessageMentions commit: %w", err)
+		return 0, fmt.Errorf("ReplaceMessageMentions commit: %w", err)
 	}
-	return nil
+	return replyPingUserID, nil
 }
 
 // insertMentionRows writes the mention rows for one message inside tx.
 // Self-mentions are stored like any other: the fan-out, not storage, is what
-// excludes the author.
-func insertMentionRows(ctx context.Context, tx mentionExecer, messageID int64, mentionedUserIDs []int64) error {
-	if len(mentionedUserIDs) > maxMentionsPerMessage {
-		mentionedUserIDs = mentionedUserIDs[:maxMentionsPerMessage]
-	}
-	for _, uid := range mentionedUserIDs {
+// excludes the author. The content ids are capped at maxMentionsPerMessage
+// after the reply-ping user is removed from them, then the reply-ping row is
+// upserted on top, so the target is never displaced and a message holds at
+// most maxMentionsPerMessage+1 rows. When the content also names the target
+// the one row ends up flagged reply_ping = 1.
+func insertMentionRows(ctx context.Context, tx mentionExecer, messageID int64, mentionedUserIDs []int64, replyPingUserID int64) error {
+	for _, uid := range contentMentionIDs(mentionedUserIDs, replyPingUserID) {
 		if _, err := tx.ExecContext(ctx,
 			`INSERT OR IGNORE INTO message_mentions (message_id, mentioned_user_id) VALUES (?, ?)`,
 			messageID, uid,
 		); err != nil {
 			return fmt.Errorf("insertMentionRows: %w", err)
+		}
+	}
+	if replyPingUserID != 0 {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO message_mentions (message_id, mentioned_user_id, reply_ping) VALUES (?, ?, 1)
+			 ON CONFLICT(message_id, mentioned_user_id) DO UPDATE SET reply_ping = 1`,
+			messageID, replyPingUserID,
+		); err != nil {
+			return fmt.Errorf("insertMentionRows reply ping: %w", err)
 		}
 	}
 	return nil
@@ -355,6 +393,16 @@ const (
 	mentionTargetsByUser mentionTargetColumn = "id"
 )
 
+// mentionTargetFilter is the WHERE predicate for a column, over users aliased u.
+// Matching a role walks user_roles, so a member holding several roles is
+// listed once and counted for any of them.
+func mentionTargetFilter(column mentionTargetColumn, placeholders string) string {
+	if column == mentionTargetsByRole {
+		return `EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role_id IN (` + placeholders + `))`
+	}
+	return `u.id IN (` + placeholders + `)`
+}
+
 // listMentionTargets returns non-banned users whose column is in ids, with the
 // presence status @here filters on. It is the shared body of
 // ListMentionTargetsByRoles and ListMentionTargetsByUserIDs, which differ only
@@ -372,9 +420,11 @@ func (d *DB) listMentionTargets(ctx context.Context, column mentionTargetColumn,
 	}
 
 	rows, err := d.reader.QueryContext(ctx,
-		fmt.Sprintf( //nolint:gosec // G201: placeholders plus a named-type column constant, not user input
-			`SELECT id, status, role_id FROM users WHERE %s AND %s IN (%s)`,
-			notBannedClause, string(column), strings.Join(placeholders, ",")),
+		fmt.Sprintf( //nolint:gosec // G201: placeholders plus a closed filter chosen by a named-type constant, not user input
+			`SELECT u.id, u.status, u.role_id,
+			        COALESCE((SELECT group_concat(ur2.role_id) FROM user_roles ur2 WHERE ur2.user_id = u.id), '')
+			 FROM users u WHERE %s AND %s`,
+			notBannedClause, mentionTargetFilter(column, strings.Join(placeholders, ","))),
 		args...,
 	)
 	if err != nil {
@@ -385,8 +435,14 @@ func (d *DB) listMentionTargets(ctx context.Context, column mentionTargetColumn,
 	targets := []MentionTarget{}
 	for rows.Next() {
 		var t MentionTarget
-		if scanErr := rows.Scan(&t.UserID, &t.Status, &t.RoleID); scanErr != nil {
+		var held string
+		if scanErr := rows.Scan(&t.UserID, &t.Status, &t.RoleID, &held); scanErr != nil {
 			return nil, fmt.Errorf("%s scan: %w", caller, scanErr)
+		}
+		for f := range strings.SplitSeq(held, ",") {
+			if id, perr := strconv.ParseInt(f, 10, 64); perr == nil {
+				t.RoleIDs = append(t.RoleIDs, id)
+			}
 		}
 		targets = append(targets, t)
 	}

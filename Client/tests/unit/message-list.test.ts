@@ -113,6 +113,8 @@ describe("MessageList", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -425,7 +427,7 @@ describe("MessageList", () => {
     const content = container.querySelector(".virtual-content");
     expect(content).not.toBeNull();
     // The virtual scroll renders items based on estimated heights.
-    // In jsdom with 0 clientHeight, renderWindow computes start=0, end=OVERSCAN+1.
+    // In jsdom with 0 clientHeight, renderWindow computes start=0, end=OVERSCAN_MAX_ROWS+1.
     // With only 4 items (2 dividers + 2 messages), all should be in the window.
     const dividers = container.querySelectorAll(".msg-day-divider");
     expect(dividers.length).toBe(2);
@@ -810,6 +812,8 @@ describe("MessageList", () => {
   });
 
   it("disables every reaction control inline while timed out, and re-enables on lift (B9-15)", () => {
+    setConnectionStatus("connected");
+    uiStore.flush();
     setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
     msgList.mount(container);
     const controls = (): HTMLElement[] => [
@@ -1036,22 +1040,30 @@ describe("MessageList", () => {
     });
 
     it("re-renders the next row when a delete ends its grouping, and nothing further", () => {
-      // Same author a minute apart: every row after the first is grouped.
-      setMessages(
-        1,
-        [1, 2, 3, 4].map((id) =>
-          makeMessage({ id, timestamp: new Date(Date.UTC(2024, 0, 15, 12, id)).toISOString() }),
-        ),
-      );
+      // Alice, then Bob a minute apart: Bob's second and third rows are grouped.
+      const bob = (id: number): Message =>
+        makeMessage({
+          id,
+          user: { id: 2, username: "Bob", avatar: null },
+          timestamp: new Date(Date.UTC(2024, 0, 15, 12, id)).toISOString(),
+        });
+      setMessages(1, [
+        makeMessage({ id: 1, timestamp: new Date(Date.UTC(2024, 0, 15, 12, 1)).toISOString() }),
+        bob(2),
+        bob(3),
+        bob(4),
+      ]);
       msgList.mount(container);
       const [row1, row3, row4] = [row(1), row(3), row(4)];
       expect(row3!.classList.contains("grouped")).toBe(true);
 
       replace(2, { deleted: true });
 
+      // The deleted row leaves the list (the store keeps its tombstone).
+      expect(row(2)).toBeNull();
       expect(row(1)).toBe(row1);
       expect(row(4)).toBe(row4);
-      // A deleted row never groups, so the row under it now shows its author.
+      // The row under it now follows Alice's message, so it shows its author.
       expect(row(3)).not.toBe(row3);
       expect(row(3)!.classList.contains("grouped")).toBe(false);
     });
@@ -1231,6 +1243,8 @@ describe("MessageList", () => {
     });
 
     it("disables reaction controls while timed out without rebuilding rows (B9-15)", () => {
+      setConnectionStatus("connected");
+      uiStore.flush();
       setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
       msgList.mount(container);
       const row1 = container.querySelector("[data-testid='message-1']");
@@ -1778,6 +1792,57 @@ describe("MessageList", () => {
         const text = container.querySelector(".msg-time")!.textContent!;
         expect(text).toContain("18:34");
         expect(text).not.toMatch(/AM|PM/i);
+        expect(container.querySelector<HTMLElement>(".msg-time")!.title).toContain("18:34");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("relabels the compact and gutter clock times, keeping them short", () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date(2024, 0, 15, 18, 34, 0));
+        const now = new Date().toISOString();
+        setMessages(1, [
+          makeMessage({ id: 1, timestamp: now }),
+          makeMessage({ id: 2, timestamp: now }),
+        ]);
+        msgList.mount(container);
+
+        const compact = container.querySelector<HTMLElement>(".msg-compact-time")!;
+        const hover = container.querySelector<HTMLElement>(".msg-hover-time")!;
+        expect(compact.textContent).toContain("6:34 PM");
+        expect(hover.textContent).toContain("6:34 PM");
+
+        localStorage.setItem("owncord:settings:timeFormat", JSON.stringify("24h"));
+        window.dispatchEvent(
+          new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }),
+        );
+
+        for (const el of [compact, hover]) {
+          expect(el.textContent).toContain("18:34");
+          expect(el.textContent).not.toMatch(/AM|PM|Today|Yesterday/i);
+          expect(el.title).toContain("18:34");
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("rewrites a relative <t:…:R> timestamp as time passes", () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
+        const target = Math.floor(Date.now() / 1000) + 5 * 60;
+        setMessages(1, [
+          makeMessage({ id: 1, content: `<t:${target}:R>`, timestamp: new Date().toISOString() }),
+        ]);
+        msgList.mount(container);
+        const time = container.querySelector("time.md-timestamp")!;
+        expect(time.textContent).toBe("in 5 minutes");
+
+        vi.advanceTimersByTime(3 * 60_000);
+        expect(time.textContent).toBe("in 2 minutes");
       } finally {
         vi.useRealTimers();
       }

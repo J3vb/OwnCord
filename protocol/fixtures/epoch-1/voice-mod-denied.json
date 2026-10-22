@@ -1,0 +1,54 @@
+{
+  "journey": "voice-mod-denied",
+  "connections": {
+    "a": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ],
+    "b": [
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {
+            "user_id": "<id:number>"
+          },
+          "type": "voice_mod_kick"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "payload": {
+            "code": "FORBIDDEN",
+            "message": "cannot moderate a user of equal or higher rank"
+          },
+          "type": "error"
+        }
+      },
+      {
+        "dir": "c2s",
+        "frame": {
+          "payload": {},
+          "type": "ping"
+        }
+      },
+      {
+        "dir": "s2c",
+        "frame": {
+          "type": "pong"
+        }
+      }
+    ]
+  }
+}

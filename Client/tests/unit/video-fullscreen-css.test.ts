@@ -30,19 +30,26 @@ describe("video full-screen CSS", () => {
   });
 });
 
-// An inline video is capped like an image (max 300px tall, never wider than the
-// column); a 16:9 placeholder ratio limits the jump until metadata sets the real one.
+// An inline video's box hugs the player (no black bars beside a small or
+// portrait clip), the player never grows past the column, and a 16:9
+// placeholder at the box width stands in until the real size is known.
 describe("inline video attachment CSS", () => {
-  it("has no fixed-size box", () => {
-    expect(cascadedDeclaration(".msg-video", "width")).toBeUndefined();
+  it("hugs the player instead of filling the column", () => {
+    expect(cascadedDeclaration(".msg-video", "width")?.value.value).toMatchObject({
+      type: "fit-content",
+    });
     expect(cascadedDeclaration(".msg-video", "aspect-ratio")).toBeUndefined();
   });
 
-  it("caps the video at the column width and 300px tall", () => {
-    expect(cascadedDeclaration(".msg-video video", "max-height")?.value.value).toMatchObject({
-      value: { type: "dimension", value: { unit: "px", value: 300 } },
+  it("starts 400px wide, never wider than the column", () => {
+    expect(cascadedDeclaration(".msg-video video", "width")?.value.value).toMatchObject({
+      type: "length-percentage",
+      value: { type: "dimension", value: { unit: "px", value: 400 } },
     });
-    expect(cascadedDeclaration(".msg-video video", "max-width")).toBeDefined();
+    expect(cascadedDeclaration(".msg-video video", "max-width")?.value.value).toEqual({
+      type: "length-percentage",
+      value: { type: "percentage", value: 1 },
+    });
   });
 
   it("starts with a 16:9 placeholder ratio", () => {

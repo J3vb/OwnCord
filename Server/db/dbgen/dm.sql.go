@@ -253,6 +253,27 @@ func (q *Queries) GetDMParticipantsForUser(ctx context.Context, userID int64) ([
 	return items, nil
 }
 
+const getGroupDMMeta = `-- name: GetGroupDMMeta :one
+SELECT CAST(COALESCE(dm_owner_id, 0) AS INTEGER) AS owner_id,
+       CAST(COALESCE(dm_icon, '') AS TEXT)       AS icon_id
+FROM channels
+WHERE id = ? AND is_group = 1
+`
+
+type GetGroupDMMetaRow struct {
+	OwnerID int64  `json:"ownerId"`
+	IconID  string `json:"iconId"`
+}
+
+// The owner (0 when none) and the icon attachment id (” when none) of a group
+// DM. No row when the channel is not a group.
+func (q *Queries) GetGroupDMMeta(ctx context.Context, id int64) (GetGroupDMMetaRow, error) {
+	row := q.db.QueryRowContext(ctx, getGroupDMMeta, id)
+	var i GetGroupDMMetaRow
+	err := row.Scan(&i.OwnerID, &i.IconID)
+	return i, err
+}
+
 const getUserDMChannelIDs = `-- name: GetUserDMChannelIDs :many
 SELECT channel_id FROM dm_open_state WHERE user_id = ?
 `
@@ -285,6 +306,8 @@ SELECT
     c.id                                          AS channel_id,
     c.name                                        AS name,
     c.is_group                                    AS is_group,
+    CAST(COALESCE(c.dm_owner_id, 0) AS INTEGER)   AS owner_id,
+    CAST(COALESCE(c.dm_icon, '') AS TEXT)         AS icon_id,
     lm.id                                         AS last_message_id,
     COALESCE(lm.content, '')                      AS last_message,
     COALESCE(lm.timestamp, '')                    AS last_message_at,
@@ -295,7 +318,9 @@ SELECT
       LIMIT 100)
     ) AS unread_count,
     CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
-               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count,
+    CAST(COALESCE((SELECT rs.last_message_id FROM read_states rs
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS last_read_message_id
 FROM dm_open_state dos
 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
 LEFT JOIN messages lm    ON lm.id = (
@@ -306,14 +331,17 @@ ORDER BY COALESCE(lm.timestamp, dos.opened_at) DESC
 `
 
 type GetUserDMChannelsRow struct {
-	ChannelID     int64  `json:"channelId"`
-	Name          string `json:"name"`
-	IsGroup       int64  `json:"isGroup"`
-	LastMessageID *int64 `json:"lastMessageId"`
-	LastMessage   string `json:"lastMessage"`
-	LastMessageAt string `json:"lastMessageAt"`
-	UnreadCount   int64  `json:"unreadCount"`
-	MentionCount  int64  `json:"mentionCount"`
+	ChannelID         int64  `json:"channelId"`
+	Name              string `json:"name"`
+	IsGroup           int64  `json:"isGroup"`
+	OwnerID           int64  `json:"ownerId"`
+	IconID            string `json:"iconId"`
+	LastMessageID     *int64 `json:"lastMessageId"`
+	LastMessage       string `json:"lastMessage"`
+	LastMessageAt     string `json:"lastMessageAt"`
+	UnreadCount       int64  `json:"unreadCount"`
+	MentionCount      int64  `json:"mentionCount"`
+	LastReadMessageID int64  `json:"lastReadMessageId"`
 }
 
 // A DM row carries no recipient any more: dm_participants holds N users, so
@@ -333,11 +361,14 @@ func (q *Queries) GetUserDMChannels(ctx context.Context, userID int64) ([]GetUse
 			&i.ChannelID,
 			&i.Name,
 			&i.IsGroup,
+			&i.OwnerID,
+			&i.IconID,
 			&i.LastMessageID,
 			&i.LastMessage,
 			&i.LastMessageAt,
 			&i.UnreadCount,
 			&i.MentionCount,
+			&i.LastReadMessageID,
 		); err != nil {
 			return nil, err
 		}
@@ -415,18 +446,4 @@ func (q *Queries) OpenDMIfParticipant(ctx context.Context, arg OpenDMIfParticipa
 		return 0, err
 	}
 	return result.RowsAffected()
-}
-
-const setDMChannelName = `-- name: SetDMChannelName :exec
-UPDATE channels SET name = ? WHERE id = ? AND type = 'dm'
-`
-
-type SetDMChannelNameParams struct {
-	Name string `json:"name"`
-	ID   int64  `json:"id"`
-}
-
-func (q *Queries) SetDMChannelName(ctx context.Context, arg SetDMChannelNameParams) error {
-	_, err := q.db.ExecContext(ctx, setDMChannelName, arg.Name, arg.ID)
-	return err
 }

@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS roles (
     color       TEXT,
     permissions INTEGER NOT NULL DEFAULT 0,
     position    INTEGER NOT NULL DEFAULT 0,
-    is_default  INTEGER NOT NULL DEFAULT 0
+    is_default  INTEGER NOT NULL DEFAULT 0,
+    hoist       INTEGER NOT NULL DEFAULT 0,
+    mentionable INTEGER NOT NULL DEFAULT 0
 );
 INSERT OR IGNORE INTO roles (id, name, color, permissions, position, is_default) VALUES
     (1, 'Owner',     '#E74C3C', 2147483647, 100, 0),
@@ -52,7 +54,27 @@ CREATE TABLE IF NOT EXISTS users (
     identity_public_key TEXT,
     display_name TEXT,
     about TEXT,
-    custom_status TEXT
+    custom_status TEXT,
+    custom_status_expires_at TEXT,
+    banner_id TEXT,
+    banner_color TEXT
+);
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+) WITHOUT ROWID;
+
+CREATE TRIGGER IF NOT EXISTS user_roles_on_user_insert AFTER INSERT ON users
+BEGIN
+    INSERT OR IGNORE INTO user_roles (user_id, role_id)
+    SELECT NEW.id, r.id FROM roles r WHERE r.id = NEW.role_id;
+END;
+
+CREATE TABLE IF NOT EXISTS erasure_jobs (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    state   TEXT    NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,11 +103,34 @@ CREATE TABLE IF NOT EXISTS recovery_assists (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 
+CREATE TABLE IF NOT EXISTS channel_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_categories_name ON channel_categories(name COLLATE NOCASE);
+CREATE TABLE IF NOT EXISTS category_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    role_id     INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, role_id)
+);
+CREATE TABLE IF NOT EXISTS category_user_overrides (
+    category_id INTEGER NOT NULL REFERENCES channel_categories(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    allow       INTEGER NOT NULL DEFAULT 0,
+    deny        INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(category_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     name             TEXT    NOT NULL,
     type             TEXT    NOT NULL DEFAULT 'text',
-    category         TEXT,
+    category_id INTEGER REFERENCES channel_categories(id) ON DELETE SET NULL,
+    permissions_synced INTEGER NOT NULL DEFAULT 0,
     topic            TEXT,
     position         INTEGER NOT NULL DEFAULT 0,
     slow_mode        INTEGER NOT NULL DEFAULT 0,
@@ -96,7 +141,33 @@ CREATE TABLE IF NOT EXISTS channels (
     mixing_threshold INTEGER,
     voice_max_video  INTEGER NOT NULL DEFAULT 0,
     nsfw             INTEGER NOT NULL DEFAULT 0,
-    is_group         INTEGER NOT NULL DEFAULT 0
+    afk             INTEGER NOT NULL DEFAULT 0,
+    parent_channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE,
+    thread_starter_message_id INTEGER,
+    thread_owner_id INTEGER,
+    thread_archived INTEGER NOT NULL DEFAULT 0,
+    thread_locked INTEGER NOT NULL DEFAULT 0,
+    thread_auto_archive_minutes INTEGER NOT NULL DEFAULT 1440,
+    thread_last_activity_at TEXT,
+    forum_require_tag INTEGER NOT NULL DEFAULT 0,
+    forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
+    thread_post_message_id INTEGER,
+    is_group         INTEGER NOT NULL DEFAULT 0,
+    dm_owner_id      INTEGER,
+    dm_icon      TEXT
+);
+CREATE TABLE IF NOT EXISTS forum_tags (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    forum_id   INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    name       TEXT NOT NULL,
+    emoji      TEXT,
+    position   INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE TABLE IF NOT EXISTS thread_tags (
+    thread_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    tag_id    INTEGER NOT NULL REFERENCES forum_tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (thread_id, tag_id)
 );
 CREATE TABLE IF NOT EXISTS channel_overrides (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,6 +185,12 @@ CREATE TABLE IF NOT EXISTS channel_user_overrides (
     deny       INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (channel_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS thread_members (
+    thread_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    PRIMARY KEY (thread_id, user_id)
+) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS messages (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
@@ -125,12 +202,49 @@ CREATE TABLE IF NOT EXISTS messages (
     pinned     INTEGER NOT NULL DEFAULT 0,
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
     mentions_everyone INTEGER NOT NULL DEFAULT 0,
-    pinned_at  TEXT
+    pinned_at  TEXT,
+    kind       INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     PRIMARY KEY (message_id, mentioned_user_id)
+);
+CREATE TABLE IF NOT EXISTS message_role_mentions (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    role_id    INTEGER NOT NULL,
+    PRIMARY KEY (message_id, role_id)
+);
+
+-- History reads look up forward blocks on every page (migration 071).
+CREATE TABLE IF NOT EXISTS message_forwards (
+    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    source_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    source_channel_id INTEGER NOT NULL,
+    source_timestamp  TEXT    NOT NULL
+);
+
+-- History reads look up poll blocks on every page (migration 073).
+CREATE TABLE IF NOT EXISTS polls (
+    message_id        INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    question          TEXT    NOT NULL,
+    allow_multiselect INTEGER NOT NULL DEFAULT 0,
+    expires_at        TEXT    NOT NULL,
+    ended_at          TEXT,
+    version           INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS poll_answers (
+    message_id INTEGER NOT NULL REFERENCES polls(message_id) ON DELETE CASCADE,
+    answer_id  INTEGER NOT NULL,
+    text       TEXT    NOT NULL,
+    emoji      TEXT,
+    PRIMARY KEY (message_id, answer_id)
+);
+CREATE TABLE IF NOT EXISTS poll_votes (
+    message_id INTEGER NOT NULL,
+    answer_id  INTEGER NOT NULL,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (message_id, user_id, answer_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id DESC);
@@ -221,6 +335,34 @@ CREATE TABLE IF NOT EXISTS dm_open_state (
     PRIMARY KEY (user_id, channel_id)
 );
 
+-- Group DM create reads the recipients' DM privacy, trust rows and the
+-- creator's message requests (migrations 046 and 070, WP 6.8d).
+CREATE TABLE IF NOT EXISTS user_privacy (
+    user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+    message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+CREATE TABLE IF NOT EXISTS trusted_senders (
+    recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (recipient_id, sender_id)
+);
+CREATE TABLE IF NOT EXISTS message_requests (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    sender_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id       INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    first_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+    state            TEXT    NOT NULL DEFAULT 'pending'
+                     CHECK (state IN ('pending', 'accepted', 'ignored', 'deleted', 'blocked')),
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    decided_at       TEXT,
+    UNIQUE (sender_id, recipient_id)
+);
+
 -- B5-9: PurgeMessages/DeleteMessage write a removal row here in the same
 -- transaction as their effect (PurgeChannelMessagesWithAction/
 -- DeleteMessageWithRemoval).
@@ -261,7 +403,7 @@ func buildChannelRouter(database *db.DB) http.Handler {
 	limiter := auth.NewRateLimiter()
 	st := database
 	svc := service.New(st, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, nil, nil)
+	api.MountChannelRoutes(r, svc, limiter, nil, nil)
 	return r
 }
 
@@ -759,7 +901,7 @@ func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, []string{"127.0.0.0/8"}, nil)
+	api.MountChannelRoutes(r, svc, limiter, []string{"127.0.0.0/8"}, nil)
 	token := chTestCreateToken(t, database, "proxysearch", 1)
 
 	for i := range 30 {
@@ -840,6 +982,21 @@ func newPinTestDB(t *testing.T) *db.DB {
 		-- Mirrors migration 012. DM pin authorization consults the block list
 		-- (a blocked user must not mutate the blocker's pins), so this fixture
 		-- needs the table or the lookup fails closed with a 500.
+		-- DM pin authorization also reads the recipient's DM privacy (migration
+		-- 070) and trust rows (migration 046) through the same gate.
+		CREATE TABLE IF NOT EXISTS user_privacy (
+			user_id           INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			allow_member_dms  INTEGER NOT NULL DEFAULT 1 CHECK (allow_member_dms IN (0, 1)),
+			message_requests  INTEGER NOT NULL DEFAULT 1 CHECK (message_requests IN (0, 1)),
+			updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+		);
+		CREATE TABLE IF NOT EXISTS trusted_senders (
+			recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			source       TEXT    NOT NULL CHECK (source IN ('accepted', 'sent_first', 'grandfathered')),
+			created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+			PRIMARY KEY (recipient_id, sender_id)
+		);
 		CREATE TABLE IF NOT EXISTS user_blocks (
 			blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -905,7 +1062,9 @@ func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
 	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "pinned message", nil)
-	_ = database.SetMessagePinned(context.Background(), msgID, true)
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 	// Also create an unpinned message — should not appear.
 	_, _ = database.CreateMessage(context.Background(), chID, user.ID, "not pinned", nil)
 
@@ -938,7 +1097,7 @@ func TestGetPins_HasMoreOnlyPastCap(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateMessage: %v", err)
 		}
-		if err := database.SetMessagePinned(context.Background(), id, true); err != nil {
+		if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
 			t.Fatalf("SetMessagePinned: %v", err)
 		}
 	}
@@ -1065,7 +1224,9 @@ func TestSetPinned_UnpinSuccessfully(t *testing.T) {
 	user, _ := database.GetUserByUsername(context.Background(), "unpinner1")
 	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "unpin me", nil)
-	_ = database.SetMessagePinned(context.Background(), msgID, true)
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 
 	rr := chDelete(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
 	if rr.Code != http.StatusNoContent {
@@ -1123,7 +1284,9 @@ func TestSetPinned_Idempotent(t *testing.T) {
 	user, _ := database.GetUserByUsername(context.Background(), "pinner4")
 	chID, _ := database.CreateChannel(context.Background(), "general", "text", "", "", 0)
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "already pinned", nil)
-	_ = database.SetMessagePinned(context.Background(), msgID, true)
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 
 	// Pinning again should still succeed (idempotent).
 	rr := chPost(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
@@ -1138,6 +1301,8 @@ func TestSetPinned_Idempotent(t *testing.T) {
 // assert one event carries every purged id.
 type recordingPurgeBroadcaster struct {
 	calls []purgeBroadcast
+	// pinRows records every PinEventRow fan-out (WP 6.12).
+	pinRows []*service.PinEventResult
 }
 
 type purgeBroadcast struct {
@@ -1153,6 +1318,11 @@ func (b *recordingPurgeBroadcaster) BroadcastChatBulkDeleted(channelID int64, id
 // asserted in ws/messages_test.go.
 func (b *recordingPurgeBroadcaster) BroadcastMessagePinned(_ int64, _ int64, _ bool) {}
 
+// PinEventRow records the pin row fan-out.
+func (b *recordingPurgeBroadcaster) PinEventRow(_ context.Context, res *service.PinEventResult) {
+	b.pinRows = append(b.pinRows, res)
+}
+
 // buildPurgeRouter wires the channel routes with a recording broadcaster onto a
 // DB that has the DM and audit tables the purge path touches.
 func buildPurgeRouter(t *testing.T) (http.Handler, *db.DB, *recordingPurgeBroadcaster) {
@@ -1162,7 +1332,7 @@ func buildPurgeRouter(t *testing.T) (http.Handler, *db.DB, *recordingPurgeBroadc
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
-	api.MountChannelRoutes(r, database, svc, limiter, nil, broadcaster)
+	api.MountChannelRoutes(r, svc, limiter, nil, broadcaster)
 	return r, database, broadcaster
 }
 
@@ -1390,5 +1560,41 @@ func TestPurgeMessages_NilBroadcasterStillPurges(t *testing.T) {
 		if !msg.Deleted {
 			t.Errorf("message %d not purged", id)
 		}
+	}
+}
+
+// ─── pin row fan-out (WP 6.12) ──────────────────────────────────────────────
+
+func TestHandleSetPinned_EmitsRowOnce(t *testing.T) {
+	router, database, broadcaster := buildPurgeRouter(t)
+	token := chTestCreateToken(t, database, "pinrow", 1)
+	user, _ := database.GetUserByUsername(context.Background(), "pinrow")
+	chID, _ := database.CreateChannel(context.Background(), "pinrows", "text", "", "", 0)
+	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "pin me", nil)
+	path := fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID)
+
+	if rr := chPost(t, router, path, token); rr.Code != http.StatusNoContent {
+		t.Fatalf("pin status = %d, want 204; body: %s", rr.Code, rr.Body.String())
+	}
+	if len(broadcaster.pinRows) != 1 {
+		t.Fatalf("pin row fan-outs after a pin = %d, want 1", len(broadcaster.pinRows))
+	}
+	got := broadcaster.pinRows[0]
+	if got.Row.PinnedMessageID != msgID || got.Row.ChannelID != chID || got.Author.ID != user.ID {
+		t.Errorf("fan-out = %+v (author %+v), want target %d channel %d author %d", got.Row, got.Author, msgID, chID, user.ID)
+	}
+
+	// A re-pin, an unpin and a flap inside the window emit nothing more.
+	if rr := chPost(t, router, path, token); rr.Code != http.StatusNoContent {
+		t.Fatalf("re-pin status = %d", rr.Code)
+	}
+	if rr := chDelete(t, router, path, token); rr.Code != http.StatusNoContent {
+		t.Fatalf("unpin status = %d", rr.Code)
+	}
+	if rr := chPost(t, router, path, token); rr.Code != http.StatusNoContent {
+		t.Fatalf("flap pin status = %d", rr.Code)
+	}
+	if len(broadcaster.pinRows) != 1 {
+		t.Errorf("pin row fan-outs after re-pin, unpin and flap = %d, want still 1", len(broadcaster.pinRows))
 	}
 }

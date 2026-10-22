@@ -53,30 +53,29 @@ func (c *cancelAfterArm) Err() error {
 	return nil
 }
 
-// cancelOnLookupStore wraps the real *db.DB. Its GetDMParticipantIDs cancels
-// reqCtx — standing in for the client hanging up immediately after the
-// rename's DB commit, i.e. right when the handler goes to look up
-// participants for the fan-out — and then performs the real lookup with
-// whatever ctx it was handed. If the caller passed r.Context() straight
-// through, the lookup itself observes the cancellation and fails; if the
-// caller detached it first (context.WithoutCancel), the lookup is unaffected
-// and succeeds. This is exactly OC-0222's repro.
+// cancelAfterRenameStore wraps the real *db.DB. Its SetGroupDMName commits the
+// rename and then cancels reqCtx, standing in for the client hanging up right
+// after the rename's DB commit. Everything the service and handler do after
+// that point (the follow-up reads and the fan-out) must run on a context
+// detached from the request: if any of it observed the cancellation, the
+// survivors would never be told.
 //
 // Because reqCtx is also the *http.Request's own context, every later
 // r.Context()-based call in the handler (e.g. the final DMSummaryFor) is
-// realistically affected too — matching a real dropped connection, where
+// realistically affected too, matching a real dropped connection, where
 // everything downstream of the disconnect point shares the same fate. Only
 // the fan-out (broadcastDMOpen / MarkVisibilityChanged) is this finding's
 // concern; the eventual HTTP response is moot once the client is gone, so
 // the test does not assert on it.
-type cancelOnLookupStore struct {
+type cancelAfterRenameStore struct {
 	*db.DB
 	reqCtx *cancelAfterArm
 }
 
-func (s *cancelOnLookupStore) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error) {
+func (s *cancelAfterRenameStore) SetGroupDMName(ctx context.Context, channelID, actorID int64, name, content string) (*db.GroupChange, error) {
+	change, err := s.DB.SetGroupDMName(ctx, channelID, actorID, name, content)
 	s.reqCtx.Cancel()
-	return s.DB.GetDMParticipantIDs(ctx, channelID)
+	return change, err
 }
 
 // OC-0222: handleRenameGroupDM's post-rename fan-out — the per-viewer
@@ -97,7 +96,7 @@ func TestRenameGroupDM_FanOutSurvivesContextCancelledAfterCommit(t *testing.T) {
 	// itself.
 	setupRouter := chi.NewRouter()
 	setupSvc := service.New(database, auth.NewRateLimiter())
-	api.MountDMRoutes(setupRouter, database, setupSvc, bc)
+	api.MountDMRoutes(setupRouter, setupSvc, bc, nil, nil)
 	tokens := []string{
 		dmCreateToken(t, database, "rn_alice", 4),
 		dmCreateToken(t, database, "rn_bob", 4),
@@ -109,13 +108,13 @@ func TestRenameGroupDM_FanOutSurvivesContextCancelledAfterCommit(t *testing.T) {
 	bc.sent = nil
 	bc.markCalls = 0
 
-	// Now build a router whose ChannelService cancels the *request's own*
-	// context the instant the post-rename participant lookup runs.
+	// Now build a router whose DMService cancels the *request's own* context
+	// the instant the rename has committed.
 	reqCtx := newCancelAfterArm(context.Background())
 	renameRouter := chi.NewRouter()
 	renameSvc := service.New(database, auth.NewRateLimiter())
-	renameSvc.Channels = service.NewChannelService(&cancelOnLookupStore{DB: database, reqCtx: reqCtx}, renameSvc.Permissions)
-	api.MountDMRoutes(renameRouter, database, renameSvc, bc)
+	renameSvc.DMs = service.NewDMService(&cancelAfterRenameStore{DB: database, reqCtx: reqCtx}, renameSvc.Permissions)
+	api.MountDMRoutes(renameRouter, renameSvc, bc, nil, nil)
 
 	body, _ := json.Marshal(map[string]any{"name": "Renamed after disconnect"})
 	req := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/v1/dms/%d", group.ChannelID), bytes.NewReader(body))

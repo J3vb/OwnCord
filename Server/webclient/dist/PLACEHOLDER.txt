@@ -1,0 +1,3 @@
+This folder holds the browser client bundle (Client/dist-web/) when a release
+build copies it in before `go build`. The committed tree carries only this
+file, so the server builds without npm and serves no browser client.

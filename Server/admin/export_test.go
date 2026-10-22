@@ -2,25 +2,13 @@ package admin
 
 import (
 	"context"
-	"errors"
-	"net/http"
-	"net/http/httptest"
+	"github.com/J3vb/OwnCord/Server/updater"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/service"
 )
-
-// BroadcastRolesForTest exposes broadcastRoles for external tests. It builds
-// a bare *http.Request carrying ctx, since broadcastRoles's only use of its
-// *http.Request argument is r.Context().
-func BroadcastRolesForTest(ctx context.Context, roles *service.RoleService, hub HubBroadcaster) {
-	r := httptest.NewRequest(http.MethodPost, "/roles", nil).WithContext(ctx)
-	broadcastRoles(r, roles, hub)
-}
 
 // CaptureSetupLimiter installs h so the next NewAdminAPI call reports the
 // *auth.RateLimiter it creates for the /setup endpoint. NewAdminAPI returns
@@ -32,21 +20,15 @@ func CaptureSetupLimiter(h func(*auth.RateLimiter)) (restore func()) {
 	return func() { setupLimiterHook = prev }
 }
 
-// SetSetupLimiterReapTiming overrides the interval the setup endpoint's
-// rate-limiter reaper uses, so tests don't wait on the real 5-minute
-// interval. Cleanup no longer takes a separate max-window (item 6, round 3
-// review) — each entry retires on its own window.
-func SetSetupLimiterReapTiming(interval time.Duration) (restore func()) {
-	prev := setupLimiterReapInterval
-	setupLimiterReapInterval = interval
-	return func() {
-		setupLimiterReapInterval = prev
-	}
-}
+// OwnerOnlyRoutesForTest returns the routes api registered through
+// ownerOnly. Test-only surface (the route-walk test, P2-13 Codex review).
+func OwnerOnlyRoutesForTest(api *AdminAPI) []OwnerOnlyRoute { return api.ownerOnlyRoutes() }
 
-// SetBackupBaseDir overrides backupBaseDir so tests can point backup handlers
-// at a temp dir. Lives here so it stays out of the production binary.
-func SetBackupBaseDir(dir string) { backupBaseDir = dir }
+// SharesOwnerOnlyRegistryForTest reports whether a and b record owner-only
+// routes in the same registry.
+func SharesOwnerOnlyRegistryForTest(a, b *AdminAPI) bool {
+	return &a.owner == &b.owner || (len(a.owner.routes) > 0 && &a.owner.routes[0] == &b.owner.routes[0])
+}
 
 // SetArchiveBeforeSnapshotHook installs h to run synchronously between the
 // archive's first plan and its database snapshot, the window an upload that
@@ -86,52 +68,6 @@ func SetCreateChannelPostCommitHook(h func()) (restore func()) {
 	return func() { createChannelPostCommitHook = prev }
 }
 
-// StubCopyBackup swaps the restore path's file-copy hook so tests can inject
-// mid-copy failures that pass the pre-copy integrity gate. CopyBackupForTest
-// is the real implementation, for stubs that only want to fail once.
-func StubCopyBackup(fn func(src, dst string) error) (restore func()) {
-	prev := copyBackupFile
-	copyBackupFile = fn
-	return func() { copyBackupFile = prev }
-}
-
-// CopyBackupForTest exposes the real copy for StubCopyBackup delegates.
-var CopyBackupForTest = db.CopyDatabaseFile
-
-// StubCloseError makes the next handleRestoreBackup call's database.Close()
-// return err instead of actually closing the pools, so tests can exercise the
-// Close-failure branch without a genuine driver-level close error (see
-// dbCloser's doc comment for why that's not otherwise reachable in a test).
-func StubCloseError(msg string) (restore func()) {
-	closeMu.Lock()
-	prev := dbCloser
-	dbCloser = func(*db.DB) error { return errors.New(msg) }
-	closeMu.Unlock()
-	return func() {
-		closeMu.Lock()
-		dbCloser = prev
-		closeMu.Unlock()
-	}
-}
-
-// StubCloser swaps the restore path's database-close hook for fn, so a test
-// can act on the files between the pools closing and the backup being copied
-// in. CloseDatabaseForTest is the real close, for stubs that wrap it.
-func StubCloser(fn func(*db.DB) error) (restore func()) {
-	closeMu.Lock()
-	prev := dbCloser
-	dbCloser = fn
-	closeMu.Unlock()
-	return func() {
-		closeMu.Lock()
-		dbCloser = prev
-		closeMu.Unlock()
-	}
-}
-
-// CloseDatabaseForTest is the real close behind dbCloser.
-func CloseDatabaseForTest(database *db.DB) error { return database.Close() }
-
 // ApplyStagedUpdate exposes applyStagedUpdate (the on-disk swap behind
 // POST /updates/apply's background goroutine) so tests can drive it directly
 // with fake filesystem paths, instead of exercising the full HTTP handler —
@@ -144,6 +80,12 @@ var ApplyStagedUpdate = applyStagedUpdate
 // swap → restart request / guard release) for tests, combined with
 // StubRestart and SetApplyRestartDelay.
 var ApplyAndRestart = applyAndRestart
+
+// NewStopSignal builds the shutdown signal applyAndRestart watches: draining
+// is the background group's Draining channel, shutdown the process-wide one.
+func NewStopSignal(draining, shutdown <-chan struct{}) stopSignal {
+	return stopSignal{draining: draining, shutdown: shutdown}
+}
 
 // SetApplyRestartDelay shrinks the client-facing restart countdown so tests
 // of applyAndRestart don't sleep the real 5 seconds.
@@ -228,4 +170,20 @@ func StubRestartCapture() (reasons func() []string, restore func()) {
 			restartMu.Unlock()
 			ResetRestartState()
 		}
+}
+
+// SetInstallWritable replaces the install-directory probe and returns a
+// restore func, so tests can simulate a read-only install.
+func SetInstallWritable(f func() error) (restore func()) {
+	prev := installWritable
+	installWritable = f
+	return func() { installWritable = prev }
+}
+
+// SetDownloadAndVerify replaces the download stage of POST /updates/apply and
+// returns a restore func.
+func SetDownloadAndVerify(f func(u *updater.Updater, ctx context.Context, latest, dl, sum, sig, man, manSig, dest string) (string, error)) (restore func()) {
+	prev := downloadAndVerify
+	downloadAndVerify = f
+	return func() { downloadAndVerify = prev }
 }

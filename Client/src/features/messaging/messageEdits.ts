@@ -9,6 +9,7 @@ import type {
   ChatBulkDeletedPayload,
 } from "../../lib/types";
 import type { ReferencedMessage } from "../../lib/types";
+import { isPinRowKind } from "../../lib/messageKind";
 import type { Message, MessagesState } from "./messageModel";
 
 /** A parent that is deleted, purged or erased: no author, no text. */
@@ -16,17 +17,23 @@ function redactSnippet(id: number): ReferencedMessage {
   return { id, user: null, content: "", deleted: true, has_attachments: false };
 }
 
-/** Redact the snippet of every reply in `list` whose parent `hit` selects; `list` itself when none. */
-function redactReplies(
-  list: readonly Message[],
-  hit: (ref: ReferencedMessage) => boolean,
-): readonly Message[] {
-  if (!list.some((m) => m.referencedMessage && hit(m.referencedMessage))) return list;
-  return list.map((m) =>
-    m.referencedMessage && hit(m.referencedMessage)
-      ? { ...m, referencedMessage: redactSnippet(m.referencedMessage.id) }
-      : m,
-  );
+/**
+ * The message `m` points at: a reply's parent, or the target of a pin row. A
+ * live pin row arrives with no snippet, so its target is only in `replyTo`.
+ */
+function pointedAt(m: Message): number | null {
+  if (m.referencedMessage) return m.referencedMessage.id;
+  return isPinRowKind(m.kind) ? m.replyTo : null;
+}
+
+/** Redact the snippet of every row in `list` whose parent or pin target `hit` selects; `list` itself when none. */
+function redactReplies(list: readonly Message[], hit: (id: number) => boolean): readonly Message[] {
+  const hits = (m: Message): boolean => {
+    const id = pointedAt(m);
+    return id !== null && hit(id);
+  };
+  if (!list.some(hits)) return list;
+  return list.map((m) => (hits(m) ? { ...m, referencedMessage: redactSnippet(pointedAt(m)!) } : m));
 }
 
 /** The server caps a reply snippet at 100 code points (Server/db/referenced_message.go). */
@@ -61,6 +68,9 @@ export function reduceEditMessage(prev: MessagesState, payload: ChatEditedPayloa
             editedAt: payload.edited_at,
             mentions: payload.mentions,
             mentionsEveryone: payload.mentions_everyone,
+            mentionRoles: payload.mention_roles,
+            // A call row's end carries the finished `call`; its edited_at is null.
+            ...(payload.call !== undefined && { kind: payload.kind ?? "call", call: payload.call }),
           }
         : msg,
     ),
@@ -83,7 +93,7 @@ export function reduceDeleteMessage(
 
   const updatedList = redactReplies(
     channelMessages.map((msg) => (msg.id === payload.message_id ? { ...msg, deleted: true } : msg)),
-    (ref) => ref.id === payload.message_id,
+    (id) => id === payload.message_id,
   );
 
   const updatedMessages = new Map(prev.messagesByChannel);
@@ -102,9 +112,7 @@ export function reduceBulkDeleteMessages(
   const purged = new Set(payload.ids);
   if (
     !channelMessages.some(
-      (msg) =>
-        (purged.has(msg.id) && !msg.deleted) ||
-        (msg.referencedMessage && purged.has(msg.referencedMessage.id)),
+      (msg) => (purged.has(msg.id) && !msg.deleted) || purged.has(pointedAt(msg) ?? 0),
     )
   ) {
     return prev;
@@ -112,7 +120,7 @@ export function reduceBulkDeleteMessages(
 
   const updatedList = redactReplies(
     channelMessages.map((msg) => (purged.has(msg.id) ? { ...msg, deleted: true } : msg)),
-    (ref) => purged.has(ref.id),
+    (id) => purged.has(id),
   );
 
   const updatedMessages = new Map(prev.messagesByChannel);
@@ -127,8 +135,13 @@ export function reduceSetMessagePinned(
   messageId: number,
   pinned: boolean,
 ): MessagesState {
+  const pinRevision = new Map(prev.pinRevision);
+  pinRevision.set(channelId, (pinRevision.get(channelId) ?? 0) + 1);
+  const messagePinRevision = new Map(prev.messagePinRevision);
+  messagePinRevision.set(messageId, (messagePinRevision.get(messageId) ?? 0) + 1);
+
   const channelMessages = prev.messagesByChannel.get(channelId);
-  if (!channelMessages) return prev;
+  if (!channelMessages) return { ...prev, pinRevision, messagePinRevision };
 
   const updatedList = channelMessages.map((msg) =>
     msg.id === messageId ? { ...msg, pinned } : msg,
@@ -136,5 +149,5 @@ export function reduceSetMessagePinned(
 
   const updatedMessages = new Map(prev.messagesByChannel);
   updatedMessages.set(channelId, updatedList);
-  return { ...prev, messagesByChannel: updatedMessages };
+  return { ...prev, messagesByChannel: updatedMessages, pinRevision, messagePinRevision };
 }

@@ -51,6 +51,7 @@ function resetStores(): void {
     voiceStatus: "idle",
   }));
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],
@@ -82,6 +83,7 @@ function setVoiceConnected(screenshare = false): void {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         },

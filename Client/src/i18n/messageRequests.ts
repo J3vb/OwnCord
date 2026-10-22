@@ -8,7 +8,10 @@ export const messageRequestsText = defineCatalog("messageRequests", {
     "Accept trusts the sender on this server and opens your conversation with them. Ignore and Delete remove the request without telling the sender.",
   loading: "Loading message requests…",
   empty: "No pending message requests.",
-  unavailable: "Message requests couldn't be loaded. They load again when you reconnect.",
+  unavailable:
+    "Message requests couldn't be loaded. Try again, or they load again when you reconnect.",
+  retry: "Retry",
+  retrying: "Retrying…",
   reconnecting: "Reconnecting. This list may be out of date.",
   listLabel: "Pending message requests",
   unknownSender: "Unknown user",
@@ -36,5 +39,7 @@ export const messageRequestsText = defineCatalog("messageRequests", {
   "confirm.block.title": "Block {name}?",
   "confirm.block.body":
     "{name} can no longer message you on this server, and this request is removed. They are not told now, but if they message you again they will see it wasn't sent. You can unblock them later.",
+  "confirm.blockUser.body":
+    "{name} can no longer message you on this server. They are not told now, but if they message you again they will see it wasn't sent. You can unblock them later.",
   "confirm.block.confirm": "Block",
 });

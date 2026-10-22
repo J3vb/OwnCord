@@ -22,6 +22,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { loadPref, savePref } from "@lib/preferences";
 import type { IconName } from "@lib/icons";
 import type { AvatarSubject } from "@lib/avatar";
 import { createAvatarElement } from "@components/message-list/avatar";
@@ -35,7 +36,7 @@ import type { DmChannel } from "@stores/dm.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
-import { formatElapsed, headerStatusText, isConnecting } from "@components/VoiceWidget";
+import { formatElapsed, headerStatusText, isConnecting } from "@components/voiceStatusText";
 import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
 import type { GridPerson, VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";
@@ -69,6 +70,9 @@ export type DmCallView =
       readonly inRoom: readonly number[];
       /** Someone was in the call and you are now alone in it. */
       readonly peerLeft: boolean;
+      /** Ring again is offered: you are alone after a peer left, or a group
+       *  has a member who is not in the call. */
+      readonly canRingAgain: boolean;
     };
 
 export interface DmCallViewInput {
@@ -80,6 +84,13 @@ export interface DmCallViewInput {
   readonly outgoing: OutgoingCallState | null;
   /** Someone else has been in this call's room since you joined. */
   readonly peerWasHere?: boolean;
+}
+
+/** The members of a group DM who are not in the call (everyone but you is in
+ *  `dm.participants`), in the DM's order. A 1:1 has no roster to grey out. */
+export function absentMembers(dm: DmChannel, present: readonly number[]): number[] {
+  if (!dm.isGroup) return [];
+  return dm.participants.map((p) => p.id).filter((id) => !present.includes(id));
 }
 
 /** Which panel, if any, the open channel shows. Pure: the whole decision. */
@@ -103,11 +114,14 @@ export function deriveCallView(input: DmCallViewInput): DmCallView {
       if (out.phase === "ringing") return { kind: "outgoing", dm, pending: out.pending };
       return { kind: "unanswered", dm, reason: out.phase };
     }
+    const inRoom = [selfId, ...others];
+    const peerLeft = !dm.isGroup && others.length === 0 && input.peerWasHere === true;
     return {
       kind: "connected",
       dm,
-      inRoom: [selfId, ...others],
-      peerLeft: !dm.isGroup && others.length === 0 && input.peerWasHere === true,
+      inRoom,
+      peerLeft,
+      canRingAgain: peerLeft || absentMembers(dm, inRoom).length > 0,
     };
   }
   if (others.length > 0) {
@@ -246,8 +260,20 @@ function caption(main: string, sub: string): HTMLElement[] {
 export {
   alertIncomingCall,
   alertMissedCall,
+  alertSupersededCall,
   clearIncomingCall,
 } from "../features/direct-messages/callAlerts";
+
+/** Marks a group member who is not in the call: dimmed, no pulse. */
+const ABSENT_CLASS = "dcp-avatar--absent";
+
+/** The expanded panel's dragged height, in px; 0 means the default share. */
+const HEIGHT_PREF = "dmCallHeight";
+/** Keep MIN_HEIGHT in step with the clamp on `.dm-call-panel--expanded`. */
+const MIN_HEIGHT = 160;
+/** What a drag always leaves for the message list. */
+const MESSAGES_MIN_HEIGHT = 120;
+const KEY_STEP = 24;
 
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
   const disposable = new Disposable();
@@ -286,7 +312,20 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     "aria-live": "polite",
     "data-testid": "dm-call-live",
   });
-  appendChildren(root, body, live);
+  // The drag handle on the panel's bottom edge (Discord's resizable call):
+  // outside `body`, so a rebuild keeps it and a drag in progress.
+  const resizer = createElement("div", {
+    class: "dcp-resize",
+    role: "separator",
+    "aria-orientation": "horizontal",
+    "aria-label": d("resizeLabel"),
+    "aria-valuemin": String(MIN_HEIGHT),
+    tabindex: "0",
+    "data-testid": "dcp-resize",
+  });
+  appendChildren(root, body, resizer, live);
+  let savedHeight = loadPref<number>(HEIGHT_PREF, 0);
+  let drag: { startY: number; startHeight: number; max: number } | null = null;
 
   // Per-render references for the in-place refresh.
   let avatars = new Map<number, AvatarRef>();
@@ -344,7 +383,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       case "unanswered":
         return `unanswered|${v.dm.channelId}|${v.reason}|${String(videoActive)}`;
       case "connected":
-        return `connected|${v.dm.channelId}|${v.inRoom.join(",")}|${String(v.peerLeft)}|${String(collapsed)}|${String(videoActive)}`;
+        return `connected|${v.dm.channelId}|${v.inRoom.join(",")}|${String(v.peerLeft)}|${String(v.canRingAgain)}|${String(collapsed)}|${String(videoActive)}`;
       default:
         return "none";
     }
@@ -377,12 +416,20 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const badge = createElement("span", { class: "dcp-avatar-badge" });
     badge.hidden = true;
     wrap.appendChild(badge);
+    if (extra.split(" ").includes(ABSENT_CLASS)) {
+      // Every surface that draws a greyed member (stage, grid tile, live strip).
+      wrap.title = d("notInCall");
+      wrap.appendChild(createElement("span", { class: "sr-only" }, d("notInCall")));
+    }
     avatars.set(userId, { wrap, badge, verify: null, verifyKey: "" });
     return wrap;
   }
 
   function person(userId: number, dm: DmChannel, extra = ""): HTMLElement {
-    const col = createElement("div", { class: "dcp-person" });
+    const absent = extra.split(" ").includes(ABSENT_CLASS);
+    const col = createElement("div", {
+      class: absent ? "dcp-person dcp-person--absent" : "dcp-person",
+    });
     const label = createElement(
       "span",
       { class: "dcp-person-name" },
@@ -461,7 +508,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
         options.onScreenshareToggle,
       ),
     };
-    appendChildren(bar, controls.mute!, controls.deafen!, controls.camera!, controls.share!);
+    appendChildren(bar, controls.mute!, controls.deafen!, controls.camera!);
+    if (!(__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function")) {
+      bar.appendChild(controls.share!);
+    }
     if (!compact)
       bar.appendChild(createElement("span", { class: "dcp-sep", "aria-hidden": "true" }));
     bar.appendChild(
@@ -522,14 +572,20 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     dm: DmChannel,
     ids: readonly number[],
     ringing: readonly number[] = [],
+    absent: readonly number[] = [],
   ): HTMLElement {
     root.classList.add("dm-call-panel--video");
     const me = currentUserId();
     const voice = voiceStore.getState();
-    people = ids.map((id) => ({
+    people = [...ids, ...absent].map((id) => ({
       userId: id,
       label: resolvePerson(id, dm, voice, me).name,
-      content: avatar(id, dm, "lg", ringing.includes(id) ? "dcp-avatar--ringing" : ""),
+      content: avatar(
+        id,
+        dm,
+        "lg",
+        ringing.includes(id) ? "dcp-avatar--ringing" : absent.includes(id) ? ABSENT_CLASS : "",
+      ),
       // Its avatars draw their own speaking ring and mute badge.
       marksOwnState: true as const,
     }));
@@ -591,6 +647,9 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const row = createElement("div", { class: "dcp-row" });
     const faces = createElement("div", { class: "dcp-faces" });
     for (const id of v.inRoom) faces.appendChild(avatar(id, v.dm, "sm"));
+    for (const id of absentMembers(v.dm, v.inRoom)) {
+      faces.appendChild(avatar(id, v.dm, "sm", ABSENT_CLASS));
+    }
     const text = createElement("div", { class: "dcp-row-text" });
     let hint = d("joinHint");
     if (v.otherChannelId !== null) {
@@ -627,13 +686,15 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     const me = currentUserId();
     const callees =
       v.pending.length > 0 ? v.pending : v.dm.participants.map((p) => p.id).slice(0, 1);
+    const absent = absentMembers(v.dm, [me, ...callees]);
     let stage: HTMLElement;
     if (videoActive) {
-      stage = videoStage(v.dm, [me, ...callees], callees);
+      stage = videoStage(v.dm, [me, ...callees], callees, absent);
     } else {
       stage = createElement("div", { class: "dcp-stage" });
       stage.appendChild(person(me, v.dm));
       for (const id of callees) stage.appendChild(person(id, v.dm, "dcp-avatar--ringing"));
+      for (const id of absent) stage.appendChild(person(id, v.dm, ABSENT_CLASS));
     }
     fill(
       topBar(d("calling"), "warn", true, true),
@@ -649,13 +710,16 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     // Nobody else is in the room (deriveCallView hands us "unanswered" only
     // then), so the absent callee has no tile: showing their placeholder would
     // look like they joined. Ring again restores the ringing tile.
+    // A group still lists its members, greyed out: they are not in the call.
     const ids = [currentUserId()];
+    const absent = absentMembers(v.dm, ids);
     let stage: HTMLElement;
     if (videoActive) {
-      stage = videoStage(v.dm, ids);
+      stage = videoStage(v.dm, ids, [], absent);
     } else {
       stage = createElement("div", { class: "dcp-stage" });
       for (const id of ids) stage.appendChild(person(id, v.dm));
+      for (const id of absent) stage.appendChild(person(id, v.dm, ABSENT_CLASS));
     }
     const actions = createElement("div", { class: "dcp-controls" });
     appendChildren(
@@ -702,18 +766,21 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       return;
     }
     root.classList.add("dm-call-panel--expanded");
+    const absent = absentMembers(v.dm, v.inRoom);
     let stage: HTMLElement;
     if (videoActive) {
-      stage = videoStage(v.dm, v.inRoom);
+      stage = videoStage(v.dm, v.inRoom, [], absent);
     } else {
       stage = createElement("div", { class: "dcp-stage" });
       for (const id of v.inRoom) stage.appendChild(person(id, v.dm));
+      for (const id of absent) stage.appendChild(person(id, v.dm, ABSENT_CLASS));
     }
-    if (!v.peerLeft) {
+    if (!v.canRingAgain) {
       fill(topBar(status, "", true, true), stage, callControls(false));
       return;
     }
-    // The other person hung up: say so and offer the redial, as for an unanswered ring.
+    // The other person hung up, or a group member is missing: offer the redial,
+    // as for an unanswered ring (a group re-rings everyone).
     const ringAgain = textButton(d("ringAgain"), "btn-primary dcp-pill", "dcp-ring-again", () =>
       options.onRingAgain(v.dm.channelId),
     );
@@ -742,6 +809,117 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     appendChildren(row, faces, text, ctrl, collapseButton());
     body.appendChild(row);
   }
+
+  // --- Resize -------------------------------------------------------------
+
+  /** Only the expanded panel resizes; collapsed and strip rows keep their own
+   *  height. The stylesheet clamps the height to the chat column. */
+  function applyHeight(): void {
+    const expanded = root.classList.contains("dm-call-panel--expanded");
+    resizer.hidden = !expanded;
+    if (!expanded) {
+      endDrag();
+      root.style.removeProperty("--dcp-height");
+      return;
+    }
+    if (savedHeight > 0) root.style.setProperty("--dcp-height", `${String(savedHeight)}px`);
+    else root.style.removeProperty("--dcp-height");
+    resizer.setAttribute("aria-valuemax", String(maxHeight()));
+    resizer.setAttribute("aria-valuenow", String(drawnHeight()));
+  }
+
+  function drawnHeight(): number {
+    return Math.round(root.getBoundingClientRect().height);
+  }
+
+  /** The tallest the panel may be: the chat column less its fixed rows (the
+   *  header, typing line and composer, at their current heights) and room for
+   *  a few messages. */
+  function maxHeight(): number {
+    let column = root.parentElement;
+    while (column !== null && getComputedStyle(column).display === "contents") {
+      column = column.parentElement;
+    }
+    if (column === null) return MIN_HEIGHT;
+    let fixed = 0;
+    for (const child of Array.from(column.children)) {
+      if (child.contains(root) || parseFloat(getComputedStyle(child).flexGrow) > 0) continue;
+      fixed += child.getBoundingClientRect().height;
+    }
+    const available = column.getBoundingClientRect().height - fixed - MESSAGES_MIN_HEIGHT;
+    return Math.max(MIN_HEIGHT, Math.round(available));
+  }
+
+  /** Saves what is actually drawn: an audio-only panel never goes below its
+   *  content (min-height: fit-content), so the saved height cannot sit under it. */
+  function setHeight(height: number, max: number): void {
+    savedHeight = Math.round(Math.max(MIN_HEIGHT, Math.min(height, max)));
+    applyHeight();
+    const drawn = drawnHeight();
+    if (drawn > 0 && drawn !== savedHeight) {
+      savedHeight = drawn;
+      applyHeight();
+    }
+  }
+
+  function endDrag(): void {
+    if (drag === null) return;
+    drag = null;
+    root.classList.remove("dm-call-panel--resizing");
+    savePref(HEIGHT_PREF, savedHeight);
+  }
+
+  const resizeOpts = { signal: disposable.signal };
+  resizer.addEventListener(
+    "pointerdown",
+    (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      drag = {
+        startY: e.clientY,
+        startHeight: root.getBoundingClientRect().height,
+        max: maxHeight(),
+      };
+      root.classList.add("dm-call-panel--resizing");
+      try {
+        resizer.setPointerCapture(e.pointerId);
+      } catch {
+        // No capture (the pointer is already gone): moves over the handle still resize.
+      }
+    },
+    resizeOpts,
+  );
+  resizer.addEventListener(
+    "pointermove",
+    (e: PointerEvent) => {
+      if (drag !== null) setHeight(drag.startHeight + e.clientY - drag.startY, drag.max);
+    },
+    resizeOpts,
+  );
+  resizer.addEventListener("pointerup", endDrag, resizeOpts);
+  resizer.addEventListener("pointercancel", endDrag, resizeOpts);
+  resizer.addEventListener("lostpointercapture", endDrag, resizeOpts);
+  resizer.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      e.preventDefault();
+      const step = e.key === "ArrowUp" ? -KEY_STEP : KEY_STEP;
+      setHeight(root.getBoundingClientRect().height + step, maxHeight());
+      savePref(HEIGHT_PREF, savedHeight);
+    },
+    resizeOpts,
+  );
+  // Double-click puts the default height back.
+  resizer.addEventListener(
+    "dblclick",
+    () => {
+      savedHeight = 0;
+      applyHeight();
+      savePref(HEIGHT_PREF, 0);
+    },
+    resizeOpts,
+  );
 
   // --- Update ---------------------------------------------------------------
 
@@ -794,6 +972,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       peopleGiven = people.length > 0;
     }
     root.hidden = view.kind === "none";
+    // After the reveal, so the separator's value is measured from a drawn panel.
+    applyHeight();
     if (view.kind === "none") root.removeAttribute("aria-label");
     else root.setAttribute("aria-label", d("region", { name: callName(view.dm, currentUserId()) }));
     root.dataset.state = view.kind;

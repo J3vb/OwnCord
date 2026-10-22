@@ -18,7 +18,7 @@
     "admin/static/js/members.js": {
       "2339:Property 'click' does not exist on type 'Element'.": 1,
       "2339:Property 'focus' does not exist on type 'Element'.": 2,
-      "2339:Property 'value' does not exist on type 'HTMLElement'.": 4
+      "2339:Property 'value' does not exist on type 'HTMLElement'.": 3
     },
     "admin/static/js/operations.js": {
       "2339:Property 'disabled' does not exist on type 'HTMLElement'.": 3,

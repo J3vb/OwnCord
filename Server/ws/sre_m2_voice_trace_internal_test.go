@@ -87,7 +87,7 @@ func voiceFrame(t *testing.T, typ, id string, payload map[string]any) []byte {
 func joinVoiceForTrace(t *testing.T, h *Hub, c *Client, chID int64) {
 	t.Helper()
 	h.handleMessage(c, voiceFrame(t, "voice_join", "join", map[string]any{"channel_id": chID}))
-	if got := c.getVoiceChID(); got != chID {
+	if got := c.voice.channel(); got != chID {
 		t.Fatalf("setup join did not land: voice channel = %d, want %d", got, chID)
 	}
 }
@@ -182,7 +182,7 @@ func TestHandleVoiceJoin_LogsReqID(t *testing.T) {
 	buf := captureVoiceLog(t)
 	h.handleMessage(c, voiceFrame(t, "voice_join", reqID, map[string]any{"channel_id": chID}))
 
-	if got := c.getVoiceChID(); got != chID {
+	if got := c.voice.channel(); got != chID {
 		t.Fatalf("join did not land: voice channel = %d, want %d (log:\n%s)", got, chID, buf.String())
 	}
 	for line := range strings.Lines(buf.String()) {

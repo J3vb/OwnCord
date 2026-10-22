@@ -21,10 +21,15 @@ on:
     branches: [main, dev]
   workflow_dispatch:
 
-# Cancel in-progress runs for the same branch/PR, never on main
+# Cancel a superseded run of the same pull request. Any other run (a push to
+# dev or main, a manual dispatch) is never cancelled once it is running: each
+# dev push is a merged tree that the next merge would otherwise cancel before
+# it finished, so the "green alone, red together" check a dev push exists for
+# rarely completed. Later runs queue behind it, and GitHub keeps only one
+# pending run per group, so of three quick merges the middle one is skipped.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -62,11 +67,12 @@ jobs:
       rust: ${{ steps.select.outputs.rust }}
       browser: ${{ steps.select.outputs.browser }}
       integration: ${{ steps.select.outputs.integration }}
+      webclient: ${{ steps.select.outputs.webclient }}
       native: ${{ steps.select.outputs.native }}
-      harness: ${{ steps.select.outputs.harness }}
       workflows: ${{ steps.select.outputs.workflows }}
       deps: ${{ steps.select.outputs.deps }}
       permissions: ${{ steps.select.outputs.permissions }}
+      changelog: ${{ steps.select.outputs.changelog }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -167,16 +173,20 @@ jobs:
   # each 20-27 minute server leg, so a lint or invariant failure was found after
   # the race tests. This job is deliberately additive: it runs the same checks
   # early for fast feedback, and every step it mirrors stays in the required
-  # `Server Build & Test` legs, so no gating is moved off a required context and
-  # no required-check name changes. A lint or invariant failure now reports in
+  # `Server Build & Test` legs (for a changelog-only selection, the ubuntu
+  # leg's "Changelog gate" step), so no gating is moved off a required context
+  # and no required-check name changes. A lint or invariant failure now reports in
   # minutes instead of after the 20-minute race step.
   #
   # Gated on the `server` capability like the other server jobs, so a client-only
-  # PR does not pay for it.
+  # PR does not pay for it, and also on `changelog`: its document gates run
+  # TestBundledChangelog, the server's only reader of CHANGELOG.md, so a
+  # changelog line on a client PR is reported here early as well as in the
+  # required ubuntu leg.
   server-fast-checks:
     name: Server Lint & Invariants
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true' || needs.changes.outputs.changelog == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -322,8 +332,10 @@ jobs:
         shell: bash
         env:
           SELECTED: ${{ needs.changes.result != 'success' || needs.changes.outputs.server == 'true' }}
+          CHANGELOG: ${{ needs.changes.outputs.changelog == 'true' }}
         run: |
           echo "RUN_SERVER=${SELECTED:-true}" >> "$GITHUB_ENV"
+          echo "RUN_CHANGELOG=${CHANGELOG:-true}" >> "$GITHUB_ENV"
           # Printed as well as written, so the decision is readable in the log of
           # each leg rather than only inferable from which steps ran.
           echo "server checks selected: ${SELECTED:-true}"
@@ -332,10 +344,19 @@ jobs:
           fi
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
-        if: env.RUN_SERVER != 'false'
+        if: env.RUN_SERVER != 'false' || (matrix.os == 'ubuntu-latest' && env.RUN_CHANGELOG != 'false')
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
+
+      # A CHANGELOG.md edit selects `changelog`, not `server` (ci-select.mjs), so
+      # a client PR's changelog line does not pay for the race legs. Its one
+      # server reader, TestBundledChangelog, still has to block the merge, so
+      # this required leg runs it alone when the full server checks are off.
+      # When they are on, "Run document gates" below runs it instead.
+      - name: Changelog gate (server checks not selected)
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER == 'false' && env.RUN_CHANGELOG != 'false'
+        run: go test -count=1 -run TestBundledChangelog ./admin/
 
       # scripts/coverage-floor.sh parses the floor file with node (the coverage
       # profile itself is still read by the same line-oriented awk pass). This
@@ -459,9 +480,19 @@ jobs:
         if: env.RUN_SERVER != 'false'
         run: go build -tags otel,wazero ./...
 
+      # The install fetches modules the build did not (x/vuln, x/telemetry), and
+      # a proxy.golang.org stream reset there once failed a leg before any test
+      # ran. Retry only the download; the scan itself runs once.
       - name: Go vulnerability check
         if: env.RUN_SERVER != 'false'
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 && govulncheck ./...
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 && break
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
+          govulncheck ./...
 
       # Generated sqlc output must never drift from db/queries/. One leg of
       # the matrix is enough; make is not guaranteed on the Windows runner.
@@ -482,9 +513,16 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: make docs-verify
 
+      # Coverage is profiled on the Linux leg only: the floor check below reads
+      # that leg alone, and coverage instrumentation slows the Windows leg,
+      # which is the longest job in the workflow, for a profile nothing reads.
       - name: Run tests with race detection and coverage
-        if: env.RUN_SERVER != 'false'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
+
+      - name: Run tests with race detection
+        if: matrix.os != 'ubuntu-latest' && env.RUN_SERVER != 'false'
+        run: go test -race -timeout 20m ./...
 
       # Real-SFU proof for single-port UDP (O1). Single-port mode is untested
       # upstream, so a YAML-only assertion cannot tell whether livekit-server
@@ -512,15 +550,19 @@ jobs:
           OWNCORD_LIVEKIT_TEST_BINARY: ../../Client/tests/e2e/.bin/livekit-server
         run: go test -count=1 ./ws/ -run '^TestRealLiveKit_'
 
+      # One leg is enough: -tags deadlock swaps syncutil's lock types and
+      # reports lock-order inversions, which do not depend on the OS, and no
+      # Windows-only file takes a syncutil lock. The race step above still runs
+      # every test on both legs.
       - name: Run tests with deadlock detection
-        if: env.RUN_SERVER != 'false'
+        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: go test -tags deadlock -count=1 ./...
 
       # Document gates. Both read a Markdown file OUTSIDE the Server module, so
       # Go's test cache does not record it as an input and the -race run above
-      # answers a doc-only edit from cache. The deadlock leg happens to run them
-      # with -count=1 today; this step says so on purpose, so narrowing that
-      # leg's package set cannot silently drop the gates.
+      # answers a doc-only edit from cache. The ubuntu deadlock step happens to
+      # run them with -count=1 today; this step says so on purpose, on both legs,
+      # so narrowing that step's package set cannot silently drop the gates.
       #   cmd/dbinventory  -> docs/architecture/server-boundaries.md (B3-0)
       #   migrations       -> docs/architecture/community-services.md (B5-0)
       #   admin            -> CHANGELOG.md (the panel's bundled release notes)
@@ -577,7 +619,7 @@ jobs:
         run: bash scripts/coverage-floor.sh coverage.out
 
       - name: Upload Go coverage
-        if: always()
+        if: always() && matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: go-coverage-${{ matrix.os }}
@@ -829,6 +871,9 @@ jobs:
 
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
+
+      - name: Self-test the CI cost report
+        run: node --test scripts/ci-cost-report.test.mjs
 
       # RL-07. FINDINGS.md is not tracked, so it cannot drift -- but L-07 also
       # asks that the rendering be reproducible and that CI reject a generation
@@ -1143,7 +1188,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/owncord-linux-webrtc
-          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v2
+          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v3
 
       - name: Install native-voice build prerequisites
         run: bash ../scripts/linux-webrtc-toolchain.sh
@@ -1157,6 +1202,9 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          # webrtc-sys build.rs does not rerun on CUDA_HOME; keep a target/ built
+          # without NVENC from restoring over one that has it.
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST CUDA_HOME"
 
       # Self-test the glibc-floor matcher before trusting it (the same rule the
       # count/citation/migration matchers follow): a gate whose parser silently
@@ -1195,16 +1243,9 @@ jobs:
         working-directory: Client/
         run: npm ci
 
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
-
       - name: Install Playwright browser
-        timeout-minutes: 8
-        working-directory: Client/
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
 
       # The pinned livekit-server archive (~60 MB) is the slow, flaky part of
       # this job. install-livekit.mjs still verifies the pinned sha256 on every
@@ -1244,7 +1285,10 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 40: playwright.config.ts's 30-minute globalTimeout plus setup, whose
+    # cold Playwright install alone may take 8, so the suite stops itself and
+    # still uploads its report.
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: Client/
@@ -1262,34 +1306,16 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
-
       - name: Install Playwright browser
-        timeout-minutes: 8
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
 
-      # Fast feedback by default. `client-e2e-parity` runs the complete
-      # 694-test suite against the built bundle, and until this split this job
-      # ran those same 694 against the dev server — the two configs share
-      # testDir and testIgnore, so the jobs differed only in which server served
-      # the app (10.8 and 8.8 minutes for one identical test set).
-      #
-      # So this leg runs the 137-test smoke set (Client/playwright.config.smoke.ts)
-      # and widens back to the full 694 when the specs or their fixtures moved —
-      # at that point the smoke set is no longer a fair sample of the change.
-      # The two steps are complementary rather than a default and an override,
-      # so exactly one runs; the full-suite condition doubles as the fail-safe,
-      # running the full suite if the selection job did not succeed.
-      - name: Run Playwright tests (full development suite)
-        if: ${{ needs.changes.result != 'success' || needs.changes.outputs.harness == 'true' }}
-        run: npx playwright test --config=playwright.config.ts
-
+      # Fast feedback: this job runs the smoke set
+      # (Client/playwright.config.smoke.ts) against the Vite dev server.
+      # `client-e2e-parity` runs the complete suite against the built
+      # bundle on every browser change, including when Change selection fails
+      # (its own `if:` fail-safe), so the full suite is not repeated here.
       - name: Run Playwright tests (smoke)
-        if: ${{ needs.changes.result == 'success' && needs.changes.outputs.harness != 'true' }}
         run: npm run test:e2e:smoke
 
       # Browser-mode unit tests (tests/browser/): real AudioContext + WASM
@@ -1337,15 +1363,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
-
       - name: Install Playwright browser
-        timeout-minutes: 8
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
 
       - name: Run admin-panel journey
         run: npm run test:e2e:admin
@@ -1390,15 +1410,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
-
       - name: Install Playwright browser
-        timeout-minutes: 8
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
 
       - name: Run production e2e specs
         run: npm run test:e2e:prod
@@ -1519,7 +1533,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/owncord-linux-webrtc
-          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v2
+          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v3
 
       - name: Install native-voice build prerequisites
         if: startsWith(matrix.os, 'ubuntu')
@@ -1534,6 +1548,9 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          # webrtc-sys build.rs does not rerun on CUDA_HOME; keep a target/ built
+          # without NVENC from restoring over one that has it.
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST CUDA_HOME"
 
       - name: Install npm dependencies
         run: npm ci
@@ -1563,12 +1580,19 @@ jobs:
         working-directory: Client/
         run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
 
+      - name: Check the binary has the NVIDIA encoder
+        if: startsWith(matrix.os, 'ubuntu')
+        working-directory: Client/
+        run: bash scripts/check-nvenc-linked.sh src-tauri/target/release/owncord-client
+
   client-fullstack:
     name: Client E2E (real server and media)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 40: playwright.config.fullstack.ts's 26-minute globalTimeout plus the
+    # server and client builds and setup (a cold Playwright install may take 8).
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: Client/
@@ -1586,14 +1610,9 @@ jobs:
           cache: npm
           cache-dependency-path: Client/package-lock.json
       - run: npm ci
-      - name: Cache Playwright browser
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
       - name: Install Playwright browser
-        timeout-minutes: 8
-        run: bash ../scripts/ci/playwright-install.sh
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
       - name: Cache livekit-server archive
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -1613,12 +1632,62 @@ jobs:
             Client/test-results/
           retention-days: 7
 
+  # The browser portal (WP 6.13g1): a real server with the browser client on,
+  # serving the web bundle it embeds, driven by Chromium at its own origin. New
+  # and NON-BLOCKING: continue-on-error keeps a red run from failing the PR
+  # while the suite earns its keep; 6.13g2 promotes it once it is steady. Gated
+  # on the `webclient` capability (the client source, the web build, this suite,
+  # the embedded bundle and the portal handler), so it skips a Rust-only,
+  # test-only or docs PR. No LiveKit here: its voice case skips itself without
+  # OWNCORD_E2E_LIVEKIT_BINARY, and client-fullstack owns the media path.
+  client-web:
+    name: Client E2E (web portal, non-blocking)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.webclient == 'true') }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # playwright.config.web.ts's 12-minute globalTimeout plus the web and
+    # server builds and a cold Playwright install.
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: Client/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.27"
+          cache-dependency-path: Server/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: Client/package-lock.json
+      - run: npm ci
+      - name: Install Playwright browser
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
+      - name: Test the web portal against a real server
+        run: npm run test:e2e:web
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: web-e2e-report
+          path: |
+            Client/playwright-report/web/
+            Client/test-results/web/
+          retention-days: 7
+
   client-native:
     name: Client E2E (Windows native)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.native == 'true') }}
     runs-on: windows-latest
-    timeout-minutes: 100
+    # 2026-09-21..10-21: 2,921 runs, p99 25 min, max 63, none near the old
+    # 100 (docs/audits/2026-10-21-ci-cost.md). A hang now frees its slot sooner.
+    timeout-minutes: 70
     defaults:
       run:
         working-directory: Client/

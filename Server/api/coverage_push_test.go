@@ -18,6 +18,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -753,8 +754,8 @@ func buildCombinedRouter(t *testing.T) (http.Handler, *auth.RateLimiter, string)
 	r := chi.NewRouter()
 	svc := service.New(database, limiter)
 	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
-	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil, nil)
-	api.MountInviteRoutes(r, database, svc)
+	api.MountProfileRoutes(r, svc, nil, limiter, nil, nil, nil)
+	api.MountInviteRoutes(r, svc)
 
 	token := loginAndGetToken(t, r, database, "combined1", 2)
 	return r, limiter, token
@@ -835,7 +836,9 @@ func TestUnpin_Success(t *testing.T) {
 	user, _ := database.GetUserByUsername(context.Background(), "unpinner")
 	chID, _ := database.CreateChannel(context.Background(), "unpin-ch", "text", "", "", 0)
 	msgID, _ := database.CreateMessage(context.Background(), chID, user.ID, "to unpin", nil)
-	_ = database.SetMessagePinned(context.Background(), msgID, true)
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: msgID, Pinned: true, UserID: user.ID}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 
 	rr := chDelete(t, router, fmt.Sprintf("/api/v1/channels/%d/pins/%d", chID, msgID), token)
 	if rr.Code != http.StatusNoContent {

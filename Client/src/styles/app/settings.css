@@ -175,6 +175,10 @@
   transition: background 0.2s;
   flex-shrink: 0;
 }
+.toggle[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .toggle.on {
   background: var(--green);
 }
@@ -279,6 +283,9 @@
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.setting-row .slider-row {
+  flex: 0 0 220px;
 }
 .settings-slider {
   flex: 1;
@@ -667,7 +674,8 @@ details.disclose[open] > summary .icon {
 
 /* ── Discord-style account profile card ── */
 .account-banner {
-  height: 100px;
+  height: var(--upp-banner-h, 100px);
+  overflow: hidden;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   background: var(--accent);
 }
@@ -881,6 +889,16 @@ details.disclose[open] > summary .icon {
   margin-top: auto;
   padding-top: 8px;
 }
+/* The app version under Log Out: small, muted, not a nav item. */
+.settings-sidebar-version {
+  padding: 4px 10px 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  user-select: text;
+}
+.settings-sidebar-version.solo {
+  margin-top: auto;
+}
 .theme-options {
   display: flex;
   gap: 12px;
@@ -922,6 +940,19 @@ details.disclose[open] > summary .icon {
 .theme-opt.midnight {
   background: #1a1a2e;
   color: #f4f5fa;
+}
+/* Sync with computer: both previews on one tile, the label outlined so it
+   reads on either half. */
+.theme-opt.system {
+  width: auto;
+  min-width: 80px;
+  padding: 0 10px;
+  text-align: center;
+  background: linear-gradient(135deg, #313338 50%, #f2f3f5 50%);
+  color: #fff;
+  text-shadow:
+    0 0 2px #000,
+    0 0 4px #000;
 }
 /* Accent color picker */
 .accent-swatches {
@@ -980,6 +1011,62 @@ details.disclose[open] > summary .icon {
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   color: var(--text-normal);
+}
+
+.keybind-capture .keybind-row {
+  gap: var(--space-2);
+}
+.keybind-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.kbd.keybind-capture-btn {
+  cursor: pointer;
+  min-width: 80px;
+  text-align: center;
+}
+.kbd.keybind-capture-btn.capturing {
+  border-color: var(--accent);
+}
+.keybind-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.keybind-mini-btn:hover:not(:disabled) {
+  color: var(--text-normal);
+  border-color: var(--text-muted);
+}
+.keybind-mini-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.keybind-alert {
+  margin: 2px 0 0 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--text-danger);
+}
+.keybind-alert[hidden] {
+  display: none;
+}
+.keybind-hint {
+  margin: 4px 0 0 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--text-micro);
+}
+.keybind-hint[hidden] {
+  display: none;
 }
 
 /* ── Safety: My reports (B9-10) ── */
@@ -1140,4 +1227,88 @@ details.disclose[open] > summary .icon {
 }
 .changelog-body a {
   color: var(--text-link);
+}
+
+/* ── Settings search (3E-3b) ── */
+.settings-nav-item[hidden],
+.settings-cat[hidden],
+.settings-search-clear[hidden],
+.settings-search-empty[hidden] {
+  display: none;
+}
+.settings-search {
+  position: relative;
+  margin: 0 4px 8px;
+}
+.settings-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 28px 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+}
+.settings-search-input::placeholder {
+  color: var(--text-muted);
+}
+.settings-search-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.settings-search-clear:hover {
+  color: var(--text-normal);
+}
+.settings-search-empty {
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.settings-search-hit {
+  background: color-mix(in srgb, var(--yellow) 40%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+/* ── Privacy & Safety: Blocked users (3B-7) ── */
+.blocked-users-list {
+  list-style: none;
+  margin: var(--space-3) 0 0;
+  padding: 0;
+}
+.blocked-user-row {
+  justify-content: flex-start;
+}
+.blocked-user-info {
+  flex: 1;
+}
+.blocked-user-row .ac-btn {
+  flex-shrink: 0;
+}
+.blocked-user-avatar {
+  position: relative;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--on-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  overflow: hidden;
+}
+.shortcuts-modal {
+  width: 520px;
+  max-width: calc(100vw - 32px);
 }

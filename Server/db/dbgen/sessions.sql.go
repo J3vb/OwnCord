@@ -151,7 +151,13 @@ func (q *Queries) GetSessionWithBanStatus(ctx context.Context, token string) (Ge
 
 const insertSession = `-- name: InsertSession :execresult
 INSERT INTO sessions (user_id, token, device, ip_address, expires_at, unseen)
-VALUES (?, ?, ?, ?, ?, ?)
+SELECT CAST(?1 AS INTEGER), CAST(?2 AS TEXT),
+       ?3, ?4,
+       CAST(?5 AS TEXT), CAST(?6 AS INTEGER)
+WHERE NOT EXISTS (
+    SELECT 1 FROM erasure_jobs
+    WHERE erasure_jobs.user_id = ?1 AND erasure_jobs.state = 'queued'
+)
 `
 
 type InsertSessionParams struct {
@@ -163,6 +169,8 @@ type InsertSessionParams struct {
 	Unseen    int64   `json:"unseen"`
 }
 
+// Sign-in is refused while an account deletion is being completed: no row is
+// written for a user with a queued erasure job (zero rows affected).
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, insertSession,
 		arg.UserID,

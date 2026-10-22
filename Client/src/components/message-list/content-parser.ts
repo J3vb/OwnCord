@@ -11,10 +11,18 @@
 
 import { createElement, setText } from "@lib/dom";
 import { navigateToChannel, findChannelByName, findChannelById } from "@lib/channel-navigation";
-import { parseMessageLink } from "@lib/deep-link";
+import { parseInviteLink, parseMessageLink } from "@lib/deep-link";
+import { getChannelMutesHost } from "@lib/channel-mutes";
+import { normalizeHostForCertCompare } from "@lib/hostNormalize";
+import { requestInviteJoin } from "@lib/invite-navigation";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
+import { channelsStore, type ChannelsState } from "@stores/channels.store";
+import { memberDisplayName, membersStore } from "@stores/members.store";
 import {
+  ID_MENTION_REGEX,
+  currentUserHeldRoleIds,
+  ROLE_MENTION_REGEX,
   CHANNEL_TOKEN_REGEX,
   MENTION_TOKEN_REGEX,
   isEveryoneToken,
@@ -23,6 +31,10 @@ import {
 } from "@lib/mentions";
 import { isSafeUrl } from "./attachments";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./custom-emoji";
+import {
+  formatDiscordTimestamp,
+  type TimestampStyle,
+} from "../../features/messaging/discordTimestamp";
 import { messagingText } from "../../i18n/messaging";
 import {
   parseInline,
@@ -49,8 +61,12 @@ export const MASKED_LINK_REGEX = /\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+\)/g;
  * (`\|`) is content that never closes the span.
  */
 export const SPOILER_REGEX = /\|\|(?!\|)(?:\\[\s\S]|(?!\|\|)[^\\])+\|\|/g;
+/** `<https://…>` — a link its author asked to post without an embed. */
+export const ANGLE_URL_REGEX = /(?<!(?:^|[^\\])\\(?:\\\\)*)<https?:\/\/[^\s<>]+>/gi;
 /** `owncord://message/<channelId>/<messageId>` pasted into a message. */
 export const MESSAGE_LINK_REGEX = /owncord:\/\/message\/\d+\/\d+/g;
+/** `owncord://invite/<code>` (optionally `?host=…`) pasted into a message. */
+export const INVITE_LINK_REGEX = /owncord:\/\/invite\/[\w%-]+(?:\?host=[\w.:%[\]-]*[\w%\]-])?/g;
 
 export type { MentionInfo };
 
@@ -157,6 +173,28 @@ function buildMaskedLink(
   for (const chip of link.querySelectorAll<HTMLElement>(".mention[data-user-id]")) {
     stripMentionControl(chip);
   }
+  // An invite chip is a control too, and a click would also follow the link:
+  // inside a masked link it stays the text it was typed as.
+  for (const chip of link.querySelectorAll<HTMLElement>(".message-link-chip[data-raw]")) {
+    chip.replaceWith(document.createTextNode(chip.dataset["raw"] ?? ""));
+  }
+  return link;
+}
+
+/** `<https://…>`: the link without its brackets, and (in extractUrls) no embed. */
+function buildAngleUrl(node: { readonly url: string; readonly raw: string }): HTMLElement {
+  if (!isSafeUrl(node.url)) {
+    const raw = createElement("span", { class: "msg-link-raw" });
+    setText(raw, node.raw);
+    return raw;
+  }
+  const link = createElement("a", {
+    class: "msg-link",
+    href: node.url,
+    target: "_blank",
+    rel: "noopener noreferrer",
+  });
+  setText(link, node.url);
   return link;
 }
 
@@ -182,6 +220,21 @@ function appendInline(parent: Node, nodes: readonly InlineNode[], info?: Mention
           setText(raw, node.raw);
           parent.appendChild(raw);
         }
+        break;
+      }
+      case "url":
+        parent.appendChild(buildAngleUrl(node));
+        break;
+      case "timestamp": {
+        const { text, title } = formatDiscordTimestamp(node.unix, node.style);
+        const time = createElement("time", {
+          class: "md-timestamp",
+          datetime: new Date(node.unix * 1000).toISOString(),
+          title,
+          "data-style": node.style,
+        });
+        setText(time, text);
+        parent.appendChild(time);
         break;
       }
       case "spoiler":
@@ -273,9 +326,111 @@ function buildMentionNode(raw: string, token: string, info?: MentionInfo): HTMLS
     role: "button",
     tabindex: "0",
     "data-user-id": String(userId),
+    // The typed token, so a resync re-resolves it though the text is a name.
+    "data-mention": raw,
   });
-  setText(span, raw);
+  // Show the display name when the member has one; the typed @username stays
+  // as the title. Trailing punctuation the token matched through is kept.
+  const member = membersStore.getState().members.get(userId);
+  const name = member === undefined ? null : memberDisplayName(member);
+  if (member !== undefined && name !== member.username) {
+    const tail = token.toLowerCase().startsWith(member.username.toLowerCase())
+      ? token.slice(member.username.length)
+      : "";
+    setText(span, `@${name}${tail}`);
+    span.title = raw;
+  } else {
+    setText(span, raw);
+  }
   return span;
+}
+
+/** `<@5>` / `<@&5>` in full: group 1 is the role marker, group 2 the id. */
+const ID_TOKEN_FULL = /^<@(&?)(\d{1,15})>$/;
+
+/** The only role colours a pill applies: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`. */
+const HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+
+type RosterRole = ChannelsState["roles"][number];
+
+/** Roles by id, built once per roster snapshot: a token is then a map read. */
+const rolesById = new WeakMap<ChannelsState["roles"], ReadonlyMap<number, RosterRole>>();
+
+function rosterRole(id: number): RosterRole | undefined {
+  const roles = channelsStore.getState().roles;
+  let byId = rolesById.get(roles);
+  if (byId === undefined) {
+    byId = new Map(roles.map((r) => [r.id, r]));
+    rolesById.set(roles, byId);
+  }
+  return byId.get(id);
+}
+
+/** A mention the reader sees as plain text: nothing to click, nothing to ping. */
+function buildPlainMention(raw: string, text: string): HTMLSpanElement {
+  const span = createElement("span", { class: "mention-plain", "data-mention": raw });
+  setText(span, text);
+  return span;
+}
+
+/** `<@id>`: the member's current name, or `@unknown-user` for one nobody can name. */
+function buildUserIdNode(raw: string, userId: number, info?: MentionInfo): HTMLSpanElement {
+  const me = authStore.getState().user;
+  const member = membersStore.getState().members.get(userId);
+  // The signed-in user is not always in the member map (DM-only views).
+  const named =
+    member ??
+    (me?.id === userId
+      ? { username: me.username, displayName: me.display_name ?? undefined }
+      : undefined);
+  if (named === undefined) return buildPlainMention(raw, messagingText("mention.unknownUser"));
+  const span = createElement("span", {
+    class:
+      me?.id === userId && (info?.mentions === undefined || info.mentions.includes(userId))
+        ? "mention mention-self"
+        : "mention",
+    role: "button",
+    tabindex: "0",
+    "data-user-id": String(userId),
+    "data-mention": raw,
+    title: `@${named.username}`,
+  });
+  setText(span, `@${memberDisplayName(named)}`);
+  return span;
+}
+
+/** `<@&id>`: the role's name in its colour, `@deleted-role` once it is gone. */
+function buildRoleIdNode(raw: string, roleId: number, info?: MentionInfo): HTMLSpanElement {
+  const role = rosterRole(roleId);
+  if (role === undefined) return buildPlainMention(raw, messagingText("mention.deletedRole"));
+  // The server dropped this ping (the sender could not mention the role): it
+  // reads as the text it is, never as a mention.
+  if (info?.mentionRoles !== undefined && !info.mentionRoles.includes(roleId)) {
+    return buildPlainMention(raw, `@${role.name}`);
+  }
+  const span = createElement("span", {
+    class:
+      info?.mentionRoles?.includes(roleId) === true && currentUserHeldRoleIds().includes(roleId)
+        ? "mention mention-role mention-self"
+        : "mention mention-role",
+    "data-role-id": String(roleId),
+    "data-mention": raw,
+  });
+  setText(span, `@${role.name}`);
+  // Only a hex literal reaches the style; anything else leaves the default pill.
+  if (role.color != null && HEX_COLOR.test(role.color)) {
+    span.dataset["roleColor"] = role.color;
+    span.style.setProperty("--role-pill", role.color);
+  }
+  return span;
+}
+
+/** Build the pill (or plain stand-in) for a `<@id>` / `<@&id>` token, or null if `raw` is neither. */
+function buildIdMentionNode(raw: string, info?: MentionInfo): HTMLSpanElement | null {
+  const match = ID_TOKEN_FULL.exec(raw);
+  if (match === null) return null;
+  const id = Number(match[2]);
+  return match[1] === "&" ? buildRoleIdNode(raw, id, info) : buildUserIdNode(raw, id, info);
 }
 
 /** Build the clickable chip for a `#name` that resolves, or null. */
@@ -344,6 +499,67 @@ function buildMessageLinkNode(url: string): HTMLSpanElement | null {
   return chip;
 }
 
+/** Same server, ignoring case, whitespace, a default :443 and IPv6 brackets. */
+function sameHost(a: string, b: string): boolean {
+  return normalizeHostForCertCompare(a.trim()) === normalizeHostForCertCompare(b.trim());
+}
+
+/**
+ * Build the chip for a pasted `owncord://invite/…` link, or null when it does
+ * not parse. Joining signs out of the current server, so a chip for another
+ * server confirms first, and one for the server already open just says so.
+ */
+function buildInviteLinkNode(url: string): HTMLSpanElement | null {
+  const invite = parseInviteLink(url);
+  if (invite === null) return null;
+  const current = getChannelMutesHost();
+  const alreadyIn = invite.host !== undefined && current !== null && sameHost(invite.host, current);
+  const target = invite.host ?? messagingText("invite.thisServer");
+
+  const chip = createElement("span", {
+    class: alreadyIn ? "message-link-chip invite-chip-here" : "message-link-chip",
+    "data-invite-code": invite.code,
+    "data-raw": url,
+    title: alreadyIn
+      ? messagingText("invite.alreadyIn")
+      : messagingText("invite.joinTitle", { server: target }),
+  });
+  const label = createElement("span", { class: "mlc-channel" });
+  setText(label, target);
+  const action = createElement("span", { class: "mlc-action" });
+  setText(action, alreadyIn ? messagingText("invite.alreadyIn") : messagingText("invite.join"));
+  chip.appendChild(label);
+  chip.appendChild(action);
+  if (alreadyIn) return chip;
+
+  chip.setAttribute("role", "link");
+  chip.setAttribute("tabindex", "0");
+  const go = (): void => {
+    const name = authStore.getState().serverName ?? current ?? "";
+    const body =
+      invite.host === undefined
+        ? messagingText("invite.confirmBodyNoHost", { current: name })
+        : messagingText("invite.confirmBody", { current: name, target });
+    // On demand, like the masked-link guard: keeps the modal off the startup chunk.
+    void import("../InviteJoinConfirm").then((m) =>
+      m.confirmInviteJoin(body, () => requestInviteJoin(invite.code, invite.host)),
+    );
+  };
+  chip.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    go();
+  });
+  chip.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      go();
+    }
+  });
+  return chip;
+}
+
 /**
  * Render @mentions, #channel links and message permalinks within a text
  * segment (no http URLs). Tokens that resolve to nothing are left as plain text.
@@ -356,6 +572,23 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
     if (idx === undefined) continue;
     const node = buildMessageLinkNode(match[0]);
     if (node !== null) matches.push({ start: idx, end: idx + match[0].length, node });
+  }
+
+  for (const match of text.matchAll(INVITE_LINK_REGEX)) {
+    const idx = match.index;
+    if (idx === undefined) continue;
+    const node = buildInviteLinkNode(match[0]);
+    if (node !== null) matches.push({ start: idx, end: idx + match[0].length, node });
+  }
+
+  for (const regex of [ID_MENTION_REGEX, ROLE_MENTION_REGEX]) {
+    for (const match of text.matchAll(regex)) {
+      const idx = match.index;
+      const node = idx === undefined ? null : buildIdMentionNode(match[0], info);
+      if (idx !== undefined && node !== null) {
+        matches.push({ start: idx, end: idx + match[0].length, node });
+      }
+    }
   }
 
   for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
@@ -414,11 +647,16 @@ export function renderMentionSegment(text: string, info?: MentionInfo): Document
  *  `[text](url)` link does get mentions rendered inside it, so `.masked` links
  *  stay transparent. */
 const MENTION_OPAQUE_SELECTOR =
-  "code, .msg-codeblock, .mention, .channel-mention, .message-link-chip, .msg-link-raw, .msg-link:not(.masked)";
+  "code, .msg-codeblock, .mention, .mention-plain, .channel-mention, .message-link-chip, .msg-link-raw, .msg-link:not(.masked)";
 
 /** Whether a rebuilt pill is identical to the one already in the DOM. */
 function sameMention(a: HTMLElement, b: HTMLElement): boolean {
-  return a.className === b.className && (a.dataset["userId"] ?? "") === (b.dataset["userId"] ?? "");
+  return (
+    a.className === b.className &&
+    (a.dataset["userId"] ?? "") === (b.dataset["userId"] ?? "") &&
+    (a.dataset["roleId"] ?? "") === (b.dataset["roleId"] ?? "") &&
+    (a.dataset["roleColor"] ?? "") === (b.dataset["roleColor"] ?? "")
+  );
 }
 
 /**
@@ -465,16 +703,27 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
   for (const content of root.querySelectorAll(".msg-text, .sm-text")) {
     // querySelectorAll returns a static list, so replacing a span as we go does
     // not disturb the walk.
-    for (const span of content.querySelectorAll<HTMLElement>(".mention")) {
-      const raw = span.textContent ?? "";
+    for (const span of content.querySelectorAll<HTMLElement>(".mention, .mention-plain")) {
+      // The typed token lives in data-mention; the text may be a display name.
+      const raw = span.dataset["mention"] ?? span.textContent ?? "";
       const token = raw.startsWith("@") ? raw.slice(1) : raw;
-      const replacement = buildMentionNode(raw, token, info);
+      // An id token always rebuilds to a pill or its plain stand-in, so a
+      // rename, a role rename, recolour or deletion, or a member leaving or
+      // returning shows at once (MessageList resyncs on member and role changes).
+      const replacement = buildIdMentionNode(raw, info) ?? buildMentionNode(raw, token, info);
       // A mention that labels a masked link stays plain link content when it is
       // rebuilt, as at first render (buildMaskedLink).
       if (replacement !== null && span.closest("a.msg-link.masked") !== null) {
         stripMentionControl(replacement);
       }
-      if (replacement !== null && sameMention(span, replacement)) continue;
+      if (replacement !== null && sameMention(span, replacement)) {
+        if (span.textContent !== replacement.textContent) {
+          setText(span, replacement.textContent ?? raw);
+        }
+        if (replacement.title === "") span.removeAttribute("title");
+        else span.title = replacement.title;
+        continue;
+      }
       span.replaceWith(replacement ?? document.createTextNode(raw));
     }
 
@@ -513,6 +762,7 @@ interface ParsedListItem {
 type ParsedBlock =
   | { readonly type: "paragraph"; readonly inline: readonly InlineNode[] }
   | { readonly type: "heading"; readonly level: 1 | 2 | 3; readonly inline: readonly InlineNode[] }
+  | { readonly type: "subtext"; readonly inline: readonly InlineNode[] }
   | { readonly type: "quote"; readonly blocks: readonly ParsedBlock[] }
   | {
       readonly type: "list";
@@ -541,6 +791,9 @@ function parseBlocksInto(text: string, depth: number): readonly ParsedBlock[] {
     switch (block.type) {
       case "heading":
         out.push({ type: "heading", level: block.level, inline: parseInline(block.text) });
+        break;
+      case "subtext":
+        out.push({ type: "subtext", inline: parseInline(block.text) });
         break;
       case "quote":
         if (depth + 1 >= MAX_BLOCK_DEPTH) {
@@ -640,6 +893,12 @@ function renderParsedBlocks(
         parent.appendChild(heading);
         break;
       }
+      case "subtext": {
+        const sub = createElement("div", { class: "md-subtext" });
+        appendInline(sub, block.inline, info);
+        parent.appendChild(sub);
+        break;
+      }
       case "quote": {
         const quote = createElement("blockquote", { class: "md-quote" });
         renderParsedBlocks(quote, block.blocks, info);
@@ -674,11 +933,13 @@ function renderParsedCodeBlock(segment: Extract<ParsedSegment, { kind: "code" }>
   const block = createElement("div", { class: "msg-codeblock" });
   if (segment.canonical !== null) block.setAttribute("data-lang", segment.canonical);
   for (const token of segment.tokens) {
-    if (token.cls === null) {
+    if (token.cls === null && token.ansi === undefined) {
       block.appendChild(document.createTextNode(token.text));
       continue;
     }
-    const span = createElement("span", { class: `tok-${token.cls}` });
+    const span = createElement("span", {
+      class: token.cls === null ? (token.ansi ?? "") : `tok-${token.cls}`,
+    });
     setText(span, token.text);
     block.appendChild(span);
   }
@@ -768,4 +1029,19 @@ export function renderMessageContent(
   }
 
   return fragment;
+}
+
+/**
+ * Rewrite the `<t:…>` timestamps under `root` in the current clock preference
+ * and relative to now, for a 12h/24h switch or a passing midnight.
+ */
+export function relabelInlineTimestamps(root: ParentNode): void {
+  for (const el of root.querySelectorAll<HTMLTimeElement>("time.md-timestamp")) {
+    const ms = Date.parse(el.dateTime);
+    if (Number.isNaN(ms)) continue;
+    const style = (el.dataset["style"] ?? "f") as TimestampStyle;
+    const { text, title } = formatDiscordTimestamp(ms / 1000, style);
+    el.textContent = text;
+    el.title = title;
+  }
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
 // Store is the data-access surface the service layer depends on. It is the
@@ -18,6 +19,8 @@ import (
 // permissions.NewChecker takes its own narrower interface (permissions.DB),
 // which *db.DB and this Store both satisfy.
 type Store interface {
+	CallLogStore // the DM call log worker's reads and writes (WP 3B-9)
+	GroupDMStore // group DM membership and its system rows (WP 3B-10)
 	// ── Second-factor state (B4-3) ──
 	// The durable backend behind the auth service's partial-auth, pending
 	// enrolment and used-code stores, plus the recovery-code rows; stdlib
@@ -31,7 +34,7 @@ type Store interface {
 
 	// ── Messages / reactions / read-state ──
 	CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error)
-	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, mentionsEveryone bool) (*db.Message, error)
+	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool, mentionedRoleIDs []int64) (*db.Message, error)
 	FindMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
 	CreateMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
 	MessageDeliveryFloorMS() int64
@@ -42,10 +45,9 @@ type Store interface {
 	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
-	SearchMessages(ctx context.Context, query string, channelID *int64, page db.SearchPage) ([]db.MessageSearchResult, error)
-	SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, page db.SearchPage) ([]db.MessageSearchResult, error)
+	SearchMessagesFiltered(ctx context.Context, q db.SearchQuery, page db.SearchPage) ([]db.MessageSearchResult, error)
 	GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]db.MessageAPIResponse, error)
-	SetMessagePinned(ctx context.Context, id int64, pinned bool) error
+	SetMessagePinned(ctx context.Context, p db.SetPinnedParams) (*db.PinEventRow, error)
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
@@ -54,10 +56,14 @@ type Store interface {
 	// CreateMessageWithMentions / CreateMessageDelivery.
 	MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error
 	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
+	// MoveReadPointer moves a reader's pointer and recomputes mention_count
+	// from the receipts in one writer transaction (WP 3D-5c). The caller holds
+	// mentionEmitMu across it and the frame it sends.
+	MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 
 	// ── Mentions ──
-	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool) error
+	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool, mentionedRoleIDs []int64) (replyPingUserID int64, err error)
 	IncrementMentionCounts(ctx context.Context, channelID, msgID int64, userIDs []int64) error
 	// IncrementMentionCountsBatch applies a coalesced window of mention jobs in
 	// one writer transaction — the mention worker's flush path (P5-O05). It
@@ -79,10 +85,11 @@ type Store interface {
 	// remaining attempts (R3).
 	IsBlocked(ctx context.Context, blockerID, blockedID int64) (bool, error)
 	GetChannelOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
+	GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error)
 	GetChannelUserOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
 	ListMentionTargetsByUserIDs(ctx context.Context, userIDs []int64) ([]db.MentionTarget, error)
 	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
-	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) (int64, error)
+	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) ([]string, error)
 	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
 	GetReferencedMessages(ctx context.Context, channelID int64, ids []int64) (map[int64]*db.ReferencedMessage, error)
 
@@ -104,11 +111,11 @@ type Store interface {
 	DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error
 	UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error
 	DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error
-	// GetChannelOverridesFor merges the role and per-user override layers for
-	// one member in two batch queries — the single fetch behind every
+	// GetMemberGrants fetches every held role's override and the per-user
+	// layer for one member in batch queries — the single fetch behind every
 	// "what can this member do here" site, and the reason no site pays an N+1
-	// for the second layer.
-	GetChannelOverridesFor(ctx context.Context, roleID, userID int64) (map[int64]db.ChannelOverride, error)
+	// for the extra layers.
+	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 
 	// ── Users ──
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
@@ -138,9 +145,12 @@ type Store interface {
 	CountPendingUsers(ctx context.Context) (int64, error)
 	ApprovePendingUser(ctx context.Context, userID int64) error
 	DenyPendingUser(ctx context.Context, userID int64) error
-	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error
+	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
-	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus *string) error
+	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus, expiresAt *string) error
+	NextCustomStatusExpiry(ctx context.Context) (string, bool, error)
+	ListExpiredCustomStatuses(ctx context.Context, now string, limit int) ([]db.ExpiredCustomStatus, error)
+	ClearCustomStatusIfExpiry(ctx context.Context, userID int64, expiresAt string) (bool, error)
 	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
 	UpdateUserStatus(ctx context.Context, id int64, status string) error
 	StampConnections(ctx context.Context, connected, disconnected []int64) error
@@ -148,10 +158,8 @@ type Store interface {
 	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
 	UpdateUserRole(ctx context.Context, userID, roleID int64) error
 	ResetAllUserStatuses(ctx context.Context) error
-	// Account erasure (B4-9): the database half in one transaction, the
-	// file half journaled in erasure_jobs and resumed until every file is
-	// gone; ReferencedStoredFiles serves the storage reconciliation pass.
-	EraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
+	// Account erasure (B4-9): the stages of the database half (WP 4.1a).
+	ErasureStageStore
 	EraseAccountPreflight(ctx context.Context, userID int64) error
 	ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
 	FlushAudits(ctx context.Context) error
@@ -209,13 +217,13 @@ type Store interface {
 
 	// ── Roles ──
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
-	GetRoleForUser(ctx context.Context, userID int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 	ListRoles(ctx context.Context) ([]*db.Role, error)
 	GetRoleByName(ctx context.Context, name string) (*db.Role, error)
 	GetDefaultRole(ctx context.Context) (*db.Role, error)
-	CreateRole(ctx context.Context, name string, color *string, perms int64, position int) (*db.Role, error)
-	UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int) error
-	SetRolePositions(ctx context.Context, positions map[int64]int) error
+	CreateRole(ctx context.Context, name string, color *string, perms int64, position int, hoist, mentionable bool) (*db.Role, error)
+	UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int, hoist, mentionable bool) ([]int64, error)
+	SetRolePositions(ctx context.Context, positions map[int64]int) ([]int64, error)
 	DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID int64) ([]int64, error)
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	CountRoleMembers(ctx context.Context) (map[int64]int, error)
@@ -280,15 +288,14 @@ type Store interface {
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
 	GetDMRecipient(ctx context.Context, channelID, requestingUserID int64) (*db.User, error)
-	CreateGroupDMChannel(ctx context.Context, name string, participantIDs []int64) (*db.Channel, error)
-	LeaveGroupDM(ctx context.Context, userID, channelID int64) (bool, error)
+	CreateGroupDMChannel(ctx context.Context, name string, ownerID int64, participantIDs []int64) (*db.Channel, error)
+	GetGroupDMMeta(ctx context.Context, channelID int64) (ownerID int64, iconID string, err error)
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
-	SetDMChannelName(ctx context.Context, channelID int64, name string) error
 	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
 	// ── Message requests (migration 046, B5-6) ──
 	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
-	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (bool, error)
+	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (db.MessageRequestOutcome, error)
 	GetMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
 	GetMessageRequestByPair(ctx context.Context, senderID, recipientID int64) (*db.MessageRequest, error)
 	ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]db.MessageRequestView, error)
@@ -323,6 +330,7 @@ type Store interface {
 	// avatar check backs the "public exactly while in use" half.
 	IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error)
 	IsAvatarFileURL(ctx context.Context, url string) (bool, error)
+	IsGroupDMIconForUser(ctx context.Context, fileID string, userID int64) (bool, error) // live icon, members only
 	// The per-user upload byte counter (migration 044, B5-2): charged before
 	// a store write, released on a failed one, recounted from the rows on
 	// the maintenance tick. See UploadService.Reserve.
@@ -410,6 +418,13 @@ type Store interface {
 	// falls back to the fixed phrase "message removed" (P2-10).
 	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error
 	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
+	// PurgeUserChannelMessagesSince/ListUserMessageChannelsSince are the ban
+	// purge's author-and-window-scoped counterparts of
+	// PurgeChannelMessagesWithAction; RecordRemovalAction writes the one
+	// removal ledger row (targeting the author) for the whole purge.
+	PurgeUserChannelMessagesSince(ctx context.Context, channelID, userID int64, since string, limit int) ([]int64, error)
+	ListUserMessageChannelsSince(ctx context.Context, userID int64, since string) ([]int64, error)
+	RecordRemovalAction(ctx context.Context, targetID, actorID int64, reason string) error
 	RetireModerationActions(ctx context.Context, days int) (int64, error)
 	// GetModerationAction is B5-10's appeal submission and decision both
 	// needing the appealed action's own kind, target and actor.

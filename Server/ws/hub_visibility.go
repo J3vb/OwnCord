@@ -50,22 +50,10 @@ func (h *Hub) channelReadAudienceIgnoringArchived(ctx context.Context, channelID
 }
 
 func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, ignoreArchived bool) []int64 {
-	h.mu.RLock()
-	userIDs := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
-		userIDs = append(userIDs, uid)
-	}
-	h.mu.RUnlock()
-
-	// A DM channel carries no channel_overrides rows, so every connected
-	// user whose base role holds READ_MESSAGES would otherwise pass the role
-	// scan below — leaking a private DM call's voice_state/voice_leave
-	// events to the whole server. Resolve the DM's real audience (its
-	// participants, intersected with who is actually connected) instead,
-	// mirroring the IsDMParticipant membership rule hasChannelAccess uses.
-	var ref permissions.ChannelRef
+	var ch *db.Channel
 	if h.db != nil {
-		ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
+		var err error
+		ch, err = h.readers.Visibility.GetChannel(ctx, channelID)
 		if err != nil {
 			// Fail closed: an unresolvable channel must not fall through to
 			// the role scan, which would treat it as a readable non-DM channel.
@@ -83,6 +71,30 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 		if ch == nil {
 			return []int64{}
 		}
+	}
+	return h.channelReadAudienceFor(ctx, channelID, ch, ignoreArchived)
+}
+
+// channelReadAudienceFor is channelReadAudienceImpl over a channel row the
+// caller already read, so a caller that also needs the row (the channel_activity
+// flush reads its type and NSFW label) pays one GetChannel for both. A nil ch is
+// the bare test hub with no database: the role scan runs without a channel ref.
+func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *db.Channel, ignoreArchived bool) []int64 {
+	h.mu.RLock()
+	userIDs := make([]int64, 0, len(h.clients))
+	for uid := range h.clients {
+		userIDs = append(userIDs, uid)
+	}
+	h.mu.RUnlock()
+
+	// A DM channel carries no channel_overrides rows, so every connected
+	// user whose base role holds READ_MESSAGES would otherwise pass the role
+	// scan below — leaking a private DM call's voice_state/voice_leave
+	// events to the whole server. Resolve the DM's real audience (its
+	// participants, intersected with who is actually connected) instead,
+	// mirroring the IsDMParticipant membership rule hasChannelAccess uses.
+	var ref permissions.ChannelRef
+	if ch != nil {
 		if ch.Type == "dm" {
 			return h.channelReadAudienceDM(ctx, channelID, userIDs)
 		}
@@ -245,13 +257,16 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// Called via the admin HubBroadcaster interface, which carries no context;
 	// the targeted re-sync must complete regardless of the triggering request.
 	ctx := context.Background()
+	// Channel-level, so read once for every recipient of this fan-out.
+	private := h.channelIsPrivate(ctx, ch.ID, ch.Type)
 
 	// Visibility is CanViewChannel — the single predicate shared with
 	// buildReady / REST ListVisibleChannels — resolved per user from their
 	// CURRENT role (c.user is a connect-time snapshot). With a
 	// PermissionService the subject comes from the per-user cache — safe
-	// because the admin handlers invalidate (InvalidateAll on override
-	// change, InvalidateUser on role change) before calling into the hub, so
+	// because the role, channel and moderation services invalidate the
+	// affected users (InvalidateAll when that list is unreadable) before
+	// calling into the hub (WP 5.1a), so
 	// the lookups below repopulate from post-change data; the 30s TTL is only
 	// a backstop and the F6 gen-counter guard keeps a racing populate from
 	// caching stale rows. Without a service (bare test hubs) each client is
@@ -295,13 +310,17 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		}
 
 		if visible {
+			// A socket without the forums feature is sent no forum row
+			// (client_features.go). Nothing is allocated for the skipped send:
+			// this frame is per recipient and unsequenced.
+			if !live.sendsChannel(ch.Type) {
+				continue
+			}
 			// Idempotent add on the client; also refreshes channel metadata.
 			// Addressed per client so it can carry this recipient's own
-			// can_send and can_moderate_voice verdicts — the whole point of
-			// this fan-out is that a permission change just made those
-			// verdicts diverge.
-			canSend, canModerateVoice := h.refreshChannelVisibilityAffordances(ctx, ch, c.user.ID)
-			live.sendMsg(buildChannelCreateFor(ch, canSend, canModerateVoice))
+			// affordance verdicts — the whole point of this fan-out is that
+			// a permission change just made those verdicts diverge.
+			live.sendMsg(buildChannelCreateFor(ch, private, h.refreshChannelVisibilityAffordances(ctx, ch, c.user.ID)))
 			continue
 		}
 		live.sendMsg(buildChannelDelete(ch.ID))
@@ -311,6 +330,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 			live.channelID = 0
 		}
 		live.mu.Unlock()
+		h.revokeHeldThread(ctx, live, ch.ID)
 	}
 
 	// Clients not connected right now missed the targeted sends above. Move
@@ -322,54 +342,43 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	h.bumpVisibilityWatermark()
 }
 
-// refreshChannelVisibilityAffordances is the can_send and can_moderate_voice
-// verdicts the ready payload ships per channel (channelCanSend,
-// channelCanModerateVoice), recomputed for one live user from their CURRENT
-// role: permissions.CanSendMessage and permissions.AuthorizeVoiceModerator
-// over the one subject subjectFor resolves in either the service or the
-// bare-hub branch, both failing closed on a lookup error (S-12).
+// refreshChannelVisibilityAffordances is the five affordance verdicts the
+// ready payload ships per channel (affordancesFor), recomputed for one live
+// user from their CURRENT role over the one subject subjectFor resolves in
+// either the service or the bare-hub branch. A lookup error returns the zero
+// value, which fails closed (S-12).
 //
-// Without this, both are only ever computed at connect time, so a role edit
-// or override edit leaves every connected client's composer and voice
-// controls stuck on their stale connect-time verdicts until the socket is
-// rebuilt.
-func (h *Hub) refreshChannelVisibilityAffordances(ctx context.Context, ch *db.Channel, userID int64) (canSend, canModerateVoice bool) {
+// Without this, they are only ever computed at connect time, so a role edit
+// or override edit leaves every connected client's composer, voice, delete,
+// pin and reaction controls stuck on their stale connect-time verdicts until
+// the socket is rebuilt.
+func (h *Hub) refreshChannelVisibilityAffordances(ctx context.Context, ch *db.Channel, userID int64) channelAffordances {
 	sub, err := h.subjectFor(ctx, userID, ch.ID)
 	if err != nil {
-		return false, false
+		return channelAffordances{}
 	}
 	sub.Channel = channelRef(ch)
-	return permissions.CanSendMessage(sub) == nil, permissions.AuthorizeVoiceModerator(sub) == nil
+	return affordancesFor(sub)
 }
 
-// RefreshAllChannelVisibility re-runs RefreshChannelVisibility for every
-// non-DM channel. A role's permission mask is the base every channel's
-// effective permission is computed from, so editing or deleting a role can
-// change visibility of *any* channel at once — where a channel_overrides edit
-// touches exactly one. DM channels are skipped: their access is participant-
-// based and no role change can alter it.
+// RefreshAllChannelVisibility re-derives, for every connected user, which
+// non-DM channels they may see: held topics are revoked first, then each user
+// gets a channel_create (with their own affordances) or channel_delete per
+// channel. A role's permission mask is the base every channel's effective
+// permission is computed from, so editing or deleting a role can change
+// visibility of *any* channel at once — where a channel_overrides edit touches
+// exactly one. DM channels are skipped: their access is participant-based and
+// no role change can alter it.
 //
-// Called via the admin HubBroadcaster interface (no context), so the channel
-// list is read against Background — the re-sync must complete regardless of the
-// triggering request. The caller invalidates the permission cache first, as the
-// channel-override handlers do, so the per-client lookups below repopulate from
-// post-change data.
+// Synchronous, against Background. The caller invalidates the permission cache
+// first, so the per-user lookups repopulate from post-change data.
 func (h *Hub) RefreshAllChannelVisibility() {
-	if h.db == nil {
-		return
-	}
+	// The same per-user step the role-refresh worker runs (role_refresh_round.go),
+	// over every connected user and synchronously. Admin role handlers no
+	// longer call it; they enqueue (EnqueueRoleRefresh).
 	ctx := context.Background()
-	channels, err := h.readers.Visibility.ListChannels(ctx)
-	if err != nil {
-		slog.Warn("hub: RefreshAllChannelVisibility could not list channels", "err", err)
-		return
-	}
-	for i := range channels {
-		if channels[i].Type == "dm" {
-			continue
-		}
-		h.RefreshChannelVisibility(&channels[i])
-	}
+	h.refreshVisibilityUsers(ctx, h.connectedUserIDs(), nil)
+	h.refreshTimeoutViewsFor(ctx, nil)
 }
 
 func (h *Hub) revokeUnreadableChannels(userID int64) {
@@ -400,7 +409,8 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 
 	// Called via the admin HubBroadcaster interface, which carries no context;
 	// the re-evaluation must complete regardless of the triggering request.
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), roleRefreshUserBudget)
+	defer cancel()
 
 	// c.user is a connect-time snapshot and the role just changed, so resolve
 	// the current user — and through it the current role — from the DB.
@@ -428,52 +438,7 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 		return
 	}
 
-	for _, topic := range h.pubsub.TopicsForClient(userID) {
-		chID := channelTopicID(topic)
-		if chID == 0 || allowed[chID] {
-			continue
-		}
-		// DM access is gated on dm_participants, which no role change can
-		// alter, while allowed sources DMs from dm_open_state — a DM the user
-		// has closed (or every DM, if the DM lookup inside
-		// computeAllowedChannels failed) is missing from allowed even though
-		// its subscription is still legitimate. Never revoke a DM topic here;
-		// on a lookup error close the socket rather than guess.
-		ch, chErr := h.readers.Visibility.GetChannel(ctx, chID)
-		if chErr != nil {
-			slog.Warn("hub: role change channel lookup failed, closing socket",
-				"user_id", userID, "channel_id", chID, "err", chErr)
-			if live := h.GetClient(userID); live != nil {
-				h.kickClient(live)
-			}
-			return
-		}
-		if ch != nil && ch.Type == "dm" {
-			continue
-		}
-		if revokeUnreadableChannelsPreActRaceHook != nil {
-			revokeUnreadableChannelsPreActRaceHook(userID)
-		}
-		// Re-resolve the live client immediately before acting: the DB round
-		// trips above (and computeAllowedChannels before the loop) give a
-		// reconnect room to replace this user's *Client in h.clients. Acting
-		// on the snapshot c would target the dead socket, and Unsubscribe
-		// would no-op on unsubscribeLocked's identity guard — stranding the
-		// replacement with the revoked topic (audit-2026-08-19 F-2; mirrors
-		// RefreshChannelVisibility's live re-resolve). A nil result means the
-		// user disconnected entirely; nothing left to revoke.
-		live := h.GetClient(userID)
-		if live == nil {
-			return
-		}
-		live.sendMsg(buildChannelDelete(chID))
-		h.pubsub.Unsubscribe(live, topic)
-		live.mu.Lock()
-		if live.channelID == chID {
-			live.channelID = 0
-		}
-		live.mu.Unlock()
-	}
+	_, _ = h.revokeTopicsNotIn(ctx, userID, allowed, nil)
 }
 
 // computeAllowedChannels returns the set of channel IDs a user may access,
@@ -488,22 +453,23 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database VisibilityRea
 		return nil, fmt.Errorf("computeAllowedChannels ListChannels: %w", err)
 	}
 
-	role, err := database.GetRoleByID(ctx, user.RoleID)
+	roles, err := database.GetMemberRoles(ctx, user.ID)
 	if err != nil {
-		return nil, fmt.Errorf("computeAllowedChannels GetRoleByID: %w", err)
+		return nil, fmt.Errorf("computeAllowedChannels GetMemberRoles: %w", err)
 	}
 
-	// Nil role = zero access (fail closed). Admins skip the override fetch.
+	// No role = zero access (fail closed). Admins skip the override fetch.
 	allowed := make(map[int64]bool)
-	if role != nil {
-		var overrides map[int64]db.ChannelOverride
-		if !permissions.HasAdmin(role.Permissions) {
-			overrides, err = database.GetChannelOverridesFor(ctx, role.ID, user.ID)
+	if roles != nil {
+		grants := permissions.MemberGrants{Perms: roles.Perms}
+		if !permissions.HasAdmin(roles.Perms) {
+			grants, err = database.GetMemberGrants(ctx, user.ID)
 			if err != nil {
-				return nil, fmt.Errorf("computeAllowedChannels GetChannelOverridesFor: %w", err)
+				return nil, fmt.Errorf("computeAllowedChannels GetMemberGrants: %w", err)
 			}
+			grants.Perms = roles.Perms
 		}
-		allowed = h.permChecker.VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
+		allowed = h.permChecker.VisibleChannelIDs(grants, channelRefs(channels))
 	}
 
 	// Include the user's open DM channels. Only the ID set matters here, so
@@ -517,6 +483,10 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database VisibilityRea
 	}
 	for _, id := range dmIDs {
 		allowed[id] = true
+	}
+	// The thread the user's socket has open rides its parent's visibility.
+	if err := h.admitHeldThread(ctx, database, user.ID, allowed); err != nil {
+		return nil, err
 	}
 
 	return allowed, nil
@@ -573,4 +543,11 @@ func (h *Hub) MarkVisibilityChanged() {
 	defer h.seqMu.Unlock()
 	defer h.observeSeqMuHold(start)
 	h.bumpVisibilityWatermark()
+}
+
+// roleChannel is one non-DM channel and its channel-level private flag, read
+// once per round for every user (WP 4.4b's role refresh round).
+type roleChannel struct {
+	ch      *db.Channel
+	private bool
 }

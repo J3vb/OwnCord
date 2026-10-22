@@ -172,12 +172,12 @@ func TestHub_ChannelReadAudience_ExcludesArchivedChannel(t *testing.T) {
 		t.Fatalf("GetChannel: %v", err)
 	}
 	if err := database.AdminUpdateChannel(context.Background(), chID, db.ChannelUpdate{
-		Name:     ch.Name,
-		Topic:    ch.Topic,
-		Category: ch.Category,
-		SlowMode: ch.SlowMode,
-		Position: ch.Position,
-		Archived: true,
+		Name:       ch.Name,
+		Topic:      ch.Topic,
+		CategoryID: ch.CategoryID,
+		SlowMode:   ch.SlowMode,
+		Position:   ch.Position,
+		Archived:   true,
 	}); err != nil {
 		t.Fatalf("AdminUpdateChannel: %v", err)
 	}
@@ -193,20 +193,6 @@ func TestHub_ChannelReadAudience_ExcludesArchivedChannel(t *testing.T) {
 
 	assertNotReceived(t, send, "member with base READ_MESSAGES on an archived channel")
 }
-
-// stubDMEvent is a minimal ws.SequencedDMEvent so EmitEvents routes through
-// sendSequencedToUsers — persistEvent's second call site, the one that stamps
-// a non-zero channel_id without going through the broadcast queue.
-type stubDMEvent struct {
-	channelID      int64
-	participantIDs []int64
-	payload        []byte
-}
-
-func (e stubDMEvent) EventType() string       { return "chat_message" }
-func (e stubDMEvent) ChannelID() int64        { return e.channelID }
-func (e stubDMEvent) ParticipantIDs() []int64 { return e.participantIDs }
-func (e stubDMEvent) Payload() []byte         { return e.payload }
 
 // TestHub_SetEventPersister pins the invariant persistEvent exists for: the
 // row written to the EventStore carries the same seq (and type, and channel)
@@ -246,11 +232,10 @@ func TestHub_SetEventPersister(t *testing.T) {
 	globalFrame := awaitRawMessage(t, send)
 
 	// Sequenced DM → sendSequencedToUsers → persistEvent(seq, chID, wrapped).
-	hub.EmitEvents(context.Background(), []ws.Event{stubDMEvent{
-		channelID:      chID,
-		participantIDs: []int64{user.ID},
-		payload:        []byte(`{"type":"chat_message","payload":{"id":1}}`),
-	}})
+	hub.EmitEvents(context.Background(), []ws.Event{ws.NewTestDMEvent(
+		"chat_message", chID, []int64{user.ID},
+		[]byte(`{"type":"chat_message","payload":{"id":1}}`),
+	)})
 	dmFrame := awaitRawMessage(t, send)
 
 	// Stop drains the queue and waits for the flusher to exit, so everything

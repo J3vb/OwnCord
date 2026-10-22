@@ -21,6 +21,7 @@ import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import { shellText } from "../../src/i18n/shell";
+import { formatClockTime, userRoleColorVar } from "../../src/lib/formatting";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearReactionUsersCache,
@@ -129,6 +130,8 @@ function makeOpts(overrides: Partial<MessageListOptions> = {}): MessageListOptio
     onScrollTop: vi.fn(),
     onReplyClick: vi.fn(),
     onEditClick: vi.fn(),
+    onEditSave: vi.fn(() => true),
+    onEmptyEdit: vi.fn(),
     onDeleteClick: vi.fn(),
     onReactionClick: vi.fn(),
     onPinClick: vi.fn(),
@@ -219,11 +222,23 @@ describe("renderers", () => {
       expect(shouldGroup(prev, curr)).toBe(false);
     });
 
+    it("groups a same-author pair 6 minutes apart (inside the 7-minute window)", () => {
+      const prev = makeMessage({ timestamp: "2025-01-15T12:00:00Z" });
+      const curr = makeMessage({ id: 2, timestamp: "2025-01-15T12:06:00Z" });
+      expect(shouldGroup(prev, curr)).toBe(true);
+    });
+
+    it("does not group a pair exactly 7:00 apart (the window is exclusive)", () => {
+      const prev = makeMessage({ timestamp: "2025-01-15T12:00:00Z" });
+      const curr = makeMessage({ id: 2, timestamp: "2025-01-15T12:07:00Z" });
+      expect(shouldGroup(prev, curr)).toBe(false);
+    });
+
     it("returns false when time difference exceeds threshold", () => {
       const prev = makeMessage({ timestamp: "2025-01-15T12:00:00Z" });
       const curr = makeMessage({
         id: 2,
-        timestamp: "2025-01-15T12:06:00Z",
+        timestamp: "2025-01-15T12:08:00Z",
       });
       expect(shouldGroup(prev, curr)).toBe(false);
     });
@@ -297,6 +312,36 @@ describe("renderers", () => {
       ac.abort();
     });
 
+    it("frames a forwarded message's body and files, with reactions outside the frame", () => {
+      const msg = makeMessage({
+        content: "snapshot text",
+        forward: {
+          source_channel_id: 5,
+          source_message_id: 9,
+          source_timestamp: "2025-01-10T09:00:00Z",
+        },
+        reactions: [{ emoji: "👍", count: 1, me: false }],
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      const box = el.querySelector(".msg-forward");
+      expect(box?.querySelector(".msg-forward-head")?.textContent).toBe("Forwarded");
+      expect(box?.querySelector(".msg-text")?.textContent).toBe("snapshot text");
+      expect(el.querySelector(".msg-reactions")?.closest(".msg-forward")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("draws an ordinary message without the frame", () => {
+      const msg = makeMessage();
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], makeOpts(), ac.signal));
+      expect(container.querySelector(".msg-forward")).toBeNull();
+      ac.abort();
+    });
+
     it("marks the author name and avatar as a keyboard-reachable profile control", () => {
       const msg = makeMessage({ user: { id: 42, username: "Alice", avatar: null } });
       const ac = new AbortController();
@@ -312,33 +357,16 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("offers Report on someone else's message only, and passes its id (B9-10)", () => {
-      const onReportClick = vi.fn();
+    it("keeps Report off the hover bar: it lives in the message menu (WP 3A-7)", () => {
       const ac = new AbortController();
       const theirs = renderMessage(
         makeMessage({ id: 5, user: { id: 11, username: "Bob", avatar: null } }),
         false,
         [],
-        makeOpts({ onReportClick }),
+        makeOpts({ onReportClick: vi.fn() }),
         ac.signal,
       );
-      const btn = theirs.querySelector<HTMLButtonElement>("[data-testid='msg-report-5']");
-      expect(btn?.getAttribute("aria-label")).toBe("Report message");
-      expect(btn?.getAttribute("aria-haspopup")).toBe("dialog");
-      btn?.click();
-      expect(onReportClick).toHaveBeenCalledWith(5);
-
-      const mine = renderMessage(makeMessage(), false, [], makeOpts({ onReportClick }), ac.signal);
-      expect(mine.querySelector("[data-testid^='msg-report-']")).toBeNull();
-      // No handler, no dead button.
-      const unwired = renderMessage(
-        makeMessage({ id: 6, user: { id: 11, username: "Bob", avatar: null } }),
-        false,
-        [],
-        makeOpts(),
-        ac.signal,
-      );
-      expect(unwired.querySelector("[data-testid^='msg-report-']")).toBeNull();
+      expect(theirs.querySelector("[data-testid^='msg-report-']")).toBeNull();
       ac.abort();
     });
 
@@ -362,6 +390,24 @@ describe("renderers", () => {
       // No hover actions on an unsent row.
       expect(container.querySelector(".msg-actions-bar")).toBeNull();
 
+      ac.abort();
+    });
+
+    it("explains a REQUEST_TIMEOUT failure as a busy server and keeps Retry (WP 4.1b)", () => {
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "c-busy",
+        id: 0,
+        errorCode: "REQUEST_TIMEOUT",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
+        "The server is busy — retry in a moment",
+      );
+      expect(container.querySelector('[data-testid="msg-retry-c-busy"]')).not.toBeNull();
       ac.abort();
     });
 
@@ -390,6 +436,118 @@ describe("renderers", () => {
       discard!.click();
       expect(onRetry).toHaveBeenCalledWith("c1");
       expect(onDeleteDraft).toHaveBeenCalledWith("c1");
+
+      ac.abort();
+    });
+
+    it("renders an uploading row as pending, with the strip from the hook and no bars", () => {
+      const strip = document.createElement("div");
+      strip.className = "msg-upload-strip";
+      const renderUploadStrip = vi.fn((_cid: string, _signal: AbortSignal) => strip);
+      const msg = makeMessage({ status: "uploading", correlationId: "u1", id: 0 });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts({ renderUploadStrip }), ac.signal);
+      container.appendChild(el);
+
+      expect(el.classList.contains("pending")).toBe(true);
+      expect(el.classList.contains("failed")).toBe(false);
+      expect(el.querySelector(".msg-upload-strip")).toBe(strip);
+      // The strip belongs to the row's render: it gets the row's own signal.
+      expect(renderUploadStrip).toHaveBeenCalledWith("u1", ac.signal);
+      expect(container.querySelector(".msg-actions-bar")).toBeNull();
+      expect(container.querySelector(".msg-send-failed")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("gives the uploading row's text an id its Cancel button describes itself by", async () => {
+      const { renderUploadStrip: realStrip } =
+        await import("../../src/features/messaging/sendQueue");
+      const entry = {
+        cid: "u1",
+        channelId: 1,
+        userId: 1,
+        content: "hello",
+        replyTo: null,
+        replyPing: false,
+        items: [{ filename: "a.pdf" }],
+      };
+      const msg = makeMessage({
+        status: "uploading",
+        correlationId: "u1",
+        id: 0,
+        content: "hello",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(
+        msg,
+        false,
+        [msg],
+        makeOpts({ renderUploadStrip: (_cid, signal) => realStrip(entry, signal) }),
+        ac.signal,
+      );
+      container.appendChild(el);
+
+      const cancel = el.querySelector(".msg-upload-cancel")!;
+      const target = el.querySelector(`#msg-body-u1`);
+      expect(cancel.getAttribute("aria-describedby")).toContain("msg-body-u1");
+      expect(target?.textContent).toContain("hello");
+
+      ac.abort();
+    });
+
+    it("renders an uploading row without a strip when the host has none", () => {
+      const msg = makeMessage({ status: "uploading", correlationId: "u1", id: 0 });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+
+      expect(el.classList.contains("pending")).toBe(true);
+      expect(el.querySelector(".msg-upload-strip")).toBeNull();
+
+      ac.abort();
+    });
+
+    it("keeps the strip on a failed queued row, above 'Upload failed' with Retry and Delete", () => {
+      const strip = document.createElement("div");
+      strip.className = "msg-upload-strip";
+      const renderUploadStrip = vi.fn(() => strip);
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "u2",
+        id: 0,
+        errorCode: "UPLOAD_FAILED",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts({ renderUploadStrip }), ac.signal);
+      container.appendChild(el);
+
+      expect(el.querySelector(".msg-upload-strip")).toBe(strip);
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe("Upload failed");
+      expect(container.querySelector('[data-testid="msg-retry-u2"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="msg-discard-u2"]')).not.toBeNull();
+      // The strip comes before the failed bar.
+      expect(
+        strip.compareDocumentPosition(container.querySelector(".msg-send-failed")!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+
+      ac.abort();
+    });
+
+    it("names a cancelled upload on the failed bar", () => {
+      const msg = makeMessage({
+        status: "failed",
+        correlationId: "u3",
+        id: 0,
+        errorCode: "UPLOAD_CANCELLED",
+      });
+      const ac = new AbortController();
+      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+      container.appendChild(el);
+
+      expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
+        "Upload cancelled",
+      );
 
       ac.abort();
     });
@@ -476,6 +634,26 @@ describe("renderers", () => {
       const edited = container.querySelector(".msg-edited");
       expect(edited).not.toBeNull();
       expect(edited!.textContent).toBe("(edited)");
+
+      ac.abort();
+    });
+
+    it("gives the header time and (edited) a weekday, date and time tooltip", () => {
+      const msg = makeMessage({
+        timestamp: "2025-01-15T12:00:00Z",
+        editedAt: "2025-01-16T13:05:00Z",
+      });
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], makeOpts(), ac.signal));
+
+      const full = /^\w+day, \w+ \d{1,2}, \d{4}( at |, )\d{1,2}:\d{2}\s?(AM|PM)$/;
+      const timeTitle = container.querySelector(".msg-time")?.getAttribute("title") ?? "";
+      const editedTitle = container.querySelector(".msg-edited")?.getAttribute("title") ?? "";
+      expect(timeTitle).toMatch(full);
+      expect(timeTitle).toMatch(/Wednesday, January 15, 2025|Wednesday, January 1[45], 2025/);
+      expect(editedTitle).toMatch(full);
+      expect(editedTitle).toMatch(/Thursday, January 1[67], 2025/);
+      expect(editedTitle).not.toBe(timeTitle);
 
       ac.abort();
     });
@@ -1101,20 +1279,21 @@ describe("renderers", () => {
 
       const ref = container.querySelector(".msg-reply-ref")!;
       expect(ref.querySelector(".rr-author")).toBeNull();
-      expect(ref.textContent).toBe("[message deleted]");
+      expect(ref.textContent).toBe("Original message was deleted");
       ac.abort();
     });
 
-    it("renders '[message deleted]' preview for deleted referenced message", () => {
+    it("says the original message was deleted, with no avatar or author, for a deleted loaded parent", () => {
       const original = makeMessage({ id: 1, content: "Original", deleted: true });
       const reply = makeMessage({ id: 2, replyTo: 1, content: "reply" });
       const ac = new AbortController();
       const el = renderMessage(reply, false, [original, reply], makeOpts(), ac.signal);
       container.appendChild(el);
 
-      const replyText = container.querySelector(".rr-text");
-      expect(replyText).not.toBeNull();
-      expect(replyText!.textContent).toBe("[message deleted]");
+      const ref = container.querySelector(".msg-reply-ref")!;
+      expect(ref.textContent).toBe("Original message was deleted");
+      expect(ref.classList.contains("msg-reply-ref--deleted")).toBe(true);
+      expect(ref.querySelector(".rr-avatar, .rr-author, .rr-text")).toBeNull();
 
       ac.abort();
     });
@@ -1174,116 +1353,23 @@ describe("renderers", () => {
   // Developer mode — copy ID button
   // ---------------------------------------------------------------------------
 
-  describe("developer mode — Copy ID button", () => {
-    it("renders Copy ID button when developerMode is enabled", () => {
-      // loadPref reads from localStorage with the "owncord:settings:" prefix
-      localStorage.setItem("owncord:settings:developerMode", "true");
-      // Dispatch pref-change to invalidate the cached developerModeEnabled value
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-
-      const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
-
-      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-1']");
-      expect(copyIdBtn).not.toBeNull();
-      expect(copyIdBtn!.getAttribute("aria-label")).toBe("Copy ID");
-
-      // Clean up: restore developer mode to false
+  describe("developer mode — Copy ID", () => {
+    it("is not a hover-bar button in either mode; the message menu offers it (WP 3A-7)", () => {
+      for (const mode of ["true", "false"]) {
+        localStorage.setItem("owncord:settings:developerMode", mode);
+        window.dispatchEvent(
+          new CustomEvent("owncord:pref-change", { detail: { key: "developerMode" } }),
+        );
+        const msg = makeMessage();
+        const ac = new AbortController();
+        const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
+        expect(el.querySelector("[data-testid^='msg-copy-id-']")).toBeNull();
+        ac.abort();
+      }
       localStorage.setItem("owncord:settings:developerMode", "false");
       window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
+        new CustomEvent("owncord:pref-change", { detail: { key: "developerMode" } }),
       );
-      ac.abort();
-    });
-
-    it("Copy ID button calls clipboard.writeText on click", () => {
-      localStorage.setItem("owncord:settings:developerMode", "true");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-
-      const writeTextMock = vi.fn().mockResolvedValue(undefined);
-      Object.assign(navigator, { clipboard: { writeText: writeTextMock } });
-
-      const msg = makeMessage({ id: 42 });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
-
-      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-42']") as HTMLElement;
-      expect(copyIdBtn).not.toBeNull();
-      copyIdBtn.click();
-
-      expect(writeTextMock).toHaveBeenCalledWith("42");
-
-      // Clean up
-      localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-      ac.abort();
-    });
-
-    it("Copy ID button handles clipboard failure gracefully", () => {
-      localStorage.setItem("owncord:settings:developerMode", "true");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-
-      Object.assign(navigator, {
-        clipboard: { writeText: vi.fn().mockRejectedValue(new Error("clipboard unavailable")) },
-      });
-
-      const msg = makeMessage({ id: 42 });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
-
-      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-42']") as HTMLElement;
-      // Should not throw
-      expect(() => copyIdBtn.click()).not.toThrow();
-
-      // Clean up
-      localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-      ac.abort();
-    });
-
-    it("does not render Copy ID button when developerMode is disabled", () => {
-      localStorage.setItem("owncord:settings:developerMode", "false");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "developerMode" },
-        }),
-      );
-
-      const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
-
-      const copyIdBtn = container.querySelector("[data-testid='msg-copy-id-1']");
-      expect(copyIdBtn).toBeNull();
-
-      ac.abort();
     });
   });
 
@@ -1588,9 +1674,26 @@ describe("renderers", () => {
 
       const hoverTime = container.querySelector(".msg-hover-time");
       expect(hoverTime).not.toBeNull();
-      // Same format as the message header (F24): it carries a time, not a
-      // bare 24h HH:MM.
-      expect(hoverTime!.textContent).toMatch(/\d{1,2}:\d{2}\s?(AM|PM)?/i);
+      // The header's clock time (F24), without "Today at", which wrapped
+      // over the avatar column.
+      expect(hoverTime!.textContent).toBe(formatClockTime(msg.timestamp));
+      expect(hoverTime!.textContent).not.toMatch(/today|yesterday/i);
+
+      ac.abort();
+    });
+  });
+
+  describe("compact header time", () => {
+    it("renders the short clock time before the author, titled with the full date", () => {
+      const msg = makeMessage();
+      const ac = new AbortController();
+      container.appendChild(renderMessage(msg, false, [msg], makeOpts(), ac.signal));
+
+      const compact = container.querySelector<HTMLElement>(".msg-header .msg-compact-time");
+      expect(compact).not.toBeNull();
+      expect(compact!.textContent).toBe(formatClockTime(msg.timestamp));
+      expect(compact!.title).toBe(container.querySelector<HTMLElement>(".msg-time")!.title);
+      expect(compact!.nextElementSibling?.classList.contains("msg-author")).toBe(true);
 
       ac.abort();
     });
@@ -2149,5 +2252,32 @@ describe("message row author identity", () => {
 
     expect(el.querySelector(".msg-author")?.textContent).toBe("Ghosty");
     expect(el.querySelector(".msg-avatar .avatar-initial")?.textContent).toBe("G");
+  });
+});
+
+describe("userRoleColorVar", () => {
+  it("uses the highest coloured held role, matching the member list", () => {
+    setRoles([
+      { id: 1, name: "Vip", color: null, permissions: 0, position: 30 },
+      { id: 2, name: "Helper", color: "#2ecc71", permissions: 0, position: 20 },
+      { id: 3, name: "Member", color: "#111111", permissions: 0, position: 10 },
+    ]);
+    membersStore.setState((p) => ({
+      ...p,
+      members: new Map([
+        [
+          9,
+          {
+            id: 9,
+            username: "u",
+            avatar: null,
+            role: "vip",
+            roleIds: [1, 3, 2],
+            status: "online" as const,
+          },
+        ],
+      ]),
+    }));
+    expect(userRoleColorVar(9)).toBe("#2ecc71");
   });
 });

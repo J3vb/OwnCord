@@ -15,6 +15,7 @@
 import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
+import { publicAssetUrl } from "@lib/publicAssets";
 import {
   createMicProcessor,
   GATE_LOOKAHEAD_S,
@@ -198,7 +199,7 @@ export function startVadDetector(
   };
 
   ctx.audioWorklet
-    .addModule("/vad-worklet.js")
+    .addModule(publicAssetUrl("vad-worklet.js"))
     .then(() => {
       if (stopped) return;
       try {
@@ -262,10 +263,38 @@ interface PttGatedRoom {
 }
 
 /** A room that runs the sensitivity gate on its own capture (NativeRoom),
- *  reporting its verdicts as the detector's `onGate` would. */
+ *  reporting its verdicts as the detector's `onGate` would; "auto" runs the
+ *  noise-floor estimate there, seeded and reported as the detector's. */
 interface VoiceGatedRoom {
-  setVoiceGate(threshold: number, onSpeaking: (speaking: boolean | null) => void): void;
+  setVoiceGate(
+    gate: number | "auto",
+    onSpeaking: (speaking: boolean | null) => void,
+    auto?: { seed?: number; onThreshold?: (threshold: number) => void },
+  ): void;
 }
+
+/** A room whose own capture takes the input volume and reports its level
+ *  (NativeRoom): the meter's feed where no web processor runs. */
+interface InputGainRoom {
+  setInputGain(percent: number): void;
+  setInputLevelListener(listener: ((rms: number | null, open: boolean) => void) | null): void;
+}
+
+/** A room whose own capture takes the four processing toggles live
+ *  (NativeRoom): there is no web mic track to restart or processor to
+ *  reroute. */
+interface AudioProcessingRoom {
+  setAudioProcessing(audio: {
+    echoCancellation: boolean;
+    noiseSuppression: boolean;
+    autoGainControl: boolean;
+    enhancedNoiseSuppression: boolean;
+  }): void;
+}
+
+/** A capture level report: the detector's RMS and whether the gate is open. */
+/** A level report; null as the level means the capture stopped. */
+export type InputLevelListener = (rms: number | null, open: boolean) => void;
 
 export class AudioPipeline {
   private room: Room | null = null;
@@ -302,16 +331,46 @@ export class AudioPipeline {
   onGateSpeaking: ((speaking: boolean | null) => void) | null = null;
 
   setRoom(room: Room | null): void {
+    const previous = this.room as Partial<InputGainRoom> | null;
+    if (previous?.setInputLevelListener) {
+      previous.setInputLevelListener(null);
+      // Detached before its capture's own stop could arrive: end the meter here.
+      for (const listener of this.inputLevelListeners) listener(null, false);
+    }
     this.room = room;
+    const gainRoom = room as Partial<InputGainRoom> | null;
+    gainRoom?.setInputGain?.(Math.round(this.currentInputGain * 100));
+    gainRoom?.setInputLevelListener?.((rms, open) => {
+      for (const listener of this.inputLevelListeners) listener(rms, open);
+    });
     this.applyRoomVoiceGate();
   }
 
-  /** Hand the saved sensitivity to a room that gates its own capture. */
+  /** Who hears a room capture's level reports (see onRoomInputLevel). */
+  private readonly inputLevelListeners = new Set<InputLevelListener>();
+
+  /** Hear the level reports of a room that captures on its own (the Linux
+   *  native engine), while one is set; the web path's meter runs its own
+   *  detector instead. Returns the unsubscribe. */
+  onRoomInputLevel(listener: InputLevelListener): () => void {
+    this.inputLevelListeners.add(listener);
+    return () => this.inputLevelListeners.delete(listener);
+  }
+
+  /** Hand the saved sensitivity, or automatic sensitivity, to a room that
+   *  gates its own capture. */
   private applyRoomVoiceGate(): void {
-    const sensitivity = effectiveVoiceSensitivity(this.pttPollingLive());
+    const pttLive = this.pttPollingLive();
+    const auto = effectiveVoiceGate(pttLive) === "auto";
     (this.room as Partial<VoiceGatedRoom> | null)?.setVoiceGate?.(
-      vadThreshold(sensitivity),
+      auto ? "auto" : vadThreshold(effectiveVoiceSensitivity(pttLive)),
       (speaking) => this.onGateSpeaking?.(speaking),
+      {
+        seed: this.lastAutoThreshold,
+        onThreshold: (next) => {
+          this.lastAutoThreshold = next;
+        },
+      },
     );
   }
 
@@ -452,6 +511,7 @@ export class AudioPipeline {
   /** Route the live processor through or around RNNoise for the saved
    *  preference. The capture is not touched. */
   async reapplyEnhancedNoiseSuppression(onError?: (message: string) => void): Promise<void> {
+    if (this.applyNativeProcessing()) return;
     const processor = this.processor;
     if (processor === null) return;
     await this.applyEnhancedPreference();
@@ -459,6 +519,21 @@ export class AudioPipeline {
     if (loadPref<boolean>("enhancedNoiseSuppression", false) && !processor.enhanced) {
       onError?.(voiceText("audio.settingsFailed"));
     }
+  }
+
+  /** Hand the saved toggles to a room whose own capture applies them live.
+   *  False for a web room, whose mic track and processor the callers go on
+   *  to rework. */
+  private applyNativeProcessing(): boolean {
+    const room = this.room as Partial<AudioProcessingRoom> | null;
+    if (!room?.setAudioProcessing) return false;
+    room.setAudioProcessing({
+      echoCancellation: loadPref("echoCancellation", true),
+      noiseSuppression: loadPref("noiseSuppression", true),
+      autoGainControl: loadPref("autoGainControl", true),
+      enhancedNoiseSuppression: loadPref("enhancedNoiseSuppression", false),
+    });
+    return true;
   }
 
   // --- Volume / gates ---
@@ -469,6 +544,7 @@ export class AudioPipeline {
     this.currentInputGain = clamped / 100;
     this.processor?.setInputGain(this.currentInputGain);
     this.vad?.resetFloor();
+    (this.room as Partial<InputGainRoom> | null)?.setInputGain?.(clamped);
   }
 
   /** Close (true) or open (false) the push-to-talk gate. It is applied to the
@@ -567,6 +643,7 @@ export class AudioPipeline {
       log.debug("Skipping audio processing reapply — no active voice session");
       return;
     }
+    if (this.applyNativeProcessing()) return;
     const track = this.micTrack;
     if (track === undefined) {
       log.debug("Skipping audio processing reapply — no mic track");

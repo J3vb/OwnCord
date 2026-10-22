@@ -97,10 +97,10 @@ func newNSFWGateFixture(t *testing.T) *nsfwGateFixture {
 	if err != nil {
 		t.Fatalf("SendMessage(labelled): %v", err)
 	}
-	if err := svc.Messages.SetMessagePinned(ctx, authorID, labelledID, sent.MessageID, true); err != nil {
+	if _, err := svc.Messages.SetMessagePinned(ctx, authorID, labelledID, sent.MessageID, true); err != nil {
 		t.Fatalf("SetMessagePinned: %v", err)
 	}
-	if _, err := svc.Messages.AddReaction(ctx, authorID, sent.MessageID, "👍"); err != nil {
+	if err := database.AddReaction(ctx, sent.MessageID, authorID, "👍"); err != nil {
 		t.Fatalf("AddReaction: %v", err)
 	}
 	const attID = "nsfw-gate-attachment"
@@ -159,12 +159,12 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 	if _, err := f.svc.Messages.GetReactionUsers(ctx, f.bobID, f.labelledID, f.msgID, "👍"); !isNSFWForbidden(err) {
 		t.Errorf("GetReactionUsers(bob) = %v, want ErrForbidden+ErrNSFWUnacknowledged", err)
 	}
-	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, "needleword", &f.labelledID, db.SearchPage{Limit: 10}); !isNSFWForbidden(err) {
+	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, service.SearchRequest{Query: "needleword", ChannelID: &f.labelledID, Page: db.SearchPage{Limit: 10}}); !isNSFWForbidden(err) {
 		t.Errorf("SearchMessages(bob, single-channel) = %v, want ErrForbidden+ErrNSFWUnacknowledged", err)
 	}
 	// Both orders, so newest-first paging (DP-20) cannot reopen the leak.
 	for _, page := range []db.SearchPage{{Limit: 10}, {Limit: 10, Recent: true}} {
-		globalHits, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, "needleword", nil, page)
+		globalHits, _, err := f.svc.Messages.SearchMessages(ctx, f.bobID, service.SearchRequest{Query: "needleword", Page: page})
 		if err != nil {
 			t.Fatalf("SearchMessages(bob, global, %+v): %v", page, err)
 		}
@@ -323,7 +323,7 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 	if _, err := f.svc.Messages.GetReactionUsers(ctx, f.aliceID, f.labelledID, f.msgID, "👍"); err != nil {
 		t.Errorf("GetReactionUsers(alice) = %v, want nil", err)
 	}
-	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.aliceID, "needleword", &f.labelledID, db.SearchPage{Limit: 10}); err != nil {
+	if _, _, err := f.svc.Messages.SearchMessages(ctx, f.aliceID, service.SearchRequest{Query: "needleword", ChannelID: &f.labelledID, Page: db.SearchPage{Limit: 10}}); err != nil {
 		t.Errorf("SearchMessages(alice, single-channel) = %v, want nil", err)
 	}
 	aliceRole, err := f.db.GetRoleForUser(ctx, f.aliceID)
@@ -666,6 +666,12 @@ func TestReconnectPrecheck_ComputeReadableChannelsErrorFallsBackToFullReady(t *t
 // auth_ok, up to a short idle timeout.
 func dialAndResume(t *testing.T, hub *Hub, token string, lastSeq uint64) [][]byte {
 	t.Helper()
+	return dialAndResumeWith(t, hub, token, lastSeq, nil)
+}
+
+// dialAndResumeWith is dialAndResume for a client that declares features.
+func dialAndResumeWith(t *testing.T, hub *Hub, token string, lastSeq uint64, features []string) [][]byte {
+	t.Helper()
 	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
 
@@ -680,10 +686,11 @@ func dialAndResume(t *testing.T, hub *Hub, token string, lastSeq uint64) [][]byt
 	}
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
 
-	raw, _ := json.Marshal(map[string]any{
-		"type":    "auth",
-		"payload": map[string]any{"token": token, "last_seq": lastSeq},
-	})
+	authPayload := map[string]any{"token": token, "last_seq": lastSeq}
+	if features != nil {
+		authPayload["features"] = features
+	}
+	raw, _ := json.Marshal(map[string]any{"type": "auth", "payload": authPayload})
 	if err := conn.Write(dialCtx, websocket.MessageText, raw); err != nil {
 		t.Fatalf("write auth: %v", err)
 	}
@@ -804,7 +811,7 @@ func TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts(t *testi
 	if err != nil || existing == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
-	if _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
+	if _, _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
 		Name: existing.Name, NSFW: false,
 	}, nil); err != nil {
 		t.Fatalf("AdminUpdateChannel (unlabel): %v", err)
@@ -817,7 +824,7 @@ func TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts(t *testi
 	if err != nil || existing == nil {
 		t.Fatalf("GetChannel (re-read): %v", err)
 	}
-	if _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
+	if _, _, err := f.svc.Channels.AdminUpdateChannel(ctx, f.authorID, existing, service.AdminChannelUpdate{
 		Name: existing.Name, NSFW: true,
 	}, nil); err != nil {
 		t.Fatalf("AdminUpdateChannel (relabel): %v", err)

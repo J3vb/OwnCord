@@ -21,6 +21,7 @@ const (
 	MuteMembers     = int64(0x100000)   // bit 20
 	MentionEveryone = int64(0x200000)   // bit 21
 	ModerateMembers = int64(0x400000)   // bit 22 — warn and time out members, work the report queue (B5-8/B5-9)
+	ManageNicknames = int64(0x800000)   // bit 23 — set or clear another member's nickname (WP 6.4); server-wide, outside AdminPerimeter
 	ManageRoles     = int64(0x1000000)  // bit 24
 	ManageServer    = int64(0x2000000)  // bit 25
 	ManageInvites   = int64(0x4000000)  // bit 26
@@ -33,7 +34,7 @@ const (
 const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
 	ConnectVoice | SpeakVoice | UseVideo | ShareScreen |
 	ManageMessages | ManageChannels | KickMembers | BanMembers | MuteMembers |
-	MentionEveryone | ModerateMembers | ManageRoles | ManageServer | ManageInvites | ViewAuditLog |
+	MentionEveryone | ModerateMembers | ManageNicknames | ManageRoles | ManageServer | ManageInvites | ViewAuditLog |
 	Administrator
 
 // AdminPerimeter is the set of bits that admits a principal to the /admin/api
@@ -68,6 +69,7 @@ var bitNames = map[int64]string{
 	MuteMembers:     "MUTE_MEMBERS",
 	MentionEveryone: "MENTION_EVERYONE",
 	ModerateMembers: "MODERATE_MEMBERS",
+	ManageNicknames: "MANAGE_NICKNAMES",
 	ManageRoles:     "MANAGE_ROLES",
 	ManageServer:    "MANAGE_SERVER",
 	ManageInvites:   "MANAGE_INVITES",
@@ -180,4 +182,35 @@ func EffectivePerms(rolePerm, allow, deny int64) int64 {
 func EffectiveChannelPerms(basePerms int64, o ChannelOverride) int64 {
 	roleLayer := EffectivePerms(basePerms, o.Allow, o.Deny)
 	return EffectivePerms(roleLayer, o.UserAllow, o.UserDeny)
+}
+
+// RoleGrant is one held role's contribution to a channel: the role's base
+// mask and that role's own channel override (Allow/Deny, zero when the role
+// has none there).
+type RoleGrant struct {
+	Perms int64
+	Allow int64
+	Deny  int64
+	// RoleID names the role for traces (Explain); the formula ignores it.
+	RoleID int64
+}
+
+// MemberChannelPerms resolves a member's permissions in ONE channel when they
+// hold several roles. Each held role is resolved with its OWN override, the
+// results are OR'd, and only then does the member's override apply:
+//
+//	roleLayer = OR over held roles r of ((perms_r & ^deny_r) | allow_r)
+//	effective = (roleLayer & ^userDeny) | userAllow
+//
+// A role therefore only ever adds permissions: a restrictive role (Member with
+// READ denied on a private channel) cannot take away a bit another held role
+// (Moderator) grants. For a single grant this is exactly EffectiveChannelPerms.
+// ADMINISTRATOR is not handled here, as in EffectiveChannelPerms: callers
+// short-circuit on HasAdmin of the OR of the held masks.
+func MemberChannelPerms(layers []RoleGrant, userAllow, userDeny int64) int64 {
+	var roleLayer int64
+	for _, g := range layers {
+		roleLayer |= EffectivePerms(g.Perms, g.Allow, g.Deny)
+	}
+	return EffectivePerms(roleLayer, userAllow, userDeny)
 }

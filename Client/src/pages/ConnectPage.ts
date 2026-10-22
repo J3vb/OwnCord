@@ -2,7 +2,7 @@
 // Thin composition shell that wires ServerPanel and LoginForm together.
 
 import { Disposable } from "@lib/disposable";
-import { createElement, appendChildren } from "@lib/dom";
+import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import { createLogger } from "@lib/logger";
 import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
@@ -13,6 +13,7 @@ import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
 import { createIncompatibleNotice } from "./connect-page/IncompatibleNotice";
 import { loadCredential } from "@lib/credentials";
+import { desktop } from "../platform/desktop";
 
 const log = createLogger("ConnectPage");
 
@@ -24,6 +25,7 @@ export type { SimpleProfile } from "./connect-page/ServerPanel";
 
 import type { SimpleProfile } from "./connect-page/ServerPanel";
 import { connectText } from "../i18n/connect";
+import { portalText } from "../i18n/portal";
 
 /** Callbacks for external wiring (API integration added later). */
 export interface ConnectPageCallbacks {
@@ -46,6 +48,8 @@ export interface ConnectPageCallbacks {
   getRetentionNotice?(host: string): string | null;
   /** A typed host settled in register mode; probe its `server-info` if unknown. */
   onHostSettled?(host: string): void;
+  /** The name `server-info` reported for a host, if known (the portal card's subtitle, WP 6.13e). */
+  getServerName?(host: string): string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +108,11 @@ export function createConnectPage(
   let container: Element | null = null;
   let root: HTMLDivElement;
 
+  // The one host a web portal signs in to (WP 6.13e). Read only behind
+  // `__OWNCORD_WEB__`: the server panel is built but not mounted, and a header
+  // names the server.
+  const fixedHost = __OWNCORD_WEB__ ? (desktop.serverScope.fixedHost ?? undefined) : undefined;
+
   // Cleanup tracking
   const disposable = new Disposable();
   const { signal } = disposable;
@@ -122,7 +131,23 @@ export function createConnectPage(
     getRegistrationMode: callbacks.getRegistrationMode,
     getRetentionNotice: callbacks.getRetentionNotice,
     onHostSettled: callbacks.onHostSettled,
+    // A typed host that is a saved profile takes that profile's two flags, so
+    // an opted-out profile is not overridden by the defaults. Applied once per
+    // match so later edits to the boxes are the user's own.
+    onHostInput: (host) => applySavedFlags(host),
+    ...(__OWNCORD_WEB__ ? { fixedHost } : {}),
   });
+  let knownProfiles: readonly SimpleProfile[] = initialProfiles;
+  let appliedProfileHost = "";
+  function applySavedFlags(host: string): void {
+    if (host === appliedProfileHost) return;
+    const saved = knownProfiles.find((p) => p.synthetic !== true && p.host === host) as
+      { autoConnect?: boolean; rememberPassword?: boolean } | undefined;
+    appliedProfileHost = saved ? host : "";
+    if (!saved) return;
+    loginForm.setAutoConnect(saved.autoConnect === true);
+    loginForm.setRememberPassword(saved.rememberPassword === true);
+  }
 
   // Per-host compatibility from the advisory preflight. The notice reads it
   // when the user selects a server; the 15 s probe only writes badges.
@@ -160,13 +185,21 @@ export function createConnectPage(
   const serverPanel = createServerPanel(
     {
       signal,
-      onServerClick(host: string, username?: string, autoConnect?: boolean) {
+      onServerClick(
+        host: string,
+        username?: string,
+        autoConnect?: boolean,
+        rememberPassword?: boolean,
+      ) {
         loginForm.cancelServerWaitUnless(host);
         loginForm.setHost(host);
         if (username) {
           loginForm.setCredentials(username);
         }
-        loginForm.setAutoConnect(autoConnect === true);
+        // A saved profile sets both boxes; a host with no profile gets the
+        // defaults (stay signed in, password not remembered).
+        loginForm.setAutoConnect(autoConnect ?? true);
+        loginForm.setRememberPassword(rememberPassword ?? false);
         // The notice appears only for the host the user selects — never for a
         // background-probe profile (Decision 2).
         selectHost(host);
@@ -183,6 +216,16 @@ export function createConnectPage(
     },
     initialProfiles,
   );
+
+  // The portal's one heading is the form card; its subtitle names the server:
+  // what `server-info` reported, else the host.
+  function refreshPortalName(): void {
+    if (!__OWNCORD_WEB__ || fixedHost === undefined) return;
+    const subtitle = loginForm.element.querySelector(".form-logo p");
+    if (subtitle === null) return;
+    const server = callbacks.getServerName?.(fixedHost) ?? fixedHost;
+    setText(subtitle, portalText("login.subtitle", { server }));
+  }
 
   // ---------------------------------------------------------------------------
   // DOM construction
@@ -268,9 +311,16 @@ export function createConnectPage(
     const brandTag = createElement("div", { class: "brand-tagline" }, connectText("brand.tagline"));
     appendChildren(branding, brandName, brandTag);
 
-    serverPanel.element.insertBefore(branding, serverPanel.element.firstChild);
-
-    appendChildren(root, serverPanel.element, loginForm.element);
+    if (__OWNCORD_WEB__ && fixedHost !== undefined) {
+      // One server: no list to pick from and no second brand block; the form
+      // card is the only heading and the panel is never mounted.
+      root.classList.add("connect-page--portal");
+      appendChildren(root, loginForm.element);
+      refreshPortalName();
+    } else {
+      serverPanel.element.insertBefore(branding, serverPanel.element.firstChild);
+      appendChildren(root, serverPanel.element, loginForm.element);
+    }
 
     // The incompatible-epoch notice sits above the form so it is seen before
     // another attempt; hidden until a mismatch is selected or refused. It goes
@@ -319,6 +369,7 @@ export function createConnectPage(
         onChangePassword: () => Promise.resolve(undefined),
         onUpdateProfile: () => Promise.resolve(),
         onUploadAvatar: notAuthenticated,
+        onRemoveAvatar: notAuthenticated,
         onLogout: () => {},
         onDeleteAccount: () => Promise.resolve(),
         onStatusChange: () => {},
@@ -426,6 +477,7 @@ export function createConnectPage(
     ) => {
       compatibilityByHost.set(host, { compatibility, serverEpoch });
       serverPanel.updateCompatibility(host, compatibility);
+      refreshPortalName();
       // A fresh server-info snapshot may change the host's registration mode;
       // re-derive the register affordances if it is the selected host.
       if (loginForm.getHost().trim() === host) {
@@ -441,7 +493,11 @@ export function createConnectPage(
     getPassword: () => loginForm.getPassword(),
     isUsingSavedPassword: () => loginForm.isUsingSavedPassword(),
     refreshProfiles(profiles: readonly SimpleProfile[]): void {
+      knownProfiles = profiles;
       serverPanel.renderProfiles(profiles);
+      // Profiles load after the form mounts; a host typed before they arrived
+      // still takes its saved profile's flags.
+      applySavedFlags(loginForm.getHost().trim());
     },
     selectServer(
       host: string,
@@ -453,7 +509,8 @@ export function createConnectPage(
       if (username) {
         loginForm.setCredentials(username);
       }
-      loginForm.setAutoConnect(autoConnect === true);
+      loginForm.setAutoConnect(autoConnect ?? true);
+      loginForm.setRememberPassword(rememberPassword ?? false);
       // A profile that opted out must not pick up a stored credential that outlived the opt-out.
       if (rememberPassword === false) return;
       // Load saved credentials asynchronously (same flow as clicking a server card)

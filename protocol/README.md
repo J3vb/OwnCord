@@ -110,6 +110,42 @@ fixed list that the client switches on: `threshold_mode`, `quality`, `status`,
 `replay_source`, a channel `type`. Renaming or dropping a member of such a list
 is a protocol change, even though only a value moved.
 
+## N-1 compatibility
+
+Clients lag the server: a user can be one release behind. The
+`Protocol N-1 Compatibility` workflow (`.github/workflows/protocol-compat.yml`)
+checks that the **previous release's client** still works against the wire the
+server sends today. It runs on pull requests that touch `protocol/fixtures/**`
+or the check itself, weekly, and on demand.
+
+It checks out the newest release tag, then does two things with that tree's own
+client code:
+
+- **Strict.** Every fixture the tag also has is overwritten with the current
+  one, and the tag's own contract test
+  (`Client/tests/contract/protocol-fixtures.test.ts`) runs. This proves every
+  frame that release relied on still has the shape it reads.
+- **Tolerant.** Fixtures that are new since the tag are replayed through its
+  dispatcher (`Client/tests/compat/n1-new-frames.compat.ts`). The only
+  assertion is that no handler throws; an old client may log about a frame it
+  does not know.
+
+Run it locally from the repository root. It needs the release tags and an
+`npm ci` of the old client, and removes its temporary worktree afterwards:
+
+```bash
+node scripts/protocol-n1-compat.mjs                  # newest release tag
+node scripts/protocol-n1-compat.mjs --tag v2.2.0-beta.3
+node scripts/protocol-n1-compat.mjs --keep           # keep the worktree to debug in
+```
+
+If it fails, the change breaks the last release's clients. Do not edit the
+fixtures or the old test to make it pass. Make the change additive (an optional
+field, a new frame the old client can ignore), or plan an epoch bump as
+described in [`docs/protocol.md`](../docs/protocol.md), _Compatibility_. A
+failure in the tolerant half means an old handler throws on a new frame; guard
+the frame so it is ignorable.
+
 ## Further reading
 
 - The narrative protocol reference: [`docs/protocol.md`](../docs/protocol.md)

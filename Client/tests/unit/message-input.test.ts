@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /** Captured emoji picker callbacks so tests can simulate selection. */
-let lastEmojiPickerOptions: { onSelect: (emoji: string) => void; onClose: () => void } | null =
-  null;
+let lastEmojiPickerOptions: {
+  onSelect: (emoji: string, select?: { keepOpen: boolean }) => void;
+  onClose: () => void;
+} | null = null;
 
 vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: (opts: { onSelect: (emoji: string) => void; onClose: () => void }) => {
+  createEmojiPicker: (opts: NonNullable<typeof lastEmojiPickerOptions>) => {
     lastEmojiPickerOptions = opts;
     const element = document.createElement("div");
     element.classList.add("emoji-picker");
@@ -37,6 +39,7 @@ import {
 } from "@components/MessageInput";
 import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
 import { authStore } from "@stores/auth.store";
+import { canMention, mentionInComposer } from "../../src/features/messaging/activeComposer";
 
 /** GIF endpoints on the user's own server (never api.klipy.com). */
 const stubGifApi: GifApi & GifFavoritesApi = {
@@ -54,7 +57,6 @@ function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInput
     gifApi: stubGifApi,
     onSend: vi.fn(),
     onTyping: vi.fn(),
-    onEditMessage: vi.fn(),
     ...overrides,
   };
 }
@@ -106,7 +108,7 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    expect(opts.onSend).toHaveBeenCalledWith("Hello world", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("Hello world", null, [], [], false);
 
     comp.destroy?.();
   });
@@ -121,7 +123,7 @@ describe("MessageInput", () => {
 
     textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 
-    expect(opts.onSend).toHaveBeenCalledWith("Enter message", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("Enter message", null, [], [], false);
 
     comp.destroy?.();
   });
@@ -190,7 +192,6 @@ describe("MessageInput", () => {
     sendBtn.click();
 
     expect(opts.onSend).not.toHaveBeenCalled();
-    expect(opts.onEditMessage).not.toHaveBeenCalled();
     const errEl = container.querySelector(".attachment-upload-error");
     expect(errEl).not.toBeNull();
     expect(errEl?.textContent).toContain("4000");
@@ -198,21 +199,50 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("refuses an over-long edit through the same guard", () => {
+  it("dismisses the refusal line with its close button", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
-    comp.startEdit(77, "x");
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "a".repeat(4001);
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
 
-    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
-    sendBtn.click();
+    const dismiss = container.querySelector(
+      ".attachment-upload-error-dismiss",
+    ) as HTMLButtonElement | null;
+    expect(dismiss?.getAttribute("aria-label")).toBe("Dismiss");
+    dismiss!.click();
 
-    expect(opts.onEditMessage).not.toHaveBeenCalled();
-    expect(opts.onSend).not.toHaveBeenCalled();
-    expect(container.querySelector(".attachment-upload-error")).not.toBeNull();
+    expect(container.querySelector(".attachment-upload-error")).toBeNull();
+    expect(container.querySelector(".attachment-preview-bar")?.classList.contains("visible")).toBe(
+      false,
+    );
+    expect(textarea.hasAttribute("aria-describedby")).toBe(false);
+    expect(document.activeElement).toBe(textarea);
+
+    comp.destroy?.();
+  });
+
+  it("keeps the dismiss button, and its focus, when the shown reason changes", () => {
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    comp.setSendGate("Slow mode: wait 5s");
+    (container.querySelector(".send-btn") as HTMLButtonElement).click();
+    const dismiss = container.querySelector(
+      ".attachment-upload-error-dismiss",
+    ) as HTMLButtonElement;
+    dismiss.focus();
+
+    comp.setSendGate("Slow mode: wait 4s");
+
+    expect(container.querySelector(".attachment-upload-error")?.textContent).toBe(
+      "Slow mode: wait 4s",
+    );
+    expect(container.querySelector(".attachment-upload-error-dismiss")).toBe(dismiss);
+    expect(document.activeElement).toBe(dismiss);
 
     comp.destroy?.();
   });
@@ -279,7 +309,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("isIdle is true only with no text, reply or edit", () => {
+  it("isIdle is true only with no text or reply", () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
@@ -293,165 +323,12 @@ describe("MessageInput", () => {
     expect(comp.isIdle()).toBe(false);
     comp.clearReply();
 
-    comp.startEdit(99, "");
-    expect(comp.isIdle()).toBe(false);
-    comp.cancelEdit();
     expect(comp.isIdle()).toBe(true);
 
     comp.destroy?.();
   });
 
-  it("startEdit sets textarea value and shows edit bar", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    comp.startEdit(99, "editing this");
-
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    expect(textarea.value).toBe("editing this");
-
-    // The edit bar is the second .reply-bar
-    const bars = container.querySelectorAll(".reply-bar");
-    const editBar = bars[1] as HTMLDivElement;
-    expect(editBar.classList.contains("visible")).toBe(true);
-
-    comp.destroy?.();
-  });
-
-  it("cancelEdit clears textarea and hides edit bar", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    comp.startEdit(99, "editing this");
-    comp.cancelEdit();
-
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    expect(textarea.value).toBe("");
-
-    const bars = container.querySelectorAll(".reply-bar");
-    const editBar = bars[1] as HTMLDivElement;
-    expect(editBar.classList.contains("visible")).toBe(false);
-
-    comp.destroy?.();
-  });
-
   // ── P1-08: an edit keeps what you were typing ──
-
-  it("cancelEdit restores the draft and reply the edit displaced", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-
-    textarea.value = "draft";
-    comp.setReplyTo(7, "alice");
-    comp.startEdit(88, "original body");
-    expect(textarea.value).toBe("original body");
-    const bars = container.querySelectorAll(".reply-bar");
-    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(false);
-
-    comp.cancelEdit();
-
-    expect(textarea.value).toBe("draft");
-    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(true);
-    expect(bars[0]!.textContent).toContain("alice");
-    comp.destroy?.();
-  });
-
-  it("sending an edit restores the draft and reply the edit displaced", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-
-    textarea.value = "draft";
-    comp.setReplyTo(7, "alice");
-    comp.startEdit(88, "original body");
-
-    textarea.value = "edited body";
-    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-
-    expect(opts.onEditMessage).toHaveBeenCalledWith(88, "edited body");
-    expect(opts.onSend).not.toHaveBeenCalled();
-    expect(textarea.value).toBe("draft");
-    const bars = container.querySelectorAll(".reply-bar");
-    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(true);
-    comp.destroy?.();
-  });
-
-  it("getDraft during an edit returns the stashed pre-edit draft", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-
-    textarea.value = "draft";
-    comp.setReplyTo(7, "alice");
-    comp.startEdit(88, "original body");
-
-    const draft = comp.getDraft();
-    expect(draft.content).toBe("draft");
-    expect(draft.replyTo).toEqual({ messageId: 7, username: "alice" });
-    comp.destroy?.();
-  });
-
-  it("a channel switch mid-edit restores the pre-edit draft on return (P1-08)", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-
-    textarea.value = "draft";
-    comp.setReplyTo(7, "alice");
-    comp.startEdit(88, "original body");
-
-    // What ChannelController stashes before tearing the composer down.
-    const stashed = comp.getDraft();
-    comp.destroy?.();
-
-    const next = createMessageInput(opts);
-    next.mount(container);
-    next.restoreDraft(stashed);
-
-    const restored = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    expect(restored.value).toBe("draft");
-    const bars = container.querySelectorAll(".reply-bar");
-    expect((bars[0] as HTMLDivElement).classList.contains("visible")).toBe(true);
-    expect(bars[0]!.textContent).toContain("alice");
-    next.destroy?.();
-  });
-
-  it("staged attachments survive an edit and return with the pre-edit draft", async () => {
-    const onUploadFile = vi.fn(async () => ({ id: "srv-1", url: "/f/1", filename: "a.png" }));
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", {
-      value: [new File(["x"], "a.png", { type: "image/png" })],
-      writable: true,
-    });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
-
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    textarea.value = "draft";
-    comp.startEdit(88, "original body");
-
-    // The edit never touches the staged chip...
-    expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
-    comp.cancelEdit();
-
-    // ...and it rides the restored draft.
-    expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
-    expect(textarea.value).toBe("draft");
-    (container.querySelector(".send-btn") as HTMLButtonElement).click();
-    expect(opts.onSend).toHaveBeenCalledWith("draft", null, ["srv-1"]);
-    comp.destroy?.();
-  });
 
   it("typing emits onTyping (throttled)", () => {
     vi.useFakeTimers();
@@ -519,105 +396,6 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  // ── Edit mode sends via onEditMessage ──
-
-  it("sending in edit mode calls onEditMessage instead of onSend", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    comp.startEdit(77, "old content");
-
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    textarea.value = "updated content";
-
-    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
-    sendBtn.click();
-
-    expect(opts.onEditMessage).toHaveBeenCalledWith(77, "updated content");
-    expect(opts.onSend).not.toHaveBeenCalled();
-
-    // After send, edit bar should be hidden and textarea cleared
-    const bars = container.querySelectorAll(".reply-bar");
-    const editBar = bars[1] as HTMLDivElement;
-    expect(editBar.classList.contains("visible")).toBe(false);
-    expect(textarea.value).toBe("");
-
-    comp.destroy?.();
-  });
-
-  // ── Emptied edits are refused, never submitted ──
-
-  it("does not submit an emptied edit while an attachment is queued", async () => {
-    const uploadResult = { id: "srv-9", url: "http://server/pic.png", filename: "pic.png" };
-    const onUploadFile = vi.fn(async () => uploadResult);
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    // Queue an attachment first, then enter edit mode.
-    const testFile = new File(["image data"], "pic.png", { type: "image/png" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [testFile], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-    await vi.waitFor(() => {
-      expect(onUploadFile).toHaveBeenCalledWith(
-        testFile,
-        expect.any(AbortSignal),
-        expect.any(Function),
-      );
-    });
-    // Wait for the upload to fully settle so the send is not blocked by the
-    // uploads-in-flight guard instead of the empty-content one.
-    const previewBar = container.querySelector(".attachment-preview-bar");
-    await vi.waitFor(() => {
-      expect(previewBar!.querySelector(".uploading")).toBeNull();
-    });
-
-    comp.startEdit(77, "old content");
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    textarea.value = "";
-
-    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
-    sendBtn.click();
-
-    // Same as with no attachment queued: the empty edit is refused and edit
-    // mode survives.
-    expect(opts.onEditMessage).not.toHaveBeenCalled();
-    expect(opts.onSend).not.toHaveBeenCalled();
-    const bars = container.querySelectorAll(".reply-bar");
-    const editBar = bars[1] as HTMLDivElement;
-    expect(editBar.classList.contains("visible")).toBe(true);
-
-    // Typing real content and sending again still submits the edit.
-    textarea.value = "fixed content";
-    sendBtn.click();
-    expect(opts.onEditMessage).toHaveBeenCalledWith(77, "fixed content");
-
-    comp.destroy?.();
-  });
-
-  it("emptied edit with no attachment queued is a no-op that stays in edit mode", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    comp.startEdit(88, "old content");
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    textarea.value = "";
-
-    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
-    sendBtn.click();
-
-    expect(opts.onEditMessage).not.toHaveBeenCalled();
-    expect(opts.onSend).not.toHaveBeenCalled();
-    const bars = container.querySelectorAll(".reply-bar");
-    const editBar = bars[1] as HTMLDivElement;
-    expect(editBar.classList.contains("visible")).toBe(true);
-
-    comp.destroy?.();
-  });
-
   it("sends an attachment-only message with no text", async () => {
     const uploadResult = { id: "srv-7", url: "http://server/pic.png", filename: "pic.png" };
     const onUploadFile = vi.fn(async () => uploadResult);
@@ -644,7 +422,13 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    expect(opts.onSend).toHaveBeenCalledWith("", null, ["srv-7"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "",
+      null,
+      ["srv-7"],
+      [expect.objectContaining({ id: "srv-7" })],
+      false,
+    );
 
     comp.destroy?.();
   });
@@ -664,7 +448,7 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    expect(opts.onSend).toHaveBeenCalledWith("reply content", 55, []);
+    expect(opts.onSend).toHaveBeenCalledWith("reply content", 55, [], [], true);
 
     // Reply bar should be hidden after send
     const replyBar = container.querySelector(".reply-bar") as HTMLDivElement;
@@ -674,25 +458,6 @@ describe("MessageInput", () => {
   });
 
   // ── Escape key behavior ──
-
-  it("escape key cancels edit mode", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    comp.startEdit(88, "editing");
-
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-
-    // Edit bar should be hidden
-    const bars = container.querySelectorAll(".reply-bar");
-    const editBar = bars[1] as HTMLDivElement;
-    expect(editBar.classList.contains("visible")).toBe(false);
-    expect(textarea.value).toBe("");
-
-    comp.destroy?.();
-  });
 
   it("escape key clears reply when not in edit mode", () => {
     const opts = makeOptions();
@@ -706,6 +471,24 @@ describe("MessageInput", () => {
 
     const replyBar = container.querySelector(".reply-bar") as HTMLDivElement;
     expect(replyBar.classList.contains("visible")).toBe(false);
+
+    comp.destroy?.();
+  });
+
+  it("an Escape that cancels a reply is used up; one with nothing to cancel is not", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    const escape = (): KeyboardEvent => {
+      const e = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+      textarea.dispatchEvent(e);
+      return e;
+    };
+
+    comp.setReplyTo(44, "replyuser");
+    expect(escape().defaultPrevented).toBe(true);
+    // Nothing left to cancel: the app-wide Escape (mark read) may have it.
+    expect(escape().defaultPrevented).toBe(false);
 
     comp.destroy?.();
   });
@@ -730,18 +513,25 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("ArrowUp that opens an edit cancels the default caret move", () => {
+  it("MessageInput has no edit mode: ArrowUp only dispatches edit-last-message", () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    container.addEventListener("edit-last-message", () => comp.startEdit(5, "last message"));
+    const listener = vi.fn();
+    container.addEventListener("edit-last-message", listener);
 
     const event = new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true });
     textarea.dispatchEvent(event);
 
+    // The event is the whole hand-off: the caret move is cancelled, the
+    // composer text is left alone, and there is no edit bar or edit API.
+    expect(listener).toHaveBeenCalledTimes(1);
     expect(event.defaultPrevented).toBe(true);
-    expect(textarea.value).toBe("last message");
+    expect(textarea.value).toBe("");
+    expect(container.querySelectorAll(".reply-bar").length).toBe(1);
+    expect("startEdit" in comp).toBe(false);
+    expect("cancelEdit" in comp).toBe(false);
 
     comp.destroy?.();
   });
@@ -809,27 +599,6 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
-    it("never stashes the in-progress edit text as a new-message draft", () => {
-      const opts = makeOptions();
-      const comp = createMessageInput(opts);
-      comp.mount(container);
-      comp.startEdit(5, "original text");
-
-      // The pre-edit draft (empty here) is stashed, never the edit text.
-      const draft = comp.getDraft();
-      expect(draft).toEqual({ content: "", replyTo: null, attachments: [] });
-
-      // Restored into a fresh composer, Enter must not repost the edit text.
-      comp.destroy?.();
-      const next = createMessageInput(opts);
-      next.mount(container);
-      next.restoreDraft(draft);
-      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      expect(opts.onSend).not.toHaveBeenCalled();
-      next.destroy?.();
-    });
-
     it("drops restored attachments past the server's unlinked-upload sweep, with one notice", () => {
       const opts = makeOptions();
       const comp = createMessageInput(opts);
@@ -854,7 +623,13 @@ describe("MessageInput", () => {
       expect(notices[0]!.textContent).toMatch(/expired/i);
 
       (container.querySelector(".send-btn") as HTMLButtonElement).click();
-      expect(opts.onSend).toHaveBeenCalledWith("with files", null, ["fresh"]);
+      expect(opts.onSend).toHaveBeenCalledWith(
+        "with files",
+        null,
+        ["fresh"],
+        [expect.objectContaining({ id: "fresh" })],
+        false,
+      );
       comp.destroy?.();
     });
 
@@ -928,7 +703,7 @@ describe("MessageInput", () => {
 
       comp.setDisabled(null);
       (container.querySelector(".send-btn") as HTMLButtonElement).click();
-      expect(opts.onSend).toHaveBeenCalledWith("queued", null, []);
+      expect(opts.onSend).toHaveBeenCalledWith("queued", null, [], [], false);
       comp.destroy?.();
     });
 
@@ -948,6 +723,40 @@ describe("MessageInput", () => {
       expect(reason!.textContent).toBe("Slow mode — 4s");
       expect(textarea.getAttribute("aria-describedby")).toBe(reason!.id);
       expect(opts.onSend).not.toHaveBeenCalled();
+      comp.destroy?.();
+    });
+
+    it("shows a slow-mode note under the composer and hides it again, never gating Send", () => {
+      const opts = makeOptions();
+      const comp = createMessageInput(opts);
+      comp.mount(container);
+      const note = (): HTMLElement | null =>
+        container.querySelector<HTMLElement>("[data-testid='slow-mode-note']");
+      expect(note()?.hidden).toBe(true);
+
+      comp.setSlowModeNote("Slow mode is on: one message every 5s");
+      expect(note()?.hidden).toBe(false);
+      expect(note()?.textContent).toBe("Slow mode is on: one message every 5s");
+
+      // The note is information only: the first send still goes.
+      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+      textarea.value = "first message";
+      (container.querySelector(".send-btn") as HTMLButtonElement).click();
+      expect(opts.onSend).toHaveBeenCalledWith("first message", null, [], [], false);
+
+      comp.setSlowModeNote(null);
+      expect(note()?.hidden).toBe(true);
+      expect(note()?.textContent).toBe("");
+      comp.destroy?.();
+    });
+
+    it("keeps a slow-mode note set before mount", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.setSlowModeNote("Slow mode is on: one message every 9s");
+      comp.mount(container);
+      expect(container.querySelector("[data-testid='slow-mode-note']")?.textContent).toBe(
+        "Slow mode is on: one message every 9s",
+      );
       comp.destroy?.();
     });
 
@@ -982,7 +791,7 @@ describe("MessageInput", () => {
       // Lifting the gate allows the send.
       comp.setSendGate(null);
       (container.querySelector(".send-btn") as HTMLButtonElement).click();
-      expect(opts.onSend).toHaveBeenCalledWith("typing through the cooldown", null, []);
+      expect(opts.onSend).toHaveBeenCalledWith("typing through the cooldown", null, [], [], false);
       comp.destroy?.();
     });
 
@@ -1031,7 +840,7 @@ describe("MessageInput", () => {
       expect(container.querySelector(".attachment-upload-error")).toBeNull();
       expect(textarea.hasAttribute("aria-describedby")).toBe(false);
       textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      expect(opts.onSend).toHaveBeenCalledWith("mid-sentence", null, []);
+      expect(opts.onSend).toHaveBeenCalledWith("mid-sentence", null, [], [], false);
       comp.destroy?.();
     });
 
@@ -1062,7 +871,7 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
-    it("does not enter edit mode on ArrowUp while gated", () => {
+    it("does not ask for an edit on ArrowUp while gated", () => {
       const comp = createMessageInput(makeOptions());
       comp.mount(container);
       comp.setDisabled("Slow mode — 5s");
@@ -1139,7 +948,13 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    expect(opts.onSend).toHaveBeenCalledWith("with attachment", null, ["srv-123"]);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "with attachment",
+      null,
+      ["srv-123"],
+      [expect.objectContaining({ id: "srv-123" })],
+      false,
+    );
 
     comp.destroy?.();
   });
@@ -1451,12 +1266,12 @@ describe("MessageInput", () => {
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "hello";
     (container.querySelector(".send-btn") as HTMLButtonElement).click();
-    expect(opts.onSend).toHaveBeenCalledWith("hello", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith("hello", null, [], [], false);
 
     comp.destroy?.();
   });
 
-  it("removing a finished upload keeps Send blocked on a later in-flight one", async () => {
+  it("removing a finished upload leaves only the in-flight one in the queued send", async () => {
     const onUploadFile = vi
       .fn<
         (file: File, signal?: AbortSignal) => Promise<{ id: string; url: string; filename: string }>
@@ -1487,8 +1302,18 @@ describe("MessageInput", () => {
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "hello";
     (container.querySelector(".send-btn") as HTMLButtonElement).click();
-    expect(opts.onSend).not.toHaveBeenCalled();
-    expect(container.querySelector(".attachment-preview-item")).not.toBeNull();
+    // 3A-9: the removed upload's id is never sent; only b.pdf is queued.
+    expect(opts.onSend).toHaveBeenCalledOnce();
+    const call = vi.mocked(opts.onSend).mock.calls[0]!;
+    expect(call.slice(0, 5)).toEqual(["hello", null, [], [], false]);
+    expect(call[5]).toEqual([
+      {
+        filename: "b.pdf",
+        file: expect.any(File),
+        upload: expect.objectContaining({ filename: "b.pdf" }),
+      },
+    ]);
+    expect(container.querySelector(".attachment-preview-item")).toBeNull();
 
     comp.destroy?.();
   });
@@ -1544,8 +1369,8 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("blocks send while uploads are still in flight", async () => {
-    // Create an upload that never resolves during the test
+  it("queues the send while uploads are still in flight", async () => {
+    // Create an upload that stays pending until the test resolves it
     let resolveUpload: ((v: { id: string; url: string; filename: string }) => void) | null = null;
     const onUploadFile = vi.fn(
       () =>
@@ -1568,16 +1393,23 @@ describe("MessageInput", () => {
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
 
-    // Should NOT have sent -- upload still pending
-    expect(opts.onSend).not.toHaveBeenCalled();
-    // Should show "wait" error
-    const error = container.querySelector(".attachment-upload-error");
-    expect(error).not.toBeNull();
-    expect(error!.textContent).toContain("wait for uploads");
+    // 3A-9: the send goes to the host as a queued one, the composer is empty
+    // at once, and nothing is refused.
+    expect(opts.onSend).toHaveBeenCalledOnce();
+    const call = vi.mocked(opts.onSend).mock.calls[0]!;
+    expect(call.slice(0, 5)).toEqual(["trying to send", null, [], [], false]);
+    expect(call[5]).toEqual([
+      { filename: "doc.txt", file, upload: expect.objectContaining({ filename: "doc.txt" }) },
+    ]);
+    expect(textarea.value).toBe("");
+    expect(container.querySelector(".attachment-preview-item")).toBeNull();
+    expect(container.querySelector(".attachment-upload-error")?.textContent ?? "").toBe("");
 
-    // Now resolve the upload
+    // Once the upload resolves the composer sends nothing more and shows no error.
     resolveUpload!({ id: "done", url: "http://x", filename: "doc.txt" });
     await new Promise((r) => setTimeout(r, 10));
+    expect(opts.onSend).toHaveBeenCalledOnce();
+    expect(container.querySelector(".attachment-upload-error")?.textContent ?? "").toBe("");
 
     comp.destroy?.();
   });
@@ -1665,96 +1497,7 @@ describe("MessageInput", () => {
     textarea.value = "no attachment";
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
     sendBtn.click();
-    expect(opts.onSend).toHaveBeenCalledWith("no attachment", null, []);
-
-    comp.destroy?.();
-  });
-
-  it("refuses to attach a file while editing a message", async () => {
-    const onUploadFile = vi.fn(async () => ({
-      id: "srv-1",
-      url: "http://x.png",
-      filename: "x.png",
-    }));
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    comp.startEdit(77, "old content");
-
-    const file = new File(["data"], "photo.png", { type: "image/png" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-
-    await new Promise((r) => setTimeout(r, 10));
-
-    // Must not upload, and must not silently ride along with the next
-    // ordinary send once the edit is cancelled.
-    expect(onUploadFile).not.toHaveBeenCalled();
-    expect(container.querySelector(".attachment-upload-error")).not.toBeNull();
-
-    comp.destroy?.();
-  });
-
-  // ── setReplyTo clears edit mode ──
-
-  it("setReplyTo hides edit bar if editing", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    comp.startEdit(88, "editing");
-    const bars = container.querySelectorAll(".reply-bar");
-    const editBar = bars[1] as HTMLDivElement;
-    expect(editBar.classList.contains("visible")).toBe(true);
-
-    comp.setReplyTo(55, "replying");
-
-    // Edit bar hidden, reply bar shown
-    expect(editBar.classList.contains("visible")).toBe(false);
-    const replyBar = bars[0] as HTMLDivElement;
-    expect(replyBar.classList.contains("visible")).toBe(true);
-
-    comp.destroy?.();
-  });
-
-  it("setReplyTo while editing clears the stale edit text from the textarea", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    comp.startEdit(88, "old message body");
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-    expect(textarea.value).toBe("old message body");
-
-    comp.setReplyTo(55, "replying");
-
-    // The edit text must not survive into reply mode -- otherwise Enter
-    // reposts it verbatim as a duplicate reply.
-    expect(textarea.value).toBe("");
-
-    comp.destroy?.();
-  });
-
-  // ── startEdit clears reply mode ──
-
-  it("startEdit hides reply bar if replying", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
-
-    comp.setReplyTo(55, "replying");
-    const bars = container.querySelectorAll(".reply-bar");
-    const replyBar = bars[0] as HTMLDivElement;
-    expect(replyBar.classList.contains("visible")).toBe(true);
-
-    comp.startEdit(88, "now editing");
-
-    // Reply bar hidden, edit bar shown
-    expect(replyBar.classList.contains("visible")).toBe(false);
-    const editBar = bars[1] as HTMLDivElement;
-    expect(editBar.classList.contains("visible")).toBe(true);
+    expect(opts.onSend).toHaveBeenCalledWith("no attachment", null, [], [], false);
 
     comp.destroy?.();
   });
@@ -1780,19 +1523,15 @@ describe("MessageInput", () => {
 
   // ── Accessible names for icon-only composer controls (B9-22) ──
 
-  it("names the reply and edit close buttons (B9-22)", () => {
+  it("names the reply close button (B9-22)", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     comp.setReplyTo(1, "x");
-    comp.startEdit(2, "draft");
 
-    const bars = container.querySelectorAll(".reply-bar");
-    const replyClose = (bars[0] as HTMLElement).querySelector(".reply-close")!;
-    const editClose = (bars[1] as HTMLElement).querySelector(".reply-close")!;
+    const replyClose = container.querySelector(".reply-bar .reply-close")!;
     expect(replyClose.getAttribute("aria-label")).toBe("Cancel reply");
-    expect(editClose.getAttribute("aria-label")).toBe("Cancel editing");
 
     comp.destroy?.();
   });
@@ -1841,13 +1580,14 @@ describe("MessageInput", () => {
 
   // ── Emoji picker ──
 
-  it("clicking emoji button opens emoji picker", () => {
+  it("clicking emoji button opens emoji picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
 
     const picker = container.querySelector(".emoji-picker");
     expect(picker).not.toBeNull();
@@ -1855,7 +1595,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("selecting emoji inserts it into textarea at cursor position", () => {
+  it("selecting emoji inserts it into textarea at cursor position", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1868,6 +1608,7 @@ describe("MessageInput", () => {
     // Open picker
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
 
     expect(lastEmojiPickerOptions).not.toBeNull();
     lastEmojiPickerOptions!.onSelect("🎉");
@@ -1878,15 +1619,79 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("a plain pick closes the emoji picker", async () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    (container.querySelector(".emoji-btn") as HTMLElement).click();
+    await vi.dynamicImportSettled();
+
+    lastEmojiPickerOptions!.onSelect("🎉");
+
+    expect(container.querySelector(".emoji-picker")).toBeNull();
+    comp.destroy?.();
+  });
+
+  it("a Shift-pick inserts at the caret and keeps the picker open for the next one", async () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    textarea.value = "ab";
+    textarea.selectionStart = textarea.selectionEnd = 1;
+    (container.querySelector(".emoji-btn") as HTMLElement).click();
+    await vi.dynamicImportSettled();
+
+    lastEmojiPickerOptions!.onSelect("🎉", { keepOpen: true });
+    lastEmojiPickerOptions!.onSelect("🔥", { keepOpen: true });
+
+    expect(textarea.value).toBe("a🎉🔥b");
+    expect(textarea.selectionStart).toBe("a🎉🔥".length);
+    expect(container.querySelector(".emoji-picker")).not.toBeNull();
+    comp.destroy?.();
+  });
+
+  it("togglePicker opens and closes the emoji and GIF pickers like their buttons", async () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+
+    comp.togglePicker("emoji");
+    await vi.dynamicImportSettled();
+    expect(container.querySelector(".emoji-picker")).not.toBeNull();
+    comp.togglePicker("gif");
+    await vi.dynamicImportSettled();
+    expect(container.querySelector(".emoji-picker")).toBeNull();
+    expect(container.querySelector(".gif-picker")).not.toBeNull();
+    comp.togglePicker("gif");
+    await vi.dynamicImportSettled();
+    expect(container.querySelector(".gif-picker")).toBeNull();
+
+    comp.destroy?.();
+  });
+
+  it("togglePicker does nothing while the composer is disabled", async () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    comp.setDisabled("No permission");
+
+    comp.togglePicker("emoji");
+    await vi.dynamicImportSettled();
+    comp.togglePicker("gif");
+    await vi.dynamicImportSettled();
+
+    expect(container.querySelector(".emoji-picker")).toBeNull();
+    expect(container.querySelector(".gif-picker")).toBeNull();
+    comp.destroy?.();
+  });
+
   // ── GIF picker ──
 
-  it("clicking GIF button opens GIF picker", () => {
+  it("clicking GIF button opens GIF picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
 
     const picker = container.querySelector(".gif-picker");
     expect(picker).not.toBeNull();
@@ -1894,29 +1699,37 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("selecting a GIF sends it as a message immediately", () => {
+  it("selecting a GIF sends it as a message immediately", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
 
     expect(lastGifPickerOptions).not.toBeNull();
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
-    expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "https://media.klipy.com/example.gif",
+      null,
+      [],
+      [],
+      false,
+    );
 
     comp.destroy?.();
   });
 
-  it("selecting a GIF under a slow-mode send gate is refused with the reason", () => {
+  it("selecting a GIF under a slow-mode send gate is refused with the reason", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
 
     comp.setSendGate("Slow mode — 5s");
     (container.querySelector(".gif-btn") as HTMLElement).click();
+    await vi.dynamicImportSettled();
     expect(lastGifPickerOptions).not.toBeNull();
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
@@ -1926,7 +1739,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("selecting a GIF sends it without discarding a typed draft", () => {
+  it("selecting a GIF sends it without discarding a typed draft", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1936,11 +1749,18 @@ describe("MessageInput", () => {
 
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
     expect(lastGifPickerOptions).not.toBeNull();
     lastGifPickerOptions!.onSelect("https://media.klipy.com/example.gif");
 
     // The GIF is sent as its own message...
-    expect(opts.onSend).toHaveBeenCalledWith("https://media.klipy.com/example.gif", null, []);
+    expect(opts.onSend).toHaveBeenCalledWith(
+      "https://media.klipy.com/example.gif",
+      null,
+      [],
+      [],
+      false,
+    );
     // ...and the user's typed draft survives, instead of being overwritten
     // and thrown away.
     expect(textarea.value).toBe("wait for it...");
@@ -1948,7 +1768,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("opening GIF picker closes emoji picker", () => {
+  it("opening GIF picker closes emoji picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1956,11 +1776,13 @@ describe("MessageInput", () => {
     // Open emoji picker first
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".emoji-picker")).not.toBeNull();
 
     // Open GIF picker
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
 
     // Emoji picker should be removed
     expect(container.querySelector(".emoji-picker")).toBeNull();
@@ -1974,6 +1796,7 @@ describe("MessageInput", () => {
     const comp = createMessageInput(makeOptions());
     comp.mount(container);
     (container.querySelector(".gif-btn") as HTMLElement).click();
+    await vi.dynamicImportSettled();
     await new Promise((r) => setTimeout(r, 0));
 
     const overlay = document.createElement("div");
@@ -1991,7 +1814,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("opening emoji picker closes GIF picker", () => {
+  it("opening emoji picker closes GIF picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1999,11 +1822,13 @@ describe("MessageInput", () => {
     // Open GIF picker first
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".gif-picker")).not.toBeNull();
 
     // Open emoji picker
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
 
     // GIF picker should be removed
     expect(container.querySelector(".gif-picker")).toBeNull();
@@ -2015,7 +1840,7 @@ describe("MessageInput", () => {
 
   // ── Destroy cleans up ──
 
-  it("destroy removes DOM and cleans up pickers", () => {
+  it("destroy removes DOM and cleans up pickers", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -2023,6 +1848,7 @@ describe("MessageInput", () => {
     // Open a picker so there's state to clean up
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();
+    await vi.dynamicImportSettled();
 
     comp.destroy?.();
 
@@ -2262,7 +2088,7 @@ describe("MessageInput", () => {
 
   // ── Toggling emoji picker closed ──
 
-  it("clicking emoji button again closes the picker", () => {
+  it("clicking emoji button again closes the picker", async () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -2271,10 +2097,12 @@ describe("MessageInput", () => {
 
     // Open
     emojiBtn.click();
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".emoji-picker")).not.toBeNull();
 
     // Close
     emojiBtn.click();
+    await vi.dynamicImportSettled();
     expect(container.querySelector(".emoji-picker")).toBeNull();
 
     comp.destroy?.();
@@ -2305,22 +2133,24 @@ describe("MessageInput", () => {
       comp.destroy?.();
     });
 
-    it("does not open a picker when no gifApi is wired", () => {
+    it("does not open a picker when no gifApi is wired", async () => {
       const comp = createMessageInput(makeOptions({ gifApi: undefined }));
       comp.mount(container);
 
       (container.querySelector(".gif-btn") as HTMLElement).click();
+      await vi.dynamicImportSettled();
       expect(container.querySelector(".gif-picker")).toBeNull();
 
       comp.destroy?.();
     });
 
-    it("disables the GIF button when the picker reports the server has GIFs off", () => {
+    it("disables the GIF button when the picker reports the server has GIFs off", async () => {
       const comp = createMessageInput(makeOptions());
       comp.mount(container);
 
       const gifBtn = container.querySelector(".gif-btn") as HTMLButtonElement;
       gifBtn.click();
+      await vi.dynamicImportSettled();
       lastGifPickerOptions!.onUnavailable!("GIFs are not enabled on this server");
 
       expect(gifBtn.hasAttribute("disabled")).toBe(true);
@@ -2492,5 +2322,119 @@ describe("MessageInput", () => {
       const result = wrapWithMarker("**bold**", 2, 6, "*");
       expect(result.value).toBe("***bold***");
     });
+  });
+});
+
+// (22) the member menu's Mention writes through insertMention (WP 3C-3)
+describe("MessageInput insertMention", () => {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  function mountInput(overrides: Partial<MessageInputOptions> = {}) {
+    const comp = createMessageInput(makeOptions(overrides));
+    comp.mount(container);
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    return { comp, textarea };
+  }
+
+  it("inserts '@name ' into an empty composer and parks the caret after it", () => {
+    const { comp, textarea } = mountInput();
+    expect(comp.insertMention("Dave")).toBe(true);
+    expect(textarea.value).toBe("@Dave ");
+    expect(textarea.selectionStart).toBe(6);
+    expect(textarea.selectionEnd).toBe(6);
+    expect(document.activeElement).toBe(textarea);
+    comp.destroy?.();
+  });
+
+  it("adds a leading space after a word, but not after whitespace", () => {
+    const { comp, textarea } = mountInput();
+    textarea.value = "hello";
+    textarea.setSelectionRange(5, 5);
+    comp.insertMention("Dave");
+    expect(textarea.value).toBe("hello @Dave ");
+
+    textarea.value = "hello ";
+    textarea.setSelectionRange(6, 6);
+    comp.insertMention("Eve");
+    expect(textarea.value).toBe("hello @Eve ");
+    comp.destroy?.();
+  });
+
+  it("inserts at the caret, keeping the text after it", () => {
+    const { comp, textarea } = mountInput();
+    textarea.value = "hi  there";
+    textarea.setSelectionRange(3, 3);
+    comp.insertMention("Dave");
+    expect(textarea.value).toBe("hi @Dave  there");
+    expect(textarea.selectionStart).toBe(9);
+    comp.destroy?.();
+  });
+
+  it("returns false and leaves the draft alone while the composer is disabled", () => {
+    const { comp, textarea } = mountInput();
+    comp.setDisabled("You cannot send messages here");
+    expect(comp.insertMention("Dave")).toBe(false);
+    expect(textarea.value).toBe("");
+    comp.setDisabled(null);
+    expect(comp.insertMention("Dave")).toBe(true);
+    comp.destroy?.();
+  });
+
+  it("returns false once the composer is destroyed", () => {
+    const { comp } = mountInput();
+    comp.destroy?.();
+    expect(comp.insertMention("Dave")).toBe(false);
+  });
+});
+
+// (23) MessageInput claims the active-composer slot the member menu reads (WP 3C-3)
+describe("MessageInput active composer", () => {
+  let a: HTMLDivElement;
+  let b: HTMLDivElement;
+
+  beforeEach(() => {
+    a = document.createElement("div");
+    b = document.createElement("div");
+    document.body.append(a, b);
+  });
+
+  afterEach(() => {
+    a.remove();
+    b.remove();
+  });
+
+  it("is claimed on mount, follows the disabled state and is released on destroy", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(a);
+    expect(canMention()).toBe(true);
+    expect(mentionInComposer("Dave")).toBe(true);
+    expect((a.querySelector("textarea") as HTMLTextAreaElement).value).toBe("@Dave ");
+    comp.setDisabled("You cannot send messages here");
+    expect(canMention()).toBe(false);
+    comp.setDisabled(null);
+    comp.destroy?.();
+    expect(canMention()).toBe(false);
+    expect(mentionInComposer("Dave")).toBe(false);
+  });
+
+  it("keeps the newer composer when the older one is destroyed after it mounts", () => {
+    const first = createMessageInput(makeOptions());
+    const second = createMessageInput(makeOptions());
+    first.mount(a);
+    second.mount(b);
+    first.destroy?.();
+    expect(mentionInComposer("Dave")).toBe(true);
+    expect((b.querySelector("textarea") as HTMLTextAreaElement).value).toBe("@Dave ");
+    expect((a.querySelector("textarea") as HTMLTextAreaElement | null)?.value ?? "").toBe("");
+    second.destroy?.();
   });
 });

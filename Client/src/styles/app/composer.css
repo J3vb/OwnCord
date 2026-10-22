@@ -65,10 +65,37 @@
 .attachment-preview-remove:hover {
   background: var(--scrim-hover);
 }
+.attachment-preview-spoiler {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-circle);
+  background: var(--bg-overlay);
+  color: var(--on-fill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s;
+}
+.attachment-preview-spoiler:hover {
+  background: var(--scrim-hover);
+}
+.attachment-preview-spoiler.active {
+  background: var(--accent);
+}
+.attachment-preview-spoiler:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
 .attachment-preview-item.uploading {
   opacity: 0.6;
 }
-.attachment-preview-item.expired {
+.attachment-preview-item.expired,
+.attachment-preview-item.unsent {
   opacity: 0.5;
   outline: 2px solid var(--red);
   outline-offset: -2px;
@@ -145,6 +172,23 @@
   color: var(--text-danger);
   background: color-mix(in srgb, var(--red) 10%, transparent);
   border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.attachment-upload-error-dismiss {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--text-danger);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.attachment-upload-error-dismiss:hover {
+  background: color-mix(in srgb, var(--red) 20%, transparent);
 }
 .attachment-preview-bar.visible + .message-input-box {
   border-radius: 0 0 var(--radius-md) var(--radius-md);
@@ -187,6 +231,10 @@
 .input-btn:hover {
   background: var(--bg-hover);
   color: var(--text-normal);
+}
+.poll-btn {
+  font-size: var(--font-size-xs);
+  font-weight: 700;
 }
 .msg-textarea {
   flex: 1;
@@ -253,4 +301,71 @@
 .msg-send-retry:hover,
 .msg-send-discard:hover {
   background: color-mix(in srgb, var(--red) 15%, transparent);
+}
+
+/* Characters left, shown near the message limit; red past it. */
+.char-counter {
+  align-self: flex-end;
+  padding: 0 6px;
+  line-height: 36px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.char-counter.over {
+  color: var(--text-danger);
+}
+.char-counter[hidden] {
+  display: none;
+}
+
+/* Slow mode, said up front under the composer. */
+.composer-slow-note {
+  margin-top: 6px;
+  padding: 0 4px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.composer-slow-note[hidden] {
+  display: none;
+}
+
+/* "Upload to #channel" while a file is dragged over the chat. Fixed to the
+   chat area's box (set on show) and ignores the pointer, so the drop lands on
+   the slot underneath. */
+.drop-overlay {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-overlay);
+  pointer-events: none;
+}
+.drop-overlay[hidden] {
+  display: none;
+}
+.drop-overlay-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+  padding: 24px 32px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  color: var(--text-normal);
+  text-align: center;
+}
+.drop-overlay-card strong {
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+@media (pointer: coarse) {
+  .input-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

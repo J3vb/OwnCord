@@ -31,7 +31,7 @@ func TestCreateMessageWithMentions_StoresRowsAndFlag(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, true)
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestCreateMessageWithMentions_CapsStoredRows(t *testing.T) {
 		ids = append(ids, uid)
 	}
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "spam", nil, ids, false)
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "spam", nil, ids, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -91,11 +91,11 @@ func TestReplaceMessageMentions(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, true)
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
-	if err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{3}, false); err != nil {
+	if _, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{3}, false, nil); err != nil {
 		t.Fatalf("ReplaceMessageMentions: %v", err)
 	}
 
@@ -311,7 +311,7 @@ func TestDecrementMentionCounts_SkipsNeverCountedBlockedMention(t *testing.T) {
 	// records the row (fan-out, not storage, excludes blockers), but the
 	// service layer never calls IncrementMentionCounts for Bob because he
 	// blocked Alice -- so no increment ever landed for this message.
-	blockedMsg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, false)
+	blockedMsg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, false, nil)
 	if err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestMessagesForAPI_CarryMentions(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, true); err != nil {
+	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi @bob", nil, []int64{2}, 0, true, nil); err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
 	msgs, err := database.GetMessagesForAPI(ctx, 1, 0, 10, 1)
@@ -598,7 +598,7 @@ func TestSearchMessages_CarryMentions(t *testing.T) {
 	seedMentionFixture(t, database)
 	ctx := context.Background()
 
-	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "deployment notes", nil, []int64{2}, false); err != nil {
+	if _, err := database.CreateMessageWithMentions(ctx, 1, 1, "deployment notes", nil, []int64{2}, 0, false, nil); err != nil {
 		t.Fatalf("CreateMessageWithMentions: %v", err)
 	}
 	results, err := database.SearchMessages(ctx, "deployment", nil, db.SearchPage{Limit: 10})
@@ -763,5 +763,198 @@ func TestIncrementMentionCountsBatch_ReturnsOnlyBumpedReaders(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("bumped readers for a deleted message = %v, want none", got)
+	}
+}
+
+// replyPingRows returns reply_ping per mentioned user id for one message.
+func replyPingRows(t *testing.T, database *db.DB, msgID int64) map[int64]int64 {
+	t.Helper()
+	rows, err := database.QueryContext(context.Background(),
+		`SELECT mentioned_user_id, reply_ping FROM message_mentions WHERE message_id = ?`, msgID)
+	if err != nil {
+		t.Fatalf("query message_mentions: %v", err)
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var uid, flag int64
+		if err := rows.Scan(&uid, &flag); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		out[uid] = flag
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	return out
+}
+
+func TestCreateMessageWithMentions_ReplyPingRow(t *testing.T) {
+	cases := []struct {
+		name    string
+		content []int64
+		want    map[int64]int64
+	}{
+		{"target not in content", []int64{3}, map[int64]int64{3: 0, 2: 1}},
+		{"target also in content gives one flagged row", []int64{2, 3}, map[int64]int64{2: 1, 3: 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			database := openMigratedMemory(t)
+			seedMentionFixture(t, database)
+			msg, err := database.CreateMessageWithMentions(context.Background(), 1, 1, "re", nil, tc.content, 2, false, nil)
+			if err != nil {
+				t.Fatalf("CreateMessageWithMentions: %v", err)
+			}
+			got := replyPingRows(t, database, msg.ID)
+			if len(got) != len(tc.want) {
+				t.Fatalf("rows = %v, want %v", got, tc.want)
+			}
+			for uid, flag := range tc.want {
+				if got[uid] != flag {
+					t.Errorf("reply_ping[%d] = %d, want %d (rows %v)", uid, got[uid], flag, got)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateMessageWithMentions_ReplyPingIsExtraToTheCap(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	ids := make([]int64, 0, storageMentionCap+5)
+	for i := range storageMentionCap + 5 {
+		uid, err := database.CreateUser(context.Background(), "capuser"+strconv.Itoa(i), "hash", 4)
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		ids = append(ids, uid)
+	}
+	// The target is the last content id, which the content cap would drop.
+	target := ids[len(ids)-1]
+	msg, err := database.CreateMessageWithMentions(context.Background(), 1, 1, "re", nil, ids, target, false, nil)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	got := replyPingRows(t, database, msg.ID)
+	if len(got) != storageMentionCap+1 {
+		t.Errorf("rows = %d, want %d", len(got), storageMentionCap+1)
+	}
+	if got[target] != 1 {
+		t.Errorf("target row reply_ping = %d, want 1", got[target])
+	}
+}
+
+func TestReplaceMessageMentions_KeepsReplyPingRow(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "re @carol", nil, []int64{3}, 2, false, nil)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+
+	// The edit drops carol and names the reply target in content.
+	kept, err := database.ReplaceMessageMentions(ctx, msg.ID, []int64{2}, false, nil)
+	if err != nil {
+		t.Fatalf("ReplaceMessageMentions: %v", err)
+	}
+	if kept != 2 {
+		t.Errorf("returned reply ping user = %d, want 2", kept)
+	}
+	if got := replyPingRows(t, database, msg.ID); len(got) != 1 || got[2] != 1 {
+		t.Errorf("rows = %v, want only user 2 flagged", got)
+	}
+
+	// An edit with no mentions still keeps the reply row.
+	if kept, err = database.ReplaceMessageMentions(ctx, msg.ID, nil, false, nil); err != nil || kept != 2 {
+		t.Fatalf("second replace = (%d, %v), want (2, nil)", kept, err)
+	}
+	if got := replyPingRows(t, database, msg.ID); len(got) != 1 || got[2] != 1 {
+		t.Errorf("rows = %v, want only user 2 flagged", got)
+	}
+
+	// A message that never pinged returns 0.
+	plain, err := database.CreateMessageWithMentions(ctx, 1, 1, "x", nil, []int64{3}, 0, false, nil)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	if kept, err = database.ReplaceMessageMentions(ctx, plain.ID, []int64{2}, false, nil); err != nil || kept != 0 {
+		t.Errorf("plain replace = (%d, %v), want (0, nil)", kept, err)
+	}
+}
+
+func TestRoleMentionRows_RoundTripAndReplace(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	msg, err := database.CreateMessageWithMentions(ctx, 1, 1, "hi", nil, nil, 0, false, []int64{1, 2, 2})
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	other, err := database.CreateMessageWithMentions(ctx, 1, 1, "plain", nil, nil, 0, false, nil)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions plain: %v", err)
+	}
+	got, err := database.GetRoleMentionsByMessageIDs(ctx, []int64{msg.ID, other.ID})
+	if err != nil {
+		t.Fatalf("GetRoleMentionsByMessageIDs: %v", err)
+	}
+	if len(got[msg.ID]) != 2 || got[msg.ID][0] != 1 || got[msg.ID][1] != 2 || len(got[other.ID]) != 0 {
+		t.Errorf("role mentions = %v, want {msg:[1 2]}", got)
+	}
+
+	if _, err := database.ReplaceMessageMentions(ctx, msg.ID, nil, false, []int64{3}); err != nil {
+		t.Fatalf("ReplaceMessageMentions: %v", err)
+	}
+	got, _ = database.GetRoleMentionsByMessageIDs(ctx, []int64{msg.ID})
+	if len(got[msg.ID]) != 1 || got[msg.ID][0] != 3 {
+		t.Errorf("role mentions after replace = %v, want [3]", got[msg.ID])
+	}
+
+	if empty, err := database.GetRoleMentionsByMessageIDs(ctx, nil); err != nil || len(empty) != 0 {
+		t.Errorf("empty id list = %v, %v", empty, err)
+	}
+}
+
+func TestUserAndRoleHolderLookups(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database) // alice=1, bob=2, Carol=3, all role 4
+	ctx := context.Background()
+
+	if _, err := database.ExecContext(ctx, `UPDATE users SET banned = 1 WHERE id = 2`); err != nil {
+		t.Fatalf("ban bob: %v", err)
+	}
+	ids, err := database.GetReachableUserIDs(ctx, []int64{1, 2, 3, 99})
+	if err != nil {
+		t.Fatalf("GetReachableUserIDs: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 3 {
+		t.Errorf("reachable = %v, want [1 3] (banned and unknown dropped)", ids)
+	}
+	if none, err := database.GetReachableUserIDs(ctx, nil); err != nil || len(none) != 0 {
+		t.Errorf("empty = %v, %v", none, err)
+	}
+
+	role, err := database.CreateRole(ctx, "devs", nil, 0, 5, false, true)
+	if err != nil {
+		t.Fatalf("CreateRole: %v", err)
+	}
+	for _, uid := range []int64{3, 1} {
+		if _, err := database.ExecContext(ctx, `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, uid, role.ID); err != nil {
+			t.Fatalf("grant: %v", err)
+		}
+	}
+	// Roles 4 (everyone) and the new one overlap on users 1 and 3: each once.
+	holders, err := database.ListUserIDsByRoles(ctx, []int64{4, role.ID})
+	if err != nil {
+		t.Fatalf("ListUserIDsByRoles: %v", err)
+	}
+	if len(holders) != 3 || holders[0] != 1 || holders[1] != 2 || holders[2] != 3 {
+		t.Errorf("holders = %v, want [1 2 3] once each", holders)
+	}
+	if none, err := database.ListUserIDsByRoles(ctx, nil); err != nil || len(none) != 0 {
+		t.Errorf("empty = %v, %v", none, err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/telemetry"
@@ -23,6 +24,9 @@ type ModerationService struct {
 	// (ActOnReport, kind="removal") — package-private, same package, not a
 	// second copy of DeleteMessage's authorization.
 	messages *MessageService
+	// users performs the moderator nickname write under the target's profile
+	// lock (SetNickname). Wired by New; nil fails SetNickname closed.
+	users *UserService
 	// notifier delivers a live mod_action frame to a connected target
 	// (B5-9): warning issued, timeout applied, or timeout lifted. *ws.Hub
 	// implements it; wired via SetNotifier from the composition root,
@@ -31,12 +35,23 @@ type ModerationService struct {
 	// next connect (ready's notices) or a timeout on their next attempted
 	// send (the predicates).
 	notifier ModActionNotifier
+	// permNotifier receives a committed role assignment's live fan-out (WP
+	// 5.1a); a separate port from the mod_action notifier. Nil is a no-op.
+	permNotifier PermissionChangeNotifier
 	// voiceMuter applies or lifts the voice half of a timeout on a
 	// currently-connected target, through the exact SFU mechanism
 	// voice_mod_mute uses (decision 6: timeout's voice half defers to
 	// MUTE_MEMBERS rather than adding a second path to the same effect).
 	// Nil is a normal no-op — Timeout still lands for text and reactions.
 	voiceMuter TimeoutVoiceMuter
+	// limiter throttles the ban purge's authorization per actor
+	// (AuthorizeBanPurge); nil disables the throttle.
+	limiter *auth.RateLimiter
+	// banPurgeSem admits one ban purge at a time server-wide. See
+	// PurgeAfterBan for the lock order.
+	banPurgeSem chan struct{}
+	// banPurgeRowCap overrides banPurgeMaxRows when positive (tests only).
+	banPurgeRowCap int
 }
 
 // ModActionNotifier delivers a live mod_action frame to a connected target.
@@ -91,7 +106,7 @@ type TimeoutVoiceMuter interface {
 
 // NewModerationService creates a ModerationService.
 func NewModerationService(st Store, perms *PermissionService) *ModerationService {
-	return &ModerationService{st: st, perms: perms}
+	return &ModerationService{st: st, perms: perms, banPurgeSem: make(chan struct{}, 1)}
 }
 
 // SetNotifier installs the live mod_action notifier.
@@ -153,6 +168,10 @@ func (s *ModerationService) EraseUser(ctx context.Context, actorID, targetID int
 		case errors.Is(err, ErrErasureFilesPending):
 			// The account is gone; the journal finishes the files.
 			slog.Warn("admin erasure: files pending", "actor_id", actorID, "target_id", targetID, "err", err)
+		case errors.Is(err, ErrErasureInProgress):
+			// The account is locked and the erasure is committed to; the
+			// maintenance loop finishes it.
+			slog.Info("admin erasure: in progress", "actor_id", actorID, "target_id", targetID)
 		default:
 			slog.Error("admin erasure failed", "actor_id", actorID, "target_id", targetID, "err", err)
 			return fmt.Errorf("%w: failed to erase account", ErrInternal)
@@ -183,7 +202,8 @@ func (s *ModerationService) roleFor(ctx context.Context, userID int64, which str
 	if err != nil || role == nil {
 		return nil, fmt.Errorf("%w: failed to load %s role", ErrForbidden, which)
 	}
-	return role, nil
+	// Top role identity (rank, ownership) with the OR of every held mask.
+	return role.Effective(), nil
 }
 
 // requirePerm verifies the actor holds perm (or the Administrator bypass) and
@@ -229,39 +249,6 @@ func (s *ModerationService) requireOutranksRole(ctx context.Context, actorRole *
 	}
 	if actorRole.Position <= targetRole.Position {
 		return fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
-	}
-	return nil
-}
-
-// reasonMaxRunes bounds the moderator-action ledger's free-text reason (S6
-// storage exhaustion, and the same shape the audit detail denylist expects
-// of every free-text field): 500 runes, no control characters. Applies to
-// warning and timeout, whose reason is shown to the TARGET — the audit row
-// itself never carries it (a fixed phrase instead; see Warn).
-const reasonMaxRunes = 500
-
-// validateActionReason is warning/timeout's shared reason-shape rule.
-func validateActionReason(reason string) error {
-	if len([]rune(reason)) > reasonMaxRunes {
-		return fmt.Errorf("%w: reason is too long", ErrBadRequest)
-	}
-	if hasControlChar(reason) {
-		return fmt.Errorf("%w: reason contains control characters", ErrBadRequest)
-	}
-	return nil
-}
-
-// requireHumanActor is workstream 10's absence-proof guard, repeated at the
-// top of every ModerationService action method before any other check: no
-// plugin capability or automated caller can pass a non-positive actor id and
-// have it land on the ledger (Server/db's recordModerationAction/
-// recordLedgerRow repeat the same guard at the transaction, since that is
-// the one place every kind funnels through — this is the service-boundary
-// half). Deliberately NOT a schema CHECK (docs: erasure sets actor_id to 0
-// for an erased moderator, and a constraint would forbid that transition).
-func requireHumanActor(actorID int64) error {
-	if actorID <= 0 {
-		return fmt.Errorf("%w: a moderation action requires a human actor", ErrForbidden)
 	}
 	return nil
 }
@@ -780,6 +767,7 @@ func (s *ModerationService) ChangeUserRole(ctx context.Context, actorID, targetI
 		fmt.Sprintf("changed %s role to %s", target.Username, newRole.Name))
 
 	slog.Info("role changed", "actor_id", actorID, "target_id", targetID, "new_role_id", newRoleID)
+	s.roleAssigned(targetID)
 	return newRole, nil
 }
 

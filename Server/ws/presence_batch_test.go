@@ -70,9 +70,9 @@ func presenceBatchHub(t *testing.T) (*Hub, *db.DB, func(name string, seen bool) 
 			t.Fatalf("GetUserByID: %v", err)
 		}
 		c := herdClient(ctx, h, u)
-		h.registerNow(c, nil)
+		h.registerNowTest(c, nil)
 		c.user.Status = db.StatusOnline
-		c.setLivePresence(db.StatusOnline, nil)
+		c.setLivePresence(db.StatusOnline, nil, "")
 		return c
 	}
 	return h, database, connect
@@ -173,7 +173,7 @@ func TestFreshConnect_FailedFirstHandshakeStillAnnouncesOnNextConnect(t *testing
 			t.Fatalf("GetUserByID = %+v, %v; want last_seen stamped", u, err)
 		}
 		c := herdClient(ctx, h, u)
-		h.registerNow(c, nil)
+		h.registerNowTest(c, nil)
 		h.applyConnectStatus(ctx, c)
 		h.announceFreshConnect(c)
 		return c
@@ -248,8 +248,8 @@ func TestPresenceBatch_LostAtEnqueueRepairsBySnapshot(t *testing.T) {
 		t.Fatalf("GetUserByID: %v", err)
 	}
 	watcher := herdClient(ctx, h, u)
-	h.registerNow(watcher, nil)
-	watcher.setLivePresence(db.StatusOnline, nil)
+	h.registerNowTest(watcher, nil)
+	watcher.setLivePresence(db.StatusOnline, nil, "")
 
 	for len(h.broadcast) < cap(h.broadcast) {
 		h.broadcast <- broadcastMsg{}
@@ -366,7 +366,7 @@ func TestPresenceStale_NextWindowSendsFullSnapshot(t *testing.T) {
 	drain(slow.send)
 	fillQueue(slow)
 
-	ghost.setLivePresence(db.StatusInvisible, nil)
+	ghost.setLivePresence(db.StatusInvisible, nil, "")
 	h.QueuePresence(ghost.userID, db.StatusInvisible, nil)
 	settle(t, h)
 	drain(slow.send) // the reader catches up
@@ -432,7 +432,7 @@ func TestPresenceBatch_ErasedUserLosesOnlyItsOwnEntry(t *testing.T) {
 
 func TestPresenceUpdate_InsideTheWindowStillDeliversTheNewMember(t *testing.T) {
 	h := &Hub{broadcast: make(chan broadcastMsg, 8)}
-	m := memberUserPayload{ID: 9, Username: "newcomer"}
+	m := memberJoinUser{ID: 9, Username: "newcomer"}
 	h.queuePresence(9, pendingPresence{status: db.StatusOnline, member: &m})
 	h.QueuePresence(9, db.StatusOnline, nil) // a later state keeps the member data
 	h.presenceMu.Lock()
@@ -487,7 +487,7 @@ func TestPresenceSnapshot_InvisibleIsIndistinguishableFromOffline(t *testing.T) 
 	ctx := context.Background()
 	observer := connect("observer", true)
 	ghost := connect("ghost", true)
-	ghost.setLivePresence(db.StatusInvisible, nil)
+	ghost.setLivePresence(db.StatusInvisible, nil, "")
 	away, err := database.CreateUser(ctx, "away", "hash", 4)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -597,7 +597,7 @@ func TestPresenceSnapshot_InvisibleTextOnlyToSelf(t *testing.T) {
 	observer := connect("observer", true)
 	ghost := connect("ghost", true)
 	text := "heads down"
-	ghost.setLivePresence(db.StatusInvisible, &text)
+	ghost.setLivePresence(db.StatusInvisible, &text, "")
 	settle(t, h)
 	drain(observer.send)
 	drain(ghost.send)

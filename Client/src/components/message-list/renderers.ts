@@ -7,25 +7,25 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { loadPref } from "@lib/preferences";
-import { canManageMessages } from "@lib/permissions";
-import { showToast } from "@lib/toast";
-import { formatMessageLink } from "@lib/deep-link";
-import type { Message } from "@stores/messages.store";
+import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
+import { groupRowIcon, groupRowText } from "./groupRows";
+import { renderPinRowText } from "./pinRows";
+import { endForwardBlock, startForwardBlock } from "./forwardBlock";
+import { renderPollCard } from "./pollCard";
+import { renderThreadChip } from "./threadChip";
+import { threadOfMessage } from "@stores/threads.store";
+import { connectionLockReason, messageActionGates } from "./message-actions";
+import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
+import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
-import { reportEntryText } from "../../i18n/reportEntry";
+import { messageStatusText } from "../../i18n/messageStatus";
 import { messagingText } from "../../i18n/messaging";
-import { shellText } from "../../i18n/shell";
+import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
-
-/** Cached value of the developerMode preference. Invalidated on pref change. */
-let developerModeEnabled = loadPref<boolean>("developerMode", false);
-window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
-  if (e.detail.key === "developerMode") {
-    developerModeEnabled = loadPref<boolean>("developerMode", false);
-  }
-}) as EventListener);
+import { voiceStore } from "@stores/voice.store";
+import { dmCallText } from "../../i18n/dmCall";
+import type { CallInfo } from "../../lib/types";
 
 // -- Re-exports (only the names consumers actually import; everything else is
 // -- available directly from the split modules) -------------------------------
@@ -51,19 +51,72 @@ export { setServerHost } from "./attachments";
 
 // -- Imports for composite functions ------------------------------------------
 
-import { formatFullDate, formatMessageTimestamp } from "@lib/formatting";
-import { getUserRole, resolveAuthor, roleColorVar } from "@lib/formatting";
-import { createAvatarElement } from "./avatar";
+import {
+  formatClockTime,
+  formatFullDate,
+  formatMessageTimestamp,
+  parseTimestamp,
+} from "@lib/formatting";
+import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
+import { resolveAuthor, userRoleColorVar } from "@lib/formatting";
+import { createAvatarElement, pickAvatarColor } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { markdownToPlainText } from "@lib/markdown";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
 import { renderUrlEmbeds } from "./media";
-import { renderAttachment } from "./attachments";
-import { reactionLockReason, renderReactions, wireReactionControl } from "./reactions";
+import {
+  isGalleryImage,
+  renderAttachment,
+  resolveServerUrl,
+  type LightboxGallery,
+} from "./attachments";
+import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
+
+/** What a row render reads beyond the list's own options. */
+export interface MessageRenderOptions extends MessageListOptions {
+  /** Authors whose messages are hidden, so a reply quoting one shows no content. */
+  readonly blockedUsers?: ReadonlySet<number>;
+  /** The list's own lifetime: owners that must outlive a row rebuild (the End poll confirm) use it. */
+  readonly listSignal?: AbortSignal;
+}
 
 // -- Composite rendering functions --------------------------------------------
+
+/** Weekday, date and time for a tooltip, in Discord's "F" style. */
+export function fullDateTimeTitle(iso: string): string {
+  return formatFullDateTime(parseTimestamp(iso));
+}
+
+/** The header over a run of blocked users' messages, with its Show/Hide toggle. */
+export function renderBlockedRun(
+  item: { readonly firstId: number; readonly count: number; readonly expanded: boolean },
+  onToggle: () => void,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const toggle = createElement(
+    "button",
+    {
+      type: "button",
+      class: "msg-blocked-toggle",
+      "aria-expanded": String(item.expanded),
+      "data-testid": `msg-blocked-toggle-${item.firstId}`,
+    },
+    messagingText(item.expanded ? "blocked.hide" : "blocked.show"),
+  );
+  toggle.addEventListener("click", onToggle, { signal });
+  const run = createElement("div", {
+    class: "msg-blocked-run",
+    "data-testid": `msg-blocked-run-${item.firstId}`,
+  });
+  appendChildren(
+    run,
+    createElement("span", { class: "msg-blocked-text" }, messagingText("blocked.run", item)),
+    toggle,
+  );
+  return run;
+}
 
 export function renderDayDivider(iso: string): HTMLDivElement {
   const divider = createElement("div", { class: "msg-day-divider" });
@@ -160,9 +213,7 @@ function applyDeleteGate(
   }
   btn.disabled = true;
   btn.setAttribute("aria-disabled", "true");
-  btn.title = shellText(
-    status === "reconnecting" ? "channel.reconnecting" : "channel.notConnected",
-  );
+  btn.title = connectionLockReason(status) ?? messagingText("action.delete");
 }
 
 /** Toggle the delete gate on every rendered delete control for the current
@@ -179,61 +230,64 @@ export function refreshConnectionControls(root: ParentNode): void {
  * including when that message is outside the loaded window, which is why the
  * bar stays clickable even in the "unknown message" case: the id is known, and
  * the jump path can fetch the window around it. A deleted target has nothing
- * to jump to, so its bar is plain text.
+ * to jump to, so its bar is plain text: "Original message was deleted".
  */
 function renderReplyRef(
   replyToId: number,
   referenced: Message["referencedMessage"],
   allMessages: readonly Message[],
-  opts: MessageListOptions,
+  opts: MessageRenderOptions,
   signal: AbortSignal,
 ): HTMLDivElement {
   const ref = allMessages.find((m) => m.id === replyToId);
   const deleted = ref ? ref.deleted : referenced?.deleted === true;
-  const bar = deleted
-    ? createElement("div", {
-        class: "msg-reply-ref msg-reply-ref--deleted",
-        "data-reply-to": String(replyToId),
-      })
-    : createElement("div", {
-        class: "msg-reply-ref",
-        role: "button",
-        tabindex: "0",
-        "data-reply-to": String(replyToId),
-        title: messagingText("reply.jumpTitle"),
-      });
-  if (!deleted) {
-    const jump = (): void => opts.onJumpToMessage?.(replyToId);
-    bar.addEventListener("click", jump, { signal });
-    bar.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          jump();
-        }
-      },
-      { signal },
+  // A deleted parent has nothing to show or jump to: plain text, no avatar or
+  // author (the list no longer draws the parent at all).
+  if (deleted) {
+    return createElement(
+      "div",
+      { class: "msg-reply-ref msg-reply-ref--deleted", "data-reply-to": String(replyToId) },
+      messagingText("reply.originalDeleted"),
     );
   }
-  if (ref) {
-    const plain = ref.deleted
-      ? messagingText("message.deleted")
-      : Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
-          .slice(0, 100)
-          .join("");
+  const bar = createElement("div", {
+    class: "msg-reply-ref",
+    role: "button",
+    tabindex: "0",
+    "data-reply-to": String(replyToId),
+    title: messagingText("reply.jumpTitle"),
+  });
+  const jump = (): void => opts.onJumpToMessage?.(replyToId);
+  bar.addEventListener("click", jump, { signal });
+  bar.addEventListener(
+    "keydown",
+    (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        jump();
+      }
+    },
+    { signal },
+  );
+  const parentAuthorId = ref?.user.id ?? referenced?.user?.id;
+  if (parentAuthorId !== undefined && opts.blockedUsers?.has(parentAuthorId) === true) {
+    bar.classList.add("msg-reply-ref--blocked");
+    setText(bar, messagingText("blocked.message"));
+  } else if (ref) {
+    const plain = Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
+      .slice(0, 100)
+      .join("");
     // A message that is only an attachment (or only a spoiler) has no plain
     // text; show a placeholder rather than an empty preview (F24).
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
-    const role = getUserRole(ref.user.id);
     const author = resolveAuthor(ref.user);
-    const roleColor = roleColorVar(role);
+    const roleColor = userRoleColorVar(ref.user.id);
     // Tag the quoted author so a rename/role change repaints it in place,
     // without rebuilding the row (P4-02).
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
     const miniAvatar = createAvatarElement(author, {
       className: "rr-avatar",
-      background: roleColor,
+      background: pickAvatarColor(author.username),
     });
     appendChildren(
       bar,
@@ -241,16 +295,17 @@ function renderReplyRef(
       createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
       createElement("span", { class: "rr-text" }, preview),
     );
-  } else if (referenced?.deleted) {
-    setText(bar, messagingText("message.deleted"));
   } else if (referenced?.user) {
     const author = resolveAuthor(referenced.user);
-    const roleColor = roleColorVar(getUserRole(referenced.user.id));
+    const roleColor = userRoleColorVar(referenced.user.id);
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
     const plain = markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
     appendChildren(
       bar,
-      createAvatarElement(author, { className: "rr-avatar", background: roleColor }),
+      createAvatarElement(author, {
+        className: "rr-avatar",
+        background: pickAvatarColor(author.username),
+      }),
       createElement("span", { class: "rr-author" }, resolveDisplayName(author)),
       createElement(
         "span",
@@ -275,6 +330,121 @@ function renderSystemMessage(msg: Message): HTMLDivElement {
   return el;
 }
 
+/**
+ * A DM call log row (WP 3B-9c), drawn from `kind` and `call` only, never from
+ * `content`. Live calls offer Join; an ended call reads "lasted N minutes" to
+ * the author and anyone who joined, and "You missed a call" to everyone else.
+ */
+function renderCallRow(
+  msg: Message,
+  call: CallInfo,
+  opts: MessageListOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const name = resolveDisplayName(resolveAuthor(msg.user));
+  const live = call.ended_at === null;
+  const missed =
+    !live && msg.user.id !== opts.currentUserId && !call.participants.includes(opts.currentUserId);
+  const el = createElement("div", {
+    class: "message call-row" + (missed ? " call-missed" : ""),
+    "data-testid": `message-${msg.id}`,
+  });
+  const icon = createElement("span", { class: "cr-icon" });
+  icon.appendChild(createIcon(missed ? "phone-off" : "phone", 16));
+  const text = createElement("span", { class: "cr-text" });
+  if (live) {
+    setText(text, dmCallText("rowLive", { name }));
+  } else {
+    const seconds = Math.max(
+      0,
+      (parseTimestamp(call.ended_at).getTime() - parseTimestamp(call.started_at).getTime()) / 1000,
+    );
+    const count = Math.floor(seconds / 60);
+    const few = count < 1;
+    if (missed) {
+      setText(
+        text,
+        few
+          ? dmCallText("rowMissedSeconds", { name })
+          : dmCallText("rowMissedMinutes", { name, count }),
+      );
+    } else {
+      setText(
+        text,
+        few
+          ? dmCallText("rowLastedSeconds", { name })
+          : dmCallText("rowLastedMinutes", { name, count }),
+      );
+    }
+  }
+  const time = createElement(
+    "span",
+    { class: "cr-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
+  appendChildren(el, icon, text);
+  const inThisCall = voiceStore.getState().currentChannelId === msg.channelId;
+  if (live && opts.onJoinCall !== undefined && !inThisCall) {
+    const join = createElement(
+      "button",
+      {
+        class: "cr-join",
+        "data-testid": `call-join-${msg.id}`,
+        "aria-label": dmCallText("rowJoinLabel"),
+      },
+      dmCallText("rowJoin"),
+    );
+    const onJoinCall = opts.onJoinCall;
+    join.addEventListener("click", () => onJoinCall(msg.channelId), { signal });
+    el.appendChild(join);
+  }
+  el.appendChild(time);
+  return el;
+}
+
+/**
+ * A group DM system row (WP 3B-11a): add, remove, leave, rename, icon. A
+ * one-line record like a call row, drawn from `kind` + `groupEvent` alone. The
+ * group name is set as text, so it is never parsed as markdown or mentions.
+ */
+function renderGroupRow(msg: Message, text: string): HTMLDivElement {
+  const el = createElement("div", {
+    class: "message group-row",
+    "data-testid": `message-${msg.id}`,
+  });
+  const icon = createElement("span", { class: "gr-icon" });
+  icon.appendChild(createIcon(groupRowIcon(msg.kind), 16));
+  const body = createElement("span", { class: "gr-text" });
+  setText(body, text);
+  const time = createElement(
+    "span",
+    { class: "gr-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
+  appendChildren(el, icon, body, time);
+  return el;
+}
+
+/**
+ * A "pinned a message" row (WP 6.12): the same one-line record as a group row,
+ * with two links in its sentence. See pinRows.ts.
+ */
+function renderPinRow(msg: Message, opts: MessageListOptions, signal: AbortSignal): HTMLDivElement {
+  const el = createElement("div", {
+    class: "message pin-row",
+    "data-testid": `message-${msg.id}`,
+  });
+  const icon = createElement("span", { class: "pr-icon" });
+  icon.appendChild(createIcon("pin", 16));
+  const time = createElement(
+    "span",
+    { class: "pr-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
+  appendChildren(el, icon, renderPinRowText(msg, opts, signal), time);
+  return el;
+}
+
 /** Map a send-failure error code to a short, user-facing reason. */
 function sendErrorReason(code: string | null): string {
   switch (code) {
@@ -284,6 +454,8 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.rateLimited");
     case "FORBIDDEN":
       return messagingText("send.forbidden");
+    case "REQUEST_TIMEOUT":
+      return messageStatusText("send.requestTimeout");
     case "OFFLINE":
       return messagingText("send.disconnected");
     case "OFFLINE_NO_RECOVERY":
@@ -296,6 +468,10 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.recovered");
     case "BAD_REQUEST":
       return messagingText("send.rejected");
+    case "UPLOAD_FAILED":
+      return messagingText("send.uploadFailed");
+    case "UPLOAD_CANCELLED":
+      return messagingText("send.uploadCancelled");
     case "BEFORE_RESTORE":
       return connectText("app.sendBeforeRestore");
     default:
@@ -303,12 +479,65 @@ function sendErrorReason(code: string | null): string {
   }
 }
 
+/** Append a message's attachments. Its inline images form one lightbox
+ *  sequence, in attachment order (3A-10c); an unconfirmed row (id 0) has none,
+ *  and a lone image opens as it always did. */
+function appendAttachments(el: HTMLElement, msg: Message): void {
+  // A pending row already lays its images out as the grid, so confirming it
+  // does not resize the row; only the lightbox sequence waits for the id.
+  const tiles = msg.attachments.filter(isGalleryImage);
+  // A spoiler image stays out of the sequence, or the arrows would open it
+  // while it is covered; once revealed it opens on its own.
+  const images = msg.id === 0 ? [] : tiles.filter((att) => !isSpoilerFilename(att.filename));
+  const items = images.map((att) => ({
+    url: resolveServerUrl(att.url),
+    filename: att.filename,
+    mime: att.mime,
+  }));
+  const isDeleted = (): boolean =>
+    messagesStore
+      .getState()
+      .messagesByChannel.get(msg.channelId)
+      ?.find((m) => m.id === msg.id)?.deleted === true;
+  // Two or more images share one mosaic wrapper, placed where the first image was.
+  const grid =
+    tiles.length >= 2
+      ? createElement("div", { class: "msg-image-grid", "data-count": String(tiles.length) })
+      : null;
+  for (const att of msg.attachments) {
+    const index = images.indexOf(att);
+    const gallery: LightboxGallery | undefined =
+      index === -1 || items.length < 2
+        ? undefined
+        : {
+            items,
+            index,
+            isGone: isDeleted,
+            watch: (onGone) =>
+              messagesStore.subscribeSelector(isDeleted, (gone) => {
+                if (gone) onGone();
+              }),
+            // The row is re-rendered as a tombstone: find the new element.
+            row: () => document.querySelector(`[data-testid="message-${msg.id}"]`),
+          };
+    const node = renderAttachment(att, gallery);
+    if (grid !== null && tiles.includes(att)) {
+      if (grid.parentNode === null) el.appendChild(grid);
+      grid.appendChild(node);
+    } else {
+      el.appendChild(node);
+    }
+  }
+}
+
 export function renderMessage(
   msg: Message,
   isGrouped: boolean,
   allMessages: readonly Message[],
-  opts: MessageListOptions,
+  opts: MessageRenderOptions,
   signal: AbortSignal,
+  /** The inline editor to host in place of the message body (WP 3A-8). */
+  editor?: HTMLElement,
 ): HTMLDivElement {
   // id 0 is the reserved sentinel for server-synthesized system rows (DB
   // user ids are AUTOINCREMENT starting at 1, so no real account can ever
@@ -320,28 +549,54 @@ export function renderMessage(
     return renderSystemMessage(msg);
   }
 
+  // A call log row is drawn from kind + call alone, and a group DM row from
+  // kind + groupEvent. Any other kind (a future one) falls back to plain system
+  // text; so does a call row with no `call`. An empty kind counts as unset.
+  if (isServerRowKind(msg.kind)) {
+    if (msg.kind === "call" && msg.call !== undefined) {
+      return renderCallRow(msg, msg.call, opts, signal);
+    }
+    if (isPinRowKind(msg.kind)) return renderPinRow(msg, opts, signal);
+    const groupText = groupRowText(msg, opts.currentUserId);
+    if (groupText !== null) return renderGroupRow(msg, groupText);
+    const fallback = renderSystemMessage(msg);
+    fallback.dataset["testid"] = `message-${msg.id}`;
+    return fallback;
+  }
+
   const statusClass =
-    msg.status === "pending" ? " pending" : msg.status === "failed" ? " failed" : "";
-  const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
+    msg.status === "pending" || msg.status === "uploading"
+      ? " pending"
+      : msg.status === "failed"
+        ? " failed"
+        : "";
+  const mentionInfo = {
+    mentions: msg.mentions,
+    mentionsEveryone: msg.mentionsEveryone,
+    mentionRoles: msg.mentionRoles,
+  };
   // A deleted row shows no content, so it must not keep the mention accent.
   const mentionedClass =
     !msg.deleted && highlightsCurrentUser(msg.content, mentionInfo) ? " mentioned" : "";
   const el = createElement("div", {
-    class: (isGrouped ? "message grouped" : "message") + statusClass + mentionedClass,
+    class:
+      (isGrouped ? "message grouped" : "message") +
+      statusClass +
+      mentionedClass +
+      (editor === undefined ? "" : " editing"),
     "data-testid": `message-${msg.id}`,
   });
 
-  const role = getUserRole(msg.user.id);
   // The author's current identity, not the one frozen into the payload: a
   // rename or a new avatar has to show up on the messages already on screen.
   const author = resolveAuthor(msg.user);
-  const roleColor = roleColorVar(role);
+  const roleColor = userRoleColorVar(msg.user.id);
   // Tag the row with the identity it was drawn from, so MessageList can repaint
   // only the rows whose author actually changed on a roleRevision bump (P4-02).
   el.dataset["authorKey"] = authorAvatarKey(author, roleColor);
   const avatar = createAvatarElement(author, {
     className: "msg-avatar",
-    background: roleColor,
+    background: pickAvatarColor(author.username),
     attrs: { "data-user-id": String(msg.user.id) },
   });
   el.appendChild(avatar);
@@ -351,11 +606,11 @@ export function renderMessage(
       "div",
       {
         class: "msg-hover-time",
-        title: formatFullDate(msg.timestamp),
+        title: fullDateTimeTitle(msg.timestamp),
       },
-      // Same "Today at 2:34 PM" format the header uses, not a bare 24h HH:MM
-      // that disagreed with it (F24).
-      formatMessageTimestamp(msg.timestamp),
+      // The header's clock time without its "Today at" (F24): the full form
+      // wrapped onto three lines over the avatar column. The title has the date.
+      formatClockTime(msg.timestamp),
     );
     el.appendChild(hoverTime);
   }
@@ -384,18 +639,39 @@ export function renderMessage(
   );
   const time = createElement(
     "span",
-    { class: "msg-time", title: formatFullDate(msg.timestamp) },
+    { class: "msg-time", title: fullDateTimeTitle(msg.timestamp) },
     formatMessageTimestamp(msg.timestamp),
   );
-  appendChildren(header, authorEl, time);
+  // Compact mode shows this short clock time ahead of the name; CSS hides it
+  // otherwise. The clock time never changes, so relabelRenderedTimes skips it.
+  const compactTime = createElement(
+    "span",
+    { class: "msg-compact-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatClockTime(msg.timestamp),
+  );
+  appendChildren(header, compactTime, authorEl, time);
   el.appendChild(header);
 
-  if (msg.deleted) {
+  if (editor !== undefined) {
+    // The editor takes the body's place; attachments and reactions stay.
+    el.appendChild(editor);
+    appendAttachments(el, msg);
+    if (msg.reactions.length > 0) {
+      el.appendChild(renderReactions(msg, opts, signal));
+    }
+  } else if (msg.deleted) {
     const text = createElement("div", { class: "msg-text" });
     text.style.fontStyle = "italic";
     text.style.color = "var(--text-muted)";
     setText(text, messagingText("message.deleted"));
     el.appendChild(text);
+  } else if (msg.poll !== undefined) {
+    // A poll's card takes the body's place (the server's fallback text is for
+    // clients that predate polls); it has no files or embeds, and reactions stay.
+    el.appendChild(renderPollCard(msg, opts, signal));
+    if (msg.reactions.length > 0) {
+      el.appendChild(renderReactions(msg, opts, signal));
+    }
   } else {
     // Key the parse cache by the message's identity plus its edit stamp: an
     // unchanged message reuses its parse when a row is re-materialised, and an
@@ -403,26 +679,52 @@ export function renderMessage(
     // unconfirmed-optimistic sentinel shared by every pending row, so it is not
     // a unique identity — those parse uncached.
     const cacheKey = msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`;
-    el.appendChild(renderMessageContent(msg.content, mentionInfo, cacheKey));
+    const body = renderMessageContent(msg.content, mentionInfo, cacheKey);
+    // A forward's text, files and embeds sit inside its "Forwarded" frame (WP 6.9a).
+    const box = msg.forward === undefined ? el : startForwardBlock();
+    if (msg.status === "uploading" && msg.correlationId !== null) {
+      // A queued row's Cancel describes itself by this text (3A-9).
+      const wrap = createElement("div", { id: `msg-body-${msg.correlationId}` });
+      wrap.style.display = "contents";
+      wrap.appendChild(body);
+      box.appendChild(wrap);
+    } else box.appendChild(body);
     if (msg.editedAt !== null) {
-      el.appendChild(
-        createElement("span", { class: "msg-edited" }, messagingText("message.edited")),
+      box.appendChild(
+        createElement(
+          "span",
+          { class: "msg-edited", title: fullDateTimeTitle(msg.editedAt) },
+          messagingText("message.edited"),
+        ),
       );
     }
 
-    for (const att of msg.attachments) {
-      el.appendChild(renderAttachment(att));
-    }
+    appendAttachments(box, msg);
 
     // URL embeds (YouTube players, link previews)
     const embeds = renderUrlEmbeds(msg.content);
     if (embeds.childNodes.length > 0) {
-      el.appendChild(embeds);
+      box.appendChild(embeds);
     }
+    if (msg.forward !== undefined) {
+      endForwardBlock(box, msg.forward);
+      el.appendChild(box);
+    }
+
+    // The thread this message started, below its body (WP 6.9c).
+    const thread = threadOfMessage(msg);
+    if (thread !== undefined) el.appendChild(renderThreadChip(thread, opts.onOpenThread, signal));
 
     if (msg.reactions.length > 0) {
       el.appendChild(renderReactions(msg, opts, signal));
     }
+  }
+
+  // A send queued behind its files shows them, with progress and Cancel while
+  // they upload and plain once it failed (3A-9).
+  if ((msg.status === "uploading" || msg.status === "failed") && msg.correlationId !== null) {
+    const strip = opts.renderUploadStrip?.(msg.correlationId, signal);
+    if (strip != null) el.appendChild(strip);
   }
 
   // Failed optimistic send: show the reason and offer retry / discard.
@@ -448,10 +750,39 @@ export function renderMessage(
     el.appendChild(bar);
   }
 
-  // The hover action bar (react/reply/pin/edit/delete) only applies to
-  // confirmed server messages — not deleted rows or unsent optimistic rows.
-  if (!msg.deleted && msg.status === "sent") {
+  // The hover action bar only applies to confirmed server messages — not
+  // deleted rows or unsent optimistic rows. Normal bar: the quick reactions,
+  // React, Edit (own) or Reply (others'), then "...". Holding Shift also shows
+  // Pin, Delete and, on your own message, Reply (CSS on `.shift-held`; the
+  // buttons are always rendered when their gate allows, `display:none` keeps
+  // them out of the tab order otherwise). Copy Link, Report and Copy ID live
+  // in the "..." menu.
+  if (!msg.deleted && msg.status === "sent" && editor === undefined) {
+    const gates = messageActionGates(msg, opts);
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
+
+    // The lock is applied at render from the current timeout, then updated in
+    // place by refreshReactionLocks when the timeout changes (P4-02).
+    quickReactionEmojiForPass(QUICK_REACTIONS).forEach((emoji, index) => {
+      // A new emoji on a message at the cap is left out, as in the menu.
+      if (atReactionLimit(msg.reactions, emoji)) return;
+      const { node, name } = emojiNode(emoji);
+      const label = messagingText("action.reactWith", { name });
+      const quickBtn = createElement("button", {
+        class: "msg-quick-react",
+        "data-testid": `msg-quick-react-${msg.id}-${index}`,
+        "aria-label": label,
+      });
+      quickBtn.appendChild(node);
+      quickBtn.title = label;
+      wireReactionControl(
+        quickBtn,
+        () => opts.onReactionClick(msg.id, emoji),
+        gates.react.reason,
+        signal,
+      );
+      actionsBar.appendChild(quickBtn);
+    });
 
     const reactBtn = createElement("button", {
       "data-testid": `msg-react-${msg.id}`,
@@ -459,43 +790,16 @@ export function renderMessage(
     });
     reactBtn.appendChild(createIcon("smile", 16));
     reactBtn.title = messagingText("action.react");
-    // The lock is applied at render from the current timeout, then updated in
-    // place by refreshReactionLocks when the timeout changes (P4-02).
     wireReactionControl(
       reactBtn,
       () => opts.onReactionClick(msg.id, ""),
-      reactionLockReason(),
+      gates.react.reason,
       signal,
     );
     actionsBar.appendChild(reactBtn);
 
-    const replyBtn = createElement("button", {
-      "data-testid": `msg-reply-${msg.id}`,
-      "aria-label": messagingText("action.reply"),
-    });
-    replyBtn.appendChild(createIcon("reply", 16));
-    replyBtn.title = messagingText("action.reply");
-    replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
-    actionsBar.appendChild(replyBtn);
-
-    const pinBtn = createElement("button", {
-      "data-testid": `msg-pin-${msg.id}`,
-      "aria-label": msg.pinned ? messagingText("action.unpin") : messagingText("action.pin"),
-    });
-    pinBtn.appendChild(createIcon(msg.pinned ? "pin-off" : "pin", 16));
-    pinBtn.title = msg.pinned ? messagingText("action.unpin") : messagingText("action.pin");
-    pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
-      signal,
-    });
-    // The server gates SetMessagePinned on MANAGE_MESSAGES for a channel, but
-    // any DM participant may pin — so offering it to a plain member is a
-    // broken affordance (PRD.md: permission is a pre-disabled affordance, not
-    // a rejection after the fact).
-    if (opts.channelType === "dm" || canManageMessages()) {
-      actionsBar.appendChild(pinBtn);
-    }
-
-    if (msg.user.id === opts.currentUserId) {
+    const own = gates.edit.shown;
+    if (own) {
       const editBtn = createElement("button", {
         "data-testid": `msg-edit-${msg.id}`,
         "aria-label": messagingText("action.edit"),
@@ -506,9 +810,36 @@ export function renderMessage(
       actionsBar.appendChild(editBtn);
     }
 
-    // Own message, or a moderator acting on someone else's.
-    if (msg.user.id === opts.currentUserId || canManageMessages()) {
+    const replyBtn = createElement("button", {
+      class: own ? "msg-shift-only" : "",
+      ...(own ? { tabindex: "-1" } : {}),
+      "data-testid": `msg-reply-${msg.id}`,
+      "aria-label": messagingText("action.reply"),
+    });
+    replyBtn.appendChild(createIcon("reply", 16));
+    replyBtn.title = messagingText("action.reply");
+    replyBtn.addEventListener("click", () => opts.onReplyClick(msg.id), { signal });
+    actionsBar.appendChild(replyBtn);
+
+    if (gates.pin.shown) {
+      const pinBtn = createElement("button", {
+        class: "msg-shift-only",
+        tabindex: "-1",
+        "data-testid": `msg-pin-${msg.id}`,
+        "aria-label": msg.pinned ? messagingText("action.unpin") : messagingText("action.pin"),
+      });
+      pinBtn.appendChild(createIcon(msg.pinned ? "pin-off" : "pin", 16));
+      pinBtn.title = msg.pinned ? messagingText("action.unpin") : messagingText("action.pin");
+      pinBtn.addEventListener("click", () => opts.onPinClick(msg.id, msg.channelId, msg.pinned), {
+        signal,
+      });
+      actionsBar.appendChild(pinBtn);
+    }
+
+    if (gates.delete.shown) {
       const deleteBtn = createElement("button", {
+        class: "msg-shift-only",
+        tabindex: "-1",
         "data-testid": `msg-delete-${msg.id}`,
         "aria-label": messagingText("action.delete"),
       });
@@ -529,61 +860,16 @@ export function renderMessage(
       actionsBar.appendChild(deleteBtn);
     }
 
-    const copyLinkBtn = createElement("button", {
-      "data-testid": `msg-copy-link-${msg.id}`,
-      "aria-label": messagingText("action.copyLink"),
+    const moreBtn = createElement("button", {
+      "data-testid": `msg-more-${msg.id}`,
+      "aria-label": messagingText("action.more"),
+      "aria-haspopup": "menu",
+      "aria-expanded": "false",
     });
-    copyLinkBtn.appendChild(createIcon("link", 16));
-    copyLinkBtn.title = messagingText("action.copyLink");
-    copyLinkBtn.addEventListener(
-      "click",
-      () => {
-        // No silent success: a copy with no feedback is indistinguishable
-        // from a clipboard that refused.
-        void navigator.clipboard.writeText(formatMessageLink(msg.channelId, msg.id)).then(
-          () => showToast(messagingText("toast.linkCopied"), "success"),
-          () => showToast(messagingText("toast.linkCopyFailed"), "error"),
-        );
-      },
-      { signal },
-    );
-    actionsBar.appendChild(copyLinkBtn);
-
-    // Someone else's message: report it, or one of its attachments (B9-10).
-    const onReport = opts.onReportClick;
-    if (onReport !== undefined && msg.user.id !== opts.currentUserId) {
-      const reportBtn = createElement("button", {
-        "data-testid": `msg-report-${msg.id}`,
-        "aria-label": reportEntryText("reportMessage"),
-        "aria-haspopup": "dialog",
-      });
-      reportBtn.appendChild(createIcon("flag", 16));
-      reportBtn.title = reportEntryText("reportMessage");
-      reportBtn.addEventListener("click", () => onReport(msg.id), { signal });
-      actionsBar.appendChild(reportBtn);
-    }
-
-    if (developerModeEnabled) {
-      const copyIdBtn = createElement("button", {
-        "data-testid": `msg-copy-id-${msg.id}`,
-        "aria-label": messagingText("action.copyId"),
-      });
-      copyIdBtn.appendChild(createIcon("hash", 16));
-      copyIdBtn.title = messagingText("action.copyId");
-      copyIdBtn.addEventListener(
-        "click",
-        () => {
-          // No silent success: a copy with no feedback is indistinguishable
-          // from a clipboard that refused.
-          void navigator.clipboard.writeText(String(msg.id)).then(
-            () => showToast(messagingText("toast.idCopied"), "success"),
-            () => showToast(messagingText("toast.idCopyFailed"), "error"),
-          );
-        },
-        { signal },
-      );
-      actionsBar.appendChild(copyIdBtn);
-    }
+    moreBtn.appendChild(createIcon("ellipsis", 16));
+    moreBtn.title = messagingText("action.more");
+    // Opened by MessageList's delegated listener, which owns the menu's signal.
+    actionsBar.appendChild(moreBtn);
 
     el.appendChild(actionsBar);
   }

@@ -17,7 +17,7 @@ import (
 // account self-deletion). The plugin lifecycle rows live in
 // audit_coverage_plugin_test.go because their fixtures are package-internal.
 // The closing subtest runs the detail denylist over the recorded corpus
-// (plan docs/plans/b2-protocol-trust-compat-2026-08-28.md § B2-6).
+// (plan docs/archive/plans/b2-protocol-trust-compat-2026-08-28.md § B2-6).
 func TestAuditCoverage_APIMutations(t *testing.T) {
 	const password = "Password1!"
 

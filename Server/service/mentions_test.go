@@ -97,7 +97,8 @@ func TestParseMentionTokens(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tokens, everyone, here := parseMentionTokens(tt.content)
+			parsed := parseMentionTokens(tt.content)
+			tokens, everyone, here := parsed.Tokens, parsed.Everyone, parsed.Here
 			var got []string
 			for _, tok := range tokens {
 				got = append(got, tok.spellings[0])
@@ -118,7 +119,7 @@ func TestParseMentionTokens(t *testing.T) {
 // TestParseMentionTokens_TrailingPunctuationSpelling locks the fallback that
 // makes "@bob." resolve to bob when no user is literally named "bob.".
 func TestParseMentionTokens_TrailingPunctuationSpelling(t *testing.T) {
-	tokens, _, _ := parseMentionTokens("thanks @bob.")
+	tokens := parseMentionTokens("thanks @bob.").Tokens
 	if len(tokens) != 1 {
 		t.Fatalf("tokens = %d, want 1", len(tokens))
 	}
@@ -132,7 +133,7 @@ func TestParseMentionTokens_CandidateCap(t *testing.T) {
 	for i := range maxMentionCandidates + 20 {
 		fmt.Fprintf(&sb, "@user%d ", i)
 	}
-	tokens, _, _ := parseMentionTokens(sb.String())
+	tokens := parseMentionTokens(sb.String()).Tokens
 	if len(tokens) != maxMentionCandidates {
 		t.Errorf("tokens = %d, want %d", len(tokens), maxMentionCandidates)
 	}
@@ -515,7 +516,7 @@ func TestSendMessage_DirectMentionIncrementsCount(t *testing.T) {
 func TestSendMessage_MentionCountsWrittenInBackground(t *testing.T) {
 	svc, _, database := newMentionFixture(t)
 	// Undo the fixture's inline seam so bg is the production `go fn()` again.
-	svc.bg = func(fn func()) { go fn() }
+	svc.bgInline = false
 
 	sendAs(t, svc, 1, "@Bob ping")
 
@@ -756,5 +757,60 @@ func TestSendMessage_DMMentionsResolve(t *testing.T) {
 	}
 	if res.MentionsEveryone {
 		t.Error("DM must not honor @everyone")
+	}
+}
+
+// TestMentionReach_AgreesWithMentionEntries pins MentionReach's expected
+// (direct, broad) verdict per reader, including the @here statuses, and checks
+// that mentionEntries batches exactly the readers it reports a hit for. The
+// author and the author's blockers are removed by the caller, outside
+// MentionReach, so they are not part of this table.
+func TestMentionReach_AgreesWithMentionEntries(t *testing.T) {
+	svc, _, _ := newMentionFixture(t)
+	ctx := context.Background()
+	// bob(2) online, carol(3) no connection, mod(4) invisible; alice(1) authors.
+	live := map[int64]string{1: db.StatusOnline, 2: db.StatusOnline, 3: "", 4: db.StatusInvisible}
+	svc.SetLiveStatusLookup(func(userID int64) string { return live[userID] })
+
+	type verdict struct{ direct, broad bool }
+	cases := []struct {
+		name string
+		set  mentionSet
+		want map[int64]verdict // readers 2, 3, 4
+	}{
+		{"none", mentionSet{UserIDs: []int64{}}, map[int64]verdict{}},
+		{"direct", mentionSet{UserIDs: []int64{2, 3}}, map[int64]verdict{2: {true, false}, 3: {true, false}}},
+		{"everyone", mentionSet{UserIDs: []int64{}, Everyone: true},
+			map[int64]verdict{2: {false, true}, 3: {false, true}, 4: {false, true}}},
+		{"here reaches only present readers", mentionSet{UserIDs: []int64{}, Everyone: true, HereOnly: true},
+			map[int64]verdict{2: {false, true}}},
+		{"direct and everyone", mentionSet{UserIDs: []int64{3}, Everyone: true},
+			map[int64]verdict{2: {false, true}, 3: {true, true}, 4: {false, true}}},
+		{"direct and here", mentionSet{UserIDs: []int64{3}, Everyone: true, HereOnly: true},
+			map[int64]verdict{2: {false, true}, 3: {true, false}}},
+		{"unknown id", mentionSet{UserIDs: []int64{99}}, map[int64]verdict{}},
+	}
+	const authorID = int64(1)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			batched := map[int64]bool{}
+			for _, e := range svc.mentionEntries(ctx, 10, 500, authorID, tc.set, false, nil) {
+				for _, uid := range e.UserIDs {
+					batched[uid] = true
+				}
+			}
+			for uid := int64(2); uid <= 4; uid++ {
+				direct, broad := MentionReach(tc.set.UserIDs, tc.set.Everyone, tc.set.HereOnly, uid, live[uid])
+				if got := (verdict{direct, broad}); got != tc.want[uid] {
+					t.Errorf("user %d: MentionReach = %+v, want %+v", uid, got, tc.want[uid])
+				}
+				if hit := direct || broad; hit != batched[uid] {
+					t.Errorf("user %d: MentionReach hit = %v, mentionEntries batched = %v", uid, hit, batched[uid])
+				}
+			}
+			if batched[authorID] {
+				t.Errorf("the author was batched")
+			}
+		})
 	}
 }

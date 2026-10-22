@@ -66,7 +66,12 @@ function resetStores(): void {
     detachedChannels: new Set(),
   }));
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
-  channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
 }
 
 /** Authors alternate between two other users so no row is ever grouped, and
@@ -171,6 +176,8 @@ describe("MessageList — unread navigation (P4-03)", () => {
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
@@ -753,6 +760,10 @@ describe("MessageList — unread navigation (P4-03)", () => {
       scrollUp();
       returnToTail();
       await nextFrame();
+      // The window follows the reader (a viewport of buffer, not the whole
+      // 60-row tail), so bring the unread rows into it before looking.
+      scrollTo(60 * ROW_PX - CLIENT_HEIGHT - 100);
+      await nextFrame();
 
       const divider = container.querySelector('[data-testid="new-messages-divider"]');
       expect((divider?.nextElementSibling as HTMLElement | null)?.dataset.testid).toBe(
@@ -986,6 +997,62 @@ describe("MessageList — unread navigation (P4-03)", () => {
       vi.advanceTimersByTime(2000);
 
       expect(sendMarkRead).not.toHaveBeenCalled();
+    });
+  });
+  // ---------------------------------------------------------------------------
+  // 3A-1 — Escape and the page keys
+  // ---------------------------------------------------------------------------
+
+  describe("Escape and PageUp/PageDown (3A-1)", () => {
+    const bar = () => container.querySelector<HTMLElement>('[data-testid="unread-bar"]');
+
+    it("Escape marks read once, drops the unread bar and goes to the bottom", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(5);
+      mount();
+      expect(bar()?.hidden).toBe(false);
+      scrollUp();
+      // A message counted while the reader was scrolled up.
+      incrementUnread(CHANNEL_ID, true);
+
+      msgList!.markReadAndJumpToPresent();
+
+      expect(sendMarkRead).toHaveBeenCalledOnce();
+      expect(sendMarkRead).toHaveBeenCalledWith(CHANNEL_ID);
+      expect(unreadCount()).toBe(0);
+      expect(bar()?.hidden).toBe(true);
+      expect(root().scrollTop).toBe(SCROLL_HEIGHT);
+
+      // Nothing left unread: a second Escape spends no mark_read.
+      msgList!.markReadAndJumpToPresent();
+      expect(sendMarkRead).toHaveBeenCalledOnce();
+    });
+
+    it("Escape in a detached window jumps to the present", () => {
+      const onJumpToPresent = vi.fn();
+      options = { ...options, onJumpToPresent };
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      setDetached(true);
+      mount();
+      scrollUp();
+
+      msgList!.markReadAndJumpToPresent();
+
+      expect(onJumpToPresent).toHaveBeenCalledOnce();
+      expect(root().scrollTop).toBe(300);
+    });
+
+    it("scrollPage moves about one screen, keeping a line of context", () => {
+      setMessages(range(1, 50));
+      openChannelWithUnread(0);
+      mount();
+      scrollTo(5_000);
+
+      msgList!.scrollPage(-1);
+      expect(root().scrollTop).toBe(5_000 - 525);
+      msgList!.scrollPage(1);
+      expect(root().scrollTop).toBe(5_000);
     });
   });
 });

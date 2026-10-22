@@ -76,14 +76,20 @@ export function qs(selector: string, parent?: Element): Element | null {
  * nodes. The abort registration is dropped when the timer fires, so re-arming
  * never accumulates cleanups. Nothing is scheduled once `signal` has aborted.
  */
-export function setOwnedTimeout(signal: AbortSignal, fn: () => void, ms: number): void {
-  if (signal.aborted) return;
+export function setOwnedTimeout(signal: AbortSignal, fn: () => void, ms: number): () => void {
+  if (signal.aborted) return () => {};
   const clear = (): void => clearTimeout(timer);
   const timer = setTimeout(() => {
     signal.removeEventListener("abort", clear);
     fn();
   }, ms);
   signal.addEventListener("abort", clear, { once: true });
+  // Lets an owner that re-arms drop the pending timer (and its abort
+  // registration) instead of leaving it to fire as a no-op.
+  return () => {
+    clear();
+    signal.removeEventListener("abort", clear);
+  };
 }
 
 /**
@@ -95,4 +101,17 @@ export function setOwnedTimeout(signal: AbortSignal, fn: () => void, ms: number)
 export function focusIsOurs(owner: Element): boolean {
   const active = document.activeElement;
   return active === null || active === document.body || owner.contains(active);
+}
+
+/**
+ * Whether a right-click on `target` should keep the webview's own menu: a
+ * text field, where it offers Cut, Copy, Paste, Select All and spelling
+ * fixes. The app suppresses that menu everywhere else.
+ */
+export function wantsNativeMenu(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement) return true;
+  if (target instanceof HTMLInputElement) {
+    return /^(text|search|email|url|password|number|tel)$/.test(target.type);
+  }
+  return target instanceof HTMLElement && target.isContentEditable === true;
 }

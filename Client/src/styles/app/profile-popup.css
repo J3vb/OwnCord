@@ -25,6 +25,7 @@
   /* A long "about me" scrolls inside the card instead of growing it off the
      bottom of the screen. */
   max-height: calc(100vh - 16px);
+  max-height: calc(100dvh - 16px);
   opacity: 0;
   transform: scale(0.95);
   transform-origin: top left;
@@ -37,7 +38,8 @@
   transform: scale(1);
 }
 .upp-banner {
-  height: 60px;
+  height: var(--upp-banner-h, 60px);
+  overflow: hidden;
   flex-shrink: 0;
   background: var(--accent-gradient);
 }
@@ -52,7 +54,7 @@
    avatar, so it straddles the seam. */
 .upp-avatar {
   position: absolute;
-  top: 24px;
+  top: calc(var(--upp-banner-h, 60px) - 36px);
   left: 16px;
   box-sizing: border-box;
   width: 72px;
@@ -96,6 +98,86 @@
   font-size: var(--font-size-xs);
   color: var(--text-normal);
 }
+/* The role picker: the badge becomes a button, and its list opens in the flow
+   below it (the card body scrolls, so an absolutely placed list would clip). */
+.upp-role-btn {
+  border: 1px solid transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+.upp-role-btn:hover,
+.upp-role-btn[aria-expanded="true"] {
+  border-color: var(--border);
+}
+/* Multi-role chips (WP 6.3d): each held role is a pill with an x, and the "+"
+   pill opens the same list below as the single-role picker. */
+.upp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.upp-chips .upp-role-badge {
+  margin-top: 4px;
+}
+.upp-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+.upp-chip-x:hover,
+.upp-chip-x:focus-visible {
+  background: var(--bg-active);
+  color: var(--header-primary);
+}
+.upp-chip-add {
+  color: var(--text-muted);
+}
+.upp-role-menu {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  padding: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.upp-role-option {
+  display: block;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-normal);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.upp-role-option:hover,
+.upp-role-option:focus-visible {
+  background: var(--bg-hover);
+}
+.upp-role-option[aria-checked="true"] {
+  font-weight: 700;
+  color: var(--header-primary);
+}
+.upp-role-option[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: progress;
+}
 .upp-status-line {
   display: flex;
   align-items: center;
@@ -114,6 +196,7 @@
 /* Both sections are always built and left empty when the user has no data for
    them, so they have to collapse rather than render as blank panels. */
 .upp-about,
+.upp-note,
 .upp-join-date {
   margin-top: 12px;
   padding: 12px;
@@ -121,6 +204,7 @@
   background: var(--bg-secondary);
 }
 .upp-about:empty,
+.upp-note:empty,
 .upp-join-date:empty {
   display: none;
 }
@@ -138,6 +222,31 @@
   color: var(--text-normal);
   overflow-wrap: anywhere;
 }
+/* The viewer's private note: a plain box in the section, with the failed-save
+   line under it (empty while all is well). */
+.upp-note-input {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  box-sizing: border-box;
+  background: var(--bg-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--header-primary);
+  font-size: var(--font-size-sm);
+  padding: 8px;
+  font-family: inherit;
+}
+.upp-note-error,
+.dps-note-error {
+  margin-top: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--red);
+}
+.upp-note-error:empty,
+.dps-note-error:empty {
+  display: none;
+}
 .upp-divider {
   height: 1px;
   margin: 12px 0;
@@ -145,6 +254,7 @@
 }
 .upp-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .upp-action-btn {
@@ -167,8 +277,22 @@
 .upp-action-btn:hover {
   background: var(--accent-hover);
 }
+.upp-action-btn:disabled,
+.upp-action-btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--accent);
+}
 @media (prefers-reduced-motion: reduce) {
   .upp-popup {
     transition: none;
   }
+}
+
+/* A banner picture fills its strip (popup, DM panel and settings card). */
+.banner-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }

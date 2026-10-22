@@ -24,6 +24,17 @@ const clickTab = (root: HTMLElement, label: string) => {
   tab.click();
 };
 
+const openWithAudio = async () => {
+  const picking = showScreenSharePicker({
+    sources,
+    portal: false,
+    audioAvailable: true,
+    defaultQuality: "high",
+    defaultFps: 30,
+  });
+  return { picking, root: await mounted() };
+};
+
 describe("showScreenSharePicker", () => {
   afterEach(() => {
     document.body.replaceChildren();
@@ -65,10 +76,43 @@ describe("showScreenSharePicker", () => {
     const root = await mounted();
     expect(root.querySelector('[role="switch"]')).toBeNull();
     expect(root.querySelector(".ssp-opt-text")?.textContent).toContain(
-      "Audio sharing is not available on Linux yet",
+      "Audio sharing needs a PulseAudio or PipeWire sound server",
     );
     root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
     await expect(picking).resolves.not.toHaveProperty("audio");
+  });
+
+  it("shows a share-audio switch on Linux when the host can capture audio", async () => {
+    const first = await openWithAudio();
+    const toggle = first.root.querySelector<HTMLElement>('[role="switch"]')!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(first.root.querySelector(".ssp-opt-text")).toBeNull();
+    first.root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(first.picking).resolves.toMatchObject({ audio: true });
+    await vi.waitFor(() => expect(document.querySelector('[role="switch"]')).toBeNull());
+
+    const second = await openWithAudio();
+    const off = second.root.querySelector<HTMLElement>('[role="switch"]')!;
+    off.click();
+    expect(off.getAttribute("aria-checked")).toBe("false");
+    second.root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(second.picking).resolves.toMatchObject({ audio: false });
+  });
+
+  it("toggles the share-audio switch with Space and Enter", async () => {
+    const { picking, root } = await openWithAudio();
+    const toggle = root.querySelector<HTMLElement>('[role="switch"]')!;
+    for (const [key, expected] of [
+      [" ", "false"],
+      ["Enter", "true"],
+    ] as const) {
+      toggle.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      expect(toggle.getAttribute("aria-checked")).toBe(expected);
+    }
+    toggle.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+    await expect(picking).resolves.toMatchObject({ audio: true });
   });
 
   it("asks only for the source when changing a live share's source", async () => {
@@ -262,6 +306,83 @@ describe("showScreenSharePicker", () => {
     await expect(picking).resolves.toBeNull();
   });
 
+  describe("monitor refresh gate on 120 fps", () => {
+    const monitors: NativeVoiceScreenSource[] = [
+      { id: "screen:1", kind: "screen", title: "Slow", thumbnail: null, refreshHz: 60 },
+      { id: "screen:2", kind: "screen", title: "Fast", thumbnail: null, refreshHz: 144 },
+      { id: "screen:3", kind: "screen", title: "Unknown", thumbnail: null, refreshHz: null },
+      { id: "window:9", kind: "window", title: "Code", thumbnail: null, refreshHz: null },
+    ];
+    const open = async (defaultFps: number) => {
+      const picking = showScreenSharePicker({
+        sources: monitors,
+        portal: false,
+        defaultQuality: "source",
+        defaultFps,
+      });
+      const root = await mounted();
+      const fps = root.querySelectorAll<HTMLSelectElement>(".ssp-select")[1]!;
+      const option120 = [...fps.options].find((o) => o.value === "120")!;
+      const pick = (id: string) =>
+        root.querySelector<HTMLButtonElement>(`[data-source-id="${id}"]`)!.click();
+      return { picking, root, fps, option120, pick };
+    };
+
+    it("disables 120 with the monitor rate on a 60 Hz screen", async () => {
+      const { picking, fps, option120 } = await open(120);
+      expect(option120.disabled).toBe(true);
+      expect(option120.title).toBe("Your monitor runs at 60 Hz");
+      expect(fps.value).toBe("60");
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await expect(picking).resolves.toBeNull();
+    });
+
+    it("allows 120 on a 144 Hz screen", async () => {
+      const { picking, fps, option120, pick } = await open(120);
+      pick("screen:2");
+      expect(option120.disabled).toBe(false);
+      expect(option120.title).toBe("");
+      fps.value = "120";
+      fps.dispatchEvent(new Event("change"));
+      document.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+      await expect(picking).resolves.toMatchObject({ source: "screen:2", fps: 120 });
+    });
+
+    it("never gates on an unknown rate or a window", async () => {
+      const { picking, option120, pick, root } = await open(120);
+      pick("screen:3");
+      expect(option120.disabled).toBe(false);
+      pick("screen:1");
+      expect(option120.disabled).toBe(true);
+      clickTab(root, "Applications");
+      expect(option120.disabled).toBe(false);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      await expect(picking).resolves.toBeNull();
+    });
+
+    it("drops a chosen 120 to 60 when switching to a 60 Hz screen", async () => {
+      const { picking, fps, option120, pick } = await open(60);
+      pick("screen:2");
+      fps.value = "120";
+      fps.dispatchEvent(new Event("change"));
+      expect(fps.value).toBe("120");
+      pick("screen:1");
+      expect(option120.disabled).toBe(true);
+      expect(fps.value).toBe("60");
+      document.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+      await expect(picking).resolves.toMatchObject({ source: "screen:1", fps: 60 });
+    });
+
+    it("restores a saved 120 when moving from a 60 Hz screen to a 144 Hz one", async () => {
+      const { picking, fps, pick } = await open(120);
+      expect(fps.value).toBe("60");
+      pick("screen:2");
+      expect(fps.value).toBe("120");
+      document.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+      await expect(picking).resolves.toMatchObject({ source: "screen:2", fps: 120 });
+    });
+  });
+
   it("shows only the quality step before the Windows picker and resolves the OS pick", async () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/141",
@@ -291,6 +412,45 @@ describe("showScreenSharePicker", () => {
     expect(goLive.disabled).toBe(false);
     goLive.click();
     await expect(picking).resolves.toEqual({ source: "os", quality: "source", fps: 60 });
+  });
+
+  it("on Windows says what 120 fps needs, only while 120 is chosen (M-2)", async () => {
+    const picking = showScreenSharePicker({
+      sources: [],
+      portal: false,
+      osPicker: true,
+      defaultQuality: "high",
+      defaultFps: 30,
+    });
+    const root = await mounted();
+    const hint = root.querySelector<HTMLElement>('[data-testid="ssp-fps120-hint"]')!;
+    expect(hint.textContent).toBe(
+      "120 fps needs a 120 Hz or faster monitor. It uses H.264 on your graphics card where it can, even if you picked VP8.",
+    );
+    expect(hint.hidden).toBe(true);
+    const fps = root.querySelectorAll<HTMLSelectElement>(".ssp-select")[1]!;
+    fps.value = "120";
+    fps.dispatchEvent(new Event("change"));
+    expect(hint.hidden).toBe(false);
+    expect(fps.getAttribute("aria-describedby")).toBe(hint.id);
+    fps.value = "60";
+    fps.dispatchEvent(new Event("change"));
+    expect(hint.hidden).toBe(true);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await expect(picking).resolves.toBeNull();
+  });
+
+  it("has no 120 fps hint outside the Windows picker", async () => {
+    const picking = showScreenSharePicker({
+      sources,
+      portal: false,
+      defaultQuality: "source",
+      defaultFps: 120,
+    });
+    const root = await mounted();
+    expect(root.querySelector('[data-testid="ssp-fps120-hint"]')).toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await expect(picking).resolves.toBeNull();
   });
 
   it("says so when there is nothing to share", async () => {

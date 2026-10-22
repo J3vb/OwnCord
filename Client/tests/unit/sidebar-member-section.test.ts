@@ -32,6 +32,7 @@ import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "@components/MemberList";
 import { openUserReport } from "../../src/features/reports/openers";
 import { Permission, type UserStatus } from "../../src/lib/types";
+import { ApiClientError } from "../../src/lib/api";
 
 // ---------------------------------------------------------------------------
 // Store reset
@@ -55,6 +56,7 @@ function resetStores(): void {
   // Role lookups read the dispatcher-updated channels.store (see the role-source
   // unification). Seed via the same setRoles action the dispatcher calls.
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [
@@ -178,16 +180,6 @@ describe("SidebarMemberSection", () => {
       expect(createMemberList).toHaveBeenCalled();
       const mountFn = (createMemberList as ReturnType<typeof vi.fn>).mock.results[0]!.value.mount;
       expect(mountFn).toHaveBeenCalled();
-
-      section.destroy();
-    });
-
-    it("returns the memberListComponent for external tracking", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
-
-      expect(section.memberListComponent).toBeDefined();
-      expect(typeof section.memberListComponent.mount).toBe("function");
 
       section.destroy();
     });
@@ -434,6 +426,58 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
+    function startDrag(): { section: ReturnType<typeof createSidebarMemberSection> } {
+      const section = createSidebarMemberSection(defaultOpts());
+      container.appendChild(section.element);
+      const handle = container.querySelector(".sidebar-resize-handle") as HTMLElement;
+      handle.dispatchEvent(new MouseEvent("mousedown", { clientY: 300, bubbles: true }));
+      return { section };
+    }
+
+    it("writes localStorage once on mouseup, not on every mousemove", () => {
+      const setItem = vi.spyOn(Storage.prototype, "setItem");
+      const { section } = startDrag();
+
+      for (const y of [290, 280, 270, 260]) {
+        document.dispatchEvent(new MouseEvent("mousemove", { clientY: y, bubbles: true }));
+      }
+      expect(setItem.mock.calls.filter(([k]) => k === LS_KEY_HEIGHT)).toHaveLength(0);
+
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      const writes = setItem.mock.calls.filter(([k]) => k === LS_KEY_HEIGHT);
+      expect(writes).toHaveLength(1);
+      // jsdom lays nothing out (start height 0), so the clamp floor of 80 applies.
+      expect(writes[0]![1]).toBe("80");
+
+      // A second mouseup after the drag ended writes nothing more.
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      expect(setItem.mock.calls.filter(([k]) => k === LS_KEY_HEIGHT)).toHaveLength(1);
+
+      section.destroy();
+      setItem.mockRestore();
+    });
+
+    it("does not throw when storage rejects the write on mouseup", () => {
+      const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new DOMException("quota", "QuotaExceededError");
+      });
+      // jsdom reports a listener's exception as a window "error" event rather
+      // than throwing out of dispatchEvent, so watch for that.
+      const reported = vi.fn((e: Event) => e.preventDefault());
+      window.addEventListener("error", reported);
+      const { section } = startDrag();
+      document.dispatchEvent(new MouseEvent("mousemove", { clientY: 250, bubbles: true }));
+
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+      expect(setItem).toHaveBeenCalled();
+      expect(reported).not.toHaveBeenCalled();
+
+      window.removeEventListener("error", reported);
+      section.destroy();
+      setItem.mockRestore();
+    });
+
     it("does not resize when not dragging", () => {
       const section = createSidebarMemberSection(defaultOpts());
       container.appendChild(section.element);
@@ -461,12 +505,7 @@ describe("SidebarMemberSection", () => {
     /** Extract the callbacks passed to createMemberList */
     function getCapturedCallbacks(): {
       onKick: (userId: number, username: string) => Promise<void>;
-      onBan: (
-        userId: number,
-        username: string,
-        reason: string,
-        durationHours: number,
-      ) => Promise<void>;
+      onBan: (userId: number, username: string, displayName: string) => void;
       onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
     } {
       const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
@@ -543,11 +582,28 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
-    it("ban: calls API and shows success toast", async () => {
+    /** Open the Ban dialog the member menu asks for and return its controls. */
+    async function openBanDialogFor(
+      callbacks: ReturnType<typeof getCapturedCallbacks>,
+    ): Promise<{ reason: HTMLInputElement; confirm: HTMLButtonElement; status: HTMLElement }> {
+      callbacks.onBan(3, "Bob", "Bob");
+      const dialog = await vi.waitFor(() => {
+        const el = document.querySelector('[data-testid="ban-dialog"]');
+        if (el === null) throw new Error("ban dialog not open yet");
+        return el;
+      });
+      return {
+        reason: dialog.querySelector('[data-testid="ban-reason-input"]') as HTMLInputElement,
+        confirm: dialog.querySelector('[data-testid="ban-confirm"]') as HTMLButtonElement,
+        status: dialog.querySelector('[data-testid="ban-status"]') as HTMLElement,
+      };
+    }
+
+    it("ban: opens the dialog, calls the API and shows the success toast", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn(),
-        adminBanMember: vi.fn().mockResolvedValue(undefined),
+        adminBanMember: vi.fn().mockResolvedValue({}),
         adminChangeRole: vi.fn(),
       };
       const opts = {
@@ -558,16 +614,20 @@ describe("SidebarMemberSection", () => {
       const section = createSidebarMemberSection(opts);
       container.appendChild(section.element);
 
-      const callbacks = getCapturedCallbacks();
-      await callbacks.onBan(3, "Bob", "spamming", 0);
+      const { reason, confirm } = await openBanDialogFor(getCapturedCallbacks());
+      // Nothing is sent by opening the dialog.
+      expect(mockApi.adminBanMember).not.toHaveBeenCalled();
+      reason.value = "spamming";
+      confirm.click();
+      await vi.waitFor(() => expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success"));
 
-      expect(mockApi.adminBanMember).toHaveBeenCalledWith(3, "spamming", 0);
-      expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success");
+      expect(mockApi.adminBanMember).toHaveBeenCalledWith(3, "spamming", 0, undefined, 0);
+      expect(document.querySelector('[data-testid="ban-dialog"]')).toBeNull();
 
       section.destroy();
     });
 
-    it("ban: shows error toast on API failure", async () => {
+    it("ban: shows the server's error in the dialog and keeps it open", async () => {
       const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn(),
@@ -582,16 +642,18 @@ describe("SidebarMemberSection", () => {
       const section = createSidebarMemberSection(opts);
       container.appendChild(section.element);
 
-      const callbacks = getCapturedCallbacks();
-      await callbacks.onBan(3, "Bob", "", 0);
+      const { confirm, status } = await openBanDialogFor(getCapturedCallbacks());
+      confirm.click();
+      await vi.waitFor(() => expect(status.textContent).toBe("Ban denied"));
 
-      expect(mockShow).toHaveBeenCalledWith("Ban denied", "error");
+      expect(document.querySelector('[data-testid="ban-dialog"]')).not.toBeNull();
+      expect(mockShow).not.toHaveBeenCalled();
 
       section.destroy();
+      expect(document.querySelector('[data-testid="ban-dialog"]')).toBeNull();
     });
 
     it("ban: shows generic error for non-Error exceptions", async () => {
-      const mockShow = vi.fn();
       const mockApi = {
         adminKickMember: vi.fn(),
         adminBanMember: vi.fn().mockRejectedValue("string error"),
@@ -599,16 +661,15 @@ describe("SidebarMemberSection", () => {
       };
       const opts = {
         api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+        getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
       };
 
       const section = createSidebarMemberSection(opts);
       container.appendChild(section.element);
 
-      const callbacks = getCapturedCallbacks();
-      await callbacks.onBan(3, "Bob", "", 0);
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to ban member", "error");
+      const { confirm, status } = await openBanDialogFor(getCapturedCallbacks());
+      confirm.click();
+      await vi.waitFor(() => expect(status.textContent).toBe("Failed to ban member"));
 
       section.destroy();
     });
@@ -633,6 +694,28 @@ describe("SidebarMemberSection", () => {
 
       expect(mockApi.adminChangeRole).toHaveBeenCalledWith(4, 2); // admin has roleId 2
       expect(mockShow).toHaveBeenCalledWith("Changed Charlie's role to admin", "success");
+
+      section.destroy();
+    });
+
+    it("changeRole: keeps the role's capitalisation in the toast and still resolves its id", async () => {
+      const mockShow = vi.fn();
+      const mockApi = {
+        adminKickMember: vi.fn(),
+        adminBanMember: vi.fn(),
+        adminChangeRole: vi.fn().mockResolvedValue(undefined),
+      };
+      setRoles([{ id: 7, name: "Moderator", color: null, permissions: 0 }]);
+      const section = createSidebarMemberSection({
+        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+      container.appendChild(section.element);
+
+      await getCapturedCallbacks().onChangeRole(4, "Charlie", "Moderator");
+
+      expect(mockApi.adminChangeRole).toHaveBeenCalledWith(4, 7);
+      expect(mockShow).toHaveBeenCalledWith("Changed Charlie's role to Moderator", "success");
 
       section.destroy();
     });
@@ -781,7 +864,7 @@ describe("SidebarMemberSection", () => {
       await vi.waitFor(() => expect(open).toHaveBeenCalled());
       const { userId, name, list } = open.mock.calls[open.mock.calls.length - 1]![0];
       expect({ userId, name }).toEqual({ userId: 7, name: "bob" });
-      expect(list).toBe(container.querySelector(".sidebar-members-content"));
+      expect(list).toBe(container.querySelector(".member-panel"));
 
       section.destroy();
     });
@@ -901,6 +984,24 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
+    it("shows the bans section once a roles update grants BAN_MEMBERS to your role", async () => {
+      // No permission yet: the section must not list anything.
+      const opts = defaultOpts();
+      const listUsers = opts.api.adminListUsers as unknown as ReturnType<typeof vi.fn>;
+      listUsers.mockResolvedValue([bannedUser(3, "spammer")]);
+
+      const section = createSidebarMemberSection(opts);
+      container.appendChild(section.element);
+      await Promise.resolve();
+      expect(container.querySelectorAll(".banned-row")).toHaveLength(0);
+
+      // roles_update only rewrites channelsStore.roles.
+      grantBanPermission();
+      await vi.waitFor(() => expect(container.querySelectorAll(".banned-row")).toHaveLength(1));
+
+      section.destroy();
+    });
+
     it("refetches when another moderator's ban or unban changes the roster", async () => {
       grantBanPermission();
       const opts = defaultOpts();
@@ -974,6 +1075,85 @@ describe("SidebarMemberSection", () => {
       // Still listed: the ban is still in force.
       expect(container.querySelectorAll(".banned-row")).toHaveLength(1);
 
+      section.destroy();
+    });
+  });
+  // -------------------------------------------------------------------------
+  // Timeout actions (3C-3)
+  // -------------------------------------------------------------------------
+
+  describe("timeout actions", () => {
+    function setup(api: Record<string, unknown>) {
+      const show = vi.fn();
+      const section = createSidebarMemberSection({
+        api: api as unknown as SidebarMemberSectionOptions["api"],
+        getToast: vi.fn().mockReturnValue({ show }),
+      });
+      container.appendChild(section.element);
+      const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
+      const callbacks = calls[calls.length - 1]![0] as {
+        onTimeoutMember: (userId: number, username: string, seconds: number) => Promise<void>;
+        onRemoveTimeout: (userId: number, username: string) => Promise<void>;
+      };
+      return { show, section, callbacks };
+    }
+
+    // (18)
+    it("onTimeoutMember sends the length with an empty reason and toasts success", async () => {
+      const timeoutMember = vi.fn().mockResolvedValue({ id: 1, voice: "skipped" });
+      const { show, section, callbacks } = setup({ timeoutMember });
+
+      await callbacks.onTimeoutMember(4, "Dave", 3600);
+
+      expect(timeoutMember).toHaveBeenCalledWith(4, 3600, "");
+      expect(show).toHaveBeenCalledWith("Timed out Dave (1 Hour)", "success");
+      section.destroy();
+    });
+
+    it("onTimeoutMember shows the server's message as an error toast on failure", async () => {
+      const timeoutMember = vi.fn().mockRejectedValue(new Error("Cannot time out that member"));
+      const { show, section, callbacks } = setup({ timeoutMember });
+
+      await callbacks.onTimeoutMember(4, "Dave", 60);
+
+      expect(show).toHaveBeenCalledWith("Cannot time out that member", "error");
+      section.destroy();
+    });
+
+    it("onRemoveTimeout lifts the timeout and toasts success", async () => {
+      const liftTimeout = vi.fn().mockResolvedValue(undefined);
+      const { show, section, callbacks } = setup({ liftTimeout });
+
+      await callbacks.onRemoveTimeout(4, "Dave");
+
+      expect(liftTimeout).toHaveBeenCalledWith(4);
+      expect(show).toHaveBeenCalledWith("Removed Dave's timeout", "success");
+      section.destroy();
+    });
+
+    // (19) edge case 2: stale timeout state
+    it("a 404 from Remove Timeout is an info toast, not an error", async () => {
+      const liftTimeout = vi
+        .fn()
+        .mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "no active timeout"));
+      const { show, section, callbacks } = setup({ liftTimeout });
+
+      await callbacks.onRemoveTimeout(4, "Dave");
+
+      expect(show).toHaveBeenCalledTimes(1);
+      expect(show).toHaveBeenCalledWith("Dave is not timed out", "info");
+      section.destroy();
+    });
+
+    it("any other Remove Timeout failure is an error toast", async () => {
+      const liftTimeout = vi
+        .fn()
+        .mockRejectedValue(new ApiClientError(403, "FORBIDDEN", "Not allowed"));
+      const { show, section, callbacks } = setup({ liftTimeout });
+
+      await callbacks.onRemoveTimeout(4, "Dave");
+
+      expect(show).toHaveBeenCalledWith("Not allowed", "error");
       section.destroy();
     });
   });

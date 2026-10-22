@@ -53,10 +53,10 @@ function makeMessage(id: number): Message {
     pinned: false,
     editedAt: null,
     deleted: false,
-    // 5 minutes apart, on the same UTC day, and exactly at (not under)
-    // GROUP_THRESHOLD_MS so shouldGroup never merges two of these rows —
-    // every message renders at its full (ungrouped) height.
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 5)).toISOString(),
+    // 10 minutes apart, on the same UTC day, and past GROUP_THRESHOLD_MS
+    // (7 minutes) so shouldGroup never merges two of these rows — every
+    // message renders at its full (ungrouped) height.
+    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
     status: "sent",
     correlationId: null,
     errorCode: null,
@@ -96,6 +96,8 @@ describe("MessageList — history prepend keeps the reading position (OC-0248)",
       onScrollTop: vi.fn(),
       onReplyClick: vi.fn(),
       onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
       onDeleteClick: vi.fn(),
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),

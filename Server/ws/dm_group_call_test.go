@@ -20,7 +20,7 @@ const absenceWindow = 100 * time.Millisecond
 // seedGroupDM creates a group DM containing every listed user.
 func seedGroupDM(t *testing.T, database *db.DB, name string, userIDs ...int64) int64 {
 	t.Helper()
-	ch, err := database.CreateGroupDMChannel(context.Background(), name, userIDs)
+	ch, err := database.CreateGroupDMChannel(context.Background(), name, userIDs[0], userIDs)
 	if err != nil {
 		t.Fatalf("seedGroupDM: %v", err)
 	}
@@ -114,6 +114,40 @@ func TestGroupDM_ChannelOpenIsPerViewer(t *testing.T) {
 		if int64(m["id"].(float64)) == bob.ID {
 			t.Error("bob appears in his own recipients list")
 		}
+	}
+}
+
+// A send that re-opens a closed group DM builds a dm_channel_open, and that
+// frame must carry the group's owner_id: it is how a client learns the room has
+// owners at all (WP 3B-10a review item).
+func TestGroupDM_ReopenOnSendCarriesOwnerID(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	alice := seedOwnerUser(t, database, "grp-owner-alice")
+	bob := seedMemberUser(t, database, "grp-owner-bob")
+	carol := seedMemberUser(t, database, "grp-owner-carol")
+	// seedGroupDM makes the first user the owner.
+	chID := seedGroupDM(t, database, "Owned", alice.ID, bob.ID, carol.ID)
+	if err := database.CloseDM(context.Background(), bob.ID, chID); err != nil {
+		t.Fatalf("CloseDM: %v", err)
+	}
+
+	sendAlice := make(chan []byte, 64)
+	sendBob := make(chan []byte, 64)
+	cAlice := ws.NewTestClientWithUser(hub, alice, chID, sendAlice)
+	cBob := ws.NewTestClientWithUser(hub, bob, chID, sendBob)
+	hub.Register(cAlice)
+	hub.Register(cBob)
+	waitRegistered(t, hub, cBob)
+
+	hub.HandleMessageForTest(cAlice, dmChatSendMsg(chID, "ping"))
+
+	env := dmWaitMsgType(sendBob, "dm_channel_open", waitTimeout)
+	if env == nil {
+		t.Fatal("bob did not receive dm_channel_open")
+	}
+	payload, _ := env["payload"].(map[string]any)
+	if got, ok := payload["owner_id"].(float64); !ok || int64(got) != alice.ID {
+		t.Errorf("dm_channel_open owner_id = %v, want %d (the creator)", payload["owner_id"], alice.ID)
 	}
 }
 

@@ -36,7 +36,8 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	if delivery != nil {
 		delivery.Content = content
 	}
-	if err := s.checkReplyTarget(ctx, p); err != nil {
+	replyRef, err := s.checkReplyTarget(ctx, p)
+	if err != nil {
 		return nil, err
 	}
 	if err := s.checkMessageSlowMode(ctx, p, ch); err != nil {
@@ -46,30 +47,37 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// Resolve mentions against the sanitized content, before the insert, so the
 	// row and its mention set are written together. Unknown @words and an
 	// unauthorized @everyone resolve to nothing and stay plain text.
-	mentions := s.resolveMentions(ctx, content, p.UserID, p.ChannelID, isDM)
+	// A reply_ping adds the replied-to author on top of the capped content
+	// mentions, without taking a content slot; everything downstream reads the
+	// one set.
+	mentions := s.loadRoleHolders(ctx, s.resolveMentions(ctx, content, p.UserID, p.ChannelID, isDM).
+		withReplyPing(replyPingTarget(p, replyRef)), p.ChannelID)
 
 	// Persist message. RETURNING hands back the inserted row, so the DB-assigned
 	// timestamp the fan-out needs arrives with the insert instead of a re-read.
-	msg, attachments, duplicate, err := s.persistMessage(ctx, p, content, mentions, delivery)
+	msg, attachments, skipped, duplicate, err := s.persistMessage(ctx, p, content, mentions, delivery)
 	if err != nil {
 		return nil, err
 	}
 	if duplicate {
-		return &SendMessageResult{MessageID: msg.ID, Timestamp: msg.Timestamp, Duplicate: true}, nil
+		return &SendMessageResult{
+			MessageID: msg.ID, Timestamp: msg.Timestamp, Duplicate: true,
+			SkippedAttachmentIDs: s.replaySkipped(ctx, p, msg.ID),
+		}, nil
 	}
 	msgID := msg.ID
 
 	result := &SendMessageResult{
-		MessageID:        msgID,
-		Timestamp:        msg.Timestamp,
-		Content:          content,
-		IsDM:             isDM,
-		Channel:          ch,
-		Attachments:      attachments,
-		Mentions:         mentions.UserIDs,
-		MentionsEveryone: mentions.Everyone,
-		MentionsHere:     mentions.HereOnly,
+		MessageID:            msgID,
+		Timestamp:            msg.Timestamp,
+		Content:              content,
+		IsDM:                 isDM,
+		Channel:              ch,
+		Attachments:          attachments,
+		SkippedAttachmentIDs: skipped,
+		ThreadJoined:         msg.ThreadJoined,
 	}
+	mentions.fill(result)
 	if p.ReplyTo != nil {
 		// The message is committed; a failed snippet read only costs the
 		// snippet, so it must not fail the send.
@@ -103,9 +111,9 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// bg, so the counts are readable as soon as SendMessage returns.
 	channelID, authorID, participantIDs := p.ChannelID, p.UserID, result.ParticipantIDs
 	bgCtx := context.WithoutCancel(ctx)
-	// A message with no @user, @everyone or @here raises no badge, so it never
-	// takes a queue slot or a goroutine.
-	if len(mentions.UserIDs) > 0 || mentions.Everyone {
+	// A message with no @user, @role, @everyone or @here raises no badge, so it
+	// never takes a queue slot or a goroutine.
+	if mentions.pings() {
 		s.dispatchMentionBadges(bgCtx, mentionJob{
 			enqueueAt: time.Now(), channelID: channelID, msgID: msgID,
 			apply: func(ctx context.Context) []db.MentionBatchEntry {
@@ -118,14 +126,14 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 	// (the Notify call can take seconds) rather than sharing the worker's
 	// queue.
 	if s.pushNotifier != nil {
-		candidates := mentions.UserIDs
+		candidates := mentions.reachIDs()
 		if isDM {
 			candidates = participantIDs
 		}
-		pushCtx, cancel := context.WithTimeout(bgCtx, backgroundJobTimeout)
-		s.bg(func() {
+		s.runBackground(bgCtx, "push dispatch", func(ctx context.Context) {
+			ctx, cancel := context.WithTimeout(ctx, backgroundJobTimeout)
 			defer cancel()
-			s.pushNotifier.Notify(pushCtx, channelID, authorID, candidates)
+			s.pushNotifier.Notify(ctx, channelID, authorID, candidates)
 		})
 	}
 
@@ -173,9 +181,9 @@ func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageP
 // Nothing requested is a no-op. A failed link, or a link that attached nothing
 // to a message with no content of its own, compensates by soft-deleting the
 // row and returns the error the caller surfaces to the sender.
-func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendMessageParams, msgID int64, content string) ([]db.AttachmentInfo, error) {
+func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendMessageParams, msgID int64, content string) ([]db.AttachmentInfo, []string, error) {
 	if len(p.AttachmentIDs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Link attachments. Ownership is enforced atomically inside the link
@@ -191,13 +199,14 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 		if delErr := s.st.DeleteMessage(context.WithoutCancel(ctx), msgID, p.UserID, true); delErr != nil {
 			slog.Error("MessageService.SendMessage DeleteMessage (cleanup)", "err", delErr, "msg_id", msgID)
 		}
-		return nil, fmt.Errorf("%w: failed to send message with attachments", ErrInternal)
+		return nil, nil, fmt.Errorf("%w: failed to send message with attachments", ErrInternal)
 	}
-	if linked < int64(len(p.AttachmentIDs)) {
+	skipped := skippedAttachmentIDs(p.AttachmentIDs, linked)
+	if len(skipped) > 0 {
 		slog.Warn("MessageService.SendMessage: skipped attachments (not owned, already linked, or missing)",
-			"msg_id", msgID, "user_id", p.UserID, "requested", len(p.AttachmentIDs), "linked", linked)
+			"msg_id", msgID, "user_id", p.UserID, "requested", len(p.AttachmentIDs), "linked", len(linked))
 	}
-	if linked == 0 && content == "" {
+	if len(linked) == 0 && content == "" {
 		// sanitizeContent waived the empty-content check purely on the
 		// requested attachment count, before any link attempt. None of
 		// them actually linked (all missing, foreign, or already
@@ -208,9 +217,9 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 		if delErr := s.st.DeleteMessage(context.WithoutCancel(ctx), msgID, p.UserID, true); delErr != nil {
 			slog.Error("MessageService.SendMessage DeleteMessage (empty-after-link cleanup)", "err", delErr, "msg_id", msgID)
 		}
-		return nil, fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
+		return nil, nil, errAllAttachmentsSkipped()
 	}
-	if linked > 0 {
+	if len(linked) > 0 {
 		// Detached from ctx for the same reason as the compensating deletes
 		// above: the link already committed, so a request ctx canceled the
 		// instant it returns (sender disconnects right after) must not turn
@@ -222,7 +231,7 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 			attachments = attMap[msgID]
 		}
 	}
-	return attachments, nil
+	return attachments, skipped, nil
 }
 
 // sendMessageDMSideEffects fills in the DM-specific fields of result,
@@ -274,12 +283,13 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 		slog.Warn("MessageService.SendMessage GetDMParticipants", "err", partErr, "channel_id", p.ChannelID)
 	}
 
-	for _, t := range targets {
+	for i := range targets {
+		t := targets[i]
 		if t.UserID == p.UserID {
 			continue
 		}
-		if !isGroup && s.messageRequests != nil && s.dmFirstContactGate(bgCtx, p, t, result) {
-			// Staged as a request (or refused outright — banned recipient):
+		if !isGroup && s.messageRequests != nil && s.dmFirstContactGate(bgCtx, p, &targets[i], result) {
+			// Staged as a request (or refused outright — recipient not reachable):
 			// never OpenDM an untrusted recipient. dmFirstContactGate has
 			// already done everything this send owes them.
 			continue
@@ -307,82 +317,22 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 		}
 	}
 
+	s.fillGroupOwner(bgCtx, isGroup, p.ChannelID, result)
+
 	// The live-delivery audience: the sender plus every other participant who
 	// trusts them (one-to-one) or every participant (group) — see
-	// DMAudience — derived from the same read. The loop above writes no row
-	// that changes it: a staged request's trust edge points the other way
-	// (the recipient becomes trusted BY the sender), so a recipient this
-	// very send just staged a request for is correctly excluded.
+	// DMAudience — derived from the same read. A staged request's trust edge
+	// points the other way (the recipient becomes trusted BY the sender), so
+	// a recipient this send just staged a request for is correctly excluded;
+	// the one write that adds a recipient is the gate's accepted edge for a
+	// recipient with message requests off, which marks that target trusted
+	// in this very slice.
 	if s.messageRequests == nil {
 		result.ParticipantIDs = dmTargetIDs(targets)
 	} else {
 		result.ParticipantIDs = dmDeliveryAudience(isGroup, targets, p.UserID)
 	}
 	return true
-}
-
-// dmFirstContactGate runs the B5-6 gate for one non-sender participant
-// (recipient, read with its trust of the sender by GetDMDeliveryTargets) of
-// a one-to-one DM p.UserID just sent into. It reports true when the send
-// effect for this recipient is already fully handled (a request was staged,
-// or the recipient is banned and gets nothing) — the caller's cue to skip
-// OpenDM entirely for them. False means the recipient already trusts the
-// sender and today's OpenDM path applies.
-func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessageParams, target db.DMDeliveryTarget, result *SendMessageResult) bool {
-	recipientID := target.UserID
-	recipient, rErr := s.st.GetUserByID(ctx, recipientID)
-	if rErr != nil {
-		slog.Error("MessageService.SendMessage: recipient lookup for the first-contact gate failed",
-			"err", rErr, "recipient_id", recipientID)
-		return true // nothing more can be decided for them; do not OpenDM
-	}
-	// "Cannot receive DMs" (community-services.md S1): no finer predicate
-	// exists today than the ban state, so a banned recipient gets no request
-	// row and no frame. The send itself still succeeds for the sender
-	// (decision 5).
-	if recipient == nil || auth.IsEffectivelyBanned(recipient) {
-		return true
-	}
-	if target.TrustsSender {
-		return false // today's OpenDM path
-	}
-	if hook := s.afterFirstContactTrustCheck; hook != nil {
-		hook()
-	}
-
-	req, fcErr := s.messageRequests.firstContact(ctx, p.UserID, recipientID, p.ChannelID, result.MessageID)
-	if fcErr != nil {
-		slog.Error("MessageService.SendMessage: first-contact gate failed",
-			"err", fcErr, "recipient_id", recipientID, "sender_id", p.UserID)
-		return true
-	}
-	if req != nil {
-		result.RequestCreatedFor = append(result.RequestCreatedFor, req)
-		if result.RequestPreview == nil {
-			if hook := s.beforeRequestPreviewLookup; hook != nil {
-				hook(result.MessageID)
-			}
-			result.RequestPreview = s.canonicalRequestPreview(ctx, result.MessageID)
-		}
-	}
-	return true
-}
-
-// canonicalRequestPreview reads messageID fresh rather than trusting the
-// send's own cached content (Codex review round 2, P1): the WS dm_request
-// frame's preview must never disagree with the REST inbox's
-// (db.DB.ListPendingMessageRequests joins first_message_id with
-// deleted = 0) — building it from cached content let a delete racing the
-// frame leave a stale, since-deleted preview on the wire while REST already
-// reported preview: null for the very same request. nil (no preview on the
-// frame) when the message cannot be read or has since been deleted —
-// exactly ListPendingMessageRequests' own condition.
-func (s *MessageService) canonicalRequestPreview(ctx context.Context, messageID int64) *DMRequestPreview {
-	msg, err := s.st.GetMessage(ctx, messageID)
-	if err != nil || msg == nil || msg.Deleted {
-		return nil
-	}
-	return &DMRequestPreview{MessageID: msg.ID, Content: msg.Content, Timestamp: msg.Timestamp}
 }
 
 // DMAudience is the live-delivery audience for a DM frame senderID's action
@@ -425,12 +375,16 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	if msg.Deleted {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrDeletedMessage)
 	}
+	// Call log and group event rows are written only by the server.
+	if msg.Kind != db.MessageKindUser {
+		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
 
 	// Channel type for DM-aware permissions. Fail closed: a lookup failure must
 	// not fall through with chanType="", which routes into the non-DM
 	// permission branch below. That branch passes on the base role mask alone
 	// (SEND_MESSAGES|READ_MESSAGES, no per-channel override exists for a DM),
-	// skipping both the DM-participant check and RequireDMNotBlocked entirely.
+	// skipping both the DM-participant check and RequireDMReachable entirely.
 	ch, chErr := s.st.GetChannel(ctx, msg.ChannelID)
 	if chErr != nil || ch == nil {
 		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
@@ -460,11 +414,14 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 	// re-adds an already-counted mention would otherwise raise the badge twice,
 	// and "only the original insert can raise a badge" is the simplest rule that
 	// is always correct.
-	mentions := s.resolveMentions(ctx, content, userID, msg.ChannelID, isDM)
-	if mErr := s.st.ReplaceMessageMentions(context.WithoutCancel(ctx), msgID, mentions.UserIDs, mentions.Everyone); mErr != nil {
+	mentions := s.resolveMentions(context.WithoutCancel(ctx), content, userID, msg.ChannelID, isDM) // detached: it swallows read errors, so a spent deadline would empty the set
+	// A reply_ping row is kept by the replace and handed back so the broadcast
+	// keeps the replied-to author highlighted.
+	replyPingID, mErr := s.st.ReplaceMessageMentions(context.WithoutCancel(ctx), msgID, mentions.UserIDs, mentions.Everyone, mentions.RoleIDs)
+	if mErr != nil {
 		slog.Error("MessageService.EditMessage ReplaceMessageMentions", "err", mErr, "msg_id", msgID)
 	}
-
+	mentions = mentions.withReplyPing(replyPingID)
 	result := &EditMessageResult{
 		MessageID:        msgID,
 		ChannelID:        msg.ChannelID,
@@ -472,8 +429,10 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		EditedAt:         editedAt,
 		IsDM:             isDM,
 		Mentions:         mentions.UserIDs,
+		MentionRoles:     mentions.RoleIDs,
 		MentionsEveryone: mentions.Everyone,
 		MentionsHere:     mentions.HereOnly,
+		PostOpening:      s.isPostOpening(context.WithoutCancel(ctx), ch, msgID),
 	}
 
 	if isDM {
@@ -527,29 +486,20 @@ func (s *MessageService) editMessageCheckAccess(ctx context.Context, userID int6
 }
 
 // deleteAuthz decides whether userID may delete msg and whether the delete
-// runs as a moderation action (isMod).
-func (s *MessageService) deleteAuthz(ctx context.Context, userID int64, msg *db.Message, isDM bool) (bool, error) {
-	if isDM {
-		ok, dmErr := s.st.IsDMParticipant(ctx, userID, msg.ChannelID)
-		if dmErr != nil || !ok {
-			return false, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
-		}
-		return false, nil
-	}
-	// Require READ_MESSAGES alongside MANAGE_MESSAGES (and alongside
-	// SEND_MESSAGES on the author path) so a role explicitly denied access to
-	// a channel cannot delete messages in it. Mirrors handleReaction and
-	// checkSendPermission, which both require ReadMessages for non-DM channels.
-	isMsgOwner := msg.UserID == userID
-	canManage := s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.ManageMessages)
-	canDelete := canManage || (isMsgOwner && s.perms.HasChannelPerm(ctx, userID, msg.ChannelID, permissions.ReadMessages|permissions.SendMessages))
-	if !canDelete {
+// runs as a moderation action (isMod). The rule is permissions.CanDeleteMessage;
+// any refusal, or a failure to resolve the subject, is one opaque ErrForbidden.
+func (s *MessageService) deleteAuthz(ctx context.Context, userID int64, msg *db.Message, ch *db.Channel) (bool, error) {
+	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, false)
+	if err != nil {
 		return false, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
 	// db.DeleteMessage skips the ownership check when ismod is true, so the
-	// moderation flag must reuse the decision made above rather than
-	// re-checking MANAGE_MESSAGES without READ_MESSAGES.
-	return canManage, nil
+	// moderation flag is the predicate's own verdict, never a second check.
+	isMod, verdict := permissions.CanDeleteMessage(sub, msg.UserID == userID)
+	if verdict != nil {
+		return false, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	}
+	return isMod, nil
 }
 
 // DeleteMessage validates and soft-deletes a message.
@@ -595,6 +545,11 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	if msg.Deleted {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
 	}
+	// Call and group rows are read-only for everyone, moderators included. A
+	// pin row deletes like a message (WP 6.12).
+	if msg.Kind != db.MessageKindUser && msg.Kind != db.MessageKindPinAdd {
+		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	}
 
 	// Fail closed, mirroring EditMessage: a lookup failure must not fall
 	// through to the non-DM permission branch (skipping the DM-participant
@@ -612,7 +567,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 		return nil, err
 	}
 
-	isMod, err := s.deleteAuthz(ctx, userID, msg, isDM)
+	isMod, err := s.deleteAuthz(ctx, userID, msg, ch)
 	if err != nil {
 		return nil, err
 	}
@@ -660,6 +615,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 		ChannelID: msg.ChannelID,
 		IsDM:      isDM,
 		IsMod:     isMod,
+		IsThread:  ch.IsThread(),
 	}
 
 	if isDM {

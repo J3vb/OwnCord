@@ -6,12 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
@@ -38,6 +36,12 @@ type userResponse struct {
 	About       *string `json:"about"`
 	// CustomStatus is the user's own free-text status line.
 	CustomStatus *string `json:"custom_status"`
+	// CustomStatusExpiresAt: RFC 3339 instant the status clears; null if none.
+	CustomStatusExpiresAt *string `json:"custom_status_expires_at"`
+	// Banner (the /api/v1/files/<id> path) and BannerColor are always present,
+	// null when unset, so a client can tell "cleared" from "not sent".
+	Banner      *string `json:"banner"`
+	BannerColor *string `json:"banner_color"`
 	// Status is the user's own true status, invisible included. This response
 	// only ever describes the caller, so there is nothing to hide from them.
 	Status      string `json:"status"`
@@ -52,17 +56,29 @@ func toUserResponse(u *db.User) *userResponse {
 	if u.Avatar != nil {
 		avatar = *u.Avatar
 	}
+	customStatus, expiresAt := u.CustomStatus, u.CustomStatusExpiresAt
+	if expiresAt != nil {
+		if at, err := time.Parse(service.CustomStatusExpiryLayout, *expiresAt); err == nil && !time.Now().Before(at) {
+			customStatus = nil // expired, not yet cleared by the expirer
+		}
+	}
+	if customStatus == nil {
+		expiresAt = nil
+	}
 	return &userResponse{
-		ID:           u.ID,
-		Username:     u.Username,
-		Avatar:       avatar,
-		DisplayName:  u.DisplayName,
-		About:        u.About,
-		CustomStatus: u.CustomStatus,
-		Status:       u.Status,
-		RoleID:       u.RoleID,
-		TOTPEnabled:  u.TOTPSecret != nil,
-		CreatedAt:    u.CreatedAt,
+		ID:                    u.ID,
+		Username:              u.Username,
+		Avatar:                avatar,
+		DisplayName:           u.DisplayName,
+		About:                 u.About,
+		CustomStatus:          customStatus,
+		CustomStatusExpiresAt: expiresAt,
+		Banner:                u.BannerPath(),
+		BannerColor:           u.BannerColor,
+		Status:                u.Status,
+		RoleID:                u.RoleID,
+		TOTPEnabled:           u.TOTPSecret != nil,
+		CreatedAt:             u.CreatedAt,
 	}
 }
 
@@ -80,6 +96,10 @@ type updateProfileRequest struct {
 	// the call site) and UserService's own sanitize of it is then a no-op.
 	DisplayName *string `json:"display_name"`
 	About       *string `json:"about"`
+	// BannerColor is omitted = unchanged, "" = cleared, otherwise #rgb or
+	// #rrggbb (validated in UserService). There is deliberately no banner id or
+	// URL field: an image can only be set by uploading it to this server.
+	BannerColor *string `json:"banner_color"`
 }
 
 // changePasswordRequest is the JSON body for PUT /api/v1/users/me/password.
@@ -133,7 +153,7 @@ const revokeAllSessionsRateLimitPerMinute = 5
 // production the router always passes the running config, so the guard compares
 // against the server's own configured hosts rather than anything the client
 // supplied.
-func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster, cfg *config.Config) {
+func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster, cfg *config.Config) {
 	selfHosts := configuredSelfHosts(cfg)
 	r.Route("/api/v1/users/me", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
@@ -144,9 +164,29 @@ func MountProfileRoutes(r chi.Router, database *db.DB, svc *service.Services, st
 		r.With(RateLimitMiddleware(limiter, "pw:", profilePasswordRateLimitPerMinute, time.Minute, trustedProxies)).
 			Put("/password", handleChangePassword(svc, limiter, broadcaster))
 
+		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
+			Delete("/avatar", handleDeleteAvatar(svc, broadcaster))
+
+		r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
+			Delete("/banner", handleDeleteBanner(svc, broadcaster))
+
 		if store != nil {
 			r.With(MaxBodySize(avatarMaxBodySize)).
 				Post("/avatar", handleUploadAvatar(svc, store, limiter, broadcaster))
+			r.With(MaxBodySize(avatarMaxBodySize)).
+				Post("/banner", handleUploadBanner(svc, store, limiter, broadcaster))
+		}
+
+		if svc.UserNotes != nil {
+			r.Get("/notes/{userId}", handleGetUserNote(svc.UserNotes))
+			r.With(RateLimitMiddleware(limiter, "user_note:", userNoteRateLimitPerMinute, time.Minute, trustedProxies)).
+				Put("/notes/{userId}", handlePutUserNote(svc.UserNotes))
+		}
+
+		if svc.Privacy != nil {
+			r.Get("/privacy", handleGetPrivacy(svc.Privacy))
+			r.With(RateLimitMiddleware(limiter, "profile:", profileUpdateRateLimitPerMinute, time.Minute, trustedProxies)).
+				Put("/privacy", handlePutPrivacy(svc.Privacy, broadcaster))
 		}
 
 		r.Get("/sessions", handleListSessions(svc))
@@ -179,20 +219,6 @@ func validateIdentityKey(key string) error {
 	return nil
 }
 
-// validateDisplayName rejects a nickname that would render as something other
-// than what it says. Length and emptiness are the service's job (empty clears
-// the field); this is the character-class check auth.ValidateUsername applies
-// for the same reason — a display name stands in for a username on every
-// message row, so a bidi override or a control character in one is a spoof.
-func validateDisplayName(name string) error {
-	for _, r := range name {
-		if unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
-			return fmt.Errorf("display_name must not contain control or invisible characters")
-		}
-	}
-	return nil
-}
-
 // allowedAvatarMIME is the set of image types an avatar may be, matched against
 // the type sniffed from the file's own bytes. GIF is absent (an animated
 // avatar in every message row is a distraction the renderer cannot opt out of)
@@ -214,7 +240,7 @@ var allowedAvatarMIME = map[string]bool{
 // and returns ok=false, and the caller must return without writing anything
 // further. Split out of handleUpdateProfile only to keep that handler under the
 // funlen limit; the field logic is unchanged.
-func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string) (updateProfileRequest, bool) {
+func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string, currentUsername string) (updateProfileRequest, bool) {
 	var req updateProfileRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
@@ -244,7 +270,15 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is required")
 		return req, false
 	}
-	if err := auth.ValidateUsername(req.Username); err != nil {
+	// A rename is held to the strict rules; resending the name the account
+	// already has (a display-name or about edit that carries it along) only
+	// gets the loose check, so an account that predates the strict rules can
+	// still edit the rest of its profile.
+	validateName := auth.ValidateNewUsername
+	if req.Username == currentUsername {
+		validateName = auth.ValidateUsername
+	}
+	if err := validateName(req.Username); err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 		return req, false
 	}
@@ -294,12 +328,19 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name is too long")
 			return req, false
 		}
-		trimmed := strings.TrimSpace(service.SanitizeText(*req.DisplayName))
+		trimmed := auth.CollapseSpaces(strings.TrimSpace(service.SanitizeText(*req.DisplayName)))
 		if err := validateDisplayName(trimmed); err != nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}
 		req.DisplayName = &trimmed
+	}
+
+	// OC-0192 again: bound the raw colour before anything looks at it. The
+	// longest valid value is 7 bytes; the service does the real validation.
+	if req.BannerColor != nil && len(*req.BannerColor) > maxBannerColorLen*4 {
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "banner_color is too long")
+		return req, false
 	}
 
 	// Validate the identity key before any write so the request is
@@ -322,7 +363,7 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, 
 			return
 		}
 
-		req, ok := parseUpdateProfileRequest(w, r, selfHosts)
+		req, ok := parseUpdateProfileRequest(w, r, selfHosts, user.Username)
 		if !ok {
 			return
 		}
@@ -332,6 +373,7 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, 
 			Avatar:      req.Avatar,
 			DisplayName: req.DisplayName,
 			About:       req.About,
+			BannerColor: req.BannerColor,
 		})
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
@@ -378,6 +420,8 @@ func broadcastUserUpdate(broadcaster ProfileBroadcaster, u *db.User) {
 		DisplayName:       u.DisplayName,
 		About:             u.About,
 		IdentityPublicKey: u.IdentityPublicKey,
+		Banner:            u.BannerPath(),
+		BannerColor:       u.BannerColor,
 	})
 }
 
@@ -645,13 +689,13 @@ func handleUploadAvatar(
 		}
 		defer file.Close() //nolint:errcheck
 
-		raw, mimeType, width, height, ok := avatarUploadReadImage(w, file)
+		raw, mimeType, width, height, ok := readProfileImage(w, file, avatarImageLimits)
 		if !ok {
 			return
 		}
 
 		filename := sanitizeUploadFilename(header.Filename)
-		fileID, written, ok := avatarStoreAndRecord(r.Context(), w, svc, store, user.ID, filename, raw, mimeType, width, height)
+		fileID, written, ok := avatarStoreAndRecord(r.Context(), w, svc, store, user.ID, filename, raw, mimeType, "avatar", width, height)
 		if !ok {
 			return
 		}
@@ -706,10 +750,10 @@ func handleUploadAvatar(
 // It writes its own error response and reports ok=false. Split out to keep
 // the handler under the funlen limit; the steps and their order are
 // unchanged from before the reservation existed.
-func avatarStoreAndRecord(ctx context.Context, w http.ResponseWriter, svc *service.Services, store FileStore, userID int64, filename string, raw []byte, mimeType string, width, height int) (string, int64, bool) {
+func avatarStoreAndRecord(ctx context.Context, w http.ResponseWriter, svc *service.Services, store FileStore, userID int64, filename string, raw []byte, mimeType, label string, width, height int) (string, int64, bool) {
 	res, err := svc.Uploads.Reserve(ctx, userID, int64(len(raw)))
 	if err != nil {
-		writeStorageSaveError(w, err, "avatar upload")
+		writeStorageSaveError(w, err, label+" upload")
 		return "", 0, false
 	}
 	defer res.Settle(ctx)
@@ -717,7 +761,7 @@ func avatarStoreAndRecord(ctx context.Context, w http.ResponseWriter, svc *servi
 	fileID := uuid.New().String()
 	written, saveErr := saveReserved(ctx, res, store, fileID, bytes.NewReader(raw))
 	if saveErr != nil {
-		writeStorageSaveError(w, saveErr, "avatar upload")
+		writeStorageSaveError(w, saveErr, label+" upload")
 		return "", 0, false
 	}
 
@@ -734,51 +778,8 @@ func avatarStoreAndRecord(ctx context.Context, w http.ResponseWriter, svc *servi
 			slog.Error("failed to clean up orphaned avatar file", "stored_as", fileID, "error", delErr)
 		}
 		slog.Error("failed to create avatar attachment record", "error", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save avatar")
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save "+label)
 		return "", 0, false
 	}
 	return fileID, written, true
-}
-
-// avatarUploadReadImage is the bytes stage of handleUploadAvatar: read the
-// uploaded file under its cap, sniff its type and measure it. It writes its own
-// 400 and reports ok=false when the upload is not an acceptable avatar, so the
-// caller only has to return. Deliberately not shared with the emoji route: the
-// two carry different caps and a different allowed MIME set.
-func avatarUploadReadImage(w http.ResponseWriter, file io.Reader) (raw []byte, mimeType string, width, height int, ok bool) {
-	// Read one byte past the cap so "exactly at the limit" passes and "one
-	// byte over" is caught, without buffering an unbounded body.
-	raw, err := io.ReadAll(io.LimitReader(file, maxAvatarFileBytes+1))
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "failed to read uploaded file")
-		return nil, "", 0, 0, false
-	}
-	if int64(len(raw)) > maxAvatarFileBytes {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("avatar must be at most %d KB", maxAvatarFileBytes>>10))
-		return nil, "", 0, 0, false
-	}
-
-	// Never trust the client's Content-Type — sniff the bytes.
-	mimeType = http.DetectContentType(raw)
-	if !allowedAvatarMIME[mimeType] {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "avatar must be a PNG, JPEG or WebP image")
-		return nil, "", 0, 0, false
-	}
-
-	width, height, err = imageDimensions(raw, mimeType)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "could not read image dimensions")
-		return nil, "", 0, 0, false
-	}
-	// Measured from the sniffed image, not from anything the client said.
-	// The client crops to a square before uploading; the server does not
-	// re-encode (that would mean decoding and re-compressing every upload
-	// to change nothing a CSS circle mask does not already do), it just
-	// refuses a picture too big to be an avatar.
-	if width <= 0 || height <= 0 || width > maxAvatarDimension || height > maxAvatarDimension {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("avatar must be at most %dx%d pixels (got %dx%d)", maxAvatarDimension, maxAvatarDimension, width, height))
-		return nil, "", 0, 0, false
-	}
-
-	return raw, mimeType, width, height, true
 }

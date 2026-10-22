@@ -4,6 +4,9 @@ import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import { loadPref } from "@lib/preferences";
 import { isMissingDeviceError } from "@lib/audioPipeline";
+import { nativeAudioDevices, type AudioDevice } from "../features/voice/native/devices";
+import { probeNativeMicrophone, type NativeMicProbe } from "../features/voice/native/micProbe";
+import { isLinuxDesktop } from "../features/voice/native/platform";
 import { settingsText as t } from "../i18n/settings";
 
 export type DiagnosticStatus = "running" | "passed" | "failed" | "not-tested";
@@ -33,6 +36,24 @@ export interface DiagnosticServices {
   ws: Pick<WsClient, "ping">;
   getRoom(): Room | null | Promise<Room | null>;
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
+  /** The native backend's microphones on Linux, where the webview cannot
+   *  open the devices voice uses; null elsewhere. */
+  listNativeInputs(): Promise<AudioDevice[] | null>;
+  /** Opens the native capture for about a second (Linux) and stops it;
+   *  aborting `signal` stops it too. */
+  probeNativeInput(input: string, signal: AbortSignal): Promise<NativeMicProbe>;
+}
+
+/** NativeRoom has no browser signaling socket; it reports its own. */
+interface NativeSignaling {
+  isSignalingConnected(): boolean;
+}
+
+function nativeSignaling(room: Room): NativeSignaling | null {
+  const candidate = room as unknown as Partial<NativeSignaling>;
+  return typeof candidate.isSignalingConnected === "function"
+    ? (candidate as NativeSignaling)
+    : null;
 }
 
 let configured: DiagnosticServices | null = null;
@@ -47,6 +68,8 @@ export function configureConnectionDiagnostics(api: ApiClient, ws: WsClient): vo
     ws,
     getRoom: async () => (await import("@lib/livekitSession")).getRoomForStats(),
     getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+    listNativeInputs: () => nativeAudioDevices("audioinput"),
+    probeNativeInput: probeNativeMicrophone,
   };
 }
 
@@ -127,6 +150,9 @@ async function readDecoding(room: Room): Promise<Map<string, DecodingSnapshot> |
   return result;
 }
 
+/** The native microphone opened but reported no audio. */
+class SilentMicrophone extends Error {}
+
 function connectionFailure(error: unknown): string {
   // Do not expose raw proxy errors (URLs, certificate fingerprints or tokens).
   if (error instanceof DOMException && error.name === "TimeoutError") {
@@ -155,13 +181,14 @@ export async function runConnectionDiagnostics(
   };
   const check = async (
     stage: DiagnosticStage,
-    task: () => Promise<string>,
+    task: () => Promise<string | { status: "not-tested"; detail: string }>,
     failure: (error: unknown) => string,
   ): Promise<void> => {
     emit(stage, "running", t("diagnostics.detail.checking"));
     try {
-      const detail = await bounded(task(), lifetime, stage === "microphone" ? 12_000 : 8_000);
-      emit(stage, "passed", detail);
+      const outcome = await bounded(task(), lifetime, stage === "microphone" ? 12_000 : 8_000);
+      if (typeof outcome === "string") emit(stage, "passed", outcome);
+      else emit(stage, outcome.status, outcome.detail);
     } catch (error) {
       lifetime.throwIfAborted();
       emit(stage, "failed", failure(error));
@@ -208,6 +235,22 @@ export async function runConnectionDiagnostics(
       "microphone",
       async () => {
         const selected = loadPref<string>("audioInputDevice", "");
+        const nativeInputs = await services.listNativeInputs();
+        if (nativeInputs !== null) {
+          // Linux voice opens the device in the native backend, so the check
+          // opens it there for a second and passes only when levels arrive.
+          // i18n-exempt: internal guard mapped to the microphone failure catalog line
+          if (nativeInputs.length === 0) throw new Error("No native microphone.");
+          const present = selected === "" || nativeInputs.some((d) => d.deviceId === selected);
+          const probe = await services.probeNativeInput(present ? selected : "", lifetime);
+          if (probe === "in-call") {
+            return { status: "not-tested", detail: t("diagnostics.detail.micNativeInCall") };
+          }
+          if (probe === "silent") throw new SilentMicrophone();
+          return present
+            ? t("diagnostics.detail.micNativePresent")
+            : t("diagnostics.detail.micNativeDefault");
+        }
         // getUserMedia cannot cancel a permission prompt. Always stop the tracks
         // in its fulfillment handler, even after timeout, close or server switch.
         const audio = selected ? { deviceId: { exact: selected } } : {};
@@ -234,6 +277,7 @@ export async function runConnectionDiagnostics(
         if (error instanceof DOMException && error.name === "TimeoutError") {
           return t("diagnostics.detail.micTimeout");
         }
+        if (error instanceof SilentMicrophone) return t("diagnostics.detail.micSilent");
         return t("diagnostics.detail.micFailed");
       },
     );
@@ -245,15 +289,27 @@ export async function runConnectionDiagnostics(
   const room = await bounded(Promise.resolve(services.getRoom()), lifetime, 5000);
   if (!room) {
     emit("signaling", "not-tested", t("diagnostics.detail.joinVoice"));
-    emit("media", "not-tested", t("diagnostics.detail.joinCall"));
+    emit(
+      "media",
+      "not-tested",
+      t(isLinuxDesktop() ? "diagnostics.detail.mediaNative" : "diagnostics.detail.joinCall"),
+    );
     return;
   }
-  if (room.state !== "connected" || room.engine.client.ws?.readyState !== WebSocket.OPEN) {
+  const native = nativeSignaling(room);
+  const signalingOpen = native
+    ? native.isSignalingConnected()
+    : room.engine.client.ws?.readyState === WebSocket.OPEN;
+  if (room.state !== "connected" || !signalingOpen) {
     emit("signaling", "failed", t("diagnostics.detail.signalingClosed"));
     emit("media", "not-tested", t("diagnostics.detail.restoreVoice"));
     return;
   }
   emit("signaling", "passed", t("diagnostics.detail.signalingOpen"));
+  if (native) {
+    emit("media", "not-tested", t("diagnostics.detail.mediaNative"));
+    return;
+  }
   if (room.remoteParticipants.size === 0) {
     emit("media", "not-tested", t("diagnostics.detail.noParticipant"));
     return;

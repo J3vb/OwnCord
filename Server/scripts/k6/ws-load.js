@@ -138,6 +138,15 @@
 //   K6_SCALE_HERD_SPREAD_S - scale: seconds the herd's drops spread over (15)
 //   K6_SCALE_LOGINS     - scale: fresh logins in the login burst (500)
 //   K6_SCALE_LOGIN_SPREAD_S - scale: seconds they spread over (10)
+//   K6_ROLE_FLIP_EVERY  - scale: WP 4.4a, off unless set. Seconds between role
+//                         changes: an admin VU flips one loadtest user's role
+//                         and PATCHes the default role every N seconds, from
+//                         the start of steady to the start of the herd
+//   K6_ROLE_FLIP_TOKEN  - scale: file holding the admin session token the flip
+//                         VU sends (required with K6_ROLE_FLIP_EVERY)
+//   K6_ROLE_FLIP_USER   - scale: the user flipped (default loadtest<K6_PEAK_VUS>)
+//   K6_ROLE_FLIP_ROLE   - scale: the role it flips to and from the default one
+//                         (default Moderator)
 //
 // Self-signed TLS (the default server cert): run k6 with --insecure-skip-tls-verify.
 
@@ -521,9 +530,73 @@ for (let i = 1; i < SCALE_BOUNDS.length; i++) SCALE_BOUNDS[i] += SCALE_BOUNDS[i 
 const SCALE_RUN_S = SCALE_BOUNDS[SCALE_BOUNDS.length - 1];
 const SCALE_LOGIN_AT_S = SCALE_BOUNDS[3];
 const SCALE_HERD_AT_S = SCALE_BOUNDS[4];
+
+// --- role flip (WP 4.4a) ----------------------------------------------------
+//
+// Off unless K6_ROLE_FLIP_EVERY is set, and then only on scale. One admin VU,
+// from the start of steady to the start of the herd (the herd's zero-kick gate
+// stays about the herd), every N seconds: PATCH /admin/api/users/{id} moving
+// one loadtest user between the default role and K6_ROLE_FLIP_ROLE, and PATCH
+// /admin/api/roles/{default} renaming and re-masking the role every loadtest
+// user holds. The second is the one that fans out to the whole server
+// (member_update per holder, a refresh of every connected user's visibility),
+// and its handler time is role_patch_time. The server-side counters the plan
+// asks for ride the observer: obs_backpressure{kind:queue_disconnects},
+// obs_broadcast_drops and obs_dispatch_lag_*_ms. Recorded, not gated: the
+// baseline is read before and after WP 4.4b, so only validity is a threshold.
+const ROLE_FLIP_RAW = __ENV.K6_ROLE_FLIP_EVERY || "";
+const ROLE_FLIP_EVERY_S = ROLE_FLIP_RAW === "" ? 0 : Number(ROLE_FLIP_RAW);
+const ROLE_FLIP_ON = IS_SCALE && ROLE_FLIP_EVERY_S > 0;
+const ROLE_FLIP_USER = __ENV.K6_ROLE_FLIP_USER || `${USERNAME_PREFIX}${PEAK_VUS}`;
+const ROLE_FLIP_ROLE = __ENV.K6_ROLE_FLIP_ROLE || "Moderator";
+// The flip window: steady's start to the herd's start.
+const ROLE_FLIP_FROM_S = SCALE_BOUNDS[1];
+const ROLE_FLIP_UNTIL_S = SCALE_HERD_AT_S;
+// The renamed default role: short enough for the 32-character role name limit.
+// A slow handler is a measurement, not a status-0 error. The restoring ticks
+// split what is left before the herd between their two PATCHes instead, so a
+// restore that cannot finish times out as a counted error rather than being
+// cut off unrecorded by the scenario's graceful stop.
+const ROLE_FLIP_TIMEOUT = "120s";
+const ROLE_FLIP_SUFFIX = "-lt";
+// ADD_REACTIONS (0x0040): a bit that changes the role's mask without touching
+// READ_MESSAGES or SEND_MESSAGES, so the load users keep posting.
+const ROLE_FLIP_PERM_BIT = 0x40;
+if (ROLE_FLIP_RAW !== "") {
+  if (!IS_SCALE) {
+    throw new Error(`K6_ROLE_FLIP_EVERY applies to the scale profile only (got: ${PROFILE})`);
+  }
+  if (
+    !Number.isInteger(ROLE_FLIP_EVERY_S) ||
+    ROLE_FLIP_EVERY_S < 1 ||
+    ROLE_FLIP_EVERY_S >= ROLE_FLIP_UNTIL_S - ROLE_FLIP_FROM_S
+  ) {
+    throw new Error(
+      `K6_ROLE_FLIP_EVERY must be a whole number of seconds shorter than the steady-to-herd window (got: ${ROLE_FLIP_RAW})`,
+    );
+  }
+  if (!__ENV.K6_ROLE_FLIP_TOKEN) {
+    throw new Error("K6_ROLE_FLIP_EVERY needs K6_ROLE_FLIP_TOKEN (a file holding the admin token)");
+  }
+}
+// The admin token, read once in init so it never sits in the process
+// environment. Empty when the scenario is off.
+const ROLE_FLIP_TOKEN = ROLE_FLIP_ON ? String(open(__ENV.K6_ROLE_FLIP_TOKEN)).trim() : "";
+// Registered on a role-flip run only, so every other scale run is unchanged.
+const rolePatchTime = ROLE_FLIP_ON ? new Trend("role_patch_time", true) : null;
+const userRolePatchTime = ROLE_FLIP_ON ? new Trend("user_role_patch_time", true) : null;
+const rolePatches = ROLE_FLIP_ON ? new Counter("role_patches") : null;
+const userRolePatches = ROLE_FLIP_ON ? new Counter("user_role_patches") : null;
+const roleFlipErrors = ROLE_FLIP_ON ? new Counter("role_flip_errors") : null;
+const obsBroadcastDrops = ROLE_FLIP_ON ? new Counter("obs_broadcast_drops") : null;
+// The server's ws_dispatch_lag_ms is a cumulative distribution since boot, so
+// each poll's p99 and max are the run so far; the window's last sample is the
+// figure to read (its max trend stat), not a per-window delta.
+const obsDispatchLagP99 = ROLE_FLIP_ON ? new Gauge("obs_dispatch_lag_p99_ms") : null;
+const obsDispatchLagMax = ROLE_FLIP_ON ? new Gauge("obs_dispatch_lag_max_ms") : null;
 // Every VU logs in as loadtest<__VU> and k6 hands ids out test-wide, so the
 // id pool is the WebSocket cohort, the observer and the login-burst VUs.
-const SCALE_VUS_MAX = PEAK_VUS + (IS_SCALE ? 1 : 0) + SCALE_LOGINS;
+const SCALE_VUS_MAX = PEAK_VUS + (IS_SCALE ? 1 : 0) + (ROLE_FLIP_ON ? 1 : 0) + SCALE_LOGINS;
 const SCALE_ACTIVE_PERMILLE = Math.round(SCALE_ACTIVE * 1000);
 
 // Activity is spread WITHIN each channel: VU n is on channel n % C, and it is
@@ -804,6 +877,21 @@ export const options = {
             startTime: `${SCALE_LOGIN_AT_S}s`,
             maxDuration: `${SCALE_RUN_S - SCALE_LOGIN_AT_S}s`,
             exec: "loginBurstScenario",
+          },
+        }
+      : {}),
+    ...(ROLE_FLIP_ON
+      ? {
+          // One admin VU through steady, burst and login, and stopped before
+          // the herd so the herd's gates stay about the herd. It holds an id
+          // in the account pool (the workflow seeds one more user for it).
+          role_flip: {
+            executor: "constant-vus",
+            vus: 1,
+            startTime: `${ROLE_FLIP_FROM_S}s`,
+            duration: `${ROLE_FLIP_UNTIL_S - ROLE_FLIP_FROM_S}s`,
+            exec: "roleFlipScenario",
+            gracefulStop: "30s",
           },
         }
       : {}),
@@ -1114,6 +1202,22 @@ function scaleThresholds() {
     }
     out[`obs_population{phase:${p}}`] = ["min>=0"];
     out[`ws_message_success{phase:${p}}`] = ["rate>=0"];
+  }
+  if (ROLE_FLIP_ON) {
+    // Recorded, not gated (WP 4.4a): the baseline is read before and after the
+    // refresh worker. Pass-through keys put every window's figures in the
+    // summary; the two gates below are validity only.
+    for (const p of SCALE_PHASES) {
+      for (const t of ["role_patch_time", "user_role_patch_time"]) {
+        out[`${t}{phase:${p}}`] = stats;
+      }
+      out[`obs_broadcast_drops{phase:${p}}`] = ["count>=0"];
+      for (const t of ["obs_dispatch_lag_p99_ms", "obs_dispatch_lag_max_ms"]) {
+        out[`${t}{phase:${p}}`] = ["value>=0"];
+      }
+    }
+    out.role_patches = ["count>=1"];
+    out.role_flip_errors = ["count==0"];
   }
   const steady = scaleMinSamples(SCALE_STEADY_S, SCALE_SEND_MS);
   const burst = scaleMinSamples(SCALE_BURST_S, SCALE_BURST_SEND_MS);
@@ -2131,6 +2235,14 @@ export function observerScenario() {
       obsBackpressure.add(d("backpressure_low_drops"), { phase, kind: "low_drops" });
     }
     obsConnRejects.add(d("ws_conn_rejects"), { phase });
+    if (obsBroadcastDrops) {
+      obsBroadcastDrops.add(d("broadcast_drops"), { phase });
+      const lag = body.ws_dispatch_lag_ms;
+      if (lag && Number.isFinite(lag.p99)) {
+        obsDispatchLagP99.add(lag.p99, { phase });
+        obsDispatchLagMax.add(lag.max, { phase });
+      }
+    }
     if (obsPopulation) {
       obsPopulation.add(body.connected_users || 0, { phase });
       obsTopicSheds.add(d("topic_sheds_total"), { phase });
@@ -2252,6 +2364,107 @@ export function loginBurstScenario() {
   loginBurstOk.add(1);
 }
 
+// The role-flip VU (WP 4.4a). Each iteration is one tick: move the flipped user
+// to the other role, then PATCH the default role every loadtest user holds, and
+// sleep out the rest of the period. The first iteration resolves the ids; if it
+// cannot, the failure is counted and the next tick tries again, so one slow
+// admin call cannot silently turn the scenario into a no-op.
+let rfIds = null;
+// What the last successful PATCH left in place (false = the original state).
+let rfUserFlipped = false;
+let rfRoleFlipped = false;
+
+function roleFlipHeaders() {
+  return { Authorization: `Bearer ${ROLE_FLIP_TOKEN}`, "Content-Type": "application/json" };
+}
+
+function roleFlipResolve() {
+  const headers = roleFlipHeaders();
+  const roles = http.get(`${HTTP_URL}/admin/api/roles`, { headers });
+  if (roles.status !== 200) return null;
+  const list = roles.json();
+  const base = list.find((r) => r.is_default);
+  const other = list.find((r) => r.name === ROLE_FLIP_ROLE && !r.is_default);
+  if (!base || !other) return null;
+  // The listing is substring-matched and capped at 500, so page until the
+  // exact username shows up.
+  let user = null;
+  for (let offset = 0; !user && offset < 5000; offset += 500) {
+    const page = http.get(
+      `${HTTP_URL}/admin/api/users?q=${encodeURIComponent(ROLE_FLIP_USER)}&limit=500&offset=${offset}`,
+      { headers },
+    );
+    if (page.status !== 200) return null;
+    const rows = page.json();
+    user = rows.find((u) => u.username === ROLE_FLIP_USER) || null;
+    if (rows.length < 500) break;
+  }
+  // Only a user starting in the default role can be restored to where it began.
+  if (!user || user.role_id !== base.id) return null;
+  return { base, other, userId: user.id };
+}
+
+export function roleFlipScenario() {
+  vuScaleOffsetS = ROLE_FLIP_FROM_S;
+  const tickStart = Date.now();
+  const headers = roleFlipHeaders();
+  if (!rfIds) rfIds = roleFlipResolve();
+  const nowS = runElapsedS() + ROLE_FLIP_FROM_S;
+  // A tick whose successor could not finish before the herd is the last one.
+  // It only restores: once everything is back to the original state, later
+  // ticks do nothing, so the herd never sees a role change in flight and the
+  // run ends with the default role, its mask and the user as they started.
+  const last = nowS + ROLE_FLIP_EVERY_S > ROLE_FLIP_UNTIL_S - ROLE_FLIP_EVERY_S;
+  if (!rfIds) {
+    roleFlipErrors.add(1, scaleTags());
+  } else if (!(last && !rfUserFlipped && !rfRoleFlipped)) {
+    const tags = scaleTags();
+    // The target of each change is the opposite of what was last applied, and
+    // the state moves only on a 200, so a failed PATCH is retried, not skipped.
+    const flipUser = last ? false : !rfUserFlipped;
+    const flipRole = last ? false : !rfRoleFlipped;
+    const timeout = last
+      ? `${Math.max(1, Math.floor((ROLE_FLIP_UNTIL_S - nowS) / 2))}s`
+      : ROLE_FLIP_TIMEOUT;
+    const slow = { headers, timeout };
+
+    let t0 = Date.now();
+    const userRes = http.patch(
+      `${HTTP_URL}/admin/api/users/${rfIds.userId}`,
+      JSON.stringify({ role_id: flipUser ? rfIds.other.id : rfIds.base.id }),
+      slow,
+    );
+    userRolePatchTime.add(Date.now() - t0, tags);
+    if (userRes.status === 200) {
+      userRolePatches.add(1, tags);
+      rfUserFlipped = flipUser;
+    } else {
+      roleFlipErrors.add(1, tags);
+    }
+
+    // Rename and re-mask together so one request takes both fan-outs: the
+    // per-holder member_update and the refresh of every connected user.
+    const name = flipRole ? `${rfIds.base.name}${ROLE_FLIP_SUFFIX}` : rfIds.base.name;
+    const permissions = flipRole
+      ? rfIds.base.permissions ^ ROLE_FLIP_PERM_BIT
+      : rfIds.base.permissions;
+    t0 = Date.now();
+    const roleRes = http.patch(
+      `${HTTP_URL}/admin/api/roles/${rfIds.base.id}`,
+      JSON.stringify({ name, permissions }),
+      slow,
+    );
+    rolePatchTime.add(Date.now() - t0, tags);
+    if (roleRes.status === 200) {
+      rolePatches.add(1, tags);
+      rfRoleFlipped = flipRole;
+    } else {
+      roleFlipErrors.add(1, tags);
+    }
+  }
+  sleep(Math.max(0.1, (ROLE_FLIP_EVERY_S * 1000 - (Date.now() - tickStart)) / 1000));
+}
+
 // k6's own text summary is not importable from a script without jslib, so an
 // overridden handleSummary can only emit JSON. The file is the artifact the
 // workflow uploads; stdout carries the same bytes for a local run.
@@ -2368,6 +2581,29 @@ function scaleSummary(data, metrics) {
       all_ready_ms: values("herd_ready_at_ms").max ?? null,
       ready_at_p95_ms: values("herd_ready_at_ms")["p(95)"] ?? null,
     },
+    ...(ROLE_FLIP_ON
+      ? {
+          role_flip: {
+            every_s: ROLE_FLIP_EVERY_S,
+            from_s: ROLE_FLIP_FROM_S,
+            until_s: ROLE_FLIP_UNTIL_S,
+            user: ROLE_FLIP_USER,
+            role: ROLE_FLIP_ROLE,
+            role_patches: count("role_patches"),
+            user_role_patches: count("user_role_patches"),
+            errors: count("role_flip_errors"),
+            windows: SCALE_PHASES.map((phase) => ({
+              phase,
+              role_patch: trend("role_patch_time", phase),
+              user_role_patch: trend("user_role_patch_time", phase),
+              broadcast_drops: count(`obs_broadcast_drops{phase:${phase}}`),
+              queue_disconnects: count(`obs_backpressure{phase:${phase},kind:queue_disconnects}`),
+              dispatch_lag_p99_ms: values(`obs_dispatch_lag_p99_ms{phase:${phase}}`).value ?? null,
+              dispatch_lag_max_ms: values(`obs_dispatch_lag_max_ms{phase:${phase}}`).value ?? null,
+            })),
+          },
+        }
+      : {}),
     login_burst: {
       ok: count("login_burst_ok"),
       giveups: count("login_burst_giveups"),

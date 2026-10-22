@@ -3,7 +3,7 @@
  * embedded DM section (channels mode) and the full DM sidebar (dms mode).
  */
 
-import { type ApiClient, errorText } from "@lib/api";
+import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import type { DmConversation } from "@components/DmSidebar";
 import { setSidebarMode, setActiveDmUser } from "@stores/ui.store";
@@ -18,7 +18,8 @@ import {
 } from "@stores/dm.store";
 import type { DmChannel, DmUser } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
-import { isChannelMuted } from "@lib/channel-mutes";
+import { voiceStore } from "@stores/voice.store";
+import { getChannelMute, isChannelMuted } from "@lib/channel-mutes";
 import { markdownToPlainText } from "@lib/markdown";
 import { connectText } from "../../i18n/connect";
 
@@ -111,12 +112,23 @@ export async function handleCreateDm(
     };
 
     addDmChannel(dmChannel);
-    selectDmConversation(dmChannel, deps);
+    // The merged row, so a reopened DM keeps the pointer the store already had.
+    selectDmConversation(storedDm(dmChannel), deps);
     onReady?.(dmChannel);
   } catch (err) {
-    const msg = errorText(err, connectText("app.dmCreateFailed"));
+    // A FORBIDDEN 403 is a block or the other member's DM setting; both read the same,
+    // in the app's own words, so the toast never says which.
+    const msg =
+      err instanceof ApiClientError && err.status === 403 && err.code === "FORBIDDEN"
+        ? connectText("blocks.blockedByThem")
+        : errorText(err, connectText("app.dmCreateFailed"));
     deps.getToast()?.show(msg, "error");
   }
+}
+
+/** The DM as the store holds it after addDmChannel merged it, else as given. */
+function storedDm(dmChannel: DmChannel): DmChannel {
+  return dmStore.getState().channels.find((c) => c.channelId === dmChannel.channelId) ?? dmChannel;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +145,7 @@ export async function handleCreateGroupDm(
     const result = await deps.api.createGroupDm(recipientIds, name);
     const dmChannel = dmChannelFromPayload(result);
     addDmChannel(dmChannel);
-    selectDmConversation(dmChannel, deps);
+    selectDmConversation(storedDm(dmChannel), deps);
   } catch (err) {
     const msg = errorText(err, connectText("app.dmCreateGroupFailed"));
     deps.getToast()?.show(msg, "error");
@@ -155,6 +167,11 @@ export function dmPreviewText(dm: DmChannel): string {
   return markdownToPlainText(dm.lastMessage, connectText("notifications.spoiler"));
 }
 
+/** Someone is in this DM's call. The one source both DM lists read for the glyph. */
+export function isDmInCall(channelId: number): boolean {
+  return (voiceStore.getState().voiceUsers.get(channelId)?.size ?? 0) > 0;
+}
+
 /**
  * Build a readonly DmConversation array from DM store state.
  *
@@ -162,6 +179,12 @@ export function dmPreviewText(dm: DmChannel): string {
  * recipient, and a user can be in both a 1:1 and a group with the same person,
  * so a user id no longer identifies a row.
  */
+/** `mutedUntil` for a timed mute only, so an untimed row's shape is unchanged. */
+function timedMute(channelId: number): { mutedUntil?: number } {
+  const until = getChannelMute(channelId)?.until ?? null;
+  return until === null ? {} : { mutedUntil: until };
+}
+
 export function buildDmConversations(activeChannelId: number | null): readonly DmConversation[] {
   const dmChannels = dmStore.getState().channels;
   return dmChannels.map((dm) => ({
@@ -171,6 +194,8 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
     avatar: dm.recipient.avatar || null,
     status: (dm.recipient.status as DmConversation["status"]) ?? "offline",
     isGroup: dm.isGroup,
+    ...(dm.ownerId !== undefined && { hasOwner: true }),
+    ...(dm.icon !== undefined && dm.icon !== "" && { icon: dm.icon }),
     participants: dm.participants.map((p) => ({
       id: p.id,
       username: (p.displayName ?? "") || p.username,
@@ -182,6 +207,7 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
     unreadCount: dm.unreadCount,
     mentionCount: dm.mentionCount,
     muted: isChannelMuted(dm.channelId),
+    ...timedMute(dm.channelId),
     active: dm.channelId === activeChannelId,
   }));
 }

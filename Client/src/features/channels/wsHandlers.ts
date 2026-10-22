@@ -1,17 +1,19 @@
 // Channel, role, member, presence and emoji WebSocket handlers — extracted
 // from lib/dispatcher.ts, which keeps every socket subscription and calls
 // these plain functions.
-import { authStore, setAuth, updateUser } from "../../stores/auth.store";
+import { authStore, setAuth } from "../../stores/auth.store";
 import {
   channelsStore,
   setChannels,
   setRoles,
+  setCategories,
   setActiveChannel,
   removeChannel,
   addChannel,
   updateChannel,
   setMentionCount,
   setNsfwAcknowledged,
+  noteChannelMessage,
 } from "../../stores/channels.store";
 import {
   setMembers,
@@ -26,20 +28,83 @@ import { updateVoiceUserProfile } from "../../stores/voice.store";
 import { dmStore, updateDmParticipant } from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { uiStore } from "../../stores/ui.store";
-import { isTextLikeChannel } from "../../lib/types";
+import { getChannelMessages } from "../../stores/messages.store";
+import { isTextLikeChannel, type ChannelActivityEntry } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
-import { isChannelAway, markChannelRead } from "../../lib/read-state";
+import {
+  acceptReadState,
+  failMarkUnread,
+  forgetPendingMarkUnread,
+  isChannelAway,
+  isHeldUnread,
+  markChannelRead,
+  markChannelReadSeen,
+  writeReadPointer,
+} from "../../lib/read-state";
+import {
+  applyReadyCapabilities,
+  hasReceivedReady,
+  readPointerEnabled,
+} from "../../lib/serverCapabilities";
 import { showToast } from "../../lib/toast";
-import { notifyMention } from "../../lib/notifications";
+import {
+  notifyChannelActivity,
+  notifyMention,
+  type ThreadNotifyContext,
+} from "../../lib/notifications";
+import {
+  loadedThreadsStore,
+  threadsStoreInUse,
+  withThreadsStore,
+} from "../../stores/threadsLoader";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
+import { registerSessionReset } from "../../lib/sessionRegistry";
 
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
   setChannels(payload.channels);
+  // Managers only; absent for everyone else and for older servers, which leaves
+  // the list empty so the groups come from the channels alone (WP 6.5a).
+  setCategories(payload.categories ?? []);
   setRoles(payload.roles ?? []);
   setMembers(payload.members);
+}
+
+/** The first text-like channel in sidebar order (D7): uncategorized rows
+ *  first, then categories by (category_position, category_id), each by
+ *  (position, id). An older server without category ids sorts by position. */
+type ReadyChannel = Payload<"ready">["channels"][number];
+
+function sidebarSortKey(ch: ReadyChannel): number[] {
+  const cat = ch.category_id ?? 0;
+  return cat === 0
+    ? [0, 0, 0, ch.position, ch.id]
+    : [1, ch.category_position ?? 0, cat, ch.position, ch.id];
+}
+
+function sortsBefore(a: number[], b: number[]): boolean {
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+function firstTextInSidebarOrder(channels: Payload<"ready">["channels"]): ReadyChannel | undefined {
+  let best: ReadyChannel | undefined;
+  let bestKey: number[] = [];
+  for (const ch of channels) {
+    if (!isTextLikeChannel(ch)) continue;
+    const k = sidebarSortKey(ch);
+    if (best === undefined || sortsBefore(k, bestKey)) {
+      best = ch;
+      bestKey = k;
+    }
+  }
+  return best;
 }
 
 /**
@@ -76,7 +141,7 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
     if (rememberedVisible) {
       setActiveChannel(remembered, { clearUnread: false });
     } else {
-      const firstText = payload.channels.find((ch) => isTextLikeChannel(ch));
+      const firstText = firstTextInSidebarOrder(payload.channels);
       if (firstText !== undefined) {
         setActiveChannel(firstText.id, { clearUnread: false });
       }
@@ -111,9 +176,90 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
  * those unseen messages read (isChannelAway, lib/read-state.ts).
  */
 export function markReadyActiveChannelRead(currentActive: number | null): void {
-  if (currentActive !== null && !isChannelAway(currentActive)) {
-    markChannelRead(currentActive);
+  // A forum holds no messages, so there is nothing in it to mark read.
+  if (
+    currentActive !== null &&
+    channelsStore.getState().channels.get(currentActive)?.type === "forum"
+  ) {
+    return;
   }
+  if (currentActive !== null && !isChannelAway(currentActive)) {
+    // With a read pointer the ready-time mark is only what the reader saw, not
+    // "everything": a resync that restated messages missed while the list was
+    // not on screen must not mark them read. Without one, as it always was.
+    if (readPointerEnabled()) markChannelReadSeen(currentActive);
+    else markChannelRead(currentActive);
+  }
+}
+
+/**
+ * The capabilities slice of a full `ready`, applied first. A new `ready`
+ * restates every pointer, so a Mark Unread still waiting for its answer from
+ * the previous connection is forgotten rather than restored or toasted against
+ * the new one.
+ */
+export function applyReadyReadPointer(payload: Payload<"ready">): void {
+  applyReadyCapabilities(payload.capabilities);
+  forgetPendingMarkUnread();
+}
+
+/**
+ * read_state: the server moved this user's read pointer in a channel or DM and
+ * says where it is now. It replaces the pointer, unread_count and mention_count
+ * outright — and a channel or DM this client does not list is ignored, as is
+ * anything before the first ready. The one exception to "outright" is the
+ * channel the reader is watching: its badge stays at zero (as handleMentionCount
+ * keeps it), because the reader is looking at it; the pointer is still stored.
+ * The NEW line already in view does not move, as it follows the pointer the
+ * channel was opened with.
+ */
+export function handleReadState(payload: Payload<"read_state">): void {
+  if (!hasReceivedReady()) return;
+  const id = payload.channel_id;
+  const ch = channelsStore.getState().channels.get(id);
+  if (ch === undefined && !dmStore.getState().channels.some((c) => c.channelId === id)) {
+    // A followed thread's pointer moved (another device read it).
+    if (threadsStoreInUse()) {
+      withThreadsStore((m) =>
+        m.applyFollowedReadState(id, {
+          lastReadId: payload.last_read_message_id,
+          unread: payload.unread_count,
+          mentions: payload.mention_count,
+        }),
+      );
+    }
+    return;
+  }
+  if (!acceptReadState(id, payload.last_read_message_id)) return;
+  // Not a channel just marked unread: that one keeps its counts, or the click
+  // would leave no badge once the reader leaves.
+  const watching =
+    channelsStore.getState().activeChannelId === id && !isChannelAway(id) && !isHeldUnread(id);
+  writeReadPointer(
+    id,
+    payload.last_read_message_id,
+    watching
+      ? { unread: 0, mention: 0 }
+      : { unread: payload.unread_count, mention: payload.mention_count },
+  );
+}
+
+/**
+ * An error reply to a `mark_unread` the client sent. RATE_LIMITED and
+ * NOT_FOUND say the click did nothing: tell the user, and put the pointer back
+ * to where it was. Correlated by the frame id the server echoes, so an error
+ * for any other frame, or for a request a new connection has replaced, is left
+ * alone. Returns true when it consumed the frame.
+ */
+export function handleMarkUnreadError(payload: Payload<"error">, id: string | undefined): boolean {
+  // Any refusal of this frame ends the request; only two have copy of their own.
+  const notice =
+    payload.code === "RATE_LIMITED"
+      ? "rateLimited"
+      : payload.code === "NOT_FOUND"
+        ? "notFound"
+        : "failed";
+  return failMarkUnread(id, notice);
 }
 
 /** The custom-emoji slice of `ready`. */
@@ -175,6 +321,11 @@ export function handleChannelUpdate(payload: Payload<"channel_update">): void {
   updateChannel(payload);
 }
 
+/** The manager's category list changed: replace what we hold (WP 6.5a). */
+export function handleChannelCategories(payload: Payload<"channel_categories">): void {
+  setCategories(payload.categories);
+}
+
 /** Another device of this account acknowledged or revoked a labelled channel (B5-7). */
 export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
   setNsfwAcknowledged(payload.channel_id, payload.acknowledged);
@@ -207,7 +358,11 @@ export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
  */
 export function handleMentionCount(payload: Payload<"mention_count">): void {
   const ch = channelsStore.getState().channels.get(payload.channel_id);
-  if (ch === undefined || ch.type === "dm") return;
+  if (ch === undefined) {
+    if (threadsStoreInUse()) withThreadsStore((m) => handleThreadMentionCount(m, payload));
+    return;
+  }
+  if (ch.type === "dm") return;
   if (payload.channel_id === channelsStore.getState().activeChannelId) {
     if (!isChannelAway(payload.channel_id)) return;
     setMentionCount(payload.channel_id, Math.min(ch.mentionCount, payload.count));
@@ -219,7 +374,187 @@ export function handleMentionCount(payload: Payload<"mention_count">): void {
   // no chat_message announced, so alert for it (WP 2B-1, interim). A lowered or
   // unchanged total (delete, purge, repeat frame) is not a new mention. The
   // active channel never alerts here: its own chat_message already does.
-  if (payload.count > previous) notifyMention(payload.channel_id);
+  // A channel_activity entry for the mention alerts with the author and the
+  // message instead (WP 2B-2), so this alert waits a moment for one.
+  // A lowered total takes back the rises it reverses, pending alerts included.
+  if (payload.count > previous) deferMentionAlert(payload.channel_id, payload.count - previous);
+  else if (payload.count < previous)
+    withdrawMentionAlert(payload.channel_id, previous - payload.count);
+}
+
+/** A followed thread's mention_count: the total repaints its row, a rise alerts like a channel's. */
+function handleThreadMentionCount(
+  m: NonNullable<ReturnType<typeof loadedThreadsStore>>,
+  payload: Payload<"mention_count">,
+): void {
+  const previous = m.setFollowedMentions(payload.channel_id, payload.count);
+  if (previous === undefined) return;
+  if (payload.count > previous) deferMentionAlert(payload.channel_id, payload.count - previous);
+  else if (payload.count < previous)
+    withdrawMentionAlert(payload.channel_id, previous - payload.count);
+}
+
+/** Who an alert for `id` is for when `id` is a followed thread: its parent, name and whether it is open. */
+function threadNotifyContext(id: number): ThreadNotifyContext | undefined {
+  const m = loadedThreadsStore();
+  const t = m?.getThread(id);
+  if (m === null || t === undefined) return undefined;
+  return {
+    parentId: t.parent_id,
+    name: t.name,
+    watching: m.threadsStore.getState().focusedThreadId === id,
+  };
+}
+
+/**
+ * How long a mention_count alert waits for a channel_activity entry that
+ * carries the mention, and how long a mention entry that came first waits for
+ * its rise. The server flushes activity on a 1 s window and
+ * resolves a flush within 2 s.
+ */
+export const MENTION_ALERT_GRACE_MS = 3000;
+
+/** A channel's mention_count rises still waiting for an activity entry. */
+interface PendingMentionAlert {
+  readonly timer: ReturnType<typeof setTimeout>;
+  /** Rises not yet matched by a mention entry. */
+  owed: number;
+}
+
+const pendingMentionAlerts = new Map<number, PendingMentionAlert>();
+/** Mention entries that arrived before their rise, with when, by channel. */
+const activityCredits = new Map<number, number[]>();
+
+/** Unexpired credits for `channelId`, oldest first. */
+function liveCredits(channelId: number): number[] {
+  const now = Date.now();
+  const live = (activityCredits.get(channelId) ?? []).filter(
+    (at) => now - at < MENTION_ALERT_GRACE_MS,
+  );
+  if (live.length === 0) activityCredits.delete(channelId);
+  else activityCredits.set(channelId, live);
+  return live;
+}
+
+/**
+ * Alert for `rises` mention_count rises unless channel_activity announces
+ * them. Each mention entry matches one rise, before or after it, so a second
+ * mention whose entry never came (the server keeps only a window's newest
+ * mentions, a dropped frame, a server without the frame) still alerts, one
+ * grace window late.
+ */
+function deferMentionAlert(channelId: number, rises: number): void {
+  const credits = liveCredits(channelId);
+  const used = Math.min(credits.length, rises);
+  if (used > 0) {
+    credits.splice(0, used);
+    if (credits.length === 0) activityCredits.delete(channelId);
+  }
+  const owed = rises - used;
+  if (owed === 0) return;
+  const pending = pendingMentionAlerts.get(channelId);
+  if (pending !== undefined) {
+    pending.owed += owed;
+    return;
+  }
+  pendingMentionAlerts.set(channelId, {
+    owed,
+    timer: setTimeout(() => {
+      pendingMentionAlerts.delete(channelId);
+      const thread = threadNotifyContext(channelId);
+      if (thread === undefined) notifyMention(channelId);
+      else notifyMention(channelId, thread);
+    }, MENTION_ALERT_GRACE_MS),
+  });
+}
+
+/** Take back `count` rises a lowered total reversed (a delete or purge). */
+function withdrawMentionAlert(channelId: number, count: number): void {
+  const pending = pendingMentionAlerts.get(channelId);
+  if (pending === undefined) return;
+  pending.owed -= count;
+  if (pending.owed <= 0) {
+    clearTimeout(pending.timer);
+    pendingMentionAlerts.delete(channelId);
+  }
+}
+
+/** A mention entry alerted: it answers one pending rise, or one still to come. */
+function matchMentionEntry(channelId: number): void {
+  const pending = pendingMentionAlerts.get(channelId);
+  if (pending === undefined) {
+    activityCredits.set(channelId, [...liveCredits(channelId), Date.now()]);
+    return;
+  }
+  pending.owed--;
+  if (pending.owed <= 0) {
+    clearTimeout(pending.timer);
+    pendingMentionAlerts.delete(channelId);
+  }
+}
+
+/** Drop pending mention alerts and what they were matched against. Run when
+ *  the dispatcher is torn down. */
+export function resetChannelActivity(): void {
+  for (const pending of pendingMentionAlerts.values()) clearTimeout(pending.timer);
+  pendingMentionAlerts.clear();
+  activityCredits.clear();
+}
+// Mention alerts are keyed by this server's channel ids and fire on a timer;
+// a server switch must not let one fire for the next server.
+void registerSessionReset("channels:activity", resetChannelActivity, { phase: "cache" }); // app-lifetime
+
+/** The newest confirmed message loaded for a channel; a pending send has id 0. */
+function newestLoadedId(channelId: number): number {
+  const rows = getChannelMessages(channelId);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i]!.id > 0) return rows[i]!.id;
+  }
+  return 0;
+}
+
+/**
+ * channel_activity (WP 2B-2): new messages in readable channels the reader is
+ * not viewing, so their unread dot shows without waiting for the next `ready`.
+ * Each entry bumps unread through noteChannelMessage, whose id watermark keeps
+ * a message `ready` already counted from counting again. The mention flags are
+ * never passed as a mention: mention_count owns the badge total. The active
+ * channel is skipped (its own chat_message reaches it), and so are unknown
+ * channels and DM ids. A message at or below the watermark, or below the
+ * newest message already loaded for the channel (one the reader just read
+ * there), neither counts nor alerts.
+ *
+ * An entry that carries a mention alerts with its author and message, so it
+ * stands in for one of that channel's mention_count rises.
+ */
+export function handleChannelActivity(payload: Payload<"channel_activity">): void {
+  const activeId = channelsStore.getState().activeChannelId;
+  for (const entry of payload.channels) {
+    if (entry.channel_id === activeId) continue;
+    const ch = channelsStore.getState().channels.get(entry.channel_id);
+    if (ch === undefined) {
+      // Not a channel: a followed thread's hint (the server sends them to
+      // followers only), or a DM's, which the thread store ignores.
+      if (threadsStoreInUse()) withThreadsStore((m) => handleThreadActivity(m, entry));
+      continue;
+    }
+    if (ch.type === "dm") continue;
+    if (ch.lastMessageId !== null && entry.message_id <= ch.lastMessageId) continue;
+    if (entry.message_id <= newestLoadedId(entry.channel_id)) continue;
+    noteChannelMessage(entry.channel_id, entry.message_id, false);
+    if (entry.mentions_you || entry.mentions_everyone) matchMentionEntry(entry.channel_id);
+    notifyChannelActivity(entry);
+  }
+}
+
+/** A followed thread's activity entry: counted on its row, then announced as its parent would. */
+function handleThreadActivity(
+  m: NonNullable<ReturnType<typeof loadedThreadsStore>>,
+  entry: ChannelActivityEntry,
+): void {
+  if (!m.noteFollowedActivity(entry.channel_id, entry.message_id)) return;
+  if (entry.mentions_you || entry.mentions_everyone) matchMentionEntry(entry.channel_id);
+  notifyChannelActivity(entry, threadNotifyContext(entry.channel_id));
 }
 
 export function handleChannelDelete(payload: Payload<"channel_delete">): void {
@@ -252,7 +587,7 @@ export function handleMemberBan(payload: Payload<"member_ban">): void {
 
 export function handleMemberUpdate(payload: Payload<"member_update">): void {
   log.info("Member role updated", { userId: payload.user_id, role: payload.role });
-  updateMemberRole(payload.user_id, payload.role);
+  updateMemberRole(payload.user_id, payload.role, payload.role_ids);
 
   // Keep authStore in sync when the signed-in user's own role changed —
   // every permission gate (canManageChannels, canViewAuditLog, ...) reads
@@ -261,7 +596,17 @@ export function handleMemberUpdate(payload: Payload<"member_update">): void {
   // the socket reconnects (mirrors the USER_UPDATE self-branch below).
   const me = authStore.getState().user;
   if (me && payload.user_id === me.id) {
-    updateUser({ role: payload.role });
+    // role_ids rides along so the held-role gates follow the echo too.
+    // An absent list drops the old one, as updateMemberRole does.
+    const { role_ids: _old, ...withoutIds } = me;
+    authStore.setState((prev) => ({
+      ...prev,
+      user: {
+        ...withoutIds,
+        role: payload.role,
+        ...(payload.role_ids === undefined ? {} : { role_ids: payload.role_ids }),
+      },
+    }));
   }
 }
 
@@ -289,6 +634,9 @@ export function handleUserUpdate(payload: Payload<"user_update">): void {
     avatar: payload.avatar,
     displayName: payload.display_name,
     identityPublicKey: payload.identity_public_key,
+    about: payload.about,
+    banner: payload.banner,
+    banner_color: payload.banner_color,
   });
   // Same reasoning as PRESENCE above: dmStore's copy of a DM partner's
   // username/avatar/displayName is otherwise never refreshed. DmUser's
@@ -318,6 +666,9 @@ export function handleUserUpdate(payload: Payload<"user_update">): void {
         avatar: payload.avatar,
         display_name: payload.display_name,
         about: payload.about,
+        // Absent (an older server) keeps the stored banner; null clears it.
+        ...(payload.banner === undefined ? {} : { banner: payload.banner }),
+        ...(payload.banner_color === undefined ? {} : { banner_color: payload.banner_color }),
       },
       authStore.getState().serverName ?? "",
       authStore.getState().motd ?? "",

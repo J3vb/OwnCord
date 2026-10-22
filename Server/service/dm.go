@@ -108,8 +108,17 @@ type CreateDMResult struct {
 	AcceptedRequest *db.MessageRequest
 }
 
+// dmReachableUser reports whether u can be the other side of a new DM or a
+// group DM membership: the account exists, is active (not awaiting approval
+// and not denied), and is not effectively banned. A temporary ban that has
+// lapsed counts as not banned (auth.IsEffectivelyBanned).
+func dmReachableUser(u *db.User) bool {
+	return u != nil && u.RegistrationStatus == db.RegistrationActive && !auth.IsEffectivelyBanned(u)
+}
+
 // CreateDM creates or retrieves a DM channel between two users.
-// Validates that neither user has blocked the other.
+// Validates that neither user has blocked the other and that the recipient
+// accepts direct messages from the caller.
 func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*CreateDMResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.CreateDM",
 		telemetry.Int64("user_id", userID),
@@ -128,14 +137,9 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 	if err != nil || recipient == nil {
 		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 	}
-	// GetUserByID has no banned filter (unlike the lookups that normally
-	// surface a user to a caller, e.g. ListMembers), and a hand-crafted
-	// recipient_id naming a deleted/banned account otherwise creates a
-	// dead-end DM channel plus participant rows for the tombstone user.
-	// Gated on IsEffectivelyBanned rather than the raw flag so a lapsed
-	// temporary ban — which login/WS already treat as not-banned — still
-	// permits the DM once it expires.
-	if auth.IsEffectivelyBanned(recipient) {
+	// Only active, not-banned accounts can be reached; anything else is the
+	// same "recipient not found" as an unknown id.
+	if !dmReachableUser(recipient) {
 		return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
 	}
 
@@ -144,7 +148,18 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		return nil, fmt.Errorf("%w: failed to check block status: %w", ErrInternal, err)
 	}
 	if blocked {
-		return nil, fmt.Errorf("%w: cannot create DM — user is blocked", ErrForbidden)
+		return nil, fmt.Errorf("%w: %s", ErrForbidden, dmUnreachableText)
+	}
+	// The recipient may have turned off direct messages from members. A
+	// trusted sender (accepted, sent_first, grandfathered) still reaches them,
+	// which includes a recipient opening a DM they were first written to in.
+	// Same refusal as a block, so the two causes read alike.
+	refused, err := storeDMReader{s.st}.DMRefusesSender(ctx, recipientID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to check DM privacy: %w", ErrInternal, err)
+	}
+	if refused {
+		return nil, fmt.Errorf("%w: %s", ErrForbidden, dmUnreachableText)
 	}
 
 	// A new channel can notify the recipient (dm_channel_open), which a
@@ -210,6 +225,9 @@ type CloseDMResult struct {
 	// RemainingParticipantIDs is who is still in the group after a leave. Empty
 	// for a 1:1 close, which changes nothing for the other party.
 	RemainingParticipantIDs []int64
+	// Rows are the group_leave row to fan out to the survivors. Empty for a
+	// 1:1 close and when the leaver was the last member.
+	Rows []GroupEventRow
 }
 
 // CloseDM closes a DM channel for a user.
@@ -244,31 +262,29 @@ func (s *DMService) CloseDM(ctx context.Context, userID, channelID int64) (*Clos
 		return &CloseDMResult{}, nil
 	}
 
-	// Read the survivors *before* the leave: after it, the caller is gone from
-	// dm_participants and a post-hoc read could not tell "left" from "was
-	// never in it" if the delete half-succeeded.
-	remaining, err := s.st.GetDMParticipantIDs(ctx, channelID)
+	leaver, _ := s.st.GetUserByID(ctx, userID) //nolint:errcheck // a failed lookup only changes the fallback text
+	res, err := s.st.LeaveGroupDM(ctx, userID, channelID, groupLeaveContent(leaver))
 	if err != nil {
-		return nil, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
-	}
-	survivors := make([]int64, 0, len(remaining))
-	for _, pid := range remaining {
-		if pid != userID {
-			survivors = append(survivors, pid)
+		if errors.Is(err, db.ErrNotFound) {
+			// Removed (or already gone) between the membership check and the tx.
+			return nil, fmt.Errorf("%w: not a participant in this DM", ErrNotFound)
 		}
-	}
-
-	deleted, err := s.st.LeaveGroupDM(ctx, userID, channelID)
-	if err != nil {
 		return nil, fmt.Errorf("%w: failed to leave group DM: %w", ErrInternal, err)
 	}
 
-	slog.Debug("group DM left", "user_id", userID, "channel_id", channelID, "deleted", deleted)
-	return &CloseDMResult{
+	// The leave has committed: the reads below must not fail because the client
+	// hung up right after, or the survivors would never hear of it.
+	ctx = context.WithoutCancel(ctx)
+	slog.Debug("group DM left", "user_id", userID, "channel_id", channelID, "deleted", res.Deleted)
+	out := &CloseDMResult{
 		Left:                    true,
-		ChannelDeleted:          deleted,
-		RemainingParticipantIDs: survivors,
-	}, nil
+		ChannelDeleted:          res.Deleted,
+		RemainingParticipantIDs: res.MemberIDs,
+	}
+	if res.Row != nil {
+		out.Rows = s.groupRows(ctx, []db.GroupEventRow{*res.Row})
+	}
+	return out, nil
 }
 
 // ─── Group DMs ──────────────────────────────────────────────────────────────
@@ -292,11 +308,15 @@ type CreateGroupDMResult struct {
 //
 // Blocks are enforced in both directions, per recipient: a user cannot pull
 // someone they have blocked into a room with them, and cannot use a group to
-// reach someone who blocked them. The check is deliberately *creation-time
-// only* — once the group exists, sending into it is not block-checked, because
-// a group DM is a shared room and silently dropping one member's messages for
-// one other member would make the conversation lie to everybody in it. That is
-// also why the composer gate on the client applies to 1:1 DMs alone.
+// reach someone who blocked them. A recipient who has turned off direct
+// messages from members and does not trust the caller, or whom the caller
+// holds an unaccepted message request to, is refused the same way. The check
+// is deliberately *creation-time only* — once the group exists, sending into
+// it is not block-checked, because a group DM is a shared room and silently
+// dropping one member's messages for one other member would make the
+// conversation lie to everybody in it. That is also why the composer gate on
+// the client applies to 1:1 DMs alone, and why a member who later turns DMs
+// off stays in the group.
 //
 // Unlike CreateDM this always creates a new channel: the same set of people may
 // want more than one group, so there is no "the group for these users" to find.
@@ -310,20 +330,9 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		return nil, err
 	}
 
-	// De-duplicate and drop the caller: a payload naming the same person twice
-	// is a client bug, not a reason to refuse, but it must not inflate the
-	// participant count or double-insert.
-	seen := map[int64]bool{userID: true}
-	unique := make([]int64, 0, len(recipientIDs))
-	for _, rid := range recipientIDs {
-		if rid <= 0 {
-			return nil, fmt.Errorf("%w: recipient_ids must be positive", ErrBadRequest)
-		}
-		if seen[rid] {
-			continue
-		}
-		seen[rid] = true
-		unique = append(unique, rid)
+	unique, err := dedupeGroupRecipients(recipientIDs, userID)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(unique) < 2 {
@@ -335,43 +344,25 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 
 	// OC-0195 sibling: bound the raw bytes before cleanText (sanitizeToFixpoint)
 	// runs — see cleanTextBounded's doc comment (user.go).
-	cleanName, err := cleanTextBounded(name, MaxGroupDMNameLen, "name")
+	cleanName, err := cleanVisibleBounded(name, MaxGroupDMNameLen, "name")
 	if err != nil {
 		return nil, err
 	}
 
-	for _, rid := range unique {
-		user, err := s.st.GetUserByID(ctx, rid)
-		if err != nil || user == nil {
-			return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
-		}
-		// See the matching check in CreateDM: gate on effective ban status,
-		// not the raw flag, so a lapsed temporary ban does not wrongly
-		// refuse the group.
-		if auth.IsEffectivelyBanned(user) {
-			return nil, fmt.Errorf("%w: recipient not found", ErrNotFound)
-		}
+	// The same checks an add runs, so the two cannot drift: recipients are
+	// dmReachableUser, no pair in the room is blocked, and each recipient is
+	// reachable by the creator. The send-time gate (RequireDMReachable) skips
+	// groups entirely, so this check is the only one: two mutually-blocked
+	// recipients must not both end up in the same group even when neither of
+	// them blocked the creator.
+	if _, err = s.validateGroupRecipients(ctx, userID, unique, []int64{userID}); err != nil {
+		return nil, err
 	}
-
-	// Block-check every pair in the room, not just creator-vs-recipient:
-	// group DMs are exempt from the send-time block gate (RequireDMNotBlocked
-	// skips groups entirely) on the strength of this creation-time check, so
-	// two mutually-blocked recipients must not both end up in the same group
-	// even when neither of them blocked the creator. n <= MaxGroupDMParticipants,
-	// so the O(n^2) scan is trivial.
 	participantIDs := append([]int64{userID}, unique...)
-	for i := range participantIDs {
-		for j := i + 1; j < len(participantIDs); j++ {
-			blocked, err := s.st.IsEitherBlocked(ctx, participantIDs[i], participantIDs[j])
-			if err != nil {
-				return nil, fmt.Errorf("%w: failed to check block status: %w", ErrInternal, err)
-			}
-			if blocked {
-				return nil, fmt.Errorf("%w: cannot add a blocked user to a group DM", ErrForbidden)
-			}
-		}
+	ch, err := s.st.CreateGroupDMChannel(ctx, cleanName, userID, participantIDs)
+	if errors.Is(err, db.ErrGroupDMBlockedPair) {
+		return nil, mapGroupDBError("failed to create group DM", err)
 	}
-	ch, err := s.st.CreateGroupDMChannel(ctx, cleanName, participantIDs)
 	if err != nil {
 		slog.Error("DMService.CreateGroupDM", "err", err)
 		return nil, fmt.Errorf("%w: failed to create group DM", ErrInternal)
@@ -405,13 +396,22 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 	}, nil
 }
 
+// RenameGroupResult is what a rename did.
+type RenameGroupResult struct {
+	// Rows is the group_rename row, empty when the name did not change.
+	Rows []GroupEventRow
+	// Audience is the members, who receive the refreshed summary and the row.
+	Audience []int64
+}
+
 // RenameGroupDM sets (or, with an empty name, clears) a group DM's name.
 //
-// Any participant may rename it, which is Discord's rule and the only one that
-// works here: a group DM has no owner column and no roles, so "who may rename"
-// has exactly one answer that does not require inventing an ownership model.
-// A 1:1 DM refuses — its name is who is in it.
-func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, name string) (*db.Channel, error) {
+// Any participant may rename it (Discord's rule; the owner has more authority
+// over membership, not over the name). A changed name also writes a
+// group_rename row, in the same transaction, returned in Rows for the caller
+// to fan out. A name equal to the current one writes no row and returns none.
+// A 1:1 DM refuses: its name is who is in it.
+func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, name string) (*RenameGroupResult, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
@@ -435,20 +435,21 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 
 	// OC-0195 sibling: bound the raw bytes before cleanText (sanitizeToFixpoint)
 	// runs — see cleanTextBounded's doc comment (user.go).
-	cleanName, err := cleanTextBounded(name, MaxGroupDMNameLen, "name")
+	cleanName, err := cleanVisibleBounded(name, MaxGroupDMNameLen, "name")
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.st.SetDMChannelName(ctx, channelID, cleanName); err != nil {
-		return nil, fmt.Errorf("%w: failed to rename group DM: %w", ErrInternal, err)
+	actor, _ := s.st.GetUserByID(ctx, userID) //nolint:errcheck // a failed lookup only changes the fallback text
+	change, err := s.st.SetGroupDMName(ctx, channelID, userID, cleanName, groupRenameContent(actor, cleanName))
+	if err != nil {
+		return nil, mapGroupDBError("failed to rename group DM", err)
 	}
 
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
-	}
-	return ch, nil
+	// The rename has committed: the reads below must not fail because the
+	// client hung up right after, or the members would never hear of it.
+	ctx = context.WithoutCancel(ctx)
+	return &RenameGroupResult{Rows: s.groupRows(ctx, change.Rows), Audience: change.MemberIDs}, nil
 }
 
 // DMSummaryFor returns one DM's payload shape as viewerID sees it: the group
@@ -475,16 +476,23 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	if err != nil {
 		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM kind: %w", ErrInternal, err)
 	}
+	var ownerID int64
+	var iconID string
+	if isGroup {
+		if ownerID, iconID, err = s.st.GetGroupDMMeta(ctx, channelID); err != nil {
+			return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read group owner: %w", ErrInternal, err)
+		}
+	}
 	// See presentableDMChannelInfo: this is the single place broadcastDMOpen
 	// (group create/rename/leave refresh) and PATCH /dms/{id}'s response
 	// build their payload from, so applying the "no live connection" rule
 	// here covers every push of a DM's membership.
-	return s.presentableDMChannelInfo(db.NewDMChannelInfo(channelID, ch.Name, isGroup, participants, viewerID), viewerID), nil
+	return s.presentableDMChannelInfo(db.NewDMChannelInfo(channelID, ch.Name, isGroup, ownerID, iconID, participants, viewerID), viewerID), nil
 }
 
 // SharedOneToOneDM returns the id of the 1:1 DM channel the two users share,
 // or ok=false when they have none. Group DMs never match, mirroring the
-// block-enforcement boundary (RequireDMNotBlocked exempts groups).
+// block-enforcement boundary (RequireDMReachable exempts groups).
 func (s *DMService) SharedOneToOneDM(ctx context.Context, userA, userB int64) (int64, bool, error) {
 	id, ok, err := s.st.FindDMChannelIDBetween(ctx, userA, userB)
 	if err != nil {
@@ -525,9 +533,9 @@ func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ri
 	}
 	// A ring is a DM interaction like any other sink: without this check a
 	// blocked user could still make the blocker's client ring (A-2026-08-03).
-	// Group DMs are exempt inside RequireDMNotBlocked, matching every other
+	// Group DMs are exempt inside RequireDMReachable, matching every other
 	// sink — blocks are enforced at group creation instead.
-	if err := RequireDMNotBlocked(ctx, s.st, userID, channelID); err != nil {
+	if err := RequireDMReachable(ctx, storeDMReader{s.st}, userID, channelID); err != nil {
 		return nil, err
 	}
 	if ring {

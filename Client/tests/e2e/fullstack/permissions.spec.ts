@@ -90,8 +90,9 @@ test.describe("Moderation rank enforcement (real server)", () => {
 
     // Positive: ban carol (Member, lower rank) — succeeds on the server.
     await menu.locator(".context-menu__item", { hasText: /^Ban$/ }).click();
-    await menu.locator("[data-testid='ban-reason-input']").fill("e2e lower-rank ban");
-    await menu.locator("[data-testid='ban-confirm']").click();
+    const banDialog = bob.locator("[data-testid='ban-dialog']");
+    await banDialog.locator("[data-testid='ban-reason-input']").fill("e2e lower-rank ban");
+    await banDialog.locator("[data-testid='ban-confirm']").click();
     await expect(bob.locator("[data-testid='toast']", { hasText: "Banned carol" })).toBeVisible({
       timeout: 10_000,
     });

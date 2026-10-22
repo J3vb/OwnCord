@@ -3,6 +3,12 @@
 // extracted from stores/messages.store.ts, which re-exports the types and
 // stays the only import path consumers use.
 import type {
+  CallInfo,
+  GroupEventInfo,
+  ForwardInfo,
+  PollInfo,
+  PollView,
+  ThreadInfo,
   ChatMessagePayload,
   MessageUser,
   Attachment,
@@ -20,8 +26,11 @@ import type {
  * - "sent": confirmed by the server (the default for every server-sourced row).
  * - "pending": optimistic local row awaiting the chat_send_ok ack.
  * - "failed": the send was rejected or dropped; the row offers retry.
+ * - "uploading": a queued send waiting for its files (3A-9). Never in
+ *   `pendingSends`, so a disconnect sweep and the content-only echo match leave
+ *   it alone; the controller turns it into a pending row when the files land.
  */
-export type MessageStatus = "sent" | "pending" | "failed";
+export type MessageStatus = "sent" | "pending" | "failed" | "uploading";
 
 export interface Message {
   readonly id: number;
@@ -56,6 +65,20 @@ export interface Message {
   readonly mentions?: readonly number[];
   /** Whether an honoured @everyone/@here is present. Optional, as above. */
   readonly mentionsEveryone?: boolean;
+  /** Server-resolved mentioned role IDs (WP 6.3f). Optional, as above. */
+  readonly mentionRoles?: readonly number[];
+  /** "call" for a server-written DM call log row; absent for an ordinary message. */
+  readonly kind?: string;
+  /** The call a `kind: "call"` row stands for; the render source, never `content`. */
+  readonly call?: CallInfo;
+  /** The payload of a group DM system row (`kind` group_*); the render source, never `content`. */
+  readonly groupEvent?: GroupEventInfo;
+  /** Set on a forwarded message (WP 6.9a): the snapshot's source, never an author. */
+  readonly forward?: ForwardInfo;
+  /** Set on a poll message (WP 6.9b): the card's source, kept in version order by pollState.ts. */
+  readonly poll?: PollView;
+  /** Set on a thread's starter message (WP 6.9c); threadsStore holds the live state. */
+  readonly thread?: ThreadInfo;
 }
 
 /** A reaction toggle applied optimistically, awaiting its server echo. Keyed
@@ -88,6 +111,23 @@ export interface MessagesState {
    */
   readonly historyLoadState: ReadonlyMap<number, "loading" | "error">;
   /**
+   * Channels whose last older-page fetch (scrolling up) failed, so the list
+   * shows an inline Retry at its top. Set on a failure, cleared when a page
+   * lands, when the window is replaced, or when the channel is mounted again.
+   * The store always sets it; optional only so the many inline MessagesState
+   * test fixtures need not restate it.
+   */
+  readonly olderLoadFailed?: ReadonlySet<number>;
+  /**
+   * channelId -> count of pin/unpin changes seen (setMessagePinned), bumped even
+   * when the message is not loaded. The open pinned panel watches its channel's
+   * entry to know its fetched list went stale (a chat_pinned names only the
+   * message). Optional like the fields above so inline fixtures need not set it.
+   */
+  readonly pinRevision?: ReadonlyMap<number, number>;
+  /** messageId -> count of pin/unpin changes seen for that message. */
+  readonly messagePinRevision?: ReadonlyMap<number, number>;
+  /**
    * Channels whose loaded window is an around-window detached from the live
    * tail: newer messages exist on the server below what is rendered. While a
    * channel is here the list shows a "Jump to Present" pill and incoming
@@ -113,6 +153,11 @@ export interface MessagesState {
 // Helpers: convert wire types to store types
 // -----------------------------------------------------------------------------
 
+/** The wire block as the client holds it: `me` is current as of the block's own version. */
+function toPollView(poll: PollInfo): PollView {
+  return { ...poll, selfVersion: poll.results.version };
+}
+
 export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
   return {
     id: payload.id,
@@ -135,6 +180,13 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     errorCode: null,
     mentions: payload.mentions,
     mentionsEveryone: payload.mentions_everyone,
+    ...(payload.mention_roles !== undefined && { mentionRoles: payload.mention_roles }),
+    ...(payload.kind !== undefined && { kind: payload.kind }),
+    ...(payload.call !== undefined && { call: payload.call }),
+    ...(payload.group_event !== undefined && { groupEvent: payload.group_event }),
+    ...(payload.forward !== undefined && { forward: payload.forward }),
+    ...(payload.poll !== undefined && { poll: toPollView(payload.poll) }),
+    ...(payload.thread !== undefined && { thread: payload.thread }),
   };
 }
 
@@ -159,6 +211,13 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     errorCode: null,
     mentions: response.mentions,
     mentionsEveryone: response.mentions_everyone,
+    ...(response.mention_roles !== undefined && { mentionRoles: response.mention_roles }),
+    ...(response.kind !== undefined && { kind: response.kind }),
+    ...(response.call !== undefined && { call: response.call }),
+    ...(response.group_event !== undefined && { groupEvent: response.group_event }),
+    ...(response.forward !== undefined && { forward: response.forward }),
+    ...(response.poll !== undefined && { poll: toPollView(response.poll) }),
+    ...(response.thread !== undefined && { thread: response.thread }),
   };
 }
 
@@ -176,6 +235,9 @@ export const INITIAL_STATE: MessagesState = {
   loadedChannels: new Set(),
   hasMore: new Map(),
   historyLoadState: new Map(),
+  olderLoadFailed: new Set(),
+  pinRevision: new Map(),
+  messagePinRevision: new Map(),
   detachedChannels: new Set(),
   loadWatermark: new Map(),
 };

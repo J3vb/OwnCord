@@ -199,7 +199,7 @@ describe("leaveVoice", () => {
       lastDirectUrl: undefined,
     });
     await lifecycle.createRoom(1);
-    lifecycle.leaveVoice(true);
+    void lifecycle.leaveVoice(true);
     expect(ws.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
     expect(room.disconnect).toHaveBeenCalled();
     expect(e2ee.clearState).toHaveBeenCalled();
@@ -212,6 +212,52 @@ describe("leaveVoice", () => {
     expect(audioElements.setScreenshareGainListener).toHaveBeenLastCalledWith(null);
   });
 
+  it("returns a promise that settles only after the room's disconnect, and never rejects", async () => {
+    let finish!: () => void;
+    const room = {
+      off: vi.fn(),
+      disconnect: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    } as unknown as Room;
+    const { lifecycle } = setup({
+      type: "connected",
+      room,
+      channelId: 1,
+      latestToken: "t",
+      lastUrl: "u",
+      lastDirectUrl: undefined,
+    });
+    await lifecycle.createRoom(1);
+    let settled = false;
+    const done = lifecycle.leaveVoice(false).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish();
+    await done;
+    expect(settled).toBe(true);
+
+    const failing = {
+      off: vi.fn(),
+      disconnect: vi.fn(() => Promise.reject(new Error("native gone"))),
+    } as unknown as Room;
+    const second = setup({
+      type: "connected",
+      room: failing,
+      channelId: 1,
+      latestToken: "t",
+      lastUrl: "u",
+      lastDirectUrl: undefined,
+    });
+    await second.lifecycle.createRoom(1);
+    await expect(second.lifecycle.leaveVoice(false)).resolves.toBeUndefined();
+  });
+
   it("aborts an in-flight reconnect and sends nothing when asked not to", () => {
     const ac = new AbortController();
     const { lifecycle, ws } = setup({
@@ -222,7 +268,7 @@ describe("leaveVoice", () => {
       lastDirectUrl: undefined,
       ac,
     });
-    lifecycle.leaveVoice(false);
+    void lifecycle.leaveVoice(false);
     expect(ac.signal.aborted).toBe(true);
     expect(ws.send).not.toHaveBeenCalled();
   });

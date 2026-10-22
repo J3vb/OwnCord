@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
@@ -139,5 +139,169 @@ describe("createAvatarElement", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(el.querySelector("img")).toBeNull();
+  });
+});
+
+describe("createAvatarElement with deferUntilVisible", () => {
+  type Callback = (entries: Array<{ target: Element; isIntersecting: boolean }>) => void;
+  let callback: Callback | null;
+  let observed: Set<Element>;
+  let constructed: number;
+
+  class FakeObserver {
+    constructor(cb: Callback) {
+      callback = cb;
+      constructed++;
+    }
+    observe(el: Element): void {
+      observed.add(el);
+    }
+    unobserve(el: Element): void {
+      observed.delete(el);
+    }
+  }
+
+  // The observer and the limiter are module state, so each test gets a fresh
+  // copy of the module.
+  async function load(): Promise<typeof import("../../src/components/message-list/avatar")> {
+    vi.resetModules();
+    return import("../../src/components/message-list/avatar");
+  }
+
+  function mount(create: typeof createAvatarElement, n: number, attach = true): HTMLDivElement {
+    const el = create(
+      { username: `u${n}`, avatar: `/api/v1/files/${n}` },
+      { className: "mi-avatar", deferUntilVisible: true },
+    );
+    if (attach) document.body.appendChild(el);
+    return el;
+  }
+
+  function show(el: Element): void {
+    callback?.([{ target: el, isIntersecting: true }]);
+  }
+
+  beforeEach(() => {
+    fetchImageAsObjectUrl.mockReset();
+    callback = null;
+    observed = new Set();
+    constructed = 0;
+    document.body.innerHTML = "";
+    vi.stubGlobal("IntersectionObserver", FakeObserver);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches only once the wrapper becomes visible, then stops observing", async () => {
+    fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
+    const { createAvatarElement: create } = await load();
+    const el = mount(create, 1);
+    expect(observed.has(el)).toBe(true);
+    expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
+
+    callback?.([{ target: el, isIntersecting: false }]);
+    expect(fetchImageAsObjectUrl).not.toHaveBeenCalled();
+
+    show(el);
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/1");
+    expect(observed.has(el)).toBe(false);
+    await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+  });
+
+  it("shares one observer across avatars", async () => {
+    const { createAvatarElement: create } = await load();
+    mount(create, 1);
+    mount(create, 2);
+    expect(constructed).toBe(1);
+    expect(observed.size).toBe(2);
+  });
+
+  it("runs at most 6 fetches at once and starts the next when one settles", async () => {
+    const settlers: Array<(value: string | null) => void> = [];
+    fetchImageAsObjectUrl.mockImplementation(
+      () => new Promise<string | null>((resolve) => settlers.push(resolve)),
+    );
+    const { createAvatarElement: create } = await load();
+    const els = Array.from({ length: 7 }, (_, i) => mount(create, i));
+    for (const el of els) show(el);
+
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(6);
+
+    settlers[0]?.(null);
+    await vi.waitFor(() => expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(7));
+    expect(fetchImageAsObjectUrl).toHaveBeenLastCalledWith("https://server.test/api/v1/files/6");
+    for (const settle of settlers) settle(null);
+  });
+
+  it("frees a slot when a fetch fails or throws", async () => {
+    let calls = 0;
+    fetchImageAsObjectUrl.mockImplementation(() => {
+      calls++;
+      if (calls === 1) throw new Error("sync failure");
+      if (calls <= 7) return Promise.reject(new Error("network"));
+      return Promise.resolve(null);
+    });
+    const { createAvatarElement: create } = await load();
+    const els = Array.from({ length: 8 }, (_, i) => mount(create, i));
+    for (const el of els) show(el);
+
+    await vi.waitFor(() => expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(8));
+  });
+
+  it("starts no fetch for a wrapper removed before it became visible", async () => {
+    fetchImageAsObjectUrl.mockResolvedValue(null);
+    const { createAvatarElement: create } = await load();
+    const gone = mount(create, 1);
+    const kept = mount(create, 2);
+    gone.remove();
+
+    // Any later report sweeps the detached wrapper out of the observer.
+    show(kept);
+    expect(observed.has(gone)).toBe(false);
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("https://server.test/api/v1/files/2");
+  });
+
+  it("skips a wrapper removed while it waited behind the cap", async () => {
+    const settlers: Array<(value: string | null) => void> = [];
+    fetchImageAsObjectUrl.mockImplementation(
+      () => new Promise<string | null>((resolve) => settlers.push(resolve)),
+    );
+    const { createAvatarElement: create } = await load();
+    const els = Array.from({ length: 7 }, (_, i) => mount(create, i));
+    for (const el of els) show(el);
+    els[6]?.remove();
+
+    settlers[0]?.(null);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(6);
+    for (const settle of settlers) settle(null);
+  });
+
+  it("fetches right away, still capped, when IntersectionObserver is missing", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const settlers: Array<(value: string | null) => void> = [];
+    fetchImageAsObjectUrl.mockImplementation(
+      () => new Promise<string | null>((resolve) => settlers.push(resolve)),
+    );
+    const { createAvatarElement: create } = await load();
+    for (let i = 0; i < 7; i++) mount(create, i);
+
+    await vi.waitFor(() => expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(6));
+    settlers[0]?.(null);
+    await vi.waitFor(() => expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(7));
+    for (const settle of settlers) settle(null);
+  });
+
+  it("leaves the default path ungated", async () => {
+    fetchImageAsObjectUrl.mockResolvedValue(null);
+    const { createAvatarElement: create } = await load();
+    create({ username: "ada", avatar: "/api/v1/files/9" }, { className: "mi-avatar" });
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+    expect(constructed).toBe(0);
   });
 });

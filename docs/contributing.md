@@ -4,6 +4,25 @@ This page is for developers who want to change OwnCord. It covers the tools you
 need, the commands you run, how branches and pull requests work, how a release
 is cut, and the rules for tests and dependencies.
 
+## Where things live
+
+One row per top-level folder. Each folder with its own README or `CLAUDE.md`
+has more detail there.
+
+| Folder                            | What it is                                                                                                                                             |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [Server/](../Server/README.md)    | Go REST and WebSocket server over SQLite, with LiveKit voice. Has a package map.                                                                       |
+| [Client/](../Client/README.md)    | Tauri v2 desktop app: TypeScript frontend and a thin Rust backend.                                                                                     |
+| [protocol/](../protocol/)         | `schema.json`, the source of truth for WebSocket message types. Generated code comes from it.                                                          |
+| [deploy/](../deploy/)             | Deployment files: the systemd unit and the Unraid template.                                                                                            |
+| [docs/](README.md)                | Guides, reference pages, architecture notes, dated audits and plans. Start at the index.                                                               |
+| [scripts/](../scripts/)           | Repository checks, the root command runner (`run.mjs`) and the CI selector.                                                                            |
+| [tools/](../tools/)               | Developer tools: the [introspection MCP server](mcp-introspect.md).                                                                                    |
+| [.github/](../.github/)           | CI workflows, issue forms and the pull request template.                                                                                               |
+| [.githooks/](../.githooks/)       | Git hooks. See [Git hooks](#git-hooks-recommended).                                                                                                    |
+| `.claude/`, `.codex/`, `.agents/` | Setup for AI coding agents, plus `.no-mistakes.yaml`. Human contributors can ignore these. The rules in `AGENTS.md` and `CLAUDE.md` apply to everyone. |
+| [.superpowers/](../.superpowers/) | The shared bug-hunt findings ledger and its renderer.                                                                                                  |
+
 ## Development Setup
 
 ### Prerequisites
@@ -137,7 +156,9 @@ How the script finds a compiler:
    this once, system-wide, and only on the Debian and Ubuntu releases
    apt.llvm.org publishes. Elsewhere, install clang 21 or newer yourself.
 
-It downloads libwebrtc once into `~/.cache/owncord-linux-webrtc`. It prints the
+It downloads libwebrtc and the CUDA headers (for NVIDIA hardware H.264) once
+into `~/.cache/owncord-linux-webrtc`. After pulling this change, run
+`cargo clean -p webrtc-sys` once so the crate rebuilds with them. It prints the
 settings (`CC`, `CXX`, `LK_CUSTOM_WEBRTC`) for the current shell only, so a new
 terminal needs the `eval` again. In CI it writes them to `$GITHUB_ENV`. CI
 caches the libwebrtc folder and installs clang fresh on each run.
@@ -203,7 +224,7 @@ whose Tauri build step leaves them out.
 - `Client/scripts/check-mutation-shards.mjs` proves the shards together still
   cover the whole surface. It runs in Client Static Checks on every PR, so a
   new file cannot sit outside every shard until the nightly fails.
-- The measured score is recorded in `docs/plans/b7-8-mutation-baseline-*.md`.
+- The measured score is recorded in `docs/archive/plans/b7-8-mutation-baseline-*.md`.
 
 **Type checking and linting**
 
@@ -407,7 +428,7 @@ This is the end-to-end procedure for cutting a release. Every step runs on
 4. **Update user-facing status text if it changed.** If the release changes
    what platforms are published or the project stage, update the platform
    table in `docs/quick-start.md` and the status wording in the README badge
-   and text, `SECURITY.md`, `CLAUDE.md`, `AGENTS.md` and `PRD.md`. The
+   and text, `SECURITY.md`, `CLAUDE.md`, `AGENTS.md` and `docs/summaries/product.md`. The
    hobby-project disclaimer stays.
 
 5. **Open the release PR from `dev` into `main`.** Every CI job runs on a PR
@@ -419,7 +440,7 @@ This is the end-to-end procedure for cutting a release. Every step runs on
    `dev` and `main` sharing history. Squash is still the rule for PRs into
    `dev`.
 
-7. **Check the nightly, then tag on `main`.** Cut the tag (`vX.Y.Z-beta.N`) on
+7. **Run the Linux checklist and check the nightly, then tag on `main`.** Cut the tag (`vX.Y.Z-beta.N`) on
    the merge commit.
    - The release ruleset forbids deleting a tag. So a failed first run costs
      you the next version number, not a rewrite.
@@ -431,6 +452,10 @@ This is the end-to-end procedure for cutting a release. Every step runs on
      latest scheduled run is not `success` or is more than 72 hours old. The
      release's own rehearsal skips the failure and recovery drills, so the
      nightly is the only place they run.
+   - Before tagging, the [Linux release checklist](linux-release-checklist.md)
+     must pass on all three sessions: X11, GNOME Wayland (48 or newer) and KDE
+     Plasma Wayland. If any item fails on any session, do not tag. Keep the
+     filled-in tables with the release PR.
    - Emergency override: set the `RELEASE_ALLOW_RED_NIGHTLY` repository
      variable to `true` before tagging, and remove it afterwards. A dry run
      uses the `allow_red_nightly` input instead. The job then passes with a
@@ -564,9 +589,9 @@ Write tests first where you can.
 | `Server/**/*_test.go`             | `make test`                     | Server Build & Test                                                                | yes                    |
 | `Client/src-tauri`                | `cargo test --lib`              | Rust Unit Tests                                                                    | yes                    |
 
-On a PR, Client E2E (Playwright) runs a smaller smoke set
-(`npm run test:e2e:smoke`). It runs the full suite when the specs or their
-fixtures change.
+On a PR, Client E2E (Playwright) always runs the smaller smoke set
+(`npm run test:e2e:smoke`) against the Vite dev server. The full suite runs in
+Client E2E (parity subset) against the production bundle.
 
 `npm test`, not `npm run test:unit`, is the command that includes
 `tests/contract`. CI runs it as `vitest run --coverage`, and
@@ -611,7 +636,7 @@ lanes, see [testing-behavior.md](testing-behavior.md).
 ## Code Style
 
 The full rules, and the tool that enforces each one, are in
-[CODE_STYLE.md](../CODE_STYLE.md). In short:
+[code-style.md](code-style.md). In short:
 
 - **TypeScript:** Prettier, ESLint, oxlint and knip. Layout:
   [Client Architecture](architecture/client.md).

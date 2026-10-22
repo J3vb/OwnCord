@@ -5,7 +5,7 @@
  * Both flows are HTTP-only from the client's side (no ws_send involved):
  *   - Group DM create:  POST /api/v1/dms/group   (SidebarDmHelpers.handleCreateGroupDm)
  *   - Group DM leave:   DELETE /api/v1/dms/{id}  (SidebarArea.closeOrLeaveDm → api.closeDm)
- *   - Change Role:      PATCH /api/v1/moderation/members/{id} { role_id }  (SidebarMemberSection.onChangeRole)
+ *   - Change Role:      PATCH /api/v1/moderation/members/{id} { role_id }  (features/members/memberPanel onChangeRole)
  *
  * A `wrappers` entry wraps window.__TAURI_INTERNALS__.invoke (run inside the
  * init script buildTauriMockScript installs) to record every HTTP fetch
@@ -294,7 +294,8 @@ test.describe("@parity Change Role via member context menu", () => {
 
     // The submenu is hidden until hover (JS mouseenter, not pure CSS :hover).
     await roleTrigger.hover();
-    const submenu = menu.locator(".context-menu__submenu");
+    // Timeout is a second flyout in the same menu, so scope to the Change Role item.
+    const submenu = roleTrigger.locator(".context-menu__submenu");
     await expect(submenu).toBeVisible();
 
     // All three server roles are offered (MOCK_ROLES, minus "owner" — none seeded).

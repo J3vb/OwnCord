@@ -35,9 +35,6 @@ WHERE dp.channel_id = sqlc.arg(channel_id);
 -- name: IsGroupDM :one
 SELECT is_group FROM channels WHERE id = ? AND type = 'dm';
 
--- name: SetDMChannelName :exec
-UPDATE channels SET name = ? WHERE id = ? AND type = 'dm';
-
 -- name: GetDMParticipants :many
 SELECT
     u.id                                      AS id,
@@ -62,6 +59,8 @@ SELECT
     c.id                                          AS channel_id,
     c.name                                        AS name,
     c.is_group                                    AS is_group,
+    CAST(COALESCE(c.dm_owner_id, 0) AS INTEGER)   AS owner_id,
+    CAST(COALESCE(c.dm_icon, '') AS TEXT)         AS icon_id,
     lm.id                                         AS last_message_id,
     COALESCE(lm.content, '')                      AS last_message,
     COALESCE(lm.timestamp, '')                    AS last_message_at,
@@ -72,7 +71,9 @@ SELECT
       LIMIT 100)
     ) AS unread_count,
     CAST(COALESCE((SELECT rs.mention_count FROM read_states rs
-               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS mention_count,
+    CAST(COALESCE((SELECT rs.last_message_id FROM read_states rs
+               WHERE rs.channel_id = c.id AND rs.user_id = dos.user_id), 0) AS INTEGER) AS last_read_message_id
 FROM dm_open_state dos
 JOIN channels c          ON c.id = dos.channel_id AND c.type = 'dm'
 LEFT JOIN messages lm    ON lm.id = (
@@ -116,3 +117,11 @@ ORDER BY dp1.channel_id ASC;
 INSERT OR IGNORE INTO dm_open_state (user_id, channel_id)
 SELECT ?1, ?2
 WHERE EXISTS (SELECT 1 FROM dm_participants WHERE user_id = ?1 AND channel_id = ?2);
+
+-- name: GetGroupDMMeta :one
+-- The owner (0 when none) and the icon attachment id ('' when none) of a group
+-- DM. No row when the channel is not a group.
+SELECT CAST(COALESCE(dm_owner_id, 0) AS INTEGER) AS owner_id,
+       CAST(COALESCE(dm_icon, '') AS TEXT)       AS icon_id
+FROM channels
+WHERE id = ? AND is_group = 1;

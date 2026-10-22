@@ -1,6 +1,6 @@
 import { Permission } from "./types";
 import { authStore } from "@stores/auth.store";
-import { channelsStore } from "@stores/channels.store";
+import { channelsStore, type ChannelsState } from "@stores/channels.store";
 
 /**
  * Returns true if `userPerms` includes the given permission bit.
@@ -20,9 +20,65 @@ export function hasPermission(userPerms: number, perm: Permission): boolean {
  * from "role with no bits" and fall back instead of hiding everything.
  */
 export function permissionsForRole(roleName: string): number | null {
+  return permissionsForRoleIn(channelsStore.getState().roles, roleName);
+}
+
+/** `permissionsForRole` over a role list the caller already holds, so a
+ *  builder fed by a snapshot reads no store. */
+export function permissionsForRoleIn(
+  roles: ChannelsState["roles"],
+  roleName: string,
+): number | null {
   const name = roleName.toLowerCase();
-  const role = channelsStore.getState().roles.find((r) => r.name.toLowerCase() === name);
-  return role?.permissions ?? null;
+  return roles.find((r) => r.name.toLowerCase() === name)?.permissions ?? null;
+}
+
+/**
+ * Permission mask of a member holding several roles (WP 6.3d): the OR of every
+ * held role's mask, so a bit any held role grants counts. `roleIds` comes from
+ * the server's `role_ids`; an id the cached roster does not know is skipped.
+ * With no `roleIds` (an older server), or none that resolve, the single role
+ * name answers exactly as `permissionsForRoleIn` does. Null = unknown.
+ */
+export function permissionsForMemberIn(
+  roles: ChannelsState["roles"],
+  roleIds: readonly number[] | undefined,
+  roleName: string,
+): number | null {
+  if (roleIds !== undefined) {
+    let mask = 0;
+    let found = false;
+    for (const id of roleIds) {
+      const role = roles.find((r) => r.id === id);
+      if (role === undefined) continue;
+      mask |= role.permissions;
+      found = true;
+    }
+    if (found) return mask;
+  }
+  return permissionsForRoleIn(roles, roleName);
+}
+
+/**
+ * Rank of a member for "who outranks whom": the highest `position` among the
+ * held roles (the top role), else the role name's position. Undefined when
+ * neither is known, which callers read as "cannot tell; the server decides".
+ */
+export function topPositionFor(
+  roles: ChannelsState["roles"],
+  roleIds: readonly number[] | undefined,
+  roleName: string,
+): number | undefined {
+  if (roleIds !== undefined) {
+    let top = Number.NEGATIVE_INFINITY;
+    for (const id of roleIds) {
+      const position = roles.find((r) => r.id === id)?.position;
+      if (position !== undefined) top = Math.max(top, position);
+    }
+    if (top !== Number.NEGATIVE_INFINITY) return top;
+  }
+  const name = roleName.toLowerCase();
+  return roles.find((r) => r.name.toLowerCase() === name)?.position;
 }
 
 /**
@@ -44,23 +100,46 @@ export function isLegacyAdminRole(roleName: string): boolean {
  * This is the single derivation every moderation affordance uses for the
  * permission bits, so the member-list gates and the voice moderation menu
  * cannot drift apart. The member list also mirrors the rank rule through
- * `positionForRole`; the voice moderation menu does not. Drives affordances
+ * `topPositionFor`; the voice moderation menu does not. Drives affordances
  * only — the server is still the authority on every action and on rank.
  */
 export function roleHasPermission(roleName: string, perm: Permission): boolean {
-  const perms = permissionsForRole(roleName);
+  return roleHasPermissionIn(channelsStore.getState().roles, roleName, perm);
+}
+
+/** `roleHasPermission` over a role list the caller already holds. */
+export function roleHasPermissionIn(
+  roles: ChannelsState["roles"],
+  roleName: string,
+  perm: Permission,
+): boolean {
+  const perms = permissionsForRoleIn(roles, roleName);
   if (perms === null) return isLegacyAdminRole(roleName);
   return hasPermission(perms, perm);
 }
 
 /**
- * Hierarchy rank of the role named `roleName` (higher outranks lower), or
- * undefined when the role is unknown or the server sent no positions. Callers
- * treat undefined as "cannot tell" and leave the decision to the server.
+ * `roleHasPermissionIn` for a member who may hold several roles: the OR of the
+ * held masks, with the same legacy owner/admin fallback when nothing resolves.
  */
-export function positionForRole(roleName: string): number | undefined {
-  const name = roleName.toLowerCase();
-  return channelsStore.getState().roles.find((r) => r.name.toLowerCase() === name)?.position;
+export function memberHasPermissionIn(
+  roles: ChannelsState["roles"],
+  roleIds: readonly number[] | undefined,
+  roleName: string,
+  perm: Permission,
+): boolean {
+  const perms = permissionsForMemberIn(roles, roleIds, roleName);
+  if (perms === null) return isLegacyAdminRole(roleName);
+  return hasPermission(perms, perm);
+}
+
+/**
+ * Whether the signed-in user holds `perm` through any held role, with the
+ * legacy owner/admin fallback. Read live from the stores.
+ */
+export function currentUserRoleHasPermission(perm: Permission): boolean {
+  const me = authStore.getState().user;
+  return memberHasPermissionIn(channelsStore.getState().roles, me?.role_ids, me?.role ?? "", perm);
 }
 
 /**
@@ -69,9 +148,10 @@ export function positionForRole(roleName: string): number | undefined {
  * or a role the server didn't send) — deny by default.
  */
 export function currentUserPermissions(): number {
-  const roleName = authStore.getState().user?.role;
+  const me = authStore.getState().user;
+  const roleName = me?.role;
   if (roleName === undefined || roleName === null) return 0;
-  return permissionsForRole(roleName) ?? 0;
+  return permissionsForMemberIn(channelsStore.getState().roles, me?.role_ids, roleName) ?? 0;
 }
 
 /**
@@ -88,6 +168,16 @@ export function canManageMessages(): boolean {
 }
 
 /**
+ * A per-channel message affordance (can_delete_others / can_pin) as the server
+ * computed it, or — when it never said (an older server) — the role's
+ * MANAGE_MESSAGES, which is the behaviour before the server sent it. Absent is
+ * never read as false.
+ */
+export function channelBitOrRole(bit: boolean | undefined): boolean {
+  return bit ?? canManageMessages();
+}
+
+/**
  * Whether the signed-in user's role holds MANAGE_CHANNELS — create, edit,
  * delete and reorder channels, all of which the server gates on the same bit
  * behind `/api/v1/moderation/channels*`.
@@ -99,8 +189,17 @@ export function canManageMessages(): boolean {
  * and the audit-log entry cannot disagree about who may manage channels.
  */
 export function canManageChannels(): boolean {
-  const roleName = authStore.getState().user?.role ?? "";
-  return roleHasPermission(roleName, Permission.MANAGE_CHANNELS);
+  return currentUserRoleHasPermission(Permission.MANAGE_CHANNELS);
+}
+
+/**
+ * The manager's category list, but only while the viewer currently holds
+ * MANAGE_CHANNELS. A viewer demoted mid-session keeps the stale list in the
+ * store until the next ready, so every reader goes through this: without the
+ * bit it is empty and the groups come from the channels' own fields.
+ */
+export function visibleCategories(): ChannelsState["categories"] {
+  return canManageChannels() ? channelsStore.getState().categories : [];
 }
 
 /**
@@ -109,8 +208,7 @@ export function canManageChannels(): boolean {
  * on every request.
  */
 export function canViewAuditLog(): boolean {
-  const roleName = authStore.getState().user?.role ?? "";
-  return roleHasPermission(roleName, Permission.VIEW_AUDIT_LOG);
+  return currentUserRoleHasPermission(Permission.VIEW_AUDIT_LOG);
 }
 
 /**
@@ -119,8 +217,7 @@ export function canViewAuditLog(): boolean {
  * header Invite button is only offered to roles that can use it.
  */
 export function canManageInvites(): boolean {
-  const roleName = authStore.getState().user?.role ?? "";
-  return roleHasPermission(roleName, Permission.MANAGE_INVITES);
+  return currentUserRoleHasPermission(Permission.MANAGE_INVITES);
 }
 
 /**
@@ -129,6 +226,5 @@ export function canManageInvites(): boolean {
  * queue read and action.
  */
 export function canModerateMembers(): boolean {
-  const roleName = authStore.getState().user?.role ?? "";
-  return roleHasPermission(roleName, Permission.MODERATE_MEMBERS);
+  return currentUserRoleHasPermission(Permission.MODERATE_MEMBERS);
 }

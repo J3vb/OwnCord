@@ -24,6 +24,7 @@ import {
 } from "../../src/stores/messages.store";
 import { registerReadingAnchor } from "../../src/features/messaging/readingAnchor";
 import { membersStore } from "../../src/stores/members.store";
+import { memberTimeoutsStore, setMemberTimeouts } from "../../src/features/moderation/store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
@@ -54,6 +55,7 @@ import type { ServerMessage, MessageResponse } from "../../src/lib/types";
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   notifyMention: vi.fn(),
+  notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
 vi.mock("@lib/livekitSession", () => ({
@@ -71,6 +73,7 @@ vi.mock("@lib/livekitSession", () => ({
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
   reconcileVideoFlags: vi.fn(),
+  resendWatching: vi.fn(),
 }));
 // The handlers load the voice module lazily and fire-and-forget
 // (`void livekitSession().then(...)`). A dynamic import resolves through the
@@ -235,6 +238,7 @@ describe("WS Dispatcher", () => {
       isAuthenticated: false,
     }));
     channelsStore.setState(() => ({
+      categories: [],
       channels: new Map(),
       activeChannelId: null,
       roles: [],
@@ -554,6 +558,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -599,6 +604,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -646,6 +652,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -957,6 +964,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -1041,6 +1049,60 @@ describe("WS Dispatcher", () => {
       });
 
       expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
+    });
+
+    describe("from a blocked author", () => {
+      beforeEach(() => {
+        setUserBlockedByMe(2, true);
+        onTestFinished(() => setUserBlockedByMe(2, false));
+      });
+
+      it("a direct mention in a channel you are away from raises unread, not a mention", () => {
+        seedChannel();
+        incoming({ content: "ping @alex", mentions: [1] });
+        const ch = channelsStore.getState().channels.get(5);
+        expect(ch?.mentionCount).toBe(0);
+        expect(ch?.unreadCount).toBe(1);
+      });
+
+      it("an @everyone raises unread, not a mention", () => {
+        seedChannel();
+        incoming({ content: "@everyone", mentions_everyone: true });
+        const ch = channelsStore.getState().channels.get(5);
+        expect(ch?.mentionCount).toBe(0);
+        expect(ch?.unreadCount).toBe(1);
+      });
+
+      it("a direct mention in a DM raises the DM's unread count, not its mention count", () => {
+        seedChannel();
+        dmStore.setState(() => ({
+          channels: [
+            {
+              channelId: 50,
+              recipient: { id: 2, username: "bob", avatar: "", status: "online" as const },
+              participants: [],
+              name: "",
+              isGroup: true,
+              lastMessageId: null,
+              lastMessage: "",
+              lastMessageAt: "",
+              unreadCount: 0,
+              mentionCount: 0,
+            },
+          ],
+        }));
+        incoming({ channel_id: 50, content: "ping @alex", mentions: [1] });
+        const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+        expect(dm?.mentionCount).toBe(0);
+        expect(dm?.unreadCount).toBe(1);
+      });
+
+      it("unblocking restores the badge", () => {
+        seedChannel();
+        setUserBlockedByMe(2, false);
+        incoming({ content: "ping @alex", mentions: [1] });
+        expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(1);
+      });
     });
 
     it("still raises the mention badge for a live (non-replayed) @here mention", () => {
@@ -1408,6 +1470,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -1434,6 +1497,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: true,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -2007,6 +2071,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -2108,6 +2173,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -2979,6 +3045,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -2995,6 +3062,54 @@ describe("WS Dispatcher", () => {
 
     const ch = channelsStore.getState().channels.get(10);
     expect(ch?.name).toBe("new-name");
+  });
+
+  it("wires channel_categories to the channels store, replacing the list wholesale", () => {
+    mock.dispatch("channel_categories", {
+      categories: [
+        { id: 7, name: "Later", position: 1 },
+        { id: 3, name: "Sooner", position: 0 },
+      ],
+    });
+    // Kept in the server's (position, id) order.
+    expect(channelsStore.getState().categories.map((c) => c.id)).toEqual([3, 7]);
+
+    mock.dispatch("channel_categories", { categories: [{ id: 7, name: "Later", position: 0 }] });
+    expect(channelsStore.getState().categories).toEqual([{ id: 7, name: "Later", position: 0 }]);
+  });
+
+  it("carries the category fields of channel_update into the channel", () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map(prev.channels).set(31, {
+        id: 31,
+        name: "moved",
+        type: "text" as const,
+        category: null,
+        position: 0,
+        unreadCount: 0,
+        mentionCount: 0,
+        lastMessageId: null,
+        canSend: true,
+        topic: "",
+        slowMode: 0,
+        nsfw: false,
+        isPrivate: false,
+        voiceMaxUsers: 0,
+        voiceMaxVideo: 0,
+      }),
+    }));
+    mock.dispatch("channel_update", {
+      id: 31,
+      category: "Games",
+      category_id: 6,
+      category_position: 2,
+    });
+    expect(channelsStore.getState().channels.get(31)).toMatchObject({
+      category: "Games",
+      categoryId: 6,
+      categoryPosition: 2,
+    });
   });
 
   it("wires channel_delete and redirects to first text channel when active is deleted", () => {
@@ -3014,6 +3129,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3030,6 +3146,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3041,7 +3158,10 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().channels.has(10)).toBe(false);
     expect(channelsStore.getState().activeChannelId).toBe(20);
     // The redirect must say why it happened (ux/channels-members-dms §1.2).
-    expect(mockShowToast).toHaveBeenCalledWith("This channel was deleted", "info");
+    expect(mockShowToast).toHaveBeenCalledWith(
+      "You no longer have access to this channel, or it was deleted",
+      "info",
+    );
   });
 
   it("wires channel_delete without a toast when a non-active channel is deleted", () => {
@@ -3061,6 +3181,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3077,6 +3198,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3106,6 +3228,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3133,6 +3256,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3149,6 +3273,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -3202,6 +3327,17 @@ describe("WS Dispatcher", () => {
     expect(authStore.getState().user?.role).toBe("admin");
   });
 
+  it("tracks role_ids for the signed-in user and drops them when the echo has none", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 42, username: "alice", avatar: null, role: "member", role_ids: [3] },
+    }));
+    mock.dispatch("member_update", { user_id: 42, role: "vip", role_ids: [6, 3] });
+    expect(authStore.getState().user?.role_ids).toEqual([6, 3]);
+    mock.dispatch("member_update", { user_id: 42, role: "vip" });
+    expect(authStore.getState().user?.role_ids).toBeUndefined();
+  });
+
   it("leaves authStore.user.role untouched for a member_update about someone else", () => {
     authStore.setState((prev) => ({
       ...prev,
@@ -3235,6 +3371,50 @@ describe("WS Dispatcher", () => {
     expect(roles.map((r) => r.id)).toEqual([1, 4]);
     expect(roles[0]?.color).toBe("#FF0000");
     expect(roles.some((r) => r.name === "Contractor")).toBe(false);
+  });
+
+  // (21) the member menu's timeout view (WP 3C-3, data half of 3C-7c)
+  describe("member timeouts", () => {
+    const emptyReady = { channels: [], members: [], voice_states: [], roles: [], dm_channels: [] };
+
+    afterEach(() => setMemberTimeouts(undefined));
+
+    it("fills the store from ready.member_timeouts, replacing the previous map", () => {
+      mock.dispatch("ready", {
+        ...emptyReady,
+        member_timeouts: [{ user_id: 4, expires_at: "2099-01-01T00:00:00Z" }],
+      });
+      expect(memberTimeoutsStore.getState()).toEqual(new Map([[4, "2099-01-01T00:00:00Z"]]));
+
+      mock.dispatch("ready", {
+        ...emptyReady,
+        member_timeouts: [{ user_id: 9, expires_at: "2099-02-02T00:00:00Z" }],
+      });
+      expect(memberTimeoutsStore.getState()).toEqual(new Map([[9, "2099-02-02T00:00:00Z"]]));
+    });
+
+    it("sets the store to null when ready carries no member_timeouts (an older server)", () => {
+      mock.dispatch("ready", {
+        ...emptyReady,
+        member_timeouts: [{ user_id: 4, expires_at: "2099-01-01T00:00:00Z" }],
+      });
+      mock.dispatch("ready", emptyReady);
+      expect(memberTimeoutsStore.getState()).toBeNull();
+    });
+
+    it("replaces the whole map on a member_timeouts frame", () => {
+      mock.dispatch("ready", {
+        ...emptyReady,
+        member_timeouts: [{ user_id: 4, expires_at: "2099-01-01T00:00:00Z" }],
+      });
+      mock.dispatch("member_timeouts", {
+        timeouts: [{ user_id: 5, expires_at: "2099-03-03T00:00:00Z" }],
+      });
+      expect(memberTimeoutsStore.getState()).toEqual(new Map([[5, "2099-03-03T00:00:00Z"]]));
+
+      mock.dispatch("member_timeouts", { timeouts: [] });
+      expect(memberTimeoutsStore.getState()).toEqual(new Map());
+    });
   });
 
   it("makes a role created by roles_update immediately assignable", () => {
@@ -4354,6 +4534,99 @@ describe("WS Dispatcher", () => {
     }
   });
 
+  it("rolls back the optimistic presence status on a REQUEST_TIMEOUT refusal (WP 4.1b)", () => {
+    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
+    setActivePresenceSender(presenceSender);
+    try {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "alice", avatar: null, role: "member" },
+      }));
+      membersStore.setState((prev) => ({
+        ...prev,
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online",
+              customStatus: "old text",
+            } as never,
+          ],
+        ]),
+      }));
+      saveCustomStatus("old text");
+      saveCustomStatus("new text");
+      presenceSender.send("dnd", "new text");
+      const id = (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
+
+      mock.dispatch("error", { code: "REQUEST_TIMEOUT", message: "the server is busy" }, id);
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(membersStore.getState().members.get(1)?.status).toBe("online");
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+    } finally {
+      setActivePresenceSender(null);
+      presenceSender.destroy();
+    }
+  });
+
+  // WP 3C-9: a custom status the server's character or length rules refuse
+  // comes back BAD_REQUEST; the optimistic value must not stay on screen, and
+  // the toast carries the server's own text.
+  it("rolls back the optimistic custom status on a BAD_REQUEST refusal and toasts the server's text", () => {
+    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
+    setActivePresenceSender(presenceSender);
+    try {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "alice", avatar: null, role: "member" },
+      }));
+      membersStore.setState((prev) => ({
+        ...prev,
+        members: new Map([
+          [
+            1,
+            {
+              id: 1,
+              username: "alice",
+              avatar: null,
+              role: "member",
+              status: "online",
+              customStatus: "old text",
+            } as never,
+          ],
+        ]),
+      }));
+      saveCustomStatus("old text");
+      saveCustomStatus("bad\u202etext");
+      presenceSender.send("online", "bad\u202etext");
+      const id = (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
+
+      mockShowToast.mockClear();
+      mock.dispatch(
+        "error",
+        { code: "BAD_REQUEST", message: "custom_status must not contain invisible characters" },
+        id,
+      );
+      expectConsole("error", /\[dispatcher\] Server error/);
+
+      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+      expect(loadCustomStatus()).toBe("old text");
+      expect(mockShowToast).toHaveBeenCalledWith(
+        "Custom_status must not contain invisible characters",
+        "error",
+      );
+    } finally {
+      setActivePresenceSender(null);
+      presenceSender.destroy();
+    }
+  });
+
   it("wires error with an unrecognized code to the generic fallback toast (OC-0064)", () => {
     // The final fallthrough is the one place every unmatched error code
     // lands (e.g. a rejected fire-and-forget chat_edit) — it must not be
@@ -4727,7 +5000,7 @@ describe("WS Dispatcher", () => {
   });
 
   // OC-0218: the ready-time GET /blocks and a user-initiated block/unblock
-  // (SidebarMemberSection's onToggleBlock -> setUserBlockedByMe, after its
+  // (memberPanel's onToggleBlock -> setUserBlockedByMe, after its
   // own await api.blockUser/unblockUser) can race. The GET is issued first
   // but its reply can land after the user's own fresher action — applying it
   // unconditionally reverts what the user just did.
@@ -4750,7 +5023,7 @@ describe("WS Dispatcher", () => {
     expect(listBlocks).toHaveBeenCalled();
 
     // While it's in flight, the user clicks "Unblock" on 42 — the same
-    // sequence SidebarMemberSection's onToggleBlock performs once its own
+    // sequence memberPanel's onToggleBlock performs once its own
     // await api.unblockUser resolves.
     setUserBlockedByMe(42, false);
     expect([...blocksStore.getState().blockedByMe]).toEqual([]);
@@ -4816,6 +5089,7 @@ describe("WS Dispatcher", () => {
         topic: "",
         slowMode: 0,
         nsfw: false,
+        isPrivate: false,
         voiceMaxUsers: 0,
         voiceMaxVideo: 0,
       });
@@ -5303,6 +5577,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -5346,6 +5621,7 @@ describe("WS Dispatcher", () => {
           topic: "",
           slowMode: 0,
           nsfw: false,
+          isPrivate: false,
           voiceMaxUsers: 0,
           voiceMaxVideo: 0,
         });
@@ -6029,5 +6305,30 @@ describe("wireConnectionStatus", () => {
     expect(dialFailed()).toBe(false);
 
     unsub();
+  });
+});
+
+describe("WS Dispatcher cleanup isolation (ARCH-012)", () => {
+  it("a throwing cleanup entry still unsubscribes every other handler", () => {
+    const m = createMockWs();
+    const realOn = m.ws.on.bind(m.ws);
+    let first = true;
+    m.ws.on = ((type: ServerMessage["type"], listener: WsListener<ServerMessage["type"]>) => {
+      const unsub = realOn(type, listener);
+      if (!first) return unsub;
+      first = false;
+      return () => {
+        throw new Error("boom");
+      };
+    }) as WsClient["on"];
+    const stop = wireDispatcher(m.ws);
+    const remaining = (): number => [...m.listeners.values()].reduce((n, set) => n + set.size, 0);
+    expect(remaining()).toBeGreaterThan(1);
+
+    expect(() => stop()).not.toThrow();
+    expectConsole("error", /Dispatcher cleanup step failed/);
+
+    // Only the entry whose unsubscribe threw is left registered.
+    expect(remaining()).toBe(1);
   });
 });

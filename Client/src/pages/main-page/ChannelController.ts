@@ -6,6 +6,7 @@
 
 import { clearChildren, createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
+import { isServerRowKind } from "@lib/messageKind";
 import { createModal } from "@lib/modalFactory";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
@@ -13,15 +14,27 @@ import type { WsClient } from "@lib/ws";
 import { ApiClientError, type ApiClient } from "@lib/api";
 import type { ChannelType } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
+import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
 import { setInlineImageDecorator } from "@components/message-list/media";
 import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
-import type { ComposerDraft, MessageInputComponent } from "@components/MessageInput";
+import type {
+  ComposerDraft,
+  MessageInputComponent,
+  QueuedAttachment,
+  ReplyTarget,
+  SentAttachment,
+} from "@components/MessageInput";
+import { endPoll, votePoll } from "../../features/messaging/pollSend";
+import { loadSendQueue, preloadSendQueue } from "../../features/messaging/sendQueue-loader";
+import type { SendQueueModule } from "../../features/messaging/sendQueue-loader";
+import type { QueuedSend, QueueDeps } from "../../features/messaging/sendQueue";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 import {
+  messagesStore,
   getChannelMessages,
   setMessagePinned,
   addOptimisticMessage,
@@ -32,27 +45,49 @@ import {
   invalidateChannelMessageWindow,
   clearChannelContent,
 } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
+import { resolveAuthor } from "@lib/formatting";
+import { resolveDisplayName } from "@lib/avatar";
+import { markdownToPlainText } from "@lib/markdown";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { MessageController } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
-import { updateChatHeaderForDm } from "./ChatHeader";
+import {
+  updateChatHeaderForDm,
+  setChatHeaderChannelType,
+  setChatHeaderThreads,
+  setChatHeaderTopic,
+} from "./ChatHeader";
+import { createThreadPanelHost } from "./ThreadPanelHost";
+import {
+  setThreadNavigationConsumer,
+  settleThreadNavigation,
+} from "../../features/threads/threadNavigation";
+import type { ThreadPanelHost } from "./ThreadPanelHost";
+import type { ThreadListPopover } from "@components/ThreadListPopover";
+import type { ThreadInfo } from "@lib/types";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import type { DmChannel } from "@stores/dm.store";
+import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
+import { buildGroupAvatarStack } from "@components/DmSidebar";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
 import { viewChannel } from "@lib/last-channel";
+import { loadSavedDraft, saveDraft, type SavedDraft } from "@lib/savedDrafts";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";
-import { shellText } from "../../i18n/shell";
+import { shellText, statusLabel } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
-import { markChannelRead } from "@lib/read-state";
+import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
+import { readPointerEnabled, threadsEnabled } from "@lib/serverCapabilities";
 import {
   newClientMessageId,
   pendingMessageExpired,
@@ -68,6 +103,11 @@ const log = createLogger("channel-ctrl");
 /** Longer than ws.ts's 60 s server-silence deadline, so a half-open socket is
  *  declared dead (and the entry failed) before the entry can expire. */
 const TRACKED_ACTION_EXPIRY_MS = 90_000;
+/** How long typing must pause before the draft is written to storage. */
+const DRAFT_SAVE_DELAY_MS = 750;
+
+/** Characters of the message shown in the delete confirm. */
+const DELETE_PREVIEW_MAX_CHARS = 200;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -85,6 +125,8 @@ export interface ChannelControllerOptions {
     readonly messagesSlot: HTMLDivElement;
     readonly typingSlot: HTMLDivElement;
     readonly inputSlot: HTMLDivElement;
+    /** Where a thread's side panel mounts, beside the chat column (WP 6.9c). */
+    readonly threadSlot?: HTMLDivElement;
   };
   readonly chatHeaderName: HTMLSpanElement | null;
   readonly chatHeaderRefs: ChatHeaderRefs | null;
@@ -94,6 +136,10 @@ export interface ChannelControllerOptions {
   /** Move focus somewhere reachable after the NSFW gate that held it is
    *  removed (accepted, declined or dismissed with Escape). */
   readonly focusFallback?: () => void;
+  /** Join the DM call a live call log row stands for (WP 3B-9c). */
+  readonly onJoinCall?: (channelId: number) => void;
+  /** Open the pinned-messages panel (the "pinned messages" link of a pin row, WP 6.12). */
+  readonly onOpenPins?: () => void;
 }
 
 export interface ChannelController {
@@ -108,18 +154,104 @@ export interface ChannelController {
   readonly currentChannelId: number | null;
   /** Currently mounted message list (for scroll-to-message). */
   readonly messageList: MessageListComponent | null;
-  /** Open the composer's attachment picker (Ctrl+U). No-op with no composer. */
+  /** Open a thread in the side panel beside the channel (WP 6.9c). */
+  openThread(thread: ThreadInfo): void;
+  /** The thread the side panel has open, or null. */
+  readonly openThreadId: number | null;
+  /** Open or close the channel's thread list under the header's Threads button. */
+  toggleThreadList(anchor: HTMLButtonElement): void;
+  /** Open the composer's attachment picker (Ctrl+Shift+U). No-op with no composer. */
   openFilePicker(): void;
+  /** Open or close the composer's emoji or GIF picker (Ctrl+E, Ctrl+G). */
+  togglePicker(kind: "emoji" | "gif"): void;
 }
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
+/** The header's mark for a DM: the partner's avatar, or a group's face stack. */
+function buildDmHeaderAvatar(dm: DmChannel, label: string): HTMLElement {
+  if (dm.isGroup) {
+    // The row's colour for a group, and a testid of its own so the header's
+    // stack never doubles the row's.
+    const stack = buildGroupAvatarStack(
+      dm.channelId,
+      dm.participants,
+      label,
+      "#5865F2",
+      "ch-avatar-stack",
+      dm.icon ?? null,
+    );
+    stack.setAttribute("aria-hidden", "true");
+    return stack;
+  }
+  const member = membersStore.getState().members.get(dm.recipient.id);
+  const wrapper = createAvatarElement(
+    {
+      username: dm.recipient.username,
+      displayName: label,
+      avatar: member?.avatar ?? dm.recipient.avatar,
+    },
+    { className: "ch-avatar-circle", background: pickAvatarColor(label) },
+  );
+  wrapper.setAttribute("aria-hidden", "true");
+  return wrapper;
+}
+
+/** What the header's avatar is drawn from; equal keys mean the same picture. */
+function dmHeaderAvatarKey(dm: DmChannel, label: string): string {
+  if (dm.isGroup) {
+    return `g|${label}|${dm.icon ?? ""}|${dm.participants.map((p) => `${p.id}:${p.avatar}`).join(",")}`;
+  }
+  const member = membersStore.getState().members.get(dm.recipient.id);
+  return `u|${label}|${dm.recipient.id}|${member?.avatar ?? dm.recipient.avatar}`;
+}
+
 function currentMessageUser(): MessageUser | null {
   const u = authStore.getState().user;
   if (u === null) return null;
   return { id: u.id, username: u.username, avatar: u.avatar };
+}
+
+/** The message the dialog is about: author and a truncated plain-text
+ *  excerpt, both set as text. An attachments-only message shows nothing
+ *  extra beyond its author. */
+function renderDeletePreview(msg: Message): HTMLElement {
+  const author = resolveDisplayName(resolveAuthor(msg.user));
+  const plain = Array.from(markdownToPlainText(msg.content, messagingText("spoiler.revealed")));
+  const excerpt = plain.slice(0, DELETE_PREVIEW_MAX_CHARS).join("");
+  const preview = createElement("div", {
+    class: "msg-delete-preview",
+    "data-testid": "msg-delete-preview",
+  });
+  preview.appendChild(createElement("span", { class: "msg-delete-preview-author" }, author));
+  if (excerpt !== "") {
+    const truncated = plain.length > DELETE_PREVIEW_MAX_CHARS;
+    preview.appendChild(
+      createElement(
+        "span",
+        { class: "msg-delete-preview-text" },
+        truncated ? `${excerpt}\u2026` : excerpt,
+      ),
+    );
+  } else if (msg.attachments.length > 0) {
+    preview.appendChild(
+      createElement(
+        "span",
+        { class: "msg-delete-preview-text" },
+        messagingText("reply.attachment"),
+      ),
+    );
+  }
+  return preview;
+}
+
+/** Stop a queued send's uploads (Delete, teardown, a stale account); the
+ *  module's Cancel does the same once it is loaded. */
+function abortQueued(entry: QueuedSend): void {
+  entry.cancelled = true;
+  for (const item of entry.items) item.upload?.owner.destroy();
 }
 
 export function createChannelController(opts: ChannelControllerOptions): ChannelController {
@@ -138,8 +270,23 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     focusFallback,
   } = opts;
 
+  // The thread side panel beside the chat column (WP 6.9c). It belongs to the
+  // mounted channel: a channel switch closes it, and `thread_focus` goes null.
+  const threadHost: ThreadPanelHost | null =
+    slots.threadSlot === undefined
+      ? null
+      : createThreadPanelHost({
+          ws,
+          api,
+          msgCtrl,
+          slot: slots.threadSlot,
+          showToast: (msg, type) => showToast(msg, type),
+        });
+  let threadList: ThreadListPopover | null = null;
+
   let currentChannelId: number | null = null;
   let channelAbort: AbortController | null = null;
+  const pinsInFlight = new Set<string>();
   let messageList: MessageListComponent | null = null;
   let messageInput: MessageInputComponent | null = null;
   let typingIndicator: MountableComponent | null = null;
@@ -158,6 +305,67 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // (not per-mount) because the whole point is to outlive a channel switch.
   // Entries are dropped once a send consumes them or the user clears them.
   const draftByChannel = new Map<number, ComposerDraft>();
+
+  // 3A-3: the mounted composer's text and reply also go to storage, so they
+  // survive a restart. Saved a moment after typing stops, and at once when the
+  // draft empties or the channel switches.
+  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  // The account the mounted composer belongs to, captured at mount, so a late
+  // save never files a draft under whoever is signed in by then.
+  let draftOwner: { host: string; userId: number; current: () => boolean } | null = null;
+  // What was last written, so an edit (whose peeked draft never changes) does
+  // not rewrite storage on every key.
+  let lastSavedDraft = "";
+
+  function persistDraft(channelId: number, draft: SavedDraft): void {
+    const owner = draftOwner;
+    if (owner === null || !(owner.userId > 0) || owner.host === "" || !owner.current()) return;
+    const stamp = JSON.stringify([owner.host, owner.userId, channelId, draft]);
+    if (stamp === lastSavedDraft) return;
+    lastSavedDraft = stamp;
+    saveDraft(owner.host, owner.userId, channelId, draft);
+  }
+
+  function saveMountedDraft(): void {
+    if (draftSaveTimer !== null) {
+      clearTimeout(draftSaveTimer);
+      draftSaveTimer = null;
+    }
+    if (messageInput !== null && currentChannelId !== null) {
+      persistDraft(currentChannelId, messageInput.peekDraft());
+    }
+  }
+
+  function scheduleDraftSave(): void {
+    if (draftSaveTimer !== null) clearTimeout(draftSaveTimer);
+    const draft = messageInput?.peekDraft();
+    if (draft !== undefined && draft.content === "" && draft.replyTo === null) {
+      saveMountedDraft();
+      return;
+    }
+    draftSaveTimer = setTimeout(saveMountedDraft, DRAFT_SAVE_DELAY_MS);
+  }
+
+  /** After a restart there is no in-memory draft, so take the saved one. Its
+   *  reply is dropped only when the loaded history shows the target deleted:
+   *  history is usually not loaded yet, and the server refuses a reply to a
+   *  message that is gone. */
+  function restoreSavedDraft(channelId: number, input: MessageInputComponent): void {
+    const userId = getCurrentUserId();
+    const host = api.getConfig?.().host ?? "";
+    if (!(userId > 0) || host === "") return;
+    const saved = loadSavedDraft(host, userId, channelId);
+    if (saved === null) return;
+    const target = saved.replyTo;
+    const gone =
+      target !== null &&
+      getChannelMessages(channelId).some((m) => m.id === target.messageId && m.deleted);
+    input.restoreDraft({
+      content: saved.content,
+      replyTo: gone ? null : target,
+      attachments: [],
+    });
+  }
 
   // When the last accepted send happened (epoch ms) per channel, so the Send
   // gate's countdown survives a channel switch instead of restarting from zero
@@ -200,13 +408,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     {
       content: string;
       replyTo: number | null;
-      attachments: readonly string[];
+      // 3A-12: the reply's @ON/@OFF, part of the retry fingerprint, so a
+      // retry resends the same value.
+      replyPing?: boolean;
+      // Each file with its name (and picked File, when there is one), so a
+      // file the server did not attach can go back into the composer (2A-3).
+      attachments: readonly SentAttachment[];
       // Which channel this cid was actually sent to. chat_send_ok and the
       // SLOW_MODE error are global ws.on subscriptions with no channel_id of
       // their own (OC-0059) — a late frame for a send made in a channel the
       // user has since left must not be attributed to whatever channel is
       // mounted when it arrives.
       channelId: number;
+      // The account that sent it: a frame for another account's send is ignored.
+      userId: number;
       clientMessageId?: string;
       // When the client handed this message to the socket (epoch ms): a late
       // ack's cooldown starts here, not when the ack is finally received.
@@ -234,6 +449,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   let sendChainBusy = false;
   let sendChainGen = 0;
   const sendTimers = new Map<string, { timer: number; release?: () => void }>();
+
+  // 3A-9: a message sent with files still uploading waits here, keyed by its
+  // "uploading" row's correlation id, and posts once its uploads land. Like
+  // draftByCorrelation it is controller-scoped, so the send keeps going (and
+  // posts to its own channel) after a channel switch. The queue module is
+  // loaded on the first upload, and kept here once it is.
+  const queuedSends = new Map<string, QueuedSend>();
+  let sendQueueMod: SendQueueModule | null = null;
 
   // CLI-08: chat_edit and chat_delete are fire-and-forget — no ack carries
   // their envelope id back, so before this they were toasted "success" on
@@ -267,21 +490,37 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     return entry;
   }
 
-  /** Put a failed edit's text back in the composer, but only while its own
-   *  channel is the mounted one and the composer holds nothing of the user's
-   *  — the row it belongs to may be gone by now, and startEdit against
-   *  another channel's composer would target the wrong message id. At most
-   *  one edit lands, the newest; the error toast (when asked for) says the text is back
-   *  only if it is. Deferred a microtask because the synchronous disconnected
-   *  path runs inside MessageInput.handleSend, whose own restore of the
-   *  pre-edit draft (right after onEditMessage returns) would otherwise wipe
-   *  the restored edit text. */
+  /** A failure can land long after the save: if the user has moved on to the
+   *  composer or another text field, the restored editor must not take focus. */
+  function userIsBusyElsewhere(): boolean {
+    if (messageInput !== null && !messageInput.isIdle()) return true;
+    const active = document.activeElement;
+    // The idle composer is where a just-saved edit hands focus back.
+    if (active instanceof HTMLElement && active.classList.contains("msg-textarea")) return false;
+    return (
+      active instanceof HTMLElement &&
+      (active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        active.isContentEditable)
+    );
+  }
+
+  /** Put a failed edit's text back in its row's inline editor, but only while
+   *  its own channel is the mounted one and no other edit is open — the row it
+   *  belongs to may be gone by now (startEdit refuses a message that is not
+   *  loaded, not yours or not sent), and a list for another channel would
+   *  target the wrong message id. At most one edit lands, the newest; the error
+   *  toast (when asked for) says the text is back only if it is. */
   function failEdits(edits: readonly TrackedEdit[], toast: boolean): void {
     queueMicrotask(() => {
       const newest = edits.findLast((edit) => edit.channelId === currentChannelId);
       let restored = false;
-      if (newest !== undefined && messageInput?.isIdle() === true) {
-        messageInput.startEdit(newest.messageId, newest.content);
+      if (
+        newest !== undefined &&
+        messageList !== null &&
+        !messageList.isEditing() &&
+        messageList.startEdit(newest.messageId, newest.content, { focus: !userIsBusyElsewhere() })
+      ) {
         restored = true;
       }
       if (toast) {
@@ -300,7 +539,57 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     owned.release?.();
   }
 
+  /** 3A-12: the reply bar shows the display name, and no @ON/@OFF on your own message. */
+  function replyTargetOf(msg: {
+    readonly id: number;
+    readonly user: {
+      readonly id: number;
+      readonly username: string;
+      readonly display_name?: string | null;
+    };
+  }): ReplyTarget {
+    return {
+      messageId: msg.id,
+      username: msg.user.display_name || msg.user.username,
+      self: msg.user.id === getCurrentUserId(),
+    };
+  }
+
+  /** 2A-3: give files a send did not carry back to the composer of the
+   *  channel it went to, mounted or stashed, with the send's reply target
+   *  when given and that composer has none of its own. */
+  function putBackUnsent(
+    sentTo: number,
+    files: readonly SentAttachment[],
+    reason: "skipped" | "unavailable",
+    replyTo: number | null = null,
+    ping?: boolean,
+  ): void {
+    const target =
+      replyTo === null
+        ? undefined
+        : getChannelMessages(sentTo).find((m) => m.id === replyTo && !m.deleted);
+    const reply = target === undefined ? null : { ...replyTargetOf(target), ping };
+    if (sentTo === currentChannelId && messageInput !== null) {
+      messageInput.restoreUnsent(files, reason, reply);
+      scheduleDraftSave();
+      return;
+    }
+    const stashed = draftByChannel.get(sentTo);
+    draftByChannel.set(sentTo, {
+      content: stashed?.content ?? "",
+      replyTo: stashed?.replyTo ?? reply,
+      attachments: [
+        ...(stashed?.attachments ?? []),
+        ...files.map((f) => ({ ...f, uploadedAt: 0, unsent: true })),
+      ],
+      ...(stashed?.uploads === undefined ? {} : { uploads: stashed.uploads }),
+    });
+  }
+
   function destroyChannel(): void {
+    threadList?.close();
+    threadHost?.close();
     // The reaction picker is a body-mounted overlay keyed to a message in
     // this channel — every other teardown path already routes through here,
     // so this is the one choke point to close it before the channel it was
@@ -330,6 +619,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       typingIndicator = null;
     }
     if (messageInput !== null) {
+      saveMountedDraft();
       // UX-1: stash the unsent state before the composer is torn down. Empty
       // drafts are not stored, so switching away from a channel with nothing
       // typed leaves no entry behind.
@@ -383,9 +673,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // channel's server-side read state; leaving one never does. Without this,
     // messages read while focused here restate as unread/mention badges on
     // the next full `ready`. mark_read is a local no-op (already zeroed on
-    // open) — it only repairs the server's view.
-    if (previousChannelId !== null) {
-      markChannelRead(previousChannelId);
+    // open) — it only repairs the server's view. With a read pointer, leaving
+    // marks only what the reader saw (leaveChannel), never "everything".
+    // A forum holds no messages, so it has no read state to repair.
+    const leftForum =
+      channelsStore.getState().channels.get(previousChannelId ?? 0)?.type === "forum";
+    if (previousChannelId !== null && !leftForum) {
+      if (readPointerEnabled()) leaveChannel(previousChannelId);
+      else markChannelRead(previousChannelId);
       // The server only delivers live broadcasts for the focused channel, so
       // the window being left stops updating the moment focus moves here.
       // Drop its loaded flag so the next visit refetches the live tail
@@ -411,6 +706,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       getCurrentUserId() === owner.userId &&
       (api.getConfig?.().host ?? "") === owner.host;
     const ownsSession = (): boolean => !signal.aborted && ownsAccountSession();
+    draftOwner = { ...owner, current: ownsAccountSession };
 
     /**
      * Mount the gate or the withdraw bar. Their module (with its catalog) is
@@ -449,31 +745,174 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       );
     }
 
+    /** Mirrors onJumpToPresent — reattach clears "loaded" so the tail is refetched. */
+    function jumpToPresentForSend(): void {
+      reattachToPresent(channelId);
+      // OC-0204: while detached, this (already-active) channel could have
+      // picked up an unread/mention badge for messages that arrived below
+      // the gap (dispatcher.ts's evenIfActive path) — nothing else clears
+      // it, since incrementUnread's usual "active channel" skip is exactly
+      // what a detached window opts out of. Jumping to present is reading
+      // it, so mark it read the same way leaving a channel does. With a read
+      // pointer that is what was seen, not everything.
+      if (readPointerEnabled()) markChannelReadSeen(channelId);
+      else markChannelRead(channelId);
+      void msgCtrl.loadMessages(channelId, signal);
+    }
+
+    /** A reply whose target was deleted while composing sends as a plain message. */
+    function liveReplyTo(replyTo: number | null): number | null {
+      const target =
+        replyTo === null ? undefined : getChannelMessages(channelId).find((m) => m.id === replyTo);
+      return target?.deleted === true ? null : replyTo;
+    }
+
+    // 3A-9: the queue's hooks into this mount. Built here, so a send queued in
+    // this channel posts, fails and puts files back for this channel even after
+    // the user has switched away.
+    function queueDeps(entry: QueuedSend): QueueDeps {
+      const live = (): boolean => queuedSends.get(entry.cid) === entry && ownsAccountSession();
+      return {
+        upload: uploadFile,
+        putBack: (files) => {
+          if (live()) putBackUnsent(entry.channelId, files, "skipped");
+        },
+        // The server refuses a send inside the channel's slow-mode window, so wait it out.
+        // Like the composer gate: the channel's current slow_mode, none for moderators.
+        slowWindow: () => {
+          const sent = slowModeSentAtByChannel.get(entry.channelId);
+          if (sent === undefined || canManageMessages()) return undefined;
+          const window = channelsStore.getState().channels.get(entry.channelId)?.slowMode ?? 0;
+          return { sentAt: sent.sentAt, window };
+        },
+        fail: (code) => {
+          if (live()) markSendFailed(entry.cid, code);
+        },
+        dispatch: (files) => {
+          if (queuedSends.get(entry.cid) !== entry) return;
+          queuedSends.delete(entry.cid);
+          // Remove and add run in this one task, so no frame shows the gap.
+          removeOptimistic(entry.cid);
+          // Everything went back to the composer and there is no text: nothing to post.
+          if (files.length === 0 && entry.content === "") return;
+          const reply = liveReplyTo(entry.replyTo);
+          performSend(entry.content, reply, files, undefined, reply !== null && entry.replyPing, {
+            queued: true,
+          });
+        },
+      };
+    }
+
+    /** Show `entry` as an "uploading" row and run it; on Retry it replaces the
+     *  failed row under a new id. The entry stays under its old id until the
+     *  module has loaded, so a Delete in that window still finds it. Waits for
+     *  the lazy module, which the first upload preloaded. A failed entry whose
+     *  row vanishes without Delete stays in `queuedSends`, holding its Files,
+     *  until teardown. */
+    function startQueued(entry: QueuedSend, retry: boolean): void {
+      // A failed load is already logged by the loader's preload.
+      void loadSendQueue()
+        .catch(() => null)
+        .then((mod) => {
+          if (queuedSends.get(entry.cid) !== entry) return;
+          const user = currentMessageUser();
+          if (user === null || !ownsAccountSession()) {
+            // Another account's send: nothing may post or keep uploading.
+            abortQueued(entry);
+            queuedSends.delete(entry.cid);
+            return;
+          }
+          if (retry) {
+            // A second Retry click in the window finds it no longer failed.
+            if (entry.failed !== true) return;
+            queuedSends.delete(entry.cid);
+            removeOptimistic(entry.cid);
+            entry.cid = crypto.randomUUID();
+            queuedSends.set(entry.cid, entry);
+          }
+          // The strip reads this when the row first renders: Cancel only while it runs.
+          entry.failed = false;
+          if (isWindowDetached(channelId) && !signal.aborted) jumpToPresentForSend();
+          // Set first, so a render during the add can draw the strip.
+          if (mod !== null) sendQueueMod = mod;
+          addOptimisticMessage({
+            correlationId: entry.cid,
+            channelId,
+            user,
+            content: entry.content,
+            replyTo: entry.replyTo,
+            timestamp: new Date().toISOString(),
+            status: "uploading",
+          });
+          if (mod === null) {
+            // The uploads keep going; the text is on the row, and Retry loads again.
+            entry.failed = true;
+            markSendFailed(entry.cid, "UPLOAD_FAILED");
+            return;
+          }
+          void (retry ? mod.retryQueuedSend : mod.runQueuedSend)(entry, queueDeps(entry));
+        });
+    }
+
+    function enqueueSend(
+      content: string,
+      replyTo: number | null,
+      replyPing: boolean,
+      queued: readonly QueuedAttachment[],
+    ): void {
+      const entry: QueuedSend = {
+        cid: crypto.randomUUID(),
+        channelId,
+        userId: owner.userId,
+        content,
+        replyTo,
+        replyPing,
+        items: queued.map((q) => ({ ...q })),
+      };
+      queuedSends.set(entry.cid, entry);
+      startQueued(entry, false);
+    }
+
+    /** The file upload, shared by the composer and a queued send's re-uploads. */
+    const uploadFile = async (
+      file: File,
+      uploadSignal?: AbortSignal,
+      onProgress?: (fraction: number) => void,
+    ): Promise<{ id: string; url: string; filename: string }> => {
+      // The first upload loads the queue module, so a send queued while it runs finds it ready.
+      preloadSendQueue();
+      try {
+        const result = await api.uploadFile(file, uploadSignal, onProgress);
+        return { id: result.id, url: result.url, filename: result.filename };
+      } catch (err) {
+        // A user-cancelled upload is not a failure — the composer already
+        // removed its preview and does not want an error for it. A real
+        // failure is reported once, inline, by the composer from this
+        // rejection, so it is not toasted here too.
+        if (!uploadSignal?.aborted) log.error("File upload failed", { error: String(err) });
+        throw err;
+      }
+    };
+
     function performSend(
       content: string,
       replyTo: number | null,
-      attachments: readonly string[],
+      files: readonly SentAttachment[],
       existingClientMessageId?: string,
+      replyPing = false,
+      sendOptions: { readonly queued?: boolean } = {},
     ): void {
+      const attachments = files.map((f) => f.id);
       const user = currentMessageUser();
-      if (user === null || !ownsSession()) return;
+      // A queued send (3A-9) was built by this mount but may post after the
+      // user left the channel: it needs the account, not the mount.
+      const owns = sendOptions.queued === true ? ownsAccountSession : ownsSession;
+      if (user === null || !owns()) return;
       // Sending while viewing a detached history window jumps to present: the
       // optimistic row belongs in the live tail, and addMessage would refuse
-      // to append the echo into a detached window anyway. Mirrors
-      // onJumpToPresent — reattach clears "loaded" so the tail is refetched.
-      if (isWindowDetached(channelId)) {
-        reattachToPresent(channelId);
-        // OC-0204: while detached, this (already-active) channel could have
-        // picked up an unread/mention badge for messages that arrived below
-        // the gap (dispatcher.ts's evenIfActive path) — nothing else clears
-        // it, since incrementUnread's usual "active channel" skip is exactly
-        // what a detached window opts out of. Jumping to present is reading
-        // it, so mark it read the same way leaving a channel does.
-        markChannelRead(channelId);
-        if (channelAbort !== null) {
-          void msgCtrl.loadMessages(channelId, channelAbort.signal);
-        }
-      }
+      // to append the echo into a detached window anyway. A queued send that
+      // outlived this mount leaves it, since that window is no longer shown.
+      if (isWindowDetached(channelId) && !signal.aborted) jumpToPresentForSend();
       const timestamp = new Date().toISOString();
       const clientMessageId =
         existingClientMessageId ??
@@ -497,7 +936,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }).then(
           () => true,
           () => {
-            if (ownsSession()) showToast(messagingText("toast.pendingSaveFailed"), "error");
+            if (owns()) showToast(messagingText("toast.pendingSaveFailed"), "error");
             return false;
           },
         );
@@ -518,8 +957,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draftByCorrelation.set(cid, {
           content,
           replyTo,
-          attachments,
+          ...(replyTo === null ? {} : { replyPing }),
+          attachments: files,
           channelId,
+          userId: owner.userId,
           clientMessageId,
           sentAt: Date.now(),
         });
@@ -529,7 +970,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // a failed write means it is gone at restart. Distinguish that from a
           // plain offline row, whose retry window is still open.
           void persistPendingText(persistId).then((saved) => {
-            if (!saved && ownsSession()) markSendFailed(cid, "OFFLINE_NO_RECOVERY");
+            if (!saved && owns()) markSendFailed(cid, "OFFLINE_NO_RECOVERY");
           });
         }
         return;
@@ -542,6 +983,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
             channel_id: channelId,
             content,
             reply_to: replyTo,
+            ...(replyTo === null ? {} : { reply_ping: replyPing }),
             attachments,
             ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
           },
@@ -558,8 +1000,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draftByCorrelation.set(cid, {
           content,
           replyTo,
-          attachments,
+          ...(replyTo === null ? {} : { replyPing }),
+          attachments: files,
           channelId,
+          userId: owner.userId,
           clientMessageId,
           sentAt: Date.now(),
         });
@@ -602,14 +1046,24 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     function retrySend(correlationId: string): void {
       if (!ownsSession()) return;
+      const queued = queuedSends.get(correlationId);
+      if (queued !== undefined) {
+        // 3A-9: a failed queued send uploads what it lacks and posts again, as
+        // a new row under a new id.
+        if (queued.channelId !== channelId) return;
+        startQueued(queued, true);
+        return;
+      }
       const recovered = recoveredPendingText(owner, correlationId);
       const draft =
         draftByCorrelation.get(correlationId) ??
         (recovered
           ? {
               ...recovered,
+              userId: owner.userId,
               replyTo: null,
-              attachments: [] as readonly string[],
+              replyPing: false,
+              attachments: [] as readonly SentAttachment[],
             }
           : undefined);
       if (draft === undefined || draft.channelId !== channelId) return;
@@ -638,11 +1092,33 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         performSend(draft.content, null, draft.attachments);
         return;
       }
-      performSend(draft.content, draft.replyTo, draft.attachments, draft.clientMessageId);
+      performSend(
+        draft.content,
+        draft.replyTo,
+        draft.attachments,
+        draft.clientMessageId,
+        draft.replyPing === true,
+      );
+    }
+
+    /** Withdraw a stored upload that will never be sent; the server sweeps it anyway if this fails. */
+    function discardQuietly(id: string): void {
+      void api.discardUpload(id).catch(() => {});
     }
 
     function deleteDraft(correlationId: string): void {
       if (!ownsSession()) return;
+      const queued = queuedSends.get(correlationId);
+      if (queued !== undefined) {
+        // 3A-9: stop its uploads and withdraw the ones already stored.
+        abortQueued(queued);
+        for (const item of queued.items) {
+          if (item.id !== undefined) discardQuietly(item.id);
+        }
+        queuedSends.delete(correlationId);
+        removeOptimistic(correlationId);
+        return;
+      }
       const id =
         draftByCorrelation.get(correlationId)?.clientMessageId ??
         recoveredPendingText(owner, correlationId)?.clientMessageId;
@@ -664,6 +1140,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     // Update header
     if (chatHeaderRefs !== null && channelType === "dm") {
+      // Presence changes re-run this; the picture only needs rebuilding when
+      // what it is drawn from changed, or it would flicker on every update.
+      let headerAvatar: { key: string; el: HTMLElement } | null = null;
       const refreshDmHeader = (): void => {
         const dmChannel = dmStore.getState().channels.find((c) => c.channelId === channelId);
         // A group has no single presence to show, so the subtitle lists who is
@@ -678,16 +1157,25 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           });
         } else if (dmChannel !== undefined) {
           const member = membersStore.getState().members.get(dmChannel.recipient.id);
-          const status =
-            member?.status ?? dmChannel.recipient.status ?? shellText("status.offline");
-          subtitle = status.charAt(0).toUpperCase() + status.slice(1);
+          subtitle = statusLabel(member?.status ?? dmChannel.recipient.status ?? "offline");
         }
         const headerName = dmChannel !== undefined ? dmDisplayName(dmChannel) : channelName;
-        updateChatHeaderForDm(chatHeaderRefs, { username: headerName, status: subtitle });
-        // A group DM has no profile panel to open, so the pointer cursor would
-        // promise a click that does nothing (F24).
-        chatHeaderRefs.nameGroupEl.style.cursor =
-          dmChannel !== undefined && dmChannel.isGroup ? "default" : "pointer";
+        updateChatHeaderForDm(chatHeaderRefs, {
+          username: headerName,
+          status: subtitle,
+          avatar: ((): HTMLElement | null => {
+            if (dmChannel === undefined) return null;
+            const key = dmHeaderAvatarKey(dmChannel, headerName);
+            if (headerAvatar === null || headerAvatar.key !== key) {
+              headerAvatar = { key, el: buildDmHeaderAvatar(dmChannel, headerName) };
+            }
+            return headerAvatar.el;
+          })(),
+          isGroup: dmChannel?.isGroup === true,
+        });
+        // Both are clickable: a 1:1 name opens the profile panel and a group
+        // name renames the group.
+        chatHeaderRefs.nameGroupEl.style.cursor = "pointer";
       };
       refreshDmHeader();
       // Keep the subtitle live across presence and roster changes — otherwise
@@ -710,6 +1198,17 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       );
     } else if (chatHeaderRefs !== null) {
       updateChatHeaderForDm(chatHeaderRefs, null);
+      const typeRefs = chatHeaderRefs;
+      const typeOf = (): ChannelType | undefined =>
+        channelsStore.getState().channels.get(channelId)?.type ?? channelType;
+      const syncHeaderType = (): void => {
+        setChatHeaderChannelType(typeRefs, typeOf());
+        setChatHeaderThreads(typeRefs, typeOf() === "text" && threadsEnabled());
+      };
+      syncHeaderType();
+      composerGatingUnsubs.push(
+        channelsStore.subscribeSelector((s) => s.channels.get(channelId)?.type, syncHeaderType),
+      );
       if (chatHeaderName !== null) {
         setText(chatHeaderName, channelName);
         // Keep the header name live across channel_update events (a rename),
@@ -726,12 +1225,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         );
       }
       // Show the channel topic and keep it live across channel_update events.
-      const topicEl = chatHeaderRefs.topicEl;
-      setText(topicEl, channelsStore.getState().channels.get(channelId)?.topic ?? "");
+      const topicRefs = chatHeaderRefs;
+      setChatHeaderTopic(
+        chatHeaderRefs,
+        channelsStore.getState().channels.get(channelId)?.topic ?? "",
+      );
       composerGatingUnsubs.push(
         channelsStore.subscribeSelector(
           (s) => s.channels.get(channelId)?.topic ?? "",
-          (topic) => setText(topicEl, topic),
+          (topic) => setChatHeaderTopic(topicRefs, topic),
         ),
       );
     } else if (chatHeaderName !== null) {
@@ -803,6 +1305,33 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       return;
     }
 
+    // A forum shows its post list in place of the message list, and has no
+    // typing row or composer (WP 6.9d). A post opens in the thread panel.
+    if ((storedChannel?.type ?? channelType) === "forum") {
+      const forum = NAVIGATION_DESTINATIONS.forum;
+      if (forum === undefined) return;
+      slots.messagesSlot.appendChild(
+        forum.build({
+          channelId,
+          signal,
+          api,
+          ws,
+          openPost: (threadId) =>
+            threadHost?.openById(
+              threadId,
+              channelId,
+              signal,
+              () =>
+                // The post's row, or the New Post button once the row is gone.
+                slots.messagesSlot.querySelector<HTMLElement>(`[data-post-id="${threadId}"]`) ??
+                slots.messagesSlot.querySelector<HTMLElement>('[data-testid="forum-new-post"]'),
+            ),
+        }),
+      );
+      if (storedChannel?.nsfw === true) mountConsentBar();
+      return;
+    }
+
     void msgCtrl.loadMessages(channelId, signal);
 
     /** Send the delete frame. CLI-08: a destructive menu action is gated on
@@ -824,7 +1353,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
      *  openLeaveConfirm / DeleteChannelModal: Cancel first and focused, Escape
      *  and the backdrop cancel, focus returns to the opener. Tied to the
      *  mounted channel's signal, so a switch or destroy closes it. */
-    function openDeleteConfirm(msgId: number): void {
+    /** `onConfirm` runs just before the delete is sent. */
+    function openDeleteConfirm(
+      msgId: number,
+      flow: { readonly onConfirm?: () => void; readonly clicked: boolean },
+    ): void {
       const promptOwner = new Disposable();
       const titleId = `msg-delete-title-${msgId}`;
       const content = createElement("div");
@@ -834,6 +1367,19 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       body.appendChild(
         createElement("p", { class: "modal-danger-text" }, messagingText("delete.body")),
       );
+      const target = getChannelMessages(channelId).find((m) => m.id === msgId);
+      if (target !== undefined) body.appendChild(renderDeletePreview(target));
+      // The tip is about the Delete click, so it is left out when no click
+      // opened this (an emptied edit).
+      if (flow.clicked) {
+        body.appendChild(
+          createElement(
+            "p",
+            { class: "msg-delete-tip", "data-testid": "msg-delete-tip" },
+            messagingText("delete.shiftTip"),
+          ),
+        );
+      }
       const footer = createElement("div", { class: "modal-footer" });
       const cancel = createElement(
         "button",
@@ -861,6 +1407,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         "click",
         () => {
           modal.close();
+          flow.onConfirm?.();
           sendDelete(msgId);
         },
         { signal: promptOwner.signal },
@@ -877,6 +1424,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelName,
       channelType,
       currentUserId: userId,
+      ...(opts.onJoinCall !== undefined && { onJoinCall: opts.onJoinCall }),
+      ...(opts.onOpenPins !== undefined && { onOpenPins: opts.onOpenPins }),
       onScrollTop: () => {
         if (channelAbort !== null) {
           return msgCtrl.loadOlderMessages(channelId, channelAbort.signal);
@@ -916,20 +1465,53 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       onReplyClick: (msgId: number) => {
         const msgs = getChannelMessages(channelId);
         const msg = msgs.find((m) => m.id === msgId);
-        messageInput?.setReplyTo(msgId, msg?.user.username ?? "");
-      },
-      onEditClick: (msgId: number) => {
-        const msgs = getChannelMessages(channelId);
-        const msg = msgs.find((m) => m.id === msgId);
-        if (msg !== undefined) {
-          messageInput?.startEdit(msgId, msg.content);
+        if (msg === undefined) messageInput?.setReplyTo(msgId, "");
+        else {
+          const { messageId, username, ...replyOpts } = replyTargetOf(msg);
+          messageInput?.setReplyTo(messageId, username, replyOpts);
         }
       },
+      onEditClick: (msgId: number) => {
+        messageList?.startEdit(msgId);
+      },
+      onEditSave: (messageId: number, content: string): boolean => {
+        const msgs = getChannelMessages(channelId);
+        const original = msgs.find((m) => m.id === messageId);
+        if (original !== undefined && original.content === content) {
+          return true;
+        }
+        // CLI-08: same connection gate as delete. A dropped edit frame must
+        // not look saved — the row would keep its old text, and the user
+        // would never know to try again. The editor stays open with the text.
+        if (uiStore.getState().connectionStatus !== "connected") {
+          showToast(messagingText("toast.editFailed"), "error");
+          return false;
+        }
+        const id = ws.send({
+          type: "chat_edit",
+          payload: { message_id: messageId, content },
+        });
+        track(pendingEdits, id, { channelId, messageId, content });
+        return true;
+      },
+      // Discord's flow: clearing an edit and pressing Save asks to delete the
+      // message. Cancel leaves the editor open; Delete closes it first.
+      onEmptyEdit: (messageId: number) => {
+        openDeleteConfirm(messageId, {
+          onConfirm: () => {
+            messageList?.cancelEdit();
+            // The modal handed focus back to the editor that is now gone.
+            messageInput?.focus();
+          },
+          clicked: false,
+        });
+      },
+      onEditEnd: () => messageInput?.focus(),
       onDeleteClick: (msgId: number, shiftKey: boolean) => {
         // Shift-click skips the prompt, as Discord's delete confirm does
         // (P4-12). A plain click opens a confirm.
         if (!shiftKey) {
-          openDeleteConfirm(msgId);
+          openDeleteConfirm(msgId, { clicked: true });
           return;
         }
         sendDelete(msgId);
@@ -938,20 +1520,36 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         reactionCtrl.handleReaction(msgId, emoji);
       },
       onPinClick: (msgId: number, chId: number, currentlyPinned: boolean) => {
+        // One request per message at a time: a second click while one is
+        // pending would race its revert against the first.
+        const flightKey = `${chId}:${msgId}`;
+        if (pinsInFlight.has(flightKey)) return;
+        pinsInFlight.add(flightKey);
+        // Optimistic: the row flips now and snaps back if the server refuses,
+        // so the control answers the click instead of waiting on the round trip.
+        setMessagePinned(chId, msgId, !currentlyPinned);
+        const revisionAfterFlip = messagesStore.getState().messagePinRevision?.get(msgId);
         const action = currentlyPinned
           ? api.unpinMessage(chId, msgId)
           : api.pinMessage(chId, msgId);
         action
           .then(() => {
-            setMessagePinned(chId, msgId, !currentlyPinned);
             showToast(
               currentlyPinned ? messagingText("toast.unpinned") : messagingText("toast.pinned"),
               "success",
             );
           })
           .catch((err) => {
+            // A moved revision means a chat_pinned for this message already
+            // holds the truth; do not overwrite it.
+            if (messagesStore.getState().messagePinRevision?.get(msgId) === revisionAfterFlip) {
+              setMessagePinned(chId, msgId, currentlyPinned);
+            }
             log.error("Pin/unpin failed", { error: String(err) });
             showToast(messagingText("toast.pinFailed"), "error");
+          })
+          .finally(() => {
+            pinsInFlight.delete(flightKey);
           });
       },
       onReportClick: (msgId: number) => {
@@ -972,8 +1570,56 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           () => showToast(reportEntryText("reportLoadFailed"), "error"),
         );
       },
+      onForwardClick: (msgId: number) => {
+        import("../../components/ForwardPicker").then(
+          ({ openForwardPicker }) => {
+            if (signal.aborted) return;
+            // Focus goes back to the composer: the menu that opened it is gone.
+            openForwardPicker({
+              ws,
+              channelId,
+              messageId: msgId,
+              signal,
+              fallbackFocus: () => slots.inputSlot.querySelector<HTMLElement>("textarea"),
+            });
+          },
+          () => showToast(messagingText("forward.loadFailed"), "error"),
+        );
+      },
+      // Voting and ending are plain requests on this channel's socket; the counts
+      // come back as poll_update through the dispatcher (WP 6.9b).
+      onPollVote: (messageId, answerIds) => votePoll(ws, messageId, answerIds, signal),
+      onPollEnd: (messageId) => endPoll(ws, messageId, signal),
+      ...(threadHost !== null && {
+        onCreateThreadClick: (msgId: number) => {
+          import("../../components/CreateThreadDialog").then(
+            ({ openCreateThreadDialog }) => {
+              if (signal.aborted) return;
+              openCreateThreadDialog({
+                ws,
+                channelId,
+                messageId: msgId,
+                signal,
+                onCreated: (thread) => threadHost.openById(thread.id, channelId, signal),
+                onExists: (threadId) => threadHost.openById(threadId, channelId, signal),
+                fallbackFocus: () => slots.inputSlot.querySelector<HTMLElement>("textarea"),
+              });
+            },
+            () => showToast(messagingText("thread.panelLoadFailed"), "error"),
+          );
+        },
+        onOpenThread: (threadId: number) => {
+          threadHost.openById(threadId, channelId, signal);
+        },
+      }),
       onRetry: (correlationId: string) => retrySend(correlationId),
       onDeleteDraft: (correlationId: string) => deleteDraft(correlationId),
+      renderUploadStrip: (correlationId, stripSignal) => {
+        const entry = queuedSends.get(correlationId);
+        return entry === undefined || sendQueueMod === null
+          ? null
+          : sendQueueMod.renderUploadStrip(entry, stripSignal);
+      },
     });
     messageList.mount(slots.messagesSlot);
     if (storedChannel?.nsfw === true) mountConsentBar();
@@ -990,32 +1636,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       channelId,
       channelName,
       gifApi: api,
-      onSend: (content: string, replyTo: number | null, attachments: readonly string[]) => {
-        // A reply whose target was deleted while composing sends as a plain
-        // message.
-        const target =
-          replyTo === null
-            ? undefined
-            : getChannelMessages(channelId).find((m) => m.id === replyTo);
-        performSend(content, target?.deleted === true ? null : replyTo, attachments);
-      },
-      onUploadFile: async (
-        file: File,
-        uploadSignal?: AbortSignal,
-        onProgress?: (fraction: number) => void,
+      onSend: (
+        content: string,
+        replyTo: number | null,
+        _attachments: readonly string[],
+        files: readonly SentAttachment[],
+        replyPing: boolean,
+        queued?: readonly QueuedAttachment[],
       ) => {
-        try {
-          const result = await api.uploadFile(file, uploadSignal, onProgress);
-          return { id: result.id, url: result.url, filename: result.filename };
-        } catch (err) {
-          // A user-cancelled upload is not a failure — the composer already
-          // removed its preview and does not want an error for it. A real
-          // failure is reported once, inline, by the composer from this
-          // rejection, so it is not toasted here too.
-          if (!uploadSignal?.aborted) log.error("File upload failed", { error: String(err) });
-          throw err;
-        }
+        const reply = liveReplyTo(replyTo);
+        const ping = reply !== null && replyPing === true;
+        if (queued === undefined) performSend(content, reply, files, undefined, ping);
+        else enqueueSend(content, reply, ping, queued);
       },
+      onUploadFile: uploadFile,
       onDiscardUpload: async (id: string) => {
         try {
           await api.discardUpload(id);
@@ -1037,29 +1671,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           });
         }
       },
-      onEditMessage: (messageId: number, content: string) => {
-        const trimmed = content.trim();
-        if (trimmed === "") {
-          showToast(messagingText("toast.emptyMessage"), "error");
-          return;
-        }
-        const msgs = getChannelMessages(channelId);
-        const original = msgs.find((m) => m.id === messageId);
-        if (original !== undefined && original.content === trimmed) {
-          return;
-        }
-        // CLI-08: same connection gate as delete. A dropped edit frame must
-        // not toast success — the row would keep its old text, and the user
-        // would never know to try again.
-        if (uiStore.getState().connectionStatus !== "connected") {
-          failEdits([{ channelId, messageId, content: trimmed }], true);
-          return;
-        }
-        const id = ws.send({
-          type: "chat_edit",
-          payload: { message_id: messageId, content: trimmed },
-        });
-        track(pendingEdits, id, { channelId, messageId, content: trimmed });
+      onDraftChange: scheduleDraftSave,
+      onCreatePoll: () => {
+        import("../../components/PollComposer").then(
+          ({ openPollComposer }) => {
+            if (signal.aborted) return;
+            openPollComposer({
+              ws,
+              channelId,
+              signal,
+              fallbackFocus: () => slots.inputSlot.querySelector<HTMLElement>("textarea"),
+            });
+          },
+          () => showToast(messagingText("poll.loadFailed"), "error"),
+        );
       },
     });
     messageInput.mount(slots.inputSlot);
@@ -1079,7 +1704,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           : stashedDraft.replyTo;
       messageInput.restoreDraft({ ...stashedDraft, replyTo });
       draftByChannel.delete(channelId);
+    } else {
+      restoreSavedDraft(channelId, messageInput);
     }
+    // A dropped reply must not come back from storage on the next start.
+    scheduleDraftSave();
 
     // Composer gating: express permission + connection as affordance. The
     // composer disables (with a reason) when the socket is down or the user
@@ -1126,7 +1755,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       }
       return null;
     };
+    // The standing slow-mode note: shown from the first moment, for anyone
+    // slow mode would limit. Not a send gate, so the first send still goes.
+    const refreshSlowModeNote = (): void => {
+      const seconds = channelsStore.getState().channels.get(channelId)?.slowMode ?? 0;
+      messageInput?.setSlowModeNote(
+        seconds > 0 && !canManageMessages()
+          ? messagingText("composer.slowModeNote", { seconds: String(seconds) })
+          : null,
+      );
+    };
     const refreshComposerState = (): void => {
+      refreshSlowModeNote();
       messageInput?.setDisabled(computeComposerReason());
       // Slow mode gates the SEND only: the draft stays editable so the user
       // can keep typing through the cooldown (Discord parity, F12).
@@ -1318,9 +1958,23 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         () => refreshComposerState(),
       ),
     );
+    // A channel_update/create that changes the interval refreshes the note.
+    composerGatingUnsubs.push(
+      channelsStore.subscribeSelector(
+        (s) => s.channels.get(channelId)?.slowMode ?? 0,
+        () => refreshComposerState(),
+      ),
+    );
     composerGatingUnsubs.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
+        () => refreshComposerState(),
+      ),
+    );
+    // A role change can make the user exempt from slow mode, or no longer so.
+    composerGatingUnsubs.push(
+      membersStore.subscribeSelector(
+        (s) => s.roleRevision ?? 0,
         () => refreshComposerState(),
       ),
     );
@@ -1347,29 +2001,132 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // optimistic row (pending/failed) carries id 0 until the server
           // acks it, so editing it would send chat_edit for a message that
           // does not exist yet.
-          if (m.user.id === myId && !m.deleted && m.status === "sent") {
-            messageInput?.startEdit(m.id, m.content);
+          // A server-written row (a DM call log) is never editable.
+          if (m.user.id === myId && !m.deleted && m.status === "sent" && !isServerRowKind(m.kind)) {
+            messageList?.startEdit(m.id);
             break;
           }
         }
       },
       { signal },
     );
+
+    // A sidebar thread row asked for this channel: open its thread or list now.
+    settleThreadNavigation(channelId);
   }
 
+  // 2A-3 at controller scope, not per mount: an ack or refusal can land while
+  // no channel is mounted (an NSFW gate, a cleared selection), and its files
+  // still go back to the channel they were sent to. Registered before any
+  // mount, so these run before a mount's own listeners drop the draft.
+  const unsentUnsubs = [
+    ws.on("chat_send_ok", (payload, correlationId) => {
+      const draft = correlationId ? draftByCorrelation.get(correlationId) : undefined;
+      if (draft === undefined || draft.userId !== getCurrentUserId()) return;
+      // The message went without these files. Ids the send did not carry are ignored.
+      const skipped = new Set(payload.skipped_attachment_ids ?? []);
+      const unsent = draft.attachments.filter((a) => skipped.has(a.id));
+      if (unsent.length > 0) putBackUnsent(draft.channelId, unsent, "skipped");
+    }),
+    ws.on("error", (payload, correlationId) => {
+      if (payload.code !== "ATTACHMENTS_UNAVAILABLE" || !correlationId) return;
+      const draft = draftByCorrelation.get(correlationId);
+      if (draft === undefined || draft.userId !== getCurrentUserId()) return;
+      // A files-only send none of whose files could be attached: the
+      // dispatcher drops its row (nothing was stored), and a Retry with the
+      // same ids would fail the same way.
+      draftByCorrelation.delete(correlationId);
+      clearSendTimer(correlationId);
+      putBackUnsent(
+        draft.channelId,
+        draft.attachments,
+        "unavailable",
+        draft.replyTo,
+        draft.replyPing,
+      );
+    }),
+  ];
+
   function destroy(): void {
+    for (const off of unsentUnsubs) off();
     destroyChannel();
     for (const draft of draftByChannel.values()) {
       for (const upload of draft.uploads ?? []) upload.owner.destroy();
     }
     draftByChannel.clear();
+    for (const entry of queuedSends.values()) abortQueued(entry);
+    queuedSends.clear();
+    threadHost?.destroy();
+    setThreadNavigationConsumer(null);
+  }
+
+  /** The header's Threads button: close the list when it is open, else open it
+   *  for the mounted channel. Its code loads on the first open. */
+  function toggleThreadList(anchor: HTMLButtonElement): void {
+    if (threadList !== null) {
+      threadList.close();
+      return;
+    }
+    const channelId = currentChannelId;
+    const signal = channelAbort?.signal;
+    if (channelId === null || signal === undefined || threadHost === null) return;
+    const host = threadHost;
+    // A second click while the code loads must not queue a second popover.
+    anchor.setAttribute("aria-expanded", "true");
+    import("../../components/ThreadListPopover").then(
+      ({ openThreadListPopover }) => {
+        if (signal.aborted) {
+          anchor.setAttribute("aria-expanded", "false");
+          return;
+        }
+        threadList = openThreadListPopover({
+          api,
+          channelId,
+          anchor,
+          signal,
+          onOpenThread: (thread) => host.open(thread),
+          onClosed: () => {
+            threadList = null;
+          },
+        });
+      },
+      () => {
+        anchor.setAttribute("aria-expanded", "false");
+        showToast(messagingText("thread.panelLoadFailed"), "error");
+      },
+    );
+  }
+
+  // The sidebar's thread rows reach this channel view through threadNavigation.
+  if (threadHost !== null) {
+    setThreadNavigationConsumer({
+      get currentChannelId() {
+        return currentChannelId;
+      },
+      open: (req) => {
+        const signal = channelAbort?.signal;
+        if (signal === undefined) return;
+        if (req.kind === "thread") {
+          threadHost.openById(req.threadId, req.parentId, signal);
+          return;
+        }
+        const anchor = chatHeaderRefs?.threadsBtn;
+        if (anchor !== undefined && !anchor.hidden && threadList === null) toggleThreadList(anchor);
+      },
+    });
   }
 
   return {
     mountChannel,
     destroyChannel,
     destroy,
+    openThread: (thread) => threadHost?.open(thread),
+    toggleThreadList,
+    get openThreadId() {
+      return threadHost?.openThreadId ?? null;
+    },
     openFilePicker: () => messageInput?.openFilePicker(),
+    togglePicker: (kind) => messageInput?.togglePicker(kind),
     get currentChannelId() {
       return currentChannelId;
     },

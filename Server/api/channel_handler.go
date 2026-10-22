@@ -39,13 +39,14 @@ func isInvalidSearchQueryError(err error) bool {
 type PurgeBroadcaster interface {
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
 	BroadcastMessagePinned(channelID, messageID int64, pinned bool)
+	PinEventRow(ctx context.Context, res *service.PinEventResult)
 }
 
 // MountChannelRoutes registers all channel-related routes onto r.
 // All routes require authentication. The limiter is used to rate-limit
 // expensive endpoints like search. broadcaster may be nil, in which case a
 // purge still commits but no chat_bulk_deleted event is emitted.
-func MountChannelRoutes(r chi.Router, database *db.DB, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster PurgeBroadcaster) {
+func MountChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.RateLimiter, trustedProxies []string, broadcaster PurgeBroadcaster) {
 	r.Route("/api/v1/channels", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleListChannels(svc))
@@ -329,7 +330,12 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 			page.Before = v
 		}
 
-		results, nextBefore, err := svc.Messages.SearchMessages(r.Context(), user.ID, q, channelID, page)
+		results, nextBefore, err := svc.Messages.SearchMessages(r.Context(), user.ID, service.SearchRequest{
+			Query:     q,
+			ChannelID: channelID,
+			TZ:        r.URL.Query().Get("tz"),
+			Page:      page,
+		})
 		if err != nil {
 			if isInvalidSearchQueryError(err) {
 				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid search query")
@@ -393,9 +399,8 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleSetPinned pins or unpins a message in a channel. The change is
-// broadcast to every reader so other clients (and the pinner's own other
-// devices) do not show stale pins (F5).
+// handleSetPinned pins or unpins a message. The change is broadcast to every
+// reader so no client shows stale pins (F5); a pin may also fan out a pin row.
 func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -412,12 +417,16 @@ func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned
 			return
 		}
 
-		if err := svc.Messages.SetMessagePinned(r.Context(), user.ID, channelID, messageID, pinned); err != nil {
+		pinRow, err := svc.Messages.SetMessagePinned(r.Context(), user.ID, channelID, messageID, pinned)
+		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
 		if broadcaster != nil {
 			broadcaster.BroadcastMessagePinned(channelID, messageID, pinned)
+			if pinRow != nil { // detached: the pin committed, a dropped pinner must not cost the room the row
+				broadcaster.PinEventRow(context.WithoutCancel(r.Context()), pinRow)
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -446,6 +455,9 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 		// "already in the requested end state" twin of DUPLICATE_REPORT, so
 		// the caller gets a clean typed refusal instead of a 500.
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "ALREADY_DELETED", Message: err.Error()})
+	case errors.Is(err, service.ErrGroupDMFull):
+		// Before ErrConflict, which it wraps: the group has no room left.
+		writeJSON(w, http.StatusConflict, errorResponse{Error: "GROUP_DM_FULL", Message: err.Error()})
 	case errors.Is(err, service.ErrConflict):
 		writeJSON(w, http.StatusConflict, errorResponse{Error: "CONFLICT", Message: err.Error()})
 	case errors.Is(err, service.ErrInternal):

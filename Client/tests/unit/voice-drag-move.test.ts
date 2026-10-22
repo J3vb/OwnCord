@@ -107,7 +107,12 @@ describe("drag a voice user onto another channel (WP 1D-8)", () => {
   }
 
   beforeEach(() => {
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" as const }));
     authStore.setState(() => ({
@@ -190,6 +195,8 @@ describe("drag a voice user onto another channel (WP 1D-8)", () => {
   it("lets a press on a draggable row close an open volume menu", async () => {
     mount(true, [81]);
     row(81).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    // The menu code loads on its first open (O-6b).
+    await vi.dynamicImportSettled();
     expect(document.querySelector(".user-vol-menu")).not.toBeNull();
     // The menu arms its outside-press listener on the next tick.
     await new Promise((resolve) => setTimeout(resolve, 0));

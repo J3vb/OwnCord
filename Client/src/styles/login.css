@@ -4,6 +4,7 @@
 .connect-page {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   position: relative;
   overflow: hidden;
 }
@@ -132,7 +133,21 @@
   color: var(--text-muted);
   line-height: 1.4;
 }
-
+/* Web portal (one server): the form card is the page's only heading */
+.connect-page--portal {
+  flex-direction: column;
+}
+.portal-insecure {
+  max-width: 480px;
+  margin: 15vh auto 0;
+  padding: 0 16px;
+  color: var(--text-normal);
+  text-align: center;
+}
+.portal-insecure-title {
+  font-size: var(--font-size-xl);
+  margin-bottom: 8px;
+}
 .header-actions {
   display: flex;
   gap: 4px;
@@ -786,6 +801,11 @@
   margin-bottom: 16px;
   margin-top: -8px;
 }
+/* Beats the flex above: the portal hides this group, and the later, equally
+   specific rule would otherwise keep it on screen. */
+.remember-password-group.form-group--hidden {
+  display: none;
+}
 .remember-password-group input[type="checkbox"] {
   width: 18px;
   height: 18px;
@@ -1151,6 +1171,31 @@
 }
 .modal-danger-text strong {
   color: var(--header-primary);
+}
+.msg-delete-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  font-size: var(--font-size-md);
+  overflow-wrap: anywhere;
+}
+.msg-delete-preview-author {
+  color: var(--header-primary);
+  font-weight: 600;
+}
+.msg-delete-preview-text {
+  color: var(--text-normal);
+  white-space: pre-wrap;
+}
+.msg-delete-tip {
+  margin: 8px 0 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
 }
 .btn-danger {
   padding: 8px 20px;
@@ -1526,6 +1571,14 @@
   font-size: var(--font-size-xs);
   line-height: 1.45;
   color: var(--text-faint);
+}
+/* Limit hint (WP 3C-9): the rule under a name or status input; the limit and
+   refusal states change the words as well as the colour. */
+.limit-hint--limit {
+  color: var(--text-normal);
+}
+.limit-hint--error {
+  color: var(--text-danger);
 }
 .form-check {
   display: flex;

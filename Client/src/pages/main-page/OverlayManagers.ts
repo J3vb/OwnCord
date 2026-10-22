@@ -6,17 +6,23 @@
 import type { MountableComponent } from "@lib/safe-render";
 import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
+import { appendChildren, createElement, setOwnedTimeout } from "@lib/dom";
+import { createModal } from "@lib/modalFactory";
+import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
-import { createQuickSwitcher } from "@components/QuickSwitcher";
-import { createInviteManager } from "@components/InviteManager";
+import { createLazyScreen } from "@components/lazyScreen";
 import type { InviteItem } from "@components/InviteManager";
 import type { InviteResponse } from "@lib/types";
-import { createPinnedMessages } from "@components/PinnedMessages";
 import type { PinnedMessage } from "@components/PinnedMessages";
-import { createSearchOverlay } from "@components/SearchOverlay";
 import { showToast } from "@lib/toast";
 import { setActiveChannel, channelsStore } from "@stores/channels.store";
-import { setMessagePinned } from "@stores/messages.store";
+import { messagesStore, setMessagePinned } from "@stores/messages.store";
+import { membersStore } from "@stores/members.store";
+import { uiStore, setSidebarMode, setActiveDmUser } from "@stores/ui.store";
+import { dmStore, addDmToChannelsStore } from "@stores/dm.store";
+import { navigateToChannel } from "@lib/channel-navigation";
+import { authStore } from "@stores/auth.store";
+import { errorText } from "@lib/api";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { resolveAuthor } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
@@ -25,6 +31,29 @@ import { shellText } from "../../i18n/shell";
 import { dialogOpen } from "@lib/dialogOpen";
 
 const log = createLogger("overlays");
+
+// Each screen loads on its first open, so its code stays out of the main-page
+// chunk. One loader per screen: it shares an in-flight import and retries a
+// failed one on the next open.
+const quickSwitcherScreen = createLazyScreen(
+  "quick-switcher",
+  () => import("@components/QuickSwitcher"),
+);
+const inviteManagerScreen = createLazyScreen(
+  "invite-manager",
+  () => import("@components/InviteManager"),
+);
+const pinnedMessagesScreen = createLazyScreen(
+  "pinned-messages",
+  () => import("@components/PinnedMessages"),
+);
+const searchOverlayScreen = createLazyScreen(
+  "search-overlay",
+  () => import("@components/SearchOverlay"),
+);
+
+/** Quiet period before an open pinned panel refetches after a pin change. */
+const PIN_REFETCH_DEBOUNCE_MS = 250;
 
 // ---------------------------------------------------------------------------
 // Invite response mapping
@@ -96,6 +125,9 @@ export function mapToPinnedMessage(msg: {
   readonly content: string;
   readonly created_at?: string;
   readonly timestamp?: string;
+  readonly mentions?: readonly number[];
+  readonly mentions_everyone?: boolean;
+  readonly mention_roles?: readonly number[];
 }): PinnedMessage {
   const author = resolveAuthor(msg.user);
   return {
@@ -107,6 +139,9 @@ export function mapToPinnedMessage(msg: {
     // Hashed from the raw username (not the resolved display name) so the hue
     // stays stable across renames — matches every other avatar-color surface.
     avatarColor: pickPinAvatarColor(msg.user.username),
+    ...(msg.mentions !== undefined ? { mentions: msg.mentions } : {}),
+    ...(msg.mentions_everyone !== undefined ? { mentionsEveryone: msg.mentions_everyone } : {}),
+    ...(msg.mention_roles !== undefined ? { mentionRoles: msg.mention_roles } : {}),
   };
 }
 
@@ -125,23 +160,71 @@ export function createQuickSwitcherManager(
   isSuspended?: () => boolean,
   /** Optional: join a voice channel selected in the switcher, matching the sidebar. */
   onJoinVoice?: (channelId: number) => void,
+  /** Optional: runs before a pick leaves a channel for a DM, so "back" returns to it. */
+  onBeforeDm?: () => void,
+  /** Optional: runs when a channel pick leaves DM mode, to drop the saved channel. */
+  onLeaveDm?: () => void,
 ): QuickSwitcherManager {
   let instance: MountableComponent | null = null;
+  // Set while the switcher's code loads. A second Ctrl+K in that window is
+  // swallowed (it opens once), and close()/detach cancels the pending open.
+  let pendingOpen: object | null = null;
 
   function open(): void {
     const root = getRoot();
-    if (instance !== null || root === null) return;
-    instance = createQuickSwitcher({
+    if (instance !== null || pendingOpen !== null || root === null) return;
+    const ticket = {};
+    pendingOpen = ticket;
+    void quickSwitcherScreen
+      .load(() => pendingOpen === ticket)
+      .then((screen) => {
+        if (pendingOpen !== ticket) return;
+        pendingOpen = null;
+        if (screen === null) return;
+        // Re-derive the root: a page teardown during the load nulls it.
+        const liveRoot = getRoot();
+        if (liveRoot === null || instance !== null) return;
+        // The keydown handler's gates held when the key was pressed; Settings or
+        // a dialog may have opened since, and the switcher must not stack on it.
+        if (isSuspended?.() === true || dialogOpen()) return;
+        mountSwitcher(screen, liveRoot);
+      });
+  }
+
+  function mountSwitcher(
+    screen: typeof import("@components/QuickSwitcher"),
+    root: HTMLDivElement,
+  ): void {
+    instance = screen.createQuickSwitcher({
       onSelectChannel: (channelId: number) => {
+        const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+        if (dm !== undefined) {
+          // The state the DM list sets on a click (selectDmConversation):
+          // remember the channel being left (a no-op when a DM is already
+          // open), refresh the mirror row so a renamed group shows its new
+          // name, then enter DM mode.
+          onBeforeDm?.();
+          addDmToChannelsStore(dm);
+          navigateToChannel(channelId);
+          setActiveDmUser(dm.isGroup ? null : dm.recipient.id);
+          setSidebarMode("dms");
+          return;
+        }
         // A voice channel selected here must go through the same join path the
-        // sidebar row uses — a bare setActiveChannel mounts the chat surface
-        // for a voice channel the user never joined (F8).
+        // sidebar row uses: a pick joins, it does not just open the chat.
         const channel = channelsStore.getState().channels.get(channelId);
         if (channel?.type === "voice" && onJoinVoice !== undefined) {
           onJoinVoice(channelId);
           return;
         }
-        setActiveChannel(channelId);
+        // A channel pick from DM mode returns the sidebar to the channel list
+        // and drops the saved "channel before the DM", so Back later cannot
+        // jump to an older channel.
+        if (uiStore.getState().sidebarMode === "dms") {
+          setSidebarMode("channels");
+          onLeaveDm?.();
+        }
+        navigateToChannel(channelId);
       },
       onClose: close,
     });
@@ -149,6 +232,7 @@ export function createQuickSwitcherManager(
   }
 
   function close(): void {
+    pendingOpen = null;
     if (instance !== null) {
       instance.destroy?.();
       instance = null;
@@ -163,6 +247,12 @@ export function createQuickSwitcherManager(
     // every other app-wide shortcut respects.
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
     if (isSuspended?.() === true) return;
+    if (pendingOpen !== null) {
+      // Still loading: the first press already asked to open, so a second one
+      // must not open twice nor cancel it.
+      e.preventDefault();
+      return;
+    }
     if (instance !== null) {
       // Always let Ctrl+K close our own overlay.
       e.preventDefault();
@@ -191,6 +281,48 @@ export function createQuickSwitcherManager(
 // Generic async overlay controller
 // ---------------------------------------------------------------------------
 
+/** Inline load-failure dialog: the message, Retry and Close. */
+function mountLoadError(
+  root: HTMLDivElement,
+  copy: { readonly message: string; readonly retryLabel: string },
+  onClose: () => void,
+  onRetry: () => void,
+): MountableComponent {
+  const content = createElement("div", { class: "modal-body" });
+  content.appendChild(
+    createElement("div", { class: "invite-manager__error", role: "alert" }, copy.message),
+  );
+  const footer = createElement("div", { class: "modal-footer" });
+  const closeBtn = createElement(
+    "button",
+    { class: "btn-modal-cancel" },
+    shellText("common.close"),
+  );
+  const retryBtn = createElement("button", { class: "btn-modal-save" }, copy.retryLabel);
+  closeBtn.addEventListener("click", onClose);
+  retryBtn.addEventListener("click", onRetry);
+  appendChildren(footer, closeBtn, retryBtn);
+  const disposable = new Disposable();
+  const modal = createModal(
+    {
+      content,
+      closeOnBackdrop: false,
+      onClose,
+      ariaLabel: copy.message,
+      signal: disposable.signal,
+    },
+    root,
+  );
+  modal.modal.appendChild(footer);
+  return {
+    mount: () => undefined,
+    destroy: () => {
+      disposable.destroy();
+      modal.destroy();
+    },
+  };
+}
+
 /**
  * Shared shape behind an overlay that opens by awaiting a fetch: an
  * instance/opening guard against a double-click during the round trip,
@@ -211,6 +343,9 @@ function createAsyncOverlayController<T>(opts: {
   readonly build: (data: T, root: HTMLDivElement, close: () => void) => MountableComponent;
   readonly errorLog: string;
   readonly errorToast: string;
+  /** When set, a failed load also mounts an inline error dialog with a Retry
+   *  button (re-runs the load) instead of leaving only the toast. */
+  readonly inlineError?: { readonly message: string; readonly retryLabel: string };
 }): { open(): Promise<void>; close(): void; isOpen(): boolean } {
   let instance: MountableComponent | null = null;
   let opening = false;
@@ -241,7 +376,15 @@ function createAsyncOverlayController<T>(opts: {
     } catch (err) {
       if (gen !== generation) return;
       log.error(opts.errorLog, { error: String(err) });
-      showToast(opts.errorToast, "error");
+      // The inline dialog carries the message; other overlays only toast.
+      if (opts.inlineError === undefined) showToast(opts.errorToast, "error");
+      const liveRoot = opts.getRoot();
+      if (opts.inlineError !== undefined && liveRoot !== null) {
+        instance = mountLoadError(liveRoot, opts.inlineError, close, () => {
+          close();
+          void open();
+        });
+      }
     } finally {
       if (gen === generation) opening = false;
     }
@@ -259,21 +402,87 @@ export interface InviteManagerController {
   cleanup(): void;
 }
 
+interface InviteLoad {
+  readonly invites: InviteResponse[];
+  readonly featuredCode: string | null;
+  readonly screen: typeof import("@components/InviteManager");
+}
+
+const DEFAULT_INVITE_HOURS = 168;
+const FRESH_INVITE_MIN_REMAINING_MS = 24 * 3_600_000;
+
+/** Newest invite of the signed-in user that is still worth handing out: it has
+ *  no use limit and is either non-expiring or expires more than 24 h from now. */
+function newestLiveInvite(list: readonly InviteResponse[]): InviteResponse | null {
+  let best: InviteResponse | null = null;
+  let bestKey = -Infinity;
+  const me = authStore.getState().user?.username ?? null;
+  for (const r of list) {
+    if (me === null || r.creator_username !== me) continue;
+    // A limited invite can run out under the user, so it is never featured.
+    if (r.max_uses !== null && r.max_uses > 0) continue;
+    if (
+      r.expires_at !== null &&
+      Date.parse(r.expires_at) - Date.now() <= FRESH_INVITE_MIN_REMAINING_MS
+    )
+      continue;
+    const created = r.created_at !== undefined ? Date.parse(r.created_at) : NaN;
+    const key = Number.isNaN(created) ? r.id : created;
+    if (best === null || key >= bestKey) {
+      best = r;
+      bestKey = key;
+    }
+  }
+  return best;
+}
+
 export function createInviteManagerController(opts: {
   readonly api: ApiClient;
   readonly getRoot: () => HTMLDivElement | null;
 }): InviteManagerController {
-  const controller = createAsyncOverlayController<InviteResponse[]>({
+  const controller = createAsyncOverlayController<InviteLoad>({
     getRoot: opts.getRoot,
-    load: () => opts.api.getInvites(),
-    build: (raw, _root, close) => {
-      const invites = raw
-        .filter((r) => !isInviteRevoked(r) && !isInviteExpired(r))
-        .map(mapInviteResponse);
-      return createInviteManager({
+    // Only MANAGE_INVITES holders can list or create invites.
+    canOpen: () => canManageInvites(),
+    load: async () => {
+      // Fetch the module alongside the list; a failed import rejects into the
+      // controller's own load-failed dialog with Retry.
+      const screenPromise = inviteManagerScreen.loadOrThrow();
+      // The fetch below may throw first; the import must not go unhandled.
+      screenPromise.catch(() => undefined);
+      const raw = await opts.api.getInvites();
+      const visible = raw.filter((r) => !isInviteRevoked(r) && !isInviteExpired(r));
+      let featured = newestLiveInvite(visible);
+      if (featured === null) {
+        // Never more than one per open; a failure must not block the manager.
+        try {
+          featured = await opts.api.createInvite({
+            expires_in_hours: DEFAULT_INVITE_HOURS,
+            max_uses: 0,
+          });
+          visible.push(featured);
+        } catch (err) {
+          log.error("Fresh invite create failed", { error: String(err) });
+          showToast(errorText(err, shellText("invite.createFailed")), "error");
+        }
+      }
+      return {
+        invites: visible,
+        featuredCode: featured?.code ?? null,
+        screen: await screenPromise,
+      };
+    },
+    build: (data, _root, close) => {
+      const invites = data.invites.map(mapInviteResponse);
+      return data.screen.createInviteManager({
         invites,
-        onCreateInvite: async () => {
-          const created = await opts.api.createInvite({});
+        featuredCode: data.featuredCode,
+        formatLink: (code: string) => formatInviteLink(code, opts.api.getConfig().host),
+        onCreateInvite: async (params) => {
+          const created = await opts.api.createInvite({
+            expires_in_hours: params.expiresInHours,
+            max_uses: params.maxUses,
+          });
           return mapInviteResponse(created);
         },
         onRevokeInvite: async (code: string) => {
@@ -302,6 +511,7 @@ export function createInviteManagerController(opts: {
     },
     errorLog: "Failed to open invite manager", // i18n-exempt: developer log line, never shown
     errorToast: shellText("invite.loadFailed"),
+    inlineError: { message: shellText("invite.loadFailed"), retryLabel: shellText("invite.retry") },
   });
 
   return { open: controller.open, cleanup: controller.close };
@@ -313,6 +523,9 @@ export function createInviteManagerController(opts: {
 
 export interface PinnedPanelController {
   toggle(): Promise<void>;
+  /** Open the panel if it is closed; a no-op while it is open or opening, so a
+   *  link into it can never close it. */
+  open(): Promise<void>;
   cleanup(): void;
   /** Close the panel if it was opened for `channelId`. */
   closeFor(channelId: number): void;
@@ -345,7 +558,10 @@ export function createPinnedPanelController(opts: {
   // capturing channelId once at the top and reusing it throughout.
   let channelId: number | null = null;
 
-  const controller = createAsyncOverlayController<Awaited<ReturnType<ApiClient["getPins"]>>>({
+  const controller = createAsyncOverlayController<{
+    readonly resp: Awaited<ReturnType<ApiClient["getPins"]>>;
+    readonly screen: typeof import("@components/PinnedMessages");
+  }>({
     getRoot: opts.getRoot,
     canOpen: () => {
       channelId = opts.getCurrentChannelId();
@@ -353,39 +569,97 @@ export function createPinnedPanelController(opts: {
       // says why nothing is shown, so the panel stays shut.
       return channelId !== null && !nsfwContentBlocked(channelId);
     },
-    load: () => opts.api.getPins(channelId as number),
-    build: (resp, _liveRoot, close) => {
+    load: async () => {
+      const screenPromise = pinnedMessagesScreen.loadOrThrow();
+      screenPromise.catch(() => undefined);
+      const resp = await opts.api.getPins(channelId as number);
+      return { resp, screen: await screenPromise };
+    },
+    build: ({ resp, screen }, _liveRoot, close) => {
       const id = channelId as number;
-      const pins = resp.messages.map(mapToPinnedMessage);
-      const mayUnpin = opts.canPin?.(id) === true;
-      return createPinnedMessages({
+      const live = new Disposable();
+      let refetchTicket = 0;
+      let mayUnpin = opts.canPin?.(id) === true;
+
+      const unpin = (msgId: number): void => {
+        void opts.api
+          .unpinMessage(id, msgId)
+          .then(() => {
+            // Update the row now rather than waiting for the server's
+            // chat_pinned broadcast, so it cannot still say "Unpin" after
+            // this panel closes; the card leaves the open panel in place.
+            setMessagePinned(id, msgId, false);
+            if (!live.signal.aborted) panel.removePin(msgId);
+          })
+          .catch((err: unknown) => {
+            log.error("Failed to unpin message", { msgId, error: String(err) });
+            showToast(shellText("pins.unpinFailed"), "error");
+          });
+      };
+
+      const panel = screen.createPinnedMessages({
         channelId: id,
-        pinnedMessages: pins,
+        pinnedMessages: resp.messages.map(mapToPinnedMessage),
         onJumpToMessage: (msgId: number) => {
           opts.onJumpToMessage?.(id, msgId);
           close();
         },
-        ...(mayUnpin
-          ? {
-              onUnpin: (msgId: number) => {
-                void opts.api
-                  .unpinMessage(id, msgId)
-                  .then(() => {
-                    // Update the row now rather than waiting for the server's
-                    // chat_pinned broadcast, so it cannot still say "Unpin"
-                    // after this panel closes.
-                    setMessagePinned(id, msgId, false);
-                    close();
-                  })
-                  .catch((err: unknown) => {
-                    log.error("Failed to unpin message", { msgId, error: String(err) });
-                    showToast(shellText("pins.unpinFailed"), "error");
-                  });
-              },
-            }
-          : {}),
+        ...(mayUnpin ? { onUnpin: unpin } : {}),
         onClose: close,
       });
+
+      // The panel is a fetched snapshot, so a chat_pinned for this channel (it
+      // names only the message) refetches the list, trailing-debounced. A
+      // response landing after the panel closed is dropped.
+      const refetch = (): void => {
+        const ticket = ++refetchTicket;
+        setOwnedTimeout(
+          live.signal,
+          () => {
+            if (ticket !== refetchTicket) return;
+            opts.api.getPins(id, live.signal).then(
+              (next) => {
+                if (live.signal.aborted || ticket !== refetchTicket) return;
+                panel.setPins(next.messages.map(mapToPinnedMessage));
+              },
+              (err: unknown) => {
+                if (live.signal.aborted) return;
+                log.warn("Failed to refresh pinned messages", { error: String(err) });
+              },
+            );
+          },
+          PIN_REFETCH_DEBOUNCE_MS,
+        );
+      };
+
+      // Unpin follows the viewer's live permission, not the one read at build.
+      const syncPermission = (): void => {
+        const next = opts.canPin?.(id) === true;
+        if (next === mayUnpin) return;
+        mayUnpin = next;
+        panel.setOnUnpin(next ? unpin : undefined);
+      };
+
+      return {
+        mount(container: Element): void {
+          panel.mount(container);
+          live.onStoreChange(messagesStore, (s) => s.pinRevision?.get(id) ?? 0, refetch);
+          live.onStoreChange(channelsStore, (s) => s.channels.get(id)?.canPin, syncPermission);
+          // Pins changed while the socket was down never sent a chat_pinned.
+          live.onStoreChange(
+            uiStore,
+            (s) => s.connectionStatus,
+            (status) => {
+              if (status === "connected") refetch();
+            },
+          );
+          live.onStoreChange(membersStore, (s) => s.roleRevision ?? 0, syncPermission);
+        },
+        destroy(): void {
+          live.destroy();
+          panel.destroy();
+        },
+      };
     },
     errorLog: "Failed to load pinned messages", // i18n-exempt: developer log line, never shown
     errorToast: shellText("pins.loadFailed"),
@@ -401,6 +675,7 @@ export function createPinnedPanelController(opts: {
 
   return {
     toggle,
+    open: controller.open,
     cleanup: controller.close,
     closeFor: (id: number) => {
       if (channelId === id) controller.close();
@@ -430,8 +705,12 @@ export function createSearchOverlayController(opts: {
   readonly onJumpToMessage?: (channelId: number, messageId: number) => void;
 }): SearchOverlayController {
   let instance: MountableComponent | null = null;
+  // Set while the overlay's code loads: a second open() is ignored, and
+  // close()/cleanup cancels the pending mount.
+  let pendingOpen: object | null = null;
 
   function close(): void {
+    pendingOpen = null;
     if (instance !== null) {
       instance.destroy?.();
       instance = null;
@@ -440,13 +719,31 @@ export function createSearchOverlayController(opts: {
 
   function open(): void {
     const root = opts.getRoot();
-    if (instance !== null || root === null) return;
+    if (instance !== null || pendingOpen !== null || root === null) return;
+    const ticket = {};
+    pendingOpen = ticket;
+    void searchOverlayScreen
+      .load(() => pendingOpen === ticket)
+      .then((screen) => {
+        if (pendingOpen !== ticket) return;
+        pendingOpen = null;
+        if (screen === null) return;
+        // Re-derive the root: a page teardown during the load nulls it.
+        const liveRoot = opts.getRoot();
+        if (liveRoot === null || instance !== null) return;
+        mountOverlay(screen, liveRoot);
+      });
+  }
 
+  function mountOverlay(
+    screen: typeof import("@components/SearchOverlay"),
+    root: HTMLDivElement,
+  ): void {
     const current = opts.getCurrentChannelId();
     // Behind the NSFW gate only a server-wide search is offered (B9-7).
     const channelId = current !== null && nsfwContentBlocked(current) ? null : current;
 
-    instance = createSearchOverlay({
+    instance = screen.createSearchOverlay({
       currentChannelId: channelId ?? undefined,
       onSearch: async (query, chId, signal, before) => {
         try {

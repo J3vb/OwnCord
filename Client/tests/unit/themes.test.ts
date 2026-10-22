@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   applyAccent,
+  applyTheme,
   applyThemeByName,
+  applyThemeChoice,
   getActiveThemeName,
   readableRoleColor,
   restoreTheme,
@@ -209,5 +211,103 @@ describe("readableRoleColor (B9 Q13 role clamp)", () => {
     expect(name.style.color).toBe("var(--text-normal)");
     setSurfaces(DARK);
     expect(name.style.color).toBe("rgb(87, 242, 135)");
+  });
+});
+
+describe("system theme", () => {
+  let matches = true;
+  let listeners: Array<() => void> = [];
+  let removed = 0;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.className = "";
+    matches = true;
+    listeners = [];
+    removed = 0;
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      get matches() {
+        return matches;
+      },
+      media,
+      addEventListener: (_t: string, fn: () => void, opts?: { signal?: AbortSignal }) => {
+        listeners.push(fn);
+        opts?.signal?.addEventListener("abort", () => {
+          listeners = listeners.filter((l) => l !== fn);
+          removed++;
+        });
+      },
+      removeEventListener: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    applyTheme("neon-glow");
+    vi.unstubAllGlobals();
+  });
+
+  const flip = (dark: boolean): void => {
+    matches = dark;
+    for (const l of listeners) l();
+  };
+
+  it("is a valid stored choice and resolves to the dark theme", () => {
+    applyThemeChoice("system");
+    expect(getActiveThemeName()).toBe("system");
+    expect(document.body.classList.contains("theme-dark")).toBe(true);
+  });
+
+  it("resolves to the light theme when the computer is light", () => {
+    matches = false;
+    applyThemeChoice("system");
+    expect(getActiveThemeName()).toBe("system");
+    expect(document.body.classList.contains("theme-light")).toBe(true);
+    expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#ffffff");
+  });
+
+  it("follows a live change and keeps system as the stored choice", () => {
+    applyThemeChoice("system");
+    flip(false);
+    expect(document.body.classList.contains("theme-light")).toBe(true);
+    flip(true);
+    expect(document.body.classList.contains("theme-dark")).toBe(true);
+    expect(getActiveThemeName()).toBe("system");
+  });
+
+  it("re-applies the saved accent after a live change", () => {
+    localStorage.setItem("owncord:settings:accentColor", JSON.stringify("#123456"));
+    applyThemeChoice("system");
+    flip(false);
+    expect(document.body.style.getPropertyValue("--accent")).toBe("#123456");
+  });
+
+  it("stops following once a concrete theme is chosen, and never stacks listeners", () => {
+    applyThemeChoice("system");
+    applyThemeChoice("system");
+    expect(listeners).toHaveLength(1);
+    applyThemeChoice("midnight");
+    expect(listeners).toHaveLength(0);
+    expect(removed).toBe(2);
+    flip(false);
+    expect(document.body.classList.contains("theme-midnight")).toBe(true);
+    expect(getActiveThemeName()).toBe("midnight");
+  });
+
+  it("falls back to dark without matchMedia", () => {
+    vi.stubGlobal("matchMedia", undefined);
+    applyThemeChoice("system");
+    expect(document.body.classList.contains("theme-dark")).toBe(true);
+  });
+
+  it("restoreTheme re-resolves a stored system choice", () => {
+    localStorage.setItem("owncord:theme:active", "system");
+    matches = false;
+    restoreTheme();
+    expect(document.body.classList.contains("theme-light")).toBe(true);
+    expect(getActiveThemeName()).toBe("system");
+  });
+
+  it("keeps the default neon-glow", () => {
+    expect(getActiveThemeName()).toBe("neon-glow");
   });
 });

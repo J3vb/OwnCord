@@ -4,63 +4,104 @@
  * virtual scrolling (DOM windowing) for performance with large message counts.
  */
 import { Disposable } from "@lib/disposable";
-import { createElement, clearChildren } from "@lib/dom";
+import { createElement, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
+import { isServerRowKind } from "@lib/messageKind";
 import type { MountableComponent } from "@lib/safe-render";
 import {
   messagesStore,
   getChannelMessages,
   hasMoreMessages,
+  hasOlderLoadFailed,
   getHistoryLoadState,
   isWindowDetached,
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
+import { membersStore, memberDisplayName } from "@stores/members.store";
+import { blocksStore } from "@stores/blocks.store";
+import { authorityChannelId, isReadSurface, threadsStore } from "@stores/threads.store";
+import { refreshThreadChips } from "./message-list/threadChip";
 import { safetyStore } from "../features/safety/store";
 import { registerReadingAnchor } from "../features/messaging/readingAnchor";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { uiStore } from "@stores/ui.store";
 import { discardMedia } from "@lib/media-visibility";
 
+/** How often rendered `<t:…:R>` timestamps are rewritten. */
+const RELATIVE_TIMESTAMP_REFRESH_MS = 60_000;
+
 const log = createLogger("message-list");
 import {
   shouldGroup,
   isSameDay,
+  renderBlockedRun,
   renderDayDivider,
   renderNewDivider,
   renderUnreadBar,
   renderMessage,
   authorAvatarKey,
   refreshConnectionControls,
+  fullDateTimeTitle,
+  type MessageRenderOptions,
 } from "./message-list/renderers";
-import { createAvatarElement } from "./message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
-import { clearContentParseCache, resyncMentions } from "./message-list/content-parser";
+import { ROW_FOCUSABLE_SELECTOR } from "./message-list/message-actions";
+import { withMessageMenu } from "./message-list/message-menu-loader";
+import { preloadInlineEdit, withInlineEdit } from "../features/messaging/inlineEditLoader";
+import type { InlineEditSession } from "../features/messaging/inlineEdit";
+import {
+  clearContentParseCache,
+  relabelInlineTimestamps,
+  resyncMentions,
+} from "./message-list/content-parser";
 import { highlightsCurrentUser } from "@lib/mentions";
+import { applyPickedMentions, tokensToPickedText } from "@lib/pickedMentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/themes";
 import { resolveDisplayName } from "@lib/avatar";
-import { channelsStore, getUnreadOnOpen } from "@stores/channels.store";
+import { channelsStore, getPointerOnOpen, getUnreadOnOpen } from "@stores/channels.store";
 import {
   UNREAD_COUNT_CAP,
   atEachMidnight,
   formatBadgeCount,
+  formatClockTime,
   formatMessageTimestamp,
-  getUserRole,
   resolveAuthor,
-  roleColorVar,
+  userRoleColorVar,
 } from "@lib/formatting";
-import { isAudioMime, isVideoAttachment } from "./message-list/attachments";
+import {
+  isAudioMime,
+  isGalleryImage,
+  isVideoAttachment,
+  resolveServerUrl,
+  thumbnailUrl,
+} from "./message-list/attachments";
+import {
+  ATTACHMENT_BOX_MAX_H,
+  fitImageBox,
+  getImageBox,
+  knownImageHeight,
+} from "./message-list/image-sizes";
+import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
+import type { PollOutcome } from "../features/messaging/pollSend";
 import { messagingText } from "../i18n/messaging";
 import {
   markChannelRead,
+  markChannelReadSeen,
   hasUnread,
+  isHeldUnread,
   isChannelAway,
   isChannelCovered,
   noteLiveMessageSeen,
+  noteMessageSeen,
+  noteVisibleMessageSeen,
+  onMarkUnreadFailed,
   setLiveTailInView,
 } from "@lib/read-state";
+import { idMentionsEnabled, readPointerEnabled } from "@lib/serverCapabilities";
+import { markMessageUnread } from "./message-list/mark-unread";
 
 // -- Options ------------------------------------------------------------------
 
@@ -82,15 +123,40 @@ export interface MessageListOptions {
   readonly onScrollBottom?: () => void | Promise<void>;
   readonly onReplyClick: (messageId: number) => void;
   readonly onEditClick: (messageId: number) => void;
+  /**
+   * Save the inline editor's text (cleaned, non-empty, within the limit).
+   * True closes the editor; false keeps it open with the text (offline).
+   */
+  readonly onEditSave: (messageId: number, content: string) => boolean;
+  /** Save with the text cleared: the host offers to delete the message. */
+  readonly onEmptyEdit: (messageId: number) => void;
+  /** The inline editor closed while it held focus: hand focus back (the composer). */
+  readonly onEditEnd?: () => void;
   readonly onDeleteClick: (messageId: number, shiftKey: boolean) => void;
   readonly onReactionClick: (messageId: number, emoji: string) => void;
   readonly onPinClick: (messageId: number, channelId: number, currentlyPinned: boolean) => void;
   /** Report someone else's message or one of its attachments (B9-10). No button without it. */
   readonly onReportClick?: (messageId: number) => void;
+  /** Opens the Forward picker for a message (WP 6.9a). Absent, the menu offers no Forward. */
+  readonly onForwardClick?: (messageId: number) => void;
+  /** Set the viewer's whole selection on a poll (`[]` removes the vote); absent disables voting (WP 6.9b). */
+  readonly onPollVote?: (
+    messageId: number,
+    answerIds: readonly number[],
+  ) => Promise<PollOutcome<unknown>>;
+  /** End a poll now; absent hides End poll (WP 6.9b). */
+  readonly onPollEnd?: (messageId: number) => Promise<PollOutcome<unknown>>;
+  /** Opens the Create Thread dialog for a message (WP 6.9c). Absent, the menu offers no Create Thread. */
+  readonly onCreateThreadClick?: (messageId: number) => void;
+  /** Opens a thread's side panel (the starter chip, WP 6.9c). Absent, the chip is inert text. */
+  readonly onOpenThread?: (threadId: number) => void;
   /** Retry a failed optimistic send (by its correlation id). */
   readonly onRetry?: (correlationId: string) => void;
   /** Discard a failed optimistic send without retrying. */
   readonly onDeleteDraft?: (correlationId: string) => void;
+  /** The upload strip of a send queued behind its files (3A-9), for the row with this
+   *  correlation id; null when the row has none. `signal` ends with the row's render. */
+  readonly renderUploadStrip?: (correlationId: string, signal: AbortSignal) => HTMLElement | null;
   /** Retry a failed first-page history fetch. */
   readonly onRetryLoad?: () => void;
   /**
@@ -104,6 +170,10 @@ export interface MessageListOptions {
    * "Jump to Present" pill, which only appears while the window is detached.
    */
   readonly onJumpToPresent?: () => void;
+  /** Open the pinned-messages panel ("pinned messages" link of a pin row). It never closes an open panel. */
+  readonly onOpenPins?: () => void;
+  /** Join the DM call a live call log row stands for (WP 3B-9c). No Join button without it. */
+  readonly onJoinCall?: (channelId: number) => void;
 }
 
 // -- Constants ----------------------------------------------------------------
@@ -124,20 +194,38 @@ const FOLLOW_OWN_SEND_MS = 10_000;
 const SCROLL_BOTTOM_THRESHOLD = 100;
 const JUMP_RECENTRE_MS = 3000;
 
+const blockedUsers = (): ReadonlySet<number> => blocksStore.getState().blockedByMe;
+
+/** The hover bar's "..." button the event came from, if any. */
+function moreButtonOf(target: EventTarget | null): HTMLElement | null {
+  return target instanceof Element
+    ? target.closest<HTMLElement>(".msg-actions-bar [data-testid^='msg-more-']")
+    : null;
+}
+
 /** Headroom above the NEW divider on open: the unread bar overlays the top of the viewport. */
 const UNREAD_BAR_CLEARANCE = 40;
 
-/** Number of items to render beyond visible viewport in each direction. */
-const OVERSCAN = 20;
+/** Most items rendered beyond the visible range in each direction. Also the
+ *  buffer when the viewport has no height yet (first paint, hidden tab). */
+const OVERSCAN_MAX_ROWS = 20;
+/** Fewest items kept beyond the visible range, so a list of tall rows still has
+ *  something to scroll into. */
+const OVERSCAN_MIN_ROWS = 4;
+/** The render window reaches this many viewport heights above and below what is
+ *  on screen, bounded by the row limits above. */
+const OVERSCAN_VIEWPORTS = 1;
 
-/** Controls a keyboard user can land on inside a rendered row. */
-const ROW_FOCUSABLE_SELECTOR = "button, [tabindex='0'], a[href]";
+function clampOverscan(rows: number): number {
+  return Math.min(OVERSCAN_MAX_ROWS, Math.max(OVERSCAN_MIN_ROWS, rows));
+}
 
 /** Regex for direct image URLs in message content. */
 const IMAGE_URL_RE = /\.(?:png|jpe?g|gif|webp)(?:\?[^\s]*)?(?:\s|$)/i;
 
 /** Regex for YouTube URLs in message content. */
-const YOUTUBE_URL_RE = /(?:youtube\.com\/watch|youtu\.be\/)/i;
+const YOUTUBE_URL_RE =
+  /(?:(?:www\.|m\.|music\.)?youtube(?:-nocookie)?\.com\/(?:watch|embed\/|shorts\/|live\/)|youtu\.be\/)/i;
 
 // -- Virtual item types -------------------------------------------------------
 
@@ -158,61 +246,216 @@ interface VirtualItemNewDivider {
   readonly kind: "new-divider";
 }
 
-type VirtualItem = VirtualItemMessage | VirtualItemDivider | VirtualItemNewDivider;
+/** A run of consecutive messages by blocked authors: the header stands for it
+ *  while collapsed, and sits above its messages while expanded. */
+interface VirtualItemBlockedRun {
+  readonly kind: "blocked-run";
+  readonly firstId: number;
+  readonly lastId: number;
+  readonly count: number;
+  readonly expanded: boolean;
+}
+
+export type VirtualItem =
+  VirtualItemMessage | VirtualItemDivider | VirtualItemNewDivider | VirtualItemBlockedRun;
 
 // -- Smart height estimation --------------------------------------------------
 
-function estimateItemHeight(item: VirtualItem): number {
-  if (item.kind === "divider" || item.kind === "new-divider") return 32;
+/** A message line: `.msg-text` is 1.45 x 15 px; the header line shares the
+ *  first row's 44 px minimum with it. */
+const TEXT_LINE_HEIGHT = 22;
+/** Average glyph width of the message font, in px (a proportional sans). */
+const AVERAGE_CHAR_WIDTH = 7.5;
+/** Width of `.messages-container` assumed before a real one is measured, and
+ *  what the row padding (`--message-content-left/right`) takes from it. */
+const DEFAULT_LIST_WIDTH = 900;
+const ROW_HORIZONTAL_PADDING = 120;
+/** Margin above an inline image or attachment box. */
+const MEDIA_MARGIN = 4;
+
+/** Rows of text a message fills at `listWidth`: each source line wraps at the
+ *  characters that fit; an empty line still takes one. */
+function estimateTextLines(content: string, listWidth: number): number {
+  const perLine = Math.max(
+    8,
+    Math.floor(Math.max(listWidth - ROW_HORIZONTAL_PADDING, 0) / AVERAGE_CHAR_WIDTH),
+  );
+  let lines = 0;
+  for (const line of content.split("\n")) lines += Math.max(1, Math.ceil(line.length / perLine));
+  return lines;
+}
+
+/** Height of an image box the list already knows: the server's dimensions,
+ *  else the size remembered for its URL; undefined when neither exists. */
+function knownAttachmentHeight(att: Message["attachments"][number]): number | undefined {
+  if (att.width != null && att.height != null) {
+    const box = fitImageBox(att.width, att.height, ATTACHMENT_BOX_MAX_H);
+    if (box !== null) return box.h;
+  }
+  return knownImageHeight(thumbnailUrl(resolveServerUrl(att.url), att.mime));
+}
+
+/** Height of the mosaic `.msg-image-grid` makes for `count` tiles (messages.css):
+ *  140 px rows, 200 px for exactly two, 4 px gaps and the 4 px margin above.
+ *  The first row holds one tile (7, 10), two (the default) or fills the width. */
+function galleryGridHeight(count: number): number {
+  let rows: number;
+  if (count === 2) rows = 1;
+  else if (count === 3 || count === 4) rows = 2;
+  else if (count === 6 || count === 9) rows = Math.ceil(count / 3);
+  else if (count === 7 || count === 10) rows = 1 + Math.ceil((count - 1) / 3);
+  else rows = 1 + Math.ceil((count - 2) / 3);
+  const rowHeight = count === 2 ? 200 : 140;
+  return rows * rowHeight + (rows - 1) * 4 + MEDIA_MARGIN;
+}
+
+export function estimateItemHeight(
+  item: VirtualItem,
+  listWidth: number = DEFAULT_LIST_WIDTH,
+): number {
+  if (item.kind !== "message") return 32;
 
   // Non-grouped: min-height 2.75rem (44px @16px root) + margin-top 17px = 61px
   // Grouped: min-height 1.375rem (22px @16px root) + margin-top 0px = 22px
+  // Both hold one line of text; each further wrapped line adds one line height.
   let height = item.isGrouped ? 22 : 61;
+  const { content } = item.message;
+  height += (estimateTextLines(content, listWidth) - 1) * TEXT_LINE_HEIGHT;
 
   // Media attachments. Video shares the image box, so it reserves the same
   // space; the audio player is a chip-height row.
+  // Two or more images share one mosaic, whatever their own sizes are.
+  const tiles = item.message.attachments.filter(isGalleryImage);
+  const gridded = tiles.length >= 2;
+  if (gridded) height += galleryGridHeight(tiles.length);
   for (const att of item.message.attachments) {
+    if (gridded && tiles.includes(att)) continue;
     if (isVideoAttachment(att)) {
       height += 220;
     } else if (isAudioMime(att.mime)) {
       height += 96;
     } else if (att.mime.startsWith("image/")) {
-      height += 220;
+      const known = knownAttachmentHeight(att);
+      height += known === undefined ? 220 : known + MEDIA_MARGIN;
     }
   }
 
-  // Inline image URLs in content
-  if (IMAGE_URL_RE.test(item.message.content)) {
-    height += 220;
+  // Inline image URLs in content: the box measured for each URL, else 220.
+  if (IMAGE_URL_RE.test(content)) {
+    // The URLs renderUrlEmbeds draws (none inside code, masked links,
+    // spoilers or angle brackets), one embed per distinct URL.
+    const rowWidth = Math.max(listWidth - ROW_HORIZONTAL_PADDING, 1);
+    for (const url of new Set(extractUrls(content).filter(isDirectImageUrl))) {
+      const box = getImageBox(url);
+      // The box shrinks with the row (max-width 100%), keeping its ratio.
+      height +=
+        box === undefined ? 220 : Math.round(box.h * Math.min(1, rowWidth / box.w)) + MEDIA_MARGIN;
+    }
   }
 
   // YouTube embeds
-  if (YOUTUBE_URL_RE.test(item.message.content)) {
+  if (YOUTUBE_URL_RE.test(content)) {
     height += 320;
   }
 
   return height;
 }
 
+/**
+ * What the list draws: the store keeps a deleted message as a tombstone (reply
+ * checks and the echo reconcile need to know it was deleted), the view leaves it
+ * out. Returns `list` itself when nothing is deleted.
+ */
+function visibleMessages(list: readonly Message[]): readonly Message[] {
+  return list.some((m) => m.deleted) ? list.filter((m) => !m.deleted) : list;
+}
+
+/**
+ * Focus the first control of the nearest row that survived a patch: the next
+ * one below the removed row, else the one above. `rows` are the rendered rows
+ * of the new window, from item index `start`.
+ */
+function focusSurvivingRow(
+  prevKeys: readonly string[],
+  nextIndex: ReadonlyMap<string, number>,
+  rows: readonly HTMLElement[],
+  start: number,
+  prevStart: number,
+  prevEnd: number,
+  removedKey: string,
+): void {
+  const from = prevKeys.indexOf(removedKey);
+  const survivor = (i: number): HTMLElement | undefined => {
+    const j = nextIndex.get(prevKeys[i]!);
+    if (j === undefined) return undefined;
+    const el = rows[j - start];
+    return el !== undefined && el.querySelector(ROW_FOCUSABLE_SELECTOR) !== null ? el : undefined;
+  };
+  for (let i = from + 1; i < prevEnd; i++) {
+    const el = survivor(i);
+    if (el !== undefined) {
+      el.querySelector<HTMLElement>(ROW_FOCUSABLE_SELECTOR)?.focus({ preventScroll: true });
+      return;
+    }
+  }
+  for (let i = from - 1; i >= prevStart; i--) {
+    const el = survivor(i);
+    if (el !== undefined) {
+      el.querySelector<HTMLElement>(ROW_FOCUSABLE_SELECTOR)?.focus({ preventScroll: true });
+      return;
+    }
+  }
+}
+
 // -- Pre-process messages into virtual items ----------------------------------
 
 /** Build virtual items for `messages`, with the NEW divider above index
- *  `newDividerAt` (-1 for none). */
+ *  `newDividerAt` (-1 for none). Consecutive messages by an author in `blocked`
+ *  become one run, broken by a day divider and by the NEW line; it is expanded
+ *  when any of its ids is in `shown`. */
 function buildVirtualItems(
   messages: readonly Message[],
   newDividerAt: number,
+  blocked: ReadonlySet<number>,
+  shown: ReadonlySet<number>,
 ): readonly VirtualItem[] {
   const items: VirtualItem[] = [];
   let lastTimestamp: string | null = null;
   let prevMsg: Message | null = null;
+  let run: Message[] = [];
+  const flushRun = (): void => {
+    if (run.length === 0) return;
+    const expanded = run.some((m) => shown.has(m.id));
+    items.push({
+      kind: "blocked-run",
+      firstId: run[0]!.id,
+      lastId: run[run.length - 1]!.id,
+      count: run.length,
+      expanded,
+    });
+    if (expanded) {
+      for (const message of run) items.push({ kind: "message", message, isGrouped: false });
+    }
+    run = [];
+  };
 
   for (const [i, msg] of messages.entries()) {
-    if (lastTimestamp === null || !isSameDay(lastTimestamp, msg.timestamp)) {
+    // A server row (call log, group event) is never folded into a blocked run.
+    const isBlocked = blocked.has(msg.user.id) && !isServerRowKind(msg.kind);
+    const newDay = lastTimestamp === null || !isSameDay(lastTimestamp, msg.timestamp);
+    const isFirstUnread = i === newDividerAt;
+    if (newDay || isFirstUnread || !isBlocked) flushRun();
+    if (newDay) {
       items.push({ kind: "divider", timestamp: msg.timestamp });
     }
-    const isFirstUnread = i === newDividerAt;
     if (isFirstUnread) {
       items.push({ kind: "new-divider" });
+    }
+    if (isBlocked) {
+      run.push(msg);
+      lastTimestamp = msg.timestamp;
+      prevMsg = null;
+      continue;
     }
     // A message directly under the NEW line starts a fresh block: rendering it
     // as a grouped continuation of a message from before the line hides both
@@ -226,6 +469,7 @@ function buildVirtualItems(
     lastTimestamp = msg.timestamp;
     prevMsg = msg;
   }
+  flushRun();
   return items;
 }
 
@@ -296,14 +540,55 @@ function renderLoadErrorState(onRetryLoad?: () => void): HTMLDivElement {
 
 // -- Factory ------------------------------------------------------------------
 
+/** Share of the visible height one PageUp/PageDown scrolls. */
+const PAGE_SCROLL_FRACTION = 0.875;
+
 export type MessageListComponent = MountableComponent & {
   /** Scroll to a message by ID. Returns false if the message is not in the loaded window. */
   scrollToMessage(messageId: number): boolean;
+  /** Escape: mark the channel read, drop the unread bar and go back to the
+   *  newest messages (a detached window jumps to the present). */
+  markReadAndJumpToPresent(): void;
+  /** PageUp/PageDown from the message box: scroll one page; 1 is down. */
+  scrollPage(direction: 1 | -1): void;
+  /**
+   * Open the inline editor in your own sent message's row, with `text` (default
+   * the message's current content). False when the message is not loaded, not
+   * yours or not sent. The editor itself arrives a moment later (lazy chunk).
+   */
+  /** Open the inline editor on one of your sent messages. `focus: false`
+   *  restores it quietly (no focus, no scrolling) for a late failed save. */
+  startEdit(messageId: number, text?: string, opts?: { readonly focus?: boolean }): boolean;
+  /** Close the open inline editor, discarding its text. */
+  cancelEdit(): void;
+  /** True while an inline editor is open (or loading) in this list. */
+  isEditing(): boolean;
 };
+
+/** The scroll viewport's geometry. Reading it forces layout when the DOM is
+ *  dirty, so a scroll frame reads it once and passes the result down. */
+interface ScrollMetrics {
+  readonly scrollTop: number;
+  readonly clientHeight: number;
+  readonly scrollHeight: number;
+}
+
+function readMetrics(el: HTMLElement): ScrollMetrics {
+  return { scrollTop: el.scrollTop, clientHeight: el.clientHeight, scrollHeight: el.scrollHeight };
+}
 
 export function createMessageList(options: MessageListOptions): MessageListComponent {
   const disposable = new Disposable();
   const unsubscribers: Array<() => void> = [];
+  /** Message ids of blocked authors whose run the reader opened, for this mount. */
+  const shownBlocked = new Set<number>();
+  const renderOptions: MessageRenderOptions = {
+    ...options,
+    listSignal: disposable.signal,
+    get blockedUsers() {
+      return blockedUsers();
+    },
+  };
   /**
    * One owner per rendered message row, scoping that row's listeners (react/
    * reply/pin/edit/delete/copy-link, reply-ref, reaction chips, ...). A row
@@ -314,6 +599,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * per rebuild (OC-0286). destroy() releases the rest.
    */
   const rowOwners = new Map<HTMLElement, Disposable>();
+  /**
+   * The open inline editor (WP 3A-8): at most one per list. `session` is null
+   * while the lazy chunk loads; `gen` tells a late load that it was superseded.
+   */
+  let edit: { readonly messageId: number; session: InlineEditSession | null; gen: number } | null =
+    null;
+  let editGen = 0;
+  // The editor held focus when its row was released by a window slide; it is
+  // focused again when the row comes back.
+  let editRefocus = false;
   /** Non-scrolling frame around the scroller; what is actually appended to
    *  the parent. The floating controls anchor to this box — an absolutely
    *  positioned box whose containing block is the scroller itself sits in
@@ -325,7 +620,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Virtual scroll state
   let virtualItems: readonly VirtualItem[] = [];
   let allMessages: readonly Message[] = [];
+  /** Every loaded message, tombstones included: a reply resolves its parent
+   *  here, so a parent deleted live reads as deleted, not as unknown. Only
+   *  `allMessages` (the rows drawn) leaves tombstones out. */
+  let replyParents: readonly Message[] = [];
   const heightCache = new Map<string, number>(); // itemKey -> measured px
+  /** Width the unmeasured rows' text estimates wrap at; the real one once the
+   *  ResizeObserver has seen the list. */
+  let estimateWidth: number | undefined;
   let tree: FenwickTree | null = null;
   let topSpacer: HTMLDivElement | null = null;
   let bottomSpacer: HTMLDivElement | null = null;
@@ -373,8 +675,12 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * window as older history is prepended and never latches to a count-derived
    * row that could leave real unread messages above it.
    */
-  const openedUnread = isWindowDetached(options.channelId) ? 0 : getUnreadOnOpen(options.channelId);
-  const unreadOnOpen = openedUnread >= UNREAD_COUNT_CAP ? Infinity : openedUnread;
+  let openedUnread = isWindowDetached(options.channelId) ? 0 : getUnreadOnOpen(options.channelId);
+  let unreadOnOpen = openedUnread >= UNREAD_COUNT_CAP ? Infinity : openedUnread;
+  /** True from the first Mark Unread here: the unread count the bar shows is the channel's now. */
+  let markedUnread = false;
+  /** The bottom was reached and marked since the reader last left it (or was away). */
+  let bottomMarked = false;
 
   /**
    * Message id the NEW divider is anchored to, once one has been picked.
@@ -386,6 +692,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * visit regardless of how the window grows around it.
    */
   let newDividerAnchorId: number | null = null;
+  /**
+   * The read pointer the NEW line follows, when the server keeps one: the one
+   * the channel had when it was opened (a visit moves the live pointer), or
+   * the one Mark Unread just set. The line goes on the first loaded message
+   * above it. Undefined keeps the count-based line.
+   */
+  let linePointer: number | undefined = readPointerEnabled()
+    ? getPointerOnOpen(options.channelId)
+    : undefined;
   /** Set while the divider waits for a revisit's refetched tail. */
   let newDividerDeferred = false;
   /** The loaded-and-empty welcome state is what the region currently shows. */
@@ -408,8 +723,33 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    */
   function resolveNewDividerIndex(messages: readonly Message[]): number {
     if (newDividerAnchorId !== null) {
-      return messages.findIndex((m) => m.id === newDividerAnchorId);
+      const at = messages.findIndex((m) => m.id === newDividerAnchorId);
+      if (at === -1) {
+        // The anchor was deleted (the store keeps it as a tombstone): the line
+        // moves to the first message after it, or waits when there is none.
+        const anchorId = newDividerAnchorId;
+        const tombstone = getChannelMessages(options.channelId).some(
+          (m) => m.id === anchorId && m.deleted,
+        );
+        if (tombstone) {
+          const nextAt = messages.findIndex((m) => m.id > anchorId);
+          if (nextAt === -1) return -1;
+          newDividerAnchorId = messages[nextAt]!.id;
+          return nextAt;
+        }
+      }
+      if (at !== -1 || linePointer === undefined) return at;
+      // The anchor left the window (a jump): place the line again by pointer.
+      newDividerAnchorId = null;
     }
+    // The first loaded message above the pointer, latched like the count-based
+    // one — except at the top of the window, where older history may still
+    // arrive above it and move the true boundary.
+    const byPointer = (): number => {
+      const idx = messages.findIndex((m) => m.id > (linePointer ?? 0));
+      if (idx > 0) newDividerAnchorId = messages[idx]!.id;
+      return idx;
+    };
     // An around-window centred on a jumped-to message is not the tail: counting
     // back from its end would mark an arbitrary row. Detachment is read here,
     // not at mount, because a cross-channel jump detaches after the mount.
@@ -418,13 +758,19 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // No divider will exist to open at, and a pending open left armed would
       // scroll the reader up to the line once the tail returns.
       openAtDividerPending = false;
-      return -1;
+      // A pointer places the line inside the around-window too (never scrolled to).
+      return linePointer === undefined ? -1 : byPointer();
     }
     // A revisit renders the cached window while its tail is refetched (DP-10).
     // Those rows predate what arrived while away, so counting back from their
     // end would mark messages already read; wait for the fetched tail.
     newDividerDeferred = unreadOnOpen > 0 && getHistoryLoadState(options.channelId) === "loading";
     if (newDividerDeferred) return -1;
+    if (linePointer !== undefined) {
+      // Only a channel that had unread when opened: with none, the first message
+      // above the pointer is just the first live arrival.
+      return unreadOnOpen > 0 ? byPointer() : -1;
+    }
     const idx = firstUnreadIndex(messages, unreadOnOpen);
     const anchor = idx !== -1 ? messages[idx] : undefined;
     if (anchor !== undefined && anchor.id !== 0 && messages.length >= unreadOnOpen) {
@@ -437,18 +783,37 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Height estimation (Fenwick tree backed)
   // ---------------------------------------------------------------------------
 
-  /** Render one virtual item — the single place the three item kinds map to DOM. */
+  /** Render one virtual item — the single place the item kinds map to DOM. */
   function renderVirtualItem(item: VirtualItem): HTMLElement {
     if (item.kind === "divider") return renderDayDivider(item.timestamp);
     if (item.kind === "new-divider") return renderNewDivider();
     const owner = new Disposable();
-    const el = renderMessage(item.message, item.isGrouped, allMessages, options, owner.signal);
+    if (item.kind === "blocked-run") {
+      const el = renderBlockedRun(item, () => toggleBlockedRun(item.firstId), owner.signal);
+      rowOwners.set(el, owner);
+      return el;
+    }
+    // The one editor node is re-hosted by every build of its row.
+    const editor =
+      edit !== null && edit.session !== null && edit.messageId === item.message.id
+        ? edit.session.element
+        : undefined;
+    const el = renderMessage(
+      item.message,
+      item.isGrouped,
+      replyParents,
+      renderOptions,
+      owner.signal,
+      editor,
+    );
     rowOwners.set(el, owner);
     return el;
   }
 
   /** Discard one rendered row: stop tracking its media and abort its listeners. */
   function releaseRow(el: HTMLElement): void {
+    const editorEl = edit?.session?.element;
+    if (editorEl !== undefined && el.contains(editorEl) && editHoldsFocus()) editRefocus = true;
     for (const img of el.querySelectorAll("img")) discardMedia(img);
     rowOwners.get(el)?.destroy();
     rowOwners.delete(el);
@@ -463,6 +828,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (item === undefined) return `idx-${index}`;
     if (item.kind === "divider") return `div-${item.timestamp}`;
     if (item.kind === "new-divider") return "new-divider";
+    if (item.kind === "blocked-run") return `blk-${item.firstId}`;
     // Every unconfirmed optimistic row (addOptimisticMessage) carries
     // id: 0 until confirmSend stamps the real id, so keying purely on
     // message.id would collide two or more pending rows onto the same
@@ -484,7 +850,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function getItemHeight(index: number): number {
     const cached = heightCache.get(itemKey(index));
     if (cached !== undefined) return cached;
-    return estimateItemHeight(virtualItems[index]!);
+    return estimateItemHeight(virtualItems[index]!, estimateWidth);
   }
 
   function totalHeight(): number {
@@ -530,7 +896,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       (m) =>
         m.id === 0 &&
         m.user.id === options.currentUserId &&
-        (m.status === "pending" || m.status === "failed") &&
+        (m.status === "pending" || m.status === "failed" || m.status === "uploading") &&
         !(m.correlationId?.startsWith("recovered:") ?? false),
     ).length;
   const followOwnSend = (): boolean =>
@@ -539,32 +905,48 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // veto the reader's own send.
   const keepBottom = (): boolean => (isNearBottom() && !loadingNewer) || followOwnSend();
 
-  function isNearBottom(threshold = SCROLL_BOTTOM_THRESHOLD): boolean {
+  /** The metrics handleScroll read this frame, for the scroll rAF's renderWindow
+   *  to reuse. Dropped by any renderWindow or scrollToBottom, so it never
+   *  outlives a pass or a write that could have moved the viewport. */
+  let scrollSnapshot: ScrollMetrics | null = null;
+
+  /** The one place the list moves the viewport: a write invalidates the frame's
+   *  snapshot, so the rAF cannot render for the position from before it. */
+  function setScrollTop(top: number): void {
+    if (root === null) return;
+    scrollSnapshot = null;
+    root.scrollTop = top;
+  }
+
+  function isNearBottom(threshold = SCROLL_BOTTOM_THRESHOLD, m?: ScrollMetrics): boolean {
     if (root === null) return true;
-    const { scrollTop, scrollHeight, clientHeight } = root;
+    const { scrollTop, scrollHeight, clientHeight } = m ?? readMetrics(root);
     return scrollHeight - scrollTop - clientHeight < threshold;
   }
 
   /** The true bottom (1 px tolerates fractional scrollTop on HiDPI), unlike the 100 px isNearBottom. */
-  function isAtBottom(): boolean {
+  function isAtBottom(m?: ScrollMetrics): boolean {
     if (root === null) return true;
-    const { scrollTop, scrollHeight, clientHeight } = root;
+    const { scrollTop, scrollHeight, clientHeight } = m ?? readMetrics(root);
     return scrollHeight - scrollTop - clientHeight <= 1;
   }
 
   function scrollToBottom(): void {
     if (root === null) return;
-    root.scrollTop = root.scrollHeight;
+    setScrollTop(root.scrollHeight);
   }
 
-  function updateScrollToBottomBtn(): void {
+  /** What the pill shows now, so a scroll burst writes the DOM only on a change. */
+  let btnShownKey = "";
+
+  function updateScrollToBottomBtn(m?: ScrollMetrics): void {
     if (scrollToBottomBtn === null) return;
-    if (isNearBottom()) {
-      scrollToBottomBtn.classList.remove("visible");
-      newBelowCount = 0;
-    } else {
-      scrollToBottomBtn.classList.add("visible");
-    }
+    const near = isNearBottom(SCROLL_BOTTOM_THRESHOLD, m);
+    if (near) newBelowCount = 0;
+    const key = `${near ? 1 : 0}:${newBelowCount}`;
+    if (key === btnShownKey) return;
+    btnShownKey = key;
+    scrollToBottomBtn.classList.toggle("visible", !near);
     if (scrollToBottomCount === null) return;
     const shown = formatBadgeCount(newBelowCount);
     scrollToBottomCount.hidden = newBelowCount === 0;
@@ -635,6 +1017,31 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     updateUnreadBar();
   }
 
+  function markReadAndJumpToPresent(): void {
+    if (root === null) return;
+    dismissUnreadBar();
+    // Just marked unread: Escape is the reader asking for it read, so mark at
+    // latest (which also ends the hold). Otherwise what was seen. The gate
+    // keeps a held or repeated Escape off the 5/s mark_read budget.
+    if (readPointerEnabled() && isHeldUnread(options.channelId)) {
+      markChannelRead(options.channelId);
+    } else if (hasUnread(options.channelId) || readPointerEnabled()) {
+      markChannelReadSeen(options.channelId);
+    }
+    if (isWindowDetached(options.channelId)) {
+      options.onJumpToPresent?.();
+      return;
+    }
+    scrollToBottom();
+    updateScrollToBottomBtn();
+  }
+
+  function scrollPage(direction: 1 | -1): void {
+    if (root === null) return;
+    // About what the browser's own PageDown moves, keeping a line of context.
+    setScrollTop(root.scrollTop + direction * Math.round(root.clientHeight * PAGE_SCROLL_FRACTION));
+  }
+
   /** A messagesByChannel / historyLoadState change landed: refresh the bar and the open position. */
   function settleUnreadNav(): void {
     // Only while the reader is still at the bottom the mount left them at.
@@ -652,17 +1059,129 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * The bottom-in-view check alone also covers focus returning while the reader
    * is scrolled up.
    */
-  function markReadIfSeen(): void {
+  function markReadIfSeen(m?: ScrollMetrics): void {
     if (root === null) return;
-    if (channelsStore.getState().activeChannelId !== options.channelId) return;
-    if (!isAtBottom()) return;
-    if (isChannelAway(options.channelId)) return;
+    if (!isReadSurface(options.channelId, channelsStore.getState().activeChannelId)) return;
+    if (!isAtBottom(m) || isChannelAway(options.channelId)) {
+      bottomMarked = false;
+      noteVisibleRowsSeen(m);
+      return;
+    }
     // The cached bottom of a revisit predates what arrived while away; keep
     // the bar until the refetched tail places the divider.
     if (newDividerDeferred) return;
     dismissUnreadBar();
-    if (!hasUnread(options.channelId)) return;
-    markChannelRead(options.channelId);
+    // With a read pointer the mark is what was seen, and what gates it is the
+    // pointer (nothing is sent unless the newest seen id is above it); without
+    // one, the local unread count gates it, as before.
+    if (readPointerEnabled()) {
+      if (!isChannelCovered()) noteMessageSeen(options.channelId, newestLoadedId());
+      // Every append auto-scrolls and lands here: send on reaching the bottom
+      // only. Arrivals watched at the bottom go by the throttled live path.
+      if (bottomMarked) return;
+      bottomMarked = true;
+    } else if (!hasUnread(options.channelId)) return;
+    markChannelReadSeen(options.channelId);
+  }
+
+  /**
+   * A reader scrolling short of the bottom has seen the rows on screen: record
+   * the newest confirmed one whose top is above the viewport's bottom, so
+   * leaving sends `mark_read` up to it (the badge was cleared on open, and the
+   * server must follow). Records only; nothing is sent here. Reads the height
+   * tree, not the DOM, so a scroll event costs one lookup.
+   */
+  function noteVisibleRowsSeen(m?: ScrollMetrics): void {
+    if (root === null || !readPointerEnabled() || isChannelCovered()) return;
+    if (newDividerDeferred || virtualItems.length === 0) return;
+    // The last pixel in view: a row starting exactly at the bottom edge is not.
+    const { scrollTop, clientHeight } = m ?? readMetrics(root);
+    const bottom = scrollTop + Math.max(clientHeight - 1, 0);
+    for (let i = Math.min(offsetToIndex(bottom), virtualItems.length - 1); i >= 0; i--) {
+      const item = virtualItems[i]!;
+      if (item.kind === "blocked-run" && !item.expanded) {
+        noteVisibleMessageSeen(options.channelId, item.lastId);
+        return;
+      }
+      if (item.kind !== "message" || item.message.id <= 0) continue;
+      noteVisibleMessageSeen(options.channelId, item.message.id);
+      return;
+    }
+  }
+
+  /** The newest confirmed message loaded here (pending rows have no id yet); 0 for none. */
+  function newestLoadedId(): number {
+    for (let i = allMessages.length - 1; i >= 0; i--) {
+      if (allMessages[i]!.id > 0) return allMessages[i]!.id;
+    }
+    return 0;
+  }
+
+  /**
+   * Mark Unread from `messageId` (the message menu, Alt+click): the server's
+   * pointer and the NEW line both move to just before it. A no-op unless the
+   * server keeps a read pointer.
+   */
+  function markUnreadFrom(messageId: number): void {
+    const before = {
+      linePointer,
+      newDividerAnchorId,
+      markedUnread,
+      unreadBarDismissed,
+      openedUnread,
+      unreadOnOpen,
+    };
+    const pointer = markMessageUnread(options.channelId, messageId);
+    if (pointer === null) return;
+    unmarked = before;
+    linePointer = pointer;
+    newDividerAnchorId = messageId;
+    markedUnread = true;
+    unreadBarDismissed = false;
+    refreshUnreadFromChannel(messageId);
+    if (!patchRows()) renderAll();
+  }
+
+  /** What the list showed before the latest Mark Unread, to go back to if it fails. */
+  let unmarked: {
+    readonly linePointer: number | undefined;
+    readonly newDividerAnchorId: number | null;
+    readonly markedUnread: boolean;
+    readonly unreadBarDismissed: boolean;
+    readonly openedUnread: number;
+    readonly unreadOnOpen: number;
+  } | null = null;
+
+  /**
+   * The Mark Unread did not happen (refused, or never sent) and its pointer is
+   * back: the NEW line and the unread bar go back to what they were. A
+   * confirming `read_state` never comes here, so a mark that worked stays.
+   */
+  function revertMarkUnread(): void {
+    if (unmarked === null) return;
+    ({
+      linePointer,
+      newDividerAnchorId,
+      markedUnread,
+      unreadBarDismissed,
+      openedUnread,
+      unreadOnOpen,
+    } = unmarked);
+    unmarked = null;
+    updateUnreadBar();
+    if (!patchRows()) renderAll();
+  }
+
+  /**
+   * After Mark Unread the top bar and the line count what is unread now: the
+   * channel's count once the server has answered (`read_state`), until then the
+   * loaded messages from the marked one on.
+   */
+  function refreshUnreadFromChannel(markedId: number): void {
+    const known = channelsStore.getState().channels.get(options.channelId)?.unreadCount ?? 0;
+    openedUnread = known > 0 ? known : allMessages.filter((m) => m.id >= markedId).length;
+    unreadOnOpen = openedUnread >= UNREAD_COUNT_CAP ? Infinity : openedUnread;
+    updateUnreadBar();
   }
 
   /**
@@ -674,9 +1193,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    */
   function markLiveArrivalSeen(): void {
     if (root === null) return;
-    if (channelsStore.getState().activeChannelId !== options.channelId) return;
+    if (!isReadSurface(options.channelId, channelsStore.getState().activeChannelId)) return;
     if (isChannelAway(options.channelId) || isChannelCovered()) return;
     if (newDividerDeferred) return;
+    noteMessageSeen(options.channelId, newestLoadedId(), true);
     noteLiveMessageSeen(options.channelId, disposable.signal);
   }
 
@@ -684,9 +1204,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // Render visible window
   // ---------------------------------------------------------------------------
 
-  function measureRendered(): void {
+  /** Record the heights of the rendered rows, or only those whose item index
+   *  lies in [from, to) (a slide measures just the rows that entered; every
+   *  other row was measured when it entered or by the ResizeObserver pass). */
+  function measureRendered(from: number = renderedStart, to: number = renderedEnd): void {
     if (contentContainer === null || renderedStart < 0) return;
     const children = contentContainer.children;
+    const first = Math.max(0, from - renderedStart);
+    const last = Math.min(children.length, to - renderedStart);
 
     // Pass 1 — pure reads: collect all heights without touching any styles.
     // Batching all getComputedStyle / offsetHeight reads before any writes
@@ -698,7 +1223,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       readonly h: number;
     }
     const measurements: Measurement[] = [];
-    for (let i = 0; i < children.length; i++) {
+    for (let i = first; i < last; i++) {
       const globalIdx = renderedStart + i;
       if (globalIdx < 0 || (tree !== null && globalIdx >= tree.size)) continue;
       const el = children[i] as HTMLElement;
@@ -774,23 +1299,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return { own: active.dataset.testid ?? null, row: row?.dataset.testid ?? null, index };
   }
 
+  /** Put focus back on the captured control's replacement; false when it has none. */
   function restoreRowFocus(
     captured: { own: string | null; row: string | null; index: number } | null,
-  ): void {
-    if (captured === null || contentContainer === null) return;
+  ): boolean {
+    if (captured === null || contentContainer === null) return false;
+    let target: HTMLElement | null | undefined = null;
     if (captured.own !== null) {
-      contentContainer
-        .querySelector<HTMLElement>(`[data-testid="${captured.own}"]`)
-        ?.focus({ preventScroll: true });
-      return;
-    }
-    if (captured.row !== null && captured.index >= 0) {
-      contentContainer
+      target = contentContainer.querySelector<HTMLElement>(`[data-testid="${captured.own}"]`);
+    } else if (captured.row !== null && captured.index >= 0) {
+      target = contentContainer
         .querySelector<HTMLElement>(`[data-testid="${captured.row}"]`)
         ?.querySelectorAll<HTMLElement>(ROW_FOCUSABLE_SELECTOR)
-        .item(captured.index)
-        ?.focus({ preventScroll: true });
+        .item(captured.index);
     }
+    target?.focus({ preventScroll: true });
+    return target !== null && target !== undefined;
   }
 
   /** Abort every rendered row's listeners before a rebuild discards the rows,
@@ -826,15 +1350,25 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function holdRow(el: Element, edge: number): void {
     if (root === null) return;
     const delta = edgeOf(el) - edge;
-    if (Math.abs(delta) >= 1) root.scrollTop += delta;
+    if (Math.abs(delta) >= 1) setScrollTop(root.scrollTop + delta);
   }
 
   /** Slide the rendered window to [start, end), which overlaps it: release the
    *  rows that left, render only the rows that entered, keep the rest. */
-  function shiftWindow(start: number, end: number): void {
+  function shiftWindow(
+    start: number,
+    end: number,
+    view: Pick<ScrollMetrics, "scrollTop" | "clientHeight">,
+  ): void {
     if (contentContainer === null) return;
-    // Record the rows' heights before any of them leave.
-    measureRendered();
+    // Rows that stay were measured when they entered or by the ResizeObserver
+    // pass, so only the rows that leave (here, before they are released: one
+    // may have grown since the last pass) and the rows that enter (below) are
+    // measured.
+    const prevStart = renderedStart;
+    const prevEnd = renderedEnd;
+    measureRendered(prevStart, start);
+    measureRendered(end, prevEnd);
     const rows = [...contentContainer.children] as HTMLElement[];
     // Rows entering above the view keep the first row that stays in place on
     // screen; rows leaving above it are measured, so their spacer share is exact.
@@ -842,7 +1376,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const keptEdge = kept === undefined ? 0 : edgeOf(kept);
     // Only a row the reader could see is worth holding: a jump to the top
     // shows the rows above it instead, laid out as they really are.
-    const hold = kept !== undefined && keptEdge < (root?.clientHeight ?? 0) && root!.scrollTop > 0;
+    const hold = kept !== undefined && keptEdge < view.clientHeight && view.scrollTop > 0;
     for (let i = 0; i < rows.length; i++) {
       const globalIdx = renderedStart + i;
       if (globalIdx < start || globalIdx >= end) releaseRow(rows[i]!);
@@ -859,17 +1393,31 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     contentContainer.appendChild(tail);
     renderedStart = start;
     renderedEnd = end;
-    measureRendered();
+    measureRendered(start, prevStart);
+    measureRendered(prevEnd, end);
     updateSpacers();
     if (hold && kept.isConnected) holdRow(kept, keptEdge);
+    refocusEditor();
   }
 
-  function renderWindow(): void {
+  /** The row that held the focused editor is back: give the editor focus again,
+   *  unless the reader has put it somewhere else meanwhile. */
+  function refocusEditor(): void {
+    const el = edit?.session?.element;
+    if (!editRefocus || el === undefined || !el.isConnected) return;
+    const active = document.activeElement;
+    editRefocus = false;
+    if (active !== null && active !== document.body) return;
+    el.querySelector("textarea")?.focus({ preventScroll: true });
+  }
+
+  function renderWindow(m?: ScrollMetrics): void {
     if (root === null || contentContainer === null || topSpacer === null || bottomSpacer === null)
       return;
 
-    const scrollTop = root.scrollTop;
-    const clientHeight = root.clientHeight;
+    scrollSnapshot = null;
+    const { scrollTop, clientHeight } = m ?? readMetrics(root);
+    lastViewportHeight = clientHeight;
 
     if (virtualItems.length === 0) {
       releaseTrackedMedia();
@@ -879,14 +1427,31 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // placeholder, an inline error + Retry, or the welcome/empty state once
       // the channel is actually loaded and empty (UX spec §1/§2).
       const loadState = getHistoryLoadState(options.channelId);
-      if (loadState === "loading") {
+      // Every loaded row was deleted but the server has older ones: not an
+      // empty channel, so load the page before them instead of welcoming.
+      const allDeleted =
+        loadState === null &&
+        getChannelMessages(options.channelId).length > 0 &&
+        hasMoreMessages(options.channelId);
+      // The page before them just failed to load: say so, with a retry,
+      // instead of a placeholder that never ends.
+      const olderFailed = allDeleted && !loadingOlder && performance.now() < olderRetryAt;
+      if (olderFailed) {
+        contentContainer.appendChild(
+          renderLoadErrorState(() => {
+            olderRetryAt = 0;
+            renderWindow();
+          }),
+        );
+      } else if (loadState === "loading" || allDeleted) {
         contentContainer.appendChild(renderLoadingState());
       } else if (loadState === "error") {
         contentContainer.appendChild(renderLoadErrorState(options.onRetryLoad));
       } else {
         contentContainer.appendChild(renderEmptyState(options.channelName, options.channelType));
       }
-      loadedEmptyShown = loadState === null;
+      loadedEmptyShown = loadState === null && !allDeleted;
+      if (allDeleted && !loadingOlder && !olderFailed) fireOlderLoad();
       topSpacer.style.height = "0px";
       bottomSpacer.style.height = "0px";
       renderedStart = 0;
@@ -898,8 +1463,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const firstVisible = offsetToIndex(scrollTop);
     const lastVisible = offsetToIndex(scrollTop + clientHeight);
 
-    let start = Math.max(0, firstVisible - OVERSCAN);
-    const end = Math.min(virtualItems.length, lastVisible + OVERSCAN + 1);
+    // Overscan is a distance, not a row count: a viewport above and below,
+    // bounded to 4..20 rows each way so tall media rows do not pile up and
+    // short rows keep a buffer. Without a viewport height, the row maximum.
+    let above = OVERSCAN_MAX_ROWS;
+    let below = OVERSCAN_MAX_ROWS;
+    if (clientHeight > 0) {
+      const margin = clientHeight * OVERSCAN_VIEWPORTS;
+      above = clampOverscan(firstVisible - offsetToIndex(scrollTop - margin));
+      below = clampOverscan(offsetToIndex(scrollTop + clientHeight + margin) - lastVisible);
+    }
+    let start = Math.max(0, firstVisible - above);
+    const end = Math.min(virtualItems.length, lastVisible + below + 1);
     // A divider is drawn with the row under it: that row's top margin depends
     // on the divider being there, so a window starting between them would
     // measure the row differently from how it is laid out once both show.
@@ -924,7 +1499,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       end > renderedStart &&
       contentContainer.children.length === renderedEnd - renderedStart
     ) {
-      shiftWindow(start, end);
+      shiftWindow(start, end, { scrollTop, clientHeight });
       return;
     }
     if (!rangeAlreadyRendered) {
@@ -963,6 +1538,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // clearChildren; capture its identity so it can be restored on its
       // replacement row (Q1: focus stays put through a virtualized rebuild).
       const focusedRow = captureRowFocus();
+      if (editHoldsFocus()) editRefocus = true;
       releaseTrackedMedia();
       beginRowRender();
       clearChildren(contentContainer);
@@ -976,6 +1552,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       measureRendered();
       updateSpacers();
       restoreRowFocus(focusedRow);
+      refocusEditor();
     } else {
       // Target range already fully rendered: no-op. The ResizeObserver
       // handles measurement and spacer updates when element sizes change.
@@ -991,10 +1568,26 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // ---------------------------------------------------------------------------
 
   function rebuildItems(): void {
-    allMessages = getChannelMessages(options.channelId);
-    virtualItems = buildVirtualItems(allMessages, resolveNewDividerIndex(allMessages));
+    replyParents = getChannelMessages(options.channelId);
+    allMessages = visibleMessages(replyParents);
+    virtualItems = buildVirtualItems(
+      allMessages,
+      resolveNewDividerIndex(allMessages),
+      blockedUsers(),
+      shownBlocked,
+    );
 
     seedTree();
+  }
+
+  /** Estimate again every row that has no measured height, leaving measured
+   *  rows (and so the rendered window) as they are. */
+  function reseedUnmeasured(): void {
+    if (tree === null) return;
+    for (let i = 0; i < virtualItems.length; i++) {
+      if (!heightCache.has(itemKey(i)))
+        tree.set(i, estimateItemHeight(virtualItems[i]!, estimateWidth));
+    }
   }
 
   /** Build the Fenwick tree from measured heights, estimating the rest. */
@@ -1012,6 +1605,35 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   const MAX_INCREMENTAL_WINDOW = 200;
 
   /**
+   * Whether a history prepend leaves every rendered row in place: each item of
+   * the new window [start, end) was a rendered row, and each rendered row is
+   * in it, bar day dividers at its head (the day now starts higher up).
+   */
+  function keepsRenderedRows(
+    prevItems: readonly VirtualItem[],
+    prevKeys: readonly string[],
+    prevIndex: ReadonlyMap<string, number>,
+    nextKeys: readonly string[],
+    nextIndex: ReadonlyMap<string, number>,
+    start: number,
+    end: number,
+  ): boolean {
+    for (let j = start; j < end; j++) {
+      const i = prevIndex.get(nextKeys[j]!);
+      if (i === undefined || i < renderedStart || i >= renderedEnd) return false;
+    }
+    let atHead = true;
+    for (let i = renderedStart; i < renderedEnd; i++) {
+      if (nextIndex.has(prevKeys[i]!)) {
+        atHead = false;
+      } else if (!atHead || prevItems[i]!.kind !== "divider") {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
    * Fast path for a store update that changes a few rows (P4-01): diff the new
    * items against the rendered ones by key and touch only what changed — a
    * reaction, edit, delete or send confirmation re-renders its own row, plus a
@@ -1022,9 +1644,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * playing video, a revealed spoiler or focus survive. A row outside the
    * rendered window only moves its height entry.
    *
+   * A history prepend keeps the DOM too, when every rendered row survives
+   * (a day divider that moved up with the page excepted) and the new items all
+   * land above the rendered window, the tail trim of the message cap included:
+   * the window's indices shift by the inserted count, the spacers take the
+   * page's estimated height and the reading position is re-applied in the same
+   * task, so no rendered row is rebuilt or has its media reloaded. A prepend
+   * that moves the NEW line, reaches into the window or drops a rendered row
+   * is left to renderAll.
+   *
    * Returns false, for renderAll to rebuild, when there is nothing rendered to
    * keep, rows were reordered, or a message was inserted above every row that
-   * stays (a history prepend, whose reading position renderAll keeps).
+   * stays and the prepend conditions above do not hold.
    *
    * The Fenwick tree is re-seeded from the height cache, as for any rebuild,
    * and the topmost visible message row that stays keeps its offset in the
@@ -1034,10 +1665,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function patchRows(): boolean {
     if (root === null || contentContainer === null || tree === null) return false;
     if (renderAllRunning || renderedStart < 0 || allMessages.length === 0) return false;
-    const next = getChannelMessages(options.channelId);
+    const nextParents = getChannelMessages(options.channelId);
+    const next = visibleMessages(nextParents);
     if (next.length === 0) return false;
     const prevItems = virtualItems;
-    const nextItems = buildVirtualItems(next, resolveNewDividerIndex(next));
+    const nextItems = buildVirtualItems(
+      next,
+      resolveNewDividerIndex(next),
+      blockedUsers(),
+      shownBlocked,
+    );
     const prevKeys = prevItems.map(keyOf);
     const nextKeys = nextItems.map(keyOf);
     const prevIndex = new Map(prevKeys.map((k, i) => [k, i]));
@@ -1045,13 +1682,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (prevIndex.size < prevKeys.length || nextIndex.size < nextKeys.length) return false;
 
     // The rows that stay keep their order, and no message lands above every
-    // message that stays (a history prepend, left to renderAll).
+    // message that stays (a history prepend sets `prepended`).
     let last = -1;
     let anchored = false;
+    let prepended = false;
     for (const [j, item] of nextItems.entries()) {
       const i = prevIndex.get(nextKeys[j]!);
       if (i === undefined) {
-        if (!anchored && item.kind === "message") return false;
+        if (!anchored && item.kind === "message") prepended = true;
         continue;
       }
       if (i < last) return false;
@@ -1071,7 +1709,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       end = j + 1;
     }
     if (start === -1) return false;
-    if (renderedStart === 0) start = 0;
+    if (
+      prepended &&
+      !keepsRenderedRows(prevItems, prevKeys, prevIndex, nextKeys, nextIndex, start, end)
+    ) {
+      return false;
+    }
+    // A prepend's window stays on the rows already drawn; the page above it is
+    // drawn by the slide below, as for any scroll.
+    if (renderedStart === 0 && !prepended) start = 0;
     if (renderedEnd === prevItems.length) end = nextItems.length;
     if (end - start > MAX_INCREMENTAL_WINDOW) return false;
 
@@ -1091,12 +1737,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     const anchorKey = prevKeys[anchor];
     const anchorOffset = root.scrollTop - offsetBefore(anchor);
+    const anchorRow = prepended ? renderedRowAt(anchor) : undefined;
+    const anchorEdge = anchorRow === undefined ? null : edgeOf(anchorRow);
 
     // A reply re-renders its quote when its parent left, arrived, or changed
-    // what the quote draws (renderReplyRef reads the parent from allMessages);
+    // what the quote draws (renderReplyRef reads the parent from replyParents);
     // a reaction or pin on the parent leaves the reply alone.
-    const prevById = new Map(allMessages.map((m) => [m.id, m]));
-    const nextById = new Map(next.map((m) => [m.id, m]));
+    const prevById = new Map(replyParents.map((m) => [m.id, m]));
+    const nextById = new Map(nextParents.map((m) => [m.id, m]));
     const quoteChanged = (id: number | null): boolean => {
       if (id === null) return false;
       const a = prevById.get(id);
@@ -1105,9 +1753,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     };
 
     const focused = captureRowFocus();
+    const editHadFocus = editHoldsFocus();
+    const prevStart = renderedStart;
+    const prevEnd = renderedEnd;
     const shown = [...contentContainer.children] as HTMLElement[];
+    // The row holding focus, so focus can move on if that row is removed.
+    const focusedAt = shown.findIndex((el) => el.contains(document.activeElement));
+    const focusedKey = focusedAt === -1 ? undefined : prevKeys[prevStart + focusedAt];
     const shownByKey = new Map(shown.map((el, i) => [prevKeys[renderedStart + i]!, el]));
     allMessages = next;
+    replyParents = nextParents;
     virtualItems = nextItems;
 
     const rows: HTMLElement[] = [];
@@ -1119,11 +1774,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // A row stays when nothing it draws changed: its message, its grouping
       // and the parent a reply quotes. A divider with the same key is the same.
       const same =
-        now.kind !== "message" ||
-        (was?.kind === "message" &&
-          was.message === now.message &&
-          was.isGrouped === now.isGrouped &&
-          !quoteChanged(now.message.replyTo));
+        now.kind === "blocked-run"
+          ? was?.kind === "blocked-run" && was.count === now.count && was.expanded === now.expanded
+          : now.kind !== "message" ||
+            (was?.kind === "message" &&
+              was.message === now.message &&
+              was.isGrouped === now.isGrouped &&
+              !quoteChanged(now.message.replyTo));
       if (el !== undefined && same) {
         rows.push(el);
         reused.add(el);
@@ -1147,15 +1804,34 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     measureRendered();
     updateSpacers();
     if (focused !== null && !contentContainer.contains(document.activeElement)) {
-      restoreRowFocus(focused);
+      if (!restoreRowFocus(focused) && focusedKey !== undefined && !nextIndex.has(focusedKey)) {
+        // The focused row was removed (deleted): focus the next surviving row,
+        // or the one before it, rather than dropping to <body>.
+        focusSurvivingRow(prevKeys, nextIndex, rows, start, prevStart, prevEnd, focusedKey);
+      }
     }
 
     if (atBottom) {
       scrollToBottom();
+      if (prepended) renderWindow();
       updateScrollToBottomBtn();
-    } else if (anchorKey !== undefined) {
-      root.scrollTop = Math.max(0, offsetBefore(nextIndex.get(anchorKey)!) + anchorOffset);
+    } else if (anchorKey === undefined) {
+      if (prepended) renderWindow();
+    } else {
+      const anchorAt = nextIndex.get(anchorKey)!;
+      setScrollTop(Math.max(0, offsetBefore(anchorAt) + anchorOffset));
+      if (prepended) {
+        // The page above is spacer only: draw the rows now in view, then
+        // re-place the anchor against the heights they measured.
+        renderWindow();
+        for (let pass = 0; pass < 3; pass++) {
+          if (!placeIndex(anchorAt, anchorOffset)) break;
+        }
+        const el = renderedRowAt(anchorAt);
+        if (el !== undefined && anchorEdge !== null) holdRow(el, anchorEdge);
+      }
     }
+    dropGoneEdit(editHadFocus);
     return true;
   }
 
@@ -1193,7 +1869,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return contentContainer?.children[idx - renderedStart];
   }
 
-  function renderAll(): void {
+  function renderAll(hold?: { readonly key: string; readonly edge: number }): void {
     if (root === null) return;
     if (renderAllRunning) return; // prevent re-entrancy
 
@@ -1218,6 +1894,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
 
     renderAllRunning = true;
+    const editHadFocus = editHoldsFocus();
     try {
       log.debug("renderAll START", { count: renderAllCount });
       wasAtBottom = keepBottom();
@@ -1234,7 +1911,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       let anchorMessageId: number | null = null;
       let anchorOffsetInItem = 0;
       let anchorEdge: number | null = null;
-      if (!wasAtBottom && root !== null) {
+      if (!wasAtBottom && root !== null && hold === undefined) {
         const anchorIdx = topMessageIndex();
         if (anchorIdx !== -1) {
           anchorMessageId = (virtualItems[anchorIdx] as VirtualItemMessage).message.id;
@@ -1261,7 +1938,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         const estTotal = totalHeight();
         if (topSpacer !== null) topSpacer.style.height = "0px";
         if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
-        root.scrollTop = Math.max(0, estTotal - root.clientHeight);
+        setScrollTop(Math.max(0, estTotal - root.clientHeight));
+      } else if (hold !== undefined && root !== null) {
+        const at = virtualItems.findIndex((item, i) => keyOf(item, i) === hold.key);
+        if (at !== -1) {
+          const estTotal = totalHeight();
+          if (topSpacer !== null) topSpacer.style.height = "0px";
+          if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
+          setScrollTop(Math.max(0, offsetBefore(at) - hold.edge));
+        }
       } else if (anchorMessageId !== null && root !== null) {
         const newIdx = virtualItems.findIndex(
           (item) => item.kind === "message" && item.message.id === anchorMessageId,
@@ -1274,7 +1959,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           const estTotal = totalHeight();
           if (topSpacer !== null) topSpacer.style.height = "0px";
           if (bottomSpacer !== null) bottomSpacer.style.height = `${estTotal}px`;
-          root.scrollTop = Math.max(0, offsetBefore(newIdx) + anchorOffsetInItem);
+          setScrollTop(Math.max(0, offsetBefore(newIdx) + anchorOffsetInItem));
         }
       }
 
@@ -1289,6 +1974,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       if (wasAtBottom) {
         scrollToBottom();
         updateScrollToBottomBtn();
+      } else if (hold !== undefined) {
+        const at = virtualItems.findIndex((item, i) => keyOf(item, i) === hold.key);
+        if (at !== -1) {
+          for (let pass = 0; pass < 3; pass++) {
+            if (!placeIndex(at, -hold.edge)) break;
+          }
+          const el = renderedRowAt(at);
+          if (el !== undefined) holdRow(el, hold.edge);
+        }
       } else if (anchorMessageId !== null) {
         // The anchor above was applied against estimates for the rows the
         // rebuild put above the reader (a prepended page); renderWindow has
@@ -1306,6 +2000,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
           if (el !== undefined && anchorEdge !== null) holdRow(el, anchorEdge);
         }
       }
+      dropGoneEdit(editHadFocus);
       log.debug("renderAll END");
     } finally {
       renderAllRunning = false;
@@ -1331,6 +2026,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     loadingOlder = value;
     if (!value) olderLoadingRow?.remove();
     else if (olderLoadingRow !== null) root?.appendChild(olderLoadingRow);
+    updateOlderFailedRow();
+  }
+  /** "Couldn't load messages" + Retry over the top of the history after a failed
+   *  older-page fetch. Overlays the region like the spinner, so no row moves. */
+  let olderFailedRow: HTMLDivElement | null = null;
+  function updateOlderFailedRow(): void {
+    if (olderFailedRow === null) return;
+    olderFailedRow.hidden = loadingOlder || !hasOlderLoadFailed(options.channelId);
+  }
+  /** An explicit Retry click: goes at once, past the automatic-retry cooldown. */
+  function retryOlder(): void {
+    if (loadingOlder) return;
+    olderRetryAt = 0;
+    fireOlderLoad();
+    // The row hides while the page loads: keep keyboard focus in the list.
+    root?.focus({ preventScroll: true });
   }
   // The oldest loaded message's id, not the count: a live tail append also
   // changes the count while a history fetch is still in flight, and
@@ -1358,8 +2069,32 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return getChannelMessages(options.channelId).findLast((m) => m.id > 0)?.id ?? 0;
   }
 
+  function fireOlderLoad(): void {
+    setLoadingOlder(true);
+    const oldestAtFire = getChannelMessages(options.channelId)[0]?.id;
+    // A failed fetch never changes the message count, so the subscriber
+    // above (which only reacts to a count change) would leave loadingOlder
+    // latched forever. Clear it once the load settles either way — the
+    // subscriber's reset still applies to the success path but is now just
+    // belt-and-braces.
+    void Promise.resolve(options.onScrollTop()).finally(() => {
+      setLoadingOlder(false);
+      // Nothing was prepended: hold off so continued scrolling in the zone
+      // does not send one failing request after another.
+      if (getChannelMessages(options.channelId)[0]?.id === oldestAtFire) {
+        olderRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
+      }
+      // With every loaded row deleted there is nothing else to redraw the
+      // region: show the outcome (the next page, or the failure and Retry).
+      if (virtualItems.length === 0 && !disposable.signal.aborted) renderWindow();
+    });
+  }
+
   let scrollRafId = 0;
   let resizeRafId = 0;
+  /** The scroll viewport's height at the last resize pass: the window's overscan
+   *  is a distance, so it must be recomputed when the viewport grows or shrinks. */
+  let lastViewportHeight = 0;
   let resizeObserver: ResizeObserver | null = null;
   // resizeDirty tracking removed — resize observer batches via RAF directly
   function handleScroll(): void {
@@ -1367,8 +2102,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Load older messages well before the top (DP-46); the floor keeps the
     // trigger working when the viewport has no height yet.
+    // The frame's only layout read: everything below, and the rAF's renderWindow,
+    // works from this snapshot, so the DOM writes in between cannot force a
+    // second layout.
+    const m = readMetrics(root);
+    scrollSnapshot = m;
     const nearTop =
-      root.scrollTop < Math.max(SCROLL_TOP_THRESHOLD, root.clientHeight * SCROLL_TOP_VIEWPORTS);
+      m.scrollTop < Math.max(SCROLL_TOP_THRESHOLD, m.clientHeight * SCROLL_TOP_VIEWPORTS);
     if (!nearTop) olderRetryAt = 0;
     if (
       nearTop &&
@@ -1376,27 +2116,14 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       performance.now() >= olderRetryAt &&
       hasMoreMessages(options.channelId)
     ) {
-      setLoadingOlder(true);
-      const oldestAtFire = getChannelMessages(options.channelId)[0]?.id;
-      // A failed fetch never changes the message count, so the subscriber
-      // below (which only reacts to a count change) would leave loadingOlder
-      // latched forever. Clear it once the load settles either way — the
-      // subscriber's reset still applies to the success path but is now just
-      // belt-and-braces.
-      void Promise.resolve(options.onScrollTop()).finally(() => {
-        setLoadingOlder(false);
-        // Nothing was prepended: hold off so continued scrolling in the zone
-        // does not send one failing request after another.
-        if (getChannelMessages(options.channelId)[0]?.id === oldestAtFire) {
-          olderRetryAt = performance.now() + OLDER_RETRY_COOLDOWN_MS;
-        }
-      });
+      fireOlderLoad();
     }
 
     // A detached window pages DOWN toward the present as the reader nears its
     // bottom; the page that reaches the newest message reattaches it.
     const nearBottomZone = isNearBottom(
-      Math.max(SCROLL_BOTTOM_THRESHOLD, root.clientHeight * SCROLL_BOTTOM_VIEWPORTS),
+      Math.max(SCROLL_BOTTOM_THRESHOLD, m.clientHeight * SCROLL_BOTTOM_VIEWPORTS),
+      m,
     );
     if (!nearBottomZone) newerRetryAt = 0;
     if (
@@ -1418,18 +2145,18 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
 
     // Update floating scroll-to-bottom button visibility
-    updateScrollToBottomBtn();
+    updateScrollToBottomBtn(m);
     // Before markReadIfSeen, which asks isChannelAway. The 100 px auto-scroll
     // threshold on purpose: inside it a new message is scrolled into view.
-    setLiveTailInView(options.channelId, isNearBottom());
+    setLiveTailInView(options.channelId, isNearBottom(SCROLL_BOTTOM_THRESHOLD, m));
     // Reaching the bottom counts as seeing it (P4-03 step A).
-    markReadIfSeen();
+    markReadIfSeen(m);
 
     // Debounce virtual window updates to animation frames
     if (scrollRafId === 0) {
       scrollRafId = requestAnimationFrame(() => {
         scrollRafId = 0;
-        renderWindow();
+        renderWindow(scrollSnapshot ?? undefined);
       });
     }
   }
@@ -1474,7 +2201,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   function mount(parentContainer: Element): void {
     region = createElement("div", { class: "messages-region" });
-    root = createElement("div", { class: "messages-container" });
+    // Focusable by script only (-1): the older-history Retry hands focus here.
+    root = createElement("div", { class: "messages-container", tabindex: "-1" });
 
     topSpacer = createElement("div", { class: "virtual-spacer-top" });
     contentContainer = createElement("div", { class: "virtual-content" });
@@ -1487,10 +2215,28 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     });
     olderLoadingRow.appendChild(createElement("div", { class: "spinner" }));
 
+    olderFailedRow = createElement("div", {
+      class: "messages-older-failed",
+      role: "alert",
+      "data-testid": "messages-older-failed",
+    });
+    olderFailedRow.appendChild(
+      createElement("span", { class: "messages-load-error-text" }, messagingText("loadFailed")),
+    );
+    const olderRetryBtn = createElement(
+      "button",
+      { class: "messages-retry-btn", type: "button", "data-testid": "messages-older-retry" },
+      messagingText("retry"),
+    );
+    olderRetryBtn.addEventListener("click", retryOlder, { signal: disposable.signal });
+    olderFailedRow.appendChild(olderRetryBtn);
+    updateOlderFailedRow();
+
     scrollToBottomBtn = createElement("button", {
       class: "scroll-to-bottom-btn",
       "aria-label": messagingText("scrollToBottom"),
     });
+    btnShownKey = "";
     scrollToBottomBtn.append("↓");
     scrollToBottomCount = createElement("span", {
       class: "scroll-to-bottom-count",
@@ -1529,6 +2275,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     root.appendChild(bottomSpacer);
     root.appendChild(scrollAnchor);
     region.appendChild(root);
+    region.appendChild(olderFailedRow);
     region.appendChild(scrollToBottomBtn);
     region.appendChild(jumpToPresentPill);
     region.appendChild(unreadBar);
@@ -1572,9 +2319,125 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     );
     disposable.signal.addEventListener("abort", () => closeProfilePopup?.(), { once: true });
 
+    // One delegated listener opens the message menu, by right-click and by the
+    // Menu key / Shift+F10 (which dispatch `contextmenu` to the focused control
+    // with no pointer position). The lazy module decides whether the target
+    // offers a menu (an image's own listener stops the event first; a text
+    // field keeps the webview's own menu), and main.ts already suppresses the
+    // webview's menu everywhere else, so nothing is prevented here.
+    contentContainer.addEventListener(
+      "contextmenu",
+      (e) => {
+        const { clientX: x, clientY: y, target } = e;
+        withMessageMenu((m) =>
+          m.openMessageMenuAt({
+            opts: options,
+            x,
+            y,
+            target,
+            signal: disposable.signal,
+            markUnread: markUnreadFrom,
+          }),
+        );
+      },
+      { signal: disposable.signal },
+    );
+    // The hover bar's "..." button: one delegated listener, so the menu is
+    // owned by the list's signal and survives its row being patched or rebuilt.
+    // A click on "..." while its menu is open closes it (the outside mousedown
+    // already has), so the open state is noted at pointerdown, before that.
+    let moreWasOpen = false;
+    contentContainer.addEventListener(
+      "pointerdown",
+      (e) => {
+        moreWasOpen = moreButtonOf(e.target)?.getAttribute("aria-expanded") === "true";
+      },
+      { signal: disposable.signal },
+    );
+    contentContainer.addEventListener(
+      "click",
+      (e) => {
+        // Reset on every click, so a press on More released elsewhere cannot
+        // leave the flag set; a keyboard click (detail 0) had no pointerdown.
+        const skip = moreWasOpen && e.detail > 0;
+        moreWasOpen = false;
+        const button = moreButtonOf(e.target);
+        if (button === null || skip) return;
+        const testId = button.dataset["testid"] ?? "";
+        withMessageMenu((m) => {
+          // The first open waits for the menu module; a patch or scroll in that
+          // time replaces the button, so anchor on the live one, or open nothing.
+          const live = button.isConnected
+            ? button
+            : (contentContainer?.querySelector<HTMLElement>(`[data-testid="${testId}"]`) ?? null);
+          if (live === null) return;
+          m.openMessageMenuFromButton({
+            opts: options,
+            button: live,
+            signal: disposable.signal,
+            markUnread: markUnreadFrom,
+          });
+        });
+      },
+      { signal: disposable.signal },
+    );
+    // Shift pressed before the pointer arrived still reveals Pin and Delete.
+    contentContainer.addEventListener(
+      "mouseover",
+      (e) => {
+        root?.classList.toggle("shift-held", e.shiftKey);
+      },
+      { signal: disposable.signal },
+    );
+    // Alt+click on a message row marks it unread (the lazy module decides which
+    // targets count: not a link, button, image or text field).
+    contentContainer.addEventListener(
+      "click",
+      (e) => {
+        if (!e.altKey || !readPointerEnabled()) return;
+        const { target } = e;
+        withMessageMenu((m) =>
+          m.markUnreadAt({ opts: options, target, markUnread: markUnreadFrom }),
+        );
+      },
+      { signal: disposable.signal },
+    );
+
     // Focus returning with the bottom already in view counts as seeing it
     // (P4-03 step A). Owned by disposable.signal so destroy() releases it.
-    window.addEventListener("focus", markReadIfSeen, { signal: disposable.signal });
+    window.addEventListener("focus", () => markReadIfSeen(), { signal: disposable.signal });
+
+    // Shift reveals the hover bar's Pin and Delete (WP 3A-7): one pair of
+    // window listeners toggles a class on the list root, and CSS shows the
+    // extra buttons. A lost keyup (focus left the window, the tab was hidden)
+    // would leave them out, so both of those reset it. Owned by disposable.signal.
+    const setShiftHeld = (held: boolean): void => {
+      root?.classList.toggle("shift-held", held);
+    };
+    const trackShift = (e: KeyboardEvent): void => {
+      // Releasing Shift hides the Shift-only buttons: if one holds focus, hand
+      // it to the row's "..." first so it does not drop to <body>.
+      if (e.type === "keyup" && !e.shiftKey) {
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active.classList.contains("msg-shift-only")) {
+          active
+            .closest(".msg-actions-bar")
+            ?.querySelector<HTMLElement>("[data-testid^='msg-more-']")
+            ?.focus();
+        }
+      }
+      setShiftHeld(e.shiftKey);
+    };
+    window.addEventListener("keydown", trackShift, { signal: disposable.signal });
+    window.addEventListener("keyup", trackShift, { signal: disposable.signal });
+    window.addEventListener("blur", () => setShiftHeld(false), { signal: disposable.signal });
+    document.addEventListener(
+      "visibilitychange",
+      () => {
+        if (document.hidden) setShiftHeld(false);
+      },
+      { signal: disposable.signal },
+    );
 
     // Watch for height changes in rendered items (images loading, embeds expanding).
     // Batched via RAF with anchor-based scroll preservation.
@@ -1585,6 +2448,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeRafId = requestAnimationFrame(() => {
         resizeRafId = 0;
         if (root === null || contentContainer === null) return;
+        // The text estimates wrap at the list's width: when it changes, the
+        // rows nothing has measured yet are estimated again (below).
+        const width = root.clientWidth;
+        const widthChanged = width > 0 && width !== (estimateWidth ?? DEFAULT_LIST_WIDTH);
+        if (widthChanged) estimateWidth = width;
+
+        // A viewport that grew (pane enlarged, window maximized) needs more
+        // rows than the window holds, with no scroll event to say so.
+        const viewportHeight = root.clientHeight;
+        if (viewportHeight !== lastViewportHeight) renderWindow();
 
         const jumpIdx =
           jumpTarget !== null && Date.now() < jumpTarget.until
@@ -1593,6 +2466,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
               )
             : -1;
         if (jumpIdx !== -1) {
+          if (widthChanged) reseedUnmeasured();
           measureRendered();
           updateSpacers();
           centreOnIndex(jumpIdx);
@@ -1605,6 +2479,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         const anchorIdx = offsetToIndex(root.scrollTop);
         const anchorOffset = root.scrollTop - offsetBefore(anchorIdx);
 
+        // The anchor above was read against the old estimates; the restore
+        // below reads the new ones, so the reading position holds.
+        if (widthChanged) reseedUnmeasured();
+
         // Re-measure rendered elements
         measureRendered();
 
@@ -1615,16 +2493,20 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         if (atBottom) {
           scrollToBottom();
         } else {
-          root.scrollTop = offsetBefore(anchorIdx) + anchorOffset;
+          setScrollTop(offsetBefore(anchorIdx) + anchorOffset);
         }
+        keepEditorCaretInView();
       });
     });
     resizeObserver.observe(contentContainer);
+    resizeObserver.observe(root);
 
     parentContainer.appendChild(region);
 
     openAtDividerPending = unreadOnOpen > 0;
     renderAll();
+    // Fetch the inline editor chunk once the list is up, so ArrowUp opens at once.
+    setOwnedTimeout(disposable.signal, preloadInlineEdit, 0);
     updateJumpToPresentPill();
     const openedAtDivider = openAtDividerIfReady();
     updateUnreadBar();
@@ -1646,6 +2528,21 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }),
     );
 
+    unsubscribers.push(
+      onMarkUnreadFailed((channelId) => {
+        if (channelId === options.channelId) revertMarkUnread();
+      }),
+    );
+    unsubscribers.push(
+      channelsStore.subscribeSelector(
+        (s) => s.channels.get(options.channelId)?.unreadCount,
+        () => {
+          if (markedUnread && newDividerAnchorId !== null) {
+            refreshUnreadFromChannel(newDividerAnchorId);
+          }
+        },
+      ),
+    );
     unsubscribers.push(
       messagesStore.subscribeSelector(
         // Scoped to the mounted channel so updates to OTHER channels (their
@@ -1701,6 +2598,13 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       ),
     );
 
+    unsubscribers.push(
+      messagesStore.subscribeSelector(
+        (s) => s.olderLoadFailed?.has(options.channelId) ?? false,
+        () => updateOlderFailedRow(),
+      ),
+    );
+
     // Show/hide the pill as the window detaches from (and reattaches to) the
     // live tail. No re-render — only the pill's visibility changes.
     unsubscribers.push(
@@ -1728,6 +2632,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // affordances (pin/delete), so that case — and only it — falls back to a
     // rebuild.
     lastCanManageMessages = canManageMessages();
+    // A block or an unblock folds or unfolds the author's rows in place.
+    let prevBlocked = blockedUsers();
+    unsubscribers.push(
+      blocksStore.subscribeSelector(
+        (s) => [...s.blockedByMe].toSorted((x, y) => x - y).join(","),
+        () => {
+          const now = blockedUsers();
+          // A run of someone blocked again starts folded, whatever was shown before.
+          for (const m of allMessages) {
+            if (now.has(m.user.id) && !prevBlocked.has(m.user.id)) shownBlocked.delete(m.id);
+          }
+          prevBlocked = now;
+          renderAll();
+        },
+      ),
+    );
     unsubscribers.push(
       membersStore.subscribeSelector(
         (s) => s.roleRevision ?? 0,
@@ -1743,24 +2663,69 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       ),
     );
 
+    // A role rename, recolour or deletion changes how role pills read.
+    unsubscribers.push(
+      channelsStore.subscribeSelector(
+        (s) => s.roles,
+        () => refreshAuthorRows(),
+      ),
+    );
+
+    // The server's per-channel verdicts change on a role or override edit.
+    // Delete and pin are built into each row, so a change there rebuilds; react
+    // only flips the lock on the rendered controls.
+    unsubscribers.push(
+      channelsStore.subscribeSelector(
+        (s) => {
+          const ch = s.channels.get(authorityChannelId(options.channelId));
+          return `${String(ch?.canDeleteOthers)}|${String(ch?.canPin)}`;
+        },
+        () => renderAll(),
+      ),
+      channelsStore.subscribeSelector(
+        (s) => s.channels.get(authorityChannelId(options.channelId))?.canReact,
+        () => {
+          if (contentContainer !== null) refreshReactionLocks(contentContainer, options.channelId);
+        },
+      ),
+    );
+
     // A timeout starting or ending toggles the reaction controls' lock in place
     // (B9-15); no row is rebuilt, so video, spoilers and focus survive.
     unsubscribers.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
         () => {
-          if (contentContainer !== null) refreshReactionLocks(contentContainer);
+          if (contentContainer !== null) refreshReactionLocks(contentContainer, options.channelId);
         },
       ),
     );
 
-    // The delete action is disabled while the socket is down (CLI-08); flip the
-    // gate on the rendered buttons in place, without a rebuild.
+    // A thread's count, name or archive state changes far more often than its
+    // starter row is rebuilt: repaint the chips on screen in place (WP 6.9c).
+    const repaintThreadChips = (): void => {
+      if (contentContainer === null) return;
+      refreshThreadChips(contentContainer, {
+        messages: getChannelMessages(options.channelId),
+        onOpen: options.onOpenThread,
+        signal: disposable.signal,
+      });
+    };
+    unsubscribers.push(
+      threadsStore.subscribeSelector((s) => s.byId, repaintThreadChips),
+      threadsStore.subscribeSelector((s) => s.byStarter, repaintThreadChips),
+      threadsStore.subscribeSelector((s) => s.deleted, repaintThreadChips),
+    );
+
+    // Delete (CLI-08) and reactions are disabled while the socket is down; flip
+    // the gates on the rendered controls in place, without a rebuild.
     unsubscribers.push(
       uiStore.subscribeSelector(
         (s) => s.connectionStatus,
         () => {
-          if (contentContainer !== null) refreshConnectionControls(contentContainer);
+          if (contentContainer === null) return;
+          refreshConnectionControls(contentContainer);
+          refreshReactionLocks(contentContainer, options.channelId);
         },
       ),
     );
@@ -1770,6 +2735,22 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // outside the window get fresh text when renderWindow builds them. Owned
     // by disposable.signal: destroy() releases the pending timer.
     atEachMidnight(disposable.signal, relabelRenderedTimes);
+
+    // A relative <t:…:R> timestamp ("in 5 minutes") drifts while the channel
+    // sits open, so the rendered ones are rewritten once a minute.
+    const relabelRelative = (): void => {
+      setOwnedTimeout(
+        disposable.signal,
+        () => {
+          if (contentContainer?.querySelector('time.md-timestamp[data-style="R"]')) {
+            relabelInlineTimestamps(contentContainer);
+          }
+          relabelRelative();
+        },
+        RELATIVE_TIMESTAMP_REFRESH_MS,
+      );
+    };
+    relabelRelative();
 
     // Switching the 12h/24h clock preference relabels the rendered rows in
     // place, the same way midnight does. Owned by disposable.signal, so the
@@ -1807,7 +2788,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // — without re-parsing or rebuilding them (P4-02, F3). A system row draws
       // its mentions with no server info, so it resyncs the same way.
       if (el.classList.contains("message")) {
-        const mentionInfo = { mentions: msg.mentions, mentionsEveryone: msg.mentionsEveryone };
+        const mentionInfo = {
+          mentions: msg.mentions,
+          mentionsEveryone: msg.mentionsEveryone,
+          mentionRoles: msg.mentionRoles,
+        };
         resyncMentions(el, mentionInfo);
         el.classList.toggle(
           "mentioned",
@@ -1816,7 +2801,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       } else {
         resyncMentions(el);
       }
-      const roleColor = roleColorVar(getUserRole(msg.user.id));
+      const roleColor = userRoleColorVar(msg.user.id);
       const author = resolveAuthor(msg.user);
       const key = authorAvatarKey(author, roleColor);
       if (key === el.dataset["authorKey"]) continue;
@@ -1834,7 +2819,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         avatar.replaceWith(
           createAvatarElement(author, {
             className: "msg-avatar",
-            background: roleColor,
+            background: pickAvatarColor(author.username),
             attrs: { "data-user-id": String(msg.user.id) },
           }),
         );
@@ -1852,9 +2837,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function repaintReplyRefAuthors(row: HTMLElement): void {
     for (const bar of row.querySelectorAll<HTMLElement>(".msg-reply-ref")) {
       const replyTo = Number(bar.dataset["replyTo"] ?? "0");
-      const parent = allMessages.find((m) => m.id === replyTo);
-      if (parent === undefined) continue;
-      const roleColor = roleColorVar(getUserRole(parent.user.id));
+      const parent = replyParents.find((m) => m.id === replyTo);
+      if (parent === undefined || parent.deleted) continue;
+      if (bar.classList.contains("msg-reply-ref--blocked")) continue;
+      const roleColor = userRoleColorVar(parent.user.id);
       const author = resolveAuthor(parent.user);
       const key = authorAvatarKey(author, roleColor);
       if (key === bar.dataset["authorKey"]) continue;
@@ -1865,7 +2851,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const avatar = bar.querySelector<HTMLElement>(".rr-avatar");
       if (avatar !== null) {
         avatar.replaceWith(
-          createAvatarElement(author, { className: "rr-avatar", background: roleColor }),
+          createAvatarElement(author, {
+            className: "rr-avatar",
+            background: pickAvatarColor(author.username),
+          }),
         );
       }
     }
@@ -1878,9 +2867,25 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       const item = virtualItems[renderedStart + i];
       if (item?.kind !== "message") continue;
       const text = formatMessageTimestamp(item.message.timestamp);
-      for (const el of children[i]!.querySelectorAll(".msg-time, .msg-hover-time, .sm-time")) {
+      for (const el of children[i]!.querySelectorAll(".msg-time, .sm-time")) {
         el.textContent = text;
       }
+      // The gutter and compact times are the short clock form, with no day word.
+      const clock = formatClockTime(item.message.timestamp);
+      for (const el of children[i]!.querySelectorAll(".msg-hover-time, .msg-compact-time")) {
+        el.textContent = clock;
+      }
+      const title = fullDateTimeTitle(item.message.timestamp);
+      for (const el of children[i]!.querySelectorAll<HTMLElement>(
+        ".msg-time, .msg-hover-time, .msg-compact-time",
+      )) {
+        el.title = title;
+      }
+      const edited = children[i]!.querySelector<HTMLElement>(".msg-edited");
+      if (edited !== null && item.message.editedAt !== null) {
+        edited.title = fullDateTimeTitle(item.message.editedAt);
+      }
+      relabelInlineTimestamps(children[i]!);
     }
   }
 
@@ -1890,6 +2895,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       resizeObserver = null;
     }
     disposable.destroy();
+    // A channel switch discards an open edit, as it always has.
+    edit?.session?.destroy();
+    edit = null;
+    editGen++;
     setLiveTailInView(options.channelId, true);
     beginRowRender();
     if (scrollRafId !== 0) {
@@ -1931,6 +2940,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     topSpacer = null;
     bottomSpacer = null;
     scrollToBottomBtn = null;
+    btnShownKey = "";
+    scrollSnapshot = null;
     unreadBar = null;
     unreadBarLabel = null;
     unreadAnnouncer = null;
@@ -1938,6 +2949,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     newBelowCount = 0;
     jumpToPresentPill = null;
     olderLoadingRow = null;
+    olderFailedRow = null;
   }
 
   /** Scroll so row `idx` sits `offset` px below the top of the view and
@@ -1947,7 +2959,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     if (root === null) return false;
     const target = Math.max(0, offsetBefore(idx) + offset);
     if (Math.abs(target - root.scrollTop) < 1) return false;
-    root.scrollTop = target;
+    setScrollTop(target);
     renderWindow();
     return true;
   }
@@ -1963,9 +2975,62 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const idx = virtualItems.findIndex(
       (item) => item.kind === "message" && item.message.id === messageId,
     );
-    if (idx === -1) return false;
+    if (idx === -1) {
+      if (!expandRunOf(messageId)) return false;
+      rebuildItems();
+      const at = virtualItems.findIndex(
+        (item) => item.kind === "message" && item.message.id === messageId,
+      );
+      if (at !== -1 && revealIndex(at, true)) return true;
+      renderAll();
+      return false;
+    }
+    return revealIndex(idx, true);
+  }
 
-    root.scrollTop = offsetBefore(idx);
+  /** Message ids of the blocked run spanning `firstId`..`lastId`. */
+  function runIds(firstId: number, lastId: number): number[] {
+    return allMessages.filter((m) => m.id >= firstId && m.id <= lastId).map((m) => m.id);
+  }
+
+  /** Open the collapsed run `messageId` sits in; false when it is in none. */
+  function expandRunOf(messageId: number): boolean {
+    const run = virtualItems.find(
+      (item) =>
+        item.kind === "blocked-run" &&
+        !item.expanded &&
+        item.firstId <= messageId &&
+        messageId <= item.lastId,
+    );
+    if (run?.kind !== "blocked-run") return false;
+    const members = runIds(run.firstId, run.lastId);
+    if (!members.includes(messageId)) return false;
+    for (const id of members) shownBlocked.add(id);
+    return true;
+  }
+
+  /** Show or Hide the run headed by `firstId`, read from the current items (the
+   *  row a click came from may be older than the run), holding its header in place. */
+  function toggleBlockedRun(firstId: number): void {
+    const key = `blk-${firstId}`;
+    const at = virtualItems.findIndex((item, i) => keyOf(item, i) === key);
+    const run = virtualItems[at];
+    if (run?.kind !== "blocked-run") return;
+    for (const id of runIds(run.firstId, run.lastId)) {
+      if (run.expanded) shownBlocked.delete(id);
+      else shownBlocked.add(id);
+    }
+    const el = renderedRowAt(at);
+    renderAll(el === undefined ? undefined : { key, edge: edgeOf(el) });
+  }
+
+  /** Centre row `idx` in the view, rendering it; with `flash`, highlight it too. */
+  function revealIndex(idx: number, flash: boolean, recentre = true): boolean {
+    if (root === null) return false;
+    const item = virtualItems[idx];
+    if (item?.kind !== "message") return false;
+    const messageId = item.message.id;
+    setScrollTop(offsetBefore(idx));
     // Force the rebuild path: a scroll-driven renderWindow only moves spacers,
     // so without this the target row can sit outside the rendered window and
     // there is nothing to flash (and nothing to look at after the scroll).
@@ -1990,10 +3055,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     // Late-sizing content (previews, images) above the target keeps it
     // centred until the highlight flash ends.
-    jumpTarget = { messageId, until: Date.now() + JUMP_RECENTRE_MS };
+    // The editor is not a jump: resizes must not pull it back to the centre.
+    if (recentre) jumpTarget = { messageId, until: Date.now() + JUMP_RECENTRE_MS };
 
     // Briefly highlight the target message element
-    if (contentContainer !== null) {
+    if (flash && contentContainer !== null) {
       const localIdx = idx - renderedStart;
       const el = contentContainer.children[localIdx] as HTMLElement | undefined;
       if (el !== undefined) {
@@ -2016,5 +3082,160 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return true;
   }
 
-  return { mount, destroy, scrollToMessage };
+  // ---------------------------------------------------------------------------
+  // Inline edit (WP 3A-8)
+  // ---------------------------------------------------------------------------
+
+  /** True while the open editor's textarea (or its links) holds focus. */
+  function editHoldsFocus(): boolean {
+    const el = edit?.session?.element;
+    return el !== undefined && el.contains(document.activeElement);
+  }
+
+  /**
+   * Draw message `id`'s row again in place and release the old one. Used when
+   * editing starts or stops: the message object did not change, so patchRows
+   * would keep the row. A row outside the rendered window is left to the next
+   * build, which reads `edit`.
+   */
+  function replaceRenderedRow(id: number): void {
+    if (contentContainer === null) return;
+    const idx = virtualItems.findIndex((it) => it.kind === "message" && it.message.id === id);
+    const old = idx === -1 ? undefined : renderedRowAt(idx);
+    if (old === undefined || !(old instanceof HTMLElement)) return;
+    const edge = edgeOf(old);
+    const fresh = renderVirtualItem(virtualItems[idx]!);
+    contentContainer.replaceChild(fresh, old);
+    releaseRow(old);
+    measureRendered();
+    updateSpacers();
+    holdRow(fresh, edge);
+  }
+
+  /** Close the open editor. With `notify`, an editor that held focus hands it back. */
+  function closeEdit(notify: boolean): void {
+    if (edit === null) return;
+    const { messageId, session } = edit;
+    const hadFocus = notify && editHoldsFocus();
+    edit = null;
+    editGen++;
+    editRefocus = false;
+    session?.destroy();
+    replaceRenderedRow(messageId);
+    if (hadFocus) options.onEditEnd?.();
+  }
+
+  /** An editor whose message left the list (deleted, or a window swap) closes. */
+  function dropGoneEdit(hadFocus: boolean): void {
+    if (edit === null || allMessages.some((m) => m.id === edit?.messageId)) return;
+    const { session } = edit;
+    edit = null;
+    editRefocus = false;
+    editGen++;
+    session?.destroy();
+    if (hadFocus) options.onEditEnd?.();
+  }
+
+  /** After the editor grew, keep its bottom (where the caret is) inside the view. */
+  function keepEditorCaretInView(): void {
+    if (root === null || !editHoldsFocus()) return;
+    const box = edit?.session?.element;
+    if (box === undefined) return;
+    const over = box.getBoundingClientRect().bottom - root.getBoundingClientRect().bottom;
+    if (over > 0) setScrollTop(root.scrollTop + over);
+  }
+
+  function startEdit(
+    messageId: number,
+    text?: string,
+    opts?: { readonly focus?: boolean },
+  ): boolean {
+    const takeFocus = opts?.focus !== false;
+    if (root === null) return false;
+    const msg = allMessages.find((m) => m.id === messageId);
+    if (msg === undefined || msg.user.id !== options.currentUserId || msg.status !== "sent") {
+      return false;
+    }
+    // A server-written row (call log, group event) is read-only.
+    if (isServerRowKind(msg.kind)) return false;
+    if (edit?.messageId === messageId) {
+      if (takeFocus) edit.session?.focusEnd();
+      return true;
+    }
+    closeEdit(false);
+    editRefocus = false;
+    const gen = ++editGen;
+    edit = { messageId, session: null, gen };
+    // Stored `<@id>` / `<@&id>` tokens read as `@name` in the box, and the
+    // spans left intact turn back into tokens on save (WP 6.3e).
+    const names = {
+      user: (id: number) => {
+        const member = membersStore.getState().members.get(id);
+        return member === undefined ? undefined : memberDisplayName(member);
+      },
+      role: (id: number) => channelsStore.getState().roles.find((r) => r.id === id)?.name,
+    };
+    const shown = tokensToPickedText(msg.content, names);
+    // A restored edit draft (failed save) is converted the same way.
+    const restored = text === undefined ? shown : tokensToPickedText(text, names);
+    const startText = restored.text;
+    withInlineEdit(
+      (m) => {
+        if (edit === null || edit.gen !== gen || disposable.signal.aborted) return;
+        const session = m.createInlineEdit({
+          messageId,
+          text: startText,
+          onSave: (content) => {
+            // Without the capability the box showed the raw text; save it as is.
+            const picks = idMentionsEnabled() ? [...shown.picks, ...restored.picks] : [];
+            if (options.onEditSave(messageId, applyPickedMentions(content, picks))) {
+              closeEdit(true);
+            }
+          },
+          onCancel: () => closeEdit(true),
+          onEmpty: () => options.onEmptyEdit(messageId),
+        });
+        edit.session = session;
+        replaceRenderedRow(messageId);
+        const idx = virtualItems.findIndex(
+          (it) => it.kind === "message" && it.message.id === messageId,
+        );
+        const row = idx === -1 ? undefined : renderedRowAt(idx);
+        const visible =
+          row !== undefined &&
+          root !== null &&
+          edgeOf(row) >= 0 &&
+          edgeOf(row) + row.getBoundingClientRect().height <= root.clientHeight;
+        // Already on screen: leave the view alone. Otherwise bring the row in.
+        // A quiet restore never moves the view or the focus.
+        if (!takeFocus) return;
+        if (!visible && idx !== -1) revealIndex(idx, false, false);
+        session.focusEnd();
+      },
+      () => {
+        // The editor chunk failed to load: nothing is open, so nothing is "editing".
+        if (edit !== null && edit.gen === gen && edit.session === null) edit = null;
+      },
+    );
+    return true;
+  }
+
+  function cancelEdit(): void {
+    closeEdit(true);
+  }
+
+  function isEditing(): boolean {
+    return edit !== null;
+  }
+
+  return {
+    mount,
+    destroy,
+    scrollToMessage,
+    markReadAndJumpToPresent,
+    scrollPage,
+    startEdit,
+    cancelEdit,
+    isEditing,
+  };
 }

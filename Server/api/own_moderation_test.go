@@ -24,10 +24,10 @@ func buildOwnModerationRouter(database *db.DB) http.Handler {
 	limiter := auth.NewRateLimiter()
 	svc := service.New(database, limiter)
 	broadcaster := &recordingModQueueBroadcaster{}
-	api.MountProfileRoutes(r, database, svc, nil, limiter, nil, nil, nil)
+	api.MountProfileRoutes(r, svc, nil, limiter, nil, nil, nil)
 	api.MountReportRoutes(r, svc, broadcaster)
 	api.MountModerationQueueRoutes(r, svc, broadcaster)
-	api.MountModerationRoutes(r, svc)
+	api.MountModerationRoutes(r, svc, nil)
 	api.MountAppealRoutes(r, svc)
 	return r
 }

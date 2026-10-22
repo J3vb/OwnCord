@@ -15,7 +15,7 @@
 // earlier decision 10 named `gzip -9`; this keeps the level and format but pins
 // the implementation, so the number is identical on every OS with no external
 // binary to probe for. The CLI figures for the same build are recorded once in
-// docs/plans/b7-0-client-baseline-2026-09-19.md as a bridge to the B7-0 record.
+// docs/archive/plans/b7-0-client-baseline-2026-09-19.md as a bridge to the B7-0 record.
 //
 // Startup budget: the JS of the entry's STATIC CLOSURE — the index.html entry
 // file plus everything reachable through its `imports` — not a fixed file list.
@@ -73,7 +73,88 @@ export function allCssFiles(manifest) {
   return files;
 }
 
+/** Longest a `note` may be. Notes say what a budget covers; why a budget moved
+ *  goes in the commit and PR that move it (bundle-budget-history.md has the
+ *  reasoning from before 2026-10-17). Every lane appending to one note made
+ *  bundle-budgets.json conflict on nearly every pair of client PRs. */
+export const MAX_NOTE_LENGTH = 300;
+
+/** The base64 encoding of the WASM magic bytes `\0asm`. */
+export const WASM_MARKER = "AGFzbQ";
+
+/** Problems with the shape of bundle-budgets.json, as messages; empty when it
+ *  is well formed. Every text field is capped and unknown keys are refused, so
+ *  history appended to any of them (or to a new sibling key) fails here, and so
+ *  does anything appended to the WASM marker, which would make that check search
+ *  for text no chunk contains. */
+export function validateBudgets(budgets) {
+  const problems = [];
+  if (budgets === null || typeof budgets !== "object") {
+    return ["bundle-budgets.json must be an object"];
+  }
+  const text = (label, value) => {
+    if (value === undefined) return;
+    if (typeof value !== "string") {
+      problems.push(`${label} must be a string`);
+    } else if (value.length > MAX_NOTE_LENGTH) {
+      problems.push(
+        `${label} is ${value.length} characters (max ${MAX_NOTE_LENGTH}); ` +
+          "put the reason for a raise in the commit and PR, not this file",
+      );
+    }
+  };
+  const keys = (label, obj, allowed) => {
+    for (const key of Object.keys(obj ?? {})) {
+      if (!allowed.includes(key)) problems.push(`${label}: unknown key '${key}'`);
+    }
+  };
+  const entry = (label, spec, allowed) => {
+    if (spec === null || typeof spec !== "object") {
+      problems.push(`${label} must be an object`);
+      return;
+    }
+    keys(label, spec, allowed);
+    if (!Number.isInteger(spec.budget) || spec.budget <= 0) {
+      problems.push(`${label}: budget must be a positive integer`);
+    }
+    if (spec.lazy !== undefined && typeof spec.lazy !== "boolean") {
+      problems.push(`${label}: lazy must be true or false`);
+    }
+    text(`${label}.note`, spec.note);
+  };
+  keys("bundle-budgets.json", budgets, [
+    "method",
+    "ratchet",
+    "history",
+    "startup",
+    "chunks",
+    "forbidEmbeddedWasm",
+    "css",
+  ]);
+  for (const key of ["method", "ratchet", "history"]) text(key, budgets[key]);
+  entry("startup", budgets.startup, ["budget", "note"]);
+  entry("css", budgets.css, ["budget", "note"]);
+  for (const [name, spec] of Object.entries(budgets.chunks ?? {})) {
+    entry(`chunks.${name}`, spec, ["budget", "lazy", "note"]);
+  }
+  keys("forbidEmbeddedWasm", budgets.forbidEmbeddedWasm, ["marker", "note"]);
+  if (budgets.forbidEmbeddedWasm?.marker !== WASM_MARKER) {
+    problems.push(`forbidEmbeddedWasm.marker must be exactly '${WASM_MARKER}'`);
+  }
+  text("forbidEmbeddedWasm.note", budgets.forbidEmbeddedWasm?.note);
+  return problems;
+}
+
 function main() {
+  const budgets = JSON.parse(
+    readFileSync(new URL("../bundle-budgets.json", import.meta.url), "utf8"),
+  );
+  const problems = validateBudgets(budgets);
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`bundle-budget: ${problem}`);
+    exit(2);
+  }
+
   let manifest;
   try {
     manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
@@ -82,10 +163,6 @@ function main() {
     console.error("bundle-budget: run 'npm run build:budget' first");
     exit(2);
   }
-
-  const budgets = JSON.parse(
-    readFileSync(new URL("../bundle-budgets.json", import.meta.url), "utf8"),
-  );
 
   const gz = (file) => gzipSync(readFileSync(`${DIST}/${file}`), { level: 9 }).length;
 

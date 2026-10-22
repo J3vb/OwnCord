@@ -14,6 +14,16 @@ const ProtocolEpoch = 1
 const (
 	MsgTypeAuth              = "auth"
 	MsgTypeChatSend          = "chat_send"
+	MsgTypeChatForward       = "chat_forward"  // forward one message to one target channel or DM (WP 6.9a)
+	MsgTypePollCreate        = "poll_create"   // post a poll as a message (WP 6.9b)
+	MsgTypePollVote          = "poll_vote"     // set the sender's whole selection on a poll, [] removes the vote (WP 6.9b)
+	MsgTypePollEnd           = "poll_end"      // end a poll now: its author, or anyone who may delete the message (WP 6.9b)
+	MsgTypeThreadCreate      = "thread_create" // start a thread on a text-channel message (WP 6.9c)
+	MsgTypeThreadUpdate      = "thread_update"
+	MsgTypeThreadDelete      = "thread_delete"
+	MsgTypeThreadFocus       = "thread_focus"      // the second subscription slot: the thread open beside the focused channel, or null to close it (WP 6.9c)
+	MsgTypeForumPostCreate   = "forum_post_create" // create a forum post and its opening message in one step, idempotent on client_message_id (WP 6.9d)
+	MsgTypeThreadFollow      = "thread_follow"     // follow or unfollow a thread {thread_id, follow}; idempotent (WP 6.9c)
 	MsgTypeChatEdit          = "chat_edit"
 	MsgTypeChatDelete        = "chat_delete"
 	MsgTypeReactionAdd       = "reaction_add"
@@ -21,6 +31,7 @@ const (
 	MsgTypeTypingStart       = "typing_start"
 	MsgTypeChannelFocus      = "channel_focus"
 	MsgTypeMarkRead          = "mark_read"
+	MsgTypeMarkUnread        = "mark_unread"
 	MsgTypePresenceUpdate    = "presence_update"
 	MsgTypeVoiceJoin         = "voice_join"
 	MsgTypeVoiceLeave        = "voice_leave"
@@ -36,6 +47,7 @@ const (
 	MsgTypeVoiceTokenRefresh = "voice_token_refresh" //nolint:gosec // G101: false positive — message type constant, not a credential
 	MsgTypeVoiceE2EEAnnounce = "voice_e2ee_announce"
 	MsgTypeVoiceE2EEOffer    = "voice_e2ee_offer"
+	MsgTypeVoiceWatch        = "voice_watch"
 	MsgTypeCallRing          = "call_ring"
 	MsgTypeCallDecline       = "call_decline"
 	MsgTypeChatCommand       = "chat_command" // plugin slash-command dispatch (Phase C)
@@ -48,11 +60,23 @@ const (
 	MsgTypeReady               = "ready"
 	MsgTypeChatMessage         = "chat_message"
 	MsgTypeChatSendOK          = "chat_send_ok"
+	MsgTypeChatForwardOK       = "chat_forward_ok"
+	MsgTypePollCreateOK        = "poll_create_ok"
+	MsgTypePollVoteOK          = "poll_vote_ok"
+	MsgTypePollEndOK           = "poll_end_ok"
+	MsgTypeThreadCreateOK      = "thread_create_ok"
+	MsgTypeThreadUpdateOK      = "thread_update_ok"
+	MsgTypeThreadFollowOK      = "thread_follow_ok"
+	MsgTypeThreadFollowUpdate  = "thread_follow_update" // WP 6.9c: your follow of a thread changed {thread_id, following, thread?}; unsequenced, low queue, never authoritative (ready.threads is)
+	MsgTypeForumPostCreateOK   = "forum_post_create_ok" // WP 6.9d: the post exists; {thread, message_id, client_message_id, deduplicated}, to the sender only
+	MsgTypeThreadChanged       = "thread_changed"       // WP 6.9c: a thread was created, renamed, archived, locked or took a message; absolute ThreadInfo, sequenced on the parent channel, at most one per thread per 2 s
+	MsgTypeThreadDeleted       = "thread_deleted"       // WP 6.9c: a thread was deleted; {channel_id (parent), thread_id}, sequenced on the parent channel
 	MsgTypeChatEdited          = "chat_edited"
 	MsgTypeChatDeleted         = "chat_deleted"
 	MsgTypeChatPinned          = "chat_pinned" // a message was pinned or unpinned in a channel the recipient can read
 	MsgTypeChatBulkDeleted     = "chat_bulk_deleted"
 	MsgTypeReactionUpdate      = "reaction_update"
+	MsgTypePollUpdate          = "poll_update" // a poll's full counts and version after a vote or its end (WP 6.9b)
 	MsgTypeTyping              = "typing"
 	MsgTypePresence            = "presence"
 	MsgTypePresenceBatch       = "presence_batch" // many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence
@@ -73,10 +97,14 @@ const (
 	MsgTypeEmojiUpdate         = "emoji_update"
 	MsgTypeUploadPolicy        = "upload_policy" // the upload file-type lists after the owner saves them in the admin panel
 	MsgTypeServerRestart       = "server_restart"
-	MsgTypeModQueue            = "mod_queue"     // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
-	MsgTypeModAction           = "mod_action"    // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
-	MsgTypeAppealStatus        = "appeal_status" // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
-	MsgTypeMentionCount        = "mention_count" // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
+	MsgTypeModQueue            = "mod_queue"          // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
+	MsgTypeModAction           = "mod_action"         // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
+	MsgTypeMemberTimeouts      = "member_timeouts"    // WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale
+	MsgTypeChannelCategories   = "channel_categories" // WP 6.5a: the full channel category list {categories:[{id,name,position}]}, sent per connected client only to MANAGE_CHANNELS/Administrator holders after any category mutation (permission evaluated at send time); targeted, unsequenced, never replayed -- replaces the manager's list wholesale. Everyone else derives groups from the category fields on the channels they can see
+	MsgTypeAppealStatus        = "appeal_status"      // B5-10: an appeal's state changed, to the appellant only, targeted and unsequenced -- not replayed
+	MsgTypeMentionCount        = "mention_count"      // DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal
+	MsgTypeReadState           = "read_state"         // WP 3D-5c: the caller's read pointer moved in a channel (after every accepted mark_read and mark_unread); targeted to the caller and unsequenced -- not replayed
+	MsgTypeChannelActivity     = "channel_activity"   // 2B-2: unread hint for unfocused readable channels; batched, unsequenced, never replayed
 	MsgTypeError               = "error"
 	MsgTypePong                = "pong"
 	MsgTypeDMChannelOpen       = "dm_channel_open"
@@ -84,6 +112,7 @@ const (
 	MsgTypeDMRequest           = "dm_request"
 	MsgTypeCallIncoming        = "call_incoming"
 	MsgTypeCallDeclined        = "call_declined"
+	MsgTypeVoiceWatching       = "voice_watching"
 	MsgTypeVoiceE2EEAnnounceBC = "voice_e2ee_announce" // broadcast (same string as client msg)
 	MsgTypeVoiceE2EEOfferRelay = "voice_e2ee_offer"    // relay (same string as client msg)
 	MsgTypeCommandReply        = "command_reply"       // ephemeral plugin reply, sent only to the invoking client
@@ -100,4 +129,17 @@ const (
 	RestartReasonBackupRestore RestartReason = "backup_restore" // an admin restored a backup
 	RestartReasonSetup         RestartReason = "setup"          // the setup wizard finished
 	RestartReasonShutdown      RestartReason = "shutdown"       // a stop or restart from outside the server (signal, supervisor)
+)
+
+// MessageKind is the closed set of values for chat_message.kind.
+type MessageKind string
+
+const (
+	MessageKindCall        MessageKind = "call"         // a call log row in a DM, written and updated only by the server
+	MessageKindGroupAdd    MessageKind = "group_add"    // a group DM row: a member was added, written only by the server
+	MessageKindGroupRemove MessageKind = "group_remove" // a group DM row: a member was removed by the owner, written only by the server
+	MessageKindGroupLeave  MessageKind = "group_leave"  // a group DM row: a member left, written only by the server
+	MessageKindGroupRename MessageKind = "group_rename" // a group DM row: the group name changed or was cleared, written only by the server
+	MessageKindGroupIcon   MessageKind = "group_icon"   // a group DM row: the group icon changed or was removed, written only by the server
+	MessageKindPinAdd      MessageKind = "pin_add"      // a row saying a member pinned a message; reply_to names the pinned message; written only by the server
 )

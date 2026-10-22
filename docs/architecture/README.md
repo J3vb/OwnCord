@@ -19,6 +19,7 @@ truth** list of the files it describes.
 | [websocket.md](websocket.md)                           | D4 WS connect / replay / dispatch                | The real-time engine: sign-in over the socket, 3-tier reconnect replay, backpressure, typed dispatch                           |
 | [data-model.md](data-model.md)                         | D5 Entity-relationship overview                  | All 50 application tables from migrations 001–059, grouped by domain                                                           |
 | [voice-e2ee.md](voice-e2ee.md)                         | D6 Voice + E2EE flow                             | LiveKit token flow, the loopback TLS tunnel, the ECDH key-holder relay, and native voice on Linux                              |
+| [linux-native-voice.md](linux-native-voice.md)         | Linux native voice                               | The Rust `native_voice/` backend: audio, camera, screen share, codecs and global shortcuts on Linux                            |
 | [client.md](client.md)                                 | D7 Client module map                             | The Tauri client as built: start-up, dispatcher, stores, Rust commands                                                         |
 | [plugins.md](plugins.md)                               | —                                                | The experimental WASM plugin boundary: off twice and compiled out of releases, no API promise, what may and may never move     |
 | [diagnostics.md](diagnostics.md)                       | —                                                | Every diagnostic surface, the list of everything the server sends off the machine, and what a support bundle contains          |
@@ -36,6 +37,14 @@ only together with the test that reads them.
 | [server-boundaries.md](server-boundaries.md)   | B3-0 inventory: every file above the domain layer that imports `db`, with a disposition. Generated table, enforced by `db-import-boundary`           |
 | [community-services.md](community-services.md) | B5-0: the community, content and moderation services, each with abuse cases, data ownership and lifecycle                                            |
 | [b9-ui-contract.md](b9-ui-contract.md)         | B9-2: the shared UI rules every feature follows: colour tokens, focus, keyboard, announcements, motion, teardown, and the reusable Playwright checks |
+
+### Decisions
+
+Short decision records, kept here until the ADR series exists (roadmap Phase 7).
+
+| Doc                                                    | Covers                                                                                        |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| [channel-scope-decision.md](channel-scope-decision.md) | Why live channel frames reach only the focused channel while replay covers every readable one |
 
 ### Target behaviour (not shipped behaviour)
 
@@ -78,7 +87,7 @@ dated audit reports, which are snapshots by design.
   These blueprints describe _structure and flow_, not payload shapes. Older
   drift between the specs and the code is listed in the dated audit reports,
   for example
-  [audit-2026-08-04-docs-and-coverage.md](../audit-2026-08-04-docs-and-coverage.md).
+  [2026-08-04-docs-and-ui-coverage.md](../audits/2026-08-04-docs-and-ui-coverage.md).
 - [trust-model.md](../trust-model.md) says who can read what, and why.
 - `docs/client-architecture.md` is a redirect page kept for old links.
   [client.md](client.md) is the client architecture document.

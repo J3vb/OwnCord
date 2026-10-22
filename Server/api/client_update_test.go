@@ -32,6 +32,10 @@ func fakeGitHubRelease(t *testing.T, tag string) *httptest.Server {
 		"OwnCord_1.0.0_amd64.AppImage.tar.gz.sig",
 		"OwnCord_1.0.0_aarch64.AppImage.tar.gz",
 		"OwnCord_1.0.0_aarch64.AppImage.tar.gz.sig",
+		"OwnCord_1.0.0_amd64.deb",
+		"OwnCord_1.0.0_amd64.deb.sig",
+		"OwnCord_1.0.0_arm64.deb",
+		"OwnCord_1.0.0_arm64.deb.sig",
 	}
 
 	mux.HandleFunc("/repos/test/repo/releases/latest", func(w http.ResponseWriter, r *http.Request) {
@@ -296,10 +300,9 @@ func TestClientUpdate_DebTargetNoContent(t *testing.T) {
 
 	router := buildClientUpdateRouter(u)
 
-	// The release ships .deb packages but no signed deb UPDATER artifact.
-	// A deb client falling back to the AppImage archive would fail install
-	// forever (the plugin's install_deb rejects gzip bytes), so it must get
-	// 204 rather than an artifact for a different installer.
+	// The release carries a signed .deb, but a client that has not opted in
+	// (no ?deb_install=pkexec) cannot install it. It must get 204 so it keeps
+	// its "cannot update itself" banner rather than an offer that always fails.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/linux-x86_64-deb/1.0.0", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)

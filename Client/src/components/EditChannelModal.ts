@@ -4,9 +4,9 @@
  * Mounted only for actors holding MANAGE_CHANNELS; the server enforces the same
  * bit on the PATCH behind it.
  *
- * Category is free text with a <datalist> of the categories already in use:
- * moving a channel between groups is a rename, not a recreate, and no category
- * name is special (a voice channel groups under whatever it carries).
+ * Category is a <select> of the known categories and "No category" (WP 6.5b):
+ * moving a channel between groups is an edit, not a recreate, and no category
+ * is special (a voice channel groups under whatever it carries).
  *
  * Slow mode is a preset <select> rather than a number box. The server accepts
  * any value in 0…21600, but the useful values are a short list, and a free
@@ -21,10 +21,21 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
+import { canManageChannels } from "@lib/permissions";
+import { forumsEnabled } from "@lib/serverCapabilities";
 import type { MountableComponent } from "@lib/safe-render";
-import { getKnownCategories } from "@stores/channels.store";
+import { channelsStore, type Channel, type ChannelsState } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
-import { channelTypeLabel } from "./CreateChannelModal";
+import type { ForumSettingsSection } from "../features/forums/ForumSettingsSection";
+import { forumsText } from "../i18n/forums";
+import type { ForumSettingsBody } from "@lib/types";
+import { channelTypeLabel, MAX_CHANNEL_TOPIC_LENGTH } from "./channelTypes";
+import {
+  buildCategorySelect,
+  categoryFields,
+  categoryOptionValue,
+  setCategoryValue,
+} from "./channelCategorySelect";
 
 /** The server's ceiling for `slow_mode`, mirrored so the UI cannot exceed it. */
 export const MAX_SLOW_MODE_SECONDS = 21600;
@@ -66,13 +77,19 @@ export function clampVoiceLimit(value: number): number {
   return Math.min(MAX_VOICE_LIMIT, Math.max(0, Math.trunc(value)));
 }
 
-/** The fields an edit submits. Mirrors the PATCH body. */
+/**
+ * The fields an edit submits. Mirrors the PATCH body, which is partial: only
+ * the fields the user changed are present, so a field someone else changed
+ * meanwhile is left as they set it.
+ */
 export interface EditChannelData {
-  readonly name: string;
-  readonly topic: string;
-  readonly category: string;
-  readonly slow_mode: number;
-  readonly nsfw: boolean;
+  readonly name?: string;
+  readonly topic?: string;
+  /** The chosen category's id (0 = none); `category` carries the name on a server that sends no ids. */
+  readonly category_id?: number;
+  readonly category?: string;
+  readonly slow_mode?: number;
+  readonly nsfw?: boolean;
   /**
    * Only present for a voice channel. A text channel's PATCH omits them
    * entirely rather than sending 0, so an edit here cannot wipe limits the
@@ -91,8 +108,10 @@ export interface EditChannelModalOptions {
   readonly channelType: string;
   /** Current channel topic ("" = none). */
   readonly channelTopic?: string;
-  /** Current channel category ("" = uncategorized). */
+  /** Current channel category name ("" = uncategorized). */
   readonly channelCategory?: string;
+  /** Current channel category id (0 or absent = none, or a server that sends no ids). */
+  readonly channelCategoryId?: number;
   /** Current cooldown in seconds (0 = off). */
   readonly channelSlowMode?: number;
   /** Whether the channel is currently flagged age-restricted. */
@@ -100,11 +119,20 @@ export interface EditChannelModalOptions {
   /** Current voice capacity limits (0 = unlimited). Voice channels only. */
   readonly channelVoiceMaxUsers?: number;
   readonly channelVoiceMaxVideo?: number;
+  /**
+   * Writes a forum's tags and settings (PUT .../forum). Its presence, a forum
+   * channel, the forums capability and MANAGE_CHANNELS together show the
+   * "Forum settings" section, which saves on its own button.
+   */
+  readonly onSaveForum?: (body: ForumSettingsBody) => Promise<void>;
   /** Called when the user saves changes. */
   readonly onSave: (data: EditChannelData) => Promise<void>;
   /** Called when the modal is closed. */
   readonly onClose: () => void;
 }
+
+const slowOf = (ch: Channel): string => String(clampSlowMode(ch.slowMode ?? 0));
+const limitOf = (value: number | undefined): string => String(clampVoiceLimit(value ?? 0));
 
 /** A labelled number input constrained to 0…MAX_VOICE_LIMIT. */
 function buildVoiceLimitField(
@@ -135,16 +163,22 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     channelType,
     channelTopic,
     channelCategory,
+    channelCategoryId,
     channelSlowMode,
     channelNsfw,
     channelVoiceMaxUsers,
     channelVoiceMaxVideo,
     onSave,
+    onSaveForum,
     onClose,
   } = options;
   const isVoice = channelType === "voice";
   const disposable = new Disposable();
   let instance: ModalInstance | null = null;
+  let forumSection: ForumSettingsSection | null = null;
+  let destroyed = false;
+  /** Set once the dialog has warned about unsaved forum settings; the next close goes through. */
+  let warnedForum = false;
 
   function mount(container: Element): void {
     // Header
@@ -158,7 +192,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     });
     closeBtn.textContent = "";
     closeBtn.appendChild(createIcon("x", 14));
-    closeBtn.addEventListener("click", onClose, { signal: disposable.signal });
+    closeBtn.addEventListener("click", requestClose, { signal: disposable.signal });
     appendChildren(header, title, closeBtn);
 
     // Body
@@ -207,34 +241,25 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       class: "form-input",
       type: "text",
       placeholder: shellText("channelForm.topicPlaceholder"),
-      maxlength: "1024",
+      maxlength: String(MAX_CHANNEL_TOPIC_LENGTH),
       "data-testid": "edit-channel-topic-input",
     });
     topicInput.value = channelTopic ?? "";
     appendChildren(topicGroup, topicLabel, topicInput);
 
-    // Channel category (free text, suggestions from the categories in use)
+    // Channel category: a select of the known categories, "No category" first.
     const categoryGroup = createElement("div", { class: "form-group" });
     const categoryLabel = createElement(
       "label",
       { class: "form-label", for: "edit-channel-category" },
       shellText("channelForm.category"),
     );
-    const categoryInput = createElement("input", {
-      id: "edit-channel-category",
-      class: "form-input",
-      type: "text",
-      list: "edit-channel-categories",
-      autocomplete: "off",
-      placeholder: shellText("channelForm.categoryPlaceholder"),
-      "data-testid": "edit-channel-category-input",
-    });
-    categoryInput.value = channelCategory ?? "";
-    const categoryList = createElement("datalist", { id: "edit-channel-categories" });
-    for (const known of getKnownCategories()) {
-      categoryList.appendChild(createElement("option", { value: known }));
-    }
-    appendChildren(categoryGroup, categoryLabel, categoryInput, categoryList);
+    const categorySelect = buildCategorySelect(
+      "edit-channel-category",
+      "edit-channel-category-select",
+      categoryOptionValue(channelCategoryId ?? 0, channelCategory ?? ""),
+    );
+    appendChildren(categoryGroup, categoryLabel, categorySelect);
 
     // Slow mode (presets; a stored off-preset value keeps its own option)
     const currentSlowMode = clampSlowMode(channelSlowMode ?? 0);
@@ -317,6 +342,121 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       body.appendChild(voiceSection);
     }
 
+    // Fields the user has not touched follow the store while the dialog is
+    // open, and only touched fields are sent: a concurrent edit by another admin
+    // is neither hidden from this form nor overwritten by its save. "Touched"
+    // is the control differing from the latest server value, so typing back
+    // what another admin replaced still counts as a change and is sent.
+    type Mutable = { -readonly [K in keyof EditChannelData]: EditChannelData[K] };
+    interface TrackedField {
+      applied: string | boolean;
+      readonly read: () => string | boolean;
+      readonly write: (value: string | boolean) => void;
+      readonly fromChannel: (ch: Channel) => string | boolean;
+      readonly send: (data: Mutable) => void;
+    }
+    const textField = (
+      input: HTMLInputElement,
+      fromChannel: (ch: Channel) => string,
+      send: (data: Mutable, value: string) => void,
+    ): TrackedField => ({
+      applied: input.value,
+      read: () => input.value,
+      write: (value) => {
+        input.value = String(value);
+      },
+      fromChannel,
+      send: (data) => send(data, input.value.trim()),
+    });
+    const fields: TrackedField[] = [
+      textField(
+        nameInput,
+        (ch) => ch.name,
+        (d, v) => {
+          d.name = v;
+        },
+      ),
+      textField(
+        topicInput,
+        (ch) => ch.topic,
+        (d, v) => {
+          d.topic = v;
+        },
+      ),
+      {
+        applied: categorySelect.value,
+        read: () => categorySelect.value,
+        write: (value) => setCategoryValue(categorySelect, String(value)),
+        fromChannel: (ch) => categoryOptionValue(ch.categoryId ?? 0, ch.category ?? ""),
+        send: (d) => Object.assign(d, categoryFields(categorySelect.value)),
+      },
+      {
+        applied: slowSelect.value,
+        read: () => slowSelect.value,
+        write: (value) => {
+          const v = String(value);
+          if (!Array.from(slowSelect.options).some((o) => o.value === v)) {
+            slowSelect.appendChild(
+              createElement("option", { value: v }, formatSlowMode(Number(v))),
+            );
+          }
+          slowSelect.value = v;
+        },
+        fromChannel: slowOf,
+        send: (d) => {
+          d.slow_mode = clampSlowMode(Number.parseInt(slowSelect.value, 10));
+        },
+      },
+      {
+        applied: nsfwInput.checked,
+        read: () => nsfwInput.checked,
+        write: (value) => {
+          nsfwInput.checked = value === true;
+        },
+        fromChannel: (ch) => ch.nsfw === true,
+        send: (d) => {
+          d.nsfw = nsfwInput.checked;
+        },
+      },
+    ];
+    if (maxUsersInput !== null && maxVideoInput !== null) {
+      const users = maxUsersInput;
+      const video = maxVideoInput;
+      fields.push(
+        textField(
+          users,
+          (ch) => limitOf(ch.voiceMaxUsers),
+          (d) => {
+            d.voice_max_users = clampVoiceLimit(Number.parseInt(users.value, 10));
+          },
+        ),
+        textField(
+          video,
+          (ch) => limitOf(ch.voiceMaxVideo),
+          (d) => {
+            d.voice_max_video = clampVoiceLimit(Number.parseInt(video.value, 10));
+          },
+        ),
+      );
+    }
+    const touched = (f: TrackedField): boolean => f.read() !== f.applied;
+    disposable.onStoreChange<ChannelsState, Channel | undefined>(
+      channelsStore,
+      (state) => state.channels.get(options.channelId),
+      (ch) => {
+        if (ch === undefined) return;
+        for (const f of fields) {
+          const next = f.fromChannel(ch);
+          if (touched(f)) {
+            f.applied = next;
+            continue;
+          }
+          f.write(next);
+          f.applied = f.read();
+        }
+      },
+    );
+
     // Error display
     const errorEl = createElement("div", {
       class: "form-group",
@@ -325,6 +465,32 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     });
     body.appendChild(errorEl);
 
+    // Forum settings: a lazy chunk, only for a forum an admin may configure.
+    if (
+      channelType === "forum" &&
+      onSaveForum !== undefined &&
+      forumsEnabled() &&
+      canManageChannels()
+    ) {
+      void import("../features/forums/ForumSettingsSection").then(
+        ({ createForumSettingsSection }) => {
+          if (destroyed) return;
+          const section = createForumSettingsSection({
+            channelId: options.channelId,
+            save: onSaveForum,
+          });
+          if (section === null) return;
+          forumSection = section;
+          body.insertBefore(section.element, errorEl);
+          section.element.addEventListener("input", rearm, { signal: disposable.signal });
+          section.element.addEventListener("click", rearm, { signal: disposable.signal });
+        },
+        () => {
+          // The chunk failed to load: the rest of the dialog still works.
+        },
+      );
+    }
+
     // Footer
     const footer = createElement("div", { class: "modal-footer" });
     const cancelBtn = createElement(
@@ -332,7 +498,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       { class: "btn-modal-cancel", type: "button" },
       shellText("common.cancel"),
     );
-    cancelBtn.addEventListener("click", onClose, { signal: disposable.signal });
+    cancelBtn.addEventListener("click", requestClose, { signal: disposable.signal });
 
     const saveBtn = createElement(
       "button",
@@ -355,24 +521,19 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
           return;
         }
 
+        if (warnUnsavedForum()) return;
+        const data: Mutable = {};
+        for (const f of fields) if (touched(f)) f.send(data);
+        // Nothing changed: there is nothing to PATCH.
+        if (Object.keys(data).length === 0) {
+          requestClose();
+          return;
+        }
+
         errorEl.style.display = "none";
         nameInput.classList.remove("error");
         saveBtn.setAttribute("disabled", "true");
         setText(saveBtn, shellText("channelForm.saving"));
-
-        const data: EditChannelData = {
-          name,
-          topic: topicInput.value.trim(),
-          category: categoryInput.value.trim(),
-          slow_mode: clampSlowMode(Number.parseInt(slowSelect.value, 10)),
-          nsfw: nsfwInput.checked,
-          ...(maxUsersInput !== null
-            ? { voice_max_users: clampVoiceLimit(Number.parseInt(maxUsersInput.value, 10)) }
-            : {}),
-          ...(maxVideoInput !== null
-            ? { voice_max_video: clampVoiceLimit(Number.parseInt(maxVideoInput.value, 10)) }
-            : {}),
-        };
 
         try {
           await onSave(data);
@@ -409,7 +570,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       "click",
       (e) => {
         if (e.target === instance?.overlay) {
-          onClose();
+          requestClose();
         }
       },
       { signal: disposable.signal },
@@ -422,7 +583,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       "keydown",
       (e: KeyboardEvent) => {
         if (e.key === "Escape" && instance?.overlay.isConnected === true) {
-          onClose();
+          requestClose();
         }
       },
       { signal: disposable.signal },
@@ -432,7 +593,32 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     nameInput.select();
   }
 
+  const rearm = (): void => {
+    warnedForum = false;
+  };
+  /**
+   * Unsaved forum settings are never dropped silently: the first Save or close
+   * with edits pending keeps the dialog open and says so; asking again discards
+   * them (editing the section again re-arms the warning). No browser confirm.
+   */
+  function warnUnsavedForum(): boolean {
+    if (forumSection?.isDirty() !== true || warnedForum) return false;
+    warnedForum = true;
+    const el = document.querySelector<HTMLElement>("[data-testid='edit-channel-error']");
+    if (el !== null) {
+      el.style.display = "block";
+      setText(el, forumsText("settings.unsaved"));
+    }
+    return true;
+  }
+  function requestClose(): void {
+    if (!warnUnsavedForum()) onClose();
+  }
+
   function destroy(): void {
+    destroyed = true;
+    forumSection?.destroy();
+    forumSection = null;
     disposable.destroy();
     instance?.destroy();
     instance = null;

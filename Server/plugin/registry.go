@@ -621,7 +621,9 @@ func (r *Registry) EnablePlugin(ctx context.Context, id int64) error {
 	if err := enablePluginActivate(r, ctx, inst); err != nil {
 		// Roll back the DB flag and the in-memory flag so the next start
 		// attempt is consistent.
-		_ = r.cfg.Store.DisablePlugin(ctx, id)
+		// WithoutCancel: the failure may be the request's own expired
+		// deadline, and the flag must still be cleared.
+		_ = r.cfg.Store.DisablePlugin(context.WithoutCancel(ctx), id)
 		r.mu.Lock()
 		inst.Enabled = false
 		// Drop bindings and free any compile activation retained, as

@@ -13,7 +13,7 @@ import (
 const createMessage = `-- name: CreateMessage :one
 INSERT INTO messages (channel_id, user_id, content, reply_to) VALUES (?, ?, ?, ?)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone, pinned_at
+          mentions_everyone, pinned_at, kind
 `
 
 type CreateMessageParams struct {
@@ -43,14 +43,17 @@ func (q *Queries) CreateMessage(ctx context.Context, arg CreateMessageParams) (M
 		&i.Timestamp,
 		&i.MentionsEveryone,
 		&i.PinnedAt,
+		&i.Kind,
 	)
 	return i, err
 }
 
 const editMessageContent = `-- name: EditMessageContent :one
-UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0
+UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0 AND kind = 0
+  AND NOT EXISTS (SELECT 1 FROM message_forwards f WHERE f.message_id = messages.id)
+  AND NOT EXISTS (SELECT 1 FROM polls p WHERE p.message_id = messages.id)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-          mentions_everyone, pinned_at
+          mentions_everyone, pinned_at, kind
 `
 
 type EditMessageContentParams struct {
@@ -61,7 +64,11 @@ type EditMessageContentParams struct {
 // The deleted = 0 guard is the one SoftDeleteMessage and SetMessagePinned
 // already carry (OC-0284): an edit that races a delete must not rewrite a
 // tombstone. No row comes back when it loses, which the wrapper reports as
-// ErrNotFound rather than a silent success (OC-0358).
+// ErrNotFound rather than a silent success (OC-0358). kind = 0 keeps a call log
+// row (kind 1) read-only: only the server rewrites its content, through
+// call_log.sql. A forward (WP 6.9a) is read-only too: its text is a snapshot of
+// another message, so no row comes back and the wrapper reports "cannot edit".
+// A poll (WP 6.9b) is read-only too: an edit would change what people voted on.
 func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContentParams) (Message, error) {
 	row := q.db.QueryRowContext(ctx, editMessageContent, arg.Content, arg.ID)
 	var i Message
@@ -77,6 +84,7 @@ func (q *Queries) EditMessageContent(ctx context.Context, arg EditMessageContent
 		&i.Timestamp,
 		&i.MentionsEveryone,
 		&i.PinnedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -91,9 +99,11 @@ SELECT c.id,
                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
          LIMIT 100)) AS unread,
        COALESCE((SELECT rs.mention_count FROM read_states rs
-                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions
+                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions,
+       COALESCE((SELECT rs.last_message_id FROM read_states rs
+                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
 FROM channels c
-WHERE c.type IN ('text', 'announcement')
+WHERE c.type IN ('text', 'announcement', 'voice')
    OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
                                   WHERE dp.channel_id = c.id AND dp.user_id = ?))
 `
@@ -102,6 +112,7 @@ type GetChannelUnreadCountsParams struct {
 	UserID   int64 `json:"userId"`
 	UserID_2 int64 `json:"userId2"`
 	UserID_3 int64 `json:"userId3"`
+	UserID_4 int64 `json:"userId4"`
 }
 
 type GetChannelUnreadCountsRow struct {
@@ -109,10 +120,16 @@ type GetChannelUnreadCountsRow struct {
 	LastMsgID interface{} `json:"lastMsgId"`
 	Unread    int64       `json:"unread"`
 	Mentions  interface{} `json:"mentions"`
+	LastRead  interface{} `json:"lastRead"`
 }
 
 func (q *Queries) GetChannelUnreadCounts(ctx context.Context, arg GetChannelUnreadCountsParams) ([]GetChannelUnreadCountsRow, error) {
-	rows, err := q.db.QueryContext(ctx, getChannelUnreadCounts, arg.UserID, arg.UserID_2, arg.UserID_3)
+	rows, err := q.db.QueryContext(ctx, getChannelUnreadCounts,
+		arg.UserID,
+		arg.UserID_2,
+		arg.UserID_3,
+		arg.UserID_4,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +142,7 @@ func (q *Queries) GetChannelUnreadCounts(ctx context.Context, arg GetChannelUnre
 			&i.LastMsgID,
 			&i.Unread,
 			&i.Mentions,
+			&i.LastRead,
 		); err != nil {
 			return nil, err
 		}
@@ -152,7 +170,7 @@ func (q *Queries) GetLatestMessageID(ctx context.Context, channelID int64) (inte
 
 const getMessage = `-- name: GetMessage :one
 SELECT id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
-       mentions_everyone, pinned_at
+       mentions_everyone, pinned_at, kind
 FROM messages WHERE id = ?
 `
 
@@ -171,6 +189,7 @@ func (q *Queries) GetMessage(ctx context.Context, id int64) (Message, error) {
 		&i.Timestamp,
 		&i.MentionsEveryone,
 		&i.PinnedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -290,7 +309,7 @@ func (q *Queries) MarkChannelReadAtLatest(ctx context.Context, arg MarkChannelRe
 }
 
 const setMessagePinned = `-- name: SetMessagePinned :execresult
-UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0
+UPDATE messages SET pinned = ?, pinned_at = ? WHERE id = ? AND deleted = 0 AND kind = 0
 `
 
 type SetMessagePinnedParams struct {
@@ -306,9 +325,11 @@ func (q *Queries) SetMessagePinned(ctx context.Context, arg SetMessagePinnedPara
 }
 
 const softDeleteMessage = `-- name: SoftDeleteMessage :execresult
-UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0
+UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind IN (0, 7)
 `
 
+// kind IN (0, 7): an ordinary message or a pin row (kind 7) may be deleted. A
+// call log row (kind 1) or a group event row (kinds 2 to 6) never is.
 func (q *Queries) SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error) {
 	return q.db.ExecContext(ctx, softDeleteMessage, id)
 }

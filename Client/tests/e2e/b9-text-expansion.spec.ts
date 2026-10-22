@@ -20,14 +20,21 @@ import { findUnnamedControls } from "./support/b9-accessibility";
 // their journeys here.
 // ---------------------------------------------------------------------------
 
-// In the tab's grouped order (Motion, Readability, Chat). The playwright
+// The switch rows in the tab's grouped order (Motion, Readability, Colors,
+// Chat); the Saturation slider is checked on its own. The playwright
 // config emulates prefers-reduced-motion: reduce, so the OS row says so.
 const ENGLISH = [
   ["Reduce Motion", "Disable animations and transitions"],
   ["Sync with OS", "Follow your system setting. It is asking for less motion right now."],
   ["High Contrast", "Increase contrast for better readability"],
   ["Large Font", "Use larger text throughout the app for better readability"],
+  ["Always underline links", "Underline links in messages even when you are not pointing at them"],
   ["Role Colors", "Show colored usernames based on role in chat"],
+] as const;
+/** The Saturation row, a slider rather than a switch. */
+const SATURATION = [
+  "Saturation",
+  "Make colored names and primary buttons more or less vivid. Images and video are not changed",
 ] as const;
 /** The text-size readout row, which has no switch. */
 const READOUT = ["Text size", "Set in Appearance"] as const;
@@ -68,7 +75,11 @@ test.describe("B9-3 Accessibility tab text", () => {
     const readout = pane(page).locator(".setting-readout");
     await expect(readout.locator(".setting-label")).toHaveText(READOUT[0]);
     await expect(readout.locator(".setting-desc")).toHaveText(READOUT[1]);
-    const rows = pane(page).locator(".setting-row:not(.setting-readout)");
+    const slider = pane(page).locator(".setting-slider");
+    await expect(slider.locator(".setting-label")).toHaveText(SATURATION[0]);
+    await expect(slider.locator(".setting-desc")).toHaveText(SATURATION[1]);
+    await expect(slider.getByRole("slider", { name: SATURATION[0], exact: true })).toBeVisible();
+    const rows = pane(page).locator(".setting-row:not(.setting-readout):not(.setting-slider)");
     await expect(rows).toHaveCount(ENGLISH.length);
     for (const [i, [label, desc]] of ENGLISH.entries()) {
       const row = rows.nth(i);
@@ -83,7 +94,7 @@ test.describe("B9-3 Accessibility tab text", () => {
   }, testInfo) => {
     await openAccessibility(page, true);
     const root = pane(page);
-    const rows = root.locator(".setting-row:not(.setting-readout)");
+    const rows = root.locator(".setting-row:not(.setting-readout):not(.setting-slider)");
     await expect(rows).toHaveCount(ENGLISH.length);
     expect(await findUnnamedControls(root)).toEqual([]);
 
@@ -136,11 +147,21 @@ test.describe("B9-3 Accessibility tab text", () => {
 // ---------------------------------------------------------------------------
 
 /** Q1's largest text at the minimum window, applied by the real startup path. */
-async function startAtLargestText(page: Page): Promise<void> {
+async function startAtLargestText(
+  page: Page,
+  opts: { memberListLeft?: boolean } = {},
+): Promise<void> {
   await page.addInitScript(() => {
     localStorage.setItem("owncord:settings:fontSize", "20");
     localStorage.setItem("owncord:settings:largeFont", "true");
   });
+  if (opts.memberListLeft === true) {
+    // The member list defaults to the right column (3C-6c); the "MEMBERS"
+    // heading checked with this option exists only in the left section.
+    await page.addInitScript(() => {
+      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
+    });
+  }
   await mockTauriFullSessionWithMessages(page);
   await page.goto("/");
 }
@@ -176,7 +197,7 @@ test.describe("B9-18 connect and shell text", () => {
   test("reads the catalogs' English copy on the connect page and in the shell", async ({
     page,
   }) => {
-    await startAtLargestText(page);
+    await startAtLargestText(page, { memberListLeft: true });
     await expect(page.locator(".server-panel-header h2")).toHaveText("Servers");
     await expect(page.locator(".btn-add-server")).toHaveText("+ Add Server");
     await expect(page.locator(".brand-tagline")).toHaveText(
@@ -203,7 +224,7 @@ test.describe("B9-18 connect and shell text", () => {
   test("keeps expanded shell and connect text whole, named and operable at 940×500 with 20px text", async ({
     page,
   }, testInfo) => {
-    await startAtLargestText(page);
+    await startAtLargestText(page, { memberListLeft: true });
     test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
 
     // Sign in: the main page renders entirely through the expanded seam.
@@ -316,6 +337,57 @@ test.describe("B9-18 connect and shell text", () => {
     await expect(addDialog).toHaveCount(0);
   });
 
+  test("keeps the right-hand member column's expanded text whole, named and operable at 940×500 with 20px text", async ({
+    page,
+  }, testInfo) => {
+    // The default layout (3C-6c): 940 px is above the 900 px overlay
+    // breakpoint, so the column sits beside the chat.
+    await startAtLargestText(page);
+    test.skip(!(await expandCatalogText(page)), "needs the dev server's modules");
+    await navigateToMainPageReady(page);
+
+    const column = page.locator("[data-testid='member-column']");
+    const toggle = page.locator("[data-testid='member-list-toggle']");
+    await expect(column).toBeVisible();
+    await expect(column).toBeInViewport({ ratio: 1 });
+    await expect(toggle).toHaveAccessibleName(expanded("Member List"));
+    await expectWhole(toggle);
+    await expect(column.locator(".member-column-resize")).toHaveAccessibleName(
+      expanded("Resize member list"),
+    );
+    const search = column.locator(".member-search");
+    // An empty input shows only its placeholder, which may truncate; the
+    // full text is in its name, so only the box is checked for clipping.
+    await expect(search).toHaveAccessibleName(expanded("Search members"));
+    await expectWhole(search);
+    // The chat beside the open column keeps its channel name whole.
+    await expectWhole(page.locator("[data-testid='chat-header-name']"));
+
+    const groups = column.locator(".member-role-group");
+    await expect(groups.first()).toBeVisible();
+    for (const group of await groups.all()) {
+      await expect(group).toHaveText(/^⟦.+⟧$/);
+      await expectWhole(group);
+    }
+    expect(await findUnnamedControls(column)).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+    await testInfo.attach("member-column-expanded-940x500-20px.png", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+
+    // The toggle closes and reopens the column from the keyboard, keeping focus.
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+    await expect(column).toBeHidden();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(column).toBeVisible();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(toggle).toBeFocused();
+  });
+
   test("keeps an incompatible server's expanded badge whole in its row at 940×500 with 20px text", async ({
     page,
   }, testInfo) => {
@@ -388,7 +460,7 @@ test.describe("B9-19 messaging text", () => {
 
     const own = page.locator("[data-testid='message-101']");
     await own.hover();
-    await expect(page.locator("[data-testid='msg-reply-101']")).toHaveAccessibleName("Reply");
+    await expect(page.locator("[data-testid='msg-more-101']")).toHaveAccessibleName("More");
     await expect(page.locator("[data-testid='msg-edit-101']")).toHaveAccessibleName("Edit");
     await expect(page.locator("[data-testid='msg-react-101']")).toHaveAccessibleName("React");
 
@@ -425,14 +497,24 @@ test.describe("B9-19 messaging text", () => {
     await own.hover();
     for (const [testId, english] of [
       ["msg-react-101", "React"],
-      ["msg-reply-101", "Reply"],
       ["msg-edit-101", "Edit"],
+      ["msg-more-101", "More"],
+    ] as const) {
+      const btn = page.locator(`[data-testid='${testId}']`);
+      await expect(btn).toHaveAccessibleName(expanded(english));
+      await expect(btn).toBeVisible();
+    }
+    // Reply and Delete on your own message show while Shift is held.
+    await page.keyboard.down("Shift");
+    for (const [testId, english] of [
+      ["msg-reply-101", "Reply"],
       ["msg-delete-101", "Delete"],
     ] as const) {
       const btn = page.locator(`[data-testid='${testId}']`);
       await expect(btn).toHaveAccessibleName(expanded(english));
       await expect(btn).toBeVisible();
     }
+    await page.keyboard.up("Shift");
 
     // The pinned panel's complementary landmark and close control are named
     // from the seam, and its empty state stays whole.

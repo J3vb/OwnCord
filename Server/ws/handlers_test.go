@@ -1397,9 +1397,10 @@ func TestReaction_ControlCharInEmoji_ReturnsBadRequest(t *testing.T) {
 	}
 }
 
-// TestReaction_NonExistentMessage_ReturnsBadRequest verifies that reacting to
-// a non-existent message returns a sanitized BAD_REQUEST (prevents IDOR).
-func TestReaction_NonExistentMessage_ReturnsBadRequest(t *testing.T) {
+// TestReaction_NonExistentMessage_ReturnsNotFound verifies that reacting to
+// a non-existent message returns the single NOT_FOUND answer shared with
+// deleted and unreadable messages.
+func TestReaction_NonExistentMessage_ReturnsNotFound(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	user := seedOwnerUser(t, database, "react-owner7")
 	chID := seedTestChannel(t, database, "react-chan7")
@@ -1412,8 +1413,8 @@ func TestReaction_NonExistentMessage_ReturnsBadRequest(t *testing.T) {
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", 99999, "👍"))
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
-	if code != "BAD_REQUEST" {
-		t.Errorf("expected BAD_REQUEST for non-existent message (IDOR sanitize), got %q", code)
+	if code != "NOT_FOUND" {
+		t.Errorf("expected NOT_FOUND for non-existent message, got %q", code)
 	}
 }
 
@@ -1465,7 +1466,7 @@ func TestReaction_InvalidMessageID_ReturnsBadRequest(t *testing.T) {
 
 // ─── BUG-126: Deleted messages must not be reactable ─────────────────────────
 
-func TestReaction_DeletedMessage_ReturnsBadRequest(t *testing.T) {
+func TestReaction_DeletedMessage_ReturnsNotFound(t *testing.T) {
 	hub, database := newHandlerHub(t)
 	user := seedOwnerUser(t, database, "react-del-owner")
 	chID := seedTestChannel(t, database, "react-del-chan")
@@ -1484,8 +1485,41 @@ func TestReaction_DeletedMessage_ReturnsBadRequest(t *testing.T) {
 	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "👍"))
 
 	code := receiveErrorCode(send, 300*time.Millisecond)
-	if code != "BAD_REQUEST" {
-		t.Errorf("expected BAD_REQUEST for reacting to deleted message, got %q", code)
+	if code != "NOT_FOUND" {
+		t.Errorf("expected NOT_FOUND for reacting to deleted message, got %q", code)
+	}
+}
+
+// TestReaction_UnreadableChannel_ReturnsNotFound verifies that add and remove
+// on a message in a channel the caller cannot read answer NOT_FOUND, the same
+// code as a missing message, and write nothing.
+func TestReaction_UnreadableChannel_ReturnsNotFound(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	owner := seedOwnerUser(t, database, "react-unread-owner")
+	member := seedMemberUser(t, database, "react-unread-member")
+	chID := seedTestChannel(t, database, "react-unread-chan")
+	msgID := seedMessage(t, database, chID, owner.ID, "hidden")
+	// Member role (4) is denied READ_MESSAGES on this channel.
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, 4, 0, ?)`,
+		chID, permissions.ReadMessages); err != nil {
+		t.Fatalf("seed override: %v", err)
+	}
+
+	send := make(chan []byte, 16)
+	c := ws.NewTestClientWithUser(hub, member, chID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	for _, typ := range []string{"reaction_add", "reaction_remove"} {
+		hub.HandleMessageForTest(c, reactionMsg(typ, msgID, "👍"))
+		if code := receiveErrorCode(send, 300*time.Millisecond); code != "NOT_FOUND" {
+			t.Errorf("%s: error code = %q, want NOT_FOUND", typ, code)
+		}
+	}
+	counts, err := database.GetReactions(context.Background(), msgID)
+	if err != nil || len(counts) != 0 {
+		t.Errorf("reactions = %v, err = %v, want none", counts, err)
 	}
 }
 
@@ -2017,5 +2051,87 @@ func TestChatSend_BroadcastCarriesReferencedMessage(t *testing.T) {
 		case <-timer.C:
 			t.Fatal("no chat_message broadcast")
 		}
+	}
+}
+
+// TestReaction_CapErrorCode verifies that a 21st distinct emoji is refused with
+// REACTION_LIMIT and that nothing is broadcast.
+func TestReaction_CapErrorCode(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedMemberUser(t, database, "reaction-cap")
+	chID := seedTestChannel(t, database, "reaction-cap-chan")
+	msgID := seedMessage(t, database, chID, user.ID, "popular")
+	for i := range db.MaxDistinctReactions {
+		if _, err := database.ExecContext(context.Background(),
+			`INSERT INTO reactions (message_id, user_id, emoji) VALUES (?, ?, ?)`, msgID, user.ID, fmt.Sprintf("e%d", i)); err != nil {
+			t.Fatalf("seed reaction: %v", err)
+		}
+	}
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, reactionMsg("reaction_add", msgID, "👍"))
+
+	deadline := time.After(500 * time.Millisecond)
+	code := ""
+	for code == "" {
+		select {
+		case m := <-send:
+			var env struct {
+				Type    string `json:"type"`
+				Payload struct {
+					Code string `json:"code"`
+				} `json:"payload"`
+			}
+			if json.Unmarshal(m, &env) != nil {
+				continue
+			}
+			if env.Type == "reaction_update" {
+				t.Fatalf("reaction_update broadcast for a refused reaction: %s", m)
+			}
+			if env.Type == "error" {
+				code = env.Payload.Code
+			}
+		case <-deadline:
+			t.Fatal("no error frame received")
+		}
+	}
+	if code != "REACTION_LIMIT" {
+		t.Errorf("error code = %q, want REACTION_LIMIT", code)
+	}
+	if extra := receiveMsgOfType(send, "reaction_update", 150*time.Millisecond); extra != nil {
+		t.Errorf("reaction_update broadcast after the refusal: %v", extra)
+	}
+}
+
+// TestChatDelete_AuthorWithoutSend_BroadcastsChatDeleted verifies C29: a member
+// whose SEND_MESSAGES is denied on the channel still deletes their own message.
+func TestChatDelete_AuthorWithoutSend_BroadcastsChatDeleted(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedMemberUser(t, database, "del-nosend")
+	chID := seedTestChannel(t, database, "del-nosend-chan")
+	msgID := seedMessage(t, database, chID, user.ID, "written before the mute")
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (?, ?, 0, ?)`,
+		chID, permissions.MemberRoleID, permissions.SendMessages); err != nil {
+		t.Fatalf("deny SEND: %v", err)
+	}
+
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	hub.HandleMessageForTest(c, chatDeleteMsg(msgID))
+
+	payload := receiveMsgOfType(send, "chat_deleted", 300*time.Millisecond)
+	if payload == nil {
+		t.Fatal("expected chat_deleted broadcast, got none")
+	}
+	if gotID, _ := payload["message_id"].(float64); int64(gotID) != msgID {
+		t.Errorf("chat_deleted message_id = %v, want %d", gotID, msgID)
 	}
 }

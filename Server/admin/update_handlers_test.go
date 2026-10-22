@@ -5,11 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -434,7 +438,7 @@ func TestApplyStagedUpdate_VerifyFails_BroadcastsAbort(t *testing.T) {
 	newPath := exePath + ".new" // deliberately never written
 
 	hub := &mockHub{}
-	admin.ApplyStagedUpdate(hub, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
+	admin.ApplyStagedUpdate(hub, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000", nil)
 
 	if len(hub.restartCalls) != 1 {
 		t.Fatalf("restartCalls = %d, want 1 (corrective broadcast after abort); got %+v", len(hub.restartCalls), hub.restartCalls)
@@ -467,7 +471,7 @@ func TestApplyStagedUpdate_RenameToOldFails_BroadcastsAbort(t *testing.T) {
 	stagedHash := hex.EncodeToString(sum[:])
 
 	hub := &mockHub{}
-	admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash)
+	admin.ApplyStagedUpdate(hub, exePath, newPath, stagedHash, nil)
 
 	if len(hub.restartCalls) != 1 {
 		t.Fatalf("restartCalls = %d, want 1 (corrective broadcast after abort); got %+v", len(hub.restartCalls), hub.restartCalls)
@@ -488,5 +492,314 @@ func TestApplyStagedUpdate_NilHub_NoPanic(t *testing.T) {
 	exePath := filepath.Join(dir, "chatserver")
 	newPath := exePath + ".new" // never written -> verification fails
 
-	admin.ApplyStagedUpdate(nil, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000")
+	admin.ApplyStagedUpdate(nil, exePath, newPath, "0000000000000000000000000000000000000000000000000000000000000000", nil)
+}
+
+// ─── Install directory the service cannot write to ───────────────────────────
+
+// releaseServer serves a release that is newer than 1.0.0 and counts every
+// request, so a test can prove nothing was fetched.
+func releaseServer(t *testing.T, hits *atomic.Int32) *httptest.Server {
+	t.Helper()
+	const dl = "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		names := []string{
+			"chatserver.exe", "chatserver-linux-amd64.tar.gz", "checksums.sha256",
+			"chatserver.exe.sig", "server-update-manifest.json", "server-update-manifest.json.sig",
+		}
+		assets := make([]map[string]any, 0, len(names))
+		for _, n := range names {
+			assets = append(assets, map[string]any{"name": n, "browser_download_url": dl + n})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v2.0.0",
+			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
+			"assets":   assets,
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func checkUpdateBody(t *testing.T) map[string]any {
+	t.Helper()
+	var hits atomic.Int32
+	mockGH := releaseServer(t, &hits)
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/updates", token, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	return body
+}
+
+func TestCheckUpdate_ReportsInstallReadOnly(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return errors.New("read-only") }))
+
+	body := checkUpdateBody(t)
+	if body["can_apply"] != false {
+		t.Errorf("can_apply = %v, want false", body["can_apply"])
+	}
+	if body["apply_blocked"] != "install_read_only" {
+		t.Errorf("apply_blocked = %v, want install_read_only", body["apply_blocked"])
+	}
+}
+
+func TestCheckUpdate_WritableInstallOmitsApplyBlocked(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return nil }))
+
+	body := checkUpdateBody(t)
+	if body["can_apply"] != true {
+		t.Errorf("can_apply = %v, want true", body["can_apply"])
+	}
+	if _, ok := body["apply_blocked"]; ok {
+		t.Errorf("apply_blocked = %v, want it absent", body["apply_blocked"])
+	}
+}
+
+// The container check wins, so the contract containers already rely on is
+// unchanged even when the install directory is also read-only.
+func TestCheckUpdate_ContainerWinsOverReadOnly(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "1")
+	t.Cleanup(admin.SetInstallWritable(func() error { return errors.New("read-only") }))
+
+	body := checkUpdateBody(t)
+	if body["can_apply"] != false {
+		t.Errorf("can_apply = %v, want false", body["can_apply"])
+	}
+	if body["apply_blocked"] != "container" {
+		t.Errorf("apply_blocked = %v, want container", body["apply_blocked"])
+	}
+}
+
+// A read-only install is refused before the release is even looked up: no
+// outbound request, no restart countdown, and the restart guard stays free.
+func TestApplyUpdate_ReadOnlyInstallRefusedBeforeDownload(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return errors.New("read-only") }))
+
+	var hits atomic.Int32
+	mockGH := releaseServer(t, &hits)
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+	hub := &mockHub{}
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, u, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodPost, "/updates/apply", token, nil)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp["error"] != "INSTALL_READ_ONLY" {
+		t.Errorf("error code = %q, want INSTALL_READ_ONLY", resp["error"])
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("release server saw %d request(s), want 0", n)
+	}
+	if len(hub.restartCalls) != 0 {
+		t.Errorf("restart broadcasts = %d, want 0", len(hub.restartCalls))
+	}
+}
+
+// newApplyTestServer serves the admin API over HTTP/2 TLS against a mock
+// GitHub whose release lookup (same version, so NO_UPDATE) sleeps for delay.
+func newApplyTestServer(t *testing.T, writeTimeout, delay time.Duration) (*httptest.Server, string) {
+	t.Helper()
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return nil }))
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(delay)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v1.0.0",
+			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v1.0.0",
+			"assets":   []map[string]any{},
+		})
+	}))
+	t.Cleanup(mockGH.Close)
+
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", nil, u, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+
+	srv := httptest.NewUnstartedServer(handler)
+	srv.EnableHTTP2 = true
+	srv.Config.WriteTimeout = writeTimeout
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	return srv, token
+}
+
+func postApply(t *testing.T, srv *httptest.Server, token string) (int, string) {
+	t.Helper()
+	status, _, code := postApplyProto(t, srv, token)
+	return status, code
+}
+
+// postApplyProto returns the status code, the negotiated HTTP major version
+// and the error code, so no *http.Response escapes with a closed body.
+func postApplyProto(t *testing.T, srv *httptest.Server, token string) (int, int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/updates/apply", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	// A dedicated transport per request: the shared httptest client keeps its
+	// HTTP/2 connection (and its read-loop goroutine) alive after the server
+	// aborts mid-stream, which goleak reports at TestMain end. DisableKeepAlives
+	// makes the transport close the connection once the response is done, and
+	// the deferred CloseIdleConnections covers any early exit.
+	tr, ok := srv.Client().Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("httptest client transport is %T, want *http.Transport", srv.Client().Transport)
+	}
+	tr = tr.Clone()
+	tr.DisableKeepAlives = true
+	defer tr.CloseIdleConnections()
+	client := &http.Client{Transport: tr}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	var body map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	_, _ = io.Copy(io.Discard, resp.Body) // drain so the stream ends cleanly
+	return resp.StatusCode, resp.ProtoMajor, body["error"]
+}
+
+// A slow release lookup that outlasts the server's WriteTimeout must still
+// reach an HTTP/2 client: the handler extends the connection deadlines. The
+// slow stage stands in for the download, which sits under the same deadlines.
+func TestAdminAPI_ApplyUpdate_OutlastsServerWriteTimeout(t *testing.T) {
+	srv, token := newApplyTestServer(t, time.Second, 3*time.Second)
+	status, protoMajor, code := postApplyProto(t, srv, token)
+	if protoMajor != 2 {
+		t.Fatalf("protocol major = %d, want HTTP/2", protoMajor)
+	}
+	if status != http.StatusConflict || code != "NO_UPDATE" {
+		t.Errorf("status = %d error = %q, want 409 NO_UPDATE", status, code)
+	}
+}
+
+// The shutdown hook ends an apply that is in its release-check stage: that
+// stage waits for its detached lookup to return (here 600 ms; up to about 30 s
+// in production) and then the handler answers SERVER_SHUTTING_DOWN instead of
+// carrying on to its 409.
+func TestAdminAPI_ApplyUpdate_EndAppliesCancelsInFlight(t *testing.T) {
+	srv, token := newApplyTestServer(t, 5*time.Second, 600*time.Millisecond)
+	hook := admin.EndApplies(srv.Config)
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		hook()
+	}()
+	status, code := postApply(t, srv, token)
+	if status != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
+		t.Errorf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", status, code)
+	}
+}
+
+// An apply that starts after the hook ran is refused straight away.
+func TestAdminAPI_ApplyUpdate_AfterEndAppliesIsCancelled(t *testing.T) {
+	srv, token := newApplyTestServer(t, 5*time.Second, 0)
+	admin.EndApplies(srv.Config)()
+	status, code := postApply(t, srv, token)
+	if status != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
+		t.Errorf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", status, code)
+	}
+}
+
+// A shutdown that lands during the download/verify stage ends the apply with
+// SERVER_SHUTTING_DOWN, removes the staged file, releases the restart slot
+// and promises no restart. The real download needs a signed release manifest,
+// so the download stage is replaced by a stub that stages a file and then
+// trickles until its context ends, then reports success: this covers both the
+// cancel and the cancel-after-verify branch.
+func TestAdminAPI_ApplyUpdate_ShutdownDuringDownloadCleansUp(t *testing.T) {
+	t.Setenv("OWNCORD_CONTAINER", "0")
+	t.Cleanup(admin.SetInstallWritable(func() error { return nil }))
+	assets := make([]map[string]any, 0, 7)
+	for _, n := range []string{"chatserver.exe", "chatserver-linux-amd64.tar.gz", "chatserver-linux-arm64.tar.gz", "checksums.sha256",
+		"chatserver.exe.sig", "server-update-manifest.json", "server-update-manifest.json.sig"} {
+		assets = append(assets, map[string]any{
+			"name":                 n,
+			"browser_download_url": "https://github.com/J3vb/OwnCord/releases/download/v2.0.0/" + n,
+		})
+	}
+	mockGH := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": "v2.0.0",
+			"html_url": "https://github.com/J3vb/OwnCord/releases/tag/v2.0.0",
+			"assets":   assets,
+		})
+	}))
+	defer mockGH.Close()
+
+	exePath, err := updater.ExecutablePath()
+	if err != nil {
+		t.Fatalf("ExecutablePath: %v", err)
+	}
+	newPath := exePath + ".new"
+	t.Cleanup(func() { _ = os.Remove(newPath) })
+	started := make(chan struct{})
+	t.Cleanup(admin.SetDownloadAndVerify(func(_ *updater.Updater, ctx context.Context, _, _, _, _, _, _, dest string) (string, error) {
+		if err := os.WriteFile(dest, []byte("partial"), 0o600); err != nil {
+			return "", err
+		}
+		close(started)
+		<-ctx.Done()
+		return "stagedhash", nil
+	}))
+
+	u := updater.NewUpdater("1.0.0", "", "J3vb", "OwnCord")
+	u.SetBaseURL(mockGH.URL)
+	database := openAdminTestDB(t)
+	hub := &mockHub{}
+	handler := admin.NewAdminAPI(database, "1.0.0", hub, u, nil, nil, nil, newTestServices(database))
+	token := createAdminUser(t, database)
+	srv := httptest.NewUnstartedServer(handler)
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+
+	hook := admin.EndApplies(srv.Config)
+	go func() {
+		<-started
+		hook()
+	}()
+	status, code := postApply(t, srv, token)
+	if status != http.StatusServiceUnavailable || code != "SERVER_SHUTTING_DOWN" {
+		t.Fatalf("status = %d error = %q, want 503 SERVER_SHUTTING_DOWN", status, code)
+	}
+	if _, statErr := os.Stat(newPath); !os.IsNotExist(statErr) {
+		t.Errorf("staged file still present: %v", statErr)
+	}
+	if len(hub.restartCalls) != 0 {
+		t.Errorf("restart broadcasts = %+v, want none", hub.restartCalls)
+	}
+	// The restart slot was released: a second apply is refused for shutdown
+	// (hook already ran), not as UPDATE_IN_PROGRESS.
+	_, code2 := postApply(t, srv, token)
+	if code2 == "UPDATE_IN_PROGRESS" || code2 == "RESTART_PENDING" {
+		t.Errorf("second apply error = %q, restart slot not released", code2)
+	}
 }

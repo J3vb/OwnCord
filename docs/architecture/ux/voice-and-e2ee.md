@@ -148,6 +148,17 @@ app window; leaving the call closes it. Show chat and the camera picker arrow
 are hidden there and the tile menu has no Profile row (each opens in the app
 window), and starting a share brings the call back first so its picker is in
 view.
+
+**The voice channel's chat beside the grid** (guild calls): opening the call
+view selects the voice channel you are in (`pages/main-page/callChat.ts`), so
+its chat mounts as for any channel, and the grid sits left of it with the chat
+in a 360px column on the right (stacked under the grid at narrow width). The
+split holds only while the active channel is the joined voice channel; a
+stream watched over a text channel, a DM call and a popped-out call keep the
+grid over the chat. Moving to another voice channel follows to its chat. Leaving
+the call closes the grid and the chat stays, full width. Show chat lands on the
+voice channel's own chat; click another channel to leave it. A voice channel is
+not remembered as the last channel.
 A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %; its mute
 button is the same local Mute as the sidebar menu's) and

@@ -8,13 +8,13 @@ import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import { bracketBareIPv6Host } from "@lib/ws";
 import type { UserStatus } from "@lib/types";
-import { errorText } from "@lib/api";
+import { ApiClientError, errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
 import { createRateLimiterSet } from "@lib/rate-limiter";
 import type { CallState, VideoGridComponent } from "@components/VideoGrid";
-import { isConnecting } from "@components/VoiceWidget";
+import { isConnecting } from "@components/voiceStatusText";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
 import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
@@ -32,14 +32,26 @@ import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.st
 import { closeSettings, openSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
 import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
+import {
+  anyTriggerBound,
+  clearPortalBound,
+  globalKeysErrorCode,
+  portalBoundBefore,
+} from "@lib/globalKeys";
+import { loadPref, savePref } from "@lib/preferences";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
+import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { voiceStore, isSelfMuted, restoreSavedSelfVoiceState } from "@stores/voice.store";
+import {
+  voiceStore,
+  isSelfMuted,
+  restoreSavedSelfVoiceState,
+  streamViewers,
+} from "@stores/voice.store";
 import type { VoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { clearCustomEmoji } from "@stores/emoji.store";
 import {
   cleanupAll as voiceCleanupAll,
   setOnRemoteVideo,
@@ -50,26 +62,24 @@ import {
   setOnError as setVoiceOnError,
   enableCamera,
   getRemoteVideoStats,
-  getLocalScreenshareFps,
+  getLocalScreenshareStats,
   setRemoteVideoView,
   setRemoteVideoWatched,
   forgetRemoteVideoWatch,
 } from "@lib/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
-  clearAttachmentCaches,
-  clearExternalImageCache,
   pruneAttachmentCacheScope,
   setAttachmentCacheScope,
 } from "@components/message-list/attachments";
-import { clearEmbedCaches } from "@components/message-list/embeds";
-import { clearMediaCaches, closeActiveLightbox } from "@components/message-list/media";
-import { forgetAdmittedItems } from "../features/content-consent/external";
+import { closeActiveLightbox } from "@components/message-list/media";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
-import { setMarkReadSender } from "@lib/read-state";
+import { createNotesContext, setNotesContextSource } from "../features/profiles/userNotes";
+import { markAllRead, setMarkReadSender } from "@lib/read-state";
+import { setMarkUnreadSender } from "@components/message-list/mark-unread";
 import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
 import { setChannelMutesHost } from "@lib/channel-mutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
@@ -77,6 +87,8 @@ import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
+import { setChatHeaderCallChat } from "./main-page/ChatHeader";
+import { createCallChat, type CallChat } from "./main-page/callChat";
 import { createMessageController } from "./main-page/MessageController";
 import type { MessageController } from "./main-page/MessageController";
 import { createReactionController } from "./main-page/ReactionController";
@@ -87,6 +99,7 @@ import { createChannelController } from "./main-page/ChannelController";
 import type { ChannelController } from "./main-page/ChannelController";
 import { createUpdateNotifier } from "@components/UpdateNotifier";
 import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmProfileSidebar";
+import type { GroupMemberPanelController } from "./main-page/GroupMemberPanelController";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
 import { createRingController, createOutgoingCall } from "@lib/call-ring";
@@ -99,6 +112,8 @@ import { createSidebarArea } from "./main-page/SidebarArea";
 import { createTileMenuActions } from "./main-page/tileMenuActions";
 import { createChatArea } from "./main-page/ChatArea";
 import type { SidebarDrawer } from "./main-page/SidebarDrawer";
+import type { MemberColumn } from "./main-page/MemberColumn";
+import { loadMemberLayout, MEMBER_LAYOUT_PREF } from "../features/members/memberLayout";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { NAVIGATION_DESTINATIONS } from "../features/navigation/destinations";
 import { createContentNavigator } from "../features/navigation/contentView";
@@ -144,6 +159,9 @@ function personName(userId: number): string | undefined {
   return (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
 }
 
+/** Saved preference: the 1:1 DM profile panel opens with the conversation. */
+const DM_PROFILE_PREF = "dmProfileOpen";
+
 /**
  * Build the profile panel's data from the live stores for a 1:1 DM channel.
  * Null for a group (no single "recipient" -- see the caller) or a channel
@@ -163,7 +181,8 @@ function buildDmProfileUser(channelId: number): DmProfileData | null {
   // Prefer membersStore's status, like the chat header's refreshDmHeader
   // does (ChannelController.ts) -- falling back to dmStore's own copy keeps
   // this correct even for a DM partner who isn't a guild member.
-  const rawStatus = membersStore.getState().members.get(recipient.id)?.status ?? recipient.status;
+  const member = membersStore.getState().members.get(recipient.id);
+  const rawStatus = member?.status ?? recipient.status;
   const status =
     rawStatus === "online" || rawStatus === "idle" || rawStatus === "dnd" || rawStatus === "offline"
       ? rawStatus
@@ -180,6 +199,8 @@ function buildDmProfileUser(channelId: number): DmProfileData | null {
     status,
     about: null,
     joinDate: null,
+    banner: member?.banner ?? null,
+    banner_color: member?.banner_color ?? null,
   };
 }
 
@@ -239,9 +260,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
   // "Mark as Read" affordances need the socket but are reached from deep inside
   // the sidebar; register the sender once instead of threading ws through.
-  setMarkReadSender((channelId) => {
-    ws.send({ type: "mark_read", payload: { channel_id: channelId } });
+  setMarkReadSender((channelId, messageId) => {
+    const payload = { channel_id: channelId };
+    ws.send({
+      type: "mark_read",
+      payload: messageId === undefined ? payload : { ...payload, message_id: messageId },
+    });
   });
+  setMarkUnreadSender((channelId, messageId) =>
+    ws.send({ type: "mark_unread", payload: { channel_id: channelId, message_id: messageId } }),
+  );
 
   // The native screen-share picker adapter is a lower layer and may not import
   // a component (ARCH-06); the UI registers the dialog here. It is loaded on
@@ -259,6 +287,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const res = await api.getReactionUsers(channelId, messageId, emoji);
     return res.users;
   });
+
+  // Cards opened from anywhere (member list, message author) take the notes
+  // context of this session when they open, never later.
+  setNotesContextSource(() => createNotesContext(api, apiConfig.host ?? ""));
 
   const limiters = createRateLimiterSet();
 
@@ -297,10 +329,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   let msgCtrl: MessageController | null = null;
   let reactionCtrl: ReactionController | null = null;
   let videoModeCtrl: VideoModeController | null = null;
+  let callChat: CallChat | null = null;
   let channelCtrl: ChannelController | null = null;
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
+  let speakingActivityTimer: ReturnType<typeof setInterval> | null = null;
+  let statusTimerWatcher: StatusTimerWatcher | null = null;
 
   // Toast container for user-facing error feedback
   let toast: ToastContainer | null = null;
@@ -308,6 +343,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // DM profile sidebar (right panel, toggled via DM header click)
   let dmProfileSidebar: DmProfileSidebarComponent | null = null;
   let dmProfileSlot: HTMLDivElement | null = null;
+  /** The header's "Show User Profile" toggle; its aria-pressed follows the panel. */
+  let dmProfileBtn: HTMLButtonElement | null = null;
+  /** The DM the open panel shows; moves with a DM-to-DM switch. */
+  let dmProfileChannelId = 0;
   /** Tears down the store subscriptions that keep an open profile panel's
    *  status/name live (see toggleDmProfile) -- null while the panel is
    *  closed. Always cleared alongside dmProfileSidebar itself. */
@@ -318,6 +357,49 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  and closeDmProfile clears it, so the import mounts only if it is still
    *  the current load when it resolves. */
   let dmProfileLoad: object | null = null;
+
+  // Group DM member panel (WP 3B-11a): mounted in the same slot as the 1:1
+  // profile panel, only one of the two showing at a time.
+  // The controller's code loads the first time a group DM is on screen, so a
+  // session that never opens one never pays for it.
+  let groupPanelCtrl: GroupMemberPanelController | null = null;
+  let groupPanelLoad: Promise<void> | null = null;
+  /** The header's "Show Member List" toggle; its aria-pressed follows the panel. */
+  let dmMembersBtn: HTMLButtonElement | null = null;
+
+  /** Run `act` on the group panel controller, loading it first if a group DM
+   *  is active (or `force`d by the header toggle). With no controller and no
+   *  group on screen there is nothing to sync or close, so nothing loads. */
+  function withGroupPanel(act: (ctrl: GroupMemberPanelController) => void, force = false): void {
+    if (groupPanelCtrl !== null) {
+      act(groupPanelCtrl);
+      return;
+    }
+    const active = getActiveChannel();
+    const groupActive =
+      active !== null &&
+      active.type === "dm" &&
+      dmStore.getState().channels.some((c) => c.channelId === active.id && c.isGroup);
+    if (!force && !groupActive) return;
+    groupPanelLoad ??= import("./main-page/GroupMemberPanelController").then(
+      ({ createGroupMemberPanelController }) => {
+        if (tornDown) return;
+        groupPanelCtrl = createGroupMemberPanelController({
+          api,
+          getSlot: () => dmProfileSlot,
+          getButton: () => dmMembersBtn,
+          notify: (message) => showToast(message, "error"),
+        });
+      },
+      () => {
+        // The chunk could not load; a later group switch or click retries.
+        groupPanelLoad = null;
+      },
+    );
+    void groupPanelLoad.then(() => {
+      if (groupPanelCtrl !== null) act(groupPanelCtrl);
+    });
+  }
 
   // B9-4: the content view (Message Requests, Moderation) shown in place of
   // the chat column. Created in mount, once the chat column exists.
@@ -338,6 +420,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // The narrow-width sidebar drawer (WCAG 1.4.10). Null above 800px in
   // practice, but always created so the breakpoint is decided by CSS, not JS.
   let sidebarDrawer: SidebarDrawer | null = null;
+
+  // The right-hand member column's controller (3C-6b). Loaded on demand; the
+  // <aside> itself always exists so the header toggle's aria-controls resolves.
+  let memberColumn: MemberColumn | null = null;
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -391,20 +477,104 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     // If already open (or loading), close it
     if (dmProfileSidebar !== null || dmProfileLoad !== null) {
-      closeDmProfile();
+      closeDmProfileByUser();
       return;
     }
 
     // Only open in DM mode
     const active = getActiveChannel();
     if (active === null || active.type !== "dm") return;
+    if (openDmProfileFor(active.id, true)) savePref(DM_PROFILE_PREF, true);
+  }
 
-    const channelId = active.id;
+  /** A close the user asked for (the X, Escape, the header button): remembered. */
+  function closeDmProfileByUser(): void {
+    closeDmProfile();
+    savePref(DM_PROFILE_PREF, false);
+  }
+
+  /** Mirror the panel's state on the header's "Show User Profile" toggle. */
+  function syncDmProfileButton(): void {
+    dmProfileBtn?.setAttribute(
+      "aria-pressed",
+      String(dmProfileSidebar !== null || dmProfileLoad !== null),
+    );
+  }
+
+  /**
+   * Make the panel match the active conversation, without touching the saved
+   * preference: a 1:1 DM shows it while the preference is on (updated for the
+   * new person on a DM-to-DM switch), a group or a server channel hides it.
+   */
+  function syncDmProfileToActive(): void {
+    const active = getActiveChannel();
+    if (active !== null && active.type === "dm" && loadPref<boolean>(DM_PROFILE_PREF, true)) {
+      // Already showing: a switch to another 1:1 DM repaints the same panel
+      // (no slide-in, no focus move) and follows the new person live.
+      const next = dmProfileSidebar !== null ? buildDmProfileUser(active.id) : null;
+      if (dmProfileSidebar !== null && next !== null) {
+        bindDmProfileLive(active.id, next.id);
+        dmProfileSidebar.update(next);
+        return;
+      }
+      closeDmProfile();
+      // It opened by itself: never take focus from what the user is typing in.
+      openDmProfileFor(active.id, false);
+      return;
+    }
+    closeDmProfile();
+  }
+
+  /**
+   * Keep the panel's status and name live across presence/rename/nickname
+   * changes for as long as it stays open on this DM -- otherwise it is painted
+   * once from an open-time snapshot and never updated until re-mounted, leaving
+   * it disagreeing with the chat header (which ChannelController's
+   * refreshDmHeader already keeps live the same way). Re-binding replaces the
+   * previous DM's subscriptions; closeDmProfile drops them.
+   */
+  function bindDmProfileLive(channelId: number, recipientId: number): void {
+    dmProfileUnsub?.();
+    dmProfileChannelId = channelId;
+    const refresh = (): void => {
+      const next = buildDmProfileUser(channelId);
+      if (next !== null) dmProfileSidebar?.update(next);
+    };
+    const unsubMembers = membersStore.subscribeSelector(
+      (s) => s.members.get(recipientId)?.status,
+      refresh,
+    );
+    // A banner change shows without reopening the panel.
+    const unsubBanner = membersStore.subscribeSelector((s) => {
+      const m = s.members.get(recipientId);
+      return `${m?.banner ?? ""}|${m?.banner_color ?? ""}`;
+    }, refresh);
+    const unsubDm = dmStore.subscribeSelector(
+      (s) => s.channels.find((c) => c.channelId === channelId),
+      refresh,
+    );
+    dmProfileUnsub = () => {
+      unsubMembers();
+      unsubBanner();
+      unsubDm();
+    };
+  }
+
+  /** Who a Block confirm names: the person the panel shows now. */
+  function dmProfileBlockName(fallback: string): string {
+    const current = buildDmProfileUser(dmProfileChannelId);
+    return current?.displayName ?? current?.username ?? fallback;
+  }
+
+  /** Mount the panel for a 1:1 DM; false (nothing opened) for a group or an unknown DM. */
+  function openDmProfileFor(channelId: number, focus: boolean): boolean {
+    if (dmProfileSlot === null) return false;
     const profileUser = buildDmProfileUser(channelId);
-    if (profileUser === null) return;
+    if (profileUser === null) return false;
 
     const load = {};
     dmProfileLoad = load;
+    syncDmProfileButton();
     void import("@components/DmProfileSidebar").then(
       ({ createDmProfileSidebar }) => {
         // A close (or teardown) since the click supersedes this import: drop it.
@@ -414,41 +584,51 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         dmProfileSidebar = createDmProfileSidebar({
           user: profileUser,
           host: apiConfig.host ?? "",
+          notes: createNotesContext(api, apiConfig.host ?? ""),
+          focus,
           onClose: () => {
-            closeDmProfile();
+            closeDmProfileByUser();
+          },
+          onToggleBlock: (userId, block) => {
+            void import("../features/blocks/blockActions").then(
+              ({ confirmAndToggleBlock }) =>
+                confirmAndToggleBlock(
+                  { api, notify: showToast },
+                  userId,
+                  // The panel may have moved to another DM since it opened.
+                  dmProfileBlockName(profileUser.username),
+                  block,
+                ),
+              () =>
+                showToast(
+                  shellText(block ? "members.blockFailed" : "members.unblockFailed"),
+                  "error",
+                ),
+            );
           },
         });
         dmProfileSidebar.mount(dmProfileSlot);
+        syncDmProfileButton();
 
-        // Keep the panel's status and name live across presence/rename/
-        // nickname changes for as long as it stays open on this DM --
-        // otherwise it is painted once from this open-time snapshot and never
-        // updated until re-mounted, leaving it disagreeing with the chat
-        // header it was opened from (which ChannelController.ts:621-638
-        // already keeps live the same way). Torn down in closeDmProfile.
-        const recipientId = profileUser.id;
-        const refresh = (): void => {
-          const next = buildDmProfileUser(channelId);
-          if (next !== null) dmProfileSidebar?.update(next);
-        };
-        const unsubMembers = membersStore.subscribeSelector(
-          (s) => s.members.get(recipientId)?.status,
-          refresh,
-        );
-        const unsubDm = dmStore.subscribeSelector(
-          (s) => s.channels.find((c) => c.channelId === channelId),
-          refresh,
-        );
-        dmProfileUnsub = () => {
-          unsubMembers();
-          unsubDm();
-        };
+        bindDmProfileLive(channelId, profileUser.id);
       },
       () => {
         // The panel could not load; a later click may retry.
         if (dmProfileLoad === load) dmProfileLoad = null;
+        syncDmProfileButton();
       },
     );
+    return true;
+  }
+
+  /** Join a DM's live call: the call panel's Join strip and a call log row's Join button. */
+  function joinDmCall(channelId: number): void {
+    if (uiStore.getState().connectionStatus !== "connected") {
+      showToast(shellText("channel.notConnected"), "error");
+      return;
+    }
+    cameraOnJoin = null;
+    createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
   }
 
   /**
@@ -459,7 +639,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    * channel, so the ring is only truthful once the caller is actually there —
    * ringing first would offer an empty room to whoever accepts.
    */
-  function startCall(): void {
+  function startCall(withVideo = false): void {
     const active = getActiveChannel();
     if (active === null || active.type !== "dm") return;
     // onVoiceJoin silently refuses to join when the socket is down
@@ -469,7 +649,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       showToast(shellText("channel.notConnected"), "error");
       return;
     }
+    cameraOnJoin = null;
     createSidebarVoiceCallbacks(ws).onVoiceJoin(active.id);
+    if (withVideo) {
+      const v = voiceStore.getState();
+      if (v.currentChannelId === active.id && v.voiceStatus === "connected") {
+        // Already in this call: the join was a no-op, so there is no
+        // "connected" to wait for.
+        if (!v.localCamera) {
+          enableCamera().catch((err: unknown) => {
+            log.error("Camera on call start failed", { error: String(err) });
+          });
+        }
+      } else if (v.currentChannelId === active.id) {
+        // The join started; the voiceStore subscriber turns the camera on once
+        // connected. A refused join (backoff) leaves nothing armed.
+        cameraOnJoin = active.id;
+      }
+    }
     ringAfterJoin(active.id);
   }
 
@@ -544,6 +741,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     lastRingId = ws.send({ type: "call_ring", payload: { channel_id: channelId } });
     const roster = voiceStore.getState().voiceUsers.get(channelId);
     const self = getCurrentUserId();
+    // The ring above already went out to the whole DM (a group redial from inside
+    // a live call too, 3B-8); with someone else in the room there is no
+    // "Calling…" to show, and the voice subscription would clear it at once.
     if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     // The server drops rings to offline members, so waiting on them would
@@ -616,6 +816,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       dmProfileSidebar.destroy?.();
       dmProfileSidebar = null;
     }
+    syncDmProfileButton();
   }
 
   // ---------------------------------------------------------------------------
@@ -729,23 +930,43 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // (status already "reconnecting") would otherwise never show the banner —
     // the whole retry cycle maps to the same 3-state value.
     syncBanner();
+    // Idle / Do Not Disturb / Invisible "for 1 hour": reverts to Online when
+    // the stored timer ends, and at once if it ended while the app was closed.
+    // Before the restore below, so that reads (and re-asserts) the reverted status.
+    statusTimerWatcher = startStatusTimerWatcher({ onRevert: (status) => applyPresence(status) });
     if (uiStore.getState().connectionStatus === "connected") restoreSavedPresence();
 
     // Auto-idle. It only ever moves a status it is itself responsible for
     // (see @lib/autoIdle) — a manually chosen Idle, Do Not Disturb or
     // Invisible is never touched — so it is safe to leave running for the
     // whole session. The OS idle source makes input in other apps count too.
-    // No idle while in a voice call; leaving one restarts the delay.
     autoIdle = startAutoIdle({
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
-      inCall: voiceStore.getState().currentChannelId !== null,
     });
+    // Talking in a call is being here even with hands off the keyboard and
+    // mouse, which neither the window nor (for another app) the OS poll sees.
+    // The local ring is the same on web and native (voice.store withLocalRing).
     unsubscribers.push(
       voiceStore.subscribeSelector(
-        (s) => s.currentChannelId !== null,
-        (inCall) => autoIdle?.setInCall(inCall),
+        (v) => {
+          const uid = authStore.getState().user?.id ?? 0;
+          const ch = v.currentChannelId;
+          return ch !== null && v.voiceUsers.get(ch)?.get(uid)?.speaking === true;
+        },
+        (speaking) => {
+          if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+          speakingActivityTimer = null;
+          if (!speaking) return;
+          autoIdle?.notifyActivity();
+          // Talking for longer than the idle delay must keep counting.
+          speakingActivityTimer = setInterval(() => autoIdle?.notifyActivity(), 60_000);
+        },
       ),
+      () => {
+        if (speakingActivityTimer !== null) clearInterval(speakingActivityTimer);
+        speakingActivityTimer = null;
+      },
     );
 
     unsubscribers.push(
@@ -790,12 +1011,23 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         videoModeCtrl.setFocus(userId);
         videoGrid?.watch(userId);
       },
-      onOpenCall: () => videoModeCtrl?.openCall(),
+      onOpenCall: () => callChat?.openVoiceCall(),
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
       // The member list's profile popup Call action opens the DM then starts
       // its call through this, the same startCall the DM header uses (BUG-05).
       onStartCall: () => startCall(),
+      // The DM row menu's Profile: select the DM, then show its panel fresh
+      // (a panel already open for another DM is replaced, not toggled away) and
+      // remember it as open. Deferred a microtask: the store's active-channel
+      // listener (which re-syncs the panel on any DM switch) runs in the
+      // microtask selecting the DM queued.
+      onOpenDmProfile: () => {
+        queueMicrotask(() => {
+          closeDmProfile();
+          toggleDmProfile();
+        });
+      },
     });
     children.push(...sidebar.children);
     unsubscribers.push(...sidebar.unsubscribers);
@@ -809,11 +1041,26 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onToggleDmProfile: () => {
         toggleDmProfile();
       },
+      onToggleMemberList: () => {
+        withGroupPanel((ctrl) => ctrl.toggle(), true);
+      },
+      onToggleGuildMemberList: () => {
+        memberColumn?.toggle();
+      },
       onStartCall: () => {
         startCall();
       },
+      onStartVideoCall: () => {
+        startCall(true);
+      },
+      onRenameGroup: () => {
+        const active = getActiveChannel();
+        if (active !== null && active.type === "dm") sidebar.renameGroup(active.id);
+      },
     });
     dmProfileSlot = chatAreaResult.dmProfileSlot;
+    dmProfileBtn = chatAreaResult.chatHeaderRefs.profileBtn;
+    dmMembersBtn = chatAreaResult.chatHeaderRefs.membersBtn ?? null;
     children.push(...chatAreaResult.children);
     unsubscribers.push(...chatAreaResult.unsubscribers);
     videoGrid = chatAreaResult.videoGrid;
@@ -825,7 +1072,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getCurrentUserId,
       // The DM call panel hosts the video of its own call (chat stays up).
       panelHost: () => callPanelHost,
+      chatColumn: chatAreaResult.chatArea,
+      onGridChange: () => callChat?.refresh(),
     });
+    // Opening the call view selects the voice channel; its chat sits beside the grid.
+    const callChatBtn = chatAreaResult.chatHeaderRefs.callChatBtn;
+    callChat = createCallChat({
+      videoModeCtrl,
+      onStateChange: (state) => setChatHeaderCallChat(chatAreaResult.chatHeaderRefs, state),
+    });
+    callChatBtn.addEventListener("click", () => callChat?.toggleChat());
 
     // The composer of the channel on screen, else the header's menu button
     // (shown only at narrow width, where the closed sidebar is inert), else
@@ -859,11 +1115,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       fallbackFocus: focusReachable,
     });
 
+    // The member column: always present, hidden until MemberColumn shows it.
+    const memberColumnEl = createElement("aside", {
+      id: "member-column",
+      class: "member-column",
+      "data-testid": "member-column",
+      "aria-label": shellText("members.region"),
+    });
+    memberColumnEl.hidden = true;
+    const memberColumnBody = createElement("div", { class: "member-column-body" });
+    memberColumnEl.appendChild(memberColumnBody);
+
     appendChildren(
       app,
       sidebar.sidebarWrapper,
       chatAreaResult.chatArea,
+      chatAreaResult.threadSlot,
       contentNav.element,
+      memberColumnEl,
       chatAreaResult.dmProfileSlot,
     );
     root.appendChild(app);
@@ -879,12 +1148,55 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         sidebar: sidebar.sidebarWrapper,
         toggle: chatAreaResult.sidebarToggle,
         fallbackFocus: focusReachable,
-        onOpen: chatAreaResult.closePinnedPanel,
+        onOpen: () => {
+          chatAreaResult.closePinnedPanel();
+          memberColumn?.closeOverlay();
+        },
       });
     });
     unsubscribers.push(() => {
       sidebarDrawer?.destroy();
       sidebarDrawer = null;
+    });
+
+    // The member list lives in exactly one place at a time (MemberList keeps
+    // module-level popup state, so two live instances would close each other's
+    // menus): "left" is SidebarArea's section, "right" is the column. This is
+    // the one layout-change handler, so the order is decided here: the
+    // outgoing host destroys its panel before the incoming host builds one.
+    // The column's own listener ignores the layout key.
+    void import("./main-page/MemberColumn").then(({ createMemberColumn }) => {
+      if (tornDown) return;
+      memberColumn = createMemberColumn({
+        column: memberColumnEl,
+        body: memberColumnBody,
+        button: chatAreaResult.chatHeaderRefs.memberListBtn,
+        buildPanel: sidebar.buildMemberPanel,
+        fallbackFocus: focusReachable,
+      });
+      memberColumn.sync();
+    });
+    const layoutOwner = new Disposable();
+    window.addEventListener(
+      "owncord:pref-change",
+      (e) => {
+        const key =
+          e instanceof CustomEvent ? (e.detail as { key?: string } | null)?.key : undefined;
+        if (key !== MEMBER_LAYOUT_PREF) return;
+        if (loadMemberLayout() === "right") {
+          sidebar.syncMemberSection();
+          memberColumn?.sync();
+        } else {
+          memberColumn?.sync();
+          sidebar.syncMemberSection();
+        }
+      },
+      { signal: layoutOwner.signal },
+    );
+    unsubscribers.push(() => {
+      layoutOwner.destroy();
+      memberColumn?.destroy();
+      memberColumn = null;
     });
 
     // --- Moderation notices (B9-15, Q4): persistent, above the app row ---
@@ -927,6 +1239,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             username: updated.username,
             display_name: updated.display_name ?? null,
             about: updated.about ?? null,
+            // An older server sends no banner keys: leave the stored colour be.
+            ...(updated.banner_color === undefined ? {} : { banner_color: updated.banner_color }),
           });
           showToast(account("toast.profileUpdated"), "success");
         } catch (err) {
@@ -947,6 +1261,48 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         } catch (err) {
           const msg = errorText(err, account("toast.avatarUploadFailed"));
           showToast(msg, "error");
+          throw err;
+        }
+      },
+      onRemoveAvatar: async () => {
+        try {
+          const username = authStore.getState().user?.username ?? "";
+          const updated = await api.removeAvatar(username);
+          // Same as the upload path: the user_update broadcast also lands, but
+          // this keeps the local copy from lagging a round-trip behind.
+          updateUser({ avatar: updated.avatar ?? null });
+          showToast(account("toast.avatarRemoved"), "success");
+        } catch (err) {
+          const msg = errorText(err, account("toast.avatarRemoveFailed"));
+          showToast(msg, "error");
+          throw err;
+        }
+      },
+      onUploadBanner: async (file) => {
+        try {
+          const uploaded = await api.uploadBanner(file);
+          // The user_update broadcast also lands; this keeps the card from lagging.
+          updateUser({ banner: uploaded.url });
+          showToast(account("toast.bannerUpdated"), "success");
+          return uploaded.url;
+        } catch (err) {
+          // 404: the server advertises banners but has attachment storage off,
+          // so the upload route is not mounted.
+          const msg =
+            err instanceof ApiClientError && err.status === 404
+              ? account("profile.bannerStorageOff")
+              : errorText(err, account("profile.bannerUploadFailed"));
+          showToast(msg, "error");
+          throw err;
+        }
+      },
+      onRemoveBanner: async () => {
+        try {
+          const updated = await api.removeBanner();
+          updateUser({ banner: updated.banner ?? null });
+          showToast(account("toast.bannerRemoved"), "success");
+        } catch (err) {
+          showToast(errorText(err, account("toast.bannerRemoveFailed")), "error");
           throw err;
         }
       },
@@ -1033,25 +1389,54 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const qsManager = createQuickSwitcherManager(
       () => root,
       () => uiStore.getState().settingsOpen,
-      // A voice row in the switcher joins voice (matching the sidebar row)
-      // instead of mounting chat for an unjoined voice channel (F8).
+      // A voice row in the switcher joins voice (matching the sidebar row): a
+      // pick joins, as a click on the row does. The call view's own chat
+      // reaches the voice channel through navigateToChannel (callChat).
       (channelId: number) => createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId),
+      () => sidebar.rememberChannel(),
+      () => sidebar.forgetChannel(),
     );
     unsubscribers.push(qsManager.attach());
 
     // The rest of the shortcuts listed on the settings Keybinds tab.
     const voiceKeybindActions = createVoiceWidgetCallbacks(ws, limiters);
+    let shortcutsOverlay: typeof import("@components/ShortcutsOverlay") | null = null;
+    let shortcutsClosed = false;
+    unsubscribers.push(() => {
+      shortcutsClosed = true;
+      shortcutsOverlay?.closeShortcutsOverlay();
+    });
     unsubscribers.push(
       attachGlobalKeybinds({
         onSearch: () => chatAreaResult.searchCtrl.open(),
+        onOpenSettings: () => openSettings(),
+        onOpenShortcuts: () =>
+          void import("@components/ShortcutsOverlay")
+            .then((m) => {
+              // The page may have unmounted while the chunk loaded.
+              if (shortcutsClosed) return;
+              shortcutsOverlay = m;
+              m.openShortcutsOverlay();
+            })
+            .catch((err: unknown) => log.warn("Shortcuts overlay failed to open", err)),
         onToggleMute: () => voiceKeybindActions.onMuteToggle(),
         onToggleDeafen: () => voiceKeybindActions.onDeafenToggle(),
         onToggleCamera: () => voiceKeybindActions.onCameraToggle(),
+        onToggleScreenshare: () => voiceKeybindActions.onScreenshareToggle(),
+        onDisconnect: () => voiceKeybindActions.onDisconnect(),
         onUploadFile: () => channelCtrl?.openFilePicker(),
+        onTogglePicker: (kind) => channelCtrl?.togglePicker(kind),
+        onMarkChannelRead: () => channelCtrl?.messageList?.markReadAndJumpToPresent(),
+        // A server-wide action, like the header's Mark Server as Read: DMs stay as they are.
+        onMarkServerRead: () => markAllRead({ includeDms: false }),
+        onScrollMessages: (direction) => channelCtrl?.messageList?.scrollPage(direction),
         onStepChannel: (direction, unreadOnly) => {
           if (uiStore.getState().sidebarMode === "dms") sidebar.rememberChannel();
           stepChannel(direction, unreadOnly);
         },
+        ringActive: () => ringCtrl?.current() != null,
+        onAcceptRing: () => acceptRing(false),
+        onDeclineRing: () => ringCtrl?.decline(),
         // Don't fire app shortcuts while the settings panel is on top of them.
         isSuspended: () => uiStore.getState().settingsOpen,
         isGlobalPollerActive: () => globalPollerActive,
@@ -1071,18 +1456,54 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Once the poller runs it also sees the keys while the window is focused,
     // so the in-app handler stands down to avoid a double toggle. The flag is
     // set before start() so a press during startup is missed, never doubled.
+    // On a Wayland session the desktop's shortcut service is the "poller": it
+    // is live only once both keys are bound, so the flag follows the host's
+    // status changes too (a bind, the user editing the keys, a portal restart).
+    // Answers can arrive out of order (a status change during startup), so
+    // only the latest query may set the flag.
+    let refreshSeq = 0;
+    const refreshGlobalKeys = (): void => {
+      const seq = ++refreshSeq;
+      void desktop.globalShortcuts
+        .supported()
+        .then(async (supported) => {
+          if (seq !== refreshSeq || tornDown) return;
+          globalPollerActive = supported;
+          if (!supported) return;
+          await desktop.globalShortcuts.start();
+        })
+        .catch(() => {
+          // Not a Tauri host, or the command was refused: the tray and the in-app
+          // shortcuts still work; the global key path simply is not live.
+          if (seq === refreshSeq && !tornDown) globalPollerActive = false;
+        });
+    };
+    refreshGlobalKeys();
+    unsubscribers.push(desktop.globalShortcuts.onStatusChange(refreshGlobalKeys));
+    // An earlier successful portal bind is restored with the saved keys; a
+    // desktop that remembers the approval answers without a dialog. Nothing
+    // is asked when the desktop already holds a trigger, and a dialog the
+    // user cancels forgets the earlier bind, so the next start is quiet.
     void desktop.globalShortcuts
-      .supported()
-      .then(async (supported) => {
-        if (tornDown) return;
-        globalPollerActive = supported;
-        if (!supported) return;
-        await desktop.globalShortcuts.start();
+      .status()
+      .then(async (status) => {
+        if (tornDown || status.backend !== "portal" || !portalBoundBefore()) return;
+        if (anyTriggerBound(status)) return;
+        const keys = loadGlobalShortcutVks();
+        try {
+          await desktop.globalShortcuts.bindPortal({
+            pttVk: loadPref<number>("pttVk", 0),
+            muteVk: keys.mute,
+            deafenVk: keys.deafen,
+          });
+        } catch (err) {
+          if (globalKeysErrorCode(err) === "bind_cancelled") clearPortalBound();
+          return;
+        }
+        if (!tornDown) refreshGlobalKeys();
       })
       .catch(() => {
-        // Not a Tauri host, or the command was refused: the tray and the in-app
-        // shortcuts still work; the global key path simply is not live.
-        globalPollerActive = false;
+        // The host could not answer: the keys stay as they were.
       });
     // Push the persisted rebind onto the running poller at startup, so a
     // choice made in Settings survives a restart (the native default is
@@ -1093,6 +1514,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       .catch(() => {
         // Not a Tauri host, or the command was refused: keep the native default.
       });
+
+    // Timed mutes: redraws the sidebars when one ends. Page-owned, so a socket
+    // reconnect leaves it alone and a server switch remounts a fresh one.
+    // Loaded on demand; the same !tornDown guard as the badge below.
+    void import("@lib/channel-mute-expiry").then((expiry) => {
+      if (!tornDown) unsubscribers.push(expiry.startMuteExpiryWatch());
+    });
 
     // DP-27: the taskbar and tray unread badge, cleared again on teardown so a
     // logout or server switch does not leave this session's count behind.
@@ -1128,10 +1556,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onRingStart: (ring) => void callAlerts().then((m) => m.alertIncomingCall(ring)),
       onMissed: (ring) => void callAlerts().then((m) => m.alertMissedCall(ring)),
-      onRingEnd: (ring) => void callAlerts().then((m) => m.clearIncomingCall(ring)),
+      onRingEnd: (ring, reason) =>
+        void callAlerts().then((m) => {
+          m.clearIncomingCall(ring);
+          if (reason === "superseded") m.alertSupersededCall(ring);
+        }),
     });
     callBanner = createIncomingCallBanner({
-      onAccept: () => acceptRing(false),
+      onAccept: (withVideo) => acceptRing(withVideo),
       onDecline: () => ringCtrl?.decline(),
     });
     callBanner.mount(root);
@@ -1187,13 +1619,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         onLeave: () => voiceKeybindActions.onDisconnect(),
         onAccept: (withVideo) => acceptRing(withVideo),
         onDecline: () => ringCtrl?.decline(),
-        onJoin: (channelId) => {
-          if (uiStore.getState().connectionStatus !== "connected") {
-            showToast(shellText("channel.notConnected"), "error");
-            return;
-          }
-          createSidebarVoiceCallbacks(ws).onVoiceJoin(channelId);
-        },
+        onJoin: joinDmCall,
         onRingAgain: (channelId) => {
           if (uiStore.getState().connectionStatus !== "connected") {
             showToast(shellText("channel.notConnected"), "error");
@@ -1380,11 +1806,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         messagesSlot: chatAreaResult.slots.messagesSlot,
         typingSlot: chatAreaResult.slots.typingSlot,
         inputSlot: chatAreaResult.slots.inputSlot,
+        threadSlot: chatAreaResult.threadSlot,
       },
       chatHeaderName: chatAreaResult.chatHeaderName,
       chatHeaderRefs: chatAreaResult.chatHeaderRefs,
       onContentGated: closeActiveLightbox,
       focusFallback: focusReachable,
+      onJoinCall: joinDmCall,
+      onOpenPins: () => {
+        void chatAreaResult.openPinnedPanel();
+      },
     });
 
     // Wire voice error callback to toast
@@ -1470,8 +1901,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? getRemoteVideoStats(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare")
           : getRemoteVideoStats(tileId, "camera"),
-      getLocalShareFps: () => getLocalScreenshareFps(),
+      getLocalShareStats: () => getLocalScreenshareStats(),
       onStreamRemoved: () => videoModeCtrl?.checkVideoMode(),
+      isStreamLive: (userId, screenshare) => {
+        const { currentChannelId, voiceUsers } = voiceStore.getState();
+        if (currentChannelId === null) return false;
+        const user = voiceUsers.get(currentChannelId)?.get(userId);
+        return (screenshare ? user?.screenshare : user?.camera) === true;
+      },
       setStreamView: (tileId, view) =>
         tileId >= SCREENSHARE_TILE_ID_OFFSET
           ? setRemoteVideoView(tileId - SCREENSHARE_TILE_ID_OFFSET, "screenshare", view)
@@ -1499,6 +1936,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     let prevVideoSignature = "";
     let prevSpeaking = "";
     let prevAudioState = "";
+    let prevViewers = "";
     let prevCallState = "";
     /** Your call state for the grid's call controls, from the voice store and
      *  the chat socket (camera and share freeze while it is down). */
@@ -1529,12 +1967,22 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       ),
     );
     const prevTileLabels = new Map<number, string>();
+    // A page rebuilt while already in voice (reconnect) loads the grid now.
+    let gridLoadChannel: number | null = voiceStore.getState().currentChannelId;
+    if (gridLoadChannel !== null) chatAreaResult.videoGrid.ensureLoaded();
     // Subscribe to voice store for camera/screenshare state changes, voice
     // channel switches, remote-tile identity changes and who is speaking.
     unsubscribers.push(
       voiceStore.subscribe((state) => {
         try {
           const channelId = state.currentChannelId;
+          // The grid's code loads on a join, so the import overlaps the
+          // connect. Once per channel: a failed import retries on the next
+          // join, not on every voice update (speaking changes fire often).
+          if (channelId !== gridLoadChannel) {
+            gridLoadChannel = channelId;
+            if (channelId !== null) chatAreaResult.videoGrid.ensureLoaded();
+          }
           // Speaking rings on the video tiles: only when who is speaking
           // changes, not on every store update.
           const talking = new Set<number>();
@@ -1562,6 +2010,24 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           if (audioKey !== prevAudioState) {
             prevAudioState = audioKey;
             videoGrid?.setUserAudioState(audioState);
+          }
+          // Eye + count on each screen-share tile: the other members watching it.
+          let viewersKey = "";
+          const viewerNames = new Map<number, readonly string[]>();
+          const roster = channelId !== null ? state.voiceUsers.get(channelId) : undefined;
+          for (const u of roster?.values() ?? []) {
+            if (!u.screenshare) continue;
+            const names = streamViewers(u.userId, false, state).flatMap((id) => {
+              const name = roster?.get(id)?.username;
+              return name === undefined ? [] : [name];
+            });
+            if (names.length === 0) continue;
+            viewerNames.set(u.userId, names);
+            viewersKey += `${String(u.userId)}:${names.join("\u0000")};`;
+          }
+          if (viewersKey !== prevViewers) {
+            prevViewers = viewersKey;
+            videoGrid?.setStreamViewers(viewerNames);
           }
           syncCallState(state);
 
@@ -1642,15 +2108,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
 
     container.appendChild(root);
 
-    // Voice is the only channel type that should keep the grid up; text, dm
-    // and announcement all mount a chat surface and must dismiss it, not just
-    // "text" (a dm/announcement switch used to leave the grid covering an
-    // unrelated channel's chat). The DM that owns the current call is the
-    // exception: its call panel shows the video above the chat (its own
-    // update re-seats the grid through onVideoHostChange).
+    // Only the channel that owns the current call keeps the grid up: the joined
+    // voice channel (its chat sits beside the grid, WP 6.1b) or the DM whose
+    // call panel shows the video above the chat (its own update re-seats the
+    // grid through onVideoHostChange). Every other channel mounts a chat
+    // surface and must dismiss it, another voice channel's chat opened from
+    // its menu included (WP 6.1d).
     const showChatFor = (active: { id: number; type: string }): void => {
-      const ownsCall = active.type === "dm" && voiceStore.getState().currentChannelId === active.id;
-      if (active.type !== "voice" && !ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
+      const ownsCall =
+        (active.type === "dm" || active.type === "voice") &&
+        voiceStore.getState().currentChannelId === active.id;
+      if (!ownsCall) videoModeCtrl?.showChat({ keepWatching: true });
     };
     // A click on the channel already open under the stream view changes no
     // store, so the subscriber below never sees it.
@@ -1669,13 +2137,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           const active = getActiveChannel();
           if (active !== null) {
             showChatFor(active);
-            // Close DM profile sidebar when switching channels
-            if (active.type !== "dm") {
-              closeDmProfile();
-            } else {
-              // Also close when switching to a different DM
-              closeDmProfile();
-            }
+            // The profile panel follows the conversation: a 1:1 DM keeps it
+            // (rebuilt for the new person) while the saved preference is on, a
+            // group or a server channel hides it without changing the preference.
+            syncDmProfileToActive();
+            withGroupPanel((ctrl) => ctrl.syncToActive());
             channelCtrl?.mountChannel(
               active.id,
               resolveChannelName(active.id, active.name, active.type),
@@ -1687,6 +2153,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             // previous channel's MessageList/composer stayed mounted and
             // enabled against a channel the server no longer recognizes.
             closeDmProfile();
+            withGroupPanel((ctrl) => ctrl.close());
             channelCtrl?.destroyChannel();
           }
         } catch (err) {
@@ -1703,54 +2170,63 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         resolveChannelName(active.id, active.name, active.type),
         active.type,
       );
+      // A 1:1 DM already active at mount opens its remembered panel.
+      syncDmProfileToActive();
+      withGroupPanel((ctrl) => ctrl.syncToActive());
     }
   }
 
   function destroy(): void {
     log.info("MainPage destroying");
     tornDown = true;
-    cancelPendingRing();
+    // Each step is isolated: a throw is logged and the rest still run, so a
+    // failing step can never skip the store unsubscriptions below. The module
+    // caches this page used to clear here reset with the session instead
+    // (sessionRegistry, cache phase).
+    const step = (name: string, fn: () => void): void => {
+      try {
+        fn();
+      } catch (err) {
+        log.error("MainPage teardown step failed", { name, error: String(err) });
+      }
+    };
+    step("cancelPendingRing", cancelPendingRing);
     try {
       // closeSettings() is otherwise only ever called from the overlay's own
       // onClose — a non-user-initiated unmount (401, ban, server shutdown)
       // left `settingsOpen` stale, and the next page to mount an (initially
       // hidden) SettingsOverlay off that flag — ConnectPage, after logout —
       // would show it over the login screen.
-      closeSettings();
+      step("closeSettings", closeSettings);
       // Before the chat teardown below: the view and its private content go
       // first, and the next page starts with no view open.
-      contentNav?.destroy();
-      contentNav = null;
-      teardownToast();
+      step("contentNav", () => {
+        contentNav?.destroy();
+        contentNav = null;
+      });
+      step("teardownToast", teardownToast);
+      step("notesContext", () => setNotesContextSource(null));
       // Full voice cleanup — tears down room, callbacks, ws ref, serverHost.
       // Prevents stale module-level state persisting across logout/reconnect cycles.
-      voiceCleanupAll();
-      // Custom emoji belong to the server this page was connected to. The set
-      // is module-global, so without this a switch to another server would keep
-      // rendering the previous one's shortcodes until its own list arrived.
-      clearCustomEmoji();
-      // Image/video/audio caches are module-global too — without this every
-      // clip viewed this session stays pinned (as a blob: URL or a cached
-      // data: URI) past logout.
-      clearAttachmentCaches();
-      unsubCacheScope();
-      // External content (link previews, YouTube titles, image heights, and
-      // broker-fetched images) was fetched for this server. Clearing it here
-      // — and moving the broker to a fresh partition — is what keeps one
-      // server's previews from being served on the next (B7-16).
-      clearEmbedCaches();
-      clearMediaCaches();
-      clearExternalImageCache();
-      forgetAdmittedItems();
+      step("voiceCleanupAll", voiceCleanupAll);
+      step("unsubCacheScope", unsubCacheScope);
       // The lightbox is a module-level overlay appended straight to
       // document.body — renderPage only clears #app, so a forced logout with
       // it open would otherwise leave it floating over the login screen with
       // live document listeners and a since-revoked blob URL (B6-15).
-      closeActiveLightbox();
-      autoIdle?.destroy();
-      autoIdle = null;
-      presenceSender.destroy();
-      setActivePresenceSender(null);
+      step("closeActiveLightbox", closeActiveLightbox);
+      step("autoIdle", () => {
+        autoIdle?.destroy();
+        autoIdle = null;
+      });
+      step("statusTimerWatcher", () => {
+        statusTimerWatcher?.destroy();
+        statusTimerWatcher = null;
+      });
+      step("presenceSender", () => {
+        presenceSender.destroy();
+        setActivePresenceSender(null);
+      });
       // Drop the mark-read sender (and, via setMarkReadSender's own
       // cancelPendingMarkAll, any still-armed "Mark All as Read" burst
       // timers) at the moment this connection is abandoned. Without this,
@@ -1758,24 +2234,37 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // is live when its timer elapses — channel ids are per-server, so
       // that can silently mark an unrelated channel read on the NEXT
       // connection (OC-0418).
-      setMarkReadSender(null);
+      step("markReadSender", () => setMarkReadSender(null));
+      step("markUnreadSender", () => setMarkUnreadSender(null));
       // The native screen-share picker is registered per page; drop it so a
       // torn-down connection cannot leave the next page's dialog pointed at a
       // dead one (a share with none registered resolves to cancelled).
-      setScreenSourcePicker(null);
-      channelCtrl?.destroy();
-      channelCtrl = null;
-
-      reactionCtrl?.destroy();
-      reactionCtrl = null;
-      msgCtrl = null;
-      videoModeCtrl?.destroy();
-      videoModeCtrl = null;
-
-      videoGrid = null;
-
-      closeDmProfile();
-      dmProfileSlot = null;
+      step("screenSourcePicker", () => setScreenSourcePicker(null));
+      step("channelCtrl", () => {
+        channelCtrl?.destroy();
+        channelCtrl = null;
+      });
+      step("reactionCtrl", () => {
+        reactionCtrl?.destroy();
+        reactionCtrl = null;
+        msgCtrl = null;
+      });
+      step("callChat", () => {
+        callChat?.destroy();
+        callChat = null;
+      });
+      step("videoModeCtrl", () => {
+        videoModeCtrl?.destroy();
+        videoModeCtrl = null;
+        videoGrid = null;
+      });
+      step("closeDmProfile", closeDmProfile);
+      step("groupPanelCtrl", () => {
+        groupPanelCtrl?.destroy();
+        groupPanelCtrl = null;
+        dmMembersBtn = null;
+        dmProfileSlot = null;
+      });
 
       for (const child of children) {
         try {
@@ -1795,10 +2284,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       }
       unsubscribers = [];
 
-      if (banner !== null) {
-        banner.destroy();
+      step("banner", () => {
+        banner?.destroy();
         banner = null;
-      }
+      });
     } finally {
       if (root !== null) {
         root.remove();

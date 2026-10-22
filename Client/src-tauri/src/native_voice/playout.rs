@@ -22,11 +22,13 @@ use livekit::prelude::*;
 use livekit::webrtc::audio_stream::native::NativeAudioStream;
 use tokio::task::JoinHandle;
 
-use super::capture::{Apm, Reference};
+use super::capture::{Apm, Reference, Shared};
 use super::session::{resolve_device, DeviceInfo};
 use super::stream_format::{pick_config, typed};
 
 pub const SAMPLE_RATE: u32 = 48_000;
+/// The key, and identity, of the mic test's one queue in its own mixer.
+pub const LOOPBACK: &str = "mic-test";
 /// A queue starts (or restarts after running dry) only once it holds this
 /// much, so the 10 ms pushes and the device's larger pulls do not alternate
 /// between sound and silence.
@@ -50,7 +52,7 @@ const PERIOD_FRAMES: u32 = SAMPLE_RATE / 50;
 /// stream is reopened.
 pub(super) const FOLLOW_EVERY: Duration = Duration::from_secs(2);
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(super) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
@@ -114,7 +116,7 @@ impl Mixer {
         lock(&self.0).gains[volume as usize].insert(identity.to_string(), gain.max(0.0));
     }
 
-    fn add(&self, sid: &str, identity: &str, volume: Option<Volume>, channels: usize) {
+    pub(super) fn add(&self, sid: &str, identity: &str, volume: Option<Volume>, channels: usize) {
         lock(&self.0).queues.insert(
             sid.to_string(),
             Queue {
@@ -128,7 +130,13 @@ impl Mixer {
         );
     }
 
-    fn remove(&self, sid: &str) {
+    /// The mic test's queue: mono, on the microphone volume, under the
+    /// fixed `LOOPBACK` key, so `set_gain(LOOPBACK, ..)` is its output gain.
+    pub fn add_loopback(&self) {
+        self.add(LOOPBACK, LOOPBACK, Some(Volume::Microphone), 1);
+    }
+
+    pub(super) fn remove(&self, sid: &str) {
         lock(&self.0).queues.remove(sid);
     }
 
@@ -292,7 +300,7 @@ pub(super) fn host_devices(
     listed
 }
 
-fn output_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device)> {
+pub(super) fn output_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device)> {
     host_devices(
         host.default_output_device(),
         host.output_devices().into_iter().flatten(),
@@ -403,7 +411,9 @@ pub struct Playout {
     /// the stream dies.
     output: Output,
     /// The processing whose echo canceller hears what is played.
-    reference: Option<Arc<Apm>>,
+    /// Shared with every output stream, so a replacement reaches the one
+    /// playing.
+    reference: Arc<Shared<Option<Arc<Apm>>>>,
     /// Set by the output stream's error callback when the sound server tears
     /// the stream down. The watcher polls it and reopens.
     dead: Arc<AtomicBool>,
@@ -432,10 +442,10 @@ impl Playout {
         lock(&self.readers).len()
     }
 
-    /// Feed what is played to `apm`'s echo canceller, from the next
-    /// (re)opened output stream on.
+    /// Feed what is played to `apm`'s echo canceller. A playing stream
+    /// follows the change on a later buffer.
     pub fn set_reference(&mut self, apm: Arc<Apm>) {
-        self.reference = Some(apm);
+        self.reference.set(Some(apm));
     }
 
     /// Open the output stream on device `id` (empty: the default), unless it
@@ -457,8 +467,15 @@ impl Playout {
         result
     }
 
+    /// Whether an echo canceller hears what is played (the mic test must
+    /// never have one).
+    #[cfg(test)]
+    pub(super) fn reference_is_set(&self) -> bool {
+        self.reference.snapshot().1.is_some()
+    }
+
     /// The current stream's device id, or None when nothing plays.
-    fn playing(&self) -> Option<String> {
+    pub(super) fn playing(&self) -> Option<String> {
         lock(&self.output).as_ref().map(|(id, _)| id.clone())
     }
 
@@ -475,7 +492,7 @@ impl Playout {
                 open_output(
                     device,
                     self.mixer.clone(),
-                    reference.map(Reference::new),
+                    Some(Reference::following(reference)),
                     self.dead.clone(),
                 )
             },
@@ -523,7 +540,7 @@ impl Playout {
                         open_output(
                             device,
                             mixer.clone(),
-                            reference.clone().map(Reference::new),
+                            Some(Reference::following(reference.clone())),
                             follow_dead.clone(),
                         )
                     },
@@ -667,6 +684,72 @@ fn open_output(
     reference: Option<Reference>,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, String> {
+    let mut reference = reference;
+    open_stream(
+        device,
+        "playout",
+        move |mixed: &mut [f32], channels| {
+            mixer.mix(mixed, channels);
+            if let Some(r) = reference.as_mut() {
+                r.feed(mixed, channels);
+            }
+        },
+        dead,
+    )
+}
+
+/// Play `samples` (mono, 48 kHz) once on `device` through a stream of its own,
+/// then silence. The stream outlives the sound until it is dropped, so the
+/// owner drops it. App sounds use this: each play is its own stream, which the
+/// sound server mixes with the others and with a call.
+pub(super) fn open_once(
+    device: &cpal::Device,
+    samples: Arc<[f32]>,
+) -> Result<cpal::Stream, String> {
+    let mut at = 0;
+    open_stream(
+        device,
+        "app sound",
+        move |mixed: &mut [f32], channels| {
+            write_once(&samples, &mut at, mixed, channels);
+        },
+        Arc::new(AtomicBool::new(false)),
+    )
+}
+
+/// One pull of a one-shot: the next samples of `samples` (from `at`) on the
+/// front pair of each frame (mono on both, the pair's mean on a mono device,
+/// as `Mixer::mix` does), silence on every other channel and after the end.
+/// Whether the sound has now been handed over in full.
+fn write_once(samples: &[f32], at: &mut usize, out: &mut [f32], channels: usize) -> bool {
+    out.fill(0.0);
+    for frame in out.chunks_exact_mut(channels.max(1)) {
+        let Some(&s) = samples.get(*at) else {
+            break;
+        };
+        *at += 1;
+        match frame {
+            [o] => *o = (s + s) / 2.0,
+            [l, r, ..] => {
+                *l = s;
+                *r = s;
+            }
+            [] => {}
+        }
+    }
+    *at >= samples.len()
+}
+
+/// Open an f32 48 kHz output stream on `device` whose audio is whatever
+/// `source` writes: it is handed a buffer of whole frames and the channel
+/// count, and fills it. `dead` is set when the sound server tears the stream
+/// down; `label` names the stream in that log line.
+fn open_stream(
+    device: &cpal::Device,
+    label: &'static str,
+    source: impl FnMut(&mut [f32], usize) + Send + 'static,
+    dead: Arc<AtomicBool>,
+) -> Result<cpal::Stream, String> {
     let supported = device
         .supported_output_configs()
         .map_err(|e| format!("playout device configs: {e}"))?;
@@ -674,14 +757,14 @@ fn open_output(
     let (config, format) = pick_config(supported, SAMPLE_RATE, channels)
         .ok_or("the playout device offers no 48 kHz format")?;
     // Shared by the two build attempts; only the one that succeeds runs.
-    let reference = Arc::new(Mutex::new(reference));
+    let source = Arc::new(Mutex::new(source));
     let build = |buffer_size| {
         let config = cpal::StreamConfig {
             buffer_size,
             ..config
         };
-        let (mixer, reference, dead) = (mixer.clone(), reference.clone(), dead.clone());
-        typed!(format, build_output(device, config, mixer, reference, dead))
+        let (source, dead) = (source.clone(), dead.clone());
+        typed!(format, build_output(device, config, label, source, dead))
     };
     let stream = build(cpal::BufferSize::Fixed(PERIOD_FRAMES))
         .or_else(|_| build(cpal::BufferSize::Default))
@@ -697,24 +780,19 @@ fn open_output(
 /// in its callback.
 const MIX_FRAMES: usize = SAMPLE_RATE as usize / 10;
 
-/// Fill device buffer `out` (`channels` wide) with the mix, made in f32 in
-/// `mixed` (a whole number of frames) and converted to the device's format;
-/// the echo canceller's reference is fed what is played.
-fn fill<T>(
+/// Fill device buffer `out` (`channels` wide) with what `source` makes in f32
+/// in `mixed` (a whole number of frames), converted to the device's format.
+fn fill_with<T>(
     out: &mut [T],
     mixed: &mut [f32],
     channels: usize,
-    mixer: &Mixer,
-    reference: &Mutex<Option<Reference>>,
+    source: &mut impl FnMut(&mut [f32], usize),
 ) where
     T: Sample + FromSample<f32>,
 {
     for out in out.chunks_mut(mixed.len()) {
         let mixed = &mut mixed[..out.len()];
-        mixer.mix(mixed, channels);
-        if let Some(r) = lock(reference).as_mut() {
-            r.feed(mixed, channels);
-        }
+        source(mixed, channels);
         for (o, s) in out.iter_mut().zip(mixed.iter()) {
             *o = s.to_sample();
         }
@@ -724,8 +802,8 @@ fn fill<T>(
 fn build_output<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
-    mixer: Arc<Mixer>,
-    reference: Arc<Mutex<Option<Reference>>>,
+    label: &'static str,
+    source: Arc<Mutex<impl FnMut(&mut [f32], usize) + Send + 'static>>,
     dead: Arc<AtomicBool>,
 ) -> Result<cpal::Stream, cpal::Error>
 where
@@ -735,13 +813,13 @@ where
     let mut mixed = vec![0.0; MIX_FRAMES * channels];
     device.build_output_stream::<T, _, _>(
         config,
-        move |out, _| fill(out, &mut mixed, channels, &mixer, &reference),
+        move |out, _| fill_with(out, &mut mixed, channels, &mut *lock(&source)),
         // A stream the sound server tore down (suspend/resume, a
         // pulseaudio restart) is only reported here: flag it so the
         // watcher reopens it, or the call goes silently dead in this
         // direction (voice #3).
         move |e| {
-            log::warn!("[native_voice] playout stream: {e}");
+            log::warn!("[native_voice] {label} stream: {e}");
             dead.store(true, Ordering::Relaxed);
         },
         None,
@@ -751,6 +829,24 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `fill_with` over the mixer and reference, as `open_output` wires them.
+    fn fill<T>(
+        out: &mut [T],
+        mixed: &mut [f32],
+        channels: usize,
+        mixer: &Mixer,
+        reference: &Mutex<Option<Reference>>,
+    ) where
+        T: Sample + FromSample<f32>,
+    {
+        fill_with(out, mixed, channels, &mut |m: &mut [f32], c| {
+            mixer.mix(m, c);
+            if let Some(r) = lock(reference).as_mut() {
+                r.feed(m, c);
+            }
+        });
+    }
 
     fn sine(amplitude: f32, len: usize) -> Vec<i16> {
         (0..len)
@@ -1108,6 +1204,26 @@ mod tests {
     }
 
     #[test]
+    fn loopback_frames_play_once_primed_at_the_output_gain() {
+        let frame = sine(8000.0, SAMPLE_RATE as usize / 100);
+        let level = |gain: Option<f32>| {
+            let m = Mixer::default();
+            m.add_loopback();
+            if let Some(g) = gain {
+                m.set_gain(LOOPBACK, Volume::Microphone, g);
+            }
+            m.push(LOOPBACK, &frame);
+            m.push(LOOPBACK, &frame);
+            assert_eq!(rms(&mixed(&m, PRIME)), 0.0, "two frames are still priming");
+            m.push(LOOPBACK, &frame);
+            rms(&mixed(&m, PRIME))
+        };
+        let unity = level(None);
+        assert!(unity > 0.1, "unity rms {unity}");
+        assert!((level(Some(0.5)) / unity - 0.5).abs() < 0.01);
+    }
+
+    #[test]
     fn each_participant_is_scaled_by_its_own_gain() {
         let tone = sine(8000.0, PRIME);
         let level = |gain: Option<f32>| {
@@ -1332,5 +1448,31 @@ mod tests {
             &Mutex::new(None),
         );
         assert_eq!(out, [32768; 4]);
+    }
+
+    /// A one-shot plays its samples on the front pair, mono on both (the mean
+    /// on a mono device), then silence, and reports itself finished once the
+    /// last sample is out, whatever the pull sizes.
+    #[test]
+    fn a_one_shot_plays_its_samples_on_the_front_pair_then_silence_and_flags_done() {
+        let samples = [0.1, 0.2, 0.3];
+        let mut at = 0;
+        // A 4-channel device: the pair carries the sound, the rest stays silent.
+        let mut out = [9.0; 8];
+        assert!(
+            !write_once(&samples, &mut at, &mut out, 4),
+            "one sample left"
+        );
+        assert_eq!(out, [0.1, 0.1, 0.0, 0.0, 0.2, 0.2, 0.0, 0.0]);
+        let mut out = [9.0; 8];
+        assert!(write_once(&samples, &mut at, &mut out, 4));
+        assert_eq!(out, [0.3, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        // A mono device gets the pair's mean, and a later pull is silence.
+        let mut at = 0;
+        let mut out = [9.0; 5];
+        assert!(write_once(&samples, &mut at, &mut out, 1));
+        assert_eq!(out, [0.1, 0.2, 0.3, 0.0, 0.0]);
+        assert!(write_once(&samples, &mut at, &mut out, 1));
+        assert_eq!(out, [0.0; 5]);
     }
 }

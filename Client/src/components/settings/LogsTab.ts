@@ -199,7 +199,32 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       },
       { signal: buildSignal },
     );
-    appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
+    // Open log folder: the tray item's twin, for desktops with no tray (stock
+    // GNOME). Failure shows in the same status line the bundle export uses.
+    const openLogsBtn = createElement(
+      "button",
+      { class: "ac-btn secondary", type: "button", "data-testid": "open-log-folder" },
+      t("logs.openFolder"),
+    );
+    openLogsBtn.addEventListener(
+      "click",
+      () => {
+        openLogsBtn.disabled = true;
+        bundleStatus.textContent = "";
+        void desktop.logFiles
+          .openFolder()
+          .then((result) => {
+            if (!result.ok) {
+              bundleStatus.textContent = t("logs.openFolderFailed", { error: result.error });
+            }
+          })
+          .finally(() => {
+            openLogsBtn.disabled = false;
+          });
+      },
+      { signal: buildSignal },
+    );
+    appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
     appendChildren(helpCard, helpHead, bundleNote, bundleStatus);
     section.appendChild(helpCard);
 

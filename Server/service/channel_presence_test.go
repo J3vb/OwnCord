@@ -36,12 +36,12 @@ func (f *faultyStore) UpdateUserCustomStatus(context.Context, int64, *string) er
 	return errors.New("presence_update must write its custom status with the status, in one transaction")
 }
 
-func (f *faultyStore) UpdateUserPresence(ctx context.Context, id int64, status string, customStatus *string) error {
+func (f *faultyStore) UpdateUserPresence(ctx context.Context, id int64, status string, customStatus, expiresAt *string) error {
 	f.presenceWrites++
 	if f.failUpdateUserPresence {
 		return errors.New("injected UpdateUserPresence failure")
 	}
-	return f.Store.UpdateUserPresence(ctx, id, status, customStatus)
+	return f.Store.UpdateUserPresence(ctx, id, status, customStatus, expiresAt)
 }
 
 // A bare status flip (no custom_status field) must read the currently stored
@@ -66,7 +66,8 @@ func TestHandlePresenceUpdate_BareStatusReadFailureAbortsBeforeCommit(t *testing
 	fs := &faultyStore{Store: database, failGetUserByID: true}
 	svc := NewChannelService(fs, NewPermissionService(database, permissions.NewChecker(database)))
 
-	got, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusIdle, nil, nil)
+	res, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusIdle, nil, nil, nil)
+	got := res.CustomStatus
 	if !errors.Is(err, ErrInternal) {
 		t.Fatalf("err = %v, want ErrInternal", err)
 	}
@@ -98,7 +99,8 @@ func TestHandlePresenceUpdate_CustomStatusIsOneWriterTransaction(t *testing.T) {
 	svc := NewChannelService(fs, NewPermissionService(database, permissions.NewChecker(database)))
 
 	text := "in a meeting"
-	got, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusDND, &text, nil)
+	res, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusDND, &text, nil, nil)
+	got := res.CustomStatus
 	if err != nil {
 		t.Fatalf("HandlePresenceUpdate: %v", err)
 	}
@@ -131,7 +133,8 @@ func TestHandlePresenceUpdate_CombinedWriteFailureCommitsNothing(t *testing.T) {
 	svc := NewChannelService(fs, NewPermissionService(database, permissions.NewChecker(database)))
 
 	text := "in a meeting"
-	got, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusDND, &text, nil)
+	res, err := svc.HandlePresenceUpdate(ctx, 1, db.StatusDND, &text, nil, nil)
+	got := res.CustomStatus
 	if !errors.Is(err, ErrInternal) {
 		t.Fatalf("err = %v, want ErrInternal", err)
 	}

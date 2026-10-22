@@ -35,8 +35,41 @@
    of the status-picker rules below. */
 .user-bar .ub-status-picker-wrap {
   position: absolute;
-  bottom: -1px;
-  right: -1px;
+  /* Over the avatar's bottom-right corner: the avatar is 32px, centred in the
+     40px profile button, which is inset 4px from the left of .ub-self. */
+  left: 26px;
+  top: 25px;
+}
+.user-bar .ub-self {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+/* The avatar + name button that opens the self profile card. */
+.user-bar .ub-profile-btn {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.user-bar .ub-profile-btn:hover,
+.user-bar .ub-profile-btn[aria-expanded="true"] {
+  background: var(--bg-hover);
+}
+.user-bar .ub-profile-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 /* UserBar.ts toggles this whenever canSetStatus() is false (socket down, or
    no ws send path at all) -- without it the dot, dropdown options and
@@ -180,4 +213,240 @@
   display: flex;
   color: var(--accent-text);
   flex-shrink: 0;
+}
+
+/* ── Self profile card (opened from the user bar's avatar/name) ── */
+.self-profile-card {
+  position: fixed;
+  /* Same layer as the profile popup: under Settings and modals. */
+  z-index: 200;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  padding: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+}
+.self-profile-card:focus {
+  outline: none;
+}
+.self-profile-card .spc-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.self-profile-card .spc-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-circle);
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--on-fill);
+}
+.self-profile-card .spc-avatar .avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.self-profile-card .spc-names {
+  min-width: 0;
+  flex: 1;
+}
+.self-profile-card .spc-name {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  color: var(--header-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.self-profile-card .spc-username {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.self-profile-card .spc-custom-line {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  /* Same two-line clip as the profile popup's status (WP 3C-9). */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.self-profile-card .spc-custom-line[hidden] {
+  display: none;
+}
+.self-profile-card .spc-custom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.self-profile-card .spc-custom-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-normal);
+  font: inherit;
+}
+.self-profile-card .spc-custom-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 0;
+}
+.self-profile-card .spc-custom-clear,
+.self-profile-card .spc-custom-emoji,
+.self-profile-card .spc-status-chevron {
+  display: flex;
+  padding: 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.self-profile-card .spc-custom-clear:hover,
+.self-profile-card .spc-custom-emoji:hover:not(:disabled),
+.self-profile-card .spc-status-chevron:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.self-profile-card .spc-divider {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--border);
+}
+.self-profile-card .spc-status,
+.self-profile-card .spc-action {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-normal);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.self-profile-card .spc-status:hover:not(:disabled),
+.self-profile-card .spc-action:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.self-profile-card .spc-status:focus-visible,
+.self-profile-card .spc-action:focus-visible,
+.self-profile-card .spc-custom-emoji:focus-visible,
+.self-profile-card .spc-custom-clear:focus-visible,
+.self-profile-card .spc-status-chevron:focus-visible,
+.self-profile-card .spc-clear-after-select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.self-profile-card .spc-status:disabled,
+.self-profile-card .spc-action:disabled,
+.self-profile-card .spc-custom-emoji:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.self-profile-card .spc-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-circle);
+  flex-shrink: 0;
+}
+.self-profile-card .spc-status-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.self-profile-card .spc-status-note,
+.self-profile-card .spc-status-until,
+.self-profile-card .spc-clears-line,
+.self-profile-card .spc-clear-after-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.self-profile-card .spc-status-check {
+  display: none;
+  color: var(--accent-text);
+  flex-shrink: 0;
+}
+.self-profile-card .spc-status--current .spc-status-check {
+  display: flex;
+}
+.self-profile-card [hidden] {
+  display: none;
+}
+.self-profile-card .spc-clear-after {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.self-profile-card .spc-clear-after-select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-normal);
+  font: inherit;
+}
+.self-profile-card .spc-status-row {
+  display: flex;
+  align-items: center;
+}
+.self-profile-card .spc-status-row .spc-status {
+  flex: 1;
+  min-width: 0;
+}
+.self-profile-card .spc-durations {
+  margin: 0 0 4px 20px;
+  display: flex;
+  flex-direction: column;
+}
+/* The picker opens beside the card, where it cannot cover the custom status
+   it is filling in; the composer's own placement is above its button. */
+.self-profile-card .spc-emoji-picker {
+  position: absolute;
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: calc(100% + 8px);
+  margin: 0;
+}
+.self-profile-card .spc-durations[hidden] {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .user-bar .ub-controls button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .user-bar .ub-profile-btn {
+    min-height: 44px;
+  }
 }

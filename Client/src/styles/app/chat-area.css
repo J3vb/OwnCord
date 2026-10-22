@@ -22,10 +22,45 @@
   font-size: 22px;
   font-weight: 600;
 }
+/* The DM partner's avatar (or a group's stack) where a channel has its "#". */
+.chat-header .ch-avatar {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+.chat-header .ch-avatar .avatar-initial {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+.chat-header .ch-avatar .ch-avatar-circle {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--on-fill);
+}
+.chat-header .ch-avatar .dm-avatar-stack {
+  width: 100%;
+  height: 100%;
+}
+.chat-header .ch-name-group {
+  min-width: 0;
+  max-width: 70%;
+}
 .chat-header .ch-name {
   font-size: var(--font-size-lg);
   font-weight: 700;
   color: var(--header-primary);
+  /* A group or person name of very wide characters stays in the header. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chat-header .ch-divider {
   width: 1px;
@@ -57,11 +92,15 @@
   align-items: center;
   justify-content: center;
 }
+.chat-header .ch-tools button[hidden] {
+  display: none;
+}
 .chat-header .ch-tools button:hover {
   background: var(--bg-hover);
   color: var(--text-normal);
 }
-.chat-header .ch-tools button.active {
+.chat-header .ch-tools button.active,
+.chat-header .ch-tools button[aria-pressed="true"] {
   color: var(--header-primary);
 }
 .chat-header .search-input {
@@ -81,6 +120,59 @@
 .chat-header .search-input:focus {
   width: 240px;
   color: var(--text-normal);
+}
+
+/* ── Call view with its chat beside the grid (WP 6.1b) ──
+   Set by VideoModeController while the active channel is the joined voice
+   channel and the grid is up: the header spans the top row, the grid fills the
+   left column, and messages, typing and the composer stack in a right column. */
+.chat-area--call-chat {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+}
+.chat-area--call-chat > .chat-header {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+.chat-area--call-chat > .video-grid-slot {
+  grid-column: 1;
+  grid-row: 2 / 5;
+}
+.chat-area--call-chat > .messages-slot {
+  grid-column: 2;
+  grid-row: 2;
+}
+.chat-area--call-chat > .typing-slot {
+  grid-column: 2;
+  grid-row: 3;
+}
+.chat-area--call-chat > .input-slot {
+  grid-column: 2;
+  grid-row: 4;
+}
+
+/* Set while the chat column is narrower than the split needs (side panels
+   included): the chat stacks under the grid. */
+.chat-area--call-chat-stacked {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto 45vh minmax(0, 1fr) auto auto;
+}
+.chat-area--call-chat-stacked > .video-grid-slot {
+  grid-column: 1;
+  grid-row: 2;
+}
+.chat-area--call-chat-stacked > .messages-slot {
+  grid-column: 1;
+  grid-row: 3;
+}
+.chat-area--call-chat-stacked > .typing-slot {
+  grid-column: 1;
+  grid-row: 4;
+}
+.chat-area--call-chat-stacked > .input-slot {
+  grid-column: 1;
+  grid-row: 5;
 }
 
 /* ── Slot wrappers (inside .chat-area flex column) ── */
@@ -570,4 +662,26 @@
 .mod-panel[hidden],
 .mod-center-toolbar[hidden] {
   display: none;
+}
+.chat-header .ch-topic[role="button"] {
+  cursor: pointer;
+}
+.chat-header .ch-topic[role="button"]:hover {
+  color: var(--text-normal);
+}
+.channel-topic-full {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-normal);
+}
+
+@media (pointer: coarse) {
+  .chat-header .ch-tools {
+    align-items: center;
+  }
+  .chat-header .ch-tools button {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

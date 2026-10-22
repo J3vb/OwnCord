@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -222,6 +221,9 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		return
 	}
 	defer backConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
+	// The library default (32 KiB) would tear down both legs on a large
+	// signaling frame before copyWS's own limit is reached.
+	backConn.SetReadLimit(wsProxyMaxMessageSize)
 
 	// Accept the frontend WebSocket. The Origin was already decided by
 	// isOriginAllowed before this handler was reached; letting Accept run its
@@ -237,6 +239,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		return
 	}
 	defer frontConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
+	frontConn.SetReadLimit(wsProxyMaxMessageSize)
 
 	// Use a cancellable context so when one direction finishes, the other
 	// goroutine's copyWS read/write is unblocked and can drain cleanly.
@@ -262,31 +265,26 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 }
 
 // wsProxyMaxMessageSize is the maximum WebSocket message size the LiveKit
-// proxy will forward. Messages exceeding this are dropped to prevent OOM.
+// proxy will forward. Both legs set it as their read limit, so a larger
+// message closes the proxied connection with StatusMessageTooBig.
 // 256 KB is generous for LiveKit signaling (typically < 10 KB).
 const wsProxyMaxMessageSize = 256 * 1024
 
 // copyWS reads messages from src and writes them to dst until an error or
-// context cancellation. H-5: Messages exceeding wsProxyMaxMessageSize are
-// rejected to prevent memory exhaustion via oversized frames.
+// context cancellation. H-5: the read limit on src rejects messages over
+// wsProxyMaxMessageSize to prevent memory exhaustion via oversized frames.
 func copyWS(ctx context.Context, dst, src *websocket.Conn) error {
 	for {
 		msgType, reader, err := src.Reader(ctx)
 		if err != nil {
 			return err
 		}
-		// Wrap reader with a size limit to prevent OOM from oversized messages.
-		limited := io.LimitReader(reader, wsProxyMaxMessageSize+1)
 		writer, err := dst.Writer(ctx, msgType)
 		if err != nil {
 			return err
 		}
-		n, copyErr := io.Copy(writer, limited)
-		if copyErr != nil {
+		if _, copyErr := io.Copy(writer, reader); copyErr != nil {
 			return copyErr
-		}
-		if n > wsProxyMaxMessageSize {
-			return fmt.Errorf("livekit proxy: message exceeds %d byte limit", wsProxyMaxMessageSize)
 		}
 		if closeErr := writer.Close(); closeErr != nil {
 			return closeErr

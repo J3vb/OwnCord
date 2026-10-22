@@ -41,6 +41,24 @@ func rawHas(rolePerms int64, o ChannelOverride, perm int64) bool {
 	return rawEffective(rolePerms, o)&perm == perm
 }
 
+// rawHasTwoRoles is Subject.Has for a member holding two roles, written out
+// longhand: each role is resolved with its OWN channel override, the results
+// are OR'd, the member override applies last, and Administrator in EITHER role
+// bypasses. It leans on none of MemberChannelPerms, Layers or EffectivePerms.
+func rawHasTwoRoles(r1, allow1, deny1, r2, allow2, deny2 int64, userAllow, userDeny, perm int64) bool {
+	if perm == 0 {
+		return false
+	}
+	if (r1|r2)&Administrator != 0 {
+		return true
+	}
+	layer1 := (r1 &^ deny1) | allow1
+	layer2 := (r2 &^ deny2) | allow2
+	roleLayer := layer1 | layer2
+	eff := (roleLayer &^ userDeny) | userAllow
+	return eff&perm == perm
+}
+
 // TestSubjectHasZeroPermIsNeverHeld pins that Subject.Has agrees with HasPerm
 // on the empty mask: it is never held, administrator or not, so a computed
 // zero perm fails closed instead of passing the Administrator bypass.
@@ -95,17 +113,25 @@ func FuzzPredicateParity(f *testing.F) {
 	roles := []int64{0, member, mod, admin, owner, -1, Administrator}
 	for _, role := range roles {
 		for _, typ := range types {
-			f.Add(role, int64(0), int64(0), int64(0), int64(0), typ, false, false, false)
-			f.Add(role, int64(0), ReadMessages, int64(0), int64(0), typ, false, true, false)
-			f.Add(role, int64(0), int64(0), ManageMessages, SendMessages, typ, true, true, true)
-			f.Add(role, ConnectVoice, MuteMembers, int64(0), ReadMessages, typ, true, false, true)
+			f.Add(role, int64(0), int64(0), int64(0), int64(0), typ, false, false, false, int64(0), int64(0), int64(0), false)
+			f.Add(role, int64(0), ReadMessages, int64(0), int64(0), typ, false, true, false, int64(0), int64(0), int64(0), false)
+			f.Add(role, int64(0), int64(0), ManageMessages, SendMessages, typ, true, true, true, int64(0), int64(0), int64(0), false)
+			f.Add(role, ConnectVoice, MuteMembers, int64(0), ReadMessages, typ, true, false, true, int64(0), int64(0), int64(0), false)
 		}
 	}
+
+	// Two-role subjects: a member holding Member and Moderator, where Member
+	// denies READ on a private channel and Moderator is not on that override.
+	f.Add(member, int64(0), ReadMessages, int64(0), int64(0), "text", false, false, false, mod, int64(0), int64(0), true)
+	f.Add(member, int64(0), ReadMessages, int64(0), ReadMessages, "text", false, false, false, mod, int64(0), int64(0), true)
+	f.Add(member, int64(0), int64(0), int64(0), int64(0), "voice", false, false, false, int64(0), ConnectVoice, SendMessages, true)
+	f.Add(int64(0), int64(0), int64(0), int64(0), int64(0), "text", false, false, false, Administrator, int64(0), ReadMessages, true)
 
 	f.Fuzz(func(t *testing.T,
 		rolePerms, allow, deny, userAllow, userDeny int64,
 		chanType string,
 		archived, dmParticipant, dmBlocked bool,
+		role2Perms, allow2, deny2 int64, twoRoles bool,
 	) {
 		o := ChannelOverride{Allow: allow, Deny: deny, UserAllow: userAllow, UserDeny: userDeny}
 		s := Subject{
@@ -116,6 +142,19 @@ func FuzzPredicateParity(f *testing.F) {
 			DMBlocked:     dmBlocked,
 		}
 		has := func(perm int64) bool { return rawHas(rolePerms, o, perm) }
+		if twoRoles {
+			// The Subject a two-role member resolves to: the OR of the masks,
+			// one layer per held role, only the member layer in Override.
+			s.RolePerms = rolePerms | role2Perms
+			s.Override = ChannelOverride{UserAllow: userAllow, UserDeny: userDeny}
+			s.Layers = []RoleGrant{
+				{Perms: rolePerms, Allow: allow, Deny: deny},
+				{Perms: role2Perms, Allow: allow2, Deny: deny2},
+			}
+			has = func(perm int64) bool {
+				return rawHasTwoRoles(rolePerms, allow, deny, role2Perms, allow2, deny2, userAllow, userDeny, perm)
+			}
+		}
 		isDM := chanType == "dm"
 
 		// Subject.Has is the one bit predicate every rule is built on.
@@ -189,6 +228,28 @@ func FuzzPredicateParity(f *testing.F) {
 			wantMod = ErrPermissionDenied
 		}
 		wantErr(t, "CanModerateVoice", s, CanModerateVoice(s), wantMod)
+
+		// Pinning, against the raw rule SetMessagePinned used: a DM answers
+		// to membership, then block, then timeout; any other channel needs
+		// effective READ+MANAGE and never consults the timeout.
+		for _, timedOut := range []bool{false, true} {
+			sp := s
+			sp.TimedOut = timedOut
+			var wantPin error
+			switch {
+			case isDM && !dmParticipant:
+				wantPin = ErrNotDMParticipant
+			case isDM && dmBlocked:
+				wantPin = ErrBlocked
+			case isDM && timedOut:
+				wantPin = ErrTimedOut
+			case isDM:
+				wantPin = nil
+			case !has(ReadMessages | ManageMessages):
+				wantPin = ErrPermissionDenied
+			}
+			wantErr(t, "CanPinMessage", sp, CanPinMessage(sp), wantPin)
+		}
 
 		// The two definitional identities. A future edit that gives session
 		// admission its own rule, or lets someone announce a post they cannot

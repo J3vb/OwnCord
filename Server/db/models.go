@@ -34,6 +34,22 @@ type User struct {
 	// CustomStatus is the optional free-text status line shown under the name.
 	// Nil = unset. Set over the WebSocket presence path and cleared on logout.
 	CustomStatus *string
+	// CustomStatusExpiresAt is the instant CustomStatus clears itself, as
+	// CustomStatusExpiryLayout text. Nil = no expiry. Only ever set with a
+	// non-nil CustomStatus.
+	CustomStatusExpiresAt *string
+	// BannerID is the attachment id of the profile banner image (migration
+	// 069). Nil = no image. The file is public while this names it.
+	BannerID *string
+	// BannerColor is the profile banner colour, lower-case #rgb or #rrggbb.
+	// Nil = unset.
+	BannerColor *string
+}
+
+// BannerPath is the URL the banner image is served from, nil when none. A
+// method, so a caller that only holds a User needs no db function.
+func (u *User) BannerPath() *string {
+	return BannerURL(u.BannerID)
 }
 
 // EffectiveDisplayName returns the name to render for the user: the display
@@ -122,36 +138,37 @@ func (i *Invite) Expired(now time.Time) bool {
 	return !now.Before(t)
 }
 
-// Role represents a row in the roles table.
-type Role struct {
-	ID          int64   `json:"id"`
-	Name        string  `json:"name"`
-	Color       *string `json:"color"`
-	Permissions int64   `json:"permissions"`
-	Position    int     `json:"position"`
-	IsDefault   bool    `json:"is_default"`
-}
-
 // Channel represents a row in the channels table.
 type Channel struct {
-	ID              int64   `json:"id"`
-	Name            string  `json:"name"`
-	Type            string  `json:"type"`
-	Category        string  `json:"category"`
-	Topic           string  `json:"topic"`
-	Position        int     `json:"position"`
-	SlowMode        int     `json:"slow_mode"`
-	Archived        bool    `json:"archived"`
-	CreatedAt       string  `json:"created_at"`
-	VoiceMaxUsers   int     `json:"voice_max_users"`
-	VoiceQuality    *string `json:"voice_quality,omitempty"`
-	MixingThreshold *int    `json:"mixing_threshold,omitempty"`
-	VoiceMaxVideo   int     `json:"voice_max_video"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Category string `json:"category"`
+	// CategoryID / CategoryPosition come from the LEFT JOIN on
+	// channel_categories (migration 072). CategoryID 0 means uncategorized,
+	// and Category is then "". Both are identical for every recipient.
+	CategoryID       int64   `json:"category_id"`
+	CategoryPosition int     `json:"category_position"`
+	Topic            string  `json:"topic"`
+	Position         int     `json:"position"`
+	SlowMode         int     `json:"slow_mode"`
+	Archived         bool    `json:"archived"`
+	CreatedAt        string  `json:"created_at"`
+	VoiceMaxUsers    int     `json:"voice_max_users"`
+	VoiceQuality     *string `json:"voice_quality,omitempty"`
+	MixingThreshold  *int    `json:"mixing_threshold,omitempty"`
+	VoiceMaxVideo    int     `json:"voice_max_video"`
 	// NSFW marks the channel as possibly carrying sensitive content. It is
 	// metadata only: the server stores, ships and audits it but imposes no
 	// content behaviour of its own (see migration 025). Clients decide what
 	// to do with it — the desktop client shows a per-session age gate.
 	NSFW bool `json:"nsfw"`
+	// AFK marks the server's one AFK voice channel (migration 068): members
+	// parked there can only listen. At most one row carries it.
+	AFK bool `json:"afk"`
+	// Thread is set on a thread row only (migration 074); never on the wire.
+	Thread ChannelThread `json:"-"`
+	Forum  *ChannelForum `json:"forum,omitempty"` // forum rows only (migration 075)
 }
 
 // Message represents a row in the messages table.
@@ -165,10 +182,51 @@ type Message struct {
 	Deleted   bool
 	Pinned    bool
 	Timestamp string
-	// MentionsEveryone is set when the message resolved an @everyone or @here
-	// token and the author held MENTION_EVERYONE. Per-user mentions live in
-	// message_mentions.
+	// MentionsEveryone: an @everyone or @here resolved and the author held
+	// MENTION_EVERYONE. Per-user mentions live in message_mentions.
 	MentionsEveryone bool
+	// Kind is MessageKindUser for an ordinary message. Every other value is a
+	// row only the server writes: a call log row or a group event row.
+	Kind         int64
+	ThreadJoined []int64 // WP 6.9c: users this send newly made thread followers; send transactions only
+}
+
+// The stored values of messages.kind. 0 is a message a user wrote, 1 a call
+// log row (WP 3B-9) and 2 to 6 the group DM event rows (WP 3B-10), 7 a pin row (WP 6.12).
+// MessageKindName gives their wire names (protocol enum chat_message.kind).
+const (
+	MessageKindUser        int64 = 0
+	MessageKindCall        int64 = 1
+	MessageKindGroupAdd    int64 = 2
+	MessageKindGroupRemove int64 = 3
+	MessageKindGroupLeave  int64 = 4
+	MessageKindGroupRename int64 = 5
+	MessageKindGroupIcon   int64 = 6
+	MessageKindPinAdd      int64 = 7
+
+	MessageKindNameCall = "call"
+)
+
+// MessageKindName is the wire name of a stored kind: "" for an ordinary
+// message (the field is omitted) and for a value this server does not know.
+func MessageKindName(kind int64) string {
+	switch kind {
+	case MessageKindCall:
+		return MessageKindNameCall
+	case MessageKindGroupAdd:
+		return "group_add"
+	case MessageKindGroupRemove:
+		return "group_remove"
+	case MessageKindGroupLeave:
+		return "group_leave"
+	case MessageKindGroupRename:
+		return "group_rename"
+	case MessageKindGroupIcon:
+		return "group_icon"
+	case MessageKindPinAdd:
+		return "pin_add"
+	}
+	return ""
 }
 
 // MessageWithUser joins a Message with the author's public fields.
@@ -202,6 +260,8 @@ type MessageSearchResult struct {
 type SearchPage struct {
 	Limit int
 	// Recent orders newest first (message id descending) instead of by rank.
+	// Relevance ranks only the newest 2,000 in-scope matches; Recent reaches
+	// older ones.
 	Recent bool
 	// Before, when positive, keeps only messages with an id below it — the
 	// cursor for the next page of a Recent search.
@@ -215,7 +275,7 @@ type UserPublic struct {
 	Avatar   *string `json:"avatar,omitempty"`
 }
 
-// MessageAPIResponse matches the API.md shape for GET /channels/{id}/messages.
+// MessageAPIResponse matches the docs/api.md shape for GET /channels/{id}/messages.
 type MessageAPIResponse struct {
 	ID          int64            `json:"id"`
 	ChannelID   int64            `json:"channel_id"`
@@ -232,10 +292,43 @@ type MessageAPIResponse struct {
 	// MentionsEveryone reports an authorized @everyone/@here.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
+	// RoleMentions adds mention_roles (WP 6.3f-1): the roles whose @role token
+	// cleared the mention gate. Embedded so its json tag lives outside
+	// models.go, whose tag count is pinned.
+	RoleMentions
 	// ReferencedMessage is the reply parent's snippet, computed at read time
 	// (never stored). Null when this is not a reply or the parent is gone or
 	// in another channel.
 	ReferencedMessage *ReferencedMessage `json:"referenced_message"`
+	// Kind and Call are set only on a call log row (kind "call") and omitted
+	// for an ordinary message. See CallInfo.
+	Kind string    `json:"kind,omitempty"`
+	Call *CallInfo `json:"call,omitempty"`
+	// GroupEvent is set only on a group event row (group_add to group_icon).
+	GroupEvent *GroupEventInfo `json:"group_event,omitempty"`
+	// Forward is set only on a forwarded message (WP 6.9a). See ForwardInfo.
+	Forward *ForwardInfo `json:"forward,omitempty"`
+	// Poll is set only on a poll (6.9b), Thread only on a thread starter (6.9c).
+	Poll   *PollInfo   `json:"poll,omitempty"`
+	Thread *ThreadInfo `json:"thread,omitempty"`
+}
+
+// GroupEventInfo is the group_event block of a group DM row. Which fields are
+// set depends on the kind: add and remove carry TargetUserID, rename carries
+// Name ("" means the name was removed) and icon carries IconRemoved. A leave
+// row carries none, so it encodes as {}.
+type GroupEventInfo struct {
+	TargetUserID int64   `json:"target_user_id,omitempty"`
+	Name         *string `json:"name,omitempty"`
+	IconRemoved  *bool   `json:"icon_removed,omitempty"`
+}
+
+// CallInfo is the call block of a call log row. Times use the message
+// timestamp layout. EndedAt is nil while the call is live.
+type CallInfo struct {
+	StartedAt    string  `json:"started_at"`
+	EndedAt      *string `json:"ended_at"`
+	Participants []int64 `json:"participants"`
 }
 
 // ReferencedMessage is the snippet of a reply's parent. A deleted parent is
@@ -246,6 +339,10 @@ type ReferencedMessage struct {
 	Content        string      `json:"content"`
 	Deleted        bool        `json:"deleted"`
 	HasAttachments bool        `json:"has_attachments"`
+	// IsSystem marks a server-written row (a call log or group event row, any
+	// kind other than MessageKindUser). It is server-side only: a reply to one
+	// is refused, so it never reaches the wire.
+	IsSystem bool `json:"-"`
 }
 
 // AttachmentInfo is the attachment shape in API responses.
@@ -313,6 +410,10 @@ type ChannelUnread struct {
 	// this user directly or via an authorized @everyone/@here. Zeroed by
 	// channel_focus, never advanced by an edit.
 	MentionCount int `json:"mention_count"`
+	// LastReadMessageID is read_states.last_message_id: the caller's read
+	// pointer, 0 when the caller has no row for the channel. It is not
+	// LastMessageID, which is the newest live message in the channel.
+	LastReadMessageID int64 `json:"last_read_message_id"`
 }
 
 // ServerStats contains aggregate counts for the admin dashboard.
@@ -331,6 +432,8 @@ type UserWithRole struct {
 	User
 	RoleName     string `json:"role_name"`
 	RolePosition int    `json:"role_position"`
+	// RoleIDs is every held role, top role first; never nil from ListAllUsers.
+	RoleIDs []int64
 }
 
 // AuditEntry represents a single row from the audit_log table joined with the

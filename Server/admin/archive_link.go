@@ -121,14 +121,14 @@ func handleArchiveLink() http.HandlerFunc {
 // single-use and short-lived, and the credential that asked for it must
 // still resolve to a non-banned Owner. Any failure to redeem is a uniform
 // 403, so a probe cannot tell unknown from expired from consumed from revoked.
-func handleArchiveDownload(database *db.DB, opts SetupOptions) http.HandlerFunc {
+func handleArchiveDownload(database *db.DB, opts SetupOptions, paths backupPaths) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		link, ok := linkStore.redeem(r.URL.Query().Get("token"))
 		if !ok || !linkOwnerStillValid(r, database, link) {
 			writeLinkInvalid(w)
 			return
 		}
-		serveArchive(w, r, database, opts, link.actorID)
+		serveArchive(w, r, database, opts, paths, link.actorID)
 	})
 }
 
@@ -162,13 +162,13 @@ func writeLinkInvalid(w http.ResponseWriter) {
 // bound to the Owner credential that asked, expiring after archiveLinkTTL,
 // never logged. Owner-only like restore: a backup holds every account's
 // password hash.
-func handleBackupLink() http.HandlerFunc {
+func handleBackupLink(paths backupPaths) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		hash, ok := linkCredentialHash(w, r)
 		if !ok {
 			return
 		}
-		name, target, ok := resolveBackupName(w, r)
+		name, target, ok := resolveBackupName(w, r, paths.dir)
 		if !ok {
 			return
 		}
@@ -189,7 +189,7 @@ func handleBackupLink() http.HandlerFunc {
 // the backup link's redemption. The token is spent on the first attempt and
 // opens only the file it was issued for; the file is streamed from disk, never
 // read into memory.
-func handleBackupDownload(database *db.DB) http.HandlerFunc {
+func handleBackupDownload(database *db.DB, paths backupPaths) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := chi.URLParam(r, "name")
 		link, ok := backupLinkStore.redeem(r.URL.Query().Get("token"))
@@ -197,7 +197,7 @@ func handleBackupDownload(database *db.DB) http.HandlerFunc {
 			writeLinkInvalid(w)
 			return
 		}
-		f, err := openBackupEntry(link.target)
+		f, err := openBackupEntry(paths.dir, link.target)
 		if err != nil {
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
 			return
@@ -209,6 +209,15 @@ func handleBackupDownload(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// Armed before the headers go out and before the audit write, so the
+		// whole response is under the progress deadline, not the server's
+		// 30 s WriteTimeout. The token is already spent by now: a transfer
+		// that fails partway leaves the link spent, and the owner asks for a
+		// new one (unchanged behaviour).
+		deadline := startArchive(w, r, func() {}, archiveProgressTimeout, archiveMaxLifetime)
+		defer deadline.release()
+		deadline.touch()
+
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
 		w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
@@ -219,7 +228,7 @@ func handleBackupDownload(database *db.DB) http.HandlerFunc {
 		db.WriteAudit(context.WithoutCancel(r.Context()), database, link.actorID, "backup_download", "server", 0,
 			fmt.Sprintf("downloaded backup %s (%d bytes)", name, info.Size()))
 
-		if _, err := io.Copy(w, f); err != nil {
+		if _, err := io.Copy(deadline, f); err != nil {
 			slog.Warn("backup download interrupted", "name", name, "err", err)
 		}
 	}
@@ -228,14 +237,14 @@ func handleBackupDownload(database *db.DB) http.HandlerFunc {
 // openBackupEntry opens the backup directory entry named name. The path is
 // built from the directory listing's own entry, never from request input, so
 // nothing a caller sends can steer it outside the backup directory.
-func openBackupEntry(name string) (*os.File, error) {
-	entries, err := os.ReadDir(backupBaseDir)
+func openBackupEntry(backupDir, name string) (*os.File, error) {
+	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		return nil, err
 	}
 	for _, e := range entries {
 		if e.Type().IsRegular() && e.Name() == name {
-			return os.Open(filepath.Join(backupBaseDir, e.Name())) //nolint:gosec // G304: an entry of the backup directory itself
+			return os.Open(filepath.Join(backupDir, e.Name())) //nolint:gosec // G304: an entry of the backup directory itself
 		}
 	}
 	return nil, os.ErrNotExist

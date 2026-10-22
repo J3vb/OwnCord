@@ -27,11 +27,13 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 5,
           "payload": {
             "attachments": [],
             "channel_id": 3,
             "content": "hello over dm",
             "id": "<id:number>",
+            "mention_roles": [],
             "mentions": [],
             "mentions_everyone": false,
             "mentions_here": false,
@@ -70,11 +72,13 @@
       {
         "dir": "s2c",
         "frame": {
+          "cseq": 3,
           "payload": {
             "attachments": [],
             "channel_id": 3,
             "content": "hello over dm",
             "id": "<id:number>",
+            "mention_roles": [],
             "mentions": [],
             "mentions_everyone": false,
             "mentions_here": false,

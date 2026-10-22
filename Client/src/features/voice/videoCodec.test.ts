@@ -5,8 +5,34 @@ vi.mock("./native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
 }));
 
-const { getVideoCodecPref, gpuRenderer, pickAutoCodec, resolveVideoCodec } =
-  await import("./videoCodec");
+const nativeH264 = vi.hoisted(() => ({ value: false }));
+const nativeVp9 = vi.hoisted(() => ({ value: false }));
+vi.mock("./native/videoCodecs", () => ({
+  nativeVideoCodecs: () =>
+    Promise.resolve({ h264: nativeH264.value, vp9: nativeVp9.value, decode: [] }),
+}));
+
+const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
+const supportsH265 = vi.hoisted(() => vi.fn(() => true));
+vi.mock("livekit-client", () => ({
+  supportsVP9: () => supportsVP9(),
+  supportsH265: () => supportsH265(),
+}));
+
+const {
+  getVideoCodecPref,
+  gpuRenderer,
+  h264Offered,
+  h265Offered,
+  pickAutoCodec,
+  resolveCodecChoice,
+  resolveVideoCodec,
+  vp9Available,
+  vp9Offered,
+} = await import("./videoCodec");
+const { voiceStore, resetVoiceStore } = await import("../../stores/voice.store");
+const { channelPeerDecode } = await import("./peerDecode");
+const { authStore } = await import("../../stores/auth.store");
 
 const encodingInfo = vi.fn();
 const NVIDIA = "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)";
@@ -46,6 +72,12 @@ function savePref(value: string): void {
 beforeEach(() => {
   localStorage.clear();
   isLinuxDesktop.mockReturnValue(false);
+  nativeH264.value = false;
+  nativeVp9.value = false;
+  supportsVP9.mockReset();
+  supportsVP9.mockReturnValue(true);
+  supportsH265.mockReset();
+  supportsH265.mockReturnValue(true);
   encodingInfo.mockReset();
   vi.stubGlobal("navigator", { mediaCapabilities: { encodingInfo } });
   stubGpu(NVIDIA);
@@ -119,9 +151,306 @@ describe("getVideoCodecPref", () => {
     expect(getVideoCodecPref()).toBe("auto");
   });
 
+  it("reads a saved VP9", () => {
+    savePref("vp9");
+    expect(getVideoCodecPref()).toBe("vp9");
+  });
+
   it("falls back to VP8 for an unknown saved value", () => {
     savePref("av1");
     expect(getVideoCodecPref()).toBe("vp8");
+  });
+});
+
+describe("resolveVideoCodec with VP9", () => {
+  beforeEach(() => {
+    savePref("vp9");
+  });
+
+  it("publishes VP8 for a saved VP9 the settings no longer offer", async () => {
+    supportsVP9.mockReturnValue(false);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP9 when supported and nobody else is in the channel, without probing", async () => {
+    await expect(resolveVideoCodec(track(), 120, 12_000_000)).resolves.toBe("vp9");
+    expect(encodingInfo).not.toHaveBeenCalled();
+  });
+
+  it("publishes VP9 when every peer reports decoding it", async () => {
+    await expect(
+      resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8", "vp9"], ["vp9"]]),
+    ).resolves.toBe("vp9");
+  });
+
+  it("falls back to VP8 when livekit-client cannot publish VP9", async () => {
+    supportsVP9.mockReturnValue(false);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("falls back to VP8 when supportsVP9 throws, as without RTCRtpSender", async () => {
+    supportsVP9.mockImplementation(() => {
+      throw new ReferenceError("RTCRtpSender is not defined");
+    });
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("reports the preferred codec beside the pick, for the live switch (WP M-5b)", async () => {
+    await expect(resolveCodecChoice(track(), 30, 1_700_000)).resolves.toEqual({
+      preferred: "vp9",
+      codec: "vp9",
+    });
+    await expect(resolveCodecChoice(track(), 30, 1_700_000, () => [undefined])).resolves.toEqual({
+      preferred: "vp9",
+      codec: "vp8",
+    });
+  });
+
+  it("falls back to VP8 with a peer whose decode list is unknown", async () => {
+    await expect(resolveVideoCodec(track(), 30, 1_700_000, () => [undefined])).resolves.toBe("vp8");
+  });
+
+  it("falls back to VP8 with a VP8 and H.264 peer", async () => {
+    await expect(resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8", "h264"]])).resolves.toBe(
+      "vp8",
+    );
+  });
+
+  it("publishes VP8 on the Linux native engine", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+});
+
+describe("Linux native codec choice (WP LP-7c)", () => {
+  beforeEach(() => {
+    isLinuxDesktop.mockReturnValue(true);
+  });
+
+  it("Linux publishes H.264 when chosen and the native encoder has it", async () => {
+    nativeH264.value = true;
+    savePref("h264");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
+  });
+
+  it("Linux falls back to VP8 when the native encoder lacks H.264", async () => {
+    nativeH264.value = false;
+    savePref("h264");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    // The saved choice is not rewritten: a build with H.264 honours it later.
+    expect(getVideoCodecPref()).toBe("h264");
+  });
+
+  it("Auto is VP8 on Linux", async () => {
+    nativeH264.value = true;
+    encodingInfo.mockResolvedValue(HARDWARE);
+    savePref("auto");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    expect(encodingInfo).not.toHaveBeenCalled();
+  });
+
+  it("maps a saved VP9 or H.265 to VP8 on Linux", async () => {
+    nativeH264.value = true;
+    for (const saved of ["vp9", "h265"]) {
+      savePref(saved);
+      // oxlint-disable-next-line no-await-in-loop -- one pref at a time
+      await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    }
+  });
+
+  it("falls back to VP8 for a chosen H.264 when a peer cannot decode it", async () => {
+    nativeH264.value = true;
+    savePref("h264");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8"]])).resolves.toBe("vp8");
+  });
+});
+
+describe("h264Offered (WP LP-7c)", () => {
+  it("is true off Linux", async () => {
+    await expect(h264Offered()).resolves.toBe(true);
+  });
+
+  it("follows the native encoder on Linux", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    nativeH264.value = true;
+    await expect(h264Offered()).resolves.toBe(true);
+    nativeH264.value = false;
+    await expect(h264Offered()).resolves.toBe(false);
+  });
+});
+
+describe("vp9Offered", () => {
+  it("is true where VP9 can be published", () => {
+    expect(vp9Offered()).toBe(true);
+  });
+
+  it("is false when VP9 cannot be published", () => {
+    supportsVP9.mockReturnValue(false);
+    expect(vp9Offered()).toBe(false);
+  });
+
+  it("is false on Linux", () => {
+    isLinuxDesktop.mockReturnValue(true);
+    expect(vp9Offered()).toBe(false);
+  });
+});
+
+describe("vp9Available (WP M-11b)", () => {
+  it("is the webview's answer off Linux", async () => {
+    await expect(vp9Available()).resolves.toBe(true);
+    supportsVP9.mockReturnValue(false);
+    await expect(vp9Available()).resolves.toBe(false);
+  });
+
+  it("follows the native encoder on Linux, not the webview", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    supportsVP9.mockReturnValue(false);
+    nativeVp9.value = true;
+    await expect(vp9Available()).resolves.toBe(true);
+    nativeVp9.value = false;
+    await expect(vp9Available()).resolves.toBe(false);
+  });
+});
+
+describe("Linux VP9 choice (WP M-11b)", () => {
+  beforeEach(() => {
+    isLinuxDesktop.mockReturnValue(true);
+    savePref("vp9");
+  });
+
+  afterEach(() => {
+    nativeVp9.value = false;
+  });
+
+  it("publishes VP9 when chosen and the native encoder has it", async () => {
+    nativeVp9.value = true;
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp9");
+  });
+
+  it("publishes VP8 for a saved VP9 when the native encoder lacks it, and keeps the pref", async () => {
+    nativeVp9.value = false;
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    expect(getVideoCodecPref()).toBe("vp9");
+  });
+
+  it("keeps Auto on VP8 even when the native encoder has VP9", async () => {
+    nativeVp9.value = true;
+    savePref("auto");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+});
+
+describe("h265Offered (WP M-6)", () => {
+  it("is true with support, a non-Intel GPU and not Linux, in a release build too", () => {
+    vi.stubEnv("DEV", false);
+    try {
+      expect(h265Offered()).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("is false when H.265 cannot be published", () => {
+    supportsH265.mockReturnValue(false);
+    expect(h265Offered()).toBe(false);
+  });
+
+  it("is false when supportsH265 throws, as without RTCRtpSender", () => {
+    supportsH265.mockImplementation(() => {
+      throw new ReferenceError("RTCRtpSender is not defined");
+    });
+    expect(h265Offered()).toBe(false);
+  });
+
+  it("is false on Intel graphics and when the GPU cannot be named", () => {
+    stubGpu(INTEL);
+    expect(h265Offered()).toBe(false);
+    stubGpu(null);
+    expect(h265Offered()).toBe(false);
+  });
+
+  it("is false on Linux", () => {
+    isLinuxDesktop.mockReturnValue(true);
+    expect(h265Offered()).toBe(false);
+  });
+});
+
+describe("resolveVideoCodec with H.265 (WP M-6a)", () => {
+  beforeEach(() => {
+    savePref("h265");
+    encodingInfo.mockResolvedValue(HARDWARE);
+  });
+
+  it("reads a saved H.265", () => {
+    expect(getVideoCodecPref()).toBe("h265");
+  });
+
+  it("publishes H.265 when offered and the encoder is power efficient, probing H.265", async () => {
+    await expect(resolveVideoCodec(track(1920, 1080), 60, 8_000_000)).resolves.toBe("h265");
+    expect(encodingInfo).toHaveBeenCalledWith({
+      type: "webrtc",
+      video: {
+        contentType: "video/H265",
+        width: 1920,
+        height: 1080,
+        bitrate: 8_000_000,
+        framerate: 60,
+      },
+    });
+  });
+
+  it("publishes H.265 when every peer decodes it, else VP8", async () => {
+    await expect(
+      resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8", "h265"], ["h265"]]),
+    ).resolves.toBe("h265");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000, () => [["vp8", "h264"]])).resolves.toBe(
+      "vp8",
+    );
+    await expect(resolveCodecChoice(track(), 30, 1_700_000, () => [undefined])).resolves.toEqual({
+      preferred: "h265",
+      codec: "vp8",
+    });
+  });
+
+  it.each([
+    ["only in software", { supported: true, smooth: true, powerEfficient: false }],
+    ["not supported", { supported: false, smooth: false, powerEfficient: false }],
+  ])("publishes VP8 when the encoder is %s", async (_name, probe) => {
+    encodingInfo.mockResolvedValue(probe);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP8 when the probe fails", async () => {
+    encodingInfo.mockRejectedValue(new TypeError("bad configuration"));
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP8 when H.265 is not offered, without probing", async () => {
+    supportsH265.mockReturnValue(false);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    expect(encodingInfo).not.toHaveBeenCalled();
+  });
+
+  it("publishes VP8 on Intel graphics", async () => {
+    stubGpu(INTEL);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP8 on Linux", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("publishes VP8 when supportsH265 throws", async () => {
+    supportsH265.mockImplementation(() => {
+      throw new ReferenceError("RTCRtpSender is not defined");
+    });
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+  });
+
+  it("never lets Auto pick H.265", async () => {
+    savePref("auto");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
   });
 });
 
@@ -131,10 +460,43 @@ describe("resolveVideoCodec", () => {
     expect(encodingInfo).not.toHaveBeenCalled();
   });
 
-  it("publishes H.264 when the user picked it, without probing", async () => {
-    savePref("h264");
-    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
-    expect(encodingInfo).not.toHaveBeenCalled();
+  describe("a saved H.264 off Linux", () => {
+    beforeEach(() => savePref("h264"));
+
+    it("publishes H.264 when the probe reports a hardware encoder", async () => {
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(3440, 1440), 30, 8_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).toHaveBeenCalledWith({
+        type: "webrtc",
+        video: {
+          contentType: "video/H264",
+          width: 3440,
+          height: 1440,
+          bitrate: 8_000_000,
+          framerate: 30,
+        },
+      });
+    });
+
+    it("publishes VP8 when the probe reports a software encoder", async () => {
+      encodingInfo.mockResolvedValue({ supported: true, smooth: false, powerEfficient: false });
+      await expect(resolveVideoCodec(track(3440, 1440), 30, 8_000_000)).resolves.toBe("vp8");
+    });
+
+    it("publishes VP8 when the probe reports H.264 unsupported", async () => {
+      encodingInfo.mockResolvedValue({ supported: false, smooth: false, powerEfficient: true });
+      await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+    });
+
+    it("keeps H.264 when the probe rejects", async () => {
+      encodingInfo.mockRejectedValue(new TypeError("unsupported config"));
+      await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
+    });
+
+    it("keeps H.264 where MediaCapabilities is missing", async () => {
+      vi.stubGlobal("navigator", {});
+      await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
+    });
   });
 
   it("probes H.264 for WebRTC at the captured size, frame rate and bitrate on Auto", async () => {
@@ -174,6 +536,7 @@ describe("resolveVideoCodec", () => {
   it("still publishes H.264 on Intel graphics when the user picked it", async () => {
     savePref("h264");
     stubGpu(INTEL);
+    encodingInfo.mockResolvedValue(HARDWARE);
 
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
   });
@@ -199,7 +562,7 @@ describe("resolveVideoCodec", () => {
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
   });
 
-  it("always publishes VP8 on the Linux native path, whatever is saved", async () => {
+  it("publishes VP8 on the Linux native path when the encoder lacks H.264, whatever is saved", async () => {
     isLinuxDesktop.mockReturnValue(true);
     encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
     for (const saved of ["h264", "auto"]) {
@@ -208,5 +571,114 @@ describe("resolveVideoCodec", () => {
       await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
     }
     expect(encodingInfo).not.toHaveBeenCalled();
+  });
+
+  describe("at 120 fps (M-2)", () => {
+    it("uses Auto's hardware rule when the saved choice is VP8", async () => {
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          video: expect.objectContaining({ width: 1920, height: 1080, framerate: 120 }),
+        }),
+      );
+    });
+
+    it("keeps VP8 on Intel graphics", async () => {
+      stubGpu(INTEL);
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("vp8");
+    });
+
+    it("keeps VP8 when the hardware cannot take 120 fps", async () => {
+      encodingInfo.mockResolvedValue({ supported: true, smooth: false, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("vp8");
+    });
+
+    it("keeps a saved H.264 the hardware probe accepts", async () => {
+      savePref("h264");
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not probe a saved VP8 at 60 fps", async () => {
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(1920, 1080), 60, 3_000_000)).resolves.toBe("vp8");
+      expect(encodingInfo).not.toHaveBeenCalled();
+    });
+
+    it("stays VP8 on the Linux native path", async () => {
+      isLinuxDesktop.mockReturnValue(true);
+      encodingInfo.mockResolvedValue(HARDWARE);
+      await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("vp8");
+      expect(encodingInfo).not.toHaveBeenCalled();
+    });
+  });
+});
+
+function inChannel(peers: Record<number, readonly string[] | undefined>): void {
+  authStore.setState((prev) => ({
+    ...prev,
+    user: { id: 1, username: "me", avatar: null, role: "member" },
+  }));
+  const users = new Map(
+    [1, ...Object.keys(peers).map(Number)].map((userId) => [
+      userId,
+      { userId, username: `u${userId}` } as never,
+    ]),
+  );
+  const decode = new Map(
+    Object.entries(peers).flatMap(([id, list]) => (list ? [[Number(id), list] as const] : [])),
+  );
+  voiceStore.setState((prev) => ({
+    ...prev,
+    currentChannelId: 4,
+    voiceUsers: new Map([[4, users]]),
+    peerVideoDecode: decode,
+  }));
+}
+
+describe("resolveVideoCodec with channel peers", () => {
+  beforeEach(() => {
+    resetVoiceStore();
+    encodingInfo.mockResolvedValue(HARDWARE);
+  });
+
+  it("downgrades a saved H.264 to VP8 for a VP8-only peer", async () => {
+    savePref("h264");
+    inChannel({ 2: ["vp8"] });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe("vp8");
+  });
+
+  it("keeps H.264 for a peer whose list is unknown", async () => {
+    savePref("h264");
+    inChannel({ 2: undefined });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe(
+      "h264",
+    );
+  });
+
+  it("keeps H.264 when every peer decodes it", async () => {
+    savePref("h264");
+    inChannel({ 2: ["vp8", "h264"], 3: ["vp8", "h264", "vp9"] });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe(
+      "h264",
+    );
+  });
+
+  it("ignores its own entry", async () => {
+    savePref("h264");
+    inChannel({ 1: ["vp8"] });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe(
+      "h264",
+    );
+  });
+
+  it("still gives VP8 on the Linux native engine without an H.264 encoder", async () => {
+    isLinuxDesktop.mockReturnValue(true);
+    savePref("h264");
+    inChannel({ 2: ["vp8", "h264"] });
+    await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe("vp8");
   });
 });

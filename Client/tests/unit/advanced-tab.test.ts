@@ -904,3 +904,157 @@ describe("AdvancedTab — Launch on Login (autostart)", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("false");
   });
 });
+
+describe("AdvancedTab — Close to Tray and Start Minimized", () => {
+  let container: HTMLDivElement;
+  const ac = new AbortController();
+  const NATIVE_PREFS = { minimizeToTray: true, startMinimized: false };
+
+  type InvokeMock = ReturnType<typeof vi.fn>;
+  let invokeMock: InvokeMock;
+  let setCalls: Array<{ pref: string; enabled: boolean }>;
+  let failSets: boolean;
+
+  beforeEach(async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    const { invoke } = await import("@tauri-apps/api/core");
+    invokeMock = invoke as InvokeMock;
+    setCalls = [];
+    failSets = false;
+    invokeMock.mockReset().mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd === "get_window_prefs") return NATIVE_PREFS;
+      if (cmd === "set_window_pref") {
+        if (failSets) throw new Error("not saved");
+        setCalls.push(args as { pref: string; enabled: boolean });
+      }
+      return undefined;
+    });
+    mockIsEnabled.mockReset().mockResolvedValue(false);
+    mockEnable.mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    container.remove();
+    invokeMock.mockReset().mockResolvedValue(undefined);
+  });
+
+  async function tick(times = 4): Promise<void> {
+    for (let i = 0; i < times; i++) await new Promise((r) => setTimeout(r, 0));
+  }
+
+  function row(label: string): HTMLElement | undefined {
+    return Array.from(container.querySelectorAll<HTMLElement>(".setting-row")).find(
+      (r) => r.querySelector(".setting-label")?.textContent === label,
+    );
+  }
+
+  function mount(): void {
+    container.appendChild(buildAdvancedTab(ac.signal));
+  }
+
+  it("shows both rows with the values the host reports", async () => {
+    invokeMock.mockImplementation(async (cmd: string) =>
+      cmd === "get_window_prefs" ? { minimizeToTray: false, startMinimized: true } : undefined,
+    );
+    mount();
+    await tick();
+
+    expect(row("Close to Tray")?.querySelector(".toggle")?.classList.contains("on")).toBe(false);
+    expect(row("Start Minimized")?.querySelector(".toggle")?.classList.contains("on")).toBe(true);
+  });
+
+  it("removes both rows when the host cannot answer", async () => {
+    invokeMock.mockRejectedValue(new Error("no host"));
+    mount();
+    await tick();
+
+    expect(row("Close to Tray")).toBeUndefined();
+    expect(row("Start Minimized")).toBeUndefined();
+  });
+
+  it("saves a Close to Tray change through set_window_pref", async () => {
+    mount();
+    await tick();
+    (row("Close to Tray")!.querySelector(".toggle") as HTMLElement).click();
+    await tick();
+
+    expect(setCalls).toEqual([{ pref: "minimizeToTray", enabled: false }]);
+  });
+
+  it("puts the toggle back when the host cannot save the change", async () => {
+    mount();
+    await tick();
+    failSets = true;
+    const toggle = row("Close to Tray")!.querySelector(".toggle") as HTMLElement;
+    toggle.click();
+    await tick();
+
+    expect(toggle.classList.contains("on")).toBe(true);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("keeps a click made before the first read comes back", async () => {
+    let release!: (v: unknown) => void;
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "get_window_prefs"
+        ? new Promise((r) => {
+            release = r;
+          })
+        : Promise.resolve(undefined),
+    );
+    mount();
+    await tick();
+    const toggle = row("Close to Tray")!.querySelector(".toggle") as HTMLElement;
+    toggle.click();
+    await tick();
+    release({ minimizeToTray: true, startMinimized: false });
+    await tick();
+
+    expect(toggle.classList.contains("on")).toBe(false);
+  });
+
+  it("lets a late read apply after a click made before it failed to save", async () => {
+    let release!: (v: unknown) => void;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_window_prefs") {
+        return new Promise((r) => {
+          release = r;
+        });
+      }
+      return cmd === "set_window_pref" ? Promise.reject(new Error("not saved")) : Promise.resolve();
+    });
+    mount();
+    await tick();
+    const toggle = row("Close to Tray")!.querySelector(".toggle") as HTMLElement;
+    toggle.click();
+    await tick();
+    // Back to what was shown before the click.
+    expect(toggle.classList.contains("on")).toBe(true);
+    release({ minimizeToTray: false, startMinimized: false });
+    await tick();
+
+    expect(toggle.classList.contains("on")).toBe(false);
+  });
+
+  it("refreshes the login entry when Start Minimized turns on while Launch on Login is on", async () => {
+    mockIsEnabled.mockResolvedValue(true);
+    mount();
+    await tick();
+    mockEnable.mockClear();
+    (row("Start Minimized")!.querySelector(".toggle") as HTMLElement).click();
+    await tick(6);
+
+    expect(setCalls).toEqual([{ pref: "startMinimized", enabled: true }]);
+    expect(mockEnable).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the login entry alone when Launch on Login is off", async () => {
+    mount();
+    await tick();
+    (row("Start Minimized")!.querySelector(".toggle") as HTMLElement).click();
+    await tick(6);
+
+    expect(mockEnable).not.toHaveBeenCalled();
+  });
+});

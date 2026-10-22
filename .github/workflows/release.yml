@@ -229,6 +229,9 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Same release-profile overrides as client-artifact-smoke-target.yml.
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
         run: npm run tauri build
 
       # Shared with client-artifact-smoke.yml's nightly build, so this
@@ -309,6 +312,8 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          # See ci.yml: CUDA_HOME gates the NVENC build and build.rs ignores it.
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST CUDA_HOME"
           lookup-only: true
 
       - name: Install npm dependencies
@@ -320,6 +325,9 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Same release-profile overrides as client-artifact-smoke-target.yml.
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
         run: npm run tauri build -- --bundles appimage,deb
 
       # Fail closed on the shipped binary's glibc floor: the prebuilt libwebrtc
@@ -330,6 +338,10 @@ jobs:
       - name: Check the binary's glibc floor
         working-directory: Client
         run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
+
+      - name: Check the binary has the NVIDIA encoder
+        working-directory: Client
+        run: bash scripts/check-nvenc-linked.sh src-tauri/target/release/owncord-client
 
       # linuxdeploy bundles the runner's libwayland-* into the AppImage, which
       # breaks Mesa EGL init on newer hosts (white window on Arch/Fedora —
@@ -357,6 +369,32 @@ jobs:
           # `requireSignedVersion` and refuse an updater artifact signed without it.
           npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$APPIMAGE"
           npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$TARBALL"
+
+      # Sign the .deb as an updater artifact (WP LP-14). Tauri does not
+      # produce a version-bound .deb.sig, so sign explicitly; rm -f makes it
+      # irrelevant whether createUpdaterArtifacts already wrote one.
+      # --app-version binds the signature to this release: clients set
+      # `requireSignedVersion` and refuse a signature without it. The server
+      # (Server/updater/assets.go) offers the package only to clients that
+      # opt in with ?deb_install=pkexec.
+      - name: Sign the .deb updater artifact
+        working-directory: Client
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(src-tauri/target/release/bundle/deb/*.deb)
+          if [ "${#debs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one .deb in src-tauri/target/release/bundle/deb, found ${#debs[@]}"
+            exit 1
+          fi
+          DEB="${debs[0]}"
+          rm -f "$DEB.sig"
+          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$DEB"
+          test -s "$DEB.sig"
 
       - name: Stage Linux release assets
         shell: bash
@@ -568,6 +606,8 @@ jobs:
         uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: Client/src-tauri
+          # See ci.yml: CUDA_HOME gates the NVENC build and build.rs ignores it.
+          env-vars: "CARGO CC CFLAGS CXX CMAKE RUST CUDA_HOME"
           lookup-only: true
 
       - name: Install npm dependencies
@@ -579,6 +619,9 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Same release-profile overrides as client-artifact-smoke-target.yml.
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
         run: npm run tauri build -- --bundles appimage,deb
 
       # Same floor check as the x86_64 job — the arm64 libwebrtc artifact
@@ -586,6 +629,10 @@ jobs:
       - name: Check the binary's glibc floor
         working-directory: Client
         run: bash scripts/check-glibc-floor.sh src-tauri/target/release/owncord-client
+
+      - name: Check the binary has the NVIDIA encoder
+        working-directory: Client
+        run: bash scripts/check-nvenc-linked.sh src-tauri/target/release/owncord-client
 
       # Same strip + re-sign as the x86_64 job — see the comment there.
       - name: Strip host-incompatible libs from AppImage and re-sign
@@ -610,6 +657,26 @@ jobs:
           # `requireSignedVersion` and refuse an updater artifact signed without it.
           npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$APPIMAGE"
           npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$TARBALL"
+
+      # Same .deb signing as the x86_64 job — see the comment there.
+      - name: Sign the .deb updater artifact
+        working-directory: Client
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(src-tauri/target/release/bundle/deb/*.deb)
+          if [ "${#debs[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one .deb in src-tauri/target/release/bundle/deb, found ${#debs[@]}"
+            exit 1
+          fi
+          DEB="${debs[0]}"
+          rm -f "$DEB.sig"
+          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$DEB"
+          test -s "$DEB.sig"
 
       # The script inserts _aarch64 into every arch-less AppImage filename:
       # FindClientAssets matches on that suffix, and the x86_64 assets land in
@@ -1155,6 +1222,30 @@ jobs:
           for f in windows/chatserver*.exe windows/server-update-manifest.json; do
             base64 -d "$f.sig" > "$RUNNER_TEMP/asset.minisig"
             minisign -Vm "$f" -x "$RUNNER_TEMP/asset.minisig" -p "$RUNNER_TEMP/server_update.pub"
+          done
+
+      # The .deb updater artifacts (WP LP-14): each linux/*.deb must carry a
+      # detached signature that verifies against the client updater public key
+      # shipped in tauri.conf.json. The server hands that signature to the
+      # client, which checks it with the same key.
+      - name: Verify client deb signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(linux/*.deb)
+          if [ "${#debs[@]}" -ne 2 ]; then
+            echo "::error::expected two .deb files (amd64, arm64) in linux/, found ${#debs[@]}"
+            exit 1
+          fi
+          jq -r .plugins.updater.pubkey Client/src-tauri/tauri.conf.json | base64 -d > "$RUNNER_TEMP/client_update.pub"
+          for f in "${debs[@]}"; do
+            if [ ! -s "$f.sig" ]; then
+              echo "::error::$(basename "$f") has no .sig"
+              exit 1
+            fi
+            base64 -d "$f.sig" > "$RUNNER_TEMP/deb.minisig"
+            minisign -Vm "$f" -x "$RUNNER_TEMP/deb.minisig" -p "$RUNNER_TEMP/client_update.pub"
           done
 
       # B6-1's contract with the updater, asserted rather than read off a

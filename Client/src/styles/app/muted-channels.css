@@ -6,7 +6,6 @@
 .dm-item.muted .dm-name {
   opacity: 0.45;
 }
-.unread-badge.muted,
 .dm-unread-badge.muted {
   background: var(--text-micro) !important;
   opacity: 0.7;
@@ -30,5 +29,10 @@
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-muted-row .settings-muted-until {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs, 11px);
   white-space: nowrap;
 }

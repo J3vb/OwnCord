@@ -27,9 +27,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/migrations"
 )
@@ -326,6 +328,7 @@ func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
 
 	// Normal path: apply any migration not yet recorded.
 	appliedCount := 0
+	var totalElapsed time.Duration
 	for _, name := range filenames {
 		applied, applyErr := isApplied(database, name)
 		if applyErr != nil {
@@ -340,12 +343,21 @@ func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
 			return appliedCount, fmt.Errorf("reading migration %s: %w", name, readErr)
 		}
 
+		started := time.Now()
 		if err := applyMigration(database, name, string(raw)); err != nil {
 			return appliedCount, err
 		}
+		elapsed := time.Since(started)
+		totalElapsed += elapsed
 		appliedCount++
+		slog.Info("db: migration applied", "file", name, "ms", elapsed.Milliseconds())
 	}
 
+	// A boot with nothing to apply stays silent; a failed migration returned
+	// above, so the summary is only ever printed for a clean run.
+	if appliedCount > 0 {
+		slog.Info("db: migrations applied", "count", appliedCount, "ms", totalElapsed.Milliseconds())
+	}
 	return appliedCount, nil
 }
 

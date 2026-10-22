@@ -1,19 +1,15 @@
 # LiveKit server configuration for OwnCord
 # Copy this file to livekit.yaml and fill in your values.
-# The api_key and api_secret here MUST match the values in your .env file.
+# The LiveKit key and secret are NOT set here: docker-compose.yml passes the
+# pair from your .env file (LIVEKIT_API_KEY / LIVEKIT_API_SECRET) to LiveKit.
 
 port: 7880
 
 rtc:
   tcp_port: 7881
-  port_range_start: 50000
-  port_range_end: 60000
-
-  # Single-port mode: uncomment udp_port and DELETE port_range_start/end above
-  # to carry all WebRTC media on one UDP port, so your firewall forwards one
-  # port instead of ten thousand. Then publish that same port in
-  # docker-compose.yml in place of the 50000-60000 range.
-  # udp_port: 7882
+  # All WebRTC media on one UDP port. docker-compose.yml pins the same port
+  # with flags and publishes it; do not add port_range_start/end here.
+  udp_port: 7882
 
   # LiveKit detects your public IP itself (over STUN) when it starts, so after a
   # dynamic address changes, `docker compose restart livekit` picks up the new
@@ -33,18 +29,14 @@ rtc:
   # It only works alongside use_external_ip, which overwrites node_ip.
   # advertise_internal_ip: true
 
-keys:
-  # Must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET in your .env file
-  YOUR_API_KEY: YOUR_API_SECRET
-
 # Optional: have LiveKit post room events to OwnCord so a stale or unexpected
 # participant is removed the moment it joins, rather than at OwnCord's next
 # once-a-minute check. Uncomment only if LiveKit can reach OwnCord at a URL
 # whose TLS certificate it trusts (a self-signed certificate fails every
 # delivery), and the sender's address is inside
-# server.livekit_webhook_allowed_cidrs. api_key must be the key above.
+# server.livekit_webhook_allowed_cidrs. api_key must be your LIVEKIT_API_KEY from .env.
 # webhook:
-#   api_key: YOUR_API_KEY
+#   api_key: YOUR_API_KEY   # same value as LIVEKIT_API_KEY in .env
 #   urls:
 #     - https://chat.example.com/api/v1/livekit/webhook
 

@@ -5,6 +5,56 @@
   "client_to_server": [
     { "wire": "auth", "go": "MsgTypeAuth", "ts": "AUTH" },
     { "wire": "chat_send", "go": "MsgTypeChatSend", "ts": "CHAT_SEND" },
+    {
+      "wire": "chat_forward",
+      "go": "MsgTypeChatForward",
+      "ts": "CHAT_FORWARD",
+      "note": "forward one message to one target channel or DM (WP 6.9a)"
+    },
+    {
+      "wire": "poll_create",
+      "go": "MsgTypePollCreate",
+      "ts": "POLL_CREATE",
+      "note": "post a poll as a message (WP 6.9b)"
+    },
+    {
+      "wire": "poll_vote",
+      "go": "MsgTypePollVote",
+      "ts": "POLL_VOTE",
+      "note": "set the sender's whole selection on a poll, [] removes the vote (WP 6.9b)"
+    },
+    {
+      "wire": "poll_end",
+      "go": "MsgTypePollEnd",
+      "ts": "POLL_END",
+      "note": "end a poll now: its author, or anyone who may delete the message (WP 6.9b)"
+    },
+    {
+      "wire": "thread_create",
+      "go": "MsgTypeThreadCreate",
+      "ts": "THREAD_CREATE",
+      "note": "start a thread on a text-channel message (WP 6.9c)"
+    },
+    { "wire": "thread_update", "go": "MsgTypeThreadUpdate", "ts": "THREAD_UPDATE" },
+    { "wire": "thread_delete", "go": "MsgTypeThreadDelete", "ts": "THREAD_DELETE" },
+    {
+      "wire": "thread_focus",
+      "go": "MsgTypeThreadFocus",
+      "ts": "THREAD_FOCUS",
+      "note": "the second subscription slot: the thread open beside the focused channel, or null to close it (WP 6.9c)"
+    },
+    {
+      "wire": "forum_post_create",
+      "go": "MsgTypeForumPostCreate",
+      "ts": "FORUM_POST_CREATE",
+      "note": "create a forum post and its opening message in one step, idempotent on client_message_id (WP 6.9d)"
+    },
+    {
+      "wire": "thread_follow",
+      "go": "MsgTypeThreadFollow",
+      "ts": "THREAD_FOLLOW",
+      "note": "follow or unfollow a thread {thread_id, follow}; idempotent (WP 6.9c)"
+    },
     { "wire": "chat_edit", "go": "MsgTypeChatEdit", "ts": "CHAT_EDIT" },
     { "wire": "chat_delete", "go": "MsgTypeChatDelete", "ts": "CHAT_DELETE" },
     { "wire": "reaction_add", "go": "MsgTypeReactionAdd", "ts": "REACTION_ADD" },
@@ -12,6 +62,7 @@
     { "wire": "typing_start", "go": "MsgTypeTypingStart", "ts": "TYPING_START" },
     { "wire": "channel_focus", "go": "MsgTypeChannelFocus", "ts": "CHANNEL_FOCUS" },
     { "wire": "mark_read", "go": "MsgTypeMarkRead", "ts": "MARK_READ" },
+    { "wire": "mark_unread", "go": "MsgTypeMarkUnread", "ts": "MARK_UNREAD" },
     { "wire": "presence_update", "go": "MsgTypePresenceUpdate", "ts": "PRESENCE_UPDATE" },
     { "wire": "voice_join", "go": "MsgTypeVoiceJoin", "ts": "VOICE_JOIN" },
     { "wire": "voice_leave", "go": "MsgTypeVoiceLeave", "ts": "VOICE_LEAVE" },
@@ -36,6 +87,7 @@
       "ts": "VOICE_E2EE_ANNOUNCE"
     },
     { "wire": "voice_e2ee_offer", "go": "MsgTypeVoiceE2EEOffer", "ts": "VOICE_E2EE_OFFER" },
+    { "wire": "voice_watch", "go": "MsgTypeVoiceWatch", "ts": "VOICE_WATCH" },
     { "wire": "call_ring", "go": "MsgTypeCallRing", "ts": "CALL_RING" },
     { "wire": "call_decline", "go": "MsgTypeCallDecline", "ts": "CALL_DECLINE" },
     {
@@ -51,6 +103,37 @@
     { "wire": "ready", "go": "MsgTypeReady", "ts": "READY" },
     { "wire": "chat_message", "go": "MsgTypeChatMessage", "ts": "CHAT_MESSAGE" },
     { "wire": "chat_send_ok", "go": "MsgTypeChatSendOK", "ts": "CHAT_SEND_OK" },
+    { "wire": "chat_forward_ok", "go": "MsgTypeChatForwardOK", "ts": "CHAT_FORWARD_OK" },
+    { "wire": "poll_create_ok", "go": "MsgTypePollCreateOK", "ts": "POLL_CREATE_OK" },
+    { "wire": "poll_vote_ok", "go": "MsgTypePollVoteOK", "ts": "POLL_VOTE_OK" },
+    { "wire": "poll_end_ok", "go": "MsgTypePollEndOK", "ts": "POLL_END_OK" },
+    { "wire": "thread_create_ok", "go": "MsgTypeThreadCreateOK", "ts": "THREAD_CREATE_OK" },
+    { "wire": "thread_update_ok", "go": "MsgTypeThreadUpdateOK", "ts": "THREAD_UPDATE_OK" },
+    { "wire": "thread_follow_ok", "go": "MsgTypeThreadFollowOK", "ts": "THREAD_FOLLOW_OK" },
+    {
+      "wire": "thread_follow_update",
+      "go": "MsgTypeThreadFollowUpdate",
+      "ts": "THREAD_FOLLOW_UPDATE",
+      "note": "WP 6.9c: your follow of a thread changed {thread_id, following, thread?}; unsequenced, low queue, never authoritative (ready.threads is)"
+    },
+    {
+      "wire": "forum_post_create_ok",
+      "go": "MsgTypeForumPostCreateOK",
+      "ts": "FORUM_POST_CREATE_OK",
+      "note": "WP 6.9d: the post exists; {thread, message_id, client_message_id, deduplicated}, to the sender only"
+    },
+    {
+      "wire": "thread_changed",
+      "go": "MsgTypeThreadChanged",
+      "ts": "THREAD_CHANGED",
+      "note": "WP 6.9c: a thread was created, renamed, archived, locked or took a message; absolute ThreadInfo, sequenced on the parent channel, at most one per thread per 2 s"
+    },
+    {
+      "wire": "thread_deleted",
+      "go": "MsgTypeThreadDeleted",
+      "ts": "THREAD_DELETED",
+      "note": "WP 6.9c: a thread was deleted; {channel_id (parent), thread_id}, sequenced on the parent channel"
+    },
     { "wire": "chat_edited", "go": "MsgTypeChatEdited", "ts": "CHAT_EDITED" },
     { "wire": "chat_deleted", "go": "MsgTypeChatDeleted", "ts": "CHAT_DELETED" },
     {
@@ -61,6 +144,12 @@
     },
     { "wire": "chat_bulk_deleted", "go": "MsgTypeChatBulkDeleted", "ts": "CHAT_BULK_DELETED" },
     { "wire": "reaction_update", "go": "MsgTypeReactionUpdate", "ts": "REACTION_UPDATE" },
+    {
+      "wire": "poll_update",
+      "go": "MsgTypePollUpdate",
+      "ts": "POLL_UPDATE",
+      "note": "a poll's full counts and version after a vote or its end (WP 6.9b)"
+    },
     { "wire": "typing", "go": "MsgTypeTyping", "ts": "TYPING" },
     { "wire": "presence", "go": "MsgTypePresence", "ts": "PRESENCE" },
     {
@@ -109,6 +198,18 @@
       "note": "B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed"
     },
     {
+      "wire": "member_timeouts",
+      "go": "MsgTypeMemberTimeouts",
+      "ts": "MEMBER_TIMEOUTS",
+      "note": "WP 3C-7c: the active-timeout list, to connected MODERATE_MEMBERS/Administrator holders (everyone) and each timed-out member (own entry only); targeted, unsequenced, never replayed -- replaces the viewer's list wholesale"
+    },
+    {
+      "wire": "channel_categories",
+      "go": "MsgTypeChannelCategories",
+      "ts": "CHANNEL_CATEGORIES",
+      "note": "WP 6.5a: the full channel category list {categories:[{id,name,position}]}, sent per connected client only to MANAGE_CHANNELS/Administrator holders after any category mutation (permission evaluated at send time); targeted, unsequenced, never replayed -- replaces the manager's list wholesale. Everyone else derives groups from the category fields on the channels they can see"
+    },
+    {
       "wire": "appeal_status",
       "go": "MsgTypeAppealStatus",
       "ts": "APPEAL_STATUS",
@@ -120,6 +221,18 @@
       "ts": "MENTION_COUNT",
       "note": "DP-27: this user's read_states.mention_count changed in a channel; targeted and unsequenced -- the live taskbar/tray badge signal"
     },
+    {
+      "wire": "read_state",
+      "go": "MsgTypeReadState",
+      "ts": "READ_STATE",
+      "note": "WP 3D-5c: the caller's read pointer moved in a channel (after every accepted mark_read and mark_unread); targeted to the caller and unsequenced -- not replayed"
+    },
+    {
+      "wire": "channel_activity",
+      "go": "MsgTypeChannelActivity",
+      "ts": "CHANNEL_ACTIVITY",
+      "note": "2B-2: unread hint for unfocused readable channels; batched, unsequenced, never replayed"
+    },
     { "wire": "error", "go": "MsgTypeError", "ts": "ERROR" },
     { "wire": "pong", "go": "MsgTypePong", "ts": "PONG" },
     { "wire": "dm_channel_open", "go": "MsgTypeDMChannelOpen", "ts": "DM_CHANNEL_OPEN" },
@@ -127,6 +240,7 @@
     { "wire": "dm_request", "go": "MsgTypeDMRequest", "ts": "DM_REQUEST" },
     { "wire": "call_incoming", "go": "MsgTypeCallIncoming", "ts": "CALL_INCOMING" },
     { "wire": "call_declined", "go": "MsgTypeCallDeclined", "ts": "CALL_DECLINED" },
+    { "wire": "voice_watching", "go": "MsgTypeVoiceWatching", "ts": "VOICE_WATCHING" },
     {
       "wire": "voice_e2ee_announce",
       "go": "MsgTypeVoiceE2EEAnnounceBC",
@@ -193,6 +307,55 @@
           "go": "RestartReasonShutdown",
           "ts": "SHUTDOWN",
           "note": "a stop or restart from outside the server (signal, supervisor)"
+        }
+      ]
+    },
+    {
+      "name": "chat_message.kind",
+      "go": "MessageKind",
+      "ts": "ChatMessageKind",
+      "values": [
+        {
+          "wire": "call",
+          "go": "MessageKindCall",
+          "ts": "CALL",
+          "note": "a call log row in a DM, written and updated only by the server"
+        },
+        {
+          "wire": "group_add",
+          "go": "MessageKindGroupAdd",
+          "ts": "GROUP_ADD",
+          "note": "a group DM row: a member was added, written only by the server"
+        },
+        {
+          "wire": "group_remove",
+          "go": "MessageKindGroupRemove",
+          "ts": "GROUP_REMOVE",
+          "note": "a group DM row: a member was removed by the owner, written only by the server"
+        },
+        {
+          "wire": "group_leave",
+          "go": "MessageKindGroupLeave",
+          "ts": "GROUP_LEAVE",
+          "note": "a group DM row: a member left, written only by the server"
+        },
+        {
+          "wire": "group_rename",
+          "go": "MessageKindGroupRename",
+          "ts": "GROUP_RENAME",
+          "note": "a group DM row: the group name changed or was cleared, written only by the server"
+        },
+        {
+          "wire": "group_icon",
+          "go": "MessageKindGroupIcon",
+          "ts": "GROUP_ICON",
+          "note": "a group DM row: the group icon changed or was removed, written only by the server"
+        },
+        {
+          "wire": "pin_add",
+          "go": "MessageKindPinAdd",
+          "ts": "PIN_ADD",
+          "note": "a row saying a member pinned a message; reply_to names the pinned message; written only by the server"
         }
       ]
     }

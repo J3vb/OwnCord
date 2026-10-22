@@ -53,6 +53,7 @@ import { createChannelSidebar, type ChannelReorderData } from "../../src/compone
 import {
   addChannel,
   channelsStore,
+  incrementUnread,
   setChannels,
   setActiveChannel,
   setRoles,
@@ -62,17 +63,31 @@ import {
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
-import { voiceStore, updateVoiceState, setSpeakers } from "../../src/stores/voice.store";
+import {
+  voiceStore,
+  updateVoiceState,
+  setSpeakers,
+  removeVoiceUser,
+} from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
 import { computeKeyFingerprint } from "@lib/e2eeCrypto";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { expectConsole } from "../helpers/console";
-import { muteChannel, unmuteChannel, invalidateMuteCache } from "@lib/channel-mutes";
+import {
+  CHANNEL_MUTE_CHANGED,
+  getChannelMutesHost,
+  muteChannel,
+  unmuteChannel,
+  invalidateMuteCache,
+} from "@lib/channel-mutes";
+import { STORAGE_PREFIX } from "@lib/preferences";
+import { setHideMutedChannels } from "@lib/hide-muted-channels";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
+    categories: [],
     channels: new Map(),
     activeChannelId: null,
     roles: [],
@@ -401,56 +416,100 @@ describe("ChannelSidebar", () => {
     expect(serverName?.textContent).toBe("Test Server");
   });
 
-  it("shows unread badge for channels with unread messages", () => {
+  it("shows plain unread as bold name and pill only, with no number badge", () => {
     setChannels(testChannels);
     sidebar.mount(container);
 
-    const badges = container.querySelectorAll(".unread-badge");
-    expect(badges.length).toBe(2); // general (2) and announcements (5)
-
-    const badgeTexts = Array.from(badges).map((b) => b.textContent);
-    expect(badgeTexts).toContain("2");
-    expect(badgeTexts).toContain("5");
+    // general (2) and announcements (5) are unread: the `.unread` class carries
+    // the bold name and the white pill; the count is not drawn.
+    const unreadRows = container.querySelectorAll(".channel-item.unread");
+    expect(unreadRows.length).toBe(2);
+    expect(container.querySelectorAll(".unread-badge").length).toBe(0);
+    expect(container.querySelector('[data-channel-id="1"]')?.textContent).not.toContain("2");
+    // The pill and the bold name are CSS on `.unread`; pin both.
+    expect(cascadedDeclaration(".channel-item.unread .ch-name", "font-weight")).toBeDefined();
+    expect(cascadedDeclaration(".channel-item.unread::before", "background")).toBeDefined();
+    // No stylesheet rule styles a server-channel count any more.
+    expect(cascadedDeclaration(".channel-item .unread-badge", "background")).toBeUndefined();
   });
 
-  it("shows the red mention badge instead of the unread badge", () => {
+  it("keeps the red mention badge, with the count, on a mentioned row", () => {
     setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 2 }, testChannels[1]!]);
     sidebar.mount(container);
 
     const item = container.querySelector('[data-channel-id="1"]')!;
     expect(item.classList.contains("mentioned")).toBe(true);
-    const mentionBadge = item.querySelector(".mention-badge");
-    expect(mentionBadge?.textContent).toBe("2");
-    // The mention badge wins outright — no double badge on one row.
+    expect(item.querySelector(".mention-badge")?.textContent).toBe("2");
     expect(item.querySelector(".unread-badge")).toBeNull();
   });
 
-  it("falls back to the unread badge when there are no mentions", () => {
+  it("an unread row with no mentions has no mention badge and no count", () => {
     setChannels([{ ...testChannels[0]!, unread_count: 7, mention_count: 0 }]);
     sidebar.mount(container);
 
     const item = container.querySelector('[data-channel-id="1"]')!;
+    expect(item.classList.contains("unread")).toBe(true);
     expect(item.classList.contains("mentioned")).toBe(false);
     expect(item.querySelector(".mention-badge")).toBeNull();
-    expect(item.querySelector(".unread-badge")?.textContent).toBe("7");
+    expect(item.querySelector(".unread-badge")).toBeNull();
   });
 
-  it("caps the unread badge at 99+", () => {
-    setChannels([{ ...testChannels[0]!, unread_count: 137, mention_count: 0 }]);
-    sidebar.mount(container);
+  describe("muted channels (N7)", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+    afterEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
 
-    const badge = container.querySelector('[data-channel-id="1"] .unread-badge');
-    expect(badge?.textContent).toBe("99+");
-  });
+    it("a muted unread row has no .unread class and no badge", () => {
+      setChannels([{ ...testChannels[0]!, unread_count: 5, mention_count: 0 }]);
+      muteChannel(1);
+      sidebar.mount(container);
 
-  it("shows 99 without the plus at the cap, and 100 as 99+", () => {
-    setChannels([{ ...testChannels[0]!, unread_count: 99, mention_count: 0 }]);
-    sidebar.mount(container);
-    expect(container.querySelector('[data-channel-id="1"] .unread-badge')?.textContent).toBe("99");
+      const item = container.querySelector('[data-channel-id="1"]')!;
+      expect(item.classList.contains("muted")).toBe(true);
+      expect(item.classList.contains("unread")).toBe(false);
+      expect(item.querySelector(".unread-badge")).toBeNull();
+      expect(item.querySelector(".mention-badge")).toBeNull();
+      expect(item.hasAttribute("aria-description")).toBe(false);
+    });
 
-    setChannels([{ ...testChannels[0]!, unread_count: 100, mention_count: 0 }]);
-    channelsStore.flush();
-    expect(container.querySelector('[data-channel-id="1"] .unread-badge')?.textContent).toBe("99+");
+    it("names plain unread for screen readers, but not a mention", () => {
+      setChannels([
+        { ...testChannels[0]!, unread_count: 5, mention_count: 0 },
+        { ...testChannels[1]!, unread_count: 5, mention_count: 1 },
+      ]);
+      sidebar.mount(container);
+
+      const plain = container.querySelector(`[data-channel-id="${testChannels[0]!.id}"]`)!;
+      const mentioned = container.querySelector(`[data-channel-id="${testChannels[1]!.id}"]`)!;
+      expect(plain.getAttribute("aria-description")).toBe("Unread");
+      expect(mentioned.hasAttribute("aria-description")).toBe(false);
+    });
+
+    it("a muted row with mentions still shows the mention", () => {
+      setChannels([{ ...testChannels[0]!, unread_count: 5, mention_count: 2 }]);
+      muteChannel(1);
+      sidebar.mount(container);
+
+      const item = container.querySelector('[data-channel-id="1"]')!;
+      expect(item.classList.contains("unread")).toBe(true);
+      expect(item.classList.contains("mentioned")).toBe(true);
+      expect(item.querySelector(".mention-badge")?.textContent).toBe("2");
+    });
+
+    it("unmuting restores the unread look", () => {
+      setChannels([{ ...testChannels[0]!, unread_count: 5, mention_count: 0 }]);
+      muteChannel(1);
+      sidebar.mount(container);
+      unmuteChannel(1);
+      channelsStore.flush();
+      const item = container.querySelector('[data-channel-id="1"]')!;
+      expect(item.classList.contains("unread")).toBe(true);
+    });
   });
 
   it("leaves the mention badge uncapped", () => {
@@ -597,6 +656,218 @@ describe("ChannelSidebar", () => {
 
   // ── WP 2B-5: a collapsed category keeps the rows that matter ──
 
+  // ── WP 3D-4d: Hide Muted Channels ──
+
+  describe("Hide Muted Channels (WP 3D-4d)", () => {
+    const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
+      id,
+      name: `text-${id}`,
+      type: "text",
+      category: "Text Channels",
+      position: id,
+      unread_count: 0,
+      last_message_id: 1,
+      ...extra,
+    });
+    const voice = (id: number): ReadyChannel => ({
+      id,
+      name: `voice-${id}`,
+      type: "voice",
+      category: "Voice Channels",
+      position: id,
+    });
+    const rowIds = (): string[] =>
+      Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
+        (el) => el.dataset.channelId ?? "",
+      );
+    const flush = (): void => {
+      channelsStore.flush();
+      voiceStore.flush();
+    };
+
+    beforeEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+
+    afterEach(() => {
+      localStorage.clear();
+      invalidateMuteCache();
+    });
+
+    it("shows muted rows while the preference is off", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(2);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "2"]);
+    });
+
+    it("hides a muted channel while the preference is on, and keeps unmuted ones", () => {
+      setChannels([text(1), text(2), text(3)]);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "3"]);
+    });
+
+    it("keeps the muted channel you are viewing", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(1);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["2"]);
+    });
+
+    it("keeps a muted channel with an unread mention, but not plain unread", () => {
+      setChannels([
+        text(1, { unread_count: 2, mention_count: 1 }),
+        text(2, { unread_count: 5 }),
+        text(3),
+      ]);
+      muteChannel(1);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "3"]);
+    });
+
+    it("keeps a muted voice channel that has people in it, and hides an empty one", () => {
+      setChannels([text(1), voice(10), voice(11)]);
+      muteChannel(10);
+      muteChannel(11);
+      addVoiceUser(10, 30, "alice");
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "10"]);
+    });
+
+    it("keeps the header of a category whose channels are all hidden", () => {
+      setChannels([text(1), voice(10)]);
+      muteChannel(1);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      const headers = Array.from(container.querySelectorAll<HTMLElement>(".category")).map(
+        (el) => el.dataset.category,
+      );
+      expect(headers).toEqual(["Text Channels", "Voice Channels"]);
+      expect(rowIds()).toEqual(["10"]);
+      expect(
+        container
+          .querySelector('[data-category="Text Channels"]')
+          ?.parentElement?.querySelector(".category-channels-container")?.children.length,
+      ).toBe(0);
+    });
+
+    it("collapsing a category still works with the preference on", () => {
+      setChannels([text(1), text(2, { unread_count: 3 })]);
+      muteChannel(1);
+      setHideMutedChannels(true);
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(["Text Channels"]) }));
+      sidebar.mount(container);
+      // Collapsed: only the unread unmuted row remains; the muted one stays hidden.
+      expect(rowIds()).toEqual(["2"]);
+    });
+
+    it("redraws live when the preference is toggled", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(2);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "2"]);
+
+      setHideMutedChannels(true);
+      expect(rowIds()).toEqual(["1"]);
+
+      setHideMutedChannels(false);
+      expect(rowIds()).toEqual(["1", "2"]);
+    });
+
+    it("redraws live when a channel is muted and unmuted", () => {
+      setChannels([text(1), text(2)]);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1", "2"]);
+
+      muteChannel(2);
+      expect(rowIds()).toEqual(["1"]);
+
+      unmuteChannel(2);
+      expect(rowIds()).toEqual(["1", "2"]);
+    });
+
+    it("a focused row that hides moves focus to the row that took its place", () => {
+      setChannels([text(1), text(2), text(3)]);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      container.querySelector<HTMLElement>('[data-channel-id="2"]')!.focus();
+
+      muteChannel(2);
+
+      expect(rowIds()).toEqual(["1", "3"]);
+      expect(document.activeElement).toBe(container.querySelector('[data-channel-id="3"]'));
+    });
+
+    it("the last focused row that hides moves focus to the row before it", () => {
+      setChannels([text(1), text(2)]);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      container.querySelector<HTMLElement>('[data-channel-id="2"]')!.focus();
+
+      muteChannel(2);
+
+      expect(document.activeElement).toBe(container.querySelector('[data-channel-id="1"]'));
+    });
+
+    it("redraws live when you switch channels: the one you leave hides, the one you open shows", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(1);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+      flush();
+      expect(rowIds()).toEqual(["2"]);
+    });
+
+    it("redraws live when a mention arrives or a voice user joins", () => {
+      setChannels([text(1), text(2), voice(10)]);
+      muteChannel(2);
+      muteChannel(10);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      expect(rowIds()).toEqual(["1"]);
+
+      channelsStore.setState((prev) => {
+        const channels = new Map(prev.channels);
+        channels.set(2, { ...channels.get(2)!, unreadCount: 1, mentionCount: 1 });
+        return { ...prev, channels };
+      });
+      flush();
+      expect(rowIds()).toEqual(["1", "2"]);
+
+      addVoiceUser(10, 30, "alice");
+      flush();
+      expect(rowIds()).toEqual(["1", "2", "10"]);
+    });
+
+    it("ignores an unrelated preference change", () => {
+      setChannels([text(1), text(2)]);
+      muteChannel(2);
+      setHideMutedChannels(true);
+      sidebar.mount(container);
+      const before = container.querySelector('[data-channel-id="1"]');
+
+      window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "fontSize" } }));
+
+      expect(container.querySelector('[data-channel-id="1"]')).toBe(before);
+      expect(rowIds()).toEqual(["1"]);
+    });
+  });
+
   describe("collapsed category shows what matters (WP 2B-5)", () => {
     const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
       id,
@@ -615,7 +886,6 @@ describe("ChannelSidebar", () => {
       Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
         (el) => el.dataset.channelId ?? "",
       );
-    const dot = (): Element | null => container.querySelector(".category-unread-dot");
 
     beforeEach(() => {
       localStorage.clear();
@@ -632,10 +902,9 @@ describe("ChannelSidebar", () => {
       collapse("Text Channels");
       sidebar.mount(container);
       expect(rowIds()).toEqual(["2"]);
-      expect(dot()).toBeNull();
     });
 
-    it("a mentioned muted channel shows; an unread muted one hides and the header dot shows", () => {
+    it("a mentioned muted channel shows; a plain-unread muted one hides and leaves no header marker", () => {
       setChannels([
         text(1, { unread_count: 2, mention_count: 1 }),
         text(2, { unread_count: 4 }),
@@ -646,18 +915,18 @@ describe("ChannelSidebar", () => {
       collapse("Text Channels");
       sidebar.mount(container);
       expect(rowIds()).toEqual(["1"]);
-      const d = dot();
-      expect(d).not.toBeNull();
-      expect(d?.getAttribute("aria-label")).toBe("Unread channels hidden");
+      // The hidden muted row looks read, so the header carries no dot (3D-2b).
+      expect(container.querySelector(".category-unread-dot")).toBeNull();
+      expect(container.querySelector(".channel-item.unread")).not.toBeNull();
+      expect(container.querySelector('[data-channel-id="2"]')).toBeNull();
     });
 
-    it("shows no dot when no hidden row is unread", () => {
+    it("a mentioned muted channel alone still shows", () => {
       setChannels([text(1, { unread_count: 2, mention_count: 1 }), text(2)]);
       muteChannel(1);
       collapse("Text Channels");
       sidebar.mount(container);
       expect(rowIds()).toEqual(["1"]);
-      expect(dot()).toBeNull();
     });
 
     it("keeps a voice channel with a person and hides an empty one", () => {
@@ -709,26 +978,22 @@ describe("ChannelSidebar", () => {
       expect(rowIds()).toEqual([]);
     });
 
-    it("muting a collapsed unread row hides it and shows the dot; unmuting reverses", () => {
+    it("muting a collapsed unread row hides it; unmuting reverses", () => {
       setChannels([text(1, { unread_count: 2 })]);
       collapse("Text Channels");
       sidebar.mount(container);
       expect(rowIds()).toEqual(["1"]);
-      expect(dot()).toBeNull();
       muteChannel(1);
       expect(rowIds()).toEqual([]);
-      expect(dot()).not.toBeNull();
       unmuteChannel(1);
       expect(rowIds()).toEqual(["1"]);
-      expect(dot()).toBeNull();
     });
 
-    it("an expanded category shows every row and no header dot", () => {
+    it("an expanded category shows every row", () => {
       setChannels([text(1, { unread_count: 2 }), text(2), text(3, { unread_count: 1 })]);
       muteChannel(3);
       sidebar.mount(container);
       expect(rowIds()).toEqual(["1", "2", "3"]);
-      expect(dot()).toBeNull();
     });
 
     it("Move Up in a collapsed category swaps with the row shown above, not a hidden one", () => {
@@ -1210,7 +1475,7 @@ describe("ChannelSidebar", () => {
     const btn = container.querySelector<HTMLElement>("[data-testid='create-channel-empty']");
     expect(btn).not.toBeNull();
     btn!.click();
-    expect(onCreateChannel).toHaveBeenCalledWith("");
+    expect(onCreateChannel).toHaveBeenCalledWith({ id: 0, name: "" });
   });
 
   it("hides the empty-state create affordance from a non-manager (#9)", () => {
@@ -1780,7 +2045,7 @@ describe("ChannelSidebar", () => {
     expect(addBtn!.textContent).toBe("+");
   });
 
-  it("clicking create channel button calls onCreateChannel with category name", () => {
+  it("clicking create channel button calls onCreateChannel with the category (id and name)", () => {
     const onCreateChannel = vi.fn();
     sidebar.destroy?.();
     setAdminUser();
@@ -1798,7 +2063,25 @@ describe("ChannelSidebar", () => {
     ) as HTMLElement;
     addBtn.click();
 
-    expect(onCreateChannel).toHaveBeenCalledWith("Text Channels");
+    // These fixtures carry no category_id: a name-only category (older server).
+    expect(onCreateChannel).toHaveBeenCalledWith({ id: 0, name: "Text Channels" });
+  });
+
+  it("the + of a real category passes its id, and the synthetic Voice group's passes none and a voice hint", () => {
+    const onCreateChannel = vi.fn();
+    sidebar.destroy?.();
+    setAdminUser();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
+    setChannels([
+      { id: 1, name: "general", type: "text", category: "Chat", category_id: 4, position: 0 },
+      { id: 2, name: "lounge", type: "voice", category: null, position: 1 },
+    ]);
+    sidebar.mount(container);
+
+    (container.querySelector('[data-testid="create-channel-chat"]') as HTMLElement).click();
+    expect(onCreateChannel).toHaveBeenLastCalledWith({ id: 4, name: "Chat" });
+    (container.querySelector('[data-testid="create-channel-voice"]') as HTMLElement).click();
+    expect(onCreateChannel).toHaveBeenLastCalledWith({ id: 0, name: "" }, "voice");
   });
 
   it("create channel button does not collapse the category", () => {
@@ -1958,7 +2241,7 @@ describe("ChannelSidebar", () => {
 
   // ── Voice user volume context menu ──
 
-  it("right-click on other user's voice row opens volume context menu", () => {
+  it("right-click on other user's voice row opens volume context menu", async () => {
     // Set current user to something different from the voice user
     authStore.setState(() => ({
       token: "tok",
@@ -1989,6 +2272,8 @@ describe("ChannelSidebar", () => {
         clientY: 250,
       }),
     );
+    // The menu code loads on its first open (O-6b).
+    await vi.dynamicImportSettled();
 
     const volMenu = document.querySelector(".user-vol-menu");
     expect(volMenu).not.toBeNull();
@@ -2009,7 +2294,7 @@ describe("ChannelSidebar", () => {
    *  by default the one the server computes with no channel override (the
    *  role's MUTE_MEMBERS, ADMINISTRATOR included). Returns the open menu
    *  element (or null). */
-  function openVoiceMenuAs(
+  async function openVoiceMenuAs(
     permissions: number,
     voiceUser: Partial<VoiceStatePayload> = {},
     onVoiceModerate?: Parameters<typeof createChannelSidebar>[0]["onVoiceModerate"],
@@ -2017,7 +2302,7 @@ describe("ChannelSidebar", () => {
     verdict: boolean | null = (permissions &
       (Permission.MUTE_MEMBERS | Permission.ADMINISTRATOR)) !==
       0,
-  ): HTMLElement | null {
+  ): Promise<HTMLElement | null> {
     sidebar.destroy?.();
     setRoles([{ id: 3, name: "Moderator", color: null, permissions }]);
     authStore.setState(() => ({
@@ -2047,11 +2332,13 @@ describe("ChannelSidebar", () => {
 
     const voiceRow = container.querySelector(".voice-user-item") as HTMLElement;
     voiceRow.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+    // The menu code loads on its first open (O-6b).
+    await vi.dynamicImportSettled();
     return document.querySelector(".user-vol-menu");
   }
 
-  it("hides the moderation section for a role without MUTE_MEMBERS", () => {
-    const menu = openVoiceMenuAs(Permission.MANAGE_CHANNELS, {}, voiceModCallbacks());
+  it("hides the moderation section for a role without MUTE_MEMBERS", async () => {
+    const menu = await openVoiceMenuAs(Permission.MANAGE_CHANNELS, {}, voiceModCallbacks());
     expect(menu).not.toBeNull();
     expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
     expect(menu!.querySelector('[data-action="voice-disconnect"]')).toBeNull();
@@ -2059,8 +2346,8 @@ describe("ChannelSidebar", () => {
     expect(menu!.textContent).toContain("Reset Volume");
   });
 
-  it("follows the channel's verdict, not the role: an override that denies hides the section", () => {
-    const menu = openVoiceMenuAs(
+  it("follows the channel's verdict, not the role: an override that denies hides the section", async () => {
+    const menu = await openVoiceMenuAs(
       Permission.MUTE_MEMBERS,
       {},
       voiceModCallbacks(),
@@ -2071,8 +2358,8 @@ describe("ChannelSidebar", () => {
     expect(menu!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
   });
 
-  it("follows the channel's verdict, not the role: a verdict of true offers the section", () => {
-    const menu = openVoiceMenuAs(
+  it("follows the channel's verdict, not the role: a verdict of true offers the section", async () => {
+    const menu = await openVoiceMenuAs(
       Permission.MANAGE_CHANNELS,
       {},
       voiceModCallbacks(),
@@ -2082,9 +2369,9 @@ describe("ChannelSidebar", () => {
     expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
-  it("offers nothing without a verdict, and says why to a role holding MUTE_MEMBERS", () => {
+  it("offers nothing without a verdict, and says why to a role holding MUTE_MEMBERS", async () => {
     const cb = voiceModCallbacks();
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, testChannels, null);
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, testChannels, null);
     expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
     expect(menu!.querySelector('[data-action="voice-disconnect"]')).toBeNull();
     const why = menu!.querySelector('[data-action="voice-mod-unavailable"]');
@@ -2095,11 +2382,11 @@ describe("ChannelSidebar", () => {
     (why as HTMLElement).click();
     expect(cb.onServerMute).not.toHaveBeenCalled();
 
-    const member = openVoiceMenuAs(Permission.SEND_MESSAGES, {}, cb, testChannels, null);
+    const member = await openVoiceMenuAs(Permission.SEND_MESSAGES, {}, cb, testChannels, null);
     expect(member!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
   });
 
-  it("reads each channel's verdict: moderating one voice channel is not moderating another", () => {
+  it("reads each channel's verdict: moderating one voice channel is not moderating another", async () => {
     const channels: ReadyChannel[] = [
       ...testChannels.map((ch) => (ch.id === 3 ? { ...ch, can_moderate_voice: false } : ch)),
       {
@@ -2111,55 +2398,62 @@ describe("ChannelSidebar", () => {
         can_moderate_voice: true,
       },
     ];
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, voiceModCallbacks(), channels, null);
+    const menu = await openVoiceMenuAs(
+      Permission.MUTE_MEMBERS,
+      {},
+      voiceModCallbacks(),
+      channels,
+      null,
+    );
     expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
   });
 
-  it("takes a live channel_create verdict at the next open, and keeps it when one is absent", () => {
+  it("takes a live channel_create verdict at the next open, and keeps it when one is absent", async () => {
     const cb = voiceModCallbacks();
     expect(
-      openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb)!.querySelector(
+      (await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb))!.querySelector(
         '[data-action="server-mute"]',
       ),
     ).not.toBeNull();
     const voice = testChannels.find((ch) => ch.id === 3)!;
     const row = (): HTMLElement => container.querySelector(".voice-user-item") as HTMLElement;
-    const reopen = (): HTMLElement | null => {
+    const reopen = async (): Promise<HTMLElement | null> => {
       row().dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
+      await vi.dynamicImportSettled();
       return document.querySelector(".user-vol-menu");
     };
 
     // An override edit revokes it (RefreshChannelVisibility's targeted channel_create).
     addChannel({ ...voice, can_moderate_voice: false });
-    expect(reopen()!.querySelector('[data-action="server-mute"]')).toBeNull();
+    expect((await reopen())!.querySelector('[data-action="server-mute"]')).toBeNull();
     // A channel_create without the field changes nothing.
     addChannel({ ...voice });
-    expect(reopen()!.querySelector('[data-action="server-mute"]')).toBeNull();
+    expect((await reopen())!.querySelector('[data-action="server-mute"]')).toBeNull();
     addChannel({ ...voice, can_moderate_voice: true });
-    expect(reopen()!.querySelector('[data-action="server-mute"]')).not.toBeNull();
+    expect((await reopen())!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
-  it("hides the moderation section when the page wired no callbacks", () => {
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS);
+  it("hides the moderation section when the page wired no callbacks", async () => {
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS);
     expect(menu).not.toBeNull();
     expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
   });
 
-  it("shows the moderation section for a role holding MUTE_MEMBERS", () => {
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, voiceModCallbacks());
+  it("shows the moderation section for a role holding MUTE_MEMBERS", async () => {
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, voiceModCallbacks());
     expect(menu).not.toBeNull();
     expect(menu!.querySelector('[data-action="server-mute"]')!.textContent).toBe("Server Mute");
     expect(menu!.querySelector('[data-action="server-deafen"]')!.textContent).toBe("Server Deafen");
     expect(menu!.querySelector('[data-action="voice-disconnect"]')).not.toBeNull();
   });
 
-  it("shows the moderation section for an ADMINISTRATOR role", () => {
-    const menu = openVoiceMenuAs(Permission.ADMINISTRATOR, {}, voiceModCallbacks());
+  it("shows the moderation section for an ADMINISTRATOR role", async () => {
+    const menu = await openVoiceMenuAs(Permission.ADMINISTRATOR, {}, voiceModCallbacks());
     expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
-  it("labels the toggles by the target's current server-imposed state", () => {
-    const menu = openVoiceMenuAs(
+  it("labels the toggles by the target's current server-imposed state", async () => {
+    const menu = await openVoiceMenuAs(
       Permission.MUTE_MEMBERS,
       { muted: true, deafened: true, server_muted: true, server_deafened: true },
       voiceModCallbacks(),
@@ -2170,26 +2464,26 @@ describe("ChannelSidebar", () => {
     );
   });
 
-  it("sends server mute with the channel and target, and disconnect with the target", () => {
+  it("sends server mute with the channel and target, and disconnect with the target", async () => {
     const cb = voiceModCallbacks();
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
 
     (menu!.querySelector('[data-action="server-mute"]') as HTMLElement).click();
     expect(cb.onServerMute).toHaveBeenCalledWith(3, 80, true);
 
-    const menu2 = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+    const menu2 = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
     (menu2!.querySelector('[data-action="voice-disconnect"]') as HTMLElement).click();
     expect(cb.onDisconnect).toHaveBeenCalledWith(80);
   });
 
-  it("greys the moderation rows with a reason while the socket is not connected", () => {
+  it("greys the moderation rows with a reason while the socket is not connected", async () => {
     const cb = voiceModCallbacks();
     const channels: ReadyChannel[] = [
       ...testChannels,
       { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
     ];
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
 
     const why = menu!.querySelector('[data-action="voice-mod-offline"]');
     expect(why!.textContent).toBe(
@@ -2209,14 +2503,14 @@ describe("ChannelSidebar", () => {
     expect(cb.onDisconnect).not.toHaveBeenCalled();
 
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
-    const offline = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    const offline = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
     expect(offline!.querySelector('[data-action="voice-mod-offline"]')!.textContent).toBe(
       "Not connected. Voice moderation needs a connection to the server.",
     );
 
     // Back online: the rows are live again and the reason is gone.
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    const live = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    const live = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
     expect(live!.querySelector('[data-action="voice-mod-offline"]')).toBeNull();
     const mute = live!.querySelector<HTMLButtonElement>('[data-action="server-mute"]')!;
     expect(mute.disabled).toBe(false);
@@ -2224,15 +2518,15 @@ describe("ChannelSidebar", () => {
     expect(cb.onServerMute).toHaveBeenCalledWith(3, 80, true);
   });
 
-  it("offers only the other voice channels as move targets", () => {
+  it("offers only the other voice channels as move targets", async () => {
     const cb = voiceModCallbacks();
-    const menu = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
 
     const moveItems = menu!.querySelectorAll("[data-move-channel]");
     // testChannels has one voice channel (id 3) — the one the target is in.
     expect(moveItems.length).toBe(0);
 
-    const menu2 = openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, [
+    const menu2 = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, [
       ...testChannels,
       { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
     ]);
@@ -3189,6 +3483,173 @@ describe("ChannelSidebar channel feature flags", () => {
     });
   });
 
+  describe("private channel lock", () => {
+    const lock = (id: number): Element | null =>
+      container.querySelector(`[data-testid='channel-private-${id}']`);
+
+    it("shows on text, announcement and voice rows, with a title and aria-label", () => {
+      setChannels([
+        { id: 1, name: "staff", type: "text", category: "Text", position: 0, private: true },
+        { id: 2, name: "news", type: "announcement", category: "Text", position: 1, private: true },
+        { id: 3, name: "war-room", type: "voice", category: "Voice", position: 0, private: true },
+      ]);
+      sidebar.mount(container);
+
+      for (const id of [1, 2, 3]) {
+        const badge = lock(id);
+        expect(badge).not.toBeNull();
+        expect(badge?.getAttribute("title")).toBe("Private channel");
+        expect(badge?.getAttribute("aria-label")).toBe("Private channel");
+        expect(badge?.querySelector("svg")).not.toBeNull();
+      }
+    });
+
+    it("is not inside the aria-hidden glyph, so it stays announced", () => {
+      setChannels([
+        { id: 1, name: "staff", type: "text", category: "Text", position: 0, private: true },
+      ]);
+      sidebar.mount(container);
+
+      expect(lock(1)?.closest("[aria-hidden='true']")).toBeNull();
+    });
+
+    it("is absent on a non-private row and on a row from an older server", () => {
+      setChannels([
+        { id: 1, name: "a", type: "text", category: "Text", position: 0, private: false },
+        { id: 2, name: "b", type: "text", category: "Text", position: 1 },
+        { id: 3, name: "c", type: "voice", category: "Voice", position: 0 },
+      ]);
+      sidebar.mount(container);
+
+      expect(lock(1)).toBeNull();
+      expect(lock(2)).toBeNull();
+      expect(lock(3)).toBeNull();
+    });
+
+    it("coexists with the nsfw marker and the voice capacity badge", () => {
+      setChannels([
+        {
+          id: 1,
+          name: "staff",
+          type: "text",
+          category: "Text",
+          position: 0,
+          private: true,
+          nsfw: true,
+        },
+        {
+          id: 5,
+          name: "war-room",
+          type: "voice",
+          category: "Voice",
+          position: 0,
+          private: true,
+          nsfw: true,
+          voice_max_users: 5,
+        },
+      ]);
+      sidebar.mount(container);
+
+      expect(lock(1)).not.toBeNull();
+      expect(container.querySelector("[data-testid='channel-nsfw-1']")).not.toBeNull();
+      expect(lock(5)).not.toBeNull();
+      expect(container.querySelector("[data-testid='channel-nsfw-5']")).not.toBeNull();
+      expect(container.querySelector("[data-testid='channel-capacity-5']")).not.toBeNull();
+    });
+
+    it("redraws the row live when a channel_create flips the flag, both ways", () => {
+      setChannels([
+        { id: 1, name: "staff", type: "text", category: "Text", position: 0, private: false },
+      ]);
+      sidebar.mount(container);
+      expect(lock(1)).toBeNull();
+
+      addChannel({
+        id: 1,
+        name: "staff",
+        type: "text",
+        category: "Text",
+        position: 0,
+        private: true,
+      });
+
+      channelsStore.flush();
+      expect(lock(1)).not.toBeNull();
+
+      // An older-server frame without the key keeps the lock.
+      addChannel({ id: 1, name: "staff", type: "text", category: "Text", position: 0 });
+      channelsStore.flush();
+      expect(lock(1)).not.toBeNull();
+
+      addChannel({
+        id: 1,
+        name: "staff",
+        type: "text",
+        category: "Text",
+        position: 0,
+        private: false,
+      });
+
+      channelsStore.flush();
+      expect(lock(1)).toBeNull();
+    });
+
+    it("redraws the row live when a channel_update flips the flag", () => {
+      setChannels([
+        { id: 1, name: "staff", type: "text", category: "Text", position: 0, private: false },
+      ]);
+      sidebar.mount(container);
+
+      updateChannel({ id: 1, private: true });
+
+      channelsStore.flush();
+      expect(lock(1)).not.toBeNull();
+
+      updateChannel({ id: 1, name: "staff-room" });
+
+      channelsStore.flush();
+      expect(lock(1)).not.toBeNull();
+
+      updateChannel({ id: 1, private: false });
+
+      channelsStore.flush();
+      expect(lock(1)).toBeNull();
+    });
+  });
+
+  describe("AFK channel marker", () => {
+    const afkTestId = "[data-testid='channel-afk-5']";
+
+    it("shows a moon and an AFK label on the AFK channel only", () => {
+      setChannels([
+        { id: 5, name: "parking", type: "voice", category: "Voice", position: 0, afk: true },
+        { id: 6, name: "lounge", type: "voice", category: "Voice", position: 1 },
+      ]);
+      sidebar.mount(container);
+
+      const badge = container.querySelector(afkTestId);
+      expect(badge?.textContent).toBe("AFK");
+      expect(badge?.querySelector("svg")?.getAttribute("data-icon")).toBe("moon");
+      expect(container.querySelector("[data-testid='channel-afk-6']")).toBeNull();
+    });
+
+    it("appears and disappears in place when the flag changes", () => {
+      setChannels([{ id: 5, name: "parking", type: "voice", category: "Voice", position: 0 }]);
+      sidebar.mount(container);
+      expect(container.querySelector(afkTestId)).toBeNull();
+      const wrapper = container.querySelector("[data-testid='channel-5']")!.parentElement;
+
+      updateChannel({ id: 5, afk: true });
+      channelsStore.flush();
+      expect(container.querySelector(afkTestId)?.textContent).toBe("AFK");
+      expect(container.querySelector("[data-testid='channel-5']")!.parentElement).toBe(wrapper);
+
+      updateChannel({ id: 5, afk: false });
+      channelsStore.flush();
+      expect(container.querySelector(afkTestId)).toBeNull();
+    });
+  });
+
   describe("voice capacity readout", () => {
     it("shows connected/limit when the channel has a user limit", () => {
       setChannels([
@@ -3484,7 +3945,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () =>
     expect(document.querySelector('[data-testid="channel-context-menu"]')).not.toBeNull();
   });
 
-  it("keeps the voice-user volume menu open when an unrelated peer's voice state changes", () => {
+  it("keeps the voice-user volume menu open when an unrelated peer's voice state changes", async () => {
     authStore.setState(() => ({
       token: "tok",
       user: { id: 99, username: "Me", avatar: null, role: "member" },
@@ -3511,6 +3972,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () =>
     voiceRow.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, clientX: 150, clientY: 250 }),
     );
+    await vi.dynamicImportSettled();
     expect(document.querySelector(".user-vol-menu")).not.toBeNull();
 
     // Unrelated re-render: a DIFFERENT peer joins/toggles state in the same
@@ -3528,5 +3990,759 @@ describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () =>
     voiceStore.flush();
 
     expect(document.querySelector(".user-vol-menu")).not.toBeNull();
+  });
+});
+
+// ── Voice rows drawn from row models (5.4c-2) ──
+//
+// The voice rows reconcile from VoiceUserRowModel / VoiceChannelChromeModel,
+// kept current by one select over their stores. A row's node is kept unless
+// something it draws changed; these pin which changes keep or rebuild which
+// node, and where focus goes when its row goes.
+describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+  let onVoiceJoin: Mock<(channelId: number) => void>;
+  let onOpenCall: Mock<() => void>;
+
+  const VOICE_CH = 3; // "voice-lobby" in testChannels
+
+  function member(id: number, username: string, displayName?: string) {
+    return {
+      id,
+      username,
+      ...(displayName !== undefined ? { displayName } : {}),
+      avatar: null,
+      role: "member",
+      status: "online" as const,
+    };
+  }
+
+  function setMembersMap(list: ReturnType<typeof member>[]): void {
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map(list.map((m) => [m.id, m] as const)),
+    }));
+  }
+
+  function userRow(userId: number): HTMLElement | null {
+    return container.querySelector<HTMLElement>(`.voice-user-item[data-voice-uid="${userId}"]`);
+  }
+
+  function wrapperOf(channelId: number): HTMLElement | null {
+    return (
+      container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${channelId}"]`)
+        ?.parentElement ?? null
+    );
+  }
+
+  function leave(channelId: number, userId: number): void {
+    removeVoiceUser({ channel_id: channelId, user_id: userId });
+    voiceStore.flush();
+  }
+
+  it("a peer whose status flips to mismatch after mount gets a working badge click", async () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "Alice");
+    setPeerVerif(10, "verified", "AB12 CD34 EF56 7890");
+    sidebar.mount(container);
+    const before = userRow(10)!;
+    expect(before.querySelector(".vu-verify.verified")).not.toBeNull();
+
+    setPeerVerif(10, "mismatch", null);
+    voiceStore.flush();
+
+    const after = userRow(10)!;
+    expect(after).not.toBe(before);
+    expect(after.querySelector(".vu-verify.verified")).toBeNull();
+    (after.querySelector(".vu-verify.mismatch") as HTMLElement).click();
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
+    });
+  });
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    onVoiceJoin = vi.fn<(channelId: number) => void>();
+    onOpenCall = vi.fn<() => void>();
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    mockGetUserLocalMute.mockImplementation(() => false);
+  });
+
+  it("rename mid-call updates the label (OC-0333)", () => {
+    setChannels(testChannels);
+    setMembersMap([member(10, "alice", "Alice"), member(11, "bob", "Bob")]);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    expect(userRow(10)!.querySelector(".vu-name")!.textContent).toBe("Alice");
+    const other = userRow(11);
+    const revision = membersStore.getState().roleRevision;
+
+    // A new display name in the member store alone: no roleRevision bump and
+    // no voice store change.
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(10, member(10, "alice", "Alicia"));
+      return { ...prev, members };
+    });
+    membersStore.flush();
+
+    expect(membersStore.getState().roleRevision).toBe(revision);
+    expect(userRow(10)!.querySelector(".vu-name")!.textContent).toBe("Alicia");
+    expect(userRow(11)).toBe(other);
+  });
+
+  it("focused user row survives another user joining", () => {
+    setChannels(testChannels.map((c) => (c.id === VOICE_CH ? { ...c, voice_max_users: 5 } : c)));
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    const wrapper = wrapperOf(VOICE_CH);
+    const focusedRow = userRow(11)!;
+    focusedRow.focus();
+    expect(document.activeElement).toBe(focusedRow);
+
+    addVoiceUser(VOICE_CH, 12, "carol");
+    voiceStore.flush();
+
+    // The capacity readout is a chrome patch: the wrapper and the focused row
+    // are kept, and focus never moves.
+    expect(
+      container.querySelector(`[data-testid="channel-capacity-${VOICE_CH}"]`)!.textContent,
+    ).toBe("3/5");
+    expect(wrapperOf(VOICE_CH)).toBe(wrapper);
+    expect(userRow(11)).toBe(focusedRow);
+    expect(document.activeElement).toBe(focusedRow);
+  });
+
+  it("focused user row survives a voice channel rename", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    const wrapper = wrapperOf(VOICE_CH);
+    userRow(11)!.focus();
+
+    setChannels(testChannels.map((c) => (c.id === VOICE_CH ? { ...c, name: "hangout" } : c)));
+    channelsStore.flush();
+
+    // The wrapper is rebuilt (its signature changed); focus follows the key
+    // path to the same participant in the replacement.
+    expect(wrapperOf(VOICE_CH)).not.toBe(wrapper);
+    expect(document.activeElement).toBe(userRow(11));
+  });
+
+  it("a focused user who leaves hands focus to the next participant, else the channel row", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    addVoiceUser(VOICE_CH, 12, "carol");
+    sidebar.mount(container);
+
+    // The participant now at the leaver's position.
+    userRow(11)!.focus();
+    leave(VOICE_CH, 11);
+    expect(document.activeElement).toBe(userRow(12));
+
+    // The last one leaving: the participant before them.
+    leave(VOICE_CH, 12);
+    expect(document.activeElement).toBe(userRow(10));
+
+    // The channel empties: its own row.
+    leave(VOICE_CH, 10);
+    expect(container.querySelector(".voice-users-list")).toBeNull();
+    expect(document.activeElement).toBe(
+      container.querySelector(`.channel-item[data-channel-id="${VOICE_CH}"]`),
+    );
+  });
+
+  it("a focused participant whose channel stops showing hands focus to the category", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    uiStore.setState((prev) => ({
+      ...prev,
+      collapsedCategories: new Set(["Voice Channels"]),
+    }));
+    sidebar.mount(container);
+    userRow(10)!.focus();
+
+    // Collapsed, the channel shows only while occupied: emptied, it hides.
+    leave(VOICE_CH, 10);
+
+    expect(container.querySelector(`.channel-item[data-channel-id="${VOICE_CH}"]`)).toBeNull();
+    const arrow = container.querySelector<HTMLElement>(
+      '.category[data-category="Voice Channels"] .category-arrow',
+    );
+    expect(document.activeElement).toBe(arrow);
+  });
+
+  it("local mute event redraws only that user's row", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 82, "loud");
+    addVoiceUser(VOICE_CH, 83, "quiet");
+    sidebar.mount(container);
+    const loud = userRow(82);
+    const quiet = userRow(83);
+
+    mockGetUserLocalMute.mockImplementation((id) => id === 82);
+    window.dispatchEvent(
+      new CustomEvent("owncord:user-local-mute-changed", { detail: { userId: 82 } }),
+    );
+
+    expect(userRow(82)).not.toBe(loud);
+    expect(userRow(82)!.querySelector(".vu-local-muted")).not.toBeNull();
+    expect(userRow(83)).toBe(quiet);
+    expect(userRow(83)!.querySelector(".vu-local-muted")).toBeNull();
+  });
+
+  it("connection drop disables the channel without rebuilding user rows", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    const wrapper = wrapperOf(VOICE_CH);
+    const rows = [userRow(10), userRow(11)];
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" as const }));
+    uiStore.flush();
+
+    const item = container.querySelector<HTMLElement>(
+      `.channel-item[data-channel-id="${VOICE_CH}"]`,
+    )!;
+    expect(item.classList.contains("disabled")).toBe(true);
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.title).toBe("Reconnecting…");
+    expect(wrapperOf(VOICE_CH)).toBe(wrapper);
+    expect([userRow(10), userRow(11)]).toEqual(rows);
+    expect(userRow(10)).toBe(rows[0]);
+    expect(userRow(11)).toBe(rows[1]);
+  });
+
+  it("draggable follows connection status", () => {
+    sidebar.destroy?.();
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 99, username: "Me", avatar: null, role: "admin" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({
+      onVoiceJoin,
+      onOpenCall,
+      onVoiceModerate: voiceModCallbacks(),
+    });
+    setChannels(testChannels.map((c) => ({ ...c, can_moderate_voice: true })));
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 99, "Me");
+    sidebar.mount(container);
+    const draggable = (id: number) => userRow(id)!.classList.contains("voice-user-draggable");
+    expect(draggable(10)).toBe(true);
+    expect(draggable(99)).toBe(false);
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" as const }));
+    uiStore.flush();
+    expect(draggable(10)).toBe(false);
+
+    uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" as const }));
+    uiStore.flush();
+    expect(draggable(10)).toBe(true);
+    expect(draggable(99)).toBe(false);
+  });
+
+  it("a click on the channel after joining opens the call", () => {
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const item = () =>
+      container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${VOICE_CH}"]`)!;
+    const first = item();
+    first.click();
+    expect(onVoiceJoin).toHaveBeenCalledWith(VOICE_CH);
+    expect(onOpenCall).not.toHaveBeenCalled();
+
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: VOICE_CH }));
+    voiceStore.flush();
+
+    // The wrapper is reused (joined is a chrome patch), so the click reads
+    // the joined channel when it fires, not when the row was built.
+    expect(item()).toBe(first);
+    expect(first.classList.contains("active")).toBe(true);
+    first.click();
+    expect(onOpenCall).toHaveBeenCalledTimes(1);
+    expect(onVoiceJoin).toHaveBeenCalledTimes(1);
+  });
+
+  it("presence change of a member not in voice keeps every voice row node", () => {
+    setChannels(testChannels);
+    setMembersMap([member(10, "alice"), member(11, "bob"), member(50, "away")]);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+    const wrapper = wrapperOf(VOICE_CH);
+    const rows = [userRow(10), userRow(11)];
+
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(50, { ...member(50, "away"), status: "idle" as const });
+      return { ...prev, members };
+    });
+    membersStore.flush();
+
+    expect(wrapperOf(VOICE_CH)).toBe(wrapper);
+    expect(userRow(10)).toBe(rows[0]);
+    expect(userRow(11)).toBe(rows[1]);
+  });
+
+  it("speaking toggle keeps the same row node, its focus and a class another module set", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 60, "talker");
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: VOICE_CH }));
+    sidebar.mount(container);
+    const row = userRow(60)!;
+    row.focus();
+    // dragMove marks the live row it is dragging.
+    row.classList.add("dragging");
+
+    setSpeakers({ channel_id: VOICE_CH, speakers: [60] });
+    voiceStore.flush();
+    expect(userRow(60)).toBe(row);
+    expect(row.classList.contains("speaking")).toBe(true);
+
+    setSpeakers({ channel_id: VOICE_CH, speakers: [] });
+    voiceStore.flush();
+    expect(userRow(60)).toBe(row);
+    expect(row.classList.contains("speaking")).toBe(false);
+    expect(row.classList.contains("dragging")).toBe(true);
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("a reconnect replacing the voice state keeps unchanged rows and redraws a changed fingerprint", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    setPeerVerif(10, "unverified", null, "AAAA 1111");
+    setPeerVerif(11, "unverified", null, "BBBB 2222");
+    sidebar.mount(container);
+    const alice = userRow(10);
+    const bob = userRow(11);
+
+    // ready replaces both maps with fresh objects; only bob's fingerprint differs.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map(
+        Array.from(prev.voiceUsers, ([ch, users]) => [
+          ch,
+          new Map(Array.from(users, ([uid, u]) => [uid, { ...u }] as const)),
+        ]),
+      ),
+      peerVerifications: new Map([
+        [
+          10,
+          { userId: 10, status: "unverified", safetyNumber: null, sessionFingerprint: "AAAA 1111" },
+        ],
+        [
+          11,
+          { userId: 11, status: "unverified", safetyNumber: null, sessionFingerprint: "CCCC 3333" },
+        ],
+      ]),
+    }));
+    voiceStore.flush();
+
+    expect(userRow(10)).toBe(alice);
+    expect(userRow(11)).not.toBe(bob);
+    const title = userRow(11)!.querySelector(".vu-verify")!.getAttribute("title") ?? "";
+    expect(title).toContain("CCCC 3333");
+    expect(title).not.toContain("BBBB 2222");
+  });
+});
+
+// ── Text rows and groups drawn from row models (5.4d-1) ──
+//
+// The text rows and category groups reconcile from models, so a row's node is
+// kept unless something it draws changed. The row's handlers are bound from
+// the model too (`access`, `orderIds`), so a role edit rebinds them.
+describe("ChannelSidebar text rows and groups on models (5.4d-1)", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+  const VOICE_CH = 3; // "voice-lobby" in testChannels
+
+  function row(channelId: number): HTMLElement | null {
+    return container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${channelId}"]`);
+  }
+
+  function ctxMenuFor(channelId: number): HTMLElement | null {
+    document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
+    row(channelId)!.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }),
+    );
+    return document.querySelector<HTMLElement>('[data-testid="channel-context-menu"]');
+  }
+
+  beforeEach(() => {
+    resetStores();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+  });
+
+  it("an unread count change keeps the focused row's node", () => {
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+    setChannels(testChannels); // channel 1 starts with 2 unread
+    sidebar.mount(container);
+    const focused = row(1)!;
+    focused.focus();
+    expect(document.activeElement).toBe(focused);
+    expect(focused.classList.contains("unread")).toBe(true);
+
+    incrementUnread(1);
+    channelsStore.flush();
+
+    // 2 -> 3: the row looks the same, so the node, its focus and its roving
+    // tab stop are untouched (it used to be rebuilt and refocused by key).
+    expect(channelsStore.getState().channels.get(1)!.unreadCount).toBe(3);
+    expect(row(1)).toBe(focused);
+    expect(document.activeElement).toBe(focused);
+    expect(focused.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("a change that flips how the row looks rebuilds it and focus follows", () => {
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+    setChannels(testChannels); // channel 2 starts read
+    sidebar.mount(container);
+    const before = row(2)!;
+    before.focus();
+    expect(before.classList.contains("unread")).toBe(false);
+
+    incrementUnread(2);
+    channelsStore.flush();
+
+    const after = row(2)!;
+    expect(after).not.toBe(before);
+    expect(after.classList.contains("unread")).toBe(true);
+    expect(document.activeElement).toBe(after);
+  });
+
+  it("a MANAGE_MESSAGES-only role edit rebinds every text row's menu and keeps voice focus", () => {
+    const onPurgeChannel = vi.fn<(channel: Channel, count: number) => Promise<void>>(
+      async () => {},
+    );
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn(), onPurgeChannel });
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
+
+    const textIds = [1, 2, 4];
+    for (const id of textIds) {
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      expect(document.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
+    }
+    const voiceWrapper = row(VOICE_CH)!.parentElement;
+    const participant = container.querySelector<HTMLElement>(
+      '.voice-user-item[data-voice-uid="11"]',
+    )!;
+    participant.focus();
+    expect(document.activeElement).toBe(participant);
+
+    // Only the permission mask changes: no channel, voice or role-name event.
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_MESSAGES }]);
+    channelsStore.flush();
+
+    for (const id of textIds) {
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      expect(
+        document.querySelector('[data-testid="ctx-purge-messages"]'),
+        `Purge on ${id}`,
+      ).not.toBeNull();
+    }
+    // The voice wrapper rebound too (a rebuild), and focus followed the key.
+    expect(row(VOICE_CH)!.parentElement).not.toBe(voiceWrapper);
+    expect(document.activeElement).toBe(
+      container.querySelector('.voice-user-item[data-voice-uid="11"]'),
+    );
+  });
+
+  function setModeratorMask(permissions: number): void {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions }]);
+    channelsStore.flush();
+  }
+
+  function useModerator(): void {
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
+      serverName: "Test Server",
+      motd: null,
+      isAuthenticated: true,
+    }));
+  }
+
+  it("a MANAGE_INVITES-only role edit grants and revokes Invite People on text and voice rows", () => {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
+    useModerator();
+    sidebar = createChannelSidebar({
+      onVoiceJoin: vi.fn(),
+      onOpenCall: vi.fn(),
+      onInviteFromChannel: vi.fn(),
+    });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const invite = (): Element | null =>
+      document.querySelector('[data-testid="ctx-invite-people"]');
+
+    for (const id of [1, VOICE_CH]) {
+      ctxMenuFor(id);
+      expect(invite(), `no invite on ${id}`).toBeNull();
+    }
+
+    // Only the permission mask changes: no channel, voice or role-name event.
+    setModeratorMask(Permission.MANAGE_INVITES);
+    for (const id of [1, VOICE_CH]) {
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      expect(invite(), `invite on ${id}`).not.toBeNull();
+    }
+
+    setModeratorMask(0);
+    for (const id of [1, VOICE_CH]) {
+      ctxMenuFor(id);
+      expect(invite(), `invite gone on ${id}`).toBeNull();
+    }
+  });
+
+  it("losing MANAGE_CHANNELS while mounted strips drag and the Edit, Delete and Move entries", () => {
+    setRoles([{ id: 3, name: "Moderator", color: null, permissions: Permission.MANAGE_CHANNELS }]);
+    useModerator();
+    sidebar = createChannelSidebar({
+      onVoiceJoin: vi.fn(),
+      onOpenCall: vi.fn(),
+      onReorderChannel: vi.fn(),
+      onEditChannel: vi.fn(),
+      onDeleteChannel: vi.fn(),
+    });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const ids = [1, 2, VOICE_CH];
+    const testIds = [
+      "ctx-edit-channel",
+      "ctx-delete-channel",
+      "ctx-move-up",
+      "ctx-move-down",
+    ] as const;
+
+    for (const id of ids) {
+      if (id !== VOICE_CH) {
+        expect(row(id)!.classList.contains("channel-draggable"), `draggable ${id}`).toBe(true);
+        expect(row(id)!.hasAttribute("data-drag-channel-id"), `drag id ${id}`).toBe(true);
+      }
+      expect(ctxMenuFor(id), `menu ${id}`).not.toBeNull();
+      for (const t of testIds) {
+        expect(document.querySelector(`[data-testid="${t}"]`), `${t} on ${id}`).not.toBeNull();
+      }
+    }
+
+    // Only the permission mask changes: no channel, voice or role-name event.
+    setModeratorMask(0);
+
+    expect(container.querySelector(".channel-draggable")).toBeNull();
+    expect(container.querySelector("[data-drag-channel-id]")).toBeNull();
+    for (const id of ids) {
+      ctxMenuFor(id);
+      for (const t of testIds) {
+        expect(document.querySelector(`[data-testid="${t}"]`), `${t} gone on ${id}`).toBeNull();
+      }
+    }
+  });
+
+  it("a voice capacity edit patches the label and keeps the wrapper", () => {
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+    const withMax = (max: number): ReadyChannel[] =>
+      testChannels.map((c) => (c.id === VOICE_CH ? { ...c, voice_max_users: max } : c));
+    setChannels(withMax(5));
+    addVoiceUser(VOICE_CH, 10, "alice");
+    sidebar.mount(container);
+    const wrapper = row(VOICE_CH)!.parentElement;
+    const label = (): string | null | undefined =>
+      container.querySelector(`[data-testid="channel-capacity-${VOICE_CH}"]`)?.textContent;
+    expect(label()).toBe("1/5");
+
+    setChannels(withMax(8));
+    channelsStore.flush();
+
+    expect(label()).toBe("1/8");
+    expect(row(VOICE_CH)!.parentElement).toBe(wrapper);
+  });
+
+  it("an edit action acts on the live channel, not the one the row was built for", () => {
+    const onEditChannel = vi.fn<(channel: Channel) => void>();
+    setAdminUser();
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn(), onEditChannel });
+    setChannels(testChannels);
+    sidebar.mount(container);
+    const before = row(2)!;
+
+    // A topic edit is not drawn, so the row is kept; its Edit must still
+    // hand over the current channel.
+    updateChannel({ id: 2, topic: "new topic" });
+    channelsStore.flush();
+    expect(row(2)).toBe(before);
+
+    expect(ctxMenuFor(2)).not.toBeNull();
+    document.querySelector<HTMLElement>('[data-testid="ctx-edit-channel"]')!.click();
+    expect(onEditChannel).toHaveBeenCalledTimes(1);
+    expect(onEditChannel.mock.calls[0]![0]).toMatchObject({ id: 2, topic: "new topic" });
+  });
+});
+
+describe("ChannelSidebar on one select (5.4d-2)", () => {
+  let container: HTMLDivElement;
+  let sidebar: ReturnType<typeof createChannelSidebar>;
+
+  const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
+    id,
+    name: `text-${id}`,
+    type: "text",
+    category: "Text Channels",
+    position: id,
+    unread_count: 0,
+    last_message_id: 1,
+    ...extra,
+  });
+  const rowIds = (): string[] =>
+    Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
+      (el) => el.dataset.channelId ?? "",
+    );
+  const row = (id: number): HTMLElement | null =>
+    container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${id}"]`);
+
+  beforeEach(() => {
+    resetStores();
+    // Mutes persist across tests; start with none.
+    unmuteChannel(1);
+    unmuteChannel(2);
+    invalidateMuteCache();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+  });
+
+  afterEach(() => {
+    sidebar.destroy?.();
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("a muted channel that gains a mention under a collapsed category shows with its badge, and keeps it when expanded", () => {
+    setChannels([text(1), text(2)]);
+    muteChannel(2);
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(["Text Channels"]) }));
+    sidebar.mount(container);
+    expect(rowIds()).toEqual([]);
+
+    channelsStore.setState((prev) => {
+      const channels = new Map(prev.channels);
+      channels.set(2, { ...channels.get(2)!, unreadCount: 1, mentionCount: 1 });
+      return { ...prev, channels };
+    });
+    channelsStore.flush();
+    expect(rowIds()).toEqual(["2"]);
+    expect(row(2)!.querySelector(".mention-badge")?.textContent).toBe("1");
+    const badgeText = row(2)!.textContent;
+
+    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set<string>() }));
+    uiStore.flush();
+    expect(rowIds()).toEqual(["1", "2"]);
+    expect(row(2)!.textContent).toBe(badgeText);
+    expect(row(2)!.querySelector(".mention-badge")?.textContent).toBe("1");
+  });
+
+  it("mount subscribes only through select", () => {
+    const stores = [voiceStore, membersStore, authStore, channelsStore, uiStore, safetyStore];
+    const subscribe = stores.map((s) => vi.spyOn(s, "subscribe"));
+    const selector = stores.map((s) => vi.spyOn(s, "subscribeSelector"));
+    setChannels([text(1)]);
+
+    sidebar.mount(container);
+
+    for (const spy of selector) expect(spy).not.toHaveBeenCalled();
+    for (const spy of subscribe) expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("muting through muteChannel ends with the row muted", () => {
+    setChannels([text(1), text(2)]);
+    sidebar.mount(container);
+    expect(row(2)!.classList.contains("muted")).toBe(false);
+
+    muteChannel(2);
+
+    expect(row(2)!.classList.contains("muted")).toBe(true);
+  });
+
+  it("a mute pref-change alone does not redraw; the mute announcement does", () => {
+    setChannels([text(1), text(2)]);
+    sidebar.mount(container);
+    const before = row(2)!;
+    expect(before.classList.contains("muted")).toBe(false);
+
+    // Write the list the way writeMuted saves it (a bare id is a forever mute),
+    // then drop the cache the module's own pref-change listener would drop.
+    const key =
+      getChannelMutesHost() === null ? "mutedChannels" : `mutedChannels:${getChannelMutesHost()}`;
+    localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify([2]));
+    invalidateMuteCache();
+    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
+
+    expect(row(2)).toBe(before);
+    expect(row(2)!.classList.contains("muted")).toBe(false);
+
+    window.dispatchEvent(new CustomEvent(CHANNEL_MUTE_CHANGED, { detail: { channelId: 2 } }));
+
+    expect(row(2)!.classList.contains("muted")).toBe(true);
+  });
+
+  it("destroy then a store change touches no row", () => {
+    setChannels([text(1), text(2)]);
+    sidebar.mount(container);
+    const first = row(1)!;
+    const second = row(2)!;
+    const observer = new MutationObserver(() => {});
+    observer.observe(first, { attributes: true, childList: true, subtree: true });
+    observer.observe(second, { attributes: true, childList: true, subtree: true });
+    const nameBefore = container.querySelector("h2");
+
+    sidebar.destroy?.();
+    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+    channelsStore.flush();
+    setRoles([{ id: 9, name: "x", color: null, permissions: 0 }]);
+    channelsStore.flush();
+    authStore.setState((prev) => ({ ...prev, serverName: "Renamed" }));
+    authStore.flush();
+    window.dispatchEvent(new CustomEvent("owncord:channel-mute-changed"));
+    muteChannel(1);
+
+    expect(observer.takeRecords()).toEqual([]);
+    observer.disconnect();
+    expect(container.querySelector(".channel-sidebar")).toBeNull();
+    expect(nameBefore?.textContent).toBe("Test Server");
   });
 });

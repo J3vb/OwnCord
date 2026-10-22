@@ -25,7 +25,68 @@ const log = createLogger("attachments");
 import type { Attachment } from "@lib/types";
 import { externalAllowed, setExternalConsentScope } from "../../features/content-consent/external";
 import { mediaControlsText } from "../../i18n/mediaControls";
+import { messagingText } from "../../i18n/messaging";
+import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { messageStatusText } from "../../i18n/messageStatus";
+import { clearStillCache } from "../../features/messaging/emojiStill";
+import { registerSessionReset } from "@lib/sessionRegistry";
+import { sniffImageBlob } from "@lib/imageHeader";
+import {
+  ATTACHMENT_BOX_MAX_H,
+  blobImageSize,
+  fitImageBox,
+  getImageBox,
+  imageSizeGeneration,
+  rememberBlobSize,
+  setImageBox,
+  type ImageBox,
+} from "./image-sizes";
+import type { ImageMenuTarget } from "./image-menu";
+
+/** One image of a message's lightbox sequence. `url` is the resolved server URL. */
+export interface LightboxGalleryItem {
+  readonly url: string;
+  readonly filename: string;
+  readonly mime: string;
+}
+
+/** The images of the clicked message, for the viewer's previous/next arrows. */
+export interface LightboxGallery {
+  readonly items: readonly LightboxGalleryItem[];
+  readonly index: number;
+  /** True once the message was deleted; checked when the viewer opens. */
+  readonly isGone?: () => boolean;
+  /** Calls `onGone` when the message is deleted; returns the unsubscribe. */
+  readonly watch?: (onGone: () => void) => () => void;
+  /** The message's row, for focus when the viewer closes over a deletion. */
+  readonly row?: () => Element | null;
+}
+
+/** What the viewer shows now: Download, Open original, the image menu and
+ *  eviction recovery all read this at use time, never at bind time. */
+export interface LightboxCurrent {
+  readonly external: ExternalImageSource | undefined;
+  readonly alt: string;
+}
+
+/** What the lazy gallery module drives (3A-10c). */
+export interface LightboxHandle {
+  readonly overlay: HTMLElement;
+  readonly img: HTMLImageElement;
+  /** Tab cycle, in order; the gallery puts its arrows first. */
+  readonly controls: HTMLButtonElement[];
+  readonly signal: AbortSignal;
+  setCurrent(current: LightboxCurrent): void;
+  /** Resets zoom and pan and ends a drag in progress. */
+  resetView(): void;
+  closeMenu(): void;
+  /** True while the image menu is open; it owns the arrow keys. */
+  isImageMenuOpen(): boolean;
+  /** Passed in so the lazy gallery module imports only types from here. */
+  fetchImageAsObjectUrl(url: string): Promise<string | null>;
+  thumbnailUrl(fileUrl: string, mime: string): string;
+  close(): void;
+}
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
@@ -169,10 +230,30 @@ function revokeObjectUrl(objectUrl: string): void {
   URL.revokeObjectURL(objectUrl);
 }
 
+/** The blob: URLs a mounted element still depends on: every connected visible
+ *  `<img>` showing one, and every connected tracked GIF's animated source
+ *  (`data-media-src`: its `<img>` shows the frozen still, but unfreezing needs
+ *  the original). Read only when a
+ *  cache is over its cap, so the scan costs nothing on a hit. */
+function liveBlobUrls(): Set<string> {
+  const live = new Set<string>();
+  if (typeof document === "undefined") return live;
+  for (const img of document.querySelectorAll("img")) {
+    // A hidden image (a failed or refused load) shows nothing, so it pins nothing.
+    if (img.hidden) continue;
+    for (const src of [img.getAttribute("src"), img.dataset["mediaSrc"]]) {
+      if (src !== undefined && src !== null && src.startsWith("blob:")) live.add(src);
+    }
+  }
+  return live;
+}
+
 /** blob: URLs by source URL, least recently used first, bounded by the bytes
  *  their Blobs pin (and optionally by count). An evicted URL is revoked; an
  *  image still showing it recovers through `recoverEvictedImage`. One entry
- *  larger than the budget stays until the next arrives. */
+ *  larger than the budget stays until the next arrives. With `keepMounted`, a
+ *  URL a mounted `<img>` still shows is never evicted (the cap then bounds the
+ *  unreferenced part), so a window wider than the cache is not re-fetched. */
 class ObjectUrlCache {
   private readonly entries = new Map<string, { objectUrl: string; bytes: number }>();
   private bytes = 0;
@@ -180,6 +261,7 @@ class ObjectUrlCache {
   constructor(
     private readonly maxBytes: number,
     private readonly maxEntries = Number.POSITIVE_INFINITY,
+    private readonly keepMounted = false,
   ) {}
 
   get(key: string): string | undefined {
@@ -202,14 +284,21 @@ class ObjectUrlCache {
     this.drop(key);
     this.entries.set(key, { objectUrl, bytes });
     this.bytes += bytes;
-    while (
-      this.entries.size > 1 &&
-      (this.bytes > this.maxBytes || this.entries.size > this.maxEntries)
-    ) {
-      const oldest = this.entries.keys().next().value;
-      if (oldest === undefined) break;
-      this.drop(oldest);
+    if (!this.overCap()) return;
+    const live = this.keepMounted ? liveBlobUrls() : null;
+    for (const [oldKey, entry] of this.entries) {
+      if (!this.overCap()) break;
+      // The entry just added stays even when it alone is over.
+      if (oldKey === key) continue;
+      if (live?.has(entry.objectUrl) === true) continue;
+      this.drop(oldKey);
     }
+  }
+
+  private overCap(): boolean {
+    return (
+      this.entries.size > 1 && (this.bytes > this.maxBytes || this.entries.size > this.maxEntries)
+    );
   }
 
   clear(): void {
@@ -230,7 +319,7 @@ export const IMAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 /** What the durable image store may hold, so it persists across restarts
  *  without growing forever. */
 export const IMAGE_DB_MAX_BYTES = 256 * 1024 * 1024;
-const imageCache = new ObjectUrlCache(IMAGE_CACHE_MAX_BYTES);
+const imageCache = new ObjectUrlCache(IMAGE_CACHE_MAX_BYTES, Number.POSITIVE_INFINITY, true);
 /** Server images the server definitely refused (missing, gone, forbidden).
  *  Asking again on every mount only repeated the answer — each one was
  *  fetched twice in the audit's channel-switch run (DP-56). Retry and a cache
@@ -281,7 +370,11 @@ export function clearAttachmentCaches(): void {
   inFlight.clear();
   mediaCache.clear();
   mediaInFlight.clear();
+  videoDims.clear();
+  clearStillCache();
 }
+// The image/video/audio caches pin blob: URLs; they end with the session.
+void registerSessionReset("attachments:caches", clearAttachmentCaches, { phase: "cache" }); // app-lifetime
 
 /** Safe MIME types allowed as a server Blob's type — blocks script injection via crafted Content-Type. */
 // Note: image/svg+xml is intentionally excluded — SVGs can execute JS if
@@ -335,7 +428,7 @@ function isExternalUrl(url: string): boolean {
 /** The server's bounded preview of an image file (P4-08), or the file itself
  *  on a server that does not advertise thumbnails or for a type the server
  *  passes through unchanged (only JPEG and PNG are scaled). */
-function thumbnailUrl(fileUrl: string, mime: string): string {
+export function thumbnailUrl(fileUrl: string, mime: string): string {
   if (
     authStore.getState().uploadPolicy?.thumbnails !== true ||
     (mime !== "image/jpeg" && mime !== "image/png") ||
@@ -642,12 +735,21 @@ async function idbPut(scope: string, url: string, blob: Blob): Promise<void> {
   }
 }
 
+/** `sniff`: read the file's header for its size, for a caller that has no
+ *  dimensions of its own (a row reserving its box). Other callers skip the read. */
+export interface ImageLoadOptions {
+  readonly sniff?: boolean;
+}
+
 /** Fetch an image and return a `blob:` URL an `<img>` can show. Server images
  *  come through memory → IndexedDB → the TOFU proxy; an external image comes
  *  from the broker and never enters those two caches, which hold server
  *  content only (B7-16). */
-export function fetchImageAsObjectUrl(url: string): Promise<string | null> {
-  if (isExternalUrl(url)) return fetchExternalImage({ url });
+export function fetchImageAsObjectUrl(
+  url: string,
+  opts?: ImageLoadOptions,
+): Promise<string | null> {
+  if (isExternalUrl(url)) return fetchExternalImage({ url }, opts);
   const generation = attachmentCacheGeneration;
   const scope = cacheScope;
 
@@ -667,6 +769,13 @@ export function fetchImageAsObjectUrl(url: string): Promise<string | null> {
     if (blob === null || generation !== attachmentCacheGeneration) return null;
     const objectUrl = createObjectUrl(blob);
     if (objectUrl === null) return null;
+    if (opts?.sniff === true && stored === null) {
+      rememberBlobSize(objectUrl, await sniffImageBlob(blob));
+    }
+    if (generation !== attachmentCacheGeneration) {
+      revokeObjectUrl(objectUrl);
+      return null;
+    }
     imageCache.set(url, objectUrl, blob.size);
     if (stored === null && scope !== null) void idbPut(scope, url, blob);
     return objectUrl;
@@ -719,6 +828,11 @@ const MEDIA_CACHE_MAX_BYTES = 256 * 1024 * 1024;
 const mediaCache = new ObjectUrlCache(MEDIA_CACHE_MAX_BYTES, MEDIA_CACHE_MAX);
 /** In-flight media fetches, deduplicated the same way images are. */
 const mediaInFlight = new Map<string, Promise<string | null>>();
+
+/** Real video sizes learnt on play, so a row rebuilt by the virtual list keeps
+ *  the clip's shape instead of falling back to the 16:9 placeholder. */
+const videoDims = new Map<string, readonly [number, number]>();
+const VIDEO_DIMS_CAP = 500;
 
 /**
  * Fetch a video/audio attachment through the same authenticated,
@@ -793,7 +907,7 @@ let externalBytes = 0;
  *  freeze/play control. */
 const externalGifUrls = new Set<string>();
 const externalInFlight = new Map<string, Promise<ExternalContentResult<string>>>();
-/** FIFO cap: these copies live in the webview, outside the broker's byte
+/** LRU cap (URLs a mounted image shows are exempt): these copies live in the webview, outside the broker's byte
  *  budget, so nothing else bounds them. Mirrors MEDIA_CACHE_MAX; higher
  *  because an image is far smaller than a clip. */
 export const EXTERNAL_IMAGE_CACHE_MAX = 100;
@@ -802,8 +916,16 @@ export const EXTERNAL_IMAGE_CACHE_MAX = 100;
  *  cache's budget. */
 export const EXTERNAL_IMAGE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
+function externalOverCap(): boolean {
+  return (
+    externalObjectUrls.size > 1 &&
+    (externalObjectUrls.size > EXTERNAL_IMAGE_CACHE_MAX ||
+      externalBytes > EXTERNAL_IMAGE_CACHE_MAX_BYTES)
+  );
+}
+
 /** Drop every broker-fetched image and move to a fresh broker partition.
- *  Called on page teardown and from the manual "clear cache" action. */
+ *  Run with the session reset and from the manual "clear cache" action. */
 export function clearExternalImageCache(): void {
   externalEpoch += 1;
   // Name the fresh partition now rather than at the next preview: the broker
@@ -818,6 +940,10 @@ export function clearExternalImageCache(): void {
   externalGifUrls.clear();
   externalInFlight.clear();
 }
+// Broker-fetched content belongs to the server it was fetched for (B7-16).
+void registerSessionReset("attachments:external-images", clearExternalImageCache, {
+  phase: "cache",
+}); // app-lifetime
 
 /** The broker cache and consent admission key for an image source. */
 export function externalKey(source: ExternalImageSource): string {
@@ -861,13 +987,18 @@ function reloadImage(source: ExternalImageSource): Promise<ExternalContentResult
  *  error listener: a recovered load stops the error from reaching them. */
 export function recoverEvictedImage(
   img: HTMLImageElement,
-  source: ExternalImageSource,
+  source: ExternalImageSource | (() => ExternalImageSource),
   onExpired?: () => void,
+  /** Identity of what `img` should show now; a reload that finishes after it
+   *  changed (a lightbox gallery step) is dropped. */
+  stillCurrent?: () => unknown,
 ): void {
   const recover = (event: Event): void => {
     if (!img.src.startsWith("blob:") || isLiveImageUrl(img.src)) return;
     event.stopImmediatePropagation();
-    void reloadImage(source).then((result) => {
+    const started = stillCurrent?.();
+    void reloadImage(typeof source === "function" ? source() : source).then((result) => {
+      if (stillCurrent !== undefined && stillCurrent() !== started) return;
       if (result.ok) {
         img.src = result.value;
         return;
@@ -886,19 +1017,28 @@ export function recoverEvictedImage(
 /** An external image, fetched by the broker and handed back as a same-origin
  *  `blob:` URL (so the GIF-freeze canvas stays untainted), or null when the
  *  broker refused it or could not fetch it. */
-export function fetchExternalImage(source: ExternalImageSource): Promise<string | null> {
-  return loadExternalImage(source).then((result) => (result.ok ? result.value : null));
+export function fetchExternalImage(
+  source: ExternalImageSource,
+  opts?: ImageLoadOptions,
+): Promise<string | null> {
+  return loadExternalImage(source, opts).then((result) => (result.ok ? result.value : null));
 }
 
 /** `fetchExternalImage`, keeping the broker's failure class. */
 export function loadExternalImage(
   source: ExternalImageSource,
+  opts?: ImageLoadOptions,
 ): Promise<ExternalContentResult<string>> {
   const key = externalKey(source);
   // B9-8: nothing is fetched for an item the viewer has not consented to.
   if (!externalAllowed(key)) return Promise.resolve({ ok: false, failure: "unavailable" });
   const cached = externalObjectUrls.get(key);
-  if (cached !== undefined) return Promise.resolve({ ok: true, value: cached.url });
+  if (cached !== undefined) {
+    // Recency order is Map order: a hit moves the entry to the back.
+    externalObjectUrls.delete(key);
+    externalObjectUrls.set(key, cached);
+    return Promise.resolve({ ok: true, value: cached.url });
+  }
   const existing = externalInFlight.get(key);
   if (existing !== undefined) return existing;
 
@@ -911,32 +1051,40 @@ export function loadExternalImage(
     }
     const objectUrl = createObjectUrl(result.value);
     if (objectUrl === null) return { ok: false, failure: "unavailable" };
+    // The header's size, read once per fetch, so the renderer reserves the
+    // box before the first decode; callers sharing this fetch all see it.
+    if (opts?.sniff === true) rememberBlobSize(objectUrl, await sniffImageBlob(result.value));
     if (epoch !== externalEpoch) {
       revokeObjectUrl(objectUrl);
       return { ok: false, failure: "unavailable" };
     }
     externalObjectUrls.set(key, { url: objectUrl, bytes: result.value.size });
     externalBytes += result.value.size;
-    // Oldest first; the entry just added stays even when it alone is over.
-    while (
-      externalObjectUrls.size > 1 &&
-      (externalObjectUrls.size > EXTERNAL_IMAGE_CACHE_MAX ||
-        externalBytes > EXTERNAL_IMAGE_CACHE_MAX_BYTES)
-    ) {
-      const [oldKey, evicted] = externalObjectUrls.entries().next().value!;
-      externalObjectUrls.delete(oldKey);
-      externalBytes -= evicted.bytes;
-      externalGifUrls.delete(evicted.url);
-      revokeObjectUrl(evicted.url);
+    // Least recently used first. The entry just added stays even when it
+    // alone is over, and so does any URL a mounted image still shows: the
+    // caps bound the unreferenced part.
+    if (externalOverCap()) {
+      const live = liveBlobUrls();
+      for (const [oldKey, evicted] of externalObjectUrls) {
+        if (!externalOverCap()) break;
+        if (oldKey === key || live.has(evicted.url)) continue;
+        externalObjectUrls.delete(oldKey);
+        externalBytes -= evicted.bytes;
+        externalGifUrls.delete(evicted.url);
+        revokeObjectUrl(evicted.url);
+      }
     }
     if (result.value.type === "image/gif") externalGifUrls.add(objectUrl);
     return { ok: true, value: objectUrl };
   })();
 
   externalInFlight.set(key, promise);
-  void promise.finally(() => {
+  // then(f, f), not finally(f): finally would leave this side branch rejected
+  // and unhandled when the broker call throws; callers still see the rejection.
+  const forget = (): void => {
     if (externalInFlight.get(key) === promise) externalInFlight.delete(key);
-  });
+  };
+  void promise.then(forget, forget);
   return promise;
 }
 
@@ -1042,15 +1190,42 @@ function swapKeepingFocus(wrap: HTMLElement, next: HTMLElement): void {
   if (hadFocus) next.querySelector<HTMLElement>(".msg-file-download")?.focus();
 }
 
-/** Inline <video> player. Sized by the same .msg-image box as images so a
- *  video never blows the message column out; the source arrives on play
- *  because it needs the session token attached. A clip the engine cannot
+/** Largest box an inline video is drawn in, in CSS pixels: the cap an inline
+ *  image is shown at (400 wide by the reserved box, 300 tall by CSS). */
+const VIDEO_MAX_W = 400;
+const VIDEO_MAX_H = 300;
+/** Narrowest player, so the play and download buttons and the native controls
+ *  still fit a tiny or very tall clip. */
+const VIDEO_MIN_W = 120;
+
+/** Size the player to the clip's own shape, scaled down to the video box, so
+ *  a small or portrait video gets no black bars. Below VIDEO_MIN_W the player
+ *  is widened, and a box that would then pass VIDEO_MAX_H is letterboxed. The
+ *  width is a ceiling: a narrow column still shrinks it, keeping the ratio. */
+function sizeVideo(video: HTMLVideoElement, w: number, h: number): void {
+  const scale = Math.min(1, VIDEO_MAX_W / w, VIDEO_MAX_H / h);
+  const scaled = Math.round(w * scale);
+  const width = Math.max(VIDEO_MIN_W, scaled);
+  const fits = scaled >= VIDEO_MIN_W || (width * h) / w <= VIDEO_MAX_H;
+  video.style.width = `${width}px`;
+  video.style.aspectRatio = fits ? `${w} / ${h}` : `${width} / ${VIDEO_MAX_H}`;
+}
+
+/** Inline <video> player, capped to the same box as an image and sized to the
+ *  clip's real shape once it is known (server dimensions, an earlier play, or
+ *  the metadata on play); until then a 16:9 placeholder. The source arrives on
+ *  play because it needs the session token attached. A clip the engine cannot
  *  decode becomes the download chip, never a broken player. */
 function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivElement {
   const wrap = createElement("div", { class: "msg-image msg-video" });
 
   const video = createElement("video", { preload: "metadata" });
   video.setAttribute("aria-label", att.filename);
+  const known =
+    att.width != null && att.height != null && att.width > 0 && att.height > 0
+      ? ([att.width, att.height] as const)
+      : videoDims.get(att.id);
+  if (known !== undefined) sizeVideo(video, known[0], known[1]);
   const unplayable = (): void => {
     const chip = renderFileChip(att, resolvedUrl);
     const note = createElement("div", { class: "msg-file-note", role: "status" });
@@ -1060,8 +1235,13 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
   };
   video.addEventListener("error", unplayable, { once: true });
   video.addEventListener("loadedmetadata", () => {
-    if (video.videoWidth > 0) {
-      video.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      sizeVideo(video, video.videoWidth, video.videoHeight);
+      if (!videoDims.has(att.id) && videoDims.size >= VIDEO_DIMS_CAP) {
+        const oldest = videoDims.keys().next().value;
+        if (oldest !== undefined) videoDims.delete(oldest);
+      }
+      videoDims.set(att.id, [video.videoWidth, video.videoHeight]);
       return;
     }
     // No picture (audio-only, or a codec the engine lacks): keep playing as audio.
@@ -1129,7 +1309,83 @@ function renderFileChip(att: Attachment, resolvedUrl: string): HTMLDivElement {
   return wrap;
 }
 
-export function renderAttachment(att: Attachment): HTMLDivElement {
+/** Whether `att` renders as an inline image, so it belongs in its message's
+ *  lightbox sequence (3A-10c). The same test `renderAttachment` applies. */
+export function isGalleryImage(att: Attachment): boolean {
+  return isImageMime(att.mime) && isSafeUrl(resolveServerUrl(att.url)) && !isVideoAttachment(att);
+}
+
+/** Cover an inline image or video until the reader asks for it (6.12). The
+ *  cover is a button over the blurred media, and while it is up nothing under
+ *  it takes input: a capture-phase guard on the box stops the lightbox, the
+ *  keyboard open, the image menu and the play button, and `inert` takes the
+ *  media out of the tab order, including media that arrives after the first
+ *  paint. The revealed state is this element's alone: a re-render covers it
+ *  again, and nothing is stored. */
+function coverSpoiler(wrap: HTMLDivElement): HTMLDivElement {
+  let covered = true;
+  wrap.classList.add("msg-spoiler-att");
+  const cover = createElement("button", {
+    class: "msg-spoiler-cover",
+    type: "button",
+    "aria-label": messagingText("spoiler.reveal"),
+  });
+  cover.appendChild(
+    createElement(
+      "span",
+      { class: "msg-spoiler-cover-label" },
+      messagingText("spoiler.attachment"),
+    ),
+  );
+
+  const setInert = (on: boolean): void => {
+    for (const child of wrap.children) {
+      if (child !== cover) child.toggleAttribute("inert", on);
+    }
+  };
+  const observer = new MutationObserver(() => setInert(true));
+  const guard = (e: Event): void => {
+    if (!covered || (e.target instanceof Node && cover.contains(e.target))) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  for (const type of ["click", "dblclick", "auxclick", "keydown", "contextmenu"]) {
+    wrap.addEventListener(type, guard, { capture: true });
+  }
+
+  cover.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    covered = false;
+    observer.disconnect();
+    setInert(false);
+    cover.remove();
+    wrap.classList.add("revealed");
+    // The cover held focus: hand it to something focusable so the keyboard
+    // keeps its place. A still-loading image has nothing yet, so the box itself.
+    let target = wrap.querySelector<HTMLElement>("img[tabindex], .msg-media-play, video[controls]");
+    if (target === null) {
+      wrap.tabIndex = -1;
+      target = wrap;
+    }
+    target.focus();
+  });
+
+  wrap.appendChild(cover);
+  setInert(true);
+  observer.observe(wrap, { childList: true });
+  return wrap;
+}
+
+export function renderAttachment(att: Attachment, gallery?: LightboxGallery): HTMLDivElement {
+  const node = renderAttachmentContent(att, gallery);
+  // Only an inline image or video is covered; a file chip or audio row shows no picture.
+  return isSpoilerFilename(att.filename) && node.classList.contains("msg-image")
+    ? coverSpoiler(node)
+    : node;
+}
+
+function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HTMLDivElement {
   const resolvedUrl = resolveServerUrl(att.url);
   const inlineable = isSafeUrl(resolvedUrl);
   if (inlineable && isVideoAttachment(att)) {
@@ -1144,52 +1400,91 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
     const inlineUrl = thumbnailUrl(resolvedUrl, att.mime);
 
     // Reserve space using server-provided dimensions to prevent layout shift.
-    if (att.width != null && att.height != null && att.width > 0 && att.height > 0) {
-      const maxW = 400,
-        maxH = 350;
-      const scale = Math.min(1, maxW / att.width, maxH / att.height);
-      const w = Math.round(att.width * scale);
-      const h = Math.round(att.height * scale);
-      wrap.style.width = `${w}px`;
-      wrap.style.height = `${h}px`;
-    } else {
-      // Fallback for old attachments without dimensions — use placeholder height.
-      wrap.style.minHeight = "200px";
-    }
+    // An old attachment has none: it takes the box remembered for its URL, or
+    // the size its header declares once the bytes arrive, or 200px until then.
+    const serverBox =
+      att.width != null && att.height != null
+        ? fitImageBox(att.width, att.height, ATTACHMENT_BOX_MAX_H)
+        : null;
+    const reserve = (box: ImageBox): void => {
+      wrap.style.minHeight = "";
+      wrap.style.width = `${box.w}px`;
+      wrap.style.height = `${box.h}px`;
+    };
+    // A reset between mount and load must not write this URL into the new session.
+    const generation = imageSizeGeneration();
+    const rememberedBox = serverBox === null ? getImageBox(inlineUrl) : undefined;
+    if (serverBox !== null) reserve(serverBox);
+    else if (rememberedBox !== undefined) reserve(rememberedBox);
+    else wrap.style.minHeight = "200px";
 
     function attachLightbox(img: HTMLImageElement): void {
+      // Keyboard-operable like an inline image (B9-9): focus it and Enter or
+      // Space opens the lightbox, the Menu key or Shift+F10 the image menu.
+      img.tabIndex = 0;
+      img.setAttribute("role", "button");
+      img.setAttribute(
+        "aria-label",
+        messageStatusText("file.openImage", { filename: att.filename }),
+      );
+      img.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        img.click();
+      });
       img.addEventListener("click", () => {
-        openImageLightbox(img.src, att.filename, { url: resolvedUrl });
+        openImageLightbox(img.src, att.filename, { url: resolvedUrl }, gallery);
       });
     }
 
     const isGif = att.mime === "image/gif";
 
-    // Clear min-height reservation and cache the natural height so virtual
-    // scroll rebuilds don't oscillate between estimated and actual heights.
-    // Measure synchronously to avoid rAF race with ResizeObserver.
-    const clearReservation = (): void => {
+    // Without server dimensions, settle the box on the real size once it is
+    // known (a header the sniffer could not read) so a rebuild starts there.
+    const clearReservation = (img: HTMLImageElement): void => {
+      if (serverBox !== null) return;
+      const actual = fitImageBox(img.naturalWidth, img.naturalHeight, ATTACHMENT_BOX_MAX_H);
+      const reserved = getImageBox(inlineUrl);
+      if (actual !== null) {
+        // Decoded and oriented by the browser: the measured box beats a sniffed one.
+        if (
+          reserved === undefined ||
+          reserved.measured !== true ||
+          reserved.w !== actual.w ||
+          reserved.h !== actual.h
+        ) {
+          reserve(actual);
+          setImageBox(inlineUrl, { ...actual, measured: true }, generation);
+        }
+        return;
+      }
+      if (reserved !== undefined) return;
+      // No intrinsic size reported: keep the measured height as the minimum.
       wrap.style.minHeight = "";
       const h = wrap.offsetHeight;
-      if (h > 0 && att.width == null) {
-        // Only cache for fallback path (no server-provided dimensions).
-        // Set min-height to prevent oscillation on virtual scroll rebuild.
-        wrap.style.minHeight = `${h}px`;
-      }
+      if (h > 0) wrap.style.minHeight = `${h}px`;
     };
 
     const buildImage = (objectUrl: string): HTMLImageElement => {
       const img = createElement("img", {
         src: objectUrl,
         alt: att.filename,
+        decoding: "async",
       });
       recoverEvictedImage(img, { url: inlineUrl });
       attachLightbox(img);
+      bindImageMenu({
+        img,
+        link: null,
+        // The row may show a thumbnail or a frozen GIF frame; copy the file.
+        full: () => fetchImageAsObjectUrl(resolvedUrl),
+        save: () => downloadFile(resolvedUrl, att.filename),
+      });
       img.addEventListener(
         "load",
         () => {
-          clearReservation();
-          if (isGif) observeMedia(img, objectUrl, wrap, !animateGifsPref);
+          clearReservation(img);
+          if (isGif) observeMedia(img, img.src, wrap, !animateGifsPref);
         },
         { once: true },
       );
@@ -1210,8 +1505,18 @@ export function renderAttachment(att: Attachment): HTMLDivElement {
       let current: Element = placeholder;
 
       const attempt = (): void => {
-        void fetchImageAsObjectUrl(inlineUrl).then((objectUrl) => {
+        void fetchImageAsObjectUrl(inlineUrl, { sniff: serverBox === null }).then((objectUrl) => {
           if (objectUrl !== null) {
+            const sniffed = serverBox === null ? blobImageSize(objectUrl) : undefined;
+            const exact =
+              sniffed === undefined
+                ? null
+                : fitImageBox(sniffed.width, sniffed.height, ATTACHMENT_BOX_MAX_H);
+            if (exact !== null) {
+              // A measured box from an earlier load wins over the header's reading.
+              const held = setImageBox(inlineUrl, exact, generation);
+              reserve(held ?? exact);
+            }
             const img = buildImage(objectUrl);
             current.replaceWith(img);
             current = img;
@@ -1265,6 +1570,54 @@ async function downloadFile(url: string, filename: string): Promise<void> {
   }
 }
 
+// -- Image menu ---------------------------------------------------------------
+
+type ImageMenuModule = typeof import("./image-menu");
+/** Set once the lazy menu module has loaded, so teardown can close its menu. */
+let imageMenuModule: ImageMenuModule | null = null;
+
+function loadImageMenu(): Promise<ImageMenuModule> {
+  return import("./image-menu").then((m) => {
+    imageMenuModule = m;
+    return m;
+  });
+}
+
+/** Save an image whose bytes are already in the webview. */
+export function saveImageBytes(src: string, url: string): Promise<void> {
+  return loadImageMenu().then((m) => m.saveImageBytes(src, url));
+}
+
+/**
+ * Open the image menu (Copy Image, Copy Link, Open Link, Save Image) on
+ * right-click of `target.img`, or on the Menu key / Shift+F10 when the image
+ * has focus (they fire `contextmenu` with no pointer position). `signal`, when
+ * given, closes the menu with its owner (the lightbox).
+ */
+export function bindImageMenu(target: ImageMenuTarget, signal?: AbortSignal): void {
+  const { img } = target;
+  img.addEventListener(
+    "contextmenu",
+    (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // A hidden image is still loading or refused: nothing to copy.
+      if (img.hidden || !img.hasAttribute("src")) return;
+      let { clientX: x, clientY: y } = e;
+      if (x === 0 && y === 0) {
+        const rect = img.getBoundingClientRect();
+        x = rect.left + rect.width / 2;
+        y = rect.top + rect.height / 2;
+      }
+      loadImageMenu().then(
+        (m) => m.openImageMenu(x, y, target, signal),
+        (err: unknown) => log.warn("Image menu failed to load", { error: String(err) }),
+      );
+    },
+    signal !== undefined ? { signal } : undefined,
+  );
+}
+
 // -- Lightbox -----------------------------------------------------------------
 
 // Store the cleanup function for the active lightbox so rapid reopens
@@ -1276,10 +1629,16 @@ let activeLightboxClose: (() => void) | null = null;
  *  document listeners and a revoked blob URL. */
 export function closeActiveLightbox(): void {
   activeLightboxClose?.();
+  imageMenuModule?.closeImageMenu();
 }
 
 /** Open a full-screen lightbox overlay with zoom and pan. */
-export function openImageLightbox(src: string, alt: string, external?: ExternalImageSource): void {
+export function openImageLightbox(
+  src: string,
+  alt: string,
+  external?: ExternalImageSource,
+  gallery?: LightboxGallery,
+): void {
   // Close any existing lightbox (including its document listeners)
   if (activeLightboxClose !== null) {
     activeLightboxClose();
@@ -1299,23 +1658,74 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
   const img = createElement("img", { src, alt });
-  if (external !== undefined) recoverEvictedImage(img, external);
+  // The image on show; a gallery step replaces it (3A-10c).
+  let current: LightboxCurrent = { external, alt };
+  const sourceOf = (c: LightboxCurrent): string | null =>
+    c.external !== undefined && "url" in c.external ? c.external.url : null;
+  // Only a public address opens in the system browser; a server attachment's
+  // address needs the session token, which the browser would not have.
+  const originalOf = (c: LightboxCurrent): string | null => {
+    const url = sourceOf(c);
+    return url !== null && isExternalUrl(url) ? url : null;
+  };
+  if (external !== undefined) {
+    recoverEvictedImage(
+      img,
+      () => current.external ?? { url: "" },
+      undefined,
+      () => current,
+    );
+  }
   // `src` can be the server's thumbnail (P4-08): show it at once, then the
   // full file. A server image shown in full is a memory-cache hit here.
   if (external !== undefined && "url" in external && isServerUrl(external.url)) {
+    const opened = current;
     void fetchImageAsObjectUrl(external.url).then((full) => {
+      // A gallery step since the open owns the picture now.
+      if (current !== opened) return;
       if (full !== null && img.isConnected && img.src !== full) img.src = full;
     });
   }
   imgWrap.appendChild(img);
   overlay.appendChild(imgWrap);
 
-  const closeBtn = createElement("button", {
-    class: "image-lightbox-close",
-    "aria-label": mediaControlsText("lightbox.close"),
-  });
-  closeBtn.appendChild(createIcon("x", 20));
-  overlay.appendChild(closeBtn);
+  // Top-right toolbar: Close, Download and (external images only) Open
+  // original, left to right with Close in the corner.
+  const toolbar = createElement("div", { class: "image-lightbox-toolbar" });
+  const lightboxButton = (
+    cls: string,
+    label: string,
+    icon: "x" | "download" | "external-link",
+  ): HTMLButtonElement => {
+    const btn = createElement("button", {
+      class: cls,
+      type: "button",
+      "aria-label": label,
+      title: label,
+    });
+    btn.appendChild(createIcon(icon, 20));
+    toolbar.appendChild(btn);
+    return btn;
+  };
+  const downloadBtn = lightboxButton(
+    "image-lightbox-action",
+    mediaControlsText("lightbox.download"),
+    "download",
+  );
+  const openBtn =
+    originalOf(current) === null
+      ? null
+      : lightboxButton(
+          "image-lightbox-action",
+          mediaControlsText("lightbox.openOriginal"),
+          "external-link",
+        );
+  const closeBtn = lightboxButton("image-lightbox-close", mediaControlsText("lightbox.close"), "x");
+  // DOM order is the visual order left to right, and so the Tab order.
+  const controls: HTMLButtonElement[] =
+    openBtn === null ? [downloadBtn, closeBtn] : [downloadBtn, openBtn, closeBtn];
+
+  overlay.appendChild(toolbar);
 
   // Zoom & pan state
   let scale = 1;
@@ -1380,6 +1790,8 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   let clickStartY = 0;
 
   img.addEventListener("mousedown", (e) => {
+    // A right-click opens the image menu; only the primary button pans.
+    if (e.button !== 0) return;
     e.preventDefault();
     clickStartX = e.clientX;
     clickStartY = e.clientY;
@@ -1421,6 +1833,69 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
   document.addEventListener("mousemove", onMove, { signal: disposable.signal });
   document.addEventListener("mouseup", onUp, { signal: disposable.signal });
 
+  // One save path for the menu's Save Image and the Download button. It reads
+  // the current image once, at the click, so a step cannot redirect it.
+  const save = (): Promise<void> => {
+    const c = current;
+    const sourceUrl = sourceOf(c);
+    const shown = img.src;
+    if (sourceUrl !== null && isServerUrl(sourceUrl)) return downloadFile(sourceUrl, c.alt);
+    if (sourceUrl === null) return saveImageBytes(shown, "");
+    // The broker's bytes, not img.src: a lightbox opened from a frozen GIF
+    // shows a one-frame preview.
+    return fetchExternalImage({ url: sourceUrl }).then((bytes) =>
+      saveImageBytes(bytes ?? shown, sourceUrl),
+    );
+  };
+  bindImageMenu(
+    {
+      img,
+      get link() {
+        return originalOf(current);
+      },
+      // img may still show the thumbnail or a frozen GIF frame it opened with.
+      get full() {
+        const sourceUrl = sourceOf(current);
+        return sourceUrl === null
+          ? undefined
+          : isServerUrl(sourceUrl)
+            ? () => fetchImageAsObjectUrl(sourceUrl)
+            : () => fetchExternalImage({ url: sourceUrl });
+      },
+      save,
+    },
+    disposable.signal,
+  );
+
+  // aria-disabled, not disabled: a disabled button drops focus and with it the
+  // Tab cycle, which keys off the focused control.
+  let saving = false;
+  downloadBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (saving) return;
+    saving = true;
+    const filename = current.alt;
+    downloadBtn.setAttribute("aria-disabled", "true");
+    save()
+      .catch((err: unknown) => {
+        log.error("Lightbox download failed", { filename, error: String(err) });
+        showToast(messageStatusText("file.downloadFailed", { filename }), "error");
+      })
+      .finally(() => {
+        saving = false;
+        downloadBtn.removeAttribute("aria-disabled");
+      });
+  });
+  openBtn?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const originalUrl = originalOf(current);
+    if (originalUrl === null) return;
+    desktop.urlOpener.open(originalUrl).catch((err: unknown) => {
+      log.warn("Open original image failed", { error: String(err) });
+      showToast(mediaControlsText("lightbox.openFailed"), "error");
+    });
+  });
+
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     close();
@@ -1432,11 +1907,22 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape") close();
-    if (e.key === "Tab") {
-      // Contain focus in the dialog: its close button is the only Tab stop.
+    // The Menu key / Shift+F10 open the image's menu from whichever toolbar
+    // button has focus, centred on the image.
+    if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
       e.preventDefault();
-      closeBtn.focus();
+      img.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     }
+    if (e.key === "Tab") {
+      // Contain focus in the dialog: Tab cycles through its toolbar buttons.
+      e.preventDefault();
+      const at = controls.findIndex((c) => c === document.activeElement);
+      const step = e.shiftKey ? -1 : 1;
+      const next = at === -1 ? (e.shiftKey ? controls.length - 1 : 0) : at + step;
+      controls[(next + controls.length) % controls.length]?.focus();
+    }
+    // Ctrl/Cmd with these keys zooms the whole app, not the image.
+    if (e.ctrlKey || e.metaKey) return;
     if (e.key === "+" || e.key === "=") {
       scale = Math.min(10, scale * 1.3);
       applyTransform();
@@ -1451,7 +1937,37 @@ export function openImageLightbox(src: string, alt: string, external?: ExternalI
 
   activeLightboxClose = close;
   document.body.appendChild(overlay);
-  // The close button is the one Tab stop, so the lightbox holds a single
-  // focusable control whose Escape/Tab behaviour never leaks behind it.
   closeBtn.focus();
+
+  // Two or more images: the arrows, counter and stepping load on demand, so a
+  // single-image open never pays for them.
+  if (gallery !== undefined && gallery.items.length > 1) {
+    const handle: LightboxHandle = {
+      overlay,
+      img,
+      controls,
+      signal: disposable.signal,
+      setCurrent: (next) => {
+        current = next;
+      },
+      resetView: () => {
+        isDragging = false;
+        overlay.classList.remove("dragging");
+        resetZoom();
+      },
+      closeMenu: () => imageMenuModule?.closeImageMenu(),
+      // The menu's own class (image-menu.ts MENU_CLASS): asked of the DOM so it
+      // holds even before the lazy menu module has loaded.
+      isImageMenuOpen: () => document.querySelector(".image-context-menu") !== null,
+      fetchImageAsObjectUrl,
+      thumbnailUrl,
+      close,
+    };
+    import("./lightbox-gallery").then(
+      (m) => {
+        if (!disposable.signal.aborted) m.attachLightboxGallery(gallery, handle);
+      },
+      (err: unknown) => log.warn("Lightbox gallery failed to load", { error: String(err) }),
+    );
+  }
 }

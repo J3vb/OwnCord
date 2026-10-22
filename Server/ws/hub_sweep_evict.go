@@ -8,8 +8,8 @@ import (
 )
 
 // sweepStaleVoiceEvictRevoked is sweepStaleVoiceStates' permission stage: it
-// re-runs the voice join gate (permissions.CanJoinVoice) for every client
-// currently in voice, evicts the ones it now refuses, and reconciles active
+// re-runs the voice stay gate (permissions.CanStayInVoice: the join gate
+// minus the timeout) for every client currently in voice, evicts the ones it now refuses, and reconciles active
 // media source permissions and flags.
 func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	// The whole SFU reconciliation pass shares a budget. An unavailable
@@ -24,7 +24,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	h.mu.RLock()
 	inVoice := make([]*Client, 0, len(h.clients))
 	for _, c := range h.clients {
-		if c.getVoiceChID() != 0 {
+		if c.voice.channel() != 0 {
 			inVoice = append(inVoice, c)
 		}
 	}
@@ -33,7 +33,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		chID := c.getVoiceChID()
+		chID := c.voice.channel()
 		if chID == 0 {
 			continue
 		}
@@ -53,7 +53,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		if allowed {
 			h.clearRevokedVoiceMedia(ctx, c, chID)
 			if h.livekit != nil && mediaCtx.Err() == nil {
-				curChID, joinToken := c.getVoiceState()
+				curChID, joinToken := c.voice.state()
 				if curChID == chID && joinToken != "" {
 					if syncErr := h.trySyncVoiceParticipantPermissions(mediaCtx, c.userID, chID, joinToken); syncErr != nil && !liveKitParticipantMissing(syncErr) {
 						slog.Warn("voice permission reconciliation deferred", "user_id", c.userID, "channel_id", chID, "err", syncErr)
@@ -68,10 +68,10 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 		// channel — never on whatever channel it is in by now.
 		// The tail budget starts once the lock is held, so a wait behind
 		// another membership change cannot spend it.
-		unlockVoice := h.voiceLock(c.userID)
+		txn := h.begin(c.userID)
 		tailCtx, cancelTail := h.sweepTailCtx(ctx)
-		evicted := h.handleVoiceLeaveIfStillIn(tailCtx, c, chID, voiceLeaveReasonRevoked)
-		unlockVoice()
+		evicted := h.handleVoiceLeaveIfStillIn(tailCtx, txn, c, chID, voiceLeaveReasonRevoked)
+		txn.end()
 		cancelTail()
 		if !evicted {
 			continue

@@ -16,6 +16,16 @@ const (
 	ErrCodeUnknownType   = "UNKNOWN_TYPE"
 	ErrCodeSlowMode      = "SLOW_MODE"
 	ErrCodeConflict      = "CONFLICT"
+	// ErrCodeAttachmentsUnavailable refines BAD_REQUEST: a send with no text
+	// whose every attachment was skipped. Nothing was stored.
+	ErrCodeAttachmentsUnavailable = "ATTACHMENTS_UNAVAILABLE"
+	// ErrCodeReactionLimit refines BAD_REQUEST: a new emoji on a message that
+	// already holds 20 different ones. No reaction_update is sent.
+	ErrCodeReactionLimit = "REACTION_LIMIT"
+	// ErrCodePollEnded refines BAD_REQUEST: a poll_vote or poll_end on a poll
+	// that was already ended or whose time ran out. Nothing was written and no
+	// poll_update is sent for the refused command.
+	ErrCodePollEnded = "POLL_ENDED"
 	// ErrCodeAlreadyDeleted is the WS twin of REST's 409 ALREADY_DELETED: the
 	// same "already in the requested end state" refusal, so a client sees one
 	// code for the state rather than FORBIDDEN over WS and ALREADY_DELETED
@@ -51,4 +61,17 @@ const (
 	// for a ready-build permit (P5-S04). It carries retry_after_ms, and the
 	// socket closes 1013 right after; the client redials no sooner.
 	ErrCodeServerBusy = "SERVER_BUSY"
+	// ErrCodeRequestTimeout answers a command whose database work ran past the
+	// per-frame deadline (command_deadline.go, WP 4.1b). It means "not
+	// applied": the command was cut short before its commit, so a retry is
+	// safe. It is not SERVER_BUSY, which the client treats as a refused
+	// connect and redials on.
+	ErrCodeRequestTimeout = "REQUEST_TIMEOUT"
+	// ErrCodeThreadExists answers a thread_create for a message that already
+	// has a thread (WP 6.9c). The payload carries thread_id, the existing
+	// thread, so the client opens it instead of failing.
+	ErrCodeThreadExists = "THREAD_EXISTS"
+	// ErrCodeThreadLocked refines FORBIDDEN: the thread is locked and only a
+	// moderator (MANAGE_MESSAGES) may post, react, pin or change it.
+	ErrCodeThreadLocked = "THREAD_LOCKED"
 )

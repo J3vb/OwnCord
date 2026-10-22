@@ -22,7 +22,7 @@ import (
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
 	clients   map[int64]*Client
-	mu        syncutil.RWMutex
+	mu        syncutil.RankedRW[lockRankHub]
 	db        *db.DB
 	limiter   *auth.RateLimiter
 	broadcast chan broadcastMsg
@@ -61,11 +61,12 @@ type Hub struct {
 
 	restartGate restartNoticeGate // dedupes BroadcastServerRestart
 
-	seq            uint64           // atomic monotonic sequence counter
-	seqMu          syncutil.Mutex   // serializes seq assignment + replay insertion + delivery order
-	replayBuf      *EventRingBuffer // recent broadcast events for reconnection replay
-	broadcastDrops atomic.Uint64    // counts messages dropped due to full broadcast channel
-	queueDrops     queueDropState   // SRV-03 (hub_stats.go)
+	seq            uint64                       // atomic monotonic sequence counter
+	seqMu          syncutil.Ranked[lockRankSeq] // seq assignment + replay + delivery order; order: lock_order.go
+	timeoutView    timeoutViewState             // member_timeouts delivery; lock order in member_timeouts_delivery.go
+	replayBuf      *EventRingBuffer             // recent broadcast events for reconnection replay
+	broadcastDrops atomic.Uint64                // counts messages dropped due to full broadcast channel
+	queueDrops     queueDropState               // SRV-03 (hub_stats.go)
 
 	// latency is the shipped in-process metrics surface (SRE-M1): broadcast
 	// and dispatch-lag histograms, the max seqMu hold, the chat-ack histogram
@@ -101,14 +102,13 @@ type Hub struct {
 	// on the struct-literal hubs internal tests build.
 	runDone chan struct{}
 
-	// life is cancelled when the hub stops (closeStop). Each background sweep
-	// derives its ctx from it, so Stop interrupts a sweep blocked on the DB or
-	// LiveKit, and sweeps counts the ones still running so Run's exit — and
-	// with it Done — waits for them. Made by NewHub.
-	life     context.Context
-	stopLife context.CancelFunc
-	sweeps   sync.WaitGroup
-	gates    contentGates // B5-7 gate reads parked off the dispatch goroutine (hub_content_gate.go)
+	// life is cancelled by closeStop; sweeps and background (ARCH-034: voice-leave
+	// cleanup, joined by JoinBackground, mutex a leaf) run under it. Made by NewHub.
+	life       context.Context
+	stopLife   context.CancelFunc
+	sweeps     sync.WaitGroup
+	background *syncutil.Group
+	gates      contentGates // B5-7 gate reads parked off the dispatch goroutine (hub_content_gate.go)
 
 	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
 	// panicked three times in a minute has unknown state, so production exits
@@ -126,19 +126,17 @@ type Hub struct {
 	connRejects atomic.Uint64 // upgrades refused by the max_ws_connections guardrail (ServeWS)
 	readyGate   chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
 
-	// coldReplayLimit caps persisted-event replay per reconnect. 0 = the
-	// compiled-in default (maxColdReplay). HubOptions.ReplayColdLimit (B3-4).
+	// coldReplayLimit caps persisted-event replay per reconnect; 0 = maxColdReplay (HubOptions.ReplayColdLimit, B3-4).
 	coldReplayLimit int
 
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
 	// goroutines (startSweep): a tick that arrives while the previous sweep
 	// is still running is skipped rather than stacked.
-	sessionSweepInFlight   atomic.Bool
-	voiceSweepInFlight     atomic.Bool
-	voiceReconcileInFlight atomic.Bool
+	sessionSweepInFlight                                         atomic.Bool
+	voiceSweepInFlight, voiceReconcileInFlight, afkSweepInFlight atomic.Bool
 
 	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
-	voiceGrace     voiceGraceState     // RT-8 grace window (voice_grace.go)
+	voiceReg       voiceRegistry       // voice membership lock and grace window (voice_registry.go)
 
 	voiceRejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
 
@@ -146,6 +144,7 @@ type Hub struct {
 	reconnectTierBuf  atomic.Uint64
 	reconnectTierDB   atomic.Uint64
 	reconnectTierFull atomic.Uint64
+	reconnectRingMiss atomic.Uint64 // WP 4.6a: resumes behind the ring (see noteRingMiss); usually ends in db or full
 
 	// Sequence watermark of the last channel-visibility change or content shed
 	// (SRV-03): neither reaches a client via replay, so one resuming from a seq
@@ -173,6 +172,9 @@ type Hub struct {
 	// readers are the hub's remaining read seams (readers.go): snapshot,
 	// visibility, member payloads and dispatch.
 	readers HubReaders
+
+	// privacy is the channel-level private flag source (nil: nothing private).
+	privacy ChannelPrivacy
 
 	// presence is the connection lifecycle's own two writes (readers.go's
 	// PresenceStamper): the status a session comes online as, and the offline
@@ -211,27 +213,28 @@ type Hub struct {
 	// Part B) — see user_locks.go. Always non-nil (initialized in
 	// NewHub, never a setter): a hub built without it would let the
 	// timeout path and the manual voice-mute endpoint interleave.
-	voiceMod    *userLocks
-	voiceMember userLocks // per-user voice membership lock (voiceLock); see user_locks.go
+	voiceMod *userLocks[lockRankVoiceMod]
 
-	settingsMu         syncutil.RWMutex
+	settingsMu         syncutil.RankedRW[lockRankHubCache]
 	settingsName       string
 	settingsMotd       string
 	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
 	settingsLastUpdate time.Time
-	uploadPolicyMu     syncutil.Mutex // orders BroadcastUploadPolicy's saves (hub_settings.go)
+	uploadPolicyMu     syncutil.Ranked[lockRankSerialiser] // orders BroadcastUploadPolicy's saves (hub_settings.go)
 
 	// voiceKeyHolders maps channelID → userID of the current key holder, the connected
 	// participant with the lowest userID in the channel. Protected by keyHolderMu.
-	keyHolderMu     syncutil.RWMutex
+	keyHolderMu     syncutil.RankedRW[lockRankHubCache]
 	voiceKeyHolders map[int64]int64
-
 	// Presence coalescer (QueuePresence): latest presence per user, flush armed. Guarded by presenceMu.
-	presenceMu         syncutil.Mutex
+	presenceMu         syncutil.Ranked[lockRankFeed]
 	presenceQueue      map[int64]pendingPresence
 	presenceFlushArmed bool
 	presenceRepair     presenceRepairState // dropped presence and its repair (hub_presence.go)
 	members            memberCache         // the ready payloads' shared member list (serve_ready_members_cache.go)
+	activity           activityState       // channel_activity coalescer (channel_activity.go)
+	roleRefresh        roleRefreshState    // role-change fan-out worker (role_refresh.go)
+	threadHub          threadHub           // thread service and thread_changed coalescer (thread_coalescer.go); timers guarded by mu
 }
 
 // Run starts the hub's dispatch loop. It blocks until Stop is called.
@@ -246,7 +249,7 @@ func (h *Hub) Run() {
 	}
 	h.running.Store(true)
 	defer h.dispatchExited.Store(true)
-	h.sweeps.Go(h.runRemovedVoiceWatch)
+	h.startSweepWorkers()
 	var panicCount int
 	var lastPanicReset time.Time
 
@@ -315,8 +318,10 @@ func (h *Hub) Run() {
 					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
 					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
-					// RT-3 has its own guard: a slow ListParticipants never suppresses the ghost sweep.
+					// RT-3 and WP 6.10b (AFK moves) each have their own guard: a slow
+					// ListParticipants or move never suppresses the ghost sweep.
 					h.startSweep(&h.voiceReconcileInFlight, h.reconcileVoiceMembership)
+					h.startSweep(&h.afkSweepInFlight, h.sweepAFK)
 				}
 			}
 		}()
@@ -382,8 +387,11 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		// Close all remaining client connections.
 		h.closeClientsForStop()
 
-		// Stop LiveKit only now, so a client leaves voice on the socket drop
-		// while its room is still up instead of reconnecting to a dead one.
+		// RT-8 grace timers stop; a late readPump park arms none.
+		h.voiceReg.close()
+
+		// Stop LiveKit after the sockets, so clients see a close rather than a
+		// dead room. The voice rows stay for the next boot's wipe.
 		h.StopLiveKit()
 
 		// Stop the hub dispatch loop.

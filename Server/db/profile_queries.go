@@ -2,22 +2,26 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// UpdateUserProfile updates the username, avatar, display name and about text
-// for the given user. All four are written unconditionally, so the caller is
+// UpdateUserProfile updates the username, avatar, display name, about text and
+// banner (image id and colour) for the given user. All are written unconditionally, so the caller is
 // responsible for merging a partial PATCH against the current row.
 // Returns ErrNotFound if the user does not exist. Returns an error wrapping
 // a UNIQUE constraint violation if the username is already taken.
-func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about *string) error {
+func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error {
 	result, err := d.q.UpdateUserProfile(ctx, dbgen.UpdateUserProfileParams{
 		Username:    username,
 		Avatar:      avatar,
 		DisplayName: displayName,
 		About:       about,
+		BannerID:    bannerID,
+		BannerColor: bannerColor,
 		ID:          userID,
 	})
 	if err != nil {
@@ -33,9 +37,15 @@ func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username strin
 	return nil
 }
 
+// CustomStatusExpiryLayout is how users.custom_status_expires_at is written:
+// UTC, second precision, the same shape SQLite's strftime renders, so the
+// stored text compares correctly as a string.
+const CustomStatusExpiryLayout = "2006-01-02T15:04:05Z"
+
 // UpdateUserCustomStatus sets (or clears, with nil) the user's custom status
-// line. Kept separate from UpdateUserProfile because it arrives on the
-// presence path and must not overwrite a concurrent profile edit.
+// line with no expiry, clearing any expiry the old text carried. Kept separate
+// from UpdateUserProfile because it arrives on the presence path and must not
+// overwrite a concurrent profile edit.
 func (d *DB) UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error {
 	if err := d.q.UpdateUserCustomStatus(ctx, dbgen.UpdateUserCustomStatusParams{
 		CustomStatus: customStatus,
@@ -46,15 +56,88 @@ func (d *DB) UpdateUserCustomStatus(ctx context.Context, userID int64, customSta
 	return nil
 }
 
-// UpdateUserPresence writes a presence_update's status and custom status line
-// in one transaction, so the two commit together or not at all (P5-O08).
-func (d *DB) UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus *string) error {
+// UpdateUserPresence writes a presence_update's status, custom status line and
+// the line's expiry (nil = none) in one transaction, so they commit together
+// or not at all (P5-O08).
+func (d *DB) UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus, expiresAt *string) error {
 	return d.inWriteTx(ctx, "UpdateUserPresence", func(q *dbgen.Queries) error {
 		if err := q.UpdateUserStatus(ctx, dbgen.UpdateUserStatusParams{Status: status, ID: userID}); err != nil {
 			return err
 		}
-		return q.UpdateUserCustomStatus(ctx, dbgen.UpdateUserCustomStatusParams{CustomStatus: customStatus, ID: userID})
+		return q.UpdateUserCustomStatus(ctx, dbgen.UpdateUserCustomStatusParams{
+			CustomStatus:          customStatus,
+			CustomStatusExpiresAt: expiresAt,
+			ID:                    userID,
+		})
 	})
+}
+
+// ExpiredCustomStatus is one custom status whose expiry has passed.
+type ExpiredCustomStatus struct {
+	UserID    int64
+	ExpiresAt string
+}
+
+// NextCustomStatusExpiry returns the soonest pending custom-status expiry, or
+// ok=false when none is pending.
+func (d *DB) NextCustomStatusExpiry(ctx context.Context) (next string, ok bool, err error) {
+	v, err := d.q.NextCustomStatusExpiry(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("NextCustomStatusExpiry: %w", err)
+	}
+	if v == nil {
+		return "", false, nil
+	}
+	return *v, true, nil
+}
+
+// ListExpiredCustomStatuses returns up to limit statuses whose expiry is at or
+// before now (CustomStatusExpiryLayout text), oldest first.
+func (d *DB) ListExpiredCustomStatuses(ctx context.Context, now string, limit int) ([]ExpiredCustomStatus, error) {
+	rows, err := d.q.ListExpiredCustomStatuses(ctx, dbgen.ListExpiredCustomStatusesParams{
+		CustomStatusExpiresAt: &now,
+		Limit:                 int64(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ListExpiredCustomStatuses: %w", err)
+	}
+	out := make([]ExpiredCustomStatus, 0, len(rows))
+	for _, r := range rows {
+		if r.CustomStatusExpiresAt == nil {
+			continue
+		}
+		out = append(out, ExpiredCustomStatus{UserID: r.ID, ExpiresAt: *r.CustomStatusExpiresAt})
+	}
+	return out, nil
+}
+
+// ClearCustomStatusIfExpiry clears the user's custom status and expiry only
+// while the stored expiry still equals expiresAt, and reports whether it did.
+// A status set after the caller read the row carries a different expiry (or
+// none), so it is left alone.
+func (d *DB) ClearCustomStatusIfExpiry(ctx context.Context, userID int64, expiresAt string) (bool, error) {
+	n, err := d.q.ClearCustomStatusIfExpiry(ctx, dbgen.ClearCustomStatusIfExpiryParams{
+		ID:                    userID,
+		CustomStatusExpiresAt: &expiresAt,
+	})
+	if err != nil {
+		return false, fmt.Errorf("ClearCustomStatusIfExpiry: %w", err)
+	}
+	return n == 1, nil
+}
+
+// IsBannerFile reports whether the attachment is currently some user's profile
+// banner image. Like IsAvatarFileURL it lets an unlinked attachment be served to
+// every authenticated user for exactly as long as a banner_id names it.
+func (d *DB) IsBannerFile(ctx context.Context, fileID string) (bool, error) {
+	n, err := d.q.IsBannerFile(ctx, &fileID)
+	if err != nil {
+		return false, fmt.Errorf("IsBannerFile: %w", err)
+	}
+	return n != 0, nil
 }
 
 // IsAvatarFileURL reports whether url is currently some user's avatar. It is

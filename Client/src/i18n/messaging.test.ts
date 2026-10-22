@@ -45,6 +45,14 @@ describe("B9-19 catalogs", () => {
     expect(messagingText("composer.slowMode", { seconds: "5" })).toBe("Slow mode — 5s");
   });
 
+  it("pluralises the blocked-run header and keeps its toggle and placeholder copy", () => {
+    expect(messagingText("blocked.run", { count: 1 })).toBe("1 blocked message");
+    expect(messagingText("blocked.run", { count: 3 })).toBe("3 blocked messages");
+    expect(messagingText("blocked.show")).toBe("Show");
+    expect(messagingText("blocked.hide")).toBe("Hide");
+    expect(messagingText("blocked.message")).toBe("Blocked message");
+  });
+
   it("keeps the DM sidebar's plural badge titles", () => {
     expect(requestsText("mention.count", { count: 1, n: "1" })).toBe("1 mention");
     expect(requestsText("mention.count", { count: 4, n: "4" })).toBe("4 mentions");

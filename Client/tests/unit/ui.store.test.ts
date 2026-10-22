@@ -44,6 +44,24 @@ describe("ui store", () => {
   });
 
   describe("openSettings / closeSettings", () => {
+    it("every request that names a tab bumps settingsTabSeq, even for the same tab", () => {
+      openSettings("Notifications");
+      const first = uiStore.getState().settingsTabSeq;
+      openSettings("Notifications");
+
+      expect(uiStore.getState().settingsTab).toBe("Notifications");
+      expect(uiStore.getState().settingsTabSeq).toBe((first ?? 0) + 1);
+    });
+
+    it("a request with no tab leaves settingsTabSeq alone", () => {
+      openSettings("Notifications");
+      const before = uiStore.getState().settingsTabSeq;
+      openSettings();
+
+      expect(uiStore.getState().settingsTab).toBeNull();
+      expect(uiStore.getState().settingsTabSeq).toBe(before);
+    });
+
     it("openSettings sets settingsOpen to true", () => {
       openSettings();
       expect(uiStore.getState().settingsOpen).toBe(true);

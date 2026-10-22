@@ -7,6 +7,7 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { voiceText as t } from "../../i18n/voice";
 import type { StreamSample } from "../../features/voice/remoteTracks";
+import type { ShareSenderSample } from "../../features/voice/shareSenderStats";
 
 export type { StreamSample };
 
@@ -37,6 +38,38 @@ export function streamInfo(sample: StreamSample, prev?: StreamSample): StreamInf
     codec: sample.codec?.split("/").pop()?.toUpperCase(),
     loss: total > 0 ? (lost / total) * 100 : undefined,
   };
+}
+
+function limitationText(reason: string | undefined): string | undefined {
+  switch (reason) {
+    case undefined:
+      return undefined;
+    case "none":
+      return t("tile.senderNotLimited");
+    case "cpu":
+      return t("tile.senderLimitedCpu");
+    case "bandwidth":
+      return t("tile.senderLimitedBandwidth");
+    default:
+      return t("tile.senderLimitedOther");
+  }
+}
+
+/** Your own share's second line (M-1): the capture rate, what holds the
+ *  encoder back, and which codec and encoder, e.g. "Capture 120 fps · Limited
+ *  by CPU · VP8 · libvpx". Empty before anything is known; a note where the
+ *  share has no sender stats to read (null: no sample yet). */
+export function senderText(sample: ShareSenderSample | null): string {
+  if (sample === null) return t("tile.senderUnavailable");
+  const parts = [
+    sample.captureFps !== undefined
+      ? t("tile.senderCapture", { fps: String(sample.captureFps) })
+      : undefined,
+    limitationText(sample.limitation),
+    sample.codec?.split("/").pop()?.toUpperCase(),
+    sample.encoder,
+  ];
+  return parts.filter((p): p is string => p !== undefined && p !== "").join(" · ");
 }
 
 /** The chip's text and spoken name, or null when there is nothing to say. */

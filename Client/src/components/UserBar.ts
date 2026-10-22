@@ -12,14 +12,18 @@ import { membersStore } from "@stores/members.store";
 import { voiceStore, isSelfMuted, type VoiceState } from "@stores/voice.store";
 import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
+import { createSelfProfileCard, type SelfProfileCard } from "@components/SelfProfileCard";
 import type { UserStatus } from "@lib/types";
 import {
+  isTimedStatus,
   loadCustomStatus,
   loadUserStatus,
   onUserStatusChange,
   saveCustomStatus,
+  saveStatusTimer,
   saveUserStatus,
 } from "@lib/userStatus";
+import { parseExpiry } from "@components/statusDefs";
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
 import { isRenderableAvatar } from "@components/message-list/avatar";
 import {
@@ -31,6 +35,7 @@ import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
+import { portalText } from "../i18n/portal";
 
 export interface UserBarOptions {
   readonly onDisconnect?: () => void;
@@ -64,6 +69,19 @@ function serverCustomStatus(): string | null {
   return user !== null ? (user.custom_status ?? "") : null;
 }
 
+/**
+ * When your own custom status clears itself. Your member entry first (the
+ * optimistic apply of a "Clear after" and a change from another device write
+ * it, `null` meaning none), then auth_ok's, which is where the server states
+ * it on a fresh connection.
+ */
+function ownCustomStatusExpiresAt(): string | null {
+  const user = authStore.getState().user;
+  const m = user === null ? undefined : membersStore.getState().members.get(user.id);
+  if (m?.customStatusExpiresAt !== undefined) return m.customStatusExpiresAt;
+  return user?.custom_status_expires_at ?? null;
+}
+
 /** Status labels for the line under the username. */
 const STATUS_TEXT = {
   online: "status.online",
@@ -88,22 +106,26 @@ function renderVoiceControls(muteBtn: HTMLButtonElement, deafenBtn: HTMLButtonEl
   const userMuted = isSelfMuted(voice);
   const serverMuted = voice.localServerMuted === true;
   const serverDeafened = voice.localServerDeafened === true;
-  const listenOnly = inCall && voice.listenOnly && !serverMuted;
-  const pttGated = inCall && voice.pttGated === true && !userMuted && !listenOnly;
+  // The AFK channel is listen-only for everyone: the mic reads muted and is locked.
+  const afkLocked = inCall && voice.inAfkChannel === true;
+  const listenOnly = inCall && voice.listenOnly && !serverMuted && !afkLocked;
+  const pttGated = inCall && voice.pttGated === true && !userMuted && !listenOnly && !afkLocked;
 
   muteBtn.classList.toggle("active-ctrl", userMuted);
   muteBtn.classList.toggle("ptt-gated", pttGated);
   muteBtn.classList.toggle("ub-listen-only", listenOnly);
-  swapIcon(muteBtn, userMuted || listenOnly ? "mic-off" : "mic");
-  muteBtn.setAttribute("aria-pressed", String(userMuted));
-  muteBtn.disabled = serverMuted || listenOnly;
+  swapIcon(muteBtn, userMuted || listenOnly || afkLocked ? "mic-off" : "mic");
+  muteBtn.setAttribute("aria-pressed", String(userMuted || afkLocked));
+  muteBtn.disabled = serverMuted || listenOnly || afkLocked;
   muteBtn.title = serverMuted
     ? voiceText("widget.mutedByModerator")
-    : listenOnly
-      ? voiceText("widget.control.listenOnly")
-      : pttGated
-        ? voiceText("widget.control.pttGated")
-        : voiceText(userMuted ? "widget.control.unmute" : "widget.control.mute");
+    : afkLocked
+      ? voiceText("widget.control.afkLocked")
+      : listenOnly
+        ? voiceText("widget.control.listenOnly")
+        : pttGated
+          ? voiceText("widget.control.pttGated")
+          : voiceText(userMuted ? "widget.control.unmute" : "widget.control.mute");
 
   deafenBtn.classList.toggle("active-ctrl", voice.localDeafened);
   swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones");
@@ -124,6 +146,7 @@ function voiceControlsKey(s: VoiceState): string {
     s.localServerDeafened === true,
     s.listenOnly,
     s.pttGated === true,
+    s.inAfkChannel === true,
   ].join("|");
 }
 
@@ -152,6 +175,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   let nameEl: HTMLSpanElement | null = null;
   let statusEl: HTMLSpanElement | null = null;
   let statusPicker: StatusPickerComponent | null = null;
+  let profileCard: SelfProfileCard | null = null;
 
   /** Swap the letter for the uploaded picture, or back again. */
   function renderAvatar(subject: {
@@ -228,6 +252,17 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     avatarTextEl = createElement("span", {});
     avatarEl.appendChild(avatarTextEl);
 
+    // The avatar and name are one real button that opens your own profile
+    // card. The status dot is a sibling laid over the avatar's corner (a
+    // control cannot nest inside a button) and keeps its own dropdown.
+    const self = createElement("div", { class: "ub-self" });
+    const profileBtn = createElement("button", {
+      class: "ub-profile-btn",
+      type: "button",
+      "aria-haspopup": "dialog",
+      "aria-expanded": "false",
+      "data-testid": "user-bar-profile",
+    });
     const info = createElement("div", { class: "ub-info" });
     nameEl = createElement("span", { class: "ub-name", "data-testid": "user-bar-name" });
     statusEl = createElement("span", { class: "ub-status" });
@@ -259,6 +294,54 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       );
     };
 
+    // One save path for the dropdown and the profile card.
+    function applyStatus(status: UserStatus, durationMs?: number): void {
+      saveUserStatus(status);
+      // After the save, which ends any earlier timer: this one reverts the
+      // status to Online when it runs out (lib/statusTimer, started by the page).
+      if (durationMs !== undefined && isTimedStatus(status)) {
+        saveStatusTimer(status, Date.now() + durationMs);
+      }
+      updateFromState();
+      const sender = options?.presenceSender;
+      if (sender !== null && sender !== undefined && canSetStatus()) {
+        // No custom_status field: a plain status change must leave whatever
+        // text the user set standing. Routed through the shared sender
+        // (not ws.send directly) so a frame the presence limiter's window
+        // rejects is retried instead of lost — see @lib/presence.
+        sender.send(status);
+      }
+    }
+    function applyCustomStatus(text: string, expiresInSeconds?: number): void {
+      saveCustomStatus(text);
+      const sender = options?.presenceSender;
+      if (sender !== null && sender !== undefined && canSetStatus()) {
+        sender.send(loadUserStatus(), text, expiresInSeconds);
+      }
+    }
+
+    profileCard = createSelfProfileCard({
+      trigger: profileBtn,
+      canSetStatus,
+      // Our own member entry first: the optimistic apply and the server echo
+      // write it, while authStore.user.custom_status only moves at auth_ok
+      // and on a rollback.
+      getCustomStatus: () => {
+        const id = authStore.getState().user?.id;
+        const m = id === undefined ? undefined : membersStore.getState().members.get(id);
+        const text =
+          m !== undefined ? (m.customStatus ?? "") : (serverCustomStatus() ?? loadCustomStatus());
+        // The server clears an expired status itself; until its broadcast
+        // lands, do not show text whose time has already passed.
+        const expiresAt = parseExpiry(ownCustomStatusExpiresAt());
+        return expiresAt !== null && expiresAt <= Date.now() ? "" : text;
+      },
+      getCustomStatusExpiresAt: ownCustomStatusExpiresAt,
+      onStatusChange: applyStatus,
+      onCustomStatusChange: applyCustomStatus,
+    });
+    disposable.onEvent(profileBtn, "click", () => profileCard?.toggle());
+
     statusPicker = createStatusPicker({
       // Start from the stored selection, not a hardcoded "online" — otherwise
       // this picker and the settings Account tab show different statuses.
@@ -272,25 +355,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       // says there is nothing to show, which is the one case that must render
       // empty for the picker's clear-it flow to work at all.
       currentCustomStatus: serverCustomStatus() ?? loadCustomStatus(),
-      onStatusChange: (status: UserStatus) => {
-        saveUserStatus(status);
-        updateFromState();
-        const sender = options?.presenceSender;
-        if (sender !== null && sender !== undefined && canSetStatus()) {
-          // No custom_status field: a plain status change must leave whatever
-          // text the user set standing. Routed through the shared sender
-          // (not ws.send directly) so a frame the presence limiter's window
-          // rejects is retried instead of lost — see @lib/presence.
-          sender.send(status);
-        }
-      },
-      onCustomStatusChange: (text: string) => {
-        saveCustomStatus(text);
-        const sender = options?.presenceSender;
-        if (sender !== null && sender !== undefined && canSetStatus()) {
-          sender.send(loadUserStatus(), text);
-        }
-      },
+      onStatusChange: applyStatus,
+      onCustomStatusChange: applyCustomStatus,
     });
     statusPicker.mount(statusPickerWrap);
 
@@ -327,7 +393,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       () => updatePickerDisabled(),
     );
 
-    avatarEl.appendChild(statusPickerWrap);
+    appendChildren(profileBtn, avatarEl, info);
+    appendChildren(self, profileBtn, statusPickerWrap);
 
     const buttons = createElement("div", { class: "ub-controls" });
 
@@ -365,10 +432,14 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
 
     if (options?.onDisconnect !== undefined) {
       const disconnectFn = options.onDisconnect;
+      // The portal serves one server, so the button signs out instead.
+      const disconnectLabel = __OWNCORD_WEB__
+        ? portalText("userBar.signOut")
+        : shellText("quickSwitch.label");
       const disconnectBtn = createElement("button", {
         class: "ub-ctrl-btn",
-        title: shellText("quickSwitch.label"),
-        "aria-label": shellText("quickSwitch.label"),
+        title: disconnectLabel,
+        "aria-label": disconnectLabel,
         "data-testid": "disconnect-btn",
       });
       disconnectBtn.appendChild(createIcon("log-out", 18));
@@ -376,7 +447,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       buttons.appendChild(disconnectBtn);
     }
 
-    appendChildren(root, avatarEl, info, buttons);
+    appendChildren(root, self, buttons);
 
     // Initial render
     updateFromState();
@@ -418,6 +489,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   }
 
   function destroy(): void {
+    profileCard?.destroy();
+    profileCard = null;
     statusPicker?.destroy?.();
     statusPicker = null;
     disposable.destroy();

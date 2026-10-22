@@ -1,0 +1,127 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { NativeMicTestEnvelope } from "../../src/platform/contracts/nativeVoice";
+
+const startMicTest = vi.fn();
+const stopMicTest = vi.fn();
+const unsubscribe = vi.fn();
+let handler: ((envelope: NativeMicTestEnvelope) => void) | null = null;
+
+vi.mock("../../src/platform/desktop", () => ({
+  desktop: {
+    nativeVoice: {
+      startMicTest: (...args: unknown[]) => startMicTest(...args) as unknown,
+      stopMicTest: (...args: unknown[]) => stopMicTest(...args) as unknown,
+      onMicTestEvent: (h: typeof handler) => {
+        handler = h;
+        return unsubscribe;
+      },
+    },
+  },
+}));
+
+import { PROBE_WINDOW_MS, probeNativeMicrophone } from "../../src/features/voice/native/micProbe";
+
+const level = (test: number): void =>
+  handler?.({ test, event: { type: "inputLevel", rms: 0.1, open: true } });
+
+describe("native microphone probe", () => {
+  let ac: AbortController;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    ac = new AbortController();
+    handler = null;
+    startMicTest.mockReset().mockResolvedValue(4);
+    stopMicTest.mockReset().mockResolvedValue(undefined);
+    unsubscribe.mockReset();
+  });
+  afterEach(() => {
+    ac.abort();
+    vi.useRealTimers();
+  });
+
+  it("opens a capture-only test on the chosen device and passes when levels arrive", async () => {
+    const probe = probeNativeMicrophone("alsa:usb", ac.signal);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(startMicTest).toHaveBeenCalledWith(
+      expect.objectContaining({ input: "alsa:usb", output: "", monitor: true, outputGain: 0 }),
+    );
+    level(4);
+    level(9);
+    await vi.advanceTimersByTimeAsync(PROBE_WINDOW_MS);
+    await expect(probe).resolves.toBe("levels");
+    expect(stopMicTest).toHaveBeenCalledWith(4);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports silence when the device opened but only another test reported", async () => {
+    const probe = probeNativeMicrophone("", ac.signal);
+    await vi.advanceTimersByTimeAsync(1);
+    level(9);
+    await vi.advanceTimersByTimeAsync(PROBE_WINDOW_MS);
+    await expect(probe).resolves.toBe("silent");
+    expect(stopMicTest).toHaveBeenCalledWith(4);
+  });
+
+  it("counts a level that arrived before the start resolved", async () => {
+    let resolveStart!: (id: number) => void;
+    startMicTest.mockReturnValue(
+      new Promise<number>((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const probe = probeNativeMicrophone("", ac.signal);
+    await vi.advanceTimersByTimeAsync(1);
+    level(4);
+    resolveStart(4);
+    await vi.advanceTimersByTimeAsync(PROBE_WINDOW_MS);
+    await expect(probe).resolves.toBe("levels");
+  });
+
+  it("reports a call that holds the capture", async () => {
+    startMicTest.mockRejectedValue(new Error("mic test unavailable during a call"));
+    await expect(probeNativeMicrophone("", ac.signal)).resolves.toBe("in-call");
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects when the device cannot open", async () => {
+    startMicTest.mockRejectedValue(new Error("no input device"));
+    await expect(probeNativeMicrophone("", ac.signal)).rejects.toThrow("no input device");
+    expect(stopMicTest).not.toHaveBeenCalled();
+  });
+
+  it("stops the capture when cancelled during the window", async () => {
+    const probe = probeNativeMicrophone("", ac.signal);
+    const settled = probe.catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(PROBE_WINDOW_MS / 2);
+    ac.abort(new DOMException("cancelled", "AbortError"));
+    expect(await settled).toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(stopMicTest).toHaveBeenCalledWith(4);
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops a capture still opening when cancelled, as soon as it resolves", async () => {
+    let resolveStart!: (id: number) => void;
+    startMicTest.mockReturnValue(
+      new Promise<number>((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    const probe = probeNativeMicrophone("", ac.signal).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(1);
+    ac.abort(new DOMException("closed", "AbortError"));
+    expect(await probe).toMatchObject({ name: "AbortError" });
+    expect(stopMicTest).not.toHaveBeenCalled();
+    resolveStart(8);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(stopMicTest).toHaveBeenCalledWith(8);
+  });
+
+  it("does not start when already cancelled", async () => {
+    ac.abort(new DOMException("cancelled", "AbortError"));
+    await expect(probeNativeMicrophone("", ac.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(startMicTest).not.toHaveBeenCalled();
+  });
+});

@@ -187,7 +187,7 @@ func TestReconcileOrphanedVoiceMutes_CrashBetweenLiftAndFinalize(t *testing.T) {
 // after the storage reconciliation, say — fails here by name, which is the
 // point: B5-4 and B5-11 add a row to steps() and to this list together.
 func TestMaintenance_StepOrderIsPinned(t *testing.T) {
-	m := newMaintenance(slog.Default(), &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), nil)
+	m := newMaintenanceWithStorage(t, &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), nil)
 	got := make([]string, 0, len(m.steps()))
 	for _, step := range m.steps() {
 		got = append(got, step.job+": "+step.failLog)
@@ -216,7 +216,7 @@ func TestMaintenance_StepOrderIsPinned(t *testing.T) {
 // services at all) is a no-op pass, not a failed one: every service-backed
 // step skips itself, so the circuit breaker never trips on a wiring gap.
 func TestMaintenance_TickWithNoServicesSucceeds(t *testing.T) {
-	m := newMaintenance(slog.Default(), &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), nil)
+	m := newMaintenanceWithStorage(t, &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), nil)
 	if failed := m.tick(context.Background()); failed {
 		t.Fatal("tick reported failure with every service-backed step skipped")
 	}
@@ -266,7 +266,7 @@ func TestMaintenance_TickReturnsBytesTheOrphanSweepFreed(t *testing.T) {
 		t.Fatalf("counter before the tick = %d, want 6", used)
 	}
 
-	m := newMaintenance(slog.Default(), cfg, database, svc)
+	m := newMaintenanceWithStorage(t, cfg, database, svc)
 	if failed := m.tick(ctx); failed {
 		t.Fatal("tick reported a failed step")
 	}
@@ -286,7 +286,7 @@ func TestMaintenance_TickReturnsBytesTheOrphanSweepFreed(t *testing.T) {
 	if used, _ := fresh.Uploads.StorageUsed(ctx, 10); used != 9 {
 		t.Fatalf("phantom charge before the restart recount = %d, want 9 (kept, high side)", used)
 	}
-	if err := newMaintenance(slog.Default(), cfg, database, fresh).recountStorage(ctx); err != nil {
+	if err := newMaintenanceWithStorage(t, cfg, database, fresh).recountStorage(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if used, _ := fresh.Uploads.StorageUsed(ctx, 10); used != 0 {
@@ -336,7 +336,7 @@ func TestMaintenance_ReportRetentionZeroDaysNeverPrunes(t *testing.T) {
 		Moderation: config.ModerationConfig{ReportRetentionDays: 0},
 	}
 	svc := service.New(database, auth.NewRateLimiter())
-	m := newMaintenance(slog.Default(), cfg, database, svc)
+	m := newMaintenanceWithStorage(t, cfg, database, svc)
 	if failed := m.tick(ctx); failed {
 		t.Fatal("tick reported a failed step")
 	}
@@ -383,7 +383,7 @@ func TestMaintenance_ReportRetentionPrunesOnlyAgedContent(t *testing.T) {
 		Moderation: config.ModerationConfig{ReportRetentionDays: 180},
 	}
 	svc := service.New(database, auth.NewRateLimiter())
-	m := newMaintenance(slog.Default(), cfg, database, svc)
+	m := newMaintenanceWithStorage(t, cfg, database, svc)
 	if failed := m.tick(ctx); failed {
 		t.Fatal("tick reported a failed step")
 	}
@@ -449,7 +449,7 @@ func TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation(t *testing.T) {
 	svc := service.New(database, auth.NewRateLimiter())
 	svc.Push.SetVAPIDKey(priv)
 
-	m := newMaintenance(slog.Default(), cfg, database, svc)
+	m := newMaintenanceWithStorage(t, cfg, database, svc)
 	stopMaintenance := make(chan struct{})
 	close(stopMaintenance)
 	maintenanceDone := make(chan struct{})
@@ -469,7 +469,7 @@ func TestMaintenance_StartUpSweepRemovesRowsAfterAKeyRotation(t *testing.T) {
 // outcome lands on the attention panel under its job name.
 func TestMaintenance_TickRecordsJobHealth(t *testing.T) {
 	attention := service.NewAttentionService(service.AttentionThresholds{}, service.AttentionSources{})
-	m := newMaintenance(slog.Default(), &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), &service.Services{Attention: attention})
+	m := newMaintenanceWithStorage(t, &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), &service.Services{Attention: attention})
 	m.tick(context.Background())
 	attention.Evaluate(context.Background(), time.Now())
 	status := map[string]string{}
@@ -489,7 +489,7 @@ func TestMaintenance_TickRecordsJobHealth(t *testing.T) {
 // steps stay unknown until then.
 func TestMaintenance_StartupRunsRecordJobHealth(t *testing.T) {
 	attention := service.NewAttentionService(service.AttentionThresholds{}, service.AttentionSources{})
-	m := newMaintenance(slog.Default(), &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), &service.Services{Attention: attention})
+	m := newMaintenanceWithStorage(t, &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}, newMaintenanceTestDB(t), &service.Services{Attention: attention})
 	stop, done := make(chan struct{}), make(chan struct{})
 	close(stop) // the start-up runs still happen before the loop sees it
 	m.loop(context.Background(), stop, done)
@@ -507,4 +507,91 @@ func TestMaintenance_StartupRunsRecordJobHealth(t *testing.T) {
 	if got, ok := status["job:Message retention"]; ok && got != service.AttentionStatusUnknown {
 		t.Errorf("tick-only job status = %q before any tick, want unknown or unlisted", got)
 	}
+}
+
+// TestMaintenance_LoopResumesAnErasureOnWake pins WP 4.1a's hand-off: an
+// erasure that outran its inline budget asks the loop to resume it, and the
+// loop does so without waiting for the 15-minute tick. The lock stage is run
+// directly, so the account is exactly as Erase leaves it.
+func TestMaintenance_LoopResumesAnErasureOnWake(t *testing.T) {
+	database := newMaintenanceTestDB(t)
+	ctx := t.Context()
+	if _, err := database.CreateUser(ctx, "wake-owner", "x", 1); err != nil {
+		t.Fatal(err)
+	}
+	member, err := database.CreateUser(ctx, "wake-member", "x", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}
+	svc := service.New(database, auth.NewRateLimiter())
+	m := newMaintenanceWithStorage(t, cfg, database, svc)
+	stop, done := make(chan struct{}), make(chan struct{})
+	go m.loop(ctx, stop, done)
+	defer func() {
+		close(stop)
+		<-done
+	}()
+	// Let the loop's start-up runs finish and block in the select, so the
+	// resume below can only come from the wake.
+	time.Sleep(300 * time.Millisecond)
+
+	if _, err := database.EraseAccountLock(ctx, member, true); err != nil {
+		t.Fatalf("EraseAccountLock: %v", err)
+	}
+	svc.Erasure.RequestResume()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		jobs, err := database.ListUnfinishedErasureJobs(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(jobs) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the loop did not resume the queued erasure after a wake: %+v", jobs)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if u, err := database.GetUserByID(ctx, member); err != nil || u != nil {
+		t.Errorf("the account after the resume = %v, %v; want erased", u, err)
+	}
+}
+
+// A resumed erasure drain ends when the loop is told to stop: the queued job
+// is left for the next start.
+func TestMaintenance_StopEndsAResumedErasureDrain(t *testing.T) {
+	database := newMaintenanceTestDB(t)
+	ctx := t.Context()
+	if _, err := database.CreateUser(ctx, "stop-owner", "x", 1); err != nil {
+		t.Fatal(err)
+	}
+	member, err := database.CreateUser(ctx, "stop-member", "x", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{Upload: config.UploadConfig{StorageDir: t.TempDir(), MaxSizeMB: 1}}
+	m := newMaintenanceWithStorage(t, cfg, database, service.New(database, auth.NewRateLimiter()))
+	stopCtx, stop := context.WithCancel(ctx)
+	m.erasureCtx = stopCtx
+	if _, err := database.EraseAccountLock(ctx, member, true); err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	if err := m.resumeErasure(ctx); err == nil {
+		t.Error("resumeErasure after stop = nil, want the drain cut short")
+	}
+	jobs, err := database.ListUnfinishedErasureJobs(ctx)
+	if err != nil || len(jobs) != 1 || jobs[0].State != db.ErasureStateQueued {
+		t.Errorf("jobs after the stopped resume = %+v, %v; want the one queued job kept", jobs, err)
+	}
+}
+
+// newMaintenanceWithStorage is newMaintenance with the one upload store opened
+// from cfg, as the app's erasure-markers stage opens it (WP 5.6g).
+func newMaintenanceWithStorage(t *testing.T, cfg *config.Config, database *db.DB, svc *service.Services) *maintenance {
+	t.Helper()
+	return newMaintenance(slog.Default(), cfg, database, svc, OpenStorage(slog.Default(), cfg))
 }

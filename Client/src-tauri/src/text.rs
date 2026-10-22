@@ -37,19 +37,37 @@ pub fn tray_tooltip(count: u32) -> String {
     }
 }
 
-// --- Startup failure dialog (not Linux) ------------------------------------
+// --- Message notifications -----------------------------------------------
 
-// The startup failure dialog is `#[cfg(not(target_os = "linux"))]` in lib.rs
-// (Linux reports a fatal startup error to the console instead), so these are
-// unused there outside the tests.
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+/// The click action on a message or call notification (macOS, Linux).
+#[cfg_attr(windows, allow(dead_code))]
+pub const NOTIFICATION_OPEN: &str = "Open";
+
+// --- Global shortcuts (Wayland portal) -------------------------------------
+
+/// What the desktop's shortcut dialog and settings list for each shortcut.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const SHORTCUT_PTT: &str = "Push to Talk";
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const SHORTCUT_MUTE: &str = "Toggle Mute";
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const SHORTCUT_DEAFEN: &str = "Toggle Deafen";
+
+// --- Close to tray notice --------------------------------------------------
+
+/// Shown once, the first time the X button hides the window to the tray.
+pub const TRAY_NOTICE_TITLE: &str = "OwnCord";
+pub const TRAY_NOTICE_BODY: &str = "OwnCord is still running in the tray";
+
+// --- Startup failure dialog ------------------------------------------------
+
+// On Linux lib.rs shows it only when a display is set; a headless run keeps
+// the stderr line alone.
 pub const STARTUP_DIALOG_TITLE: &str = "OwnCord failed to start";
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const STARTUP_DIALOG_BODY: &str =
     "The application encountered a startup error and cannot continue.\n\n{error}";
 
 /// The startup dialog body with the raw error detail appended verbatim.
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub fn startup_dialog_body(error: &str) -> String {
     STARTUP_DIALOG_BODY.replace("{error}", error)
 }
@@ -97,6 +115,26 @@ pub fn cert_mismatch(host: &str, stored: &str, current: &str) -> String {
          Use accept_cert_fingerprint to trust the new certificate."
     )
 }
+
+// --- Linux .deb update (LP-14b) -----------------------------------------
+//
+// The two `update …` strings are stable codes: the renderer matches their
+// prefix (`platform/desktop/updater.ts`) to choose its own catalog text, so do
+// not reword them. The polkit prompt's message is read by polkit from
+// `packaging/linux/com.owncord.client.update.policy`, not from here.
+
+/// pkexec reported the password prompt was dismissed (exit 126).
+#[cfg(target_os = "linux")]
+pub const UPDATE_CANCELLED: &str = "update cancelled";
+/// pkexec could not authorize the update, or no polkit agent is running (127).
+#[cfg(target_os = "linux")]
+pub const UPDATE_NOT_AUTHORIZED: &str = "update not authorized";
+/// The root helper refused the package (exit 10 to 13).
+#[cfg(target_os = "linux")]
+pub const UPDATE_PACKAGE_CHECK_FAILED: &str = "download/install failed: package check failed";
+/// apt-get, or anything else on the install path, failed.
+#[cfg(target_os = "linux")]
+pub const UPDATE_PACKAGE_MANAGER_FAILED: &str = "download/install failed: package manager failed";
 
 #[cfg(test)]
 mod tests {
@@ -160,6 +198,8 @@ mod tests {
             ("ws_proxy.rs", include_str!("ws_proxy.rs")),
             ("http_proxy.rs", include_str!("http_proxy.rs")),
             ("http_pool.rs", include_str!("http_pool.rs")),
+            ("shortcuts.rs", include_str!("shortcuts.rs")),
+            ("portal_shortcuts.rs", include_str!("portal_shortcuts.rs")),
         ];
         let quoted = [
             TRAY_SHOW_HIDE,
@@ -173,6 +213,9 @@ mod tests {
             TRAY_DEAFEN,
             TRAY_QUIT,
             TRAY_TOOLTIP,
+            SHORTCUT_PTT,
+            SHORTCUT_MUTE,
+            SHORTCUT_DEAFEN,
             STARTUP_DIALOG_TITLE,
             CERT_UNVERIFIED,
         ]

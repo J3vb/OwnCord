@@ -48,6 +48,7 @@ const mockNativeAudioDevices = vi.hoisted(() =>
 
 vi.mock("../../src/features/voice/native/devices", () => ({
   nativeAudioDevices: (kind: string) => mockNativeAudioDevices(kind),
+  onNativeDevicesChanged: () => null,
 }));
 
 import { DeviceManager, isMicPolicyGated } from "../../src/lib/deviceManager";

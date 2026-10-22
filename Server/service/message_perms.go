@@ -21,18 +21,19 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 		return nil, fmt.Errorf("%w: failed to get role: %w", ErrInternal, err)
 	}
 
-	var overrides map[int64]db.ChannelOverride
-	if !permissions.HasAdmin(role.Permissions) {
+	grants := permissions.MemberGrants{Perms: role.Perms}
+	if !permissions.HasAdmin(role.Perms) {
 		var overrideErr error
-		overrides, overrideErr = s.st.GetChannelOverridesFor(ctx, role.ID, userID)
+		grants, overrideErr = s.st.GetMemberGrants(ctx, userID)
 		if overrideErr != nil {
 			return nil, fmt.Errorf("%w: failed to fetch channel overrides: %w", ErrInternal, overrideErr)
 		}
+		grants.Perms = role.Perms
 	}
 
 	// Single visibility predicate shared with REST ListVisibleChannels and the
 	// ws ready payload, so no site can drift.
-	visibleIDs := s.perms.Checker().VisibleChannelIDs(role.Permissions, channelRefs(channels), permOverrides(overrides))
+	visibleIDs := s.perms.Checker().VisibleChannelIDs(grants, channelRefs(channels))
 	var ids []int64
 	for i := range channels {
 		if visibleIDs[channels[i].ID] {
@@ -140,6 +141,24 @@ func (s *MessageService) ChannelIsDM(ctx context.Context, channelID int64) (bool
 // SendMessage, EditMessage, CanPost, and typing via ChannelService — asks that
 // one predicate, so none can drift (S-01, S-12).
 func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, ch *db.Channel) error {
+	if err := s.checkSendVerdict(ctx, userID, ch); err != nil {
+		return err
+	}
+	// A forum holds no messages: its posts are threads, and a post is created
+	// through the forum post path (checkSendVerdict alone). Refused after the
+	// permission verdict so a caller who cannot read the forum learns nothing
+	// about its type; the messages trigger (migration 075) is the
+	// schema-level backstop.
+	if ch.Type == db.ForumTypeName {
+		return fmt.Errorf("%w: a forum holds no messages, post in one of its posts", ErrBadRequest)
+	}
+	return nil
+}
+
+// checkSendVerdict is CanSendMessage over ch for userID, mapped onto the
+// service's error kinds: the part of checkSendPermission a forum post create
+// shares with a send.
+func (s *MessageService) checkSendVerdict(ctx context.Context, userID int64, ch *db.Channel) error {
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
 	if err != nil {
 		return err
@@ -165,7 +184,8 @@ func channelSubject(ctx context.Context, st Store, perms *PermissionService, use
 	if err != nil {
 		return permissions.Subject{}, fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
 	}
-	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived}
+	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, Archived: ch.Archived,
+		AuthorityID: ch.Thread.ParentID, ThreadLocked: ch.Thread.Locked}
 	if ch.Type != "dm" {
 		return sub, nil
 	}
@@ -175,7 +195,7 @@ func channelSubject(ctx context.Context, st Store, perms *PermissionService, use
 	}
 	sub.DMParticipant = ok
 	if ok && withBlock {
-		switch blkErr := RequireDMNotBlocked(ctx, st, userID, ch.ID); {
+		switch blkErr := RequireDMReachable(ctx, storeDMReader{st}, userID, ch.ID); {
 		case errors.Is(blkErr, ErrBlocked):
 			sub.DMBlocked = true
 		case blkErr != nil:
@@ -193,7 +213,7 @@ func denial(err error) error {
 	case err == nil:
 		return nil
 	case errors.Is(err, permissions.ErrBlocked):
-		return fmt.Errorf("%w: user is blocked", ErrBlocked)
+		return fmt.Errorf("%w: %s", ErrBlocked, dmUnreachableText)
 	case errors.Is(err, permissions.ErrTimedOut):
 		return fmt.Errorf("%w: user is timed out", ErrTimedOut)
 	default:
@@ -243,7 +263,7 @@ func readSubject(ctx context.Context, st Store, perms *PermissionService, userID
 	if err != nil {
 		sub = permissions.Subject{}
 	}
-	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, NSFW: ch.NSFW}
+	sub.Channel = permissions.ChannelRef{ID: ch.ID, Type: ch.Type, NSFW: ch.NSFW, AuthorityID: ch.Thread.ParentID}
 	switch {
 	case ch.Type == "dm":
 		ok, dmErr := st.IsDMParticipant(ctx, userID, ch.ID)
@@ -299,17 +319,45 @@ func requireChannelWritable(ch *db.Channel) error {
 	return fmt.Errorf("%w: channel is archived", ErrForbidden)
 }
 
-// DMBlockReader is the narrow read set the block check needs — Store
-// satisfies it, and so do consumer-side seams (ws.DispatchReader) that
-// carry just these three reads.
+// dmUnreachableText is the one sentence every refused 1:1 interaction carries,
+// whatever the cause, so the sender cannot tell the causes apart.
+const dmUnreachableText = "you can't message this user"
+
+// DMBlockReader is the narrow read set the 1:1 reachability check needs —
+// Store satisfies it, and so do consumer-side seams (ws.DispatchReader) that
+// carry just these four reads.
 type DMBlockReader interface {
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)
 	IsEitherBlocked(ctx context.Context, a, b int64) (bool, error)
+	DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 }
 
-// RequireDMNotBlocked reports ErrBlocked when userID and the other participant
-// of DM channelID have blocked each other in either direction.
+// DMPrivacyReader is the one privacy read the 1:1 reachability check adds.
+// It is deliberately not part of Store (the Store method ratchet): *db.DB
+// satisfies it, and storeDMReader reaches it from a Store.
+type DMPrivacyReader interface {
+	DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error)
+}
+
+// storeDMReader lets a Store stand in as a DMBlockReader. A Store that does not
+// also satisfy DMPrivacyReader (a test double) fails closed with ErrInternal
+// rather than skipping the check.
+type storeDMReader struct{ Store }
+
+func (r storeDMReader) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
+	p, ok := r.Store.(DMPrivacyReader)
+	if !ok {
+		return false, errors.New("store has no DM privacy read")
+	}
+	return p.DMRefusesSender(ctx, recipientID, senderID)
+}
+
+// RequireDMReachable reports ErrBlocked when userID cannot reach the other
+// participant of DM channelID: the two have blocked each other in either
+// direction, or the other participant has turned off direct messages from
+// members and does not trust userID (trusted_senders, any source). Both causes
+// return the same error.
 //
 // It is the single block-check implementation, called from every DM
 // interaction sink — send, edit, react, pin, typing and call rings
@@ -328,6 +376,9 @@ type DMBlockReader interface {
 // reactions, ErrNotFound for pins so a foreign DM's existence stays hidden)
 // and flattening them here would change client-visible status codes.
 //
+// A failed read of the recipient's privacy state fails closed as ErrInternal,
+// never ErrBlocked, so it cannot read as a refusal by the other party.
+//
 // A GetDMRecipient lookup failure or a DM with no other participant is treated
 // as "not blocked", carrying over the posture the send path has always had
 // rather than newly failing closed on all five sinks at once.
@@ -338,7 +389,10 @@ type DMBlockReader interface {
 // them reading different conversations under the same name. Blocks are instead
 // enforced when the group is *created* (DMService.CreateGroupDM), where the
 // question "may these two be in a room together" still has one answer.
-func RequireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
+//
+// When the recipient lookup fails or the DM has no other participant, both the
+// block check and the privacy read are skipped.
+func RequireDMReachable(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
 	isGroup, gErr := st.IsGroupDM(ctx, channelID)
 	if gErr == nil && isGroup {
 		return nil
@@ -353,7 +407,14 @@ func RequireDMNotBlocked(ctx context.Context, st DMBlockReader, userID, channelI
 		return fmt.Errorf("%w: failed to check block status: %w", ErrInternal, blkErr)
 	}
 	if blocked {
-		return fmt.Errorf("%w: user is blocked", ErrBlocked)
+		return fmt.Errorf("%w: %s", ErrBlocked, dmUnreachableText)
+	}
+	refused, refErr := st.DMRefusesSender(ctx, recipient.ID, userID)
+	if refErr != nil {
+		return fmt.Errorf("%w: failed to check DM privacy: %w", ErrInternal, refErr)
+	}
+	if refused {
+		return fmt.Errorf("%w: %s", ErrBlocked, dmUnreachableText)
 	}
 	return nil
 }

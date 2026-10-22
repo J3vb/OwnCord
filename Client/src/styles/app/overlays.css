@@ -26,6 +26,10 @@
     background 0.1s ease,
     color 0.1s ease;
 }
+.context-menu-item[aria-checked="true"]::after {
+  content: "\2713" / "";
+  margin-left: auto;
+}
 .context-menu-item:hover {
   background: var(--accent);
   color: var(--on-accent);
@@ -42,6 +46,31 @@
   cursor: default;
 }
 .context-menu-item.disabled:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
+/* A row of emoji buttons (the message menu's quick reactions). */
+.context-menu-group {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0;
+}
+.context-menu-item--content {
+  flex: 1;
+  justify-content: center;
+  width: auto;
+  font-size: var(--font-size-lg, 18px);
+  line-height: 1;
+}
+.context-menu-item--content img {
+  width: 20px;
+  height: 20px;
+}
+.context-menu-item[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.context-menu-item[aria-disabled="true"]:hover {
   background: transparent;
   color: var(--text-muted);
 }
@@ -79,6 +108,37 @@
    positioned .context-menu__submenu flyout to this row. */
 .context-menu-item--submenu {
   position: relative;
+}
+/* A row that owns a sibling flyout (createSubmenuTrigger) shows a chevron;
+   the label stays the row's only text. */
+.context-menu-item--flyout::after {
+  content: "\203A" / "";
+  margin-left: auto;
+  color: var(--text-muted);
+}
+.context-menu-item--flyout:hover::after {
+  color: inherit;
+}
+/* The chosen radio row (notification level) shows a check after its label;
+   screen readers already get it from aria-checked. */
+.context-menu-item[role="menuitemradio"][aria-checked="true"]::after {
+  content: "\2713" / "";
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--accent, currentColor);
+}
+/* "Muted until 15:30" under an Unmute row: the label above, the line below. */
+.context-menu-item:has(> .context-menu-item__detail) {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+.context-menu-item__detail {
+  font-size: var(--font-size-xs, 11px);
+  color: var(--text-muted);
+}
+.context-menu-item:hover .context-menu-item__detail {
+  color: inherit;
 }
 /* A moderator-imposed mute reads differently from a self-mute. */
 .vu-muted.vu-server-muted {
@@ -122,6 +182,14 @@
 .context-menu__item--danger:hover {
   background: var(--danger-fill);
   color: var(--on-fill);
+}
+.context-menu__item[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.context-menu__item[aria-disabled="true"]:hover {
+  background: transparent;
+  color: var(--text-normal);
 }
 .context-menu__item--pending {
   opacity: 0.7;
@@ -524,6 +592,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.search-result-content--blocked {
+  font-style: italic;
+}
+
+.search-hit {
+  background: color-mix(in srgb, var(--text-warning) 35%, transparent);
+  color: var(--text-normal);
+  border-radius: 2px;
+}
+.search-overlay-retry {
+  margin: 0 20px 8px;
+}
 
 /* ── Report dialog (B9-10) ── */
 .report-dialog .report-note {
@@ -606,4 +686,111 @@
 .whats-new-actions {
   display: flex;
   gap: var(--space-2);
+}
+
+/* Masked-link warning: the real address, wrapped so a long one stays in the box. */
+.masked-link-url {
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+  max-height: 8em;
+  overflow-y: auto;
+}
+.masked-link-trust {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* Poll composer (WP 6.9b). */
+.modal.poll-composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  width: min(520px, 94vw);
+}
+.poll-composer .modal-header {
+  flex: none;
+  padding-bottom: 12px;
+}
+.poll-composer .modal-footer {
+  flex: none;
+}
+.poll-composer .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.poll-field,
+.poll-answer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.poll-answers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.poll-composer .form-input {
+  flex: 1;
+  min-width: 0;
+}
+.poll-counter {
+  min-width: 44px;
+  text-align: right;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.poll-counter.over {
+  color: var(--text-danger);
+  font-weight: 700;
+}
+.poll-emoji-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+}
+.poll-add {
+  align-self: flex-start;
+}
+.poll-options {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.poll-options select {
+  flex: 0 0 auto;
+}
+.poll-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.poll-note {
+  min-height: 1.2em;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.poll-note.is-error {
+  color: var(--text-danger);
+}
+.poll-emoji-pop {
+  position: absolute;
+  right: 16px;
+  bottom: 70px;
+  z-index: 5;
 }

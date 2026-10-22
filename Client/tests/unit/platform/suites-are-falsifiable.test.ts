@@ -89,7 +89,7 @@ import type { NativeControl as WindowControlNativeControl } from "./window.suite
 
 const failEveryTest = { expectEveryTestToFail: true };
 
-describeCredentialStoreSuite(async () => {
+const nullCredentialStore = async () => {
   const subject = {
     save: async () => undefined,
     load: async () => undefined,
@@ -102,9 +102,10 @@ describeCredentialStoreSuite(async () => {
     unavailable: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeCredentialStoreSuite(nullCredentialStore, failEveryTest);
 
-describeIdentityStoreSuite(async () => {
+const nullIdentityStore = async () => {
   const subject = {
     saveKey: async () => undefined,
     loadKey: async () => undefined,
@@ -118,7 +119,8 @@ describeIdentityStoreSuite(async () => {
     unavailable: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeIdentityStoreSuite(nullIdentityStore, failEveryTest);
 
 describeSettingsStoreSuite(async () => {
   const subject = {
@@ -193,7 +195,7 @@ describePushToTalkSuite(async () => {
   return { subject, native };
 }, failEveryTest);
 
-describeDeepLinksSuite(async () => {
+const nullDeepLinks = async () => {
   const subject = {
     init: async () => undefined,
   } as unknown as DeepLinks;
@@ -201,7 +203,8 @@ describeDeepLinksSuite(async () => {
     coldStartLinks: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeDeepLinksSuite(nullDeepLinks, failEveryTest);
 
 describeHttpClientSuite(async () => {
   const subject = {
@@ -215,7 +218,7 @@ describeHttpClientSuite(async () => {
   return { subject, native };
 }, failEveryTest);
 
-describeSocketTransportSuite(async () => {
+const nullSocketTransport = async () => {
   const subject = {
     connect: async () => undefined,
     disconnect: async () => undefined,
@@ -242,9 +245,10 @@ describeSocketTransportSuite(async () => {
     accepted: () => [],
   };
   return { transport, subject, native };
-}, failEveryTest);
+};
+describeSocketTransportSuite(nullSocketTransport, failEveryTest);
 
-describePendingMessagesSuite(async () => {
+const nullPendingMessages = async () => {
   const subject = {
     load: async () => undefined,
     save: async () => undefined,
@@ -258,9 +262,10 @@ describePendingMessagesSuite(async () => {
     deleted: () => [],
   };
   return { subject, native };
-}, failEveryTest);
+};
+describePendingMessagesSuite(nullPendingMessages, failEveryTest);
 
-describeFileSaverSuite(async () => {
+const nullFileSaver = async () => {
   const subject = {
     pickSaveLocation: async () => undefined,
     writeFile: async () => undefined,
@@ -272,7 +277,8 @@ describeFileSaverSuite(async () => {
     writeFailsWith: () => undefined,
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeFileSaverSuite(nullFileSaver, failEveryTest);
 
 describeLiveKitProxiesSuite(async () => {
   const subject = {
@@ -287,7 +293,7 @@ describeLiveKitProxiesSuite(async () => {
   return { subject, native };
 }, failEveryTest);
 
-describeNotifierSuite(async () => {
+const nullNotifier = async () => {
   const subject = {
     permissionGranted: async () => undefined,
     requestPermission: async () => undefined,
@@ -314,7 +320,8 @@ describeNotifierSuite(async () => {
     callsCleared: () => [],
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeNotifierSuite(nullNotifier, failEveryTest);
 
 describeWindowControlSuite(async () => {
   const subject = {
@@ -324,6 +331,7 @@ describeWindowControlSuite(async () => {
     outerSize: async () => undefined,
     center: async () => undefined,
     setFullscreen: async () => undefined,
+    setZoom: async () => undefined,
   } as unknown as WindowControl;
   const native: WindowControlNativeControl = {
     maximized: () => undefined,
@@ -333,6 +341,8 @@ describeWindowControlSuite(async () => {
     centered: () => 0,
     fullscreenCalls: () => [],
     labelledFullscreenCalls: () => [],
+    zoomCalls: () => [],
+    zoomFailWith: () => undefined,
   };
   return { subject, native };
 }, failEveryTest);
@@ -404,6 +414,10 @@ describeGlobalShortcutsSuite(async () => {
     start: async () => undefined,
     supported: async () => true,
     setKeys: async () => undefined,
+    status: async () => undefined,
+    bindPortal: async () => undefined,
+    configurePortal: async () => undefined,
+    onStatusChange: () => () => undefined,
     onShortcut: () => () => undefined,
   } as unknown as GlobalShortcuts;
   const native: GlobalShortcutsNativeControl = {
@@ -411,6 +425,11 @@ describeGlobalShortcutsSuite(async () => {
     commands: () => [],
     keyCodes: () => undefined,
     supported: true,
+    statusIs: () => undefined,
+    rejects: () => undefined,
+    lastArgs: () => undefined,
+    emitsStatus: async () => undefined,
+    statusListeners: () => 1,
   };
   return { subject, native };
 }, failEveryTest);
@@ -434,6 +453,13 @@ describeNativeVoiceSuite(async () => {
     stopCamera: async () => undefined,
     startCameraPreview: async () => undefined,
     stopCameraPreview: async () => undefined,
+    startMicTest: async () => undefined,
+    updateMicTest: async () => undefined,
+    stopMicTest: async () => undefined,
+    onMicTestEvent: () => () => undefined,
+    watchDevices: () => () => undefined,
+    playSound: async () => undefined,
+    stopSound: async () => undefined,
     onEvent: () => () => undefined,
   } as unknown as NativeVoice;
   const native: NativeVoiceNativeControl = {
@@ -442,14 +468,29 @@ describeNativeVoiceSuite(async () => {
     hasCameras: () => undefined,
     hasDevices: () => undefined,
     sharesScreenAs: () => undefined,
+    reportsVideoCodecs: () => undefined,
+    failsVideoCodecs: () => undefined,
+    refusesCameraChange: () => undefined,
     refusesScreenChange: () => undefined,
+    setsScreenQualityAs: () => undefined,
+    rejectsScreenQuality: () => undefined,
+    refusesScreenAudio: () => undefined,
+    startsMicTestAs: () => undefined,
+    refusesMicTest: () => undefined,
+    reportsStats: () => undefined,
+    failsStats: () => undefined,
+    refusesDeviceWatch: () => undefined,
+    startsSoundAs: () => undefined,
+    failsSound: () => undefined,
     commands: () => [],
     emits: async () => undefined,
+    emitsDevices: async () => undefined,
+    emitsMicTest: async () => undefined,
   };
   return { subject, native };
 }, failEveryTest);
 
-describeExternalContentSuite(async () => {
+const nullExternalContent = async () => {
   const subject = {
     preview: async () => undefined,
     image: async () => undefined,
@@ -461,4 +502,25 @@ describeExternalContentSuite(async () => {
     asked: () => [],
   };
   return { subject, native };
-}, failEveryTest);
+};
+describeExternalContentSuite(nullExternalContent, failEveryTest);
+
+// The browser bindings (6.13c) run four suites with a declared capability
+// difference: a token-only credential store, an identity store for which a
+// missing store is a failure, a transport whose host keeps certificate trust
+// itself, and a memory-only draft store. Each variant swaps some cases for
+// others, so each must fail against the null subject too. The http and
+// settings bindings run their suites unchanged, which the runs above already
+// cover.
+describeCredentialStoreSuite(nullCredentialStore, { ...failEveryTest, savedPasswords: false });
+describeIdentityStoreSuite(nullIdentityStore, { ...failEveryTest, missingStoreIsError: true });
+describeSocketTransportSuite(nullSocketTransport, { ...failEveryTest, certificates: false });
+describePendingMessagesSuite(nullPendingMessages, { ...failEveryTest, memoryOnly: true });
+
+// 6.13d: the browser's notifier has no window to flash, its file save is a
+// download with no dialog or path, its deep links are `?invite=` only, and its
+// external-content broker refuses every request.
+describeNotifierSuite(nullNotifier, { ...failEveryTest, windowAttention: false });
+describeFileSaverSuite(nullFileSaver, { ...failEveryTest, nativeDialog: false });
+describeDeepLinksSuite(nullDeepLinks, { ...failEveryTest, messageLinks: false });
+describeExternalContentSuite(nullExternalContent, { ...failEveryTest, broker: false });

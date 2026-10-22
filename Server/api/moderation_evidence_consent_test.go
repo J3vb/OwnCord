@@ -80,8 +80,8 @@ func newEvidenceFixture(t *testing.T, targetType string, labelled bool) *evidenc
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, authorID, []string{up.ID}); err != nil || n != 1 {
-		t.Fatalf("LinkAttachmentsToMessage = (%d, %v), want (1, nil)", n, err)
+	if n, err := database.LinkAttachmentsToMessage(ctx, msgID, authorID, []string{up.ID}); err != nil || len(n) != 1 {
+		t.Fatalf("LinkAttachmentsToMessage = (%d, %v), want (1, nil)", len(n), err)
 	}
 
 	reporterID := mintUser(t, database, "ev-reporter")
@@ -131,8 +131,8 @@ func (f *evidenceFixture) relabel(nsfw bool) {
 	if err != nil || ch == nil {
 		f.t.Fatalf("GetChannel: %v", err)
 	}
-	if _, err := f.svc.Channels.AdminUpdateChannel(ctx, 0, ch, service.AdminChannelUpdate{
-		Name: ch.Name, Topic: ch.Topic, Category: ch.Category, Position: ch.Position, NSFW: nsfw,
+	if _, _, err := f.svc.Channels.AdminUpdateChannel(ctx, 0, ch, service.AdminChannelUpdate{
+		Name: ch.Name, Topic: ch.Topic, CategoryID: ch.CategoryID, Position: ch.Position, NSFW: nsfw,
 	}, nil); err != nil {
 		f.t.Fatalf("AdminUpdateChannel(nsfw=%v): %v", nsfw, err)
 	}

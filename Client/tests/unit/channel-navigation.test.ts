@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   navigateToChannel,
   onChannelReselect,
@@ -11,6 +11,9 @@ import type { Channel } from "../../src/stores/channels.store";
 import { dmStore, setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
+import { voiceStore } from "../../src/stores/voice.store";
+import { muteChannel, invalidateMuteCache } from "../../src/lib/channel-mutes";
+import { setHideMutedChannels } from "../../src/lib/hide-muted-channels";
 
 function makeChannel(overrides: Partial<Channel> = {}): Channel {
   return {
@@ -26,6 +29,7 @@ function makeChannel(overrides: Partial<Channel> = {}): Channel {
     slowMode: 0,
     topic: "",
     nsfw: false,
+    isPrivate: false,
     voiceMaxUsers: 0,
     voiceMaxVideo: 0,
     ...overrides,
@@ -50,7 +54,12 @@ function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
 
 describe("channel-navigation", () => {
   beforeEach(() => {
-    channelsStore.setState(() => ({ channels: new Map(), activeChannelId: null, roles: [] }));
+    channelsStore.setState(() => ({
+      channels: new Map(),
+      activeChannelId: null,
+      roles: [],
+      categories: [],
+    }));
     dmStore.setState(() => ({ channels: [] }));
     uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeDmUserId: null }));
   });
@@ -207,6 +216,7 @@ describe("channel-navigation", () => {
   describe("stepChannel", () => {
     function seed(channels: Channel[], active: number | null = null): void {
       channelsStore.setState(() => ({
+        categories: [],
         channels: new Map(channels.map((c) => [c.id, c])),
         activeChannelId: active,
         roles: [],
@@ -247,6 +257,64 @@ describe("channel-navigation", () => {
       expect(channelsStore.getState().activeChannelId).toBe(3);
     });
 
+    it("the unread step reaches into a collapsed category; the plain step does not", () => {
+      seed([
+        makeChannel({ id: 1, name: "a", position: 0, category: "Open" }),
+        makeChannel({ id: 2, name: "b", position: 0, category: "Shut", unreadCount: 2 }),
+        makeChannel({ id: 3, name: "c", position: 1, category: "Shut" }),
+      ]);
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(["Shut"]) }));
+
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1);
+      expect(channelsStore.getState().activeChannelId).toBe(1);
+      stepChannel(1, true);
+      expect(channelsStore.getState().activeChannelId).toBe(2);
+    });
+
+    describe("muted channels", () => {
+      beforeEach(() => {
+        localStorage.clear();
+        invalidateMuteCache();
+      });
+
+      it("the unread step skips a muted channel without a mention", () => {
+        seed([
+          makeChannel({ id: 1, name: "a", position: 0, unreadCount: 3 }),
+          makeChannel({ id: 2, name: "b", position: 1, unreadCount: 1 }),
+        ]);
+        muteChannel(1);
+        stepChannel(1, true);
+        expect(channelsStore.getState().activeChannelId).toBe(2);
+        // Nothing else is a stop: the muted one is passed over, not revisited.
+        stepChannel(1, true);
+        expect(channelsStore.getState().activeChannelId).toBe(2);
+      });
+
+      it("the unread step starts from a muted active channel", () => {
+        seed([
+          makeChannel({ id: 1, name: "a", position: 0, unreadCount: 1 }),
+          makeChannel({ id: 2, name: "m", position: 1, unreadCount: 2 }),
+          makeChannel({ id: 3, name: "b", position: 2, unreadCount: 1 }),
+        ]);
+        muteChannel(2);
+        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+        stepChannel(1, true);
+        expect(channelsStore.getState().activeChannelId).toBe(3);
+      });
+
+      it("a muted channel with a mention still counts", () => {
+        seed([
+          makeChannel({ id: 1, name: "a", position: 0, unreadCount: 3, mentionCount: 1 }),
+          makeChannel({ id: 2, name: "b", position: 1 }),
+        ]);
+        muteChannel(1);
+        stepChannel(1, true);
+        expect(channelsStore.getState().activeChannelId).toBe(1);
+      });
+    });
+
     it("is a no-op when nothing is unread", () => {
       seed([
         makeChannel({ id: 1, name: "a", position: 0 }),
@@ -272,6 +340,82 @@ describe("channel-navigation", () => {
       expect(channelsStore.getState().activeChannelId).toBe(1);
       stepChannel(1, true);
       expect(channelsStore.getState().activeChannelId).toBe(1);
+    });
+
+    describe("Hide Muted Channels", () => {
+      const three = (): Channel[] => [
+        makeChannel({ id: 1, name: "a", position: 0 }),
+        makeChannel({ id: 2, name: "b", position: 1 }),
+        makeChannel({ id: 3, name: "c", position: 2 }),
+      ];
+      const active = (): number | null => channelsStore.getState().activeChannelId;
+
+      beforeEach(() => {
+        localStorage.clear();
+        invalidateMuteCache();
+        voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
+      });
+
+      afterEach(() => {
+        localStorage.clear();
+        invalidateMuteCache();
+      });
+
+      it("Alt+Arrow skips a muted channel while the preference is on, both ways", () => {
+        seed(three(), 1);
+        muteChannel(2);
+        setHideMutedChannels(true);
+
+        stepChannel(1);
+        expect(active()).toBe(3);
+        stepChannel(-1);
+        expect(active()).toBe(1);
+      });
+
+      it("steps through a muted channel while the preference is off", () => {
+        seed(three(), 1);
+        muteChannel(2);
+
+        stepChannel(1);
+        expect(active()).toBe(2);
+      });
+
+      it("the unread step skips a muted unread channel but reaches a muted mention", () => {
+        seed(
+          [
+            makeChannel({ id: 1, name: "a", position: 0 }),
+            makeChannel({ id: 2, name: "b", position: 1, unreadCount: 4 }),
+            makeChannel({ id: 3, name: "c", position: 2, unreadCount: 2, mentionCount: 1 }),
+          ],
+          1,
+        );
+        muteChannel(2);
+        muteChannel(3);
+        setHideMutedChannels(true);
+
+        stepChannel(1, true);
+        expect(active()).toBe(3);
+      });
+
+      it("a muted active channel still steps onward from where it is", () => {
+        seed(three(), 2);
+        muteChannel(2);
+        setHideMutedChannels(true);
+
+        stepChannel(1);
+        expect(active()).toBe(3);
+        stepChannel(-1);
+        expect(active()).toBe(1);
+      });
+
+      it("is a no-op when every channel is hidden and none is active", () => {
+        seed(three());
+        for (const id of [1, 2, 3]) muteChannel(id);
+        setHideMutedChannels(true);
+
+        stepChannel(1);
+        expect(active()).toBeNull();
+      });
     });
 
     it("is a no-op with no channels", () => {

@@ -24,7 +24,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/service"
-	"github.com/J3vb/OwnCord/Server/ws"
 )
 
 // closeStepBudget bounds each close step on its own, except the HTTP drain —
@@ -160,19 +159,40 @@ func (a *App) startDatabase() error {
 	}
 	a.database = database
 	a.onClose("database", func(context.Context) error { return database.Close() })
+	// Periodic PRAGMA optimize (SV-06). Registered after the database close, so
+	// the reverse walk stops and joins it first.
+	optCtx, optCancel := context.WithCancel(a.bgCtx)
+	optDone := database.StartOptimizer(optCtx, 0)
+	a.onClose("db-optimize", func(ctx context.Context) error {
+		optCancel()
+		select {
+		case <-optDone:
+		case <-ctx.Done():
+			a.log.Warn("database optimizer did not stop before the close budget ran out")
+		}
+		return nil
+	})
 	return nil
 }
 
 // startMigrate runs the migrations and clears state left by a previous run.
 func (a *App) startMigrate() error {
-	return initDatabase(a.log, a.cfg, a.database, a.deps.Restart)
+	if err := initDatabase(a.log, a.cfg, a.database, a.deps.Restart); err != nil {
+		return err
+	}
+	a.restoreOutcome = recordRestoreResult(a.log, a.cfg.Database.Path, a.database)
+	return nil
 }
 
 // startErasureMarkers opens the deletion-marker file and replays it against
 // the migrated database before anything can serve (B4-10): what a restored
 // backup brought back is erased again here. Its close releases the file.
 func (a *App) startErasureMarkers() error {
-	markers, err := openMarkers(context.Background(), a.log, a.cfg, a.database)
+	// The one upload store (WP 5.6g): opened here because the replay below
+	// removes erased accounts' files, and handed on to StartRuntime so the
+	// router and the maintenance loop share the instance.
+	a.storage = OpenStorage(a.log, a.cfg)
+	markers, err := openMarkers(context.Background(), a.log, a.cfg, a.database, a.storage)
 	if err != nil {
 		return err
 	}
@@ -244,11 +264,13 @@ func pushDispatchEnabled(cfg *config.Config) bool {
 // return from Run and a supervised livekit-server process is never orphaned
 // (OC-0027).
 func (a *App) startHub() error {
-	rt, err := StartRuntime(a.cfg, a.database, a.plugins)
+	rt, err := StartRuntime(a.cfg, a.database, a.plugins,
+		RuntimeInputs{Version: a.deps.Version, TOTPKey: a.totpKey, Storage: a.storage})
 	if err != nil {
 		return err
 	}
 	a.runtime = rt
+	a.startLimiterCleanup(rt.Limiter)
 	a.hub = a.runtime.Hub
 	a.afterHubStart(rt.Services)
 	// The emergency restart path must stop LiveKit even when an earlier
@@ -285,6 +307,13 @@ func (a *App) startHub() error {
 	a.onClose("hub", func(ctx context.Context) error {
 		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())
 	})
+	// Windowed metrics sampler (WP 4.3a). Registered right after "hub", so the
+	// reverse walk joins it BEFORE the hub stops and the database closes: it
+	// reads hub atomics and both pools' Stats(), and must not outlive either.
+	// It runs on bgCtx and exits on ctx.Done().
+	if rt.MetricsWindows != nil {
+		a.startMetricsWindows(rt.MetricsWindows)
+	}
 	// Mention badges' single bounded worker (P5-O05). Its close step flushes
 	// every queued job and joins the loop, and the reverse walk runs it before
 	// the database closes because it registers here, after "database" but
@@ -302,33 +331,14 @@ func (a *App) startHub() error {
 			return nil
 		})
 	}
+	a.startBackgroundJobs(rt)
 	return nil
 }
 
-// dispatchHub is the slice of *ws.Hub the hub close step drives.
-type dispatchHub interface {
-	GracefulStopContext(ctx context.Context, reason ws.RestartReason)
-	Done() <-chan struct{}
-}
-
-// stopHub is the hub close step: GracefulStopContext, then wait for the
-// dispatch goroutine itself to exit. GracefulStopContext only signals the
-// loop, and on an early start failure the goroutine StartRuntime spawned may
-// not even have been scheduled yet — without the join, Run returned with the
-// loop still alive and Close went on to release what it reads.
-func stopHub(ctx context.Context, hub dispatchHub, reason ws.RestartReason) error {
-	hub.GracefulStopContext(ctx, reason)
-	select {
-	case <-hub.Done():
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("hub dispatch did not exit: %w", ctx.Err())
-	}
-}
-
 // startRouter mounts the HTTP handler over the already-built collaborators.
-// Its close step stops the router's own background goroutine (rate-limiter
-// cleanup); the hub it serves is stopped by the step above.
+// It owns no goroutine (the limiter cleanup is startLimiterCleanup's, WP
+// 5.6g), but keeps its close step for NewRouter's cleanup hook; the hub it
+// serves is stopped by the step above.
 func (a *App) startRouter() error {
 	a.runtime.SetupToken = rand.Text()
 	router, cleanup := api.NewRouter(a.cfg, a.database, a.deps.Version, a.deps.LogBuf, a.plugins, a.runtime)
@@ -378,7 +388,7 @@ func (a *App) startAuditWriter() error {
 // in-flight tick (which can hold the writer — scheduled backups run VACUUM
 // INTO) is not still using the database when the handle closes.
 func (a *App) startMaintenance() error {
-	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services)
+	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services, a.runtime.Storage)
 	a.onClose("maintenance", func(context.Context) error {
 		stop()
 		return nil

@@ -13,7 +13,7 @@ const {
   captured,
 } = vi.hoisted(() => {
   const captured: {
-    onSelect: ((emoji: string) => void) | null;
+    onSelect: ((emoji: string, select?: { keepOpen: boolean }) => void) | null;
     onClose: (() => void) | null;
   } = { onSelect: null, onClose: null };
   const createMockEmojiPickerElement = () => document.createElement("div");
@@ -27,7 +27,7 @@ const {
     mockListCustomEmoji: vi.fn((): Array<{ id: number; shortcode: string; url: string }> => []),
     mockCreateEmojiPicker: vi.fn(
       (opts: {
-        onSelect: (e: string) => void;
+        onSelect: (e: string, select?: { keepOpen: boolean }) => void;
         onClose: () => void;
         customEmoji?: readonly { id: number; shortcode: string; url: string }[];
       }) => {
@@ -76,6 +76,13 @@ vi.mock("@stores/emoji.store", () => ({
 
 import { createReactionController } from "../../src/pages/main-page/ReactionController";
 import type { ReactionControllerOptions } from "../../src/pages/main-page/ReactionController";
+import { setConnectionStatus, uiStore } from "@stores/ui.store";
+
+// Reaction controls lock while the socket is down (3A-3); these tests react online.
+beforeEach(() => {
+  setConnectionStatus("connected");
+  uiStore.flush();
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -117,6 +124,65 @@ describe("createReactionController", () => {
   afterEach(() => {
     document.querySelectorAll(".reaction-picker-wrap").forEach((el) => el.remove());
     document.querySelectorAll("[data-testid]").forEach((el) => el.remove());
+  });
+
+  it("refuses to send while the socket is down, even from an open picker (3A-3)", () => {
+    mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
+    const opts = makeOpts();
+    const ctrl = createReactionController(opts);
+    setConnectionStatus("reconnecting");
+    uiStore.flush();
+
+    ctrl.handleReaction(1, "👍");
+
+    expect(opts.ws.send).not.toHaveBeenCalled();
+    expect(opts.showError).toHaveBeenCalledWith("Reconnecting…");
+  });
+
+  describe("20 different emoji per message (3A-12)", () => {
+    const full = Array.from({ length: 20 }, (_, i) => ({ emoji: `e${i}`, me: false }));
+
+    it("refuses a new emoji on a message that already has 20, without sending", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: full }]);
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+
+      ctrl.handleReaction(1, "👍");
+
+      expect(opts.ws.send).not.toHaveBeenCalled();
+      expect(opts.reactionsLimiter.tryConsume).not.toHaveBeenCalled();
+      expect(opts.showError).toHaveBeenCalledWith(
+        "This message has reached the reaction limit (20)",
+      );
+    });
+
+    it("still toggles an emoji that is already on the message", () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: full }]);
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+
+      ctrl.handleReaction(1, "e3");
+
+      expect(opts.ws.send).toHaveBeenCalledWith({
+        type: "reaction_add",
+        payload: { message_id: 1, emoji: "e3" },
+      });
+    });
+
+    it("does not open the picker on a full message", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: full }]);
+      const btn = document.createElement("button");
+      btn.setAttribute("data-testid", "msg-react-1");
+      document.body.appendChild(btn);
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+
+      ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
+
+      expect(mockCreateEmojiPicker).not.toHaveBeenCalled();
+      expect(opts.showError).toHaveBeenCalledOnce();
+    });
   });
 
   describe("direct emoji toggle", () => {
@@ -187,16 +253,17 @@ describe("createReactionController", () => {
   });
 
   describe("emoji picker (empty emoji)", () => {
-    it("does nothing when react button is not in DOM", () => {
+    it("does nothing when react button is not in DOM", async () => {
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
 
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
 
       expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
     });
 
-    it("passes the server's custom emoji to the picker (OC-0149)", () => {
+    it("passes the server's custom emoji to the picker (OC-0149)", async () => {
       const customEmoji = [{ id: 1, shortcode: "partyparrot", url: "/api/v1/emoji/1/image" }];
       mockListCustomEmoji.mockReturnValue(customEmoji);
 
@@ -218,11 +285,12 @@ describe("createReactionController", () => {
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
 
       expect(mockCreateEmojiPicker).toHaveBeenCalledWith(expect.objectContaining({ customEmoji }));
     });
 
-    it("opens picker when react button exists", () => {
+    it("opens picker when react button exists", async () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
@@ -242,11 +310,12 @@ describe("createReactionController", () => {
       const ctrl = createReactionController(opts);
 
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
 
       expect(document.querySelector(".reaction-picker-wrap")).not.toBeNull();
     });
 
-    it("opens the new message's picker when React is clicked on a second message (F12)", () => {
+    it("opens the new message's picker when React is clicked on a second message (F12)", async () => {
       const btnA = document.createElement("button");
       btnA.setAttribute("data-testid", "msg-react-1");
       btnA.getBoundingClientRect = vi.fn(() => ({
@@ -278,11 +347,13 @@ describe("createReactionController", () => {
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
       expect(document.querySelector(".reaction-picker-wrap")).not.toBeNull();
 
       // Clicking React on a DIFFERENT message must move the picker there, not
       // just close the first and swallow the click.
       ctrl.handleReaction(2, "");
+      await vi.dynamicImportSettled();
 
       // The picker was rebuilt for message 2 (selecting sends to message 2).
       mockGetChannelMessages.mockReturnValue([{ id: 2, reactions: [] }]);
@@ -293,7 +364,7 @@ describe("createReactionController", () => {
       });
     });
 
-    it("closes existing picker on second open", () => {
+    it("closes existing picker on second open", async () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
@@ -313,14 +384,63 @@ describe("createReactionController", () => {
       const ctrl = createReactionController(opts);
 
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
       expect(document.querySelector(".reaction-picker-wrap")).not.toBeNull();
 
       // Open again — should close
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
       expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
     });
 
-    it("sends reaction when emoji is selected from picker", () => {
+    function addReactButton(id: number): HTMLElement {
+      const btn = document.createElement("button");
+      btn.setAttribute("data-testid", `msg-react-${id}`);
+      document.body.appendChild(btn);
+      return btn;
+    }
+
+    it("a second click on the same message's react button while the code loads cancels", async () => {
+      const btn = addReactButton(1);
+      const ctrl = createReactionController(makeOpts());
+
+      ctrl.handleReaction(1, "");
+      ctrl.handleReaction(1, ""); // before the picker's code arrives
+      await vi.dynamicImportSettled();
+      expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
+      expect(mockCreateEmojiPicker).not.toHaveBeenCalled();
+      btn.remove();
+    });
+
+    it("a click on a different message while the code loads replaces the pending open", async () => {
+      const btn1 = addReactButton(1);
+      const btn2 = addReactButton(2);
+      const ctrl = createReactionController(makeOpts());
+
+      ctrl.handleReaction(1, "");
+      ctrl.handleReaction(2, "");
+      await vi.dynamicImportSettled();
+      const wraps = document.querySelectorAll(".reaction-picker-wrap");
+      expect(wraps).toHaveLength(1);
+      expect(wraps[0]!.getAttribute("data-message-id")).toBe("2");
+      expect(mockCreateEmojiPicker).toHaveBeenCalledOnce();
+      ctrl.destroy();
+      btn1.remove();
+      btn2.remove();
+    });
+
+    it("destroy during the load mounts nothing", async () => {
+      const btn = addReactButton(1);
+      const ctrl = createReactionController(makeOpts());
+
+      ctrl.handleReaction(1, "");
+      ctrl.destroy();
+      await vi.dynamicImportSettled();
+      expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
+      btn.remove();
+    });
+
+    it("sends reaction when emoji is selected from picker", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
@@ -340,6 +460,7 @@ describe("createReactionController", () => {
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
 
       // Simulate emoji selection from picker
       expect(captured.onSelect).not.toBeNull();
@@ -353,7 +474,35 @@ describe("createReactionController", () => {
       expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
     });
 
-    it("calls pickerDestroy when emoji is selected", () => {
+    it("a Shift-pick sends the reaction and keeps the picker open", async () => {
+      mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
+      const btn = document.createElement("button");
+      btn.setAttribute("data-testid", "msg-react-1");
+      document.body.appendChild(btn);
+
+      const opts = makeOpts();
+      const ctrl = createReactionController(opts);
+      ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
+
+      captured.onSelect!("🎉", { keepOpen: true });
+      captured.onSelect!("🔥", { keepOpen: true });
+
+      expect(opts.ws.send).toHaveBeenCalledTimes(2);
+      expect(opts.ws.send).toHaveBeenLastCalledWith({
+        type: "reaction_add",
+        payload: { message_id: 1, emoji: "🔥" },
+      });
+      expect(document.querySelector(".reaction-picker-wrap")).not.toBeNull();
+      expect(mockEmojiPickerDestroy).not.toHaveBeenCalled();
+
+      // A plain pick still closes it.
+      captured.onSelect!("👍");
+      expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
+      expect(mockEmojiPickerDestroy).toHaveBeenCalledOnce();
+    });
+
+    it("calls pickerDestroy when emoji is selected", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1, reactions: [] }]);
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
@@ -373,13 +522,14 @@ describe("createReactionController", () => {
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
 
       captured.onSelect!("🎉");
 
       expect(mockEmojiPickerDestroy).toHaveBeenCalledOnce();
     });
 
-    it("calls pickerDestroy when onClose fires", () => {
+    it("calls pickerDestroy when onClose fires", async () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
@@ -398,6 +548,7 @@ describe("createReactionController", () => {
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
 
       captured.onClose!();
 
@@ -405,7 +556,7 @@ describe("createReactionController", () => {
       expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
     });
 
-    it("calls pickerDestroy when toggling picker closed", () => {
+    it("calls pickerDestroy when toggling picker closed", async () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
@@ -424,16 +575,18 @@ describe("createReactionController", () => {
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
       expect(mockEmojiPickerDestroy).not.toHaveBeenCalled();
 
       // Toggle close
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
       expect(mockEmojiPickerDestroy).toHaveBeenCalledOnce();
     });
   });
 
   describe("destroy", () => {
-    it("removes open picker and calls pickerDestroy", () => {
+    it("removes open picker and calls pickerDestroy", async () => {
       const btn = document.createElement("button");
       btn.setAttribute("data-testid", "msg-react-1");
       btn.getBoundingClientRect = vi.fn(() => ({
@@ -452,6 +605,7 @@ describe("createReactionController", () => {
       const opts = makeOpts();
       const ctrl = createReactionController(opts);
       ctrl.handleReaction(1, "");
+      await vi.dynamicImportSettled();
       expect(document.querySelector(".reaction-picker-wrap")).not.toBeNull();
 
       ctrl.destroy();

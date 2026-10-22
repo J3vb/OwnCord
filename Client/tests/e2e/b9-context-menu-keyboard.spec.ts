@@ -18,7 +18,6 @@ import {
   MOCK_CHANNELS_WITH_CATEGORIES,
   MOCK_MEMBERS_MULTI_ROLE,
   MOCK_VOICE_STATE,
-  navigateToMainPage,
   navigateToMainPageReady,
 } from "./helpers";
 
@@ -161,10 +160,6 @@ async function openMenuWithKeyboard(page: Page, row: Locator): Promise<void> {
   await page.keyboard.press("Shift+F10");
 }
 
-function menuItems(page: Page, className: string): Locator {
-  return page.locator(`.${className} [role="menuitem"]`);
-}
-
 test.describe("context menus are keyboard-operable (A11Y-01)", () => {
   test.beforeEach(async ({ page }) => {
     await mockSession(page);
@@ -185,20 +180,20 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
     const menu = page.locator(".context-menu").first();
     await expect(menu).toBeVisible({ timeout: 3_000 });
 
-    // Focus moved into the menu, onto a real focusable menuitem. The Change
-    // Role trigger's text includes its nested submenu rows, so match on it.
+    // Focus moved into the menu, onto a real focusable menuitem: Profile, the
+    // first row.
     await expect(menu.locator("[role='menuitem']:focus")).toHaveCount(1);
-    await expect(menu.locator("[role='menuitem']:focus")).toContainText("Change Role");
+    await expect(menu.locator("[role='menuitem']:focus")).toHaveText("Profile");
 
     // ArrowDown steps to the next row.
     await page.keyboard.press("ArrowDown");
-    await expect(menu.locator("[role='menuitem']:focus")).toHaveText("Force Logout");
+    await expect(menu.locator("[role='menuitem']:focus")).toHaveText("Mention");
 
     // Home/End jump to the edges.
     await page.keyboard.press("End");
     await expect(menu.locator("[role='menuitem']:focus")).toHaveText("Block");
     await page.keyboard.press("Home");
-    await expect(menu.locator("[role='menuitem']:focus")).toContainText("Change Role");
+    await expect(menu.locator("[role='menuitem']:focus")).toHaveText("Profile");
 
     // Enter on the row is the same two-click block confirm a mouse gets.
     await page.keyboard.press("End");
@@ -214,10 +209,27 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
     await page.keyboard.press("Shift+F10");
 
     const menu = page.locator(".context-menu").first();
-    await expect(menu.locator("[role='menuitem']:focus")).toContainText("Change Role");
+    const focused = menu.locator("[role='menuitem']:focus");
+    // The menu opens on Profile. moderator1 is in voice, so the voice rows sit
+    // between Call and Change Role.
+    await expect(focused).toHaveText("Profile");
+    for (const label of [
+      "Mention",
+      "Message",
+      "Call",
+      "Server Mute",
+      "Server Deafen",
+      "Disconnect",
+      "Change Role",
+    ]) {
+      await page.keyboard.press("ArrowDown");
+      // oxlint-disable-next-line no-await-in-loop -- each step must land before the next
+      await expect(focused).toContainText(label);
+    }
     await page.keyboard.press("ArrowRight");
 
-    const sub = menu.locator(".context-menu__submenu");
+    const roleItem = menu.locator(".context-menu__item", { hasText: "Change Role" });
+    const sub = roleItem.locator(".context-menu__submenu");
     await expect(sub.locator("[role='menuitem']:focus")).toHaveText("admin");
     // Arrows move within the submenu; step down and back to prove it, then
     // pick admin (the target's current role is moderator, so member would be a
@@ -245,6 +257,24 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
     await page.keyboard.press("Escape");
     await expect(page.locator(".context-menu").first()).toHaveCount(0);
     expect(await row.evaluate((el) => el === document.activeElement)).toBe(true);
+  });
+
+  test("arrow to a member then Shift+F10 opens its menu", async ({ page }) => {
+    const rows = page.locator(".member-item");
+    await expect(rows.nth(1)).toBeVisible({ timeout: 5_000 });
+    await rows.first().focus();
+    await page.keyboard.press("ArrowDown");
+    const target = rows.nth(1);
+    expect(await target.evaluate((el) => el === document.activeElement)).toBe(true);
+
+    await page.keyboard.press("Shift+F10");
+    const menu = page.locator(".context-menu").first();
+    await expect(menu).toBeVisible({ timeout: 3_000 });
+    await expect(menu.locator("[role='menuitem']:focus")).toHaveCount(1);
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".context-menu")).toHaveCount(0);
+    expect(await target.evaluate((el) => el === document.activeElement)).toBe(true);
   });
 
   test("channel menu: opens from the keyboard, activates Mute, and offers Move Up/Down", async ({

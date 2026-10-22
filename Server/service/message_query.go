@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
@@ -120,56 +122,6 @@ func (s *MessageService) requireSearchChannelAccess(ctx context.Context, userID,
 	return nil
 }
 
-// SearchMessages performs full-text search across accessible channels and
-// returns one page of hits. nextBefore is the cursor for the following page
-// of a page.Recent search (0 when there is none).
-func (s *MessageService) SearchMessages(ctx context.Context, userID int64, query string, channelID *int64, page db.SearchPage) (results []db.MessageSearchResult, nextBefore int64, err error) {
-	if query == "" {
-		return nil, 0, fmt.Errorf("%w: query cannot be empty", ErrBadRequest)
-	}
-	if page.Limit <= 0 {
-		page.Limit = 50
-	}
-	if page.Limit > 100 {
-		page.Limit = 100
-	}
-	limit := page.Limit
-	if page.Recent {
-		// Fetch one extra to learn whether another page follows.
-		page.Limit++
-	}
-
-	// Single-channel search.
-	if channelID != nil && *channelID > 0 {
-		if err := s.requireSearchChannelAccess(ctx, userID, *channelID); err != nil {
-			return nil, 0, err
-		}
-		results, err = s.st.SearchMessages(ctx, query, channelID, page)
-	} else {
-		// Global search: build the READABLE channel list (B5-7) — the visible
-		// set minus any labelled channel the caller has not acknowledged, so a
-		// hit inside one is silently absent from the results rather than
-		// returned. This is the leak path the plan calls "would ship silently":
-		// a gate on the single-channel branch alone leaves this one wide open.
-		accessibleIDs, idsErr := s.ReadableChannelIDs(ctx, userID)
-		if idsErr != nil {
-			return nil, 0, idsErr
-		}
-		if len(accessibleIDs) == 0 {
-			return nil, 0, nil
-		}
-		results, err = s.st.SearchMessagesInChannels(ctx, query, accessibleIDs, page)
-	}
-	if err != nil {
-		return nil, 0, fmt.Errorf("%w: search failed: %w", ErrInternal, err)
-	}
-	if len(results) > limit {
-		results = results[:limit]
-		nextBefore = results[limit-1].MessageID
-	}
-	return results, nextBefore, nil
-}
-
 // MessageWindow is a slice of channel history centred on one message, as
 // returned by GetMessagesAround. Messages are ordered oldest-first; the
 // HasMore flags report whether the channel holds further history on each side
@@ -253,46 +205,60 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, userID, channelI
 	return msgs, nil
 }
 
-// SetMessagePinned pins or unpins a message.
-func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID, msgID int64, pinned bool) error {
+// PinEventResult is the pin row a pin wrote (WP 6.12), with its author
+// resolved and, for a DM, the participants who receive it. It is nil when the
+// pin wrote no row: an unpin, a re-pin, or a pin inside the 10 minute window.
+type PinEventResult struct {
+	Row            *db.PinEventRow
+	Author         *db.User
+	AuthorRole     string
+	ParticipantIDs []int64
+	// IsDM is true for a DM or group DM, whose row goes to ParticipantIDs.
+	IsDM bool
+}
+
+// SetMessagePinned pins or unpins a message. When the pin writes a pin row it
+// returns it for the caller to fan out; otherwise the result is nil.
+func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID, msgID int64, pinned bool) (*PinEventResult, error) {
+	if s.limiter != nil && !s.limiter.Allow(auth.Key("chat_pin", userID), 10, time.Second) {
+		return nil, ErrRateLimited
+	}
 	if channelID <= 0 || msgID <= 0 {
-		return fmt.Errorf("%w: invalid IDs", ErrBadRequest)
+		return nil, fmt.Errorf("%w: invalid IDs", ErrBadRequest)
 	}
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
-		return fmt.Errorf("%w: channel not found", ErrNotFound)
+		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	// Archived channels are read-only. SetMessagePinned bypasses
 	// checkSendPermission (it runs its own DM/permission branch below), so it
 	// needs the shared gate directly — see requireChannelWritable in
 	// message_perms.go.
 	if err := requireChannelWritable(ch); err != nil {
-		return err
+		return nil, err
 	}
-	if ch.Type == "dm" {
-		ok, err := s.st.IsDMParticipant(ctx, userID, channelID)
-		if err != nil || !ok {
-			return fmt.Errorf("%w: access denied", ErrNotFound)
-		}
-		if blkErr := RequireDMNotBlocked(ctx, s.st, userID, channelID); blkErr != nil {
-			return blkErr
-		}
-		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
-			return err
-		}
-	} else if !s.perms.HasChannelPerm(ctx, userID, channelID, permissions.ReadMessages|permissions.ManageMessages) {
-		// Require READ_MESSAGES alongside MANAGE_MESSAGES so a role locked out
-		// of a private channel cannot mutate its pins — the admin panel's
-		// "Can access" toggle denies READ_MESSAGES|CONNECT_VOICE and leaves
-		// MANAGE_MESSAGES intact. Mirrors handleReaction and checkSendPermission.
-		return fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
+	if err := s.pinAuthz(ctx, userID, ch); err != nil {
+		return nil, err
 	}
 	// Verify message belongs to this channel.
 	msg, err := s.st.GetMessage(ctx, msgID)
 	if err != nil || msg == nil || msg.ChannelID != channelID {
-		return fmt.Errorf("%w: message not found in this channel", ErrNotFound)
+		return nil, fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 	}
-	if err := s.st.SetMessagePinned(ctx, msgID, pinned); err != nil {
+	if msg.Kind != db.MessageKindUser {
+		return nil, fmt.Errorf("%w: cannot pin a system message", ErrBadRequest)
+	}
+	author, err := s.st.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: pinner lookup: %w", ErrInternal, err)
+	}
+	if author == nil {
+		return nil, fmt.Errorf("%w: pinner not found", ErrInternal)
+	}
+	row, err := s.st.SetMessagePinned(ctx, db.SetPinnedParams{
+		MessageID: msgID, Pinned: pinned, UserID: userID, Username: author.Username,
+	})
+	if err != nil {
 		// The pin SQL excludes soft-deleted rows, so a message deleted between
 		// the GetMessage check above and this UPDATE (or one whose Deleted flag
 		// we didn't re-check) surfaces here as db.ErrNotFound. Map it to the
@@ -300,9 +266,71 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		// class of guard as EditMessage's ErrDeletedMessage and handleReaction's
 		// ErrBadRequest on their own deleted-message paths.
 		if errors.Is(err, db.ErrNotFound) {
-			return fmt.Errorf("%w: message not found in this channel", ErrNotFound)
+			return nil, fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 		}
-		return fmt.Errorf("%w: %w", ErrInternal, err)
+		return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	return nil
+	if row == nil {
+		return nil, nil
+	}
+	// The pin has committed: resolve the audience on a context detached from the
+	// request so a dropped caller does not cost the room the row.
+	return s.pinEventResult(context.WithoutCancel(ctx), ch, row, author), nil
+}
+
+// pinEventResult resolves the audience of a committed pin row: its author's
+// role name and, in a DM, its delivery audience (DMAudience, as edit, delete and
+// reactions use, so a DM whose message request is pending reaches only the
+// sender and a group DM reaches every member). A failed audience lookup sends
+// the row to the pinner only; the row is committed either way.
+func (s *MessageService) pinEventResult(ctx context.Context, ch *db.Channel, row *db.PinEventRow, author *db.User) *PinEventResult {
+	res := &PinEventResult{Row: row, Author: author}
+	if role, err := s.st.GetRoleByID(ctx, author.RoleID); err == nil && role != nil {
+		res.AuthorRole = role.Name
+	}
+	if ch.Type == "dm" {
+		res.IsDM = true
+		ids, err := s.DMAudience(ctx, ch.ID, author.ID)
+		if err != nil {
+			slog.Warn("pin row: participant lookup", "err", err, "channel_id", ch.ID)
+			// Fail closed to the pinner, as EditMessage and DeleteMessage do: an
+			// empty list would make dmEventOrFallback use the topic broadcast.
+			res.ParticipantIDs = []int64{author.ID}
+		} else {
+			res.ParticipantIDs = ids
+		}
+	}
+	return res
+}
+
+// pinAuthz decides whether userID may pin or unpin in ch. The rule is
+// permissions.CanPinMessage; this only maps its verdict onto the service's
+// error kinds, which are unchanged. A DM non-participant or a failed
+// participation lookup is an opaque ErrNotFound; a confirmed participant's
+// failed block lookup stays an internal error, as before; any other failure
+// to resolve a DM subject is ErrNotFound (fail closed). A block or timeout
+// keeps its own kind, and every other refusal, or a failure to resolve a
+// channel subject, is ErrForbidden (fails closed to 403, never 500).
+func (s *MessageService) pinAuthz(ctx context.Context, userID int64, ch *db.Channel) error {
+	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
+	if err != nil {
+		if ch.Type == "dm" {
+			if sub.DMParticipant {
+				return err
+			}
+			return fmt.Errorf("%w: access denied", ErrNotFound)
+		}
+		return fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
+	}
+	verdict := permissions.CanPinMessage(sub)
+	switch {
+	case verdict == nil:
+		return nil
+	case ch.Type == "dm" && errors.Is(verdict, permissions.ErrNotDMParticipant):
+		return fmt.Errorf("%w: access denied", ErrNotFound)
+	case errors.Is(verdict, permissions.ErrBlocked), errors.Is(verdict, permissions.ErrTimedOut):
+		return denial(verdict)
+	default:
+		return fmt.Errorf("%w: missing MANAGE_MESSAGES permission", ErrForbidden)
+	}
 }

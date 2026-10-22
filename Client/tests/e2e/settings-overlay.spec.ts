@@ -63,6 +63,42 @@ test.describe("Settings Overlay", () => {
     await expect(overlay).not.toHaveClass(/open/);
   });
 
+  test("Ctrl+/ opens the keyboard shortcuts dialog and Ctrl+/ again closes it", async ({
+    page,
+  }) => {
+    const dialog = page.getByRole("dialog", { name: "Keyboard Shortcuts" });
+
+    await page.keyboard.press("Control+/");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Show Keyboard Shortcuts")).toBeVisible();
+
+    await page.keyboard.press("Control+/");
+    await expect(dialog).toBeHidden();
+
+    await page.keyboard.press("Control+/");
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  });
+
+  test("lists the app settings in Discord's order", async ({ page }) => {
+    await openSettings(page);
+
+    await expect(page.locator(".settings-sidebar > button.settings-nav-item")).toHaveText([
+      "Account",
+      "Privacy & Safety",
+      "Appearance",
+      "Accessibility",
+      "Voice & Video",
+      "Text & Images",
+      "Notifications",
+      "Keybinds",
+      "Advanced",
+      "Diagnostics & logs",
+      "About",
+    ]);
+  });
+
   test("has Log Out button with danger class", async ({ page }) => {
     await openSettings(page);
 
@@ -255,6 +291,7 @@ test.describe("Settings — Voice & Video Tab", () => {
     await expect(codec.locator("option")).toHaveText([
       "VP8 (default, most compatible)",
       "H.264 (uses your graphics card when it can)",
+      "VP9 (sharper text)",
       "Auto (H.264 when your graphics card can encode it, otherwise VP8)",
     ]);
   });
@@ -310,7 +347,7 @@ test.describe("Settings — Keybinds Tab", () => {
     // disclose the gap rather than promise a global shortcut it cannot deliver.
     const hint = page.getByTestId("keybinds-global-hint");
     await expect(hint).toContainText("tray menu");
-    await expect(hint).toContainText("does not support global mute/deafen shortcuts");
+    await expect(hint).toContainText("global mute/deafen shortcuts are not available");
   });
 });
 

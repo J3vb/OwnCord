@@ -31,9 +31,9 @@ import (
 func buildDMRequestRouter(database *db.DB, broadcaster api.DMBroadcaster) (http.Handler, *service.Services) {
 	r := chi.NewRouter()
 	svc := service.New(database, auth.NewRateLimiter())
-	api.MountDMRoutes(r, database, svc, broadcaster)
+	api.MountDMRoutes(r, svc, broadcaster, nil, nil)
 	api.MountDMRequestRoutes(r, svc, broadcaster)
-	api.MountChannelRoutes(r, database, svc, auth.NewRateLimiter(), nil, nil)
+	api.MountChannelRoutes(r, svc, auth.NewRateLimiter(), nil, nil)
 	return r, svc
 }
 

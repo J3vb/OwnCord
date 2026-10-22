@@ -145,7 +145,7 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"service.requireGrantableChannelOverride":           {classAdminPerimeter, "refuses an override that grants past the actor's own role", calls{"HasAdmin": 1}},
 	"service.(*ChannelService).requireOutranks":         {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
 	"service.(*MessageService).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query", calls{"HasAdmin": 1}},
-	"service.(*PermissionService).getOrPopulate":        {classAdminShortCircuit, "cache fill skips the override query for an administrator", calls{"HasAdmin": 1}},
+	"service.(*PermissionService).loadPerms":            {classAdminShortCircuit, "cache fill skips the override query for an administrator", calls{"HasAdmin": 1}},
 	"service.(*PermissionService).Subject":              {classAdminShortCircuit, "skips the TimedOut lookup for an administrator (B5-9)", calls{"HasAdmin": 1}},
 	"ws.(*Hub).computeAllowedChannels":                  {classAdminShortCircuit, "broadcast audience skips the override query for an administrator", calls{"HasAdmin": 1}},
 	"ws.(*Hub).readyVisibleChannels":                    {classAdminShortCircuit, "ready snapshot skips the override query for an administrator", calls{"HasAdmin": 1}},
@@ -253,7 +253,7 @@ func (h authzHit) excessMessage(want, got int) string {
 }
 
 // authzPredicateList names the B2-5 predicates a call site should be using.
-const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice, CanReadContent"
+const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice, CanReadContent, CanDeleteMessage, CanPinMessage, CanMentionRole"
 
 // authzHits reports every raw permission check in one file, whether or not it
 // is allowlisted, so the rule and TestAuthzResidueAllowIsLive read the same

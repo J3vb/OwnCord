@@ -6,19 +6,21 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
 import { createMemberList } from "@components/MemberList";
-import { parseTimestamp } from "@lib/formatting";
-import { authStore } from "@stores/auth.store";
-import { setUserBlockedByMe } from "@stores/blocks.store";
-import { getRoleIdByName } from "@stores/channels.store";
-import { membersStore } from "@stores/members.store";
-import { roleHasPermission } from "@lib/permissions";
-import { Permission, type AdminUser } from "@lib/types";
-import { type ApiClient, errorText } from "@lib/api";
-import type { ToastContainer } from "@components/Toast";
-import { reportEntryText } from "../../i18n/reportEntry";
+import { buildVoiceModOptions } from "@components/ChannelSidebar";
 import { shellText } from "../../i18n/shell";
+import {
+  createMemberPanel,
+  type MemberPanel,
+  type MemberPanelOptions,
+  type MemberPanelUi,
+} from "../../features/members/memberPanel";
+
+/** The UI-layer pieces every member panel host hands to `createMemberPanel`. */
+export const memberPanelUi: MemberPanelUi = {
+  createMemberList: (...args) => createMemberList(...args),
+  buildVoiceModOptions: (...args) => buildVoiceModOptions(...args),
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -31,35 +33,18 @@ const LS_KEY_COLLAPSED = "owncord:member-list-collapsed";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface SidebarMemberSectionOptions {
-  readonly api: ApiClient;
-  readonly getToast: () => ToastContainer | null;
-  /** Start a DM with a user (profile popup's Message button). */
-  readonly onMessageUser?: (userId: number) => void;
-  /** Call a user: open/create the 1:1 DM and start a call in it (profile
-   *  popup's Call button, BUG-05). */
-  readonly onCallUser?: (userId: number) => void;
+export interface SidebarMemberSectionOptions extends Omit<MemberPanelOptions, "ui"> {
+  /** Builds the member panel this section hosts. SidebarArea passes its single
+   *  `buildMemberPanel` factory so the callback wiring exists once; without it
+   *  the section builds one from the callbacks above. */
+  readonly buildPanel?: () => MemberPanel;
 }
 
 export interface SidebarMemberSectionResult {
   /** The root element to insert into the DOM. */
   readonly element: HTMLDivElement;
-  /** The member list MountableComponent (for external cleanup tracking). */
-  readonly memberListComponent: MountableComponent;
   /** Clean up event listeners and abort controller. */
   readonly destroy: () => void;
-}
-
-/** Whether a ban is still in force. The server never clears `banned` when a
- *  temporary ban runs out: the account is active again the moment
- *  `ban_expires` passes (auth.IsEffectivelyBanned), so the flag alone would
- *  list served bans forever. An expiry that does not parse keeps the ban in
- *  force, as it does on the server. */
-function isBanInForce(user: AdminUser): boolean {
-  if (!user.banned) return false;
-  if (!user.ban_expires) return true;
-  const expires = parseTimestamp(user.ban_expires).getTime();
-  return Number.isNaN(expires) || expires > Date.now();
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +54,6 @@ function isBanInForce(user: AdminUser): boolean {
 export function createSidebarMemberSection(
   opts: SidebarMemberSectionOptions,
 ): SidebarMemberSectionResult {
-  const { api, getToast, onMessageUser, onCallUser } = opts;
   const unsubs: Array<() => void> = [];
 
   // --- Container ---
@@ -119,11 +103,15 @@ export function createSidebarMemberSection(
   let isDragging = false;
   let startY = 0;
   let startHeight = 0;
+  // Latest height of the drag in progress; persisted once on mouseup instead
+  // of on every mousemove (a synchronous storage write per move).
+  let pendingHeight: number | null = null;
 
   resizeHandle.addEventListener(
     "mousedown",
     (e: MouseEvent) => {
       isDragging = true;
+      pendingHeight = null;
       startY = e.clientY;
       startHeight = memberListContainer.getBoundingClientRect().height;
       e.preventDefault();
@@ -139,7 +127,7 @@ export function createSidebarMemberSection(
       const maxH = window.innerHeight * 0.65;
       const newHeight = Math.max(80, Math.min(startHeight + delta, Math.max(maxH, startHeight)));
       applyMemberHeight(`${newHeight}px`);
-      localStorage.setItem(LS_KEY_HEIGHT, String(newHeight));
+      pendingHeight = newHeight;
     },
     { signal: resizeOwner.signal },
   );
@@ -147,7 +135,17 @@ export function createSidebarMemberSection(
   document.addEventListener(
     "mouseup",
     () => {
+      const wasDragging = isDragging;
       isDragging = false;
+      if (!wasDragging || pendingHeight === null) return;
+      const height = pendingHeight;
+      pendingHeight = null;
+      try {
+        localStorage.setItem(LS_KEY_HEIGHT, String(height));
+      } catch {
+        // Storage unavailable or full: the height still applies for this
+        // session, it just is not remembered.
+      }
     },
     { signal: resizeOwner.signal },
   );
@@ -183,200 +181,14 @@ export function createSidebarMemberSection(
     applyMembersCollapsed();
   });
 
-  // --- Banned members ---
-  // A banned user leaves the roster outright (dispatcher's MEMBER_BAN removes
-  // them), so the context menu that issued the ban is the only place they ever
-  // appeared — and it is gone with the row. This list, fed by the admin users
-  // page, is what makes a ban reversible from the desktop client.
-  const bannedSection = createElement("div", {
-    class: "sidebar-banned-section",
-    "data-testid": "sidebar-banned",
-  });
-  let bannedUsers: readonly AdminUser[] = [];
-
-  function renderBanned(): void {
-    bannedSection.replaceChildren();
-    if (bannedUsers.length === 0) {
-      bannedSection.style.display = "none";
-      return;
-    }
-    bannedSection.style.display = "";
-    bannedSection.appendChild(
-      createElement("div", { class: "banned-header" }, shellText("members.bannedHeading")),
-    );
-    for (const user of bannedUsers) {
-      const row = createElement("div", { class: "banned-row" });
-      row.appendChild(createElement("span", { class: "banned-name" }, user.username));
-      const unbanBtn = createElement(
-        "button",
-        { class: "banned-unban-btn", "data-testid": "unban-member" },
-        shellText("members.unban"),
-      );
-      unbanBtn.addEventListener("click", () => {
-        void unbanMember(user.id, user.username);
-      });
-      row.appendChild(unbanBtn);
-      bannedSection.appendChild(row);
-    }
-  }
-
-  /** Refetch, or give up quietly: this list is an affordance for moderators,
-   *  and a toast on every mount would be noise for the majority of members,
-   *  who never see the section at all. */
-  async function fetchBanned(): Promise<void> {
-    // Read the role live, like MemberList's menu gates do: a role change
-    // arrives as a store update, and this section is not remounted for it.
-    if (!roleHasPermission(authStore.getState().user?.role ?? "", Permission.BAN_MEMBERS)) {
-      bannedUsers = [];
-      renderBanned();
-      return;
-    }
-    try {
-      bannedUsers = (await api.adminListUsers()).filter(isBanInForce);
-    } catch {
-      return;
-    }
-    renderBanned();
-  }
-
-  // One walk of the user list at a time. A burst of roster changes would
-  // otherwise start a fetch each, and an older response landing last would win;
-  // a change that arrives mid-walk buys exactly one more walk after it.
-  let refreshing = false;
-  let refreshQueued = false;
-  async function refreshBanned(): Promise<void> {
-    if (refreshing) {
-      refreshQueued = true;
-      return;
-    }
-    refreshing = true;
-    try {
-      do {
-        refreshQueued = false;
-        // oxlint-disable-next-line no-await-in-loop -- sequential by design: one walk at a time
-        await fetchBanned();
-      } while (refreshQueued);
-    } finally {
-      refreshing = false;
-    }
-  }
-
-  // Another moderator's ban or unban reaches this client only as a roster
-  // change: member_ban drops the row and the unban's member_join restores it.
-  // roleRevision moves on exactly those (and on role and profile changes, never
-  // on presence or typing), and it is monotonic, so a ban and a join batched
-  // into one notification still register.
-  // ponytail: every roster change re-walks the user list for a moderator; a
-  // banned-only server query is the upgrade if that ever costs something.
-  unsubs.push(
-    membersStore.subscribeSelector(
-      (state) => state.roleRevision,
-      () => void refreshBanned(),
-    ),
-  );
-
-  async function unbanMember(userId: number, username: string): Promise<void> {
-    try {
-      await api.adminUnbanMember(userId);
-      getToast()?.show(shellText("members.unbanned", { username }), "success");
-      // No roster update needed: the server's member_join broadcast puts them
-      // back, and that roster change refreshes this list too. Refresh anyway —
-      // the REST call can succeed while the socket is down.
-      await refreshBanned();
-    } catch (err) {
-      const msg = errorText(err, shellText("members.unbanFailed"));
-      getToast()?.show(msg, "error");
-    }
-  }
-
-  // --- Member list component ---
-  const memberList = createMemberList({
-    currentUserRole: authStore.getState().user?.role ?? "member",
-    ...(onMessageUser !== undefined ? { onMessageUser } : {}),
-    ...(onCallUser !== undefined ? { onCallUser } : {}),
-    onReportUser: (userId, name) => {
-      // The dialog lives as long as this section (resizeOwner is its lifetime).
-      import("../../features/reports/openers").then(
-        ({ openUserReport }) => {
-          if (!resizeOwner.signal.aborted) {
-            openUserReport({ api, userId, name, signal: resizeOwner.signal, list: memberContent });
-          }
-        },
-        () => getToast()?.show(reportEntryText("reportLoadFailed"), "error"),
-      );
-    },
-    // "Force Logout", not "Kick": the endpoint revokes the target's sessions
-    // and nothing stops them signing back in — there is no membership to remove.
-    onKick: async (userId, username) => {
-      try {
-        await api.adminKickMember(userId);
-        getToast()?.show(shellText("members.forcedLogout", { username }), "success");
-      } catch (err) {
-        const msg = errorText(err, shellText("members.forceLogoutFailed"));
-        getToast()?.show(msg, "error");
-      }
-    },
-    onBan: async (userId, username, reason, durationHours) => {
-      try {
-        await api.adminBanMember(userId, reason, durationHours);
-        getToast()?.show(
-          durationHours > 0
-            ? shellText("members.bannedFor", { username, hours: durationHours })
-            : shellText("members.banned", { username }),
-          "success",
-        );
-        // The row is about to vanish from the roster; the ban has to appear
-        // somewhere or it cannot be undone from here.
-        await refreshBanned();
-      } catch (err) {
-        const msg = errorText(err, shellText("members.banFailed"));
-        getToast()?.show(msg, "error");
-      }
-    },
-    onToggleBlock: async (userId, username, block) => {
-      try {
-        if (block) {
-          await api.blockUser(userId);
-        } else {
-          await api.unblockUser(userId);
-        }
-        setUserBlockedByMe(userId, block);
-        getToast()?.show(
-          shellText(block ? "members.blocked" : "members.unblocked", { username }),
-          "success",
-        );
-      } catch (err) {
-        const fallback = shellText(block ? "members.blockFailed" : "members.unblockFailed");
-        const msg = errorText(err, fallback);
-        getToast()?.show(msg, "error");
-      }
-    },
-    onChangeRole: async (userId, username, newRole) => {
-      const roleId = getRoleIdByName(newRole);
-      if (roleId === undefined) {
-        // No silent failures: the role vanished from the server's list.
-        getToast()?.show(shellText("members.unknownRole", { role: newRole }), "error");
-        return;
-      }
-      try {
-        await api.adminChangeRole(userId, roleId);
-        getToast()?.show(shellText("members.roleChanged", { username, role: newRole }), "success");
-      } catch (err) {
-        const msg = errorText(err, shellText("members.roleChangeFailed"));
-        getToast()?.show(msg, "error");
-      }
-    },
-  });
-  memberList.mount(memberContent);
-  // Appended after MemberList's own root: its re-renders replace only the
-  // inside of that root, so this sibling survives every roster change.
-  memberContent.appendChild(bannedSection);
+  // --- Member panel (list, search and banned section) ---
+  const panel = (opts.buildPanel ?? (() => createMemberPanel({ ...opts, ui: memberPanelUi })))();
+  memberContent.appendChild(panel.element);
   memberListContainer.appendChild(memberContent);
-  void refreshBanned();
+  unsubs.push(panel.destroy);
 
   return {
     element: memberListContainer,
-    memberListComponent: memberList,
     destroy: () => {
       for (const unsub of unsubs) {
         unsub();

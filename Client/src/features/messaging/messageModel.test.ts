@@ -84,6 +84,92 @@ describe("messageResponseToMessage", () => {
   });
 });
 
+describe("group_event (WP 3B-11a)", () => {
+  it("carries a group row's kind and group_event from a live broadcast and from history", () => {
+    const base: ChatMessagePayload = {
+      id: 9,
+      channel_id: 3,
+      user,
+      content: "bob added carol to the group",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+      kind: "group_add",
+      group_event: { target_user_id: 5 },
+    };
+    expect(chatPayloadToMessage(base)).toMatchObject({
+      kind: "group_add",
+      groupEvent: { target_user_id: 5 },
+    });
+    expect(
+      chatPayloadToMessage({ ...base, kind: "group_rename", group_event: { name: "" } }),
+    ).toMatchObject({ kind: "group_rename", groupEvent: { name: "" } });
+    const response: MessageResponse = {
+      id: 9,
+      channel_id: 3,
+      user,
+      content: "x",
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+      kind: "group_icon",
+      group_event: { icon_removed: true },
+    };
+    expect(messageResponseToMessage(response)).toMatchObject({
+      kind: "group_icon",
+      groupEvent: { icon_removed: true },
+    });
+  });
+
+  it("carries the forward block from a live message and from history", () => {
+    const forward = { source_channel_id: 5, source_message_id: null, source_timestamp: "t" };
+    const live = chatPayloadToMessage({
+      id: 1,
+      channel_id: 3,
+      user,
+      content: "hi",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+      forward,
+    });
+    expect(live.forward).toEqual(forward);
+    const history = messageResponseToMessage({
+      id: 1,
+      channel_id: 3,
+      user,
+      content: "hi",
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+      forward,
+    });
+    expect(history.forward).toEqual(forward);
+  });
+
+  it("leaves an ordinary message without the field", () => {
+    const m = chatPayloadToMessage({
+      id: 1,
+      channel_id: 3,
+      user,
+      content: "hi",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+    });
+    expect("groupEvent" in m).toBe(false);
+    expect("kind" in m).toBe(false);
+  });
+});
+
 describe("INITIAL_STATE", () => {
   it("starts every collection empty", () => {
     for (const value of Object.values(INITIAL_STATE)) {
@@ -95,9 +181,12 @@ describe("INITIAL_STATE", () => {
       "historyLoadState",
       "loadWatermark",
       "loadedChannels",
+      "messagePinRevision",
       "messagesByChannel",
+      "olderLoadFailed",
       "pendingReactions",
       "pendingSends",
+      "pinRevision",
     ]);
   });
 
@@ -156,5 +245,47 @@ describe("reply snippet (referenced_message)", () => {
       timestamp: "2026-03-15T10:00:00Z",
     };
     expect("referencedMessage" in chatPayloadToMessage(live)).toBe(false);
+  });
+});
+
+describe("call log rows (WP 3B-9c)", () => {
+  const call = { started_at: "2026-03-15 10:00:00", ended_at: null, participants: [2] };
+
+  it("carries kind and call from a live chat_message", () => {
+    const row = chatPayloadToMessage({
+      id: 7,
+      channel_id: 3,
+      user,
+      content: "started a call.",
+      reply_to: null,
+      attachments: [],
+      timestamp: "2026-03-15T10:00:00Z",
+      kind: "call",
+      call,
+    });
+    expect(row).toMatchObject({ kind: "call", call });
+  });
+
+  it("carries kind and call from the history mapper, and omits both for an ordinary row", () => {
+    const base: MessageResponse = {
+      id: 8,
+      channel_id: 4,
+      user,
+      content: "x",
+      reply_to: null,
+      attachments: [],
+      reactions: [],
+      pinned: false,
+      edited_at: null,
+      deleted: false,
+      timestamp: "2026-03-15T10:00:00Z",
+    };
+    expect(messageResponseToMessage({ ...base, kind: "call", call })).toMatchObject({
+      kind: "call",
+      call,
+    });
+    const plain = messageResponseToMessage(base);
+    expect("kind" in plain).toBe(false);
+    expect("call" in plain).toBe(false);
   });
 });

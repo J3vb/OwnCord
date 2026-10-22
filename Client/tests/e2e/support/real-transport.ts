@@ -55,7 +55,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
         { event, payload },
       )
       .catch((error: Error) => {
-        if (!closed && sentTo === documents) errors.push(error.message);
+        // A closed page (a test that ends with page.close()) has no frontend
+        // left to deliver to; the server may still be sending to its socket.
+        if (!closed && sentTo === documents && !page.isClosed()) errors.push(error.message);
       });
     pendingEvents.add(pending);
     void pending.finally(() => pendingEvents.delete(pending));
@@ -190,6 +192,12 @@ export async function installRealTransport(page: Page, server: TestServer) {
           return;
         case "check_client_update":
           return { available: false, version: null, body: null };
+        // Close to Tray / Start Minimized (WP 2B-3): the host's defaults.
+        case "get_window_prefs":
+          return { minimizeToTray: true, startMinimized: false };
+        case "set_window_pref":
+        case "show_next_launch":
+          return null;
         case "plugin:path|resolve_directory":
           return "/test-logs";
         case "plugin:path|join":
@@ -202,6 +210,13 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "voice_shortcuts_supported":
         case "plugin:autostart|is_enabled":
           return false;
+        case "global_keys_status":
+          return {
+            backend: "none",
+            portalVersion: 0,
+            triggers: { ptt: null, mute: null, deafen: null },
+            canConfigure: false,
+          };
         case "plugin:app|version":
           return "e2e";
         case "plugin:deep-link|get_current":
@@ -231,6 +246,10 @@ export async function installRealTransport(page: Page, server: TestServer) {
         // The taskbar/tray unread badge (DP-27): nothing to draw here.
         case "set_unread_badge":
           return null;
+        // Windows per-app share audio (6.7): no WASAPI host here, so the
+        // share picker offers no "Share the app's sound" switch.
+        case "app_audio_available":
+          return false;
         case "external_preview":
         case "external_image":
           // No external network in this stack: the broker refuses. Teardown

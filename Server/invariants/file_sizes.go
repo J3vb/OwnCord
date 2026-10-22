@@ -25,7 +25,7 @@ const DefaultFileLimit = 500
 const (
 	// classB3ExitTarget: a B3-5 exit target, tighter than the default. The
 	// plan set these for the ws coordination hotspots
-	// (docs/plans/b3-server-architecture-guardrails-2026-08-29.md, "B3-5 exit")
+	// (docs/archive/plans/b3-server-architecture-guardrails-2026-08-29.md, "B3-5 exit")
 	// and recorded them met at 361/424/183. hub_broadcast.go and serve.go are
 	// no longer listed — the default covers them now; only hub.go's 400 still
 	// bites.
@@ -82,7 +82,7 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "bans, kicks, the moderation log",
 	},
 	"api/router.go": {
-		Ceiling: 950,
+		Ceiling: 880,
 		Class:   classGrandfathered,
 		Note:    "the route table and middleware chain",
 	},
@@ -92,7 +92,7 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "config schema and load",
 	},
 	"db/erasure.go": {
-		Ceiling: 900,
+		Ceiling: 750,
 		Class:   classGrandfathered,
 		Note:    "erasure and the erasure checkpoint",
 	},
@@ -132,7 +132,7 @@ var FileSizeOverrides = map[string]FileSizeOverride{
 		Note:    "client command dispatch",
 	},
 	"service/message_crud.go": {
-		Ceiling: 700,
+		Ceiling: 640,
 		Class:   classGrandfathered,
 		Note:    "message create, edit and delete",
 	},

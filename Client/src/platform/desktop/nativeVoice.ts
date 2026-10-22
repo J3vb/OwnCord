@@ -15,7 +15,11 @@ export const nativeVoice: NativeVoice = {
   setMicrophone: async (session, enabled, bitrate) =>
     (await service()).setMicrophone(session, enabled, bitrate),
   setPttGated: async (session, gated) => (await service()).setPttGated(session, gated),
-  setVoiceGate: async (session, threshold) => (await service()).setVoiceGate(session, threshold),
+  setVoiceGate: async (session, threshold, retune) =>
+    (await service()).setVoiceGate(session, threshold, retune),
+  setInputGain: async (session, percent) => (await service()).setInputGain(session, percent),
+  setAudioProcessing: async (session, audio) =>
+    (await service()).setAudioProcessing(session, audio),
   setSubscribed: async (session, identity, sid, subscribed) =>
     (await service()).setSubscribed(session, identity, sid, subscribed),
   setVideoView: async (session, identity, sid, enabled, quality) =>
@@ -29,6 +33,7 @@ export const nativeVoice: NativeVoice = {
   unpublishCamera: async (session, sid) => (await service()).unpublishCamera(session, sid),
   listCameras: async () => (await service()).listCameras(),
   cameraSupport: async () => (await service()).cameraSupport(),
+  videoCodecs: async () => (await service()).videoCodecs(),
   startCamera: async (session, source, capture) =>
     (await service()).startCamera(session, source, capture),
   stopCamera: async (session, capture) => (await service()).stopCamera(session, capture),
@@ -40,13 +45,69 @@ export const nativeVoice: NativeVoice = {
     (await service()).startScreen(session, source, capture),
   publishScreen: async (session, capture, options) =>
     (await service()).publishScreen(session, capture, options),
+  unpublishScreen: async (session, capture) => (await service()).unpublishScreen(session, capture),
+  publishScreenAudio: async (session, capture) =>
+    (await service()).publishScreenAudio(session, capture),
+  unpublishScreenAudio: async (session, sid) =>
+    (await service()).unpublishScreenAudio(session, sid),
   stopScreen: async (session, capture) => (await service()).stopScreen(session, capture),
+  setScreenQuality: async (session, capture, options, publish) =>
+    (await service()).setScreenQuality(session, capture, options, publish),
+  changeCamera: async (session, source, capture) =>
+    (await service()).changeCamera(session, source, capture),
   changeScreen: async (session, source, capture) =>
     (await service()).changeScreen(session, source, capture),
+  getStats: async (session) => (await service()).getStats(session),
   debugInfo: async () => (await service()).debugInfo(),
   listDevices: async () => (await service()).listDevices(),
   setDevice: async (session, kind, deviceId) =>
     (await service()).setDevice(session, kind, deviceId),
+  startMicTest: async (options) => (await service()).startMicTest(options),
+  updateMicTest: async (test, update) => (await service()).updateMicTest(test, update),
+  stopMicTest: async (test) => (await service()).stopMicTest(test),
+  onMicTestEvent(handler) {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    void service().then((s) => {
+      const stop = s.onMicTestEvent(handler);
+      if (active) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+      unlisten = null;
+    };
+  },
+  watchDevices(handler) {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    void service().then((s) => {
+      const stop = s.watchDevices(handler);
+      if (active) unlisten = stop;
+      else stop();
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+      unlisten = null;
+    };
+  },
+  async playSound(notes, deviceId, gain) {
+    try {
+      return await (await service()).playSound(notes, deviceId, gain);
+    } catch {
+      // The chunk failed to load: the caller falls back, as for a host failure.
+      return null;
+    }
+  },
+  async stopSound(id) {
+    try {
+      await (await service()).stopSound(id);
+    } catch {
+      // Nothing to cut when the host bindings never loaded.
+    }
+  },
   onEvent(handler) {
     // The service load is itself asynchronous: an unsubscribe that lands
     // before it resolves must release the subscription it would have made.

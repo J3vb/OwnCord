@@ -17,10 +17,7 @@ type sourceNSFWFixture struct {
 
 func (f *sourceNSFWFixture) channel(nsfw bool) int64 {
 	f.t.Helper()
-	id, err := f.database.CreateChannel(context.Background(), "src", "text", "", "", 0)
-	if err != nil {
-		f.t.Fatalf("CreateChannel: %v", err)
-	}
+	id := seedChannelRawSQL(f.t, f.database, "src")
 	f.label(id, nsfw)
 	return id
 }
