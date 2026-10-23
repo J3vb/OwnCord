@@ -335,19 +335,21 @@ func placeholdersFor(ids []int64) (string, []any) {
 
 // reverseMentionCountsForMessages is erasureReverseMentionCounts for an
 // explicit message set: the read_states.mention_count bumps these messages
-// made are taken back, with the same guards (undeleted, past the reader's
-// last_message_id, not from a blocked author), before the rows go.
+// made are taken back, with the same guards (counted per mention_receipts,
+// undeleted, past the reader's last_message_id, not from a blocked author),
+// before the rows go.
 func reverseMentionCountsForMessages(ctx context.Context, tx *sql.Tx, channelID int64, in string, args []any) error {
 	// The placeholder list is spliced by Replace, not concatenation: it
 	// holds "?" markers only and every id is bound below.
 	query := strings.Replace(`UPDATE read_states
 		 SET mention_count = MAX(0, mention_count - (
 		     SELECT COUNT(*)
-		     FROM message_mentions mm
-		     JOIN messages m ON m.id = mm.message_id
-		     WHERE mm.mentioned_user_id = read_states.user_id
-		       AND m.channel_id = read_states.channel_id
+		     FROM mention_receipts r
+		     JOIN messages m ON m.id = r.message_id
+		     WHERE r.user_id = read_states.user_id
+		       AND r.channel_id = read_states.channel_id
 		       AND m.deleted = 0
+		       AND `+countedReceipt+`
 		       AND m.id > read_states.last_message_id
 		       AND m.id IN (__IN__)
 		       AND NOT EXISTS (
