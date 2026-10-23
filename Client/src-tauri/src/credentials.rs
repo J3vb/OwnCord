@@ -351,6 +351,8 @@ pub fn delete_identity_key(
 
 // Pending text is private data. Reuse the credential store's verified,
 // encrypted fallback and its cross-command lock; never put it in settings.json.
+// Each command is scoped to the session's server with `ensure_verified_host`,
+// which still admits that server while its connection is down.
 const PENDING_MESSAGE_MAX_BYTES: usize = 128 * 1024;
 
 fn pending_messages_account(host: &str, user_id: u64) -> Result<String, String> {
@@ -382,10 +384,12 @@ fn validate_pending_messages(value: &str) -> Result<(), String> {
 #[tauri::command(async)]
 pub fn save_pending_messages(
     app: AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
     user_id: u64,
     value: String,
 ) -> Result<(), String> {
+    session.ensure_verified_host(&host)?;
     with_credential_lock(|| {
         let account = pending_messages_account(&host, user_id)?;
         validate_pending_messages(&value)?;
@@ -396,9 +400,11 @@ pub fn save_pending_messages(
 #[tauri::command(async)]
 pub fn load_pending_messages(
     app: AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
     host: String,
     user_id: u64,
 ) -> Result<Option<String>, String> {
+    session.ensure_verified_host(&host)?;
     with_credential_lock(|| {
         let account = pending_messages_account(&host, user_id)?;
         let value = secret_store::get(&app, &account)?;
@@ -410,7 +416,13 @@ pub fn load_pending_messages(
 }
 
 #[tauri::command(async)]
-pub fn delete_pending_messages(app: AppHandle, host: String, user_id: u64) -> Result<(), String> {
+pub fn delete_pending_messages(
+    app: AppHandle,
+    session: tauri::State<'_, crate::active_session::ActiveSession>,
+    host: String,
+    user_id: u64,
+) -> Result<(), String> {
+    session.ensure_verified_host(&host)?;
     with_credential_lock(|| {
         let account = pending_messages_account(&host, user_id)?;
         secret_store::delete(&app, &account)
