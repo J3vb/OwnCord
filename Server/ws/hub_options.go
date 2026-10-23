@@ -300,7 +300,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		LiveKit:     h.livekit,
 		TokenGen:    h, // Hub delegates to h.livekit at call time
 		KeyHolder:   h,
-		Mod:         h,
+		Mod:         h, Settings: h.settings,
 	})
 
 	h.refreshSettingsLocked(context.Background())

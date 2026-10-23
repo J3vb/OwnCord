@@ -4837,7 +4837,8 @@ audited as `setting_change`.
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
-`upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`.
+`upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
+`voice_owner_movable`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -4863,6 +4864,11 @@ dot after its leading ones, a path or stream separator or an invisible
 character, or is longer than 32 bytes, is refused with `400`. A saved row
 replaces the matching config.yaml list; an empty allowed list turns allow-only
 mode off. Like the backup policy they need the **Owner** role (`403 FORBIDDEN` otherwise).
+
+`voice_owner_movable` (WP 8.4a) decides whether a member holding `MOVE_MEMBERS`
+can move the owner between voice channels: `true` (the default while no row
+exists) or `false`, also accepted as `1`/`0`. It is stored as `true`/`false`.
+Only the **Owner** role may change it (`403 FORBIDDEN` otherwise).
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change

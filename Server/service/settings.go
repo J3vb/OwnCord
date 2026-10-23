@@ -49,6 +49,24 @@ var allowedSettingKeys = map[string]struct{}{
 	// How long a member must be idle before the AFK channel sweep may move
 	// them (WP 6.10). A missing row means AFKTimeoutDefaultSeconds.
 	AFKTimeoutKey: {},
+	// Whether a member holding MOVE_MEMBERS may move the owner (WP 8.4a).
+	VoiceOwnerMovableKey: {},
+}
+
+// VoiceOwnerMovableKey is the settings key holding whether MOVE_MEMBERS
+// holders may move the owner between voice channels: "true" or "false". A
+// missing row means true.
+const VoiceOwnerMovableKey = "voice_owner_movable"
+
+// VoiceOwnerMovable reads a stored VoiceOwnerMovableKey value: true for an
+// unset (blank) value, the parsed boolean otherwise, and false for anything
+// unparseable so a damaged row never lets the owner be moved on a guess.
+func VoiceOwnerMovable(stored string) bool {
+	if strings.TrimSpace(stored) == "" {
+		return true
+	}
+	v, err := parseBooleanSettingValue(stored)
+	return err == nil && v
 }
 
 // AFKTimeoutKey is the settings key holding the AFK timeout in seconds.
@@ -84,6 +102,9 @@ var ownerOnlySettingKeys = map[string]struct{}{
 	// it is the owner's call too.
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
+	// Whether Move Members holders may move the owner is the owner's call
+	// (WP 8.4a).
+	VoiceOwnerMovableKey: {},
 }
 
 // IsOwnerOnlySettingKey reports whether a setting key changes the owner-only

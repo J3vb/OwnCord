@@ -125,6 +125,9 @@ func requireBelowActor(actor *db.Role, target *db.Role) error {
 // an over-permissioned role impossible to wind down by anyone but an admin.
 // ADMINISTRATOR bypasses, which is what lets the owner grant anything.
 func requireGrantable(actor *db.Role, oldPerms, newPerms int64) error {
+	if err := requireOwnerGrantOnly(actor, (oldPerms^newPerms)&permissions.OwnerGrantOnly); err != nil {
+		return err
+	}
 	if permissions.HasAdmin(actor.Permissions) {
 		return nil
 	}

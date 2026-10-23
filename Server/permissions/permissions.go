@@ -14,6 +14,7 @@ const (
 	SpeakVoice      = int64(0x0400)     // bit 10
 	UseVideo        = int64(0x0800)     // bit 11
 	ShareScreen     = int64(0x1000)     // bit 12
+	MoveMembers     = int64(0x2000)     // bit 13 — move any member between voice channels, whatever their rank (WP 8.4a); server-wide, outside AdminPerimeter
 	ManageMessages  = int64(0x10000)    // bit 16
 	ManageChannels  = int64(0x20000)    // bit 17
 	KickMembers     = int64(0x40000)    // bit 18
@@ -32,7 +33,7 @@ const (
 // AllPerms is the union of every defined permission bit. Use it to mask
 // externally supplied permission values so unknown bits are dropped.
 const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
-	ConnectVoice | SpeakVoice | UseVideo | ShareScreen |
+	ConnectVoice | SpeakVoice | UseVideo | ShareScreen | MoveMembers |
 	ManageMessages | ManageChannels | KickMembers | BanMembers | MuteMembers |
 	MentionEveryone | ModerateMembers | ManageNicknames | ManageRoles | ManageServer | ManageInvites | ViewAuditLog |
 	Administrator
@@ -51,6 +52,11 @@ const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
 const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
 	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers
 
+// OwnerGrantOnly is the mask of bits that only the owner or an Administrator
+// may add to or remove from a role, or hand out by assigning a role that
+// carries them. Holding ManageRoles is not enough for these.
+const OwnerGrantOnly = MoveMembers
+
 // bitNames maps each single permission bit to its SCHEMA.md name. Used for
 // authorization error messages so the wording lives in one place.
 var bitNames = map[int64]string{
@@ -62,6 +68,7 @@ var bitNames = map[int64]string{
 	SpeakVoice:      "SPEAK_VOICE",
 	UseVideo:        "USE_VIDEO",
 	ShareScreen:     "SHARE_SCREEN",
+	MoveMembers:     "MOVE_MEMBERS",
 	ManageMessages:  "MANAGE_MESSAGES",
 	ManageChannels:  "MANAGE_CHANNELS",
 	KickMembers:     "KICK_MEMBERS",

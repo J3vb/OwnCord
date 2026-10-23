@@ -181,7 +181,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15728639,
+                "permissions": 16777215,
                 "position": 60
               },
               {
@@ -478,7 +478,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15728639,
+                "permissions": 16777215,
                 "position": 60
               },
               {

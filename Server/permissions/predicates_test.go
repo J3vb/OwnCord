@@ -157,6 +157,55 @@ func TestAuthorizeVoiceModerator(t *testing.T) {
 	})
 }
 
+// TestAuthorizeVoiceMover pins WP 8.4a's move authorizer: the actor's BASE
+// role must hold MOVE_MEMBERS (MUTE_MEMBERS no longer suffices), a channel
+// override cannot manufacture it, a channel deny still holds, and
+// Administrator passes the base gate.
+func TestAuthorizeVoiceMover(t *testing.T) {
+	const moverBits = memberBits | MoveMembers
+	runPredicate(t, "AuthorizeVoiceMover", AuthorizeVoiceMover, []predicateCase{
+		{"mover with base MOVE_MEMBERS allowed", Subject{RolePerms: moverBits, Channel: voice(false)}, nil},
+		{"MUTE_MEMBERS alone refused", Subject{RolePerms: modBits, Channel: voice(false)}, ErrPermissionDenied},
+		{"no bits refused", Subject{RolePerms: memberBits, Channel: voice(false)}, ErrPermissionDenied},
+		{"channel override alone cannot manufacture the base bit", Subject{RolePerms: memberBits, Override: allow(MoveMembers), Channel: voice(false)}, ErrPermissionDenied},
+		{"admin without the base bit allowed via the Administrator bypass", Subject{RolePerms: Administrator, Channel: voice(false)}, nil},
+		{"base bit present but a channel deny still refuses", Subject{RolePerms: moverBits, Override: deny(MoveMembers), Channel: voice(false)}, ErrPermissionDenied},
+		{"base bit present but channel hidden still refuses", Subject{RolePerms: moverBits, Override: deny(ReadMessages), Channel: voice(false)}, ErrPermissionDenied},
+		{"dm non-participant refused", Subject{RolePerms: moverBits, Channel: dm()}, ErrNotDMParticipant},
+	})
+}
+
+// TestCanMoveVoice pins the channel half of the move gate: READ_MESSAGES plus
+// MOVE_MEMBERS effective in the channel.
+func TestCanMoveVoice(t *testing.T) {
+	runPredicate(t, "CanMoveVoice", CanMoveVoice, []predicateCase{
+		{"holder allowed", Subject{RolePerms: ReadMessages | MoveMembers, Channel: voice(false)}, nil},
+		{"MUTE_MEMBERS alone refused", Subject{RolePerms: ReadMessages | MuteMembers, Channel: voice(false)}, ErrPermissionDenied},
+		{"MOVE_MEMBERS without READ refused", Subject{RolePerms: MoveMembers, Channel: voice(false)}, ErrPermissionDenied},
+	})
+}
+
+func TestCanChangeOwnerGrantOnly(t *testing.T) {
+	cases := []struct {
+		name  string
+		perms int64
+		id    int64
+		pos   int
+		want  bool
+	}{
+		{"owner role", 0, OwnerRoleID, OwnerRolePosition, true},
+		{"owner position on a renumbered role", 0, 77, OwnerRolePosition, true},
+		{"administrator below the owner", Administrator, AdminRoleID, 80, true},
+		{"manage roles holding the bit", ManageRoles | MoveMembers, ModeratorRoleID, 60, false},
+		{"zero perms", 0, MemberRoleID, 40, false},
+	}
+	for _, c := range cases {
+		if got := CanChangeOwnerGrantOnly(c.perms, c.id, c.pos); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestCanModerate pins the queue's gate: MODERATE_MEMBERS or Administrator,
 // server-wide, and — unlike every channel predicate above — never moved by a
 // channel override, because moderation authority is not a channel property.

@@ -301,3 +301,14 @@ func TestSettings_RegistrationModeTransitionsChainUnderConcurrency(t *testing.T)
 		t.Fatalf("the chain ends at %s, the setting reads %s", prev, final)
 	}
 }
+
+func TestVoiceOwnerMovable_OwnerOnlyKeyAndDefault(t *testing.T) {
+	if !IsOwnerOnlySettingKey(VoiceOwnerMovableKey) {
+		t.Error("voice_owner_movable must be an owner-only setting key")
+	}
+	for stored, want := range map[string]bool{"": true, "true": true, "false": false, "0": false, "1": true, "junk": false} {
+		if got := VoiceOwnerMovable(stored); got != want {
+			t.Errorf("VoiceOwnerMovable(%q) = %v, want %v", stored, got, want)
+		}
+	}
+}

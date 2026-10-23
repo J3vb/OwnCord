@@ -735,6 +735,12 @@ func (s *ModerationService) AuthorizeRoleChange(ctx context.Context, actorID, ta
 	if newRole.Position >= actorRole.Position {
 		return nil, nil, nil, fmt.Errorf("%w: cannot assign a role at or above your own rank", ErrForbidden)
 	}
+	// Assigning or removing a role that carries an owner-grant-only bit
+	// (MOVE_MEMBERS) needs the owner, an Administrator, or an actor whose own
+	// mask holds every such bit the role carries.
+	if err := requireOwnerGrantOnlyAssign(actorRole, newRole.Permissions&permissions.OwnerGrantOnly); err != nil {
+		return nil, nil, nil, err
+	}
 	return actorRole, target, newRole, nil
 }
 

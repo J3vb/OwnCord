@@ -2736,18 +2736,23 @@ Rate limited: 1 per 60 seconds. Must be in a voice channel.
 
 ## Voice Moderation
 
-Four moderator commands act on another user's voice session. All four run
-`permissions.AuthorizeVoiceModerator` against the actor in the TARGET's channel:
+Four moderator commands act on another user's voice session. Mute, deafen and
+disconnect run `permissions.AuthorizeVoiceModerator`; `voice_mod_move` runs
+`permissions.AuthorizeVoiceMover` and needs `MOVE_MEMBERS` instead (see
+`voice_mod_move` below). The text in this paragraph describes the
+`MUTE_MEMBERS` commands; each runs its authorizer against the actor in the TARGET's channel:
 the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR` bypasses the bit,
 never the hierarchy), and the effective permission after both override layers
 must hold `READ_MESSAGES | MUTE_MEMBERS`, so a channel-level deny holds and a
 room the actor cannot see cannot be moderated. For a DM call the actor must be a
-participant. The actor must strictly outrank the target by role position, and the
-target must currently be in a voice channel. Each is rate limited to 5/sec and
+participant. For mute, deafen and disconnect the actor must strictly outrank the
+target by role position; a move has no rank rule. The target must currently be in
+a voice channel. Each is rate limited to 5/sec and
 written to the audit log (`voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
 `voice_mod_kick`, target type `user`).
 
-Failures: `FORBIDDEN` (missing bit, or target of equal/higher rank),
+Failures: `FORBIDDEN` (missing bit, or for mute/deafen/disconnect a target of
+equal/higher rank),
 `VOICE_ERROR` (target not in voice, not in the named channel, or not
 connected), `BAD_REQUEST` (self-target, non-voice destination),
 `NOT_FOUND` (unknown destination channel), `CHANNEL_FULL` (destination at
@@ -2789,6 +2794,14 @@ the moderator did and restates it with `voice_deafen`.
 ```json
 { "type": "voice_mod_move", "payload": { "user_id": 7, "to_channel_id": 12 } }
 ```
+
+Needs `MOVE_MEMBERS` (not `MUTE_MEMBERS`) on the actor's base role, effective in
+the target's channel. A mover may move a member of any rank, the owner included;
+the owner is skipped (`FORBIDDEN`, "the owner cannot be moved") while the
+owner-only setting `voice_owner_movable` is `false` (default `true`). A move of
+a member of equal or higher rank is further limited to 3 per 30 seconds per
+target. The mover must also be able to see the destination channel; one they
+cannot see answers `NOT_FOUND` ("channel not found"), the same as a missing one.
 
 The destination is checked against the TARGET's `CONNECT_VOICE` and, outside a
 DM, `READ_MESSAGES` (a move must not place someone where they could not go
@@ -3551,7 +3564,7 @@ tables below add per-type behavioral notes.
 | `voice_screenshare`   | 2/sec                                | Requires SHARE_SCREEN                                           |
 | `voice_mod_mute`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
 | `voice_mod_deafen`    | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
-| `voice_mod_move`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_move`      | 5/sec (3 per 30 sec per higher-ranked target) | AuthorizeVoiceMover in target's channel, no rank check |
 | `voice_mod_kick`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
 | `voice_token_refresh` | 1/60sec                              | Must be in voice                                                |
 | `voice_e2ee_announce` | 5/sec                                | ECDH pubkey announce                                            |
