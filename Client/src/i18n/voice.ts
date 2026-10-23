@@ -89,6 +89,8 @@ export const voiceText = defineCatalog("voice", {
   "call.chooseCamera": "Choose camera",
   "call.defaultCamera": "Default",
   "call.cameraNumber": "Camera {n}",
+  "call.infraredCamera": "{name} (infrared)",
+  "call.sameNameCamera": "{name} ({n})",
 
   "tile.watch": "Watch {name}",
   "tile.live": "LIVE",
@@ -250,6 +252,7 @@ export const voiceText = defineCatalog("voice", {
   "share.cameraDenied": "Camera permission denied",
   "share.noCamera": "No camera found",
   "share.cameraFailed": "Failed to start camera",
+  "share.cameraSwitchFailed": "Couldn't use that camera. Still using the previous one.",
   "share.gstreamerMissing":
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "share.screenDenied": "Screen sharing permission denied",

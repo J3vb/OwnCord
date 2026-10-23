@@ -45,7 +45,12 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   capability check `inPlaceSourceChange`, never an `isLinuxDesktop()` branch.
   A camera switch is the track's own too (`NativeCameraTrack.setDeviceId`, the
   host's `native_voice_change_camera`); `mediaControl` restarts the camera only
-  when it rejects `CameraSwitchUnavailable`.
+  when it rejects `CameraSwitchUnavailable`, and goes back to the track's
+  previous device when that restart fails too. `CameraDeviceUnusable` (the
+  picked device opened but gave no frame, such as an infrared sensor) keeps
+  the live camera with no restart. The camera list marks greyscale-only
+  devices `infrared` and lists them after the colour cameras, so the default
+  camera is never one.
   The codec is the same: `resolvePreferredCodec` returns H.264 or VP9 on Linux
   only when chosen and `native_voice_video_codecs` says the engine has it (Auto
   and a saved H.265 are VP8; a native VP9 publish is one L1T3 SVC layer, never

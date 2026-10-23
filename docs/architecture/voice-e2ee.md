@@ -824,7 +824,13 @@ the watcher switches back to it on the first tick it is listed again. A
 restart kills the host connection, so the watcher rebuilds it (`WatchedHost`
 in `playout.rs`), never onto a lower backend than the one in use: while the
 server is down `cpal`'s default host is ALSA, whose constant `default` device
-would hide every later move of the real default. It adds one thread for the
+would hide every later move of the real default. Hosts come from one
+process-wide pool (`HostPool` in `playout.rs`), one per backend and role
+(device lists, capture, playout): an idle dropped PulseAudio host never closes
+its connection (pulseaudio 0.3.1's reactor thread is never woken to notice),
+so a host is only replaced once its connection is dead, and capture and
+playout keep separate connections because each connection runs its streams'
+callbacks on one thread. The watcher adds one thread for the
 call, starts when the stream first opens, and is stopped and joined when the
 session closes.
 

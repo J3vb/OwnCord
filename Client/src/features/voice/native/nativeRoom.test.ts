@@ -254,7 +254,7 @@ import { createNativeRoom } from "./nativeRoom";
 import { NativeScreenAudioTrack } from "./screenAudioTrack";
 import type { NativeScreenTrack } from "./screenTrack";
 import { nativeCounters } from "./counters";
-import { CameraSwitchUnavailable } from "../cameraSwitch";
+import { CameraDeviceUnusable, CameraSwitchUnavailable } from "../cameraSwitch";
 import { setEncryptionDegraded, setLocalDeafened, voiceStore } from "../../../stores/voice.store";
 import { createConnectionStatsPoller } from "../../../lib/connectionStats";
 import { readSenderSample } from "../shareSenderStats";
@@ -1656,6 +1656,17 @@ describe("NativeRoom camera switch", () => {
     expect(names()).toEqual(["changeCamera"]);
     expect(cam).toMatchObject({ capture: 5, device: "" });
     expect(host.renderers[0]!.disposed).toBe(false);
+    expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(cam);
+  });
+
+  it("a picked device that opens but gives no frame is unusable, not a cue to restart", async () => {
+    const { room, cam } = await publishedCamera();
+    host.changeCamera = () => Promise.reject(new Error("camera capture produced no frame in time"));
+    const err = await cam.setDeviceId("/dev/video2").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CameraDeviceUnusable);
+    expect(err).not.toBeInstanceOf(CameraSwitchUnavailable);
+    expect(names()).toEqual(["changeCamera"]);
+    expect(cam).toMatchObject({ capture: 5, device: "" });
     expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(cam);
   });
 
