@@ -308,8 +308,9 @@ func erasureCollectFiles(ctx context.Context, tx *sql.Tx, userID int64) ([]strin
 // mention_count is a stored counter nothing else ever zeroes. Inline rather
 // than DecrementMentionCounts, which opens its own writer transaction.
 //
-// The subquery mirrors DecrementMentionCounts' guard: undeleted messages
-// past the recipient's last_message_id (a reader who has since marked the
+// The subquery mirrors DecrementMentionCounts' guard: the readers each
+// message's mention_receipts say it counted, undeleted messages past the
+// recipient's last_message_id (a reader who has since marked the
 // channel read is left alone), excluding mentions to a user who has blocked
 // the departing author — mentionEntries (service/mentions.go) never
 // counted those (OC-0293), so reversing them would wipe a genuine, unrelated
@@ -319,12 +320,13 @@ func erasureReverseMentionCounts(ctx context.Context, tx *sql.Tx, userID int64) 
 		`UPDATE read_states
 		 SET mention_count = MAX(0, mention_count - (
 		     SELECT COUNT(*)
-		     FROM message_mentions mm
-		     JOIN messages m ON m.id = mm.message_id
-		     WHERE mm.mentioned_user_id = read_states.user_id
-		       AND m.channel_id = read_states.channel_id
+		     FROM mention_receipts r
+		     JOIN messages m ON m.id = r.message_id
+		     WHERE r.user_id = read_states.user_id
+		       AND r.channel_id = read_states.channel_id
 		       AND m.user_id = ?
 		       AND m.deleted = 0
+		       AND `+countedReceipt+`
 		       AND m.id > read_states.last_message_id
 		       AND NOT EXISTS (
 		           SELECT 1 FROM user_blocks b

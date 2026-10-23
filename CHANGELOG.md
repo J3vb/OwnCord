@@ -64,6 +64,9 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - A ban now also ends a connection that was still signing in at the moment of the ban.
+**Chat**
+
+- Deleting a message after an edit changed who it mentions now lowers the mention badges the message actually raised. Before, it could clear someone's badge for a different, still-unread mention, or leave a badge pointing at the deleted message. Deleting an `@everyone` message now clears its badges too.
 
 **Direct messages**
 

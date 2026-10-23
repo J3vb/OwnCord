@@ -174,23 +174,24 @@ func drainMessages(ctx context.Context, tx *sql.Tx, userID, _ int64) (drainResul
 // (reverseMentionCountsForMessages is per channel and cannot be reused). The
 // decrements are computed from the message ids outward, so the cost follows
 // the chunk and not the size of read_states; the guards are the same as the
-// whole-account statement's — undeleted, past the reader's last_message_id,
+// whole-account statement's — counted per mention_receipts, undeleted, past the reader's last_message_id,
 // not from an author the reader blocked (OC-0293).
 func erasureReverseMentionCountsFor(ctx context.Context, tx *sql.Tx, in string, args []any) error {
 	// The placeholder list is spliced by Replace and holds "?" markers only;
 	// every id is bound below.
 	query := strings.Replace(`WITH dec AS (
-		SELECT mm.mentioned_user_id AS uid, m.channel_id AS cid, COUNT(*) AS n
+		SELECT r.user_id AS uid, r.channel_id AS cid, COUNT(*) AS n
 		  FROM messages m
-		  JOIN message_mentions mm ON mm.message_id = m.id
-		  JOIN read_states rs ON rs.user_id = mm.mentioned_user_id AND rs.channel_id = m.channel_id
+		  JOIN mention_receipts r ON r.message_id = m.id AND r.channel_id = m.channel_id
+		  JOIN read_states rs ON rs.user_id = r.user_id AND rs.channel_id = r.channel_id
 		 WHERE m.id IN (__IN__)
 		   AND m.deleted = 0
+		   AND `+countedReceipt+`
 		   AND m.id > rs.last_message_id
 		   AND NOT EXISTS (
 		       SELECT 1 FROM user_blocks b
-		        WHERE b.blocker_id = mm.mentioned_user_id AND b.blocked_id = m.user_id)
-		 GROUP BY mm.mentioned_user_id, m.channel_id)
+		        WHERE b.blocker_id = r.user_id AND b.blocked_id = m.user_id)
+		 GROUP BY r.user_id, r.channel_id)
 	UPDATE read_states
 	   SET mention_count = MAX(0, mention_count - (
 	       SELECT n FROM dec WHERE dec.uid = read_states.user_id AND dec.cid = read_states.channel_id))
