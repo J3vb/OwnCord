@@ -27,3 +27,9 @@ export function isLinuxDesktop(): boolean {
   const ua = navigator.userAgent;
   return /\bLinux\b/.test(ua) && !/Android/.test(ua);
 }
+
+/** True in the Tauri app on Windows, whose webview is WebView2. */
+export function isWindowsDesktop(): boolean {
+  if (typeof navigator === "undefined" || !("__TAURI_INTERNALS__" in globalThis)) return false;
+  return /\bWindows\b/.test(navigator.userAgent);
+}

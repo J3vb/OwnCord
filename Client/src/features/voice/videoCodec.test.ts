@@ -1,8 +1,10 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
+const isWindowsDesktop = vi.hoisted(() => vi.fn(() => false));
 vi.mock("./native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
+  isWindowsDesktop: () => isWindowsDesktop(),
 }));
 
 const nativeH264 = vi.hoisted(() => ({ value: false }));
@@ -22,6 +24,8 @@ vi.mock("livekit-client", () => ({
 const {
   getVideoCodecPref,
   gpuRenderer,
+  h264GpuProfiles,
+  h264GpuPublish,
   h264Offered,
   h265Offered,
   pickAutoCodec,
@@ -72,6 +76,7 @@ function savePref(value: string): void {
 beforeEach(() => {
   localStorage.clear();
   isLinuxDesktop.mockReturnValue(false);
+  isWindowsDesktop.mockReturnValue(false);
   nativeH264.value = false;
   nativeVp9.value = false;
   supportsVP9.mockReset();
@@ -454,6 +459,41 @@ describe("resolveVideoCodec with H.265 (WP M-6a)", () => {
   });
 });
 
+describe("h264GpuProfiles", () => {
+  it("is true in the Windows app on a non-Intel GPU", () => {
+    isWindowsDesktop.mockReturnValue(true);
+    expect(h264GpuProfiles()).toBe(true);
+  });
+
+  it("is false off the Windows app", () => {
+    expect(h264GpuProfiles()).toBe(false);
+  });
+
+  it("is false on Intel graphics and when the GPU cannot be named", () => {
+    isWindowsDesktop.mockReturnValue(true);
+    vi.restoreAllMocks();
+    stubGpu(INTEL);
+    expect(h264GpuProfiles()).toBe(false);
+    vi.restoreAllMocks();
+    stubGpu(null);
+    expect(h264GpuProfiles()).toBe(false);
+  });
+});
+
+describe("h264GpuPublish", () => {
+  it("is true only for an H.264 publish where the GPU profiles apply", () => {
+    isWindowsDesktop.mockReturnValue(true);
+    expect(h264GpuPublish("h264")).toBe(true);
+    expect(h264GpuPublish("vp8")).toBe(false);
+    expect(h264GpuPublish("vp9")).toBe(false);
+    expect(h264GpuPublish("h265")).toBe(false);
+  });
+
+  it("is false for H.264 off the Windows app", () => {
+    expect(h264GpuPublish("h264")).toBe(false);
+  });
+});
+
 describe("resolveVideoCodec", () => {
   it("publishes VP8 by default without probing", async () => {
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
@@ -496,6 +536,22 @@ describe("resolveVideoCodec", () => {
     it("keeps H.264 where MediaCapabilities is missing", async () => {
       vi.stubGlobal("navigator", {});
       await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
+    });
+
+    it("keeps H.264 without probing in the Windows app on a non-Intel GPU", async () => {
+      isWindowsDesktop.mockReturnValue(true);
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 60, 8_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).not.toHaveBeenCalled();
+    });
+
+    it("still probes in the Windows app on Intel graphics", async () => {
+      isWindowsDesktop.mockReturnValue(true);
+      vi.restoreAllMocks();
+      stubGpu(INTEL);
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 60, 8_000_000)).resolves.toBe("vp8");
+      expect(encodingInfo).toHaveBeenCalled();
     });
   });
 

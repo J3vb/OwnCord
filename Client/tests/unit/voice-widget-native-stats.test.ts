@@ -20,7 +20,10 @@ vi.mock("../../src/platform/desktop", () => ({
     },
   },
 }));
-vi.mock("../../src/features/voice/native/platform", () => ({ isLinuxDesktop: () => true }));
+vi.mock("../../src/features/voice/native/platform", () => ({
+  isLinuxDesktop: () => true,
+  isWindowsDesktop: () => false,
+}));
 vi.mock("@lib/livekitSession", () => ({
   getLocalScreenshareStream: () => null,
   getScreenshareQuality: () => null,

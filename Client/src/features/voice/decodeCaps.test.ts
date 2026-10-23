@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
-vi.mock("./native/platform", () => ({ isLinuxDesktop: () => isLinuxDesktop() }));
+vi.mock("./native/platform", () => ({
+  isLinuxDesktop: () => isLinuxDesktop(),
+  isWindowsDesktop: () => false,
+}));
 
 const nativeVideoCodecs = vi.hoisted(() => vi.fn());
 vi.mock("./native/videoCodecs", () => ({ nativeVideoCodecs: () => nativeVideoCodecs() }));
