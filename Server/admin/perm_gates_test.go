@@ -622,3 +622,37 @@ func TestGetMe_OwnerFlagged(t *testing.T) {
 		t.Errorf("version = %q for the owner, want the build version", me.Version)
 	}
 }
+
+// TestVoiceOwnerMovableSetting_OwnerOnly pins WP 8.4a: the switch that lets
+// Move Members holders move the owner is the owner's alone. A MANAGE_SERVER
+// holder and a non-owner ADMINISTRATOR get 403, the Owner gets 200 and the
+// stored value is canonical, and a value that is not a boolean is a 400.
+func TestVoiceOwnerMovableSetting_OwnerOnly(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, manageToken := createRoleUser(t, database, 20, "ServerAdmin", permissions.ManageServer, 50, "voicemanageuser")
+	_, adminToken := createRoleUser(t, database, 21, "Administrator", permissions.Administrator, 90, "voiceadminuser")
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "voiceowneruser")
+
+	for name, token := range map[string]string{"MANAGE_SERVER non-owner": manageToken, "ADMINISTRATOR non-owner": adminToken} {
+		w := doRequest(t, handler, http.MethodPatch, "/settings", token, map[string]string{"voice_owner_movable": "false"})
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s PATCH voice_owner_movable = %d, want 403; body: %s", name, w.Code, w.Body.String())
+		}
+	}
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"voice_owner_movable": "0"}); w.Code != http.StatusOK {
+		t.Fatalf("Owner PATCH voice_owner_movable=0 = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if got, err := database.GetSetting(context.Background(), "voice_owner_movable"); err != nil || got != "false" {
+		t.Errorf("stored voice_owner_movable = %q, %v; want \"false\"", got, err)
+	}
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"voice_owner_movable": "TRUE"}); w.Code != http.StatusOK {
+		t.Fatalf("Owner PATCH voice_owner_movable=TRUE = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if got, _ := database.GetSetting(context.Background(), "voice_owner_movable"); got != "true" {
+		t.Errorf("stored voice_owner_movable = %q, want \"true\"", got)
+	}
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"voice_owner_movable": "maybe"}); w.Code != http.StatusBadRequest {
+		t.Errorf("Owner PATCH voice_owner_movable=maybe = %d, want 400; body: %s", w.Code, w.Body.String())
+	}
+}

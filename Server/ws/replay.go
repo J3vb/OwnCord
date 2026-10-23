@@ -129,12 +129,12 @@ func (h *Hub) handleReconnect(
 	// Deliberately outside reconnectRegister's h.seqMu section: it only needs
 	// to run after that section's registerNow, and a DB round trip has no
 	// business extending the critical section that serializes every broadcast.
-	if h.postRegisterSessionRecheck(ctx, c) {
+	if v := h.postRegisterSessionRecheck(ctx, c); v != postRegisterOK {
 		// Mirrors reconnectWriteReplay's own handshake-failure path below:
 		// the teardown already ran (inside postRegisterSessionRecheck), so
 		// only the conn needs closing. startPumps=false — readPump must
 		// never start on this closed conn (OC-0051).
-		_ = conn.Close(websocket.StatusPolicyViolation, "session revoked")
+		closeAbortedHandshake(ctx, conn, v)
 		return true, false
 	}
 

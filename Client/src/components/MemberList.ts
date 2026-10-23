@@ -36,6 +36,7 @@ import {
   type MemberItemModel,
 } from "../features/members/memberRow.view";
 import { shellText } from "../i18n/shell";
+import { playingLine } from "../features/members/gameActivityLine";
 import {
   buildModel,
   flattenModel,
@@ -206,14 +207,15 @@ function kindOf(item: ListItem): number {
   if (item.kind === "header") return HEADER;
   if (item.kind === "empty") return EMPTY;
   const custom = item.member.customStatus;
-  return typeof custom === "string" && custom.length > 0 ? ROW_STATUS : ROW;
+  const hasLine = (typeof custom === "string" && custom.length > 0) || item.member.activity != null;
+  return hasLine ? ROW_STATUS : ROW;
 }
 
 /** `kindOf` for a drawn child: the same height kind, read from its model. */
 function kindOfModel(model: MemberItemModel): number {
   if (model.kind === "header") return HEADER;
   if (model.kind === "empty") return EMPTY;
-  return model.customStatus === null ? ROW : ROW_STATUS;
+  return model.customStatus === null && model.activity === null ? ROW : ROW_STATUS;
 }
 
 /** The last model the virtual list built, so a reopened column resumes from it
@@ -270,6 +272,7 @@ function itemModel(item: ListItem): MemberItemModel {
   if (item.kind === "empty") return { kind: "empty", text: item.text };
   const { member } = item;
   const custom = member.customStatus;
+  const customStatus = typeof custom === "string" && custom.length > 0 ? custom : null;
   return {
     kind: "row",
     id: member.id,
@@ -277,7 +280,10 @@ function itemModel(item: ListItem): MemberItemModel {
     avatarName: resolveDisplayName({ username: member.username, displayName: member.displayName }),
     avatarColor: pickAvatarColor(member.username),
     avatarUrl: member.avatar,
-    customStatus: typeof custom === "string" && custom.length > 0 ? custom : null,
+    customStatus,
+    // The custom status wins the line; the game shows in the profile card.
+    activity:
+      customStatus === null && member.activity != null ? playingLine(member.activity) : null,
     colorVar: item.colorVar,
     status: member.status,
     away: isAwayStatus(member.status),

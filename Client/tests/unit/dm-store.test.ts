@@ -9,6 +9,7 @@ import {
   updateDmLastMessagePreview,
   clearDmUnread,
   updateDmParticipant,
+  setDmActivityLookup,
 } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { channelsStore } from "../../src/stores/channels.store";
@@ -84,6 +85,22 @@ describe("dmStore", () => {
   // ── addDmChannel ───────────────────────────────────────
 
   describe("addDmChannel", () => {
+    it("seeds a new DM's partner with the game presence already gave them", () => {
+      setDmActivityLookup((id) => (id === 1 ? { name: "Factorio", startedAt: 1_000 } : undefined));
+      addDmChannel(makeDm());
+      const dm = dmStore.getState().channels[0]!;
+      expect(dm.recipient.activity).toEqual({ name: "Factorio", startedAt: 1_000 });
+      expect(dm.participants[0]?.activity).toEqual({ name: "Factorio", startedAt: 1_000 });
+      setDmActivityLookup(() => undefined);
+    });
+
+    it("keeps the game a re-sent DM already showed", () => {
+      const playing = { id: 1, username: "alice", avatar: "", status: "online", activity: null };
+      addDmChannel(makeDm({ recipient: playing, participants: [playing] }));
+      addDmChannel(makeDm());
+      expect(dmStore.getState().channels[0]?.recipient.activity).toBeNull();
+    });
+
     it("adds a new channel to the front of the list", () => {
       setDmChannels([makeDm({ channelId: 1 })]);
       addDmChannel(makeDm({ channelId: 2 }));

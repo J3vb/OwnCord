@@ -542,7 +542,8 @@ details.disclose > summary {
   overflow: hidden;
   background: var(--bg-tertiary);
 }
-.camera-preview video {
+.camera-preview video,
+.camera-preview .video-surface {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -1311,4 +1312,56 @@ details.disclose[open] > summary .icon {
 .shortcuts-modal {
   width: 520px;
   max-width: calc(100vw - 32px);
+}
+
+/* ── Game activity: Your games and the Add a game picker (WP 8.3d) ── */
+.game-row-info {
+  flex: 1;
+  min-width: 0;
+  margin-right: 12px;
+  overflow-wrap: anywhere;
+}
+.game-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.game-row-actions .ac-btn {
+  margin-left: 0;
+}
+.game-picker {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.game-picker .form-input {
+  margin: 8px 0;
+}
+.game-picker .game-row-actions {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.game-picker-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.game-picker-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.game-picker-item:hover,
+.game-picker-item:focus-visible {
+  background: var(--bg-modifier-hover);
+}
+.game-list-title {
+  margin-top: 16px;
+  font-weight: 600;
 }

@@ -651,6 +651,7 @@ const ACCESS_ACTIONS=[
   ['add_reaction','Add reactions'],
   ['join_voice','Join voice'],
   ['moderate_voice','Moderate voice'],
+  ['move_voice','Move voice'],
 ];
 function accessActionLabel(a){const f=ACCESS_ACTIONS.find(x=>x[0]===a);return f?f[1]:a}
 function accessVerdict(ok){return ok?'<span style="color:var(--text-positive)">Allowed</span>':'<span style="color:var(--text-danger)">Denied</span>'}
@@ -777,7 +778,7 @@ async function saveChannelPerms(){
 
 /* Permission checkboxes, grouped exactly as docs/schema.md's "Permission
    groups" section groups the bitfield. Keep the two in step: the doc is the
-   reference an operator reads next to this grid, and every one of the 21
+   reference an operator reads next to this grid, and every one of the 22
    defined bits must appear in exactly one group or it becomes ungrantable
    here. */
 const PERM_GROUPS=[
@@ -808,7 +809,8 @@ const PERM_GROUPS=[
   {title:'Moderation',bits:[
     [0x40000,'Kick Members','Force-logout a lower-ranked member'],
     [0x80000,'Ban Members','Ban and unban lower-ranked members'],
-    [0x100000,'Mute Members','Server mute, deafen, move and disconnect in voice'],
+    [0x100000,'Mute Members','Server mute, deafen and disconnect, and move lower-ranked members'],
+    [0x2000,'Move Members','Move anyone between voice channels, whatever their rank (only the owner can grant)'],
   ]},
 ];
 
@@ -816,9 +818,15 @@ const PERM_GROUPS=[
 function myPosition(){return (state.me&&state.me.role_position)||0}
 /* True when the signed-in principal may manage this role at all. */
 function canManageRole(role){return role.position<myPosition()}
+/* Move Members can be given or taken away only by the owner or an
+   Administrator, whatever other role permissions the viewer holds (the server
+   refuses anyone else, so the box is shown greyed rather than left to fail). */
+const OWNER_GRANT_ONLY_TITLE='Only the owner or an Administrator can change this';
+function canChangeOwnerGrantOnly(){return isOwner()||can(PERM.ADMINISTRATOR)}
 /* True when this bit may be granted: ADMINISTRATOR grants anything, otherwise
    only bits the caller's own role holds. */
 function canGrantBit(bit){
+  if(bit===PERM.MOVE_MEMBERS)return canChangeOwnerGrantOnly();
   const p=(state.me&&state.me.permissions)||0;
   if((p&PERM.ADMINISTRATOR)!==0)return true;
   return (p&bit)===bit;
@@ -1016,10 +1024,13 @@ function openRoleModal(id){
          server allows, but the panel keeps the rule to one sentence), unchecked
          and locked otherwise. */
       const locked=!canGrantBit(bit);
+      const ownerOnly=bit===PERM.MOVE_MEMBERS;
+      const lockNote=ownerOnly?OWNER_GRANT_ONLY_TITLE+'.':'Locked: your own role does not have this permission.';
       grid+='<label class="perm-item'+(locked?' locked':'')+'">'
-        +'<input type="checkbox" data-permbit="'+bit+'" aria-labelledby="permName'+bit+'" aria-describedby="permDesc'+bit+'" '+(granted?'checked':'')+' '+(locked?'disabled':'')+'>'
+        +'<input type="checkbox" data-permbit="'+bit+'" aria-labelledby="permName'+bit+'" aria-describedby="permDesc'+bit+'" '+(granted?'checked':'')+' '+(locked?'disabled':'')+(locked&&ownerOnly?' title="'+esc(OWNER_GRANT_ONLY_TITLE)+'"':'')+'>'
         +'<span class="perm-text"><span class="perm-name" id="permName'+bit+'">'+esc(label)+'</span>'
-        +'<span class="perm-desc" id="permDesc'+bit+'">'+esc(desc)+(locked?'<span class="perm-lock"> Locked: your own role does not have this permission.</span>':'')+'</span></span></label>';
+        +'<span class="perm-desc" id="permDesc'+bit+'">'+esc(desc)+(locked?'<span class="perm-lock"> '+esc(lockNote)+'</span>':'')
+        +(ownerOnly&&role&&role.is_default?'<span class="perm-hint" id="permHint'+bit+'">Giving this to the default role means only the owner or an Administrator can change members\' roles.</span>':'')+'</span></span></label>';
     });
     grid+='</div></fieldset>';
   });

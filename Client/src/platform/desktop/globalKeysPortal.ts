@@ -24,6 +24,8 @@ function noKeys(): GlobalKeysStatus {
     portalVersion: 0,
     triggers: { ptt: null, mute: null, deafen: null },
     canConfigure: false,
+    triggersUnnamed: false,
+    sessionRefused: false,
   };
 }
 
@@ -48,6 +50,8 @@ export function parseStatus(raw: unknown): GlobalKeysStatus {
       deafen: trigger(triggers.deafen),
     },
     canConfigure: r.canConfigure === true,
+    triggersUnnamed: r.triggersUnnamed === true,
+    sessionRefused: r.sessionRefused === true,
   };
 }
 

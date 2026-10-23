@@ -384,6 +384,18 @@
       "binding": "narrowed",
       "category": "dom-owned",
       "reason": "WeakSet keyed by RTCRtpTransceiver objects; entries go with the closed peer connection, and an unpublished transceiver is restored and removed on the next offer"
+    },
+    {
+      "file": "lib/videoSurface.ts",
+      "binding": "surfaces",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by a native renderer's MediaStreamTrack; the entry goes with the track when its renderer is disposed"
+    },
+    {
+      "file": "lib/videoSurface.ts",
+      "binding": "shown",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by a <video> element; the entry goes with the element"
     }
   ]
 }

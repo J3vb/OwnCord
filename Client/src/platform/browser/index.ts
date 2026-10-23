@@ -23,6 +23,7 @@ import type {
   Autostart,
   CredentialStore,
   DevTools,
+  GameDetector,
   GlobalShortcuts,
   HttpClient,
   IdentityStore,
@@ -102,6 +103,8 @@ const globalShortcuts: GlobalShortcuts = {
     portalVersion: 0,
     triggers: { ptt: null, mute: null, deafen: null },
     canConfigure: false,
+    triggersUnnamed: false,
+    sessionRefused: false,
   }),
   bindPortal: () => Promise.reject(new UnsupportedKeysError()),
   configurePortal: () => Promise.reject(new UnsupportedKeysError()),
@@ -224,6 +227,12 @@ const secureMembers: SecureMembers = isSecurePage()
       socket: inertSocket,
     };
 
+const gameDetector: GameDetector = {
+  available: false,
+  detect: async () => null,
+  listRunningPrograms: async () => [],
+};
+
 const systemIdle: SystemIdle = {
   idleMs: async () => null,
 };
@@ -274,6 +283,7 @@ export const browser: Platform = {
   devTools,
   externalContent,
   fileSaver,
+  gameDetector,
   logFiles,
   nativeVoice,
   pushToTalk,

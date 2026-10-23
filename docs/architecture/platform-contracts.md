@@ -100,19 +100,19 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 92    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 96    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 28    |
+| Distinct `invoke` command names called from `Client/src/`  | 94    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 97    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
-| Files under `Client/src/platform/`                         | 54    |
+| Files under `Client/src/platform/`                         | 56    |
 
-The handler count covers the 96 distinct registrations
+The handler count covers the 97 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the forty-three `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 95 on Linux
-and 52 elsewhere. The one environment-detection helper is
+behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 96 on Linux
+and 53 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -150,6 +150,7 @@ get_window_prefs
 global_keys_portal_bind
 global_keys_portal_configure
 global_keys_status
+list_running_programs
 load_credential
 load_identity_key
 load_pending_messages
@@ -229,10 +230,15 @@ ws_disconnect
 ws_send
 ```
 
-Four registered handlers have no production platform caller:
-`get_cert_fingerprint` (native E2E), `native_voice_build_info` (native diagnostics),
-`stop_http_proxy` and `detect_game` (WP 8.3b, the Rust game scanner; its caller
-arrives with WP 8.3c). The three Windows per-app share audio commands
+Three registered handlers have no production platform caller:
+`get_cert_fingerprint` (native E2E), `native_voice_build_info` (native diagnostics)
+and `stop_http_proxy`. `detect_game` (WP 8.3b, the Rust game scanner) has its
+caller since WP 8.3c: `src/platform/desktop/gameDetector.ts`, behind the
+`GameDetector` contract, a twenty-eighth importer; the web build answers "no
+game" and hides the setting. WP 8.3d gives it a second command,
+`list_running_programs` (the user's own running programs for the "Add a game"
+picker; the list is shown only in that local picker and never stored or sent),
+and an optional `{ manual, hidden }` argument to `detect_game`. The three Windows per-app share audio commands
 `app_audio_available`, `start_app_audio` and `stop_app_audio` (WP 6.7a, the host
 half: they exist on every target and answer "unavailable" off Windows) have their
 caller since WP 6.7b: `src/platform/desktop/appAudio.ts`, behind the `AppAudio`
@@ -276,6 +282,7 @@ native surface itself lives only in `platform/desktop/`.
 | App metadata      | `settings/AboutTab.ts`                                                                                | `api/app`                                                                                                                                             | build-time constant                                         |
 | Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                                                  | `api/core` (`open_devtools`)                                                                                                                          | unsupported — the browser has its own devtools already      |
 | System idle       | `pages/MainPage.ts` (for `lib/autoIdle.ts`)                                                           | `api/core` (`system_idle_ms`)                                                                                                                         | unsupported — answers `null`; in-page activity decides      |
+| Game activity     | `pages/MainPage.ts` (for `lib/gameActivity.ts`), `settings/GameActivityRows.ts`                       | `api/core` (`detect_game`, `list_running_programs`)                                                                                                   | unsupported — answers `null`; the setting is hidden         |
 
 **Media devices are not on this map, deliberately.** No generic `@tauri-apps`
 surface exists for them: the cross-platform media-device call sites

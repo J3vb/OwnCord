@@ -15,6 +15,7 @@ import {
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
 import { appendToggleRows, createToggle } from "./helpers";
+import { buildGameActivityRows } from "./GameActivityRows";
 import { settingsText as t } from "../../i18n/settings";
 
 const log = createLogger("AdvancedTab");
@@ -50,6 +51,9 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
   if (desktop.window.available) {
     for (const row of buildWindowPrefRows(signal)) section.appendChild(row);
   }
+
+  // Share the game you are playing (WP 8.3): desktop only, nothing to show on the web.
+  for (const el of buildGameActivityRows(signal)) section.appendChild(el);
 
   // ---- Debug section (dev builds only: its one row is DevTools) --------------
 

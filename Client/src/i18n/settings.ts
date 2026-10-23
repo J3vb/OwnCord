@@ -199,6 +199,11 @@ export const settingsText = defineCatalog("settings", {
     "Your desktop manages these shortcuts. They work while OwnCord is unfocused, but your desktop keeps the keys for OwnCord in every app, so choose keys you do not need elsewhere.",
   "keybinds.portalCancelled": "Setup was cancelled. No global shortcuts were changed.",
   "keybinds.portalFailed": "Your desktop could not set up global shortcuts. Try again.",
+  "keybinds.portalRefused":
+    "Your desktop refused global shortcuts for OwnCord. Restart OwnCord. If it keeps happening, check that xdg-desktop-portal is running.",
+  "keybinds.portalUnnamed":
+    "OwnCord's shortcuts are registered, but your desktop does not say which keys run them. Assign keys in your desktop's settings. On Hyprland, add lines like these to hyprland.conf: bind = CTRL SHIFT, M, global, com.owncord.client:toggle-mute (also toggle-deafen for deafen, and push-to-talk for Push to Talk).",
+  "keybinds.portalSetInDesktop": "Set in your desktop",
   "keybinds.navigation": "Navigation",
   "keybinds.communication": "Communication",
   "keybinds.messages": "Messages",

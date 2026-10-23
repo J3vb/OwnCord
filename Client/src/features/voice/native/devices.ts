@@ -8,6 +8,7 @@
 import { desktop } from "../../../platform/desktop";
 import type { NativeVoiceCameraSupport } from "../../../platform/contracts/nativeVoice";
 import { isLinuxDesktop } from "./platform";
+import { voiceText as t } from "../../../i18n/voice";
 
 export type AudioDeviceKind = "audioinput" | "audiooutput";
 export type NativeDeviceKind = AudioDeviceKind | "videoinput";
@@ -33,7 +34,30 @@ export async function nativeAudioDevices(kind: AudioDeviceKind): Promise<AudioDe
 export async function nativeCameraDevices(): Promise<AudioDevice[] | null> {
   if (!isLinuxDesktop()) return null;
   const devices = await desktop.nativeVoice.listCameras();
-  return devices.map((d) => ({ deviceId: d.id, label: d.name, kind: "videoinput" }));
+  return cameraLabels(devices).map((label, i) => ({
+    deviceId: devices[i]!.id,
+    label,
+    kind: "videoinput",
+  }));
+}
+
+/** Picker labels that tell cameras apart: V4L2 cuts a device name at 31
+ *  characters, so a laptop's colour camera and its infrared sensor (or two
+ *  identical USB cameras) arrive with the same name. The sensor is marked as
+ *  infrared, and names still shared are numbered in list order. */
+function cameraLabels(devices: readonly { name: string; infrared: boolean }[]): string[] {
+  const labels = devices.map((d) =>
+    d.infrared && d.name !== "" ? t("call.infraredCamera", { name: d.name }) : d.name,
+  );
+  const total = new Map<string, number>();
+  for (const label of labels) total.set(label, (total.get(label) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return labels.map((label) => {
+    if (label === "" || (total.get(label) ?? 0) < 2) return label;
+    const n = (seen.get(label) ?? 0) + 1;
+    seen.set(label, n);
+    return t("call.sameNameCamera", { name: label, n });
+  });
 }
 
 /** Whether the native camera backend is usable at all (GStreamer initialises

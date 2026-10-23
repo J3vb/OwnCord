@@ -23,6 +23,7 @@ import {
   clearPeerVerification,
   clearPeerVerifications,
   setLocalSessionFingerprint,
+  setLocalSafetyNumber,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { markJoinMilestone } from "@lib/voiceJoinTrace";
@@ -273,6 +274,9 @@ export class E2EEManager {
     // the keyring once, so the added identity round-trip does NOT stack on
     // the non-key-holder's 10s key-exchange stall below (F3).
     const announcePayload = await this._identity.buildAnnouncePayload(myPubKeyBase64);
+    // Only a signed announce gives peers a safety number to compare ours with.
+    const mySafetyNumber =
+      announcePayload.signature === undefined ? null : await this._identity.safetyNumber();
 
     // Same check again after the keyring round trip — the widest window of
     // the three, and the next statements install OUR role and room key over
@@ -327,6 +331,7 @@ export class E2EEManager {
     // processed with no offer sent) and gets its offer sent below.
     this._ecdhKeyPair = ecdhKeyPair;
     setLocalSessionFingerprint(myFingerprint);
+    setLocalSafetyNumber(mySafetyNumber);
 
     if (this._isKeyHolder) {
       // Announce our (signed) key BEFORE draining queued announces. The
@@ -1074,6 +1079,7 @@ export class E2EEManager {
     this._peerOfferEpochs.clear();
     clearPeerVerifications();
     setLocalSessionFingerprint(null);
+    setLocalSafetyNumber(null);
     this._isKeyHolder = false;
     this._rotatingKey = false;
     this._rotationPending = false;
