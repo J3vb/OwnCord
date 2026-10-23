@@ -1492,6 +1492,25 @@ describe("PTT on the portal backend (LP-9b)", () => {
     expect(starts()).toBe(3);
   });
 
+  it("a portal that names no keys keeps PTT live and re-arms after a restart", async () => {
+    const unnamed = { ...portalStatus(null), triggersUnnamed: true };
+    const ptt = await service();
+    await ptt.init();
+    supported = true;
+    emit("global-keys-changed", unnamed);
+    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    expect(starts()).toBe(2);
+
+    // The portal restarts: the host reports ptt-error, then the rebind lands
+    // with the same unnamed status, which re-arms instead of tearing down.
+    emit("ptt-error", "portal_lost");
+    await vi.waitFor(() => expect(mockPttPollingLive).toBe(false));
+    emit("global-keys-changed", unnamed);
+    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    expect(starts()).toBe(3);
+    expect(mockSetPttGated).toHaveBeenLastCalledWith(true);
+  });
+
   it("ignores a status that leaves PTT unbound, or PTT off", async () => {
     const ptt = await service();
     await ptt.init();
