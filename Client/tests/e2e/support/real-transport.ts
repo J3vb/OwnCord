@@ -248,6 +248,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
         // The taskbar/tray unread badge (DP-27): nothing to draw here.
         case "set_unread_badge":
           return null;
+        // The "Add a game" picker's program list: nothing is running here.
+        case "list_running_programs":
+          return [];
         // Windows per-app share audio (6.7): no WASAPI host here, so the
         // share picker offers no "Share the app's sound" switch.
         case "app_audio_available":

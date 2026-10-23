@@ -7,14 +7,16 @@
  * name while it is on. Turning it off stops the scan and tells the server at
  * once; the loop that does both listens for the pref change (`@lib/gameActivity`).
  * The "Detected now" line scans only while the switch is on, so what it shows
- * is what others can see.
+ * is what others can see. WP 8.3d adds "Your games" below it (`./GameActivityGames`).
  */
 
 import { createElement, appendChildren, setOwnedTimeout, setText } from "@lib/dom";
 import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
+import { displayName, loadGamePrefs, toDetectPrefs } from "@lib/gameActivityPrefs";
 import { savePref } from "@lib/preferences";
 import { desktop } from "../../platform/desktop";
 import { gameActivityText as t } from "../../i18n/gameActivity";
+import { buildGamesSection } from "./GameActivityGames";
 import { createToggle } from "./helpers";
 
 /** How often the line re-checks; the same beat as the loop that sends it. */
@@ -50,11 +52,15 @@ export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
       return;
     }
     detected.hidden = false;
-    void desktop.gameDetector.detect().then((game) => {
+    const prefs = loadGamePrefs();
+    void desktop.gameDetector.detect(toDetectPrefs(prefs)).then((game) => {
       if (mine !== scan || signal.aborted) return;
+      // Shown as others see it: under the name it was renamed to.
       setText(
         detected,
-        game === null ? t("settings.detectedNone") : t("settings.detected", { game: game.name }),
+        game === null
+          ? t("settings.detectedNone")
+          : t("settings.detected", { game: displayName(prefs, game.name) }),
       );
       cancelRefresh = setOwnedTimeout(signal, refresh, REFRESH_MS);
     });
@@ -72,5 +78,10 @@ export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
   signal.addEventListener("abort", () => cancelRefresh?.(), { once: true });
   refresh();
 
-  return [createElement("div", { class: "settings-separator" }), title, row];
+  return [
+    createElement("div", { class: "settings-separator" }),
+    title,
+    row,
+    ...buildGamesSection(signal),
+  ];
 }

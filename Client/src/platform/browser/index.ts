@@ -230,6 +230,7 @@ const secureMembers: SecureMembers = isSecurePage()
 const gameDetector: GameDetector = {
   available: false,
   detect: async () => null,
+  listRunningPrograms: async () => [],
 };
 
 const systemIdle: SystemIdle = {

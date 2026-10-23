@@ -18,6 +18,9 @@
 //! - Anything else: `None`.
 //!
 //! Matching, in priority order:
+//! 0. A process whose path equals a program the user added by hand (a
+//!    [`ManualGame`] in the prefs passed to `detect_game`), named as the user
+//!    named it. A manual entry beats every automatic match.
 //! 1. A process whose path is inside an installed Steam or Epic game's folder
 //!    (`<library>/steamapps/common/<installdir>/`), unless its name is a
 //!    launcher, crash reporter or other helper ([`is_helper`]).
@@ -39,7 +42,7 @@ mod tests;
 #[cfg(windows)]
 mod win;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -53,6 +56,7 @@ pub enum GameSource {
     Steam,
     Epic,
     List,
+    Manual,
 }
 
 /// The running game, as the frontend sees it. Serialised in camelCase like the
@@ -66,21 +70,175 @@ pub struct DetectedGame {
     pub started_at_ms: u64,
 }
 
+/// A program the user added by hand: the path of its executable and the name
+/// to show for it.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ManualGame {
+    pub path: String,
+    pub name: String,
+}
+
+/// What the user decided about games, sent with every scan:
+/// `{ manual: [{ path, name }], hidden: [name] }`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DetectPrefs {
+    pub manual: Vec<ManualGame>,
+    pub hidden: Vec<String>,
+}
+
+/// [`DetectPrefs`] normalised for matching: manual paths the way process paths
+/// are, hidden names lower-cased.
+#[derive(Debug, Default)]
+struct Prefs {
+    manual: Vec<(String, String)>,
+    hidden: HashSet<String>,
+}
+
+impl Prefs {
+    fn new(prefs: &DetectPrefs) -> Self {
+        Prefs {
+            manual: prefs
+                .manual
+                .iter()
+                .map(|m| (normalize_path(&m.path), m.name.trim().to_string()))
+                .filter(|(path, name)| !path.is_empty() && !name.is_empty())
+                .collect(),
+            hidden: prefs
+                .hidden
+                .iter()
+                .map(|n| n.trim().to_lowercase())
+                .collect(),
+        }
+    }
+
+    fn is_hidden(&self, name: &str) -> bool {
+        self.hidden.contains(&name.trim().to_lowercase())
+    }
+
+    /// The manual entry's name for a process, if one of its paths is the entry's.
+    fn manual_name(&self, proc: &Proc) -> Option<&str> {
+        self.manual
+            .iter()
+            .find(|(path, _)| proc.paths.contains(path))
+            .map(|(_, name)| name.as_str())
+    }
+}
+
 /// The game being played, or `None` when nothing recognised is running or the
-/// OS cannot list processes. Read-only and argument-free; the frontend polls
-/// it while the setting is on. `async` so the scan runs on a worker thread,
-/// not the IPC main thread.
+/// OS cannot list processes. Read-only; the frontend polls it while the setting
+/// is on, passing the user's manual and hidden games. `async` so the scan runs
+/// on a worker thread, not the IPC main thread.
 #[tauri::command(async)]
-pub fn detect_game() -> Option<DetectedGame> {
+pub fn detect_game(prefs: Option<DetectPrefs>) -> Option<DetectedGame> {
     let procs = platform_processes()?;
+    let prefs = Prefs::new(&prefs.unwrap_or_default());
     let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
     detect_with(
         &procs,
         &mut state,
         libraries::load_installed,
         own_list(),
+        &prefs,
         current_os(),
     )
+}
+
+/// One program in the "Add a game" picker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RunningProgram {
+    /// The executable's file name without its extension.
+    pub name: String,
+    pub path: String,
+}
+
+/// The most programs the picker is given.
+const MAX_PROGRAMS: usize = 300;
+
+/// The user's own running programs for the picker: one per path, helpers and
+/// (on Windows) the system's own programs left out, sorted by name. Empty when
+/// the OS cannot list processes. The list is the answer to this call only; it is
+/// not stored, logged or sent anywhere.
+#[tauri::command(async)]
+pub fn list_running_programs() -> Vec<RunningProgram> {
+    platform_processes().map_or_else(Vec::new, |procs| {
+        list_programs(&procs, windows_dir().as_deref())
+    })
+}
+
+/// The Windows directory, normalised, where there is one.
+fn windows_dir() -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let dir = std::env::var("SystemRoot")
+        .or_else(|_| std::env::var("windir"))
+        .ok()?;
+    let dir = normalize_path(&dir);
+    let dir = dir.trim_end_matches('/');
+    (!dir.is_empty()).then(|| dir.to_string())
+}
+
+/// A file name without its last extension (`Game.exe` -> `Game`); a name that is
+/// all extension (`.hidden`) is kept whole.
+fn file_stem(file: &str) -> &str {
+    match file.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem,
+        _ => file,
+    }
+}
+
+/// Filter, de-duplicate by path, cap, then sort. When more than
+/// [`MAX_PROGRAMS`] remain, the most recently started ones are kept (the
+/// likeliest to be the game just launched); a start the OS would not give
+/// counts as the oldest. Two instances of one program count as the newer one.
+fn list_programs(procs: &[Proc], windows_dir: Option<&str>) -> Vec<RunningProgram> {
+    let mut index: HashMap<String, usize> = HashMap::new();
+    let mut programs: Vec<(RunningProgram, u64)> = Vec::new();
+    for proc in procs {
+        let key = normalize_path(&proc.display);
+        if key.is_empty() || is_helper(file_name(&key)) {
+            continue;
+        }
+        let in_windows_dir = windows_dir.is_some_and(|dir| {
+            key.strip_prefix(dir)
+                .is_some_and(|rest| rest.starts_with('/'))
+        });
+        let name = file_stem(proc.display.rsplit(['/', '\\']).next().unwrap_or(""));
+        if in_windows_dir || name.is_empty() {
+            continue;
+        }
+        let started = if proc.started_at_ms == UNKNOWN_START {
+            0
+        } else {
+            proc.started_at_ms
+        };
+        match index.get(&key) {
+            Some(&at) => programs[at].1 = programs[at].1.max(started),
+            None => {
+                index.insert(key, programs.len());
+                programs.push((
+                    RunningProgram {
+                        name: name.to_string(),
+                        path: proc.display.clone(),
+                    },
+                    started,
+                ));
+            }
+        }
+    }
+    if programs.len() > MAX_PROGRAMS {
+        programs.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| (&a.0.name, &a.0.path).cmp(&(&b.0.name, &b.0.path)))
+        });
+        programs.truncate(MAX_PROGRAMS);
+    }
+    let mut programs: Vec<RunningProgram> = programs.into_iter().map(|(p, _)| p).collect();
+    programs.sort_by(|a, b| {
+        (a.name.to_lowercase(), &a.name, &a.path).cmp(&(b.name.to_lowercase(), &b.name, &b.path))
+    });
+    programs
 }
 
 /// A process start time the OS would not give. It sorts after every known
@@ -104,6 +262,9 @@ struct Proc {
     /// The whole command line, lower-cased with `\` turned into `/`.
     cmdline: String,
     started_at_ms: u64,
+    /// The path to show and to hand back for a manual entry: the first raw
+    /// path that is absolute, else the first one.
+    display: String,
 }
 
 impl Proc {
@@ -115,10 +276,16 @@ impl Proc {
                 paths.push(path);
             }
         }
+        let display = raw_paths
+            .iter()
+            .find(|raw| is_absolute(raw))
+            .or_else(|| raw_paths.first())
+            .map_or_else(String::new, |raw| clean_display(raw));
         Proc {
             paths,
             cmdline: normalize_cmdline(raw_cmdline),
             started_at_ms,
+            display,
         }
     }
 }
@@ -126,6 +293,10 @@ impl Proc {
 /// Lower-case, `\` -> `/`, and drop a leading drive (`z:`, `c:`) so a Proton
 /// command line matches the Linux path it points at. Also drops a `\\?\`
 /// prefix and Linux's ` (deleted)` suffix on a replaced binary.
+///
+/// The drive letter is ignored on purpose (`C:\Games\a.exe` and `D:\Games\a.exe`
+/// are the same program here). The frontend's `pathKey` in
+/// `lib/gameActivityPrefs.ts` does the same and must stay identical.
 fn normalize_path(raw: &str) -> String {
     let lower = raw
         .trim()
@@ -138,6 +309,20 @@ fn normalize_path(raw: &str) -> String {
         [drive, b':', ..] if drive.is_ascii_alphabetic() => s[2..].to_string(),
         _ => s.to_string(),
     }
+}
+
+/// Whether a raw path starts at a root: `/x`, `C:\x`, `\\server\x`.
+fn is_absolute(raw: &str) -> bool {
+    let raw = raw.trim().trim_matches('"');
+    matches!(raw.as_bytes(), [b'/' | b'\\', ..] | [_, b':', ..])
+}
+
+/// A raw path as the picker shows it: without quotes, a `\\?\` prefix or
+/// Linux's ` (deleted)` suffix.
+fn clean_display(raw: &str) -> String {
+    let s = raw.trim().trim_matches('"');
+    let s = s.strip_suffix(" (deleted)").unwrap_or(s);
+    s.strip_prefix("\\\\?\\").unwrap_or(s).to_string()
 }
 
 fn normalize_cmdline(raw: &str) -> String {
@@ -301,11 +486,23 @@ fn earliest(candidates: Vec<DetectedGame>) -> Option<DetectedGame> {
         .min_by(|a, b| (a.started_at_ms, &a.name).cmp(&(b.started_at_ms, &b.name)))
 }
 
-fn pick(procs: &[Proc], libs: &Libraries, list: &[ListEntry], os: &str) -> Pick {
+fn pick(procs: &[Proc], libs: &Libraries, list: &[ListEntry], prefs: &Prefs, os: &str) -> Pick {
+    let mut manual_hits = Vec::new();
     let mut library_hits = Vec::new();
     let mut list_hits = Vec::new();
     let mut unknown_dirs = Vec::new();
     for proc in procs {
+        // The user's own entry claims the process before any automatic match.
+        if let Some(name) = prefs.manual_name(proc) {
+            if !prefs.is_hidden(name) {
+                manual_hits.push(DetectedGame {
+                    name: name.to_string(),
+                    source: GameSource::Manual,
+                    started_at_ms: proc.started_at_ms,
+                });
+            }
+            continue;
+        }
         let mut in_library = false;
         for path in &proc.paths {
             if let Some(dir) = libs.game_dir_of(path) {
@@ -313,7 +510,9 @@ fn pick(procs: &[Proc], libs: &Libraries, list: &[ListEntry], os: &str) -> Pick 
                 // genuine game (or list match) is still found among the rest.
                 if !is_helper(file_name(path)) {
                     in_library = true;
-                    library_hits.push(detected(dir, proc));
+                    if !prefs.is_hidden(&dir.name) {
+                        library_hits.push(detected(dir, proc));
+                    }
                 }
             } else if let Some(unknown) = libs.unknown_dir_of(path) {
                 unknown_dirs.push(unknown);
@@ -326,6 +525,7 @@ fn pick(procs: &[Proc], libs: &Libraries, list: &[ListEntry], os: &str) -> Pick 
         if let Some(entry) = list
             .iter()
             .find(|e| list_matches(e, &tails, &proc.cmdline, os))
+            .filter(|e| !prefs.is_hidden(&e.name))
         {
             list_hits.push(DetectedGame {
                 name: entry.name.clone(),
@@ -337,7 +537,9 @@ fn pick(procs: &[Proc], libs: &Libraries, list: &[ListEntry], os: &str) -> Pick 
     unknown_dirs.sort();
     unknown_dirs.dedup();
     Pick {
-        game: earliest(library_hits).or_else(|| earliest(list_hits)),
+        game: earliest(manual_hits)
+            .or_else(|| earliest(library_hits))
+            .or_else(|| earliest(list_hits)),
         unknown_dirs,
     }
 }
@@ -358,6 +560,7 @@ fn detect_with(
     state: &mut Option<State>,
     load: impl Fn() -> Libraries,
     list: &[ListEntry],
+    prefs: &Prefs,
     os: &str,
 ) -> Option<DetectedGame> {
     let st = state.get_or_insert_with(|| State {
@@ -365,14 +568,14 @@ fn detect_with(
         seen_unknown: HashSet::new(),
         current: None,
     });
-    let first = pick(procs, &st.libs, list, os);
+    let first = pick(procs, &st.libs, list, prefs, os);
     let mut fresh = false;
     for dir in &first.unknown_dirs {
         fresh |= st.seen_unknown.insert(dir.clone());
     }
     let mut game = if fresh {
         st.libs = load();
-        pick(procs, &st.libs, list, os).game
+        pick(procs, &st.libs, list, prefs, os).game
     } else {
         first.game
     };
