@@ -415,10 +415,22 @@ func CanMoveVoice(s Subject) error {
 // manufacture move authority the base role never held. MUTE_MEMBERS no longer
 // opens a move.
 func AuthorizeVoiceMover(s Subject) error {
-	if !HasServerPerm(s.RolePerms, MoveMembers) {
-		return missing(MoveMembers)
+	if err := VoiceMoverBase(s.RolePerms); err != nil {
+		return err
 	}
 	return CanMoveVoice(s)
+}
+
+// VoiceMoverBase is AuthorizeVoiceMover's base-role half on its own: the
+// actor's roles hold MOVE_MEMBERS (or Administrator). A caller that has not
+// resolved the channel yet uses it to know the move path is open; the
+// channel verdict still comes from AuthorizeVoiceMover on the resolved
+// subject, since READ_MESSAGES may come from a channel allow.
+func VoiceMoverBase(rolePerms int64) error {
+	if !HasServerPerm(rolePerms, MoveMembers) {
+		return missing(MoveMembers)
+	}
+	return nil
 }
 
 // CanChangeOwnerGrantOnly reports whether a principal may add or remove the

@@ -388,3 +388,21 @@ func TestCanMentionRole(t *testing.T) {
 		t.Errorf("mentionable role refused the zero subject: %v", err)
 	}
 }
+
+func TestVoiceMoverBase(t *testing.T) {
+	cases := []struct {
+		name  string
+		perms int64
+		ok    bool
+	}{
+		{"move bit alone", MoveMembers, true},
+		{"administrator", Administrator, true},
+		{"mute only", MuteMembers | ReadMessages, false},
+		{"none", 0, false},
+	}
+	for _, tc := range cases {
+		if got := VoiceMoverBase(tc.perms) == nil; got != tc.ok {
+			t.Errorf("%s: VoiceMoverBase(%#x) ok = %v, want %v", tc.name, tc.perms, got, tc.ok)
+		}
+	}
+}
