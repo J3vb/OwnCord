@@ -321,8 +321,13 @@ the call. Three routes:
 
 **Remote video.** On `trackSubscribed` for a video track, `NativeRoom` opens a
 `NativeVideoRenderer` (`features/voice/native/videoRenderer.ts`): it draws each
-frame with a WebGL2 I420→RGB shader (BT.601 limited range) and exposes the
-canvas as a `MediaStreamTrack` (`canvas.captureStream()`). The adapter raises
+frame with a WebGL2 I420→RGB shader (BT.601 limited range). The canvas itself
+is the picture: `lib/videoSurface.ts` shows it right after any `<video>` given
+the renderer's `MediaStreamTrack` and hides that `<video>`, following it into
+the pop-out window, the mini-player and back. The track is
+`canvas.captureStream(0)` and carries no frames: on some WebKitGTK GPU stacks
+a captured canvas reached the `<video>` as its first two frames only, and
+remote video froze. The adapter raises
 `RoomEvent.TrackSubscribed` with that track, so `roomEventHandlers`, the video
 grid consumes a MediaStream exactly
 as they do on Windows. `trackUnsubscribed`, `trackUnpublished` and a
