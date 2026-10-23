@@ -17,6 +17,7 @@ mod exit_watch;
 mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
+mod game_activity;
 mod http_pool;
 mod http_proxy;
 mod idle;
@@ -263,6 +264,7 @@ pub fn run() {
             external_content::external_preview,
             external_content::external_image,
             idle::system_idle_ms,
+            game_activity::detect_game,
             windows_app_audio::app_audio_available,
             windows_app_audio::start_app_audio,
             windows_app_audio::stop_app_audio,
