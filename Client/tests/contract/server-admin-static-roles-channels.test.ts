@@ -360,6 +360,55 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     expect(legends.map((l) => l.textContent)).toEqual(["General", "Text", "Voice", "Moderation"]);
   });
 
+  // WP 8.4b: Move Members is owner/Administrator-only to change.
+  it("greys the Move Members box with a reason unless the viewer is the owner or an Administrator", async () => {
+    const MOVE_MEMBERS = 0x2000;
+    const move = (doc: Document) =>
+      doc.querySelector<HTMLInputElement>(`input[data-permbit="${MOVE_MEMBERS}"]`)!;
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    // A role manager who holds Move Members themself still cannot change it.
+    bridge.state.me = { id: 5, permissions: MANAGE_ROLES | MOVE_MEMBERS, role_position: 90 };
+    bridge.openRoleModal(null);
+    expect(move(doc).disabled).toBe(true);
+    expect(move(doc).title).toBe("Only the owner or an Administrator can change this");
+    expect(doc.getElementById(`permDesc${MOVE_MEMBERS}`)!.textContent).toContain(
+      "Only the owner or an Administrator can change this.",
+    );
+    // Another locked box keeps its own reason and has no such title.
+    const admin = doc.querySelector<HTMLInputElement>(`input[data-permbit="${ADMINISTRATOR}"]`)!;
+    expect(admin.title).toBe("");
+
+    // An Administrator can.
+    bridge.state.me = { id: 2, permissions: ADMINISTRATOR, role_position: 80 };
+    bridge.openRoleModal(null);
+    expect(move(doc).disabled).toBe(false);
+    expect(move(doc).title).toBe("");
+
+    // So can the owner.
+    bridge.state.me = { id: 1, permissions: MANAGE_ROLES, role_position: 100, is_owner: true };
+    bridge.openRoleModal(null);
+    expect(move(doc).disabled).toBe(false);
+  });
+
+  it("hints under Move Members that giving it to the default role locks role changes to the owner", async () => {
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    const hint = () => doc.getElementById("permHint8192");
+
+    bridge.openRoleModal(4); // Member, the default role
+    expect(hint()?.textContent).toBe(
+      "Giving this to the default role means only the owner or an Administrator can change members' roles.",
+    );
+    bridge.openRoleModal(3); // Moderator
+    expect(hint()).toBeNull();
+    bridge.openRoleModal(null);
+    expect(hint()).toBeNull();
+  });
+
   it("draws roles as a ladder split at the caller's own rank", async () => {
     const booted = await boot([], (p) => (p === "/roles" ? SEEDED : {}));
     dom = booted.dom;

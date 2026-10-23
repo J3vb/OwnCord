@@ -199,7 +199,8 @@ input,select,textarea{font-family:inherit;border:none}
 .perm-text{display:flex;flex-direction:column;gap:2px;min-width:0}
 .perm-name{color:var(--text-normal)}
 .perm-desc{font-size:12px;color:var(--text-muted);line-height:1.4}
-.perm-lock{color:var(--text-warning)}
+.perm-lock,.perm-hint{color:var(--text-warning)}
+.perm-hint{display:block}
 .rc-confirm{margin-top:16px;margin-bottom:0}
 .rc-confirm strong{color:var(--text-normal);text-transform:none;letter-spacing:0}
 /* The drawer is the shared #modal dialog (focus trap, Escape, restore)

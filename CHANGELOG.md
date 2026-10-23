@@ -55,6 +55,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Accounts & admin**
+
+- New role permission Move Members: a role with it can move anyone between voice channels, whatever their rank, from the voice menu or by dragging. Only the owner or an Administrator can give it out. No role has it after the upgrade. The person moved sees who moved them. The owner can stop Move Members from moving the owner under Settings → Voice: moving members in the admin panel.
+
 **Server (operators)**
 
 - Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.

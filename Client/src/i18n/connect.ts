@@ -47,6 +47,9 @@ export const connectText = defineCatalog("connect", {
   "voice.disconnected": "You were disconnected from voice",
   "voice.afkChannelFallback": "the AFK channel",
   "voice.movedAfk": "Moved to {channel} because you were idle",
+  "voice.movedBy": "{name} moved you to {channel}",
+  "voice.movedGeneric": "You were moved to {channel}",
+  "voice.movedChannelFallback": "another voice channel",
   "voice.channelFull": "That voice channel is full",
   "voice.videoLimit": "That voice channel has reached its video limit",
 

@@ -1288,6 +1288,91 @@ func TestRefreshChannelVisibility_TargetedCreateCarriesPerClientCanSend(t *testi
 	}
 }
 
+// can_move_voice (WP 8.4b) rides the targeted channel_create beside
+// can_moderate_voice and is decided by its own predicate: a Moderator pinned
+// to MOVE_MEMBERS without MUTE_MEMBERS moves but does not moderate, and a
+// user override denying MOVE_MEMBERS flips only the move verdict.
+func TestRefreshChannelVisibility_TargetedCreateCarriesCanMoveVoice(t *testing.T) {
+	hub, database := newTestHub(t)
+	go hub.Run()
+	defer hub.Stop()
+	ctx := context.Background()
+
+	chID, err := database.CreateChannel(ctx, "movevoice-room", "voice", "", "", 0)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	ch, err := database.GetChannel(ctx, chID)
+	if err != nil || ch == nil {
+		t.Fatalf("GetChannel: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = (permissions | ?) & ? WHERE id = 3`,
+		permissions.MoveMembers, ^permissions.MuteMembers); err != nil {
+		t.Fatalf("pin Moderator to MOVE_MEMBERS only: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE roles SET permissions = permissions & ? WHERE id = 4`,
+		^(permissions.MoveMembers | permissions.MuteMembers)); err != nil {
+		t.Fatalf("strip Member move bits: %v", err)
+	}
+	modID, err := database.CreateUser(ctx, "movevoice-mod", "hash", 3)
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	mod, err := database.GetUserByID(ctx, modID)
+	if err != nil || mod == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	memberID := seedTestUser(t, database, "movevoice-member")
+	member, err := database.GetUserByID(ctx, memberID)
+	if err != nil || member == nil {
+		t.Fatalf("GetUserByID: %v", err)
+	}
+	modSend := make(chan []byte, 16)
+	memberSend := make(chan []byte, 16)
+	hub.Register(ws.NewTestClientWithUser(hub, mod, 0, modSend))
+	memberClient := ws.NewTestClientWithUser(hub, member, 0, memberSend)
+	hub.Register(memberClient)
+	waitRegistered(t, hub, memberClient)
+
+	verdicts := func(send chan []byte) (move, moderate any) {
+		t.Helper()
+		msg := drainForMsgType(t, send, "channel_create")
+		payload, ok := msg["payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("channel_create payload not an object: %#v", msg["payload"])
+		}
+		move, present := payload["can_move_voice"]
+		if !present {
+			t.Fatal("targeted channel_create omitted can_move_voice")
+		}
+		return move, payload["can_moderate_voice"]
+	}
+	steps := []struct {
+		name string
+		sql  string
+		args []any
+		want bool
+	}{
+		{"no override", "", nil, true},
+		{"user deny MOVE", `INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 0, ?)`, []any{chID, modID, permissions.MoveMembers}, false},
+	}
+	for _, s := range steps {
+		if s.sql != "" {
+			if _, err := database.ExecContext(ctx, s.sql, s.args...); err != nil {
+				t.Fatalf("%s: %v", s.name, err)
+			}
+		}
+		hub.RefreshChannelVisibility(ch)
+		move, moderate := verdicts(modSend)
+		if move != s.want || moderate != false {
+			t.Errorf("%s: moderator can_move_voice=%v can_moderate_voice=%v, want %v and false", s.name, move, moderate, s.want)
+		}
+		if move, moderate := verdicts(memberSend); move != false || moderate != false {
+			t.Errorf("%s: member can_move_voice=%v can_moderate_voice=%v, want false and false", s.name, move, moderate)
+		}
+	}
+}
+
 // can_moderate_voice (B9 Q5) rides the same targeted channel_create as
 // can_send, so an override edit on either layer converges a connected
 // moderator's voice controls without a reconnect — and the member, who never

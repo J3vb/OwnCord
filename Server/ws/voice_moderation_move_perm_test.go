@@ -419,3 +419,28 @@ func TestVoiceMod_Move_ReadFromChannelAllow_MovesHigherRank(t *testing.T) {
 
 	assertMoved(t, database, targetSend, toID)
 }
+
+// WP 8.4b: a moderator move names the mover so the moved client can say who
+// moved it; the AFK sweep's voice_moved (voice_afk_sweep_test.go) names nobody.
+func TestVoiceMod_Move_VoiceMovedCarriesMoverID(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-mv-by-from")
+	toID := seedVoiceChan(t, database, "vc-mv-by-to")
+	actor := seedVoiceUserWithRole(t, database, "mover-by", 3)
+	target := seedVoiceUserWithRole(t, database, "target-by", 4)
+
+	_, targetSend := joinVoice(t, hub, target, fromID)
+	c, _ := moveActor(t, hub, actor, fromID)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	payload := receiveMsgOfType(targetSend, "voice_moved", waitTimeout)
+	if payload == nil {
+		t.Fatal("target did not receive voice_moved")
+	}
+	if got, _ := payload["by_user_id"].(float64); int64(got) != actor.ID {
+		t.Errorf("by_user_id = %v, want %d", payload["by_user_id"], actor.ID)
+	}
+	if _, present := payload["reason"]; present {
+		t.Errorf("moderator move carries reason %v, want none", payload["reason"])
+	}
+}

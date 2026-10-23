@@ -240,6 +240,13 @@ export interface ReadyChannel {
    */
   readonly can_moderate_voice?: boolean;
   /**
+   * Whether the current user may move voice participants in this channel at
+   * any rank (MOVE_MEMBERS, WP 8.4a), independent of can_moderate_voice: a
+   * role with only Move Members moves but cannot mute, deafen or disconnect.
+   * Absent from older servers.
+   */
+  readonly can_move_voice?: boolean;
+  /**
    * Whether the current user may delete other people's messages here, as the
    * server computed it from the channel's effective permissions. Absent from
    * older servers: fall back to the role's MANAGE_MESSAGES, never to false.
@@ -1042,6 +1049,8 @@ export interface ChannelCreatePayload {
    * unchanged rules as can_send.
    */
   readonly can_moderate_voice?: boolean;
+  /** This viewer's move affordance — see ReadyChannel.can_move_voice. Absent means unchanged. */
+  readonly can_move_voice?: boolean;
   /** This viewer's message affordances — see ReadyChannel. Absent means unchanged. */
   readonly can_delete_others?: boolean;
   readonly can_pin?: boolean;
@@ -1107,6 +1116,8 @@ export interface VoiceStatePayload {
 export interface VoiceMovedPayload {
   readonly to_channel_id: number;
   readonly reason?: "afk";
+  /** The moderator who made the move; absent for the AFK sweep and on older servers. */
+  readonly by_user_id?: number;
 }
 
 /** Server -> Client: a moderator removed this client from voice. */
