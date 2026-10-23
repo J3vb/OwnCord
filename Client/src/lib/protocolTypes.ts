@@ -109,6 +109,7 @@ export const ClientMessageType = {
   MARK_READ: "mark_read",
   MARK_UNREAD: "mark_unread",
   PRESENCE_UPDATE: "presence_update",
+  ACTIVITY_UPDATE: "activity_update",
   VOICE_JOIN: "voice_join",
   VOICE_LEAVE: "voice_leave",
   VOICE_MUTE: "voice_mute",

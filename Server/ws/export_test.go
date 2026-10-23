@@ -329,6 +329,7 @@ func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, rol
 		members = append(members, m)
 	}
 	payload := map[string]any{
+		"activities":      f.head.Activities,
 		"capabilities":    f.head.Capabilities,
 		"channels":        f.head.Channels,
 		"member_timeouts": f.head.MemberTimeouts,
