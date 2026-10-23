@@ -72,6 +72,7 @@ and only when it changes something a contributor or fork holder must do
 **Direct messages**
 
 - Deleting someone's message request and later opening the conversation yourself now counts as accepting them, so their replies reach you instead of being held as a request you can no longer see.
+- A group conversation's "call ended" notice now goes to the people in the group when the call ends.
 
 **Voice and video**
 
