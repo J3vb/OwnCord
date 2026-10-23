@@ -6,6 +6,7 @@ import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/do
 import { loadPref, savePref, createToggle } from "./helpers";
 import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/shareFps";
 import { createLogger } from "@lib/logger";
+import { syncVideoSurface } from "@lib/videoSurface";
 import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../features/voice/autoPlayCameras";
 import {
   switchInputDevice,
@@ -1238,12 +1239,14 @@ function buildVoiceAudioTabInner(
     // still has a source among its pending activities, and it holds the whole
     // torn-down pane alive with it. Stopping the tracks does not release it.
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
   });
 
   function stopCameraPreview(): void {
     cameraRequestId += 1;
     registerCamera(null);
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
     setText(previewLabel, t("voiceAudio.previewOff"));
     previewLabel.hidden = false;
   }
@@ -1380,6 +1383,7 @@ function buildVoiceAudioTabInner(
       const stream = new MediaStream([renderer.mediaStreamTrack]);
       registerCamera(stream);
       previewVideo.srcObject = stream;
+      syncVideoSurface(previewVideo);
       previewLabel.hidden = true;
       const stop = (): void => {
         renderer.dispose();
@@ -1406,6 +1410,7 @@ function buildVoiceAudioTabInner(
     activeNativePreview = null;
     registerNativePreview(() => {});
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
   }
 
   // Camera teardown on overlay close is already covered by the factory's

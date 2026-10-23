@@ -542,7 +542,8 @@ details.disclose > summary {
   overflow: hidden;
   background: var(--bg-tertiary);
 }
-.camera-preview video {
+.camera-preview video,
+.camera-preview .video-surface {
   width: 100%;
   height: 100%;
   object-fit: cover;
