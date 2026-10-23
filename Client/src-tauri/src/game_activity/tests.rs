@@ -329,12 +329,19 @@ fn start_time_is_remembered_while_the_same_game_keeps_running() {
         detect_with(&[proc_at(&path, ms)], state, load, &[], "linux").map(|g| g.started_at_ms)
     };
     assert_eq!(started(&mut state, 1_000), Some(1_000));
-    // The OS later reports "now" for the same game: the answer does not move.
-    assert_eq!(started(&mut state, 16_000), Some(1_000));
-    assert_eq!(started(&mut state, 31_000), Some(1_000));
+    // The OS later will not say when it started: the answer does not move.
+    assert_eq!(started(&mut state, UNKNOWN_START), Some(1_000));
+    assert_eq!(started(&mut state, UNKNOWN_START), Some(1_000));
+    // A quick restart between two polls reports its own known start.
+    assert_eq!(started(&mut state, 40_000), Some(40_000));
     // The game quits, then it starts again: its own time is used.
     assert_eq!(detect_with(&[], &mut state, load, &[], "linux"), None);
     assert_eq!(started(&mut state, 50_000), Some(50_000));
+    // First seen with no known start: "now", then kept.
+    assert_eq!(detect_with(&[], &mut state, load, &[], "linux"), None);
+    let first = started(&mut state, UNKNOWN_START).unwrap();
+    assert!(first > 50_000 && first < UNKNOWN_START);
+    assert_eq!(started(&mut state, UNKNOWN_START), Some(first));
 }
 
 // -- Epic ---------------------------------------------------------------------------------

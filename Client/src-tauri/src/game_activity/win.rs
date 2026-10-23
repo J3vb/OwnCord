@@ -15,7 +15,7 @@ use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
-use super::{filetime_to_unix_ms, Proc};
+use super::{filetime_to_unix_ms, Proc, UNKNOWN_START};
 
 /// Longest image path asked for, in UTF-16 units (the extended-length limit).
 const MAX_IMAGE_PATH: usize = 32_768;
@@ -23,14 +23,11 @@ const MAX_IMAGE_PATH: usize = 32_768;
 /// Every process in a Toolhelp snapshot. The image path and start time come
 /// from a `PROCESS_QUERY_LIMITED_INFORMATION` handle; where the OS refuses
 /// one (protected processes, some Microsoft Store games) the snapshot's
-/// program name stands in for the path and the start time is "now", which
-/// sorts such a process after every one whose start time is known. The caller
-/// keeps the first start time it saw for a running game, so that "now" does
-/// not move the answer on every poll.
+/// program name stands in for the path and the start time is UNKNOWN_START,
+/// which sorts such a process after every one whose start time is known. The
+/// caller keeps the first start time it showed for that game, so the answer
+/// does not move on every poll.
 pub(super) fn processes() -> Option<Vec<Proc>> {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
     let mut path_buf = vec![0u16; MAX_IMAGE_PATH];
     let mut procs = Vec::new();
     // SAFETY: the snapshot handle is checked, used only by the two Process32
@@ -54,7 +51,7 @@ pub(super) fn processes() -> Option<Vec<Proc>> {
                     .unwrap_or(entry.szExeFile.len());
                 let exe_name = String::from_utf16_lossy(&entry.szExeFile[..exe_len]);
                 let mut full_path = None;
-                let mut started_at_ms = now_ms;
+                let mut started_at_ms = UNKNOWN_START;
                 let process =
                     OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID);
                 if !process.is_null() {

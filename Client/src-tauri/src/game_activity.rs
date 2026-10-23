@@ -83,6 +83,17 @@ pub fn detect_game() -> Option<DetectedGame> {
     )
 }
 
+/// A process start time the OS would not give. It sorts after every known
+/// start, and `detect_with` turns it into the start already shown for the same
+/// game, or "now".
+const UNKNOWN_START: u64 = u64::MAX;
+
+fn unix_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX - 1))
+}
+
 /// One running process, already normalised for matching.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Proc {
@@ -366,10 +377,15 @@ fn detect_with(
         first.game
     };
     if let Some(game) = &mut game {
-        match &st.current {
-            Some((name, started)) if *name == game.name => game.started_at_ms = *started,
-            _ => st.current = Some((game.name.clone(), game.started_at_ms)),
+        // Only an unknown start borrows the one already shown, so a quick
+        // restart of the same game still gets its own time.
+        if game.started_at_ms == UNKNOWN_START {
+            game.started_at_ms = match &st.current {
+                Some((name, started)) if *name == game.name => *started,
+                _ => unix_now_ms(),
+            };
         }
+        st.current = Some((game.name.clone(), game.started_at_ms));
     } else {
         st.current = None;
     }
