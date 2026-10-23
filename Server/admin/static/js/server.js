@@ -63,7 +63,7 @@ async function renderSettings(){
   if(owner){
     const movable=settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true';
     html+=settingsCard('Voice: moving members',
-      '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+OWNER_MOVABLE_KEY+'-name">Members with Move Members can move the owner</div><div class="setting-desc" id="s-'+OWNER_MOVABLE_KEY+'-desc">Turn this off to keep the owner where they are: only an Administrator or the owner can move them then</div></div><div class="setting-ctrl"><button class="toggle '+(movable?'on':'')+'" id="s-'+OWNER_MOVABLE_KEY+'" role="switch" aria-checked="'+movable+'" aria-labelledby="s-'+OWNER_MOVABLE_KEY+'-name" aria-describedby="s-'+OWNER_MOVABLE_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
+      '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+OWNER_MOVABLE_KEY+'-name">Members with Move Members can move the owner</div><div class="setting-desc" id="s-'+OWNER_MOVABLE_KEY+'-desc">Turn this off and nobody can move the owner between voice channels</div></div><div class="setting-ctrl"><button class="toggle '+(movable?'on':'')+'" id="s-'+OWNER_MOVABLE_KEY+'" role="switch" aria-checked="'+movable+'" aria-labelledby="s-'+OWNER_MOVABLE_KEY+'-name" aria-describedby="s-'+OWNER_MOVABLE_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
   }
   const extInput=k=>'<input class="form-input" id="s-'+k+'" value="'+esc(v(k).split(',').filter(Boolean).join(', '))+'" aria-describedby="s-'+k+'-desc" data-input-action="markSettingsChanged"'+(owner?'':' disabled')+'>';
   html+=settingsCard('Upload file types',
