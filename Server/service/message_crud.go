@@ -258,17 +258,13 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 	// write for an already-open DM, or delivery-audience re-read.
 	//
 	// OC-0419: the group flag rides on this read, so a failure here can
-	// never leave isGroup at its false zero value and misclassify a group DM
-	// as one-to-one (staging per-member message requests instead of
-	// delivering), nor fail closed to isGroup=true and skip the first-contact
-	// gate for an untrusted 1:1 recipient. Message stays saved; the
-	// remaining DM side effects are skipped entirely.
+	// never misclassify a group DM as one-to-one, nor skip the first-contact
+	// gate for an untrusted 1:1 recipient. Message stays saved, the other DM
+	// side effects are skipped, and the frame goes to the sender only (as in
+	// EditMessage: a nil audience means the channel-topic broadcast).
 	isGroup, targets, tErr := s.st.GetDMDeliveryTargets(bgCtx, p.ChannelID, p.UserID)
 	if tErr != nil {
 		slog.Error("MessageService.SendMessage GetDMDeliveryTargets", "err", tErr, "channel_id", p.ChannelID)
-		// Same as EditMessage and DeleteMessage (Codex P2-5): a nil audience
-		// makes dmEventOrFallback use the channel-topic broadcast, so the
-		// frame goes to the sender only until a resync delivers it.
 		result.ParticipantIDs = []int64{p.UserID}
 		return false
 	}
