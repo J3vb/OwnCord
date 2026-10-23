@@ -577,7 +577,10 @@ const EXEMPT: readonly string[] = [
 /** Every `registerSessionReset("<name>"` literal under src/, by source text. */
 function registeredNamesInSource(): Set<string> {
   const names = new Set<string>();
-  const re = /registerSessionReset\(\s*[`'"]([^`'"]+)[`'"]/g;
+  // Stryker's instrumenter wraps the name literal in its mutant switch:
+  // registerSessionReset(stryMutAct_x("1") ? "" : (stryCov_x("1"), "name"), ...).
+  const re =
+    /registerSessionReset\(\s*(?:stryMutAct_\w+\("\d+"\)\s*\?\s*(?:""|``)\s*:\s*\(stryCov_\w+\("\d+"\),\s*)?[`'"]([^`'"]+)[`'"]/g;
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);
