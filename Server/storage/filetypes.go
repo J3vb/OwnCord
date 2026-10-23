@@ -21,7 +21,8 @@ var DefaultBlockedExtensions = []string{
 	"appinstaller", "application", "jar", "reg", "cpl", "com", "pif", "gadget", "inf",
 	"lnk", "url", "scf", "settingcontent-ms", "chm", "iso", "img", "vhd", "vhdx", "exe", "dll",
 	"ws", "appref-ms", "library-ms", "searchconnector-ms", "rdp", "diagcab",
-	"html", "svg", "sh", "docm", "xlsm", "desktop", "command",
+	"html", "htm", "xhtml", "xht", "shtml", "mht", "mhtml", "svg", "svgz",
+	"sh", "docm", "xlsm", "desktop", "command",
 }
 
 // maxExtensionLen bounds one list entry, so a list stays a list of extensions.
