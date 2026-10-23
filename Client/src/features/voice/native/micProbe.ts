@@ -12,7 +12,8 @@ const log = createLogger("micProbe");
 export const PROBE_WINDOW_MS = 1000;
 
 /** `levels`: the device opened and reported audio; `silent`: it opened but
- *  nothing arrived; `in-call`: a call owns the capture, so none was opened. */
+ *  nothing or only digital silence arrived; `in-call`: a call owns the
+ *  capture, so none was opened. */
 export type NativeMicProbe = "levels" | "silent" | "in-call";
 
 /** Open `input` (empty: the host default), count its level reports for
@@ -25,7 +26,8 @@ export async function probeNativeMicrophone(
   signal.throwIfAborted();
   const levels = new Map<number, number>();
   const unsubscribe = desktop.nativeVoice.onMicTestEvent(({ test, event }) => {
-    if (event.type === "inputLevel") levels.set(test, (levels.get(test) ?? 0) + 1);
+    // A muted or blocked source still reports, at exactly zero.
+    if (event.type === "inputLevel" && event.rms > 0) levels.set(test, (levels.get(test) ?? 0) + 1);
   });
   const aborted = new Promise<never>((_, reject) => {
     signal.addEventListener("abort", () => reject(signal.reason), { once: true });

@@ -87,6 +87,20 @@ fn log_level_from_env() -> log::LevelFilter {
     }
 }
 
+/// Stdout log target that drops a line it cannot write. The plugin's own
+/// Stdout target falls back to stderr and panics when that fails too, so a
+/// closed terminal or pipe aborted the app (the panic hook logs through the
+/// same target).
+fn stdout_log_dispatch() -> tauri_plugin_log::fern::Dispatch {
+    tauri_plugin_log::fern::Dispatch::new().chain(tauri_plugin_log::fern::Output::call(|record| {
+        write_log_line(&mut std::io::stdout().lock(), record.args())
+    }))
+}
+
+fn write_log_line(out: &mut impl std::io::Write, line: &std::fmt::Arguments) {
+    let _ = writeln!(out, "{line}").and_then(|()| out.flush());
+}
+
 #[cfg(target_os = "linux")]
 fn native_voice_state() -> native_voice::NativeVoiceState {
     native_voice::NativeVoiceState::new()
@@ -150,11 +164,13 @@ pub fn run() {
         // Log plugin registered early so logging is available to everything
         // after it. Writes to stdout (dev) and a rotating file in the OS
         // app-log dir so a shipped user — whose release build has no console —
-        // can retrieve logs.
+        // can retrieve logs. `clear_targets` drops the builder's defaults (a
+        // second stdout and an `OwnCord.log` copy of the file).
         .plugin(
             tauri_plugin_log::Builder::new()
+                .clear_targets()
                 .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
+                    tauri_plugin_log::TargetKind::Dispatch(stdout_log_dispatch()),
                 ))
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::LogDir {
@@ -593,7 +609,25 @@ mod startup_dialog_tests {
 
 #[cfg(all(test, desktop))]
 mod tests {
-    use super::should_restore_on_second_launch;
+    use super::{should_restore_on_second_launch, write_log_line};
+
+    struct ClosedPipe;
+    impl std::io::Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    #[test]
+    fn a_log_line_to_a_closed_stdout_is_dropped_not_a_panic() {
+        write_log_line(&mut ClosedPipe, &format_args!("lost"));
+        let mut open = Vec::new();
+        write_log_line(&mut open, &format_args!("kept {}", 1));
+        assert_eq!(open, b"kept 1\n");
+    }
 
     #[test]
     fn forwarded_launch_restores_window_unless_installer_is_launching() {
