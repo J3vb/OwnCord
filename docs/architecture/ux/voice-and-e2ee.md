@@ -386,7 +386,7 @@ trust action entirely (a blind accept is refused).
   cannot decrypt Intel Quick Sync H.264 (livekit/client-sdk-js#2140), so a
   manual H.264 choice carries a warning. The Linux native engine always
   publishes VP8 and the setting is hidden there. In the Windows app on a
-  non-Intel GPU an H.264 camera or share offers only H.264 Main and High
+  non-Intel hardware GPU an H.264 camera or share offers only H.264 Main and High
   (`lib/h264Profile.ts`, codec preferences set on every offer): WebView2
   encodes those on the GPU but Constrained Baseline only in software, and
   LiveKit answers Constrained Baseline first when it is offered. A saved

@@ -91,10 +91,17 @@ export function h265Offered(): boolean {
 
 /** Whether an H.264 publish here offers only H.264 Main and High
  *  (`lib/h264Profile`): the Windows app, whose WebView2 encodes those on the
- *  graphics card and Constrained Baseline only in software, on a GPU known
- *  not to be Intel's (see `isKnownNonIntel`). */
+ *  graphics card and Constrained Baseline only in software, on a hardware GPU
+ *  known not to be Intel's (see `isKnownNonIntel`). */
 export function h264GpuProfiles(): boolean {
-  return isWindowsDesktop() && isKnownNonIntel(gpuRenderer());
+  const renderer = gpuRenderer();
+  return isWindowsDesktop() && isKnownNonIntel(renderer) && !isSoftwareRenderer(renderer);
+}
+
+/** WebView2 without GPU acceleration, or over RDP or in a VM, renders in
+ *  software: its encoders are software too, so the probe has to decide. */
+function isSoftwareRenderer(renderer: string): boolean {
+  return /swiftshader|basic render driver|llvmpipe|software/i.test(renderer);
 }
 
 /** Whether a publish of `codec` should offer only H.264 Main and High. */

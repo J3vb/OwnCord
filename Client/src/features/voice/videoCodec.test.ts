@@ -480,6 +480,21 @@ describe("h264GpuProfiles", () => {
   });
 });
 
+describe("h264GpuProfiles on a software renderer", () => {
+  it("is false for SwiftShader, the Basic Render Driver and llvmpipe", () => {
+    isWindowsDesktop.mockReturnValue(true);
+    for (const renderer of [
+      "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "llvmpipe (LLVM 15.0.7, 256 bits)",
+    ]) {
+      vi.restoreAllMocks();
+      stubGpu(renderer);
+      expect(h264GpuProfiles()).toBe(false);
+    }
+  });
+});
+
 describe("h264GpuPublish", () => {
   it("is true only for an H.264 publish where the GPU profiles apply", () => {
     isWindowsDesktop.mockReturnValue(true);
