@@ -39,8 +39,13 @@ const log = createLogger("gameActivity");
 /** How often the detector is asked. A game shows within 30 s of starting. */
 export const GAME_ACTIVITY_POLL_MS = 15_000;
 
-/** The refusals after which the same frame is worth sending again. */
-const RETRYABLE_REFUSALS: ReadonlySet<string> = new Set(["RATE_LIMITED", "TIMED_OUT"]);
+/** The refusals after which the same frame is worth sending again. A
+ *  REQUEST_TIMEOUT is the server's per-frame deadline: the frame was not applied. */
+const RETRYABLE_REFUSALS: ReadonlySet<string> = new Set([
+  "RATE_LIMITED",
+  "TIMED_OUT",
+  "REQUEST_TIMEOUT",
+]);
 
 /** The longest name the server accepts, in characters. */
 const MAX_NAME_CHARS = 128;

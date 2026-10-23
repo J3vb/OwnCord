@@ -229,6 +229,17 @@ describe("game activity loop", () => {
     expect(fake.sent[1]?.activity?.name).toBe("Factorio");
   });
 
+  it("sends again after the server's per-frame deadline refused the set", async () => {
+    const fake = fakeWs();
+    current = factorio;
+    start(fake);
+    await flush();
+    expect(handleActivityRefusal("REQUEST_TIMEOUT", fake.sent[0]!.id)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
+    expect(fake.sent.map((s) => s.activity?.name)).toEqual(["Factorio", "Factorio"]);
+  });
+
   it("after a refused set, sends null if the game is gone by the retry", async () => {
     const fake = fakeWs();
     current = factorio;

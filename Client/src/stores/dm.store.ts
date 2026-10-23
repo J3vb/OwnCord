@@ -6,6 +6,7 @@
 import { createStore } from "@lib/store";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import { channelsStore, removeChannel } from "@stores/channels.store";
+import { membersStore } from "@stores/members.store";
 import type { Channel } from "@stores/channels.store";
 import type { DmChannelPayload } from "@lib/types";
 import { connectText } from "../i18n/connect";
@@ -87,10 +88,29 @@ export function setDmChannels(channels: readonly DmChannel[]): void {
  * messages incremented), and a genuine reopen has nothing to lose: its local
  * count is zero too.
  */
-export function addDmChannel(channel: DmChannel): void {
+/**
+ * A DM summary carries no game (WP 8.3), so a person the payload left without
+ * one keeps the game this DM already showed, else the one presence gave the
+ * members store. A DM opened after `ready` then shows a partner who is already
+ * playing.
+ */
+function withKnownActivity(user: DmUser, prior: DmChannel | undefined): DmUser {
+  if (user.activity !== undefined) return user;
+  const shown = prior?.participants.find((p) => p.id === user.id)?.activity;
+  const known =
+    shown !== undefined ? shown : membersStore.getState().members.get(user.id)?.activity;
+  return known === undefined ? user : { ...user, activity: known };
+}
+
+export function addDmChannel(incoming: DmChannel): void {
   dmStore.setState((prev) => {
-    const existing = prev.channels.find((c) => c.channelId === channel.channelId);
-    const filtered = prev.channels.filter((c) => c.channelId !== channel.channelId);
+    const existing = prev.channels.find((c) => c.channelId === incoming.channelId);
+    const filtered = prev.channels.filter((c) => c.channelId !== incoming.channelId);
+    const channel: DmChannel = {
+      ...incoming,
+      recipient: withKnownActivity(incoming.recipient, existing),
+      participants: incoming.participants.map((p) => withKnownActivity(p, existing)),
+    };
     const merged: DmChannel =
       existing === undefined
         ? channel
