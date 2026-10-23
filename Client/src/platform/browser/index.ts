@@ -102,6 +102,8 @@ const globalShortcuts: GlobalShortcuts = {
     portalVersion: 0,
     triggers: { ptt: null, mute: null, deafen: null },
     canConfigure: false,
+    triggersUnnamed: false,
+    sessionRefused: false,
   }),
   bindPortal: () => Promise.reject(new UnsupportedKeysError()),
   configurePortal: () => Promise.reject(new UnsupportedKeysError()),

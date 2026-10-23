@@ -198,7 +198,17 @@ You also need PipeWire for the capture itself.
   positions. On Wayland it asks the desktop through the
   xdg-desktop-portal GlobalShortcuts interface. Your desktop may show a
   dialog the first time. A desktop without that portal cannot offer global
-  keys. The tray menu still has mute and deafen.
+  keys. The tray menu still has mute and deafen. To let the desktop identify
+  OwnCord, the app writes a hidden `com.owncord.client.desktop` file to
+  `~/.local/share/applications` when no such file exists. On Hyprland the
+  portal registers the shortcuts but does not choose their keys, so you assign
+  them yourself in `hyprland.conf`. Change the keys to suit you:
+
+  ```
+  bind = CTRL SHIFT, M, global, com.owncord.client:toggle-mute
+  bind = CTRL SHIFT, D, global, com.owncord.client:toggle-deafen
+  bind = , F8, global, com.owncord.client:push-to-talk
+  ```
 
 ## Updating
 

@@ -41,6 +41,8 @@ mod notification_bus;
 #[cfg(desktop)]
 mod popout;
 #[cfg(target_os = "linux")]
+mod portal_app_id;
+#[cfg(target_os = "linux")]
 mod portal_shortcuts;
 // Public: `examples/native_voice_interop.rs` drives the same session code.
 #[cfg(target_os = "linux")]

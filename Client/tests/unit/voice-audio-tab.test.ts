@@ -1848,6 +1848,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
             portalVersion: 0,
             triggers: { ptt: null, mute: null, deafen: null },
             canConfigure: false,
+            triggersUnnamed: false,
+            sessionRefused: false,
           }),
           onStatusChange: () => () => {},
         },

@@ -1398,6 +1398,8 @@ describe("PTT on the portal backend (LP-9b)", () => {
     portalVersion: 2,
     triggers: { ptt, mute: null, deafen: null },
     canConfigure: true,
+    triggersUnnamed: false,
+    sessionRefused: false,
   });
   let handlers: Map<string, (event: { payload: unknown }) => void>;
   let unlistened: string[];
