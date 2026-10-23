@@ -460,6 +460,18 @@ export interface ChannelCategoriesPayload {
   readonly categories: readonly ChannelCategory[];
 }
 
+/** The game a member is playing, as it rides `presence` and `activity_update`. */
+export interface GameActivity {
+  readonly name: string;
+  /** Unix milliseconds the game started (the server clamps it to the last 24 h). */
+  readonly started_at: number;
+}
+
+/** One entry of `ready.activities`. */
+export interface ReadyActivity extends GameActivity {
+  readonly user_id: number;
+}
+
 export interface ReadyPayload {
   readonly capabilities?: {
     readonly message_deduplication?: boolean;
@@ -531,7 +543,19 @@ export interface ReadyPayload {
      * means an older server: no Follow control, no followed threads.
      */
     readonly thread_follows?: boolean;
+    /**
+     * The server understands `activity_update` and carries a member's game as
+     * `activity` on `presence` and `presence_batch` and as `ready.activities`
+     * (WP 8.3). Absent means an older server: nothing is sent, no game shown.
+     */
+    readonly game_activity?: boolean;
   };
+  /**
+   * The games connected members are playing (WP 8.3), sorted by user id. Absent
+   * from a server without `game_activity`; authoritative for the moment of the
+   * snapshot, later changes arrive as `presence`.
+   */
+  readonly activities?: readonly ReadyActivity[];
   readonly channels: readonly ReadyChannel[];
   /**
    * The viewer's followed, open threads, newest activity first (WP 6.9c).
@@ -972,6 +996,10 @@ export interface PresencePayload {
    *  (null = none), so a cleared text is distinguishable from an event that
    *  simply does not mention it. */
   readonly custom_status?: string | null;
+  /** The game the user is playing (WP 8.3). Always present on a server with
+   *  `game_activity` (null = none); absent from an older one, where the store
+   *  leaves the shown game alone. */
+  readonly activity?: GameActivity | null;
 }
 
 export interface ChannelCreatePayload {
@@ -1152,6 +1180,8 @@ export interface PresenceBatchEntry {
   readonly status: UserStatus;
   /** Always present (null = none). */
   readonly custom_status: string | null;
+  /** Always present on a server with `game_activity` (null = none). */
+  readonly activity?: GameActivity | null;
 }
 
 /** Many users' presence in one frame: a coalescing window's changes, or with
@@ -1522,6 +1552,11 @@ export interface PresenceUpdatePayload {
   readonly custom_status_expires_in?: number;
 }
 
+/** Client→Server: the game being played, or null once it stops (WP 8.3). */
+export interface ActivityUpdatePayload {
+  readonly activity: GameActivity | null;
+}
+
 export interface VoiceJoinPayload {
   readonly channel_id: number;
   /** Set on the user's own join; automatic rejoins (reconnect, voice_moved) omit it. */
@@ -1664,6 +1699,7 @@ export type ClientMessage =
   | (WsEnvelope<MarkReadPayload> & { readonly type: "mark_read" })
   | (WsEnvelope<MarkUnreadPayload> & { readonly type: "mark_unread" })
   | (WsEnvelope<PresenceUpdatePayload> & { readonly type: "presence_update" })
+  | (WsEnvelope<ActivityUpdatePayload> & { readonly type: "activity_update" })
   | (WsEnvelope<VoiceJoinPayload> & { readonly type: "voice_join" })
   | (WsEnvelope<VoiceLeaveClientPayload> & { readonly type: "voice_leave" })
   | (WsEnvelope<VoiceMutePayload> & { readonly type: "voice_mute" })

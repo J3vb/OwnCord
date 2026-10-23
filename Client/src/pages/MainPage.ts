@@ -41,6 +41,7 @@ import {
 import { loadPref, savePref } from "@lib/preferences";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
+import type { GameActivityLoop } from "@lib/gameActivity";
 import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -197,6 +198,9 @@ function buildDmProfileUser(channelId: number): DmProfileData | null {
     displayName: recipient.displayName ?? null,
     avatar: recipient.avatar || null,
     status,
+    // The live copy first, as for the status; the DM list's own copy covers a
+    // partner who is not a member of this server.
+    activity: member === undefined ? (recipient.activity ?? null) : (member.activity ?? null),
     about: null,
     joinDate: null,
     banner: member?.banner ?? null,
@@ -334,6 +338,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
+  /** Reports the game running on this machine (WP 8.3). Desktop only, and
+   *  loaded on first use so the web build and the startup path never carry it. */
+  let gameActivity: GameActivityLoop | null = null;
   let speakingActivityTimer: ReturnType<typeof setInterval> | null = null;
   let statusTimerWatcher: StatusTimerWatcher | null = null;
 
@@ -541,7 +548,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       if (next !== null) dmProfileSidebar?.update(next);
     };
     const unsubMembers = membersStore.subscribeSelector(
-      (s) => s.members.get(recipientId)?.status,
+      (s) =>
+        `${s.members.get(recipientId)?.status ?? ""}|${s.members.get(recipientId)?.activity?.name ?? ""}`,
       refresh,
     );
     // A banner change shows without reopening the panel.
@@ -944,6 +952,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
     });
+    // The game being played, for other members' "Playing <game>" line. The
+    // loop sends nothing unless the setting is on and the server advertises
+    // game_activity; the web build has no detector and never loads it.
+    if (desktop.gameDetector.available) {
+      void import("@lib/gameActivity").then(
+        ({ startGameActivity }) => {
+          if (tornDown) return;
+          gameActivity = startGameActivity({ ws, detect: () => desktop.gameDetector.detect() });
+        },
+        (err: unknown) => log.warn("Game activity failed to load", { error: String(err) }),
+      );
+    }
     // Talking in a call is being here even with hands off the keyboard and
     // mouse, which neither the window nor (for another app) the OS poll sees.
     // The local ring is the same on web and native (voice.store withLocalRing).
@@ -2218,6 +2238,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       step("autoIdle", () => {
         autoIdle?.destroy();
         autoIdle = null;
+      });
+      step("gameActivity", () => {
+        gameActivity?.destroy();
+        gameActivity = null;
       });
       step("statusTimerWatcher", () => {
         statusTimerWatcher?.destroy();

@@ -77,6 +77,22 @@
   font-size: var(--font-size-sm);
   color: var(--text-muted);
 }
+/* WP 8.3: the partner's game, under the status line. */
+.dps-activity {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: -10px 0 16px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.dps-activity:empty {
+  display: none;
+}
+.dps-activity-icon {
+  flex: none;
+}
 .dps-status-dot-inline {
   width: 8px;
   height: 8px;

@@ -22,6 +22,7 @@ import { voiceStore } from "@stores/voice.store";
 import { getChannelMute, isChannelMuted } from "@lib/channel-mutes";
 import { markdownToPlainText } from "@lib/markdown";
 import { connectText } from "../../i18n/connect";
+import { playingLine } from "../../features/members/gameActivityLine";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -193,6 +194,9 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
     username: dmDisplayName(dm),
     avatar: dm.recipient.avatar || null,
     status: (dm.recipient.status as DmConversation["status"]) ?? "offline",
+    ...(!dm.isGroup && dm.recipient.activity != null
+      ? { activity: playingLine(dm.recipient.activity) }
+      : {}),
     isGroup: dm.isGroup,
     ...(dm.ownerId !== undefined && { hasOwner: true }),
     ...(dm.icon !== undefined && dm.icon !== "" && { icon: dm.icon }),

@@ -23,6 +23,7 @@ import type {
   Autostart,
   CredentialStore,
   DevTools,
+  GameDetector,
   GlobalShortcuts,
   HttpClient,
   IdentityStore,
@@ -224,6 +225,11 @@ const secureMembers: SecureMembers = isSecurePage()
       socket: inertSocket,
     };
 
+const gameDetector: GameDetector = {
+  available: false,
+  detect: async () => null,
+};
+
 const systemIdle: SystemIdle = {
   idleMs: async () => null,
 };
@@ -274,6 +280,7 @@ export const browser: Platform = {
   devTools,
   externalContent,
   fileSaver,
+  gameDetector,
   logFiles,
   nativeVoice,
   pushToTalk,

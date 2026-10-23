@@ -95,6 +95,7 @@ export const shards = {
     "src/lib/virtualRange.ts",
     "src/features/members/memberModel.ts",
     "src/features/members/memberRow.view.ts",
+    "src/features/members/gameActivityLine.ts",
   ], // ~513 mutants (estimated); 664 lines + virtualRange.ts and memberModel.ts (new); ~1240 lines now
   "audio-media-3": [
     "src/lib/noise-suppression.ts",
@@ -232,6 +233,8 @@ export const shards = {
     "src/lib/pickedMentions.ts",
     "src/lib/roleLookup.ts",
     "src/lib/presence.ts",
+    "src/lib/gameActivity.ts",
+    "src/lib/gameActivityBridge.ts",
     "src/lib/read-state.ts",
     "src/lib/themes.ts",
     "src/lib/toast.ts",

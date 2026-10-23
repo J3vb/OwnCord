@@ -1035,6 +1035,64 @@ describe("MemberList profile fields", () => {
     expect(container.querySelector('[data-testid="member-custom-status-2"]')).toBeNull();
   });
 
+  it("shows Playing <game> as the second line, with the controller icon (WP 8.3)", () => {
+    setTestMembers([
+      makeMember({
+        id: 1,
+        username: "alice",
+        activity: { name: "VALORANT", startedAt: Date.now() - 60_000 },
+      }),
+      makeMember({ id: 2, username: "bob" }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    const line = container.querySelector('[data-testid="member-activity-1"]');
+    expect(line?.textContent).toBe("Playing VALORANT");
+    expect(line?.querySelector("svg")).not.toBeNull();
+    expect(container.querySelector('[data-testid="member-activity-2"]')).toBeNull();
+    // The row is described by the game line as well as the status dot.
+    const row = container.querySelector('[data-testid="member-1"]');
+    expect(row?.getAttribute("aria-describedby")).toContain("mi-activity-1");
+  });
+
+  it("lets a custom status win the row; the game is not drawn there (WP 8.3)", () => {
+    setTestMembers([
+      makeMember({
+        id: 1,
+        username: "alice",
+        customStatus: "shipping phase 6",
+        activity: { name: "VALORANT", startedAt: Date.now() },
+      }),
+    ]);
+    list = createMemberList(opts);
+    list.mount(container);
+
+    expect(container.querySelector('[data-testid="member-custom-status-1"]')?.textContent).toBe(
+      "shipping phase 6",
+    );
+    expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
+  });
+
+  it("follows a game starting and stopping in place (WP 8.3)", () => {
+    setTestMembers([makeMember({ id: 1, username: "alice" })]);
+    list = createMemberList(opts);
+    list.mount(container);
+    expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
+
+    setTestMembers([
+      makeMember({ id: 1, username: "alice", activity: { name: "Factorio", startedAt: 1 } }),
+    ]);
+    membersStore.flush();
+    expect(container.querySelector('[data-testid="member-activity-1"]')?.textContent).toBe(
+      "Playing Factorio",
+    );
+
+    setTestMembers([makeMember({ id: 1, username: "alice", activity: null })]);
+    membersStore.flush();
+    expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
+  });
+
   it("opens the profile from the keyboard, where Report names the user (B9-10)", async () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice", displayName: "Alice A." }),

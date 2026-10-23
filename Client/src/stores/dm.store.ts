@@ -17,6 +17,9 @@ export interface DmUser {
   readonly status: string;
   /** Nickname to render instead of `username`. "" = unset. */
   readonly displayName?: string;
+  /** The game this person is playing (WP 8.3), copied from presence like
+   *  `status`. Null or undefined = none. */
+  readonly activity?: { readonly name: string; readonly startedAt: number } | null;
 }
 
 export interface DmChannel {

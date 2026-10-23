@@ -23,6 +23,7 @@ export interface ReadyCapabilityFlags {
   readonly manage_nicknames?: boolean;
   readonly id_mentions?: boolean;
   readonly thread_follows?: boolean;
+  readonly game_activity?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -142,4 +143,13 @@ export function idMentionsEnabled(): boolean {
  */
 export function threadFollowsEnabled(): boolean {
   return caps?.thread_follows === true && caps.threads === true;
+}
+
+/**
+ * Whether the server carries a member's game (WP 8.3): `activity_update`, and
+ * `activity` on `presence`, `presence_batch` and `ready.activities`. False
+ * sends no `activity_update` and shows no game.
+ */
+export function serverSupportsGameActivity(): boolean {
+  return caps?.game_activity === true;
 }
