@@ -1479,6 +1479,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // On a Wayland session the desktop's shortcut service is the "poller": it
     // is live only once both keys are bound, so the flag follows the host's
     // status changes too (a bind, the user editing the keys, a portal restart).
+    // start() runs whether or not the host says it is supported: the host
+    // decides whether anything can observe keys, and on Wayland it arms the
+    // portal so a press from a key the compositor itself was told to deliver
+    // (Hyprland: the portal names no keys, so it never reads as bound) gets
+    // through. Only the in-app stand-down follows `supported`.
     // Answers can arrive out of order (a status change during startup), so
     // only the latest query may set the flag.
     let refreshSeq = 0;
@@ -1489,7 +1494,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         .then(async (supported) => {
           if (seq !== refreshSeq || tornDown) return;
           globalPollerActive = supported;
-          if (!supported) return;
           await desktop.globalShortcuts.start();
         })
         .catch(() => {

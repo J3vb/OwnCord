@@ -57,7 +57,9 @@ let statusWatch: (() => void) | null = null;
  *  live binding is left alone, so a repeated change event starts nothing. */
 function onGlobalKeysChanged(status: GlobalKeysStatus): void {
   if (status.backend !== "portal") return;
-  if (status.triggers.ptt === null) {
+  // A portal that names no keys (Hyprland) still holds the shortcut; the key
+  // lives in the compositor's config, so it is not a lost binding.
+  if (status.triggers.ptt === null && !status.triggersUnnamed) {
     // The desktop dropped the key (the user cleared it in system settings):
     // no release edge can arrive, so tear the binding down like a dead poller.
     if (binding !== null && isPttPollingLive()) dropBinding(binding);

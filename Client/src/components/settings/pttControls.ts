@@ -15,10 +15,10 @@ import { loadPref, savePref } from "./helpers";
 import { vkName, pttReleaseDelayMs, PTT_RELEASE_DELAY_MAX_MS } from "@lib/ptt";
 import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
 import {
-  anyTriggerBound,
   functionKeyVk,
   globalKeysErrorCode,
   markPortalBound,
+  portalHoldsShortcuts,
 } from "@lib/globalKeys";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
 import { desktop } from "../../platform/desktop";
@@ -77,6 +77,11 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
 
   /** The key button's resting text: the desktop's own trigger on the portal path. */
   const restingKeyText = (): string => {
+    // A portal that holds the shortcut but names no key: the key is set in
+    // the compositor's config, so show what was picked here, if anything.
+    if (portal !== null && portal.triggersUnnamed && portal.triggers.ptt === null) {
+      return currentVk !== 0 ? vkName(currentVk) : t("keybinds.portalSetInDesktop");
+    }
     if (currentVk === 0) return t("keybinds.notSet");
     if (portal === null) return vkName(currentVk);
     return portal.triggers.ptt ?? t("keybinds.notSet");
@@ -119,9 +124,9 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
       });
       // The desktop remembers an approved bind, so the next start restores it
       // even when this panel is already gone.
-      if (anyTriggerBound(status)) markPortalBound();
+      if (portalHoldsShortcuts(status)) markPortalBound();
       if (attempt !== captureGeneration) return;
-      if (status.triggers.ptt !== null) {
+      if (status.triggers.ptt !== null || status.triggersUnnamed) {
         currentVk = vk;
         void desktop.pushToTalk.updateKey(vk);
       }
