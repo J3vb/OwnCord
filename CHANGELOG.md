@@ -85,6 +85,10 @@ and only when it changes something a contributor or fork holder must do
 - Deleting someone's message request and later opening the conversation yourself now counts as accepting them, so their replies reach you instead of being held as a request you can no longer see.
 - A group conversation's "call ended" notice now goes to the people in the group when the call ends.
 
+**Desktop UI**
+
+- Unsent messages kept by the desktop app for a retry are now only read and saved for the server you are signed in to, the same way as saved logins.
+
 **Voice and video**
 
 - On a self-hosted LiveKit that sends webhooks, a call member whose connection had briefly dropped could be removed without the call picking a new key holder, which could leave one participant deaf and muted until the next join or leave. The call now picks a new key holder right away.
