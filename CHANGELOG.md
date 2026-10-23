@@ -55,6 +55,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Chat**
+
+- Deleting a message after an edit changed who it mentions now lowers the mention badges the message actually raised. Before, it could clear someone's badge for a different, still-unread mention, or leave a badge pointing at the deleted message. Deleting an `@everyone` message now clears its badges too.
+
 **Direct messages**
 
 - Deleting someone's message request and later opening the conversation yourself now counts as accepting them, so their replies reach you instead of being held as a request you can no longer see.

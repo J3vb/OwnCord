@@ -227,29 +227,22 @@ const mentionCountChunkSize = 500
 // computed live and excludes deleted rows — so deleting the only mentioning
 // message in a channel leaves a mention badge pointing at nothing.
 //
-// Each message is decremented separately, guarded exactly like
-// IncrementMentionCounts guarded its own increment (last_message_id < msgID):
-// a recipient who has since marked the channel read already had mention_count
-// zeroed by that read, so this must not decrement it into a negative count
-// that a later, unrelated mention would then have to climb back out of.
-// mention_count > 0 keeps every step monotonic for the same reason.
+// The readers come from mention_receipts, the ledger of whose badge each
+// message actually raised, not from message_mentions: an edit rewrites
+// message_mentions but never moves a badge, so a mention an edit added was
+// never counted and one an edit removed still is. Reversing the current
+// mention set wiped an unrelated badge in the first case and left a badge for
+// a deleted message in the second. Receipts also cover @everyone and @here.
 //
-// @everyone/@here recipients are not stored per user — message_mentions only
-// holds resolved @user mentions, and the everyone/here fan-out is filtered by
-// presence at send time (OC-0223) rather than persisted — so this reverses
-// only stored direct mentions. That is a smaller, but never wrong, correction.
+// Each message is decremented separately, guarded like the increment
+// (last_message_id < msgID): a reader who has since read past it had the
+// badge settled by that read. mention_count > 0 keeps every step monotonic.
+// A receipt from an author the reader has blocked since is skipped, matching
+// the read-pointer recompute (receiptsAfter), which already leaves those out;
+// reversing it again could take a second badge for the same message. The
+// message's receipts are deleted in the same transaction, so a repeated call
+// for the same message lowers nothing.
 //
-// message_mentions stores every resolved mention id, blockers of the author
-// included (insertMentionRows deliberately does not filter — the fan-out,
-// not storage, is what excludes them). But the increment side
-// (mentionEntries in service/mentions.go) deletes the author's blockers
-// from the recipient set before ever calling IncrementMentionCounts, so a
-// blocker's read_states row was never bumped for this message. The NOT
-// EXISTS below mirrors that same exclusion here (OC-0293): without it, a
-// blocker who happens to have an unrelated, genuine mention badge on this
-// same channel — from some other message — has that real badge wiped out
-// when the blocked author's message is deleted, because the UPDATE cannot
-// otherwise tell "never counted" apart from "counted, now reversing".
 // The returned map is userID → mention_count after the reversal, holding
 // exactly the readers the guards admitted (the RETURNING rows) — the same
 // live-badge signal IncrementMentionCountsBatch returns, so a removal path can
@@ -272,7 +265,8 @@ func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs
 			 WHERE channel_id = ?
 			   AND mention_count > 0
 			   AND last_message_id < ?
-			   AND user_id IN (SELECT mentioned_user_id FROM message_mentions WHERE message_id = ?)
+			   AND user_id IN (SELECT user_id FROM mention_receipts
+			                    WHERE message_id = ? AND channel_id = read_states.channel_id)
 			   AND NOT EXISTS (
 			       SELECT 1 FROM user_blocks b
 			       WHERE b.blocker_id = read_states.user_id
@@ -297,6 +291,11 @@ func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs
 			return nil, fmt.Errorf("DecrementMentionCounts rows: %w", err)
 		}
 		rows.Close() //nolint:errcheck // read path; a close error adds nothing over the committed txn
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM mention_receipts WHERE message_id = ? AND channel_id = ?`,
+			msgID, channelID); err != nil {
+			return nil, fmt.Errorf("DecrementMentionCounts receipts: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("DecrementMentionCounts commit: %w", err)
