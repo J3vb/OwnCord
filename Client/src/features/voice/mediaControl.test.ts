@@ -21,6 +21,7 @@ vi.mock("../../stores/voice.store", () => ({
   setLocalDeafened: vi.fn(),
   setListenOnly: vi.fn(),
   setShareDenied: vi.fn(),
+  bumpLocalCameraRev: vi.fn(),
 }));
 vi.mock("../../lib/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
@@ -37,12 +38,20 @@ vi.mock("./codecSwitch", () => ({
     stop(): void {}
   },
 }));
+const setH264GpuProfiles = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("./videoCodec", () => ({ h264GpuPublish: (codec: string) => codec === "h264" }));
 vi.mock("../../lib/screenShare", () => ({
   enableCamera: vi.fn(async () => undefined),
   disableCamera: vi.fn(async () => undefined),
 }));
 
-import { setLocalMuted, setListenOnly, setShareDenied } from "../../stores/voice.store";
+import {
+  setLocalMuted,
+  setListenOnly,
+  setShareDenied,
+  bumpLocalCameraRev,
+} from "../../stores/voice.store";
 import { savePref } from "../../lib/preferences";
 import { enableCamera, disableCamera } from "../../lib/screenShare";
 import { CameraSwitchUnavailable } from "./cameraSwitch";
@@ -220,6 +229,7 @@ describe("switchVideoDevice", () => {
     vi.mocked(savePref).mockClear();
     vi.mocked(enableCamera).mockClear();
     vi.mocked(disableCamera).mockClear();
+    vi.mocked(bumpLocalCameraRev).mockClear();
   });
 
   it("camera off: only saves the choice", async () => {
@@ -227,6 +237,39 @@ describe("switchVideoDevice", () => {
     await media.switchVideoDevice("cam-2");
     expect(savePref).toHaveBeenCalledWith("videoInputDevice", "cam-2");
     expect(enableCamera).not.toHaveBeenCalled();
+    expect(bumpLocalCameraRev).not.toHaveBeenCalled();
+  });
+
+  it("an in-place switch to a new capture bumps the camera revision once", async () => {
+    const track = webTrack();
+    const { media } = setup(fakeRoom(), {
+      manualCameraTrack: track,
+      onCameraEnded: vi.fn(),
+    } as never);
+    await media.switchVideoDevice("cam-2");
+    expect(bumpLocalCameraRev).toHaveBeenCalledTimes(1);
+  });
+
+  it("an in-place switch that keeps the same capture bumps nothing", async () => {
+    const track = webTrack();
+    track.setDeviceId.mockImplementationOnce(async () => true);
+    const { media } = setup(fakeRoom(), { manualCameraTrack: track });
+    await media.switchVideoDevice("cam-2");
+    expect(bumpLocalCameraRev).not.toHaveBeenCalled();
+  });
+
+  it("a restart switch bumps the revision, a failed one does not", async () => {
+    const { media } = setup(fakeRoom(), { manualCameraTrack: { capture: 1 } });
+    await media.switchVideoDevice("/dev/video2");
+    expect(bumpLocalCameraRev).toHaveBeenCalledTimes(1);
+
+    const camera: { manualCameraTrack: unknown } = { manualCameraTrack: { capture: 1 } };
+    vi.mocked(enableCamera).mockImplementationOnce(async () => {
+      camera.manualCameraTrack = null;
+    });
+    const failing = setup(fakeRoom(), camera);
+    await failing.media.switchVideoDevice("/dev/video9");
+    expect(bumpLocalCameraRev).toHaveBeenCalledTimes(1);
   });
 
   it("camera on: moves the live track with setDeviceId and re-arms unplug detection", async () => {
@@ -240,6 +283,17 @@ describe("switchVideoDevice", () => {
       once: true,
     });
     expect(enableCamera).not.toHaveBeenCalled();
+  });
+
+  it("carries an H.264 camera's GPU profiles over to the new capture", async () => {
+    setH264GpuProfiles.mockClear();
+    const track = webTrack();
+    const { media } = setup(fakeRoom(), {
+      manualCameraTrack: track,
+      published: "h264",
+    } as never);
+    await media.switchVideoDevice("cam-2");
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(track.mediaStreamTrack, true);
   });
 
   it("native camera on: starts the capture again on the new device", async () => {

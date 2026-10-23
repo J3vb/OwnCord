@@ -60,11 +60,11 @@ describe("screen share FPS", () => {
       expect(getScreenShareFps()).toBe(30);
     });
 
-    it("accepts 60 and 120", () => {
+    it("accepts 60, and reads a saved 120 as 60 while 120 is hidden", () => {
       mockLoadPref.mockReturnValue(60);
       expect(getScreenShareFps()).toBe(60);
       mockLoadPref.mockReturnValue(120);
-      expect(getScreenShareFps()).toBe(120);
+      expect(getScreenShareFps()).toBe(60);
     });
 
     it("falls back to 30 on garbage values", () => {

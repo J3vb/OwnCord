@@ -24,6 +24,7 @@ function stubGpu(renderer: string): void {
 
 vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
+  isWindowsDesktop: () => false,
 }));
 vi.mock("../../src/features/voice/native/videoCodecs", () => ({
   nativeVideoCodecs: () => Promise.resolve({ h264: true, vp9: false, decode: [] }),

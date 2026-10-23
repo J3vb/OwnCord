@@ -12,6 +12,7 @@ import {
   setLocalDeafened,
   setListenOnly,
   setShareDenied,
+  bumpLocalCameraRev,
 } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/audioPipeline";
@@ -20,6 +21,8 @@ import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
 import { voiceText } from "../../i18n/voice";
 import { CodecSwitchController } from "./codecSwitch";
 import { CameraSwitchUnavailable } from "./cameraSwitch";
+import { setH264GpuProfiles } from "../../lib/h264Profile";
+import { h264GpuPublish } from "./videoCodec";
 import { savePref } from "../../lib/preferences";
 import {
   type VideoTrackDeps,
@@ -398,16 +401,22 @@ export class MediaControl {
           // publishes: restart on the new device instead.
           log.info("In-place camera switch unavailable, restarting", err);
           if (!(await restartCameraOn())) return;
+          bumpLocalCameraRev();
           log.info("Camera device switched");
           return;
         }
-        // The restart swaps the capture: unplug detection moves with it.
+        // The restart swaps the capture: unplug detection and the H.264
+        // profiles a reconnect would republish with move with it.
         const now = track.mediaStreamTrack;
+        if (now !== before) setH264GpuProfiles(now, h264GpuPublish(state.published ?? "vp8"));
         if (now !== before && state.manualCameraTrack === track && state.onCameraEnded) {
           now.addEventListener("ended", state.onCameraEnded, { once: true });
         }
-      } else if (!(await restartCameraOn())) {
-        return;
+        // The self tile holds the stopped capture: have it drawn again.
+        if (now !== before && state.manualCameraTrack === track) bumpLocalCameraRev();
+      } else {
+        if (!(await restartCameraOn())) return;
+        bumpLocalCameraRev();
       }
       log.info("Camera device switched");
     } catch (err) {

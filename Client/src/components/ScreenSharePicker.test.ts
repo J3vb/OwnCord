@@ -2,6 +2,16 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { showScreenSharePicker } from "./ScreenSharePicker";
 import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
 
+// 120 fps is hidden for now (lib/shareFps). Most tests here offer it so the
+// picker's dormant 120 handling (monitor gate, Wayland cap, M-2 hint) keeps
+// its coverage; "offers only 60 while 120 is hidden" runs the shipped state.
+const offer120 = vi.hoisted(() => ({ value: true }));
+vi.mock("@lib/shareFps", () => ({
+  get SHARE_FPS_OPTIONS(): readonly number[] {
+    return offer120.value ? [60, 120] : [60];
+  },
+}));
+
 const sources: NativeVoiceScreenSource[] = [
   {
     id: "screen:1",
@@ -39,6 +49,7 @@ describe("showScreenSharePicker", () => {
   afterEach(() => {
     document.body.replaceChildren();
     vi.restoreAllMocks();
+    offer120.value = true;
   });
 
   it("lists screens first with thumbnails and resolves the pick on Go Live", async () => {
@@ -302,6 +313,22 @@ describe("showScreenSharePicker", () => {
     const fps = root.querySelectorAll<HTMLSelectElement>(".ssp-select")[1]!;
     expect([...fps.options].find((o) => o.value === "120")!.disabled).toBe(false);
     expect(fps.value).toBe("120");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await expect(picking).resolves.toBeNull();
+  });
+
+  it("offers only 60 while 120 is hidden", async () => {
+    offer120.value = false;
+    const picking = showScreenSharePicker({
+      sources,
+      portal: false,
+      defaultQuality: "source",
+      defaultFps: 60,
+    });
+    const root = await mounted();
+    const fps = root.querySelectorAll<HTMLSelectElement>(".ssp-select")[1]!;
+    expect([...fps.options].map((o) => o.value)).toEqual(["30", "60"]);
+    expect(fps.value).toBe("60");
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await expect(picking).resolves.toBeNull();
   });

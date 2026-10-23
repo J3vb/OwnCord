@@ -5,6 +5,7 @@ const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
 
 vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
+  isWindowsDesktop: () => false,
 }));
 const nativeH264 = vi.hoisted(() => ({ value: true }));
 const nativeVp9 = vi.hoisted(() => ({ value: false }));
