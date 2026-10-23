@@ -125,7 +125,23 @@ export class NativeVideoRenderer {
 
   /** `url`: the frame socket's `/remote/<sid>` route for one track. */
   constructor(private readonly url: string) {
+    // No picture until the first frame: 0x0, not the default 300x150.
+    this.canvas.width = 0;
+    this.canvas.height = 0;
     this.gl = this.canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false });
+    this.setup();
+    // The canvas moves between documents with its tile (the pop-out window):
+    // should WebKit drop the context there, take it back and set it up again.
+    this.canvas.addEventListener("webglcontextlost", (e) => e.preventDefault());
+    this.canvas.addEventListener("webglcontextrestored", () => this.setup());
+    this.canvas.className = "video-surface";
+    this.mediaStreamTrack = this.canvas.captureStream(0).getVideoTracks()[0]!;
+    registerVideoSurface(this.mediaStreamTrack, this.canvas);
+    this.socket = this.openSocket();
+    nativeCounters.videoRenderers++;
+  }
+
+  private setup(): void {
     try {
       // i18n-exempt: internal WebGL guard, never rendered
       if (this.gl === null) throw new Error("WebGL2 unavailable");
@@ -134,11 +150,6 @@ export class NativeVideoRenderer {
       // The tile stays black; everything else (audio, the call) carries on.
       log.error("native video renderer setup failed", err);
     }
-    this.canvas.className = "video-surface";
-    this.mediaStreamTrack = this.canvas.captureStream(0).getVideoTracks()[0]!;
-    registerVideoSurface(this.mediaStreamTrack, this.canvas);
-    this.socket = this.openSocket();
-    nativeCounters.videoRenderers++;
   }
 
   private openSocket(): WebSocket {

@@ -1239,12 +1239,14 @@ function buildVoiceAudioTabInner(
     // still has a source among its pending activities, and it holds the whole
     // torn-down pane alive with it. Stopping the tracks does not release it.
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
   });
 
   function stopCameraPreview(): void {
     cameraRequestId += 1;
     registerCamera(null);
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
     setText(previewLabel, t("voiceAudio.previewOff"));
     previewLabel.hidden = false;
   }

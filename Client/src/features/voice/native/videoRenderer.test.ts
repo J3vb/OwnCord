@@ -76,6 +76,7 @@ describe("NativeVideoRenderer", () => {
     uploads: [] as Array<[number, number]>,
     draws: 0,
     lost: 0,
+    programs: 0,
   };
   beforeEach(() => {
     vi.stubGlobal("WebSocket", FakeSocket);
@@ -83,6 +84,7 @@ describe("NativeVideoRenderer", () => {
     gl.uploads.length = 0;
     gl.draws = 0;
     gl.lost = 0;
+    gl.programs = 0;
     nativeCounters.videoRenderers = 0;
     const context = {
       VERTEX_SHADER: 1,
@@ -92,7 +94,7 @@ describe("NativeVideoRenderer", () => {
       shaderSource: () => {},
       compileShader: () => {},
       getShaderParameter: () => true,
-      createProgram: () => ({}),
+      createProgram: () => (gl.programs++, {}),
       attachShader: () => {},
       linkProgram: () => {},
       getProgramParameter: () => true,
@@ -188,6 +190,21 @@ describe("NativeVideoRenderer", () => {
     // Disposed, the canvas leaves the tile with it.
     renderer.dispose();
     expect(renderer.canvas.parentNode).toBeNull();
+  });
+
+  it("has no size before its first frame, and sets up again after a lost context", () => {
+    const renderer = new NativeVideoRenderer("ws://x");
+    expect([renderer.canvas.width, renderer.canvas.height]).toEqual([0, 0]);
+    expect(gl.programs).toBe(1);
+    const lost = new Event("webglcontextlost", { cancelable: true });
+    renderer.canvas.dispatchEvent(lost);
+    // Without preventDefault WebKit never restores the context.
+    expect(lost.defaultPrevented).toBe(true);
+    renderer.canvas.dispatchEvent(new Event("webglcontextrestored"));
+    expect(gl.programs).toBe(2);
+    FakeSocket.last.deliver!({ data: message(4, 2) });
+    expect(gl.draws).toBe(1);
+    renderer.dispose();
   });
 
   it("reopens the loopback socket after the host closes it (voice #13)", async () => {

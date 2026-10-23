@@ -7,7 +7,9 @@
 //
 // The canvas follows its <video>: callers sync after giving a <video> its
 // stream or taking it away, and after moving the <video> (into a pop-out
-// window or the mini-player, back into its tile).
+// window or the mini-player, back into its tile). A canvas sits beside one
+// <video> at a time: a second consumer of the same track needs a renderer of
+// its own (the settings camera preview has one).
 
 const surfaces = new WeakMap<MediaStreamTrack, HTMLCanvasElement>();
 /** The surface each <video> last showed, to take down when its stream goes. */
