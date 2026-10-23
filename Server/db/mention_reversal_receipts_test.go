@@ -144,3 +144,35 @@ func TestDecrementMentionCounts_RepeatLowersNothing(t *testing.T) {
 		t.Errorf("bob mention_count = %d, want 1 (the second message is still unread)", n)
 	}
 }
+
+// A receipt the migration 063 backfill wrote for an @here message never
+// matched a raised badge, so deleting that message must not lower the badge
+// a real mention raised. The backfill's receipts are the ones on messages
+// older than the migration.
+func TestDecrementMentionCounts_BackfilledReceiptNeedsDirectMention(t *testing.T) {
+	database := openMigratedMemory(t)
+	seedMentionFixture(t, database)
+	ctx := context.Background()
+
+	countedMention(t, database, 3, "@bob real", []int64{2})
+	here, err := database.CreateMessageWithMentions(ctx, 1, 1, "@here old", nil, nil, 0, true, nil)
+	if err != nil {
+		t.Fatalf("CreateMessageWithMentions: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`UPDATE messages SET timestamp = '2020-01-01 00:00:00' WHERE id = ?`, here.ID); err != nil {
+		t.Fatalf("age message: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO mention_receipts (user_id, channel_id, message_id) VALUES (2, 1, ?)`, here.ID); err != nil {
+		t.Fatalf("seed backfilled receipt: %v", err)
+	}
+
+	lowered := deleteAndReverse(t, database, here.ID)
+	if len(lowered) != 0 {
+		t.Errorf("lowered = %v, want none (the backfilled receipt is not backed by a mention)", lowered)
+	}
+	if n := mentionCount(t, database, 2); n != 1 {
+		t.Errorf("bob mention_count = %d, want 1 (the real mention is still unread)", n)
+	}
+}

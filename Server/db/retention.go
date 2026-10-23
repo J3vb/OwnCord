@@ -349,6 +349,7 @@ func reverseMentionCountsForMessages(ctx context.Context, tx *sql.Tx, channelID 
 		     WHERE r.user_id = read_states.user_id
 		       AND r.channel_id = read_states.channel_id
 		       AND m.deleted = 0
+		       AND `+countedReceipt+`
 		       AND m.id > read_states.last_message_id
 		       AND m.id IN (__IN__)
 		       AND NOT EXISTS (

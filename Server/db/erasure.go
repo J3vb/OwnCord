@@ -326,6 +326,7 @@ func erasureReverseMentionCounts(ctx context.Context, tx *sql.Tx, userID int64) 
 		       AND r.channel_id = read_states.channel_id
 		       AND m.user_id = ?
 		       AND m.deleted = 0
+		       AND `+countedReceipt+`
 		       AND m.id > read_states.last_message_id
 		       AND NOT EXISTS (
 		           SELECT 1 FROM user_blocks b
