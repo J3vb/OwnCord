@@ -58,7 +58,7 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - **Threads**: start a thread from any message, reply in a side panel, follow threads to keep them under their channel in the sidebar, and archive, lock or rename them.
 - **Forum channels**: a channel of posts, each with a title, tags and its own thread, sorted by activity or date and filtered by tag.
 - **Polls**: ask a question with up to ten answers, one or several choices and a duration, in channels and DMs.
-- **Roles and names**: members can hold several roles, roles can have their own group in the member list and be @mentioned, and moderators can change a member's nickname.
+- **Roles and names**: members can hold several roles, roles can have their own group in the member list and be `@mentioned`, and moderators can change a member's nickname.
 - **Forward messages** to another channel or DM, mark images as **spoilers**, see who is **watching your stream**, and share one Windows app's sound with its window.
 - **Discord-style chat**: edit in place, a right-click menu on messages, a hover bar with quick reactions, Mark Unread, search filters like `from:` and `has:image`, and a message box that takes several files and keeps your draft.
 - **Group DMs** get an owner, a member list, Add People, an icon and call rows; DMs get privacy settings for who may message you.
@@ -101,7 +101,7 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 **Members, roles and profiles**
 
 - Members can hold several roles. Their permissions are all their roles together; their colour and rank come from the highest. Add or remove roles from the profile card's role chips or the admin panel.
-- Roles can be **hoisted** (shown as their own group in the member list) and **mentionable** (anyone can @mention them). Everyone holding a mentioned role gets the mention.
+- Roles can be **hoisted** (shown as their own group in the member list) and **mentionable** (anyone can `@mention` them). Everyone holding a mentioned role gets the mention.
 - Moderators with the new **Manage Nicknames** permission can **Change Nickname** from a member's right-click menu or the admin panel. The default Moderator role gets it; tick it on any role you renamed or edited.
 - The member list is now a right-hand column (Appearance can put it back under the channels), sorts A–Z with offline members in one **Offline** group, updates rows in place, has a search box, works with the arrow keys, and stays fast with hundreds of members.
 - Right-clicking a member opens the full menu in Discord's order, with **Timeout** (60 seconds to 1 week) and **Remove Timeout**. Members can see who is timed out.
@@ -129,7 +129,7 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - A category can carry permissions; channels created in it copy them and stay **synced** until you edit a channel's own permissions (admin panel).
 - The **AFK channel**: in the admin panel's Settings, pick a voice channel and an idle time. Members idle in voice that long are moved there, where they can listen but not speak, and the app says why.
 - A voice channel's text chat opens beside the call grid (**Hide chat** keeps the grid full width), and a voice channel shows unread and mention badges, with **Open chat** in its menu to read without joining.
-- Per-channel **Notification Settings** (All, Only @mentions, Nothing, Server Default) and **Mute** for 15 minutes up to 24 hours, also for DMs.
+- Per-channel **Notification Settings** (All, Only `@mentions`, Nothing, Server Default) and **Mute** for 15 minutes up to 24 hours, also for DMs.
 - Right-clicking a channel offers **Copy Link** and **Invite People**. Private channels show a lock. The header shows the channel's own icon and the full topic on click.
 - The Invite Manager sets expiry and max uses and shows the full link.
 - Ctrl+K also finds DMs and shows unread and mention counts. The Create Channel window has a Topic field.
@@ -168,7 +168,7 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 
 **Admin panel and server**
 
-- Members show every role as chips you add or remove one at a time, and their nickname. Roles get **Show members separately** and **Allow anyone to @mention this role**.
+- Members show every role as chips you add or remove one at a time, and their nickname. Roles get **Show members separately** and **Allow anyone to `@mention` this role**.
 - A Voice: AFK card in Settings, category permissions and **Sync now** on Channels, and Forum in the create-channel dialog.
 - `GET /api/v1/metrics/prometheus` serves the metrics in Prometheus format in every build. The JSON metrics gain one-minute and fifteen-minute windows, the write-ahead log size and replay misses, and the log shows how long each migration took.
 - `chatserver config reset-overrides` (server stopped) drops settings saved from the admin panel, to recover from a lockout.
@@ -181,7 +181,7 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - Inside a category, text channels come before voice channels, and a new channel lands at the bottom.
 - Deleted messages disappear instead of leaving a "[message deleted]" row.
 - Upload File moved from Ctrl+U to Ctrl+Shift+U. Compact mode only changes the message list.
-- Suppress @everyone and @here now hides only those pings; a mention by name still alerts. Do Not Disturb also stops the taskbar flash.
+- Suppress `@everyone` and `@here` now hides only those pings; a mention by name still alerts. Do Not Disturb also stops the taskbar flash.
 - You now go Idle after ten quiet minutes in a voice or DM call too.
 - Rarely used screens (pickers, search, Invite Manager, the voice panel, the video grid) load the first time you open them, so the app starts faster and the installers are smaller.
 
@@ -445,7 +445,7 @@ It is still a **beta and a hobby project** — don't use it for anything sensiti
 
 - GIF favorites: star a GIF in the picker or on a GIF in a message, then open the Favorites tab to send it again (newest first). Favorites are stored on your server, follow you across devices, and are capped at 250.
 - Uploaded or pasted `.mov` videos play inline like `.mp4`. A clip with no picture on your system plays as audio, and one it cannot decode shows the download with "Can't play this format".
-- Clicking an author name, avatar or @mention in a message opens that person's profile card.
+- Clicking an author name, avatar or `@mention` in a message opens that person's profile card.
 
 **Accounts & admin**
 
@@ -1748,7 +1748,7 @@ need Node.
   you had users hit this, they can log in again with no action on your side.
   Also: message search returned 500 for any query containing a hyphen (the
   one FTS5 operator the sanitizer allowlisted); usernames with an uppercase
-  non-ASCII letter could never be @mentioned; registration recorded the
+  non-ASCII letter could never be `@mentioned`; registration recorded the
   reverse-proxy address as the session IP.
 - **server:** WS hub, reconnect and replay (#1369, #1371, #1372, #1374,
   #1375) — REST DM events never bumped the visibility watermark, while
