@@ -42,9 +42,11 @@ func laterOf(a, b time.Time) time.Time {
 	return a
 }
 
-// announceEnded hands the ended row to the sink. The audience is everyone the
-// start went to plus the current audience, so a participant whose standing
-// changed mid-call still gets the end.
+// announceEnded hands the ended row to the sink. The audience is the current
+// audience plus whoever the start went to and is still a participant, so a
+// 1:1 participant whose trust changed mid-call still gets the end while a
+// member who left or was removed from a group gets nothing more. A failed
+// participant read announces nothing; the ended row is still stored.
 func (s *CallLogService) announceEnded(ctx context.Context, open *db.OpenCall, content string, startAudience []int64) {
 	sink := s.loadSink()
 	if sink == nil {
@@ -55,15 +57,12 @@ func (s *CallLogService) announceEnded(ctx context.Context, open *db.OpenCall, c
 		slog.Warn("call log: read ended call", "err", err, "message_id", open.MessageID)
 		return
 	}
-	audience := slices.Clone(startAudience)
 	isGroup, targets, err := s.st.GetDMDeliveryTargets(ctx, open.ChannelID, open.AuthorID)
 	if err != nil {
 		slog.Warn("call log: delivery targets for end", "err", err, "channel_id", open.ChannelID)
-	} else {
-		audience = append(audience, dmDeliveryAudience(isGroup, targets, open.AuthorID)...)
+		return
 	}
-	slices.Sort(audience)
-	audience = slices.Compact(audience)
+	audience := endAudience(startAudience, isGroup, targets, open.AuthorID)
 	if len(audience) == 0 {
 		return
 	}
@@ -71,6 +70,20 @@ func (s *CallLogService) announceEnded(ctx context.Context, open *db.OpenCall, c
 		MessageID: open.MessageID, ChannelID: open.ChannelID, Content: content,
 		Call: *info, Audience: audience,
 	})
+}
+
+// endAudience is the start audience narrowed to current participants, joined
+// with the current delivery audience, sorted and without duplicates.
+func endAudience(startAudience []int64, isGroup bool, targets []db.DMDeliveryTarget, authorID int64) []int64 {
+	members := dmTargetIDs(targets)
+	audience := dmDeliveryAudience(isGroup, targets, authorID)
+	for _, id := range startAudience {
+		if slices.Contains(members, id) {
+			audience = append(audience, id)
+		}
+	}
+	slices.Sort(audience)
+	return slices.Compact(audience)
 }
 
 // recoverOpenCalls ends every call a previous run left open, at the time it
