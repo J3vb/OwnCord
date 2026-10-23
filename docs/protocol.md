@@ -515,7 +515,7 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`/`forum`), `category`, `category_id`, `category_position`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`/`forum`), `category`, `category_id`, `category_position`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
 
 `last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
 the newest message id they have read, or `0` when they have no read state for the
@@ -572,14 +572,25 @@ channel, not of the viewer: every recipient of a frame gets the same value, so
 the shared `channel_update` carries it. An older server omits it; treat an
 absent `private` as `false`. A per-member override never changes it.
 
-`can_moderate_voice` is whether the caller may mute, deafen, move or disconnect
-voice participants in that channel. It is `permissions.AuthorizeVoiceModerator`,
+`can_moderate_voice` is whether the caller may mute, deafen or disconnect
+voice participants (and move those they outrank) in that channel. It is `permissions.AuthorizeVoiceModerator`,
 the same authorizer the voice-moderation commands enforce in the target's
 channel: the base role must hold `MUTE_MEMBERS`, and the effective permission
 after both override layers must hold `READ_MESSAGES | MUTE_MEMBERS`
 (Administrator bypasses the bits). Target rank and move-destination capacity
 are per-target and stay server-side refusals. No override data is sent. Older
 servers omit it.
+
+`can_move_voice` is whether the caller may move voice participants in that
+channel regardless of rank. It is `permissions.AuthorizeVoiceMover`: the base
+role must hold `MOVE_MEMBERS` and the effective permission after both override
+layers must hold `READ_MESSAGES | MOVE_MEMBERS` (Administrator bypasses the
+bits). It is independent of `can_moderate_voice`: a caller with only
+`MOVE_MEMBERS` gets `can_move_voice` true and `can_moderate_voice` false and may
+move but not mute, deafen or disconnect. The owner is a valid move target only
+while the owner-only setting `voice_owner_movable` is on, and each target takes
+at most 3 moves per 30 seconds; both stay server-side refusals. Older servers
+omit it; treat an absent value as "unchanged", never as `false`.
 
 `can_delete_others`, `can_pin` and `can_react` are the caller's per-channel
 message affordances, always present on every non-DM channel and absent from
@@ -2021,6 +2032,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
     "voice_max_video": 0,
     "can_send": true,
     "can_moderate_voice": false,
+    "can_move_voice": false,
     "can_delete_others": false,
     "can_pin": false,
     "can_react": true
@@ -2029,7 +2041,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
 ```
 
 Every `channel_create` is addressed to one client and carries that viewer's own
-`can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin` and `can_react`
+`can_send`, `can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin` and `can_react`
 — the same values `ready` ships per channel.
 It has no `seq` and is not replayed: a client that misses one is forced onto a
 full `ready` on resume instead. It is sent in three cases:
@@ -2047,7 +2059,7 @@ full `ready` on resume instead. It is sent in three cases:
   timeout without a reconnect.
 
 Older servers sent `channel_create` as one shared broadcast without these fields.
-**Treat an absent `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin` or `can_react` as "unchanged", never as `false`.**
+**Treat an absent `can_send`, `can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin` or `can_react` as "unchanged", never as `false`.**
 
 ### channel_update (Server -> Client, broadcast)
 
@@ -2082,7 +2094,7 @@ every viewer including the one that just turned the label on, since those
 frames carry no message content; `nsfw_acknowledged` is per-viewer and ships
 only in `ready` (above), not in this broadcast, the same reason `can_send` is
 omitted from it. None of the per-viewer fields (`can_send`,
-`can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`) ship here:
+`can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin`, `can_react`) ship here:
 this is one encoded frame for every recipient, and a single value would be
 wrong for some of them. See `PUT`/`DELETE
 /api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`) for how a client
@@ -2832,6 +2844,14 @@ voice instead of moved").
 
 Sent only to the moved user. The client tears down its LiveKit session and joins
 `to_channel_id`.
+
+`by_user_id` is optional: the id of the moderator who made the move, so the
+client can tell the member who moved them. It is present on a moderator move and
+absent on the AFK sweep's, which has no actor. Older servers omit it.
+
+```json
+{ "type": "voice_moved", "payload": { "to_channel_id": 12, "by_user_id": 7 } }
+```
 
 `reason` is optional and absent on a moderator move. `"afk"` means the server's
 AFK sweep moved a member who had been idle (presence `idle`) in a server voice

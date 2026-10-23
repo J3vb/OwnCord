@@ -5819,6 +5819,7 @@ server's authorization predicates:
 | `add_reaction`   | `CanAddReaction`                                          |
 | `join_voice`     | `CanJoinVoice`                                            |
 | `moderate_voice` | `AuthorizeVoiceModerator` (base `MUTE_MEMBERS` + channel) |
+| `move_voice`     | `AuthorizeVoiceMover` (base `MOVE_MEMBERS` + channel)     |
 
 The decision is the predicate's own verdict over the member's live state —
 role bits, both override layers, active timeout and NSFW acknowledgement,

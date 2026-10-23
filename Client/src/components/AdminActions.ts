@@ -276,8 +276,13 @@ function appendVoiceRows(
   signal: AbortSignal,
 ): void {
   const reason = typeof mod === "string" ? mod : mod.disabledReason;
-  const muted = typeof mod !== "string" && mod.serverMuted;
-  const deafened = typeof mod !== "string" && mod.serverDeafened;
+  const muted = typeof mod !== "string" && mod.serverMuted === true;
+  const deafened = typeof mod !== "string" && mod.serverDeafened === true;
+  // A Move Members-only verdict (WP 8.4b) carries no mute, deafen or
+  // disconnect handler, and the member menu offers no Move: show only the
+  // rows the options can run. A string (the reason) still shows all three.
+  const has = (pick: (m: VoiceModMenuOptions) => unknown): boolean =>
+    typeof mod === "string" || pick(mod) !== undefined;
   const run = (action: (m: VoiceModMenuOptions) => void) => (): void => {
     if (typeof mod === "string") return;
     action(mod);
@@ -285,27 +290,33 @@ function appendVoiceRows(
   };
   const opts = (testId: string): { testId: string; disabledReason?: string } =>
     reason === undefined ? { testId } : { testId, disabledReason: reason };
-  appendRow(
-    parent,
-    voiceText(muted ? "volume.serverUnmute" : "volume.serverMute"),
-    run((m) => m.onServerMute(!m.serverMuted)),
-    signal,
-    opts("member-menu-server-mute"),
-  );
-  appendRow(
-    parent,
-    voiceText(deafened ? "volume.serverUndeafen" : "volume.serverDeafen"),
-    run((m) => m.onServerDeafen(!m.serverDeafened)),
-    signal,
-    opts("member-menu-server-deafen"),
-  );
-  appendRow(
-    parent,
-    voiceText("volume.disconnect"),
-    run((m) => m.onDisconnect()),
-    signal,
-    opts("member-menu-disconnect"),
-  );
+  if (has((m) => m.onServerMute)) {
+    appendRow(
+      parent,
+      voiceText(muted ? "volume.serverUnmute" : "volume.serverMute"),
+      run((m) => m.onServerMute?.(!muted)),
+      signal,
+      opts("member-menu-server-mute"),
+    );
+  }
+  if (has((m) => m.onServerDeafen)) {
+    appendRow(
+      parent,
+      voiceText(deafened ? "volume.serverUndeafen" : "volume.serverDeafen"),
+      run((m) => m.onServerDeafen?.(!deafened)),
+      signal,
+      opts("member-menu-server-deafen"),
+    );
+  }
+  if (has((m) => m.onDisconnect)) {
+    appendRow(
+      parent,
+      voiceText("volume.disconnect"),
+      run((m) => m.onDisconnect?.()),
+      signal,
+      opts("member-menu-disconnect"),
+    );
+  }
 }
 
 export function createMemberContextMenu(options: MemberContextMenuOptions): ContextMenuResult {

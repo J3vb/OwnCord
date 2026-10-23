@@ -221,7 +221,7 @@ func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idle
 	if afkAfterEvictHook != nil {
 		afkAfterEvictHook()
 	}
-	if !h.SendToUser(c.userID, buildVoiceMoved(afkID, voiceMovedReasonAFK)) {
+	if !h.SendToUser(c.userID, buildVoiceMoved(afkID, voiceMovedReasonAFK, 0)) {
 		clearPendingModFlags(h, c.userID)
 		slog.Info("voice afk move: member was reconnecting, removed from voice instead of moved",
 			"user_id", c.userID, "from_channel_id", fromCh)

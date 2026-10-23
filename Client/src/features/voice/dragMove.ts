@@ -3,8 +3,8 @@
  * (voice_mod_move). Mouse-based like drag-reorder.ts (WebView2 HTML5 DnD is
  * unreliable), but a separate gesture: it never touches channel reordering.
  *
- * Gated on the source channel's server-computed can_moderate_voice, the same
- * verdict the volume menu's "Move to" uses; the server re-checks rank, the
+ * Gated on the source channel's server-computed can_moderate_voice or
+ * can_move_voice, the same verdicts the volume menu's "Move to" uses; the server re-checks rank, the
  * target's access and capacity. Each gesture owns its document listeners and
  * drops them when it ends, so a sidebar re-render mid-drag (speaking rings
  * re-render often) cannot strand one.
@@ -26,7 +26,8 @@ const VOICE_DROP_SELECTOR = "[data-voice-drop-channel-id]";
 /** Whether the signed-in user may move people out of this voice channel now. */
 export function canDragVoiceUser(channelId: number): boolean {
   if (uiStore.getState().connectionStatus !== "connected") return false;
-  return channelsStore.getState().channels.get(channelId)?.canModerateVoice === true;
+  const ch = channelsStore.getState().channels.get(channelId);
+  return ch?.canModerateVoice === true || ch?.canMoveVoice === true;
 }
 
 function contains(r: DOMRect, x: number, y: number): boolean {

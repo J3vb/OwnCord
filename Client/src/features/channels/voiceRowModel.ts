@@ -40,7 +40,7 @@ export interface VoiceRowInputs {
   readonly selfId: number | null;
   readonly connectionStatus: UiState["connectionStatus"];
   readonly timeout: SafetyState["timeout"];
-  /** Sorted ids of the voice channels whose `canModerateVoice` is true. */
+  /** Sorted ids of the voice channels whose `canModerateVoice` or `canMoveVoice` is true. */
   readonly moderatable: readonly number[];
   /** A fresh token per local-mute event: `localSilenced` answers differ after it. */
   readonly localMute: object;
