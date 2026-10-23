@@ -162,7 +162,7 @@ var settingCopy = map[string]SettingCopy{
 		"Each entry lets that site talk to your server. Add only sites you control."),
 	"server.browser_client_enabled": sc("Host a browser client",
 		"Lets this server host a web version of the client.",
-		"Off (default). The browser client is not part of this release yet.",
+		"Off (default). Release builds include the browser client; a build from source without it answers with a not-found note.",
 		"When on, the server answers at its own address with the browser client if this build includes it."),
 	"server.livekit_webhook_allowed_cidrs": sc("Networks allowed to send voice events",
 		"Network ranges allowed to call the voice server's webhook.",

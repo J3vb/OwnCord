@@ -234,8 +234,9 @@ type ServerConfig struct {
 	// BrowserClientEnabled is the owner opt-in for hosting the browser
 	// client from this server (BG-01, 6.13). It is false by default, and off
 	// nothing is mounted at / or /assets/*. On, the server serves the bundle
-	// embedded in its binary (Server/webclient) with its own CSP; a build that
-	// carries only the placeholder answers GET / with a 404 note.
+	// embedded in its binary (Server/webclient) with its own CSP. Release
+	// builds carry the bundle; a plain `go build` without it carries only the
+	// placeholder and answers GET / with a 404 note.
 	// Server/api/browser_hosting_posture_test.go proves both states.
 	BrowserClientEnabled bool `yaml:"browser_client_enabled"`
 	// ReachabilityReportEnabled is the owner opt-in for the `reachability`
@@ -555,8 +556,9 @@ server:
   # pprof_mutex_profile_fraction: 5        # sample 1 in N contended mutex events
   #                           # when pprof is on (0 disables).
   # browser_client_enabled: false  # host the browser client from this server.
-  #                           # Owner opt-in, off by default. Builds without the
-  #                           # browser bundle answer GET / with a 404 note.
+  #                           # Owner opt-in, off by default. Release builds carry
+  #                           # the browser bundle; a build from source without it
+  #                           # answers GET / with a 404 note.
   # reachability_report_enabled: false
   #                           # add a "reachability" block to the admin-only
   #                           # GET /api/v1/diagnostics/connectivity: this host's
