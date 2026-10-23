@@ -61,6 +61,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Accounts & admin**
+
+- Account recovery with a recovery kit now spends exactly the kit it checked, so a new kit set up at the same moment stays unspent and usable.
+
 **Direct messages**
 
 - Deleting someone's message request and later opening the conversation yourself now counts as accepting them, so their replies reach you instead of being held as a request you can no longer see.
