@@ -78,6 +78,7 @@ and only when it changes something a contributor or fork holder must do
 - On a self-hosted LiveKit that sends webhooks, a call member whose connection had briefly dropped could be removed without the call picking a new key holder, which could leave one participant deaf and muted until the next join or leave. The call now picks a new key holder right away.
 - Switching to another voice channel while the first was still connecting could leave you stuck on "Securing" until the call dropped. The new channel's encryption keys are now kept, so it connects.
 - Switching your camera during a call left your own video tile frozen or black until you turned the camera off and on. The tile now follows the new camera straight away.
+- In the Linux app, every voice join, device change and visit to the voice settings left a sound-server connection open, until after a long session no app on the desktop could play or record sound and the call went silent. The app now keeps a few shared connections and reuses them.
 - In the Windows app, a screen share or camera set to H.264 always fell back to VP8, even on a graphics card that can encode H.264. It now stays on H.264 and is encoded on the graphics card (not on Intel graphics, which keep the old behaviour).
 
 ## v2.4.0-beta.1
