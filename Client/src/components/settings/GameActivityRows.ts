@@ -12,7 +12,7 @@
 
 import { createElement, appendChildren, setOwnedTimeout, setText } from "@lib/dom";
 import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
-import { loadGamePrefs, toDetectPrefs } from "@lib/gameActivityPrefs";
+import { displayName, loadGamePrefs, toDetectPrefs } from "@lib/gameActivityPrefs";
 import { savePref } from "@lib/preferences";
 import { desktop } from "../../platform/desktop";
 import { gameActivityText as t } from "../../i18n/gameActivity";
@@ -52,11 +52,15 @@ export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
       return;
     }
     detected.hidden = false;
-    void desktop.gameDetector.detect(toDetectPrefs(loadGamePrefs())).then((game) => {
+    const prefs = loadGamePrefs();
+    void desktop.gameDetector.detect(toDetectPrefs(prefs)).then((game) => {
       if (mine !== scan || signal.aborted) return;
+      // Shown as others see it: under the name it was renamed to.
       setText(
         detected,
-        game === null ? t("settings.detectedNone") : t("settings.detected", { game: game.name }),
+        game === null
+          ? t("settings.detectedNone")
+          : t("settings.detected", { game: displayName(prefs, game.name) }),
       );
       cancelRefresh = setOwnedTimeout(signal, refresh, REFRESH_MS);
     });

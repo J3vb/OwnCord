@@ -59,6 +59,11 @@ and only when it changes something a contributor or fork holder must do
 
 - Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.
 
+**Desktop UI**
+
+- The member list, profile and DMs show the game someone is playing ("Playing VALORANT · for 42 min"). The desktop app finds it from your Steam and Epic libraries and a built-in list. To turn it off, use Settings → Advanced → Activity.
+- Under Settings → Advanced → Activity, Your games lets you add any running program as a game, rename a game, or keep one game from showing. These choices stay on your computer.
+
 ### Fixed
 
 **Accounts & admin**

@@ -420,6 +420,26 @@ describe("game activity loop: the user's own game choices (WP 8.3d)", () => {
     expect(fake.sent.map((s) => s.activity?.name)).toEqual(["My Factory", "Factory", "Factorio"]);
   });
 
+  it("restarts the clock when another game takes over the same shown name", async () => {
+    saveGamePrefs(
+      withRename(withRename(EMPTY_GAME_PREFS, "Factorio", "Playing"), "VALORANT", "Playing"),
+    );
+    const fake = fakeWs();
+    current = factorio;
+    start(fake);
+    await flush();
+    current = valorant;
+    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
+    expect(fake.sent.map((s) => s.activity ?? null)).toEqual([
+      { name: "Playing", started_at: factorio.startedAtMs },
+      null,
+      { name: "Playing", started_at: valorant.startedAtMs },
+    ]);
+    // The same game on the next poll sends nothing.
+    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
+    expect(fake.sent).toHaveLength(3);
+  });
+
   it("remembers every detected name, newest first, once", async () => {
     const fake = fakeWs();
     current = factorio;

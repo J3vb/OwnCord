@@ -107,6 +107,10 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
    *  = unknown (a refused frame), where the next poll sends the current answer
    *  even when it is "no game". */
   let lastSent: string | null | undefined = null;
+  /** The detected name behind `lastSent`. Two games renamed to one name are
+   *  still two games: a switch between them clears first, so the server starts
+   *  the new one's clock instead of keeping the old one's. */
+  let lastDetected: string | null = null;
   /** The user's game choices changed while a scan was running: that scan
    *  answered under the old ones, so its answer is dropped and one more scan
    *  runs at once. */
@@ -143,6 +147,7 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
       });
       remember(id);
       lastSent = name;
+      lastDetected = game === null || name === null ? null : game.name;
     } catch (err) {
       // The socket dropped between the check and the send; the next
       // connection starts over.
@@ -177,8 +182,18 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
       if (name === "") game = null;
       // A program added by hand is already in the list as itself.
       if (game !== null && game.source !== "manual") recordSeen(game.name);
-      if ((game === null ? null : name) === lastSent) return;
-      transmit(game, game === null ? null : name);
+      if (game === null || name === null) {
+        if (lastSent === null) return;
+        transmit(null, null);
+        return;
+      }
+      if (name === lastSent) {
+        if (game.name === lastDetected) return;
+        // Another game under the same shown name: a clear (never limited)
+        // lets the set below start its own clock.
+        transmit(null, null);
+      }
+      transmit(game, name);
     } finally {
       if (scanning === mine) scanning = null;
       if (rescan && mine === epoch) {
@@ -217,6 +232,7 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
     if (state !== "connected") return;
     // A new connection: the server starts it with no activity.
     lastSent = null;
+    lastDetected = null;
     sentIds.length = 0;
     void poll();
   });

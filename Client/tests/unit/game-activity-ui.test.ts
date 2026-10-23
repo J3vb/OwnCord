@@ -244,6 +244,16 @@ describe("Settings > Activity", () => {
     );
   });
 
+  it("shows the detected game under the name others see", async () => {
+    saveGamePrefs(withRename(EMPTY_GAME_PREFS, "Factorio", "My Factory"));
+    invoke.mockResolvedValue({ name: "Factorio", source: "steam", startedAtMs: 1 });
+    const host = mountRows();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(host.querySelector('[data-testid="game-activity-detected"]')?.textContent).toBe(
+      "Detected now: My Factory",
+    );
+  });
+
   it("says no game was detected, and treats a failing host that way", async () => {
     invoke.mockRejectedValue(new Error("no host"));
     const host = mountRows();
