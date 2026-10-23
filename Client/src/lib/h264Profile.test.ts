@@ -62,6 +62,7 @@ async function offer(): Promise<void> {
 }
 
 beforeEach(() => {
+  vi.stubGlobal("RTCRtpSender", { getCapabilities: () => ({ codecs: CAPABILITIES }) });
   transceivers.length = 0;
   offers.mockClear();
 });
@@ -152,6 +153,30 @@ describe("setH264GpuProfiles", () => {
 
     expect(t.setCodecPreferences).toHaveBeenCalledTimes(1);
     expect(t.setCodecPreferences).toHaveBeenCalledWith([]);
+  });
+
+  it("leaves an audio transceiver alone", async () => {
+    const track = { kind: "audio" } as MediaStreamTrack;
+    const t = transceiver(track);
+    setH264GpuProfiles(track, true);
+
+    await offer();
+
+    expect(t.setCodecPreferences).not.toHaveBeenCalled();
+  });
+
+  it("keeps the browser's preferences when it has no Main or High to offer", async () => {
+    vi.stubGlobal("RTCRtpSender", {
+      getCapabilities: () => ({ codecs: [VP8, codec("video/H264", CBP)] }),
+    });
+    const track = videoTrack();
+    const t = transceiver(track);
+    setH264GpuProfiles(track, true);
+
+    await offer();
+
+    expect(t.setCodecPreferences).not.toHaveBeenCalled();
+    expect(offers).toHaveBeenCalledTimes(1);
   });
 
   it("does not touch a transceiver it never narrowed", async () => {

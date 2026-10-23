@@ -1768,6 +1768,19 @@ describe("video codec", () => {
     expect(setH264GpuProfiles.mock.invocationCallOrder[0]!).toBeLessThan(publishOrder);
   });
 
+  it("marks an H.264 camera where the GPU profiles apply", async () => {
+    prefs({ videoCodec: "h264" });
+    gpuProfiles.value = true;
+    encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
+    const rig = fakeRoom();
+    const track = fakeVideoTrack();
+    createLocalVideoTrack.mockResolvedValue(track);
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(track.mediaStreamTrack, true);
+  });
+
   it("unmarks a camera that publishes VP8, so its offer keeps every H.264 profile", async () => {
     prefs({ videoCodec: "vp8" });
     gpuProfiles.value = true;

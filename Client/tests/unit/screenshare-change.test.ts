@@ -22,6 +22,13 @@ vi.mock("livekit-client", async (importOriginal) => {
   };
 });
 
+const setH264GpuProfiles = vi.hoisted(() => vi.fn());
+vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/videoCodec")>()),
+  h264GpuPublish: (codec: string) => codec === "h264",
+}));
+
 vi.mock("@lib/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
   savePref: (...args: unknown[]) => savePref(...args) as unknown,
@@ -125,6 +132,17 @@ beforeEach(() => {
 });
 
 describe("changeScreenshareSource", () => {
+  it("carries an H.264 share's GPU profiles over to the new capture", async () => {
+    setH264GpuProfiles.mockClear();
+    const rig = setup(false);
+    rig.state.published = "h264";
+    const [freshVideo] = picked(false);
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(freshVideo!.mediaStreamTrack, true);
+  });
+
   it("swaps the capture under the same publication and tells the server nothing", async () => {
     const rig = setup(false);
     const [freshVideo] = picked(false);
