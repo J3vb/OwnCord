@@ -243,6 +243,8 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "plugin:notification|is_permission_granted":
         // Auto-idle's OS idle poll: "the OS cannot say", in-window idle only.
         case "system_idle_ms":
+        // The game scan (WP 8.3): no game is running here.
+        case "detect_game":
         // The taskbar/tray unread badge (DP-27): nothing to draw here.
         case "set_unread_badge":
           return null;

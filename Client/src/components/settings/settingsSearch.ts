@@ -18,6 +18,7 @@
 
 import { accountText } from "../../i18n/account";
 import { externalConsentText } from "../../i18n/externalConsent";
+import { gameActivityText } from "../../i18n/gameActivity";
 import { settingsText } from "../../i18n/settings";
 import { whatsNewText } from "../../i18n/whatsNew";
 
@@ -224,6 +225,9 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("advanced.minimizeToTray.desc"),
     s("advanced.startMinimized.label"),
     s("advanced.startMinimized.desc"),
+    gameActivityText("settings.title"),
+    gameActivityText("settings.share.label"),
+    gameActivityText("settings.share.desc"),
     s("advanced.debug"),
     s("advanced.devtools.label"),
     s("advanced.devtools.desc"),

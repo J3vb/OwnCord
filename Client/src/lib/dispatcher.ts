@@ -11,6 +11,7 @@
 import type { ConnectionState, WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
 import { getActivePresenceSender } from "./presence";
+import { handleActivityRefusal } from "./gameActivityBridge";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { serverErrorText } from "./api";
@@ -48,6 +49,7 @@ import {
   handleNsfwAck,
   handlePresence,
   handlePresenceBatch,
+  applyReadyGameActivities,
   handleRolesUpdate,
   handleUserUpdate,
   markReadyActiveChannelRead,
@@ -220,6 +222,8 @@ export function wireDispatcher(
       applyReadyMessageResync(api, clock);
       const dmPayloads = payload.dm_channels ?? [];
       applyReadyDms(payload);
+      // After the roster and the DM list: the games ride on both.
+      applyReadyGameActivities(payload);
       markReadyActiveChannelRead(readyActive);
       applyReadyBlocks(api);
       applyReadyDmRequests(api);
@@ -401,6 +405,9 @@ export function wireDispatcher(
       // code-specific branch and never consumes the frame -> capacity
       // refusals -> the generic toast -> the video rollback.
       if (handleConnectionError(ws, payload)) return;
+      // The game activity loop's own refused activity_update (RATE_LIMITED,
+      // TIMED_OUT, ...): it retries on its next poll, and nothing is toasted.
+      if (handleActivityRefusal(payload.code, id)) return;
       // A server that does not know voice_watch answers with an error: ignore it.
       if (handleVoiceWatchError(payload, id)) return;
       // A timeout refuses a custom status without writing or broadcasting

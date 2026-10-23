@@ -23,9 +23,17 @@ import {
   updateMemberProfile,
   updatePresence,
   applyPresenceBatch,
+  applyReadyActivities,
+  membersStore,
+  toMemberActivity,
 } from "../../stores/members.store";
 import { updateVoiceUserProfile } from "../../stores/voice.store";
-import { dmStore, updateDmParticipant } from "../../stores/dm.store";
+import {
+  dmStore,
+  setDmActivityLookup,
+  updateDmParticipant,
+  type DmUser,
+} from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { uiStore } from "../../stores/ui.store";
 import { getChannelMessages } from "../../stores/messages.store";
@@ -285,15 +293,44 @@ export function applyReadyEmoji(api: DispatchApi | undefined): void {
   }
 }
 
+/**
+ * `ready.activities` (WP 8.3): who plays what right now. Applied after the
+ * roster and the DM list are in, so it reaches both copies; a server without
+ * the key sends no games, and the members then play nothing.
+ */
+export function applyReadyGameActivities(payload: Payload<"ready">): void {
+  const list = payload.activities ?? [];
+  applyReadyActivities(list);
+  // A DM opened from now on takes its people's games from the members store.
+  setDmActivityLookup((userId) => membersStore.getState().members.get(userId)?.activity);
+  const byUser = new Map(list.map((a) => [a.user_id, toMemberActivity(a)]));
+  const partners = new Set<number>();
+  for (const c of dmStore.getState().channels) {
+    partners.add(c.recipient.id);
+    for (const p of c.participants) partners.add(p.id);
+  }
+  for (const id of partners) updateDmParticipant(id, { activity: byUser.get(id) ?? null });
+}
+
 export function handlePresence(payload: Payload<"presence">): void {
   // custom_status is passed through verbatim, undefined included: the
   // store treats "field absent" as "leave the text alone", which is what
   // an older server's presence event means.
-  updatePresence(payload.user_id, payload.status, payload.custom_status);
+  // activity follows the same rule (WP 8.3): absent leaves the shown game alone.
+  updatePresence(
+    payload.user_id,
+    payload.status,
+    payload.custom_status,
+    undefined,
+    payload.activity,
+  );
   // dmStore keeps its own frozen copy of a DM partner's status for the
   // sidebar row (see buildDmConversations) — membersStore alone does not
   // reach it.
-  updateDmParticipant(payload.user_id, { status: payload.status });
+  updateDmParticipant(payload.user_id, {
+    status: payload.status,
+    ...(payload.activity === undefined ? {} : { activity: toMemberActivity(payload.activity) }),
+  });
 }
 
 export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
@@ -302,14 +339,23 @@ export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
   // Only DM partners need the dmStore copy (see handlePresence); a full
   // snapshot takes a partner it leaves out offline.
   const statuses = new Map(payload.updates.map((u) => [u.user_id, u.status]));
+  const activities = new Map(payload.updates.map((u) => [u.user_id, u.activity]));
   const partners = new Set<number>();
   for (const c of dmStore.getState().channels) {
     partners.add(c.recipient.id);
     for (const p of c.participants) partners.add(p.id);
   }
   for (const id of partners) {
+    const listed = statuses.has(id);
     const status = statuses.get(id) ?? (full ? "offline" : undefined);
-    if (status !== undefined) updateDmParticipant(id, { status });
+    if (status === undefined) continue;
+    const activity = activities.get(id);
+    // A partner the snapshot leaves out plays nothing; an entry without the
+    // field (an older server) leaves the shown game alone.
+    const patch: Partial<DmUser> = { status };
+    if (!listed) updateDmParticipant(id, { ...patch, activity: null });
+    else if (activity === undefined) updateDmParticipant(id, patch);
+    else updateDmParticipant(id, { ...patch, activity: toMemberActivity(activity) });
   }
 }
 
