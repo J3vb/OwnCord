@@ -266,6 +266,10 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 	isGroup, targets, tErr := s.st.GetDMDeliveryTargets(bgCtx, p.ChannelID, p.UserID)
 	if tErr != nil {
 		slog.Error("MessageService.SendMessage GetDMDeliveryTargets", "err", tErr, "channel_id", p.ChannelID)
+		// Same as EditMessage and DeleteMessage (Codex P2-5): a nil audience
+		// makes dmEventOrFallback use the channel-topic broadcast, so the
+		// frame goes to the sender only until a resync delivers it.
+		result.ParticipantIDs = []int64{p.UserID}
 		return false
 	}
 	result.DMIsGroup = isGroup
