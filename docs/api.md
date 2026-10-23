@@ -1890,7 +1890,7 @@ receives a `dm_channel_open`. Re-opening an existing DM (`200`) emits nothing â€
 it only touches the caller's own open state. The creator is not sent the event
 on either path; it learns the channel from the response body above.
 
-If the caller holds a `pending` or `ignored` message request from the other
+If the caller holds a `pending`, `ignored` or `deleted` message request from the other
 user, `POST /api/v1/dms` accepts it, atomically: trusts the sender, opens the
 conversation and marks the request `accepted`, and sends the caller's other
 devices the `dm_channel_open` and `dm_request` frames `accept` sends.
