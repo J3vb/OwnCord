@@ -19,7 +19,7 @@ use dbus::blocking::Connection;
 use dbus::message::MatchRule;
 use tauri::{AppHandle, Emitter, Runtime};
 
-use crate::message_notification::{focus_main_window, MessageTarget};
+use crate::message_notification::{focus_main_window_with, MessageTarget};
 use crate::text;
 
 const BUS_NAME: &str = "org.freedesktop.Notifications";
@@ -87,8 +87,8 @@ fn bus<R: Runtime>(app: &AppHandle<R>) -> &'static Sender<Command> {
     BUS.get_or_init(|| {
         let (tx, rx) = mpsc::channel();
         let app = app.clone();
-        let on_click = move |target: MessageTarget| {
-            focus_main_window(&app);
+        let on_click = move |target: MessageTarget, token: Option<String>| {
+            focus_main_window_with(&app, token);
             let _ = app.emit("notification-click", target);
         };
         if let Err(e) = std::thread::Builder::new()
@@ -114,8 +114,11 @@ enum Ended {
 /// Serve commands until the app exits. A session bus that cannot be reached
 /// or is lost is retried on the next command, so one bus restart does not end
 /// notifications for the rest of the run.
-fn run(commands: Receiver<Command>, on_click: impl Fn(MessageTarget) + Send + Sync + 'static) {
-    let on_click: Arc<dyn Fn(MessageTarget) + Send + Sync> = Arc::new(on_click);
+fn run(
+    commands: Receiver<Command>,
+    on_click: impl Fn(MessageTarget, Option<String>) + Send + Sync + 'static,
+) {
+    let on_click: Arc<OnClick> = Arc::new(on_click);
     let mut retry: Option<Command> = None;
     loop {
         let retrying = retry.is_some();
@@ -150,7 +153,7 @@ fn serve(
     conn: &Connection,
     first: Command,
     commands: &Receiver<Command>,
-    on_click: Arc<dyn Fn(MessageTarget) + Send + Sync>,
+    on_click: Arc<OnClick>,
 ) -> Ended {
     let popups: Arc<Mutex<Popups<MessageTarget>>> =
         Arc::new(Mutex::new(Popups::new(MAX_REMEMBERED)));
@@ -211,23 +214,39 @@ fn serve(
 fn watch_signals(
     conn: &Connection,
     popups: &Arc<Mutex<Popups<MessageTarget>>>,
-    on_click: Arc<dyn Fn(MessageTarget) + Send + Sync>,
+    on_click: Arc<OnClick>,
 ) {
-    let clicked = Arc::clone(popups);
+    // Notification spec 1.2 sends `ActivationToken` just before the
+    // `ActionInvoked` it belongs to; one slot is enough.
+    let token: Arc<Mutex<Option<(u32, String)>>> = Arc::new(Mutex::new(None));
+    let announced = Arc::clone(&token);
     let watched = conn.add_match(
-        MatchRule::new_signal(INTERFACE, "ActionInvoked")
+        MatchRule::new_signal(INTERFACE, "ActivationToken")
             .with_sender(BUS_NAME)
             .with_path(OBJECT_PATH),
-        move |(id, action): (u32, String), _: &Connection, _: &dbus::Message| {
-            if action == "default" {
-                let target = lock(&clicked).activated(id);
-                if let Some(target) = target {
-                    on_click(target);
-                }
-            }
+        move |(id, token): (u32, String), _: &Connection, _: &dbus::Message| {
+            *lock(&announced) = (!token.is_empty()).then_some((id, token));
             true
         },
     );
+    let clicked = Arc::clone(popups);
+    let watched = watched.and_then(|_| {
+        conn.add_match(
+            MatchRule::new_signal(INTERFACE, "ActionInvoked")
+                .with_sender(BUS_NAME)
+                .with_path(OBJECT_PATH),
+            move |(id, action): (u32, String), _: &Connection, _: &dbus::Message| {
+                let token = take_token(&mut lock(&token), id);
+                if action == "default" {
+                    let target = lock(&clicked).activated(id);
+                    if let Some(target) = target {
+                        on_click(target, token);
+                    }
+                }
+                true
+            },
+        )
+    });
     let gone = Arc::clone(popups);
     let watched = watched.and_then(|_| {
         conn.add_match(
@@ -290,6 +309,17 @@ fn send_popup(
         .map_err(|e| format!("failed to show notification: {e}"))?;
     lock(popups).shown(id, popup.target, popup.tag);
     Ok(())
+}
+
+/// The click handler: the popup's target and the activation token the server
+/// announced for the click, if it sent one.
+type OnClick = dyn Fn(MessageTarget, Option<String>) + Send + Sync;
+
+/// Take the remembered activation token if it belongs to popup `id`. The slot
+/// is emptied either way, so a token never outlives the click after it.
+fn take_token(slot: &mut Option<(u32, String)>, id: u32) -> Option<String> {
+    slot.take()
+        .and_then(|(token_id, token)| (token_id == id).then_some(token))
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -444,6 +474,16 @@ mod tests {
         assert_eq!(popups.activated(1), None);
         assert_eq!(popups.take_tag("call-1"), None);
         assert_eq!(popups.activated(3), Some("c"));
+    }
+
+    #[test]
+    fn an_activation_token_reaches_only_its_own_click() {
+        let mut slot = Some((7, "tok".to_string()));
+        assert_eq!(take_token(&mut slot, 7).as_deref(), Some("tok"));
+        assert_eq!(take_token(&mut slot, 7), None, "a token is used once");
+        let mut other = Some((8, "tok".to_string()));
+        assert_eq!(take_token(&mut other, 7), None, "another popup's token");
+        assert!(other.is_none(), "a mismatched token is dropped too");
     }
 
     #[test]
@@ -603,7 +643,11 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
         let (click_tx, click_rx) = mpsc::channel();
-        std::thread::spawn(move || run(rx, move |target| click_tx.send(target).unwrap()));
+        std::thread::spawn(move || {
+            run(rx, move |target, token| {
+                click_tx.send((target, token)).unwrap()
+            })
+        });
         let show = |channel_id: i64, tag: Option<&str>| {
             let (reply, answer) = mpsc::channel();
             tx.send(Command::Show {
@@ -638,11 +682,29 @@ mod tests {
                 .append2(id, "default");
             click.set_destination(Some(showed_by.clone().into()));
             signal_tx.send(click).unwrap();
-            let target = click_rx
+            let (target, token) = click_rx
                 .recv_timeout(Duration::from_secs(5))
                 .expect("click");
             assert_eq!(target.channel_id, channel_id);
+            assert_eq!(token, None, "a click with no token still works");
         }
+
+        // Spec 1.2: ActivationToken arrives just before its ActionInvoked.
+        let mut announce = Message::new_signal(OBJECT_PATH, INTERFACE, "ActivationToken")
+            .unwrap()
+            .append2(42u32, "xdg-token-1");
+        announce.set_destination(Some(showed_by.clone().into()));
+        signal_tx.send(announce).unwrap();
+        let mut click = Message::new_signal(OBJECT_PATH, INTERFACE, "ActionInvoked")
+            .unwrap()
+            .append2(42u32, "default");
+        click.set_destination(Some(showed_by.clone().into()));
+        signal_tx.send(click).unwrap();
+        let (target, token) = click_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("click with token");
+        assert_eq!(target.channel_id, 2);
+        assert_eq!(token.as_deref(), Some("xdg-token-1"));
 
         // A ring, then a redial replacing it, then the ring ends.
         show(7, Some("call-7")).expect("ring shown");

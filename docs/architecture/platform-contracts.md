@@ -101,18 +101,18 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
-| Distinct `invoke` command names called from `Client/src/`  | 91    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 95    |
+| Distinct `invoke` command names called from `Client/src/`  | 92    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 96    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 54    |
 
-The handler count covers the 94 distinct registrations
+The handler count covers the 96 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the forty-three `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 93 on Linux
-and 50 elsewhere. The one environment-detection helper is
+behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 95 on Linux
+and 52 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -199,6 +199,7 @@ native_voice_video_codecs
 native_voice_watch_devices
 notify_message
 open_devtools
+open_external_url
 open_log_folder
 ptt_listen_for_key
 ptt_polling_supported
@@ -267,7 +268,7 @@ native surface itself lives only in `platform/desktop/`.
 | Window            | `lib/window-state.ts`, `lib/notifications.ts`, `features/zoom/`                                       | `api/window`, `api/webview` (`setZoom`)                                                                                                               | mostly unsupported; degrade                                 |
 | Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                                           | `api/core`, `api/event` (`update-progress`, `update-installing`), `plugin-process`, `plugin-autostart`                                                | unsupported — the page reloads instead                      |
 | Tray status       | `main.ts`                                                                                             | `api/event` (`status-change`)                                                                                                                         | unsupported — there is no tray                              |
-| Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                                                       | `plugin-opener`                                                                                                                                       | `window.open`                                               |
+| Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                                                       | `api/core` (`open_external_url`)                                                                                                                      | `window.open`                                               |
 | File save / pick  | `message-list/attachments.ts`                                                                         | `plugin-dialog`, `plugin-fs`                                                                                                                          | `<a download>` / File System Access API                     |
 | Input / PTT       | `lib/ptt.ts`                                                                                          | `api/core`, `api/event`; 5 invokes                                                                                                                    | ⚠ see hard cases                                            |
 | Global shortcuts  | `pages/MainPage.ts`, `settings/{KeybindsTab,pttControls}.ts`, `platform/desktop/pushToTalkService.ts` | `api/core`, `api/event`; 6 invokes, 2 event listens                                                                                                   | unsupported — a page cannot observe keys outside itself     |
