@@ -88,7 +88,9 @@ func voiceModAuthorize(ctx context.Context, d VoiceDeps, actorID, targetID int64
 	move := kind == voiceModKindMove
 	outranked := actorRole.Position <= targetRole.Position
 	baseSub := permissions.Subject{RolePerms: actorRole.Permissions}
-	baseMover := move && permissions.AuthorizeVoiceMover(baseSub) == nil
+	// The base bit alone: READ_MESSAGES may come from a channel allow, which
+	// only the resolved subject in voiceModInChannel can see.
+	baseMover := move && permissions.HasServerPerm(actorRole.Permissions, permissions.MoveMembers)
 	// Administrator bypasses permission bits, never the hierarchy; only the
 	// MOVE_MEMBERS path of a move has no hierarchy.
 	if outranked && !baseMover {

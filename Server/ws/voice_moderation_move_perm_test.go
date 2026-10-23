@@ -395,3 +395,27 @@ func TestVoiceMod_Move_PerTargetLimit_AppliesToEqualRank(t *testing.T) {
 	}
 	assertStillIn(t, database, peer, fromID)
 }
+
+// A mover whose READ_MESSAGES comes only from a channel allow (the base role
+// holds MOVE_MEMBERS but not READ_MESSAGES) still moves a higher-ranked
+// target: the base check looks at the MOVE_MEMBERS bit alone and the channel
+// verdict comes from the resolved subject.
+func TestVoiceMod_Move_ReadFromChannelAllow_MovesHigherRank(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-mv-ovr-from")
+	toID := seedVoiceChan(t, database, "vc-mv-ovr-to")
+	setRolePerms(t, database, 3, permissions.MoveMembers|permissions.ConnectVoice)
+	for _, ch := range []int64{fromID, toID} {
+		if err := database.UpsertChannelOverride(context.Background(), ch, 3, permissions.ReadMessages, 0); err != nil {
+			t.Fatalf("UpsertChannelOverride: %v", err)
+		}
+	}
+	actor := seedVoiceUserWithRole(t, database, "mover-ovr-read", 3)
+	target := seedVoiceUserWithRole(t, database, "admin-target-ovr", 2)
+
+	_, targetSend := joinVoice(t, hub, target, fromID)
+	c, _ := moveActor(t, hub, actor, fromID)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	assertMoved(t, database, targetSend, toID)
+}
