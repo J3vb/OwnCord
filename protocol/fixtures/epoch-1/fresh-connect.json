@@ -47,9 +47,11 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "activities": [],
             "capabilities": {
               "dm_privacy": true,
               "forums": true,
+              "game_activity": true,
               "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
@@ -231,6 +233,7 @@
           "payload": {
             "updates": [
               {
+                "activity": null,
                 "custom_status": "fixture custom status",
                 "status": "online",
                 "user_id": "<id:number>"
@@ -270,6 +273,7 @@
           "payload": {
             "updates": [
               {
+                "activity": null,
                 "custom_status": null,
                 "status": "online",
                 "user_id": "<id:number>"
@@ -340,9 +344,11 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "activities": [],
             "capabilities": {
               "dm_privacy": true,
               "forums": true,
+              "game_activity": true,
               "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
@@ -522,6 +528,7 @@
           "payload": {
             "updates": [
               {
+                "activity": null,
                 "custom_status": null,
                 "status": "online",
                 "user_id": "<id:number>"

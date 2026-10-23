@@ -510,7 +510,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "thread_follows": true }`. `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "game_activity": true, "thread_follows": true }`. `game_activity` means the server understands `activity_update` and carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`; a client that does not see it sends no `activity_update` and shows no game. `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -641,6 +641,8 @@ every reconnect; the ready payload now ships the stored value. A DM's
 `unread_count` is capped at 100 under the same rule as `channels[]` above.
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name of the member's top role), `role_ids` (every role the member holds, top role first, always an array with at least one id; absent on an older server, where `role` is the only role), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
+
+**activities[]:** The games connected members are playing, as `{user_id, name, started_at}` (`started_at` in unix milliseconds), sorted by `user_id`; always an array, `[]` when nobody is playing. It lists every connected member who reports a game and is not offline to this viewer, the viewer included: an invisible member appears only in their own `ready`. It is a separate array, not a field of `members[]`, and is the first key of the payload. It is absent on a server without the `game_activity` capability; a client then treats every member as not playing. Later changes arrive as `presence`.
 
 **member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
 
@@ -1526,6 +1528,55 @@ The chosen status is stored as chosen, `invisible` included, and persists
 across reconnects (see `auth_ok`). A custom status persists too, and is
 cleared on `POST /api/v1/auth/logout`.
 
+### activity_update (Client -> Server)
+
+Reports the game the user is playing, or that they stopped. It has its own
+frame and its own budget, so it never competes with `presence_update` (the
+client's auto-idle timer spends that budget) and writes nothing to the
+database.
+
+```json
+{
+  "type": "activity_update",
+  "payload": { "activity": { "name": "Factorio", "started_at": 1761206400000 } }
+}
+```
+
+```json
+{ "type": "activity_update", "payload": { "activity": null } }
+```
+
+`activity` is required: an object with a string `name` and an integer
+`started_at` (unix milliseconds), or `null` to clear. A missing field, a field
+of another JSON type or a non-integer `started_at` is refused with
+`BAD_REQUEST`.
+
+- `name` is trimmed, then follows the `custom_status` text rules (single line,
+  no control or invisible characters, runs of spaces collapse), 1 to 128
+  characters. Too long or bad text is `BAD_REQUEST`. A name that is empty after
+  trimming clears the activity, like `null`.
+- `started_at` is clamped to the last 24 hours: never later than now, never
+  earlier than now minus 24 h.
+- While the user is timed out a set is refused with `TIMED_OUT`, like a
+  non-empty `custom_status`; a clear still applies.
+- Setting an activity is limited to 1 per 10 seconds per user, on its own
+  budget; over it the frame is refused with `RATE_LIMITED` and the client
+  retries on its next poll. A clear is never limited.
+- Naming the game the connection already shows (whatever its `started_at`), or
+  clearing when nothing is set, does nothing: no frame is sent, no budget is
+  spent and no reply is sent. The shown `started_at` is kept, so a client sends
+  `null` when a game exits and a relaunch starts a new timer.
+- A change is broadcast as a `presence` frame with the user's live status and
+  custom status plus the new `activity`. While the user is invisible only their
+  own connection gets that frame; nobody else is sent anything.
+- The activity belongs to the connection and has no table of its own (the
+  `presence` frames that carry it are logged like any other). A device that
+  connects again replaces the previous connection and starts with no activity
+  until it sends one; a late `activity_update` from the replaced connection is
+  ignored. Disconnecting, or a server restart, clears it.
+
+The capability is `game_activity`.
+
 ### presence (Server -> Client, broadcast)
 
 ```json
@@ -1535,10 +1586,20 @@ cleared on `POST /api/v1/auth/logout`.
   "payload": {
     "user_id": 1,
     "status": "online",
-    "custom_status": "shipping phase 6"
+    "custom_status": "shipping phase 6",
+    "activity": { "name": "Factorio", "started_at": 1761206400000 }
   }
 }
 ```
+
+`activity` is the game the user is playing (see `activity_update`), always
+present (`null` when none), like `custom_status`. Every presence frame carries
+the current value, so a status change, a custom status expiry or an idle flip
+keeps showing the game. For an invisible user, everyone else gets `activity:
+null` (the same rule that blanks `custom_status`) and only the user's own copy
+carries the game; an `activity_update` while invisible reaches only the user,
+and going back online shows it again. A server without the
+`game_activity` capability omits the key.
 
 `custom_status` is always present (`null` when unset), so "cleared it" is
 distinguishable from "this event does not mention it"; every presence
@@ -1571,16 +1632,21 @@ of N users costs each client a handful of frames instead of N.
   "type": "presence_batch",
   "payload": {
     "updates": [
-      { "user_id": 1, "status": "online", "custom_status": "shipping phase 6" },
-      { "user_id": 4, "status": "offline", "custom_status": null }
+      {
+        "user_id": 1,
+        "status": "online",
+        "custom_status": "shipping phase 6",
+        "activity": { "name": "Factorio", "started_at": 1761206400000 }
+      },
+      { "user_id": 4, "status": "offline", "custom_status": null, "activity": null }
     ]
   }
 }
 ```
 
 Each entry means what a `presence` with the same fields means: `custom_status`
-is always present (`null` when unset), and an invisible user is `"offline"`
-with `custom_status: null` for everyone but themselves — the invisible user's
+and `activity` are always present (`null` when unset), and an invisible user is
+`"offline"` with `custom_status: null` and `activity: null` for everyone but themselves — the invisible user's
 own copy of the same frame (same `seq`) carries their true status. An entry
 for a user the client does not know is ignored: a member the recipient's list
 may not have yet arrives first as a `member_join` (see `member_join`).
@@ -1590,7 +1656,7 @@ arrived has that frame dropped (not the connection) and receives, within the
 next window, an unsequenced `presence_batch` with `"full": true`. It lists
 every connected user who is not offline to that client (its own true status
 and custom text included, even when invisible), each with their current
-`custom_status` (always present, `null` when unset); every member it leaves
+`custom_status` and `activity` (always present, `null` when unset); every member it leaves
 out is offline, so an invisible member is simply absent. Clear an offline
 member's custom text, which is what `ready` shows.
 
@@ -3476,6 +3542,7 @@ tables below add per-type behavioral notes.
 | `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus; answers `read_state`   |
 | `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)   | Moves the read pointer back; answers `read_state`               |
 | `presence_update`     | 1/10sec                              |                                                                 |
+| `activity_update`     | 1/10sec, own budget (`RATE_LIMITED`) | A set only; a clear and a repeat of the current one are free    |
 | `voice_join`          | 5/sec                                |                                                                 |
 | `voice_leave`         | 5/sec                                | Empty payload                                                   |
 | `voice_mute`          | 2/sec                                | Refused with `SERVER_MUTED` while server muted                  |

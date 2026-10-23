@@ -64,6 +64,9 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - Account recovery with a recovery kit now spends exactly the kit it checked, so a new kit set up at the same moment stays unspent and usable.
+**Chat**
+
+- Deleting a message after an edit changed who it mentions now lowers the mention badges the message actually raised. Before, it could clear someone's badge for a different, still-unread mention, or leave a badge pointing at the deleted message. Deleting an `@everyone` message now clears its badges too.
 
 **Direct messages**
 
@@ -71,6 +74,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice and video**
 
+- On a self-hosted LiveKit that sends webhooks, a call member whose connection had briefly dropped could be removed without the call picking a new key holder, which could leave one participant deaf and muted until the next join or leave. The call now picks a new key holder right away.
 - Switching to another voice channel while the first was still connecting could leave you stuck on "Securing" until the call dropped. The new channel's encryption keys are now kept, so it connects.
 - Switching your camera during a call left your own video tile frozen or black until you turned the camera off and on. The tile now follows the new camera straight away.
 - In the Windows app, a screen share or camera set to H.264 always fell back to VP8, even on a graphics card that can encode H.264. It now stays on H.264 and is encoded on the graphics card (not on Intel graphics, which keep the old behaviour).
