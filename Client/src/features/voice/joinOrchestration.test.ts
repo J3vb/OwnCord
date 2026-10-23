@@ -39,7 +39,12 @@ function setup(initial: SessionState = { type: "idle" }) {
     }),
     nextJoinGeneration: vi.fn(() => ++generation),
     getRoom: () => (state.type === "connected" ? state.room : null),
-    getE2EE: () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => true) }),
+    getE2EE: () => ({
+      clearState: vi.fn(),
+      holdAnnouncesForQueuedJoin: vi.fn(),
+      releaseHeldAnnounces: vi.fn(),
+      setupKeyExchange: vi.fn(async () => true),
+    }),
     getAudioPipeline: () => ({ setRoom: vi.fn(), setupAudioPipeline: vi.fn() }),
     getAudioElements: () => ({ setRoom: vi.fn() }),
     getDeviceManager: () => ({
@@ -213,21 +218,35 @@ describe("connectAndSetup", () => {
   it("backs off the next join after the key exchange gives up, and clears it on a success", async () => {
     store.currentChannelId = 7;
     const { host, join } = setup();
-    host.getE2EE = () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => false) });
+    host.getE2EE = () => ({
+      clearState: vi.fn(),
+      holdAnnouncesForQueuedJoin: vi.fn(),
+      releaseHeldAnnounces: vi.fn(),
+      setupKeyExchange: vi.fn(async () => false),
+    });
 
     await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(false);
     expect(host.leaveVoice).toHaveBeenCalledWith(true, false);
     expect(joinRetryInMs()).toBeGreaterThan(0);
 
-    host.getE2EE = () => ({ clearState: vi.fn(), setupKeyExchange: vi.fn(async () => true) });
+    const releaseHeldAnnounces = vi.fn();
+    host.getE2EE = () => ({
+      clearState: vi.fn(),
+      holdAnnouncesForQueuedJoin: vi.fn(),
+      releaseHeldAnnounces,
+      setupKeyExchange: vi.fn(async () => true),
+    });
     await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(true);
     expect(joinRetryInMs()).toBe(0);
+    expect(releaseHeldAnnounces).toHaveBeenCalledWith(7);
   });
 
   it("does not count a second failure when the give-up finds a switch already queued", async () => {
     const { host, join } = setup();
     host.getE2EE = () => ({
       clearState: vi.fn(),
+      holdAnnouncesForQueuedJoin: vi.fn(),
+      releaseHeldAnnounces: vi.fn(),
       setupKeyExchange: vi.fn(async () => {
         host.setState({
           type: "connecting",
@@ -329,6 +348,37 @@ describe("handleVoiceToken", () => {
       pendingJoin: { token: "t", url: "u", channelId: 2, directUrl: "d", isKeyHolder: true },
     });
     expect(host.connectAndSetup).not.toHaveBeenCalled();
+  });
+
+  it("holds the key announcements of the channel it queues, retargeting on each switch", async () => {
+    const { host, join } = setup({ type: "connecting", pendingJoin: null, joinGeneration: 1 });
+    const e2ee = {
+      clearState: vi.fn(),
+      holdAnnouncesForQueuedJoin: vi.fn(),
+      releaseHeldAnnounces: vi.fn(),
+      setupKeyExchange: vi.fn(async () => true),
+    };
+    host.getE2EE = () => e2ee;
+
+    await join.handleVoiceToken("t2", "u", 2, "d", false);
+    await join.handleVoiceToken("t3", "u", 3, "d", false);
+
+    expect(e2ee.holdAnnouncesForQueuedJoin.mock.calls).toEqual([[2], [3]]);
+  });
+
+  it("keeps the held announcements when the queued join sheds the attempt it replaces", async () => {
+    const { host, join } = setup({ type: "connecting", pendingJoin: null, joinGeneration: 1 });
+    const e2ee = {
+      clearState: vi.fn(),
+      holdAnnouncesForQueuedJoin: vi.fn(),
+      releaseHeldAnnounces: vi.fn(),
+      setupKeyExchange: vi.fn(async () => true),
+    };
+    host.getE2EE = () => e2ee;
+
+    await join.connectAndSetup("t2", "/livekit", 2);
+
+    expect(e2ee.clearState).toHaveBeenCalledWith({ keepHeldAnnounces: true });
   });
 
   it("ignores a token for a channel the user already left", async () => {

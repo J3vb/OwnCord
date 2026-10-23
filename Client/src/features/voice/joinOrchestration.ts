@@ -42,7 +42,10 @@ export interface JoinHost {
   /** Draw the next value from the session's monotonic join-generation counter. */
   nextJoinGeneration(): number;
   getRoom(): Room | null;
-  getE2EE(): Pick<E2EEManager, "clearState" | "setupKeyExchange">;
+  getE2EE(): Pick<
+    E2EEManager,
+    "clearState" | "setupKeyExchange" | "holdAnnouncesForQueuedJoin" | "releaseHeldAnnounces"
+  >;
   getAudioPipeline(): AudioPipeline;
   getAudioElements(): AudioElements;
   getDeviceManager(): DeviceManager;
@@ -83,7 +86,10 @@ export class JoinOrchestration {
   private get _connecting(): boolean {
     return this.host.getState().type === "connecting";
   }
-  private get _e2ee(): Pick<E2EEManager, "clearState" | "setupKeyExchange"> {
+  private get _e2ee(): Pick<
+    E2EEManager,
+    "clearState" | "setupKeyExchange" | "holdAnnouncesForQueuedJoin" | "releaseHeldAnnounces"
+  > {
     return this.host.getE2EE();
   }
   private get _audioPipeline(): AudioPipeline {
@@ -194,7 +200,7 @@ export class JoinOrchestration {
       // state (_isKeyHolder, keypair, peer keys) behind for THIS attempt to
       // inherit via setupKeyExchange's OR-with-server-value guard. Clear it
       // explicitly since leaveVoice() itself never runs on this path.
-      this._e2ee.clearState();
+      this._e2ee.clearState({ keepHeldAnnounces: true });
     }
     // Draw the next generation from the monotonic instance counter (never
     // re-derived from `_state`) and embed it into the "connecting" state.
@@ -299,7 +305,7 @@ export class JoinOrchestration {
           // Clear this attempt's own E2EE residue (keypair/_isKeyHolder/etc.)
           // so the queued join does not inherit it — entry-point leaveVoice(false)
           // never runs for that next call since `_room` is null here (OC-0001).
-          this._e2ee.clearState();
+          this._e2ee.clearState({ keepHeldAnnounces: true });
         }
         // SRE-M2: the key exchange is a real failure stage (timeout / aborted
         // exchange), recorded so a report can place it.
@@ -399,6 +405,11 @@ export class JoinOrchestration {
         advanceJoinStage(traceId, "activate");
         log.info("Connected to LiveKit room", { channelId, url: redactTunnelUrl(resolvedUrl) });
         logIceConnectionInfo(localRoom);
+        // This attempt survived with its queued request identical to it (a
+        // duplicate frame), so no queued session will take what was held:
+        // stop holding or the live session would never see another announce,
+        // and hand what was held for this channel to the live session.
+        this._e2ee.releaseHeldAnnounces(channelId);
         // Atomic transition to "connected" — all connection fields set together.
         this.setState({
           type: "connected",
@@ -593,6 +604,14 @@ export class JoinOrchestration {
           ...this._state,
           pendingJoin: { token, url, channelId, directUrl, isKeyHolder },
         });
+        // The server has already moved us to this channel: from here on the
+        // announces it relays are the queued channel's peers, whose exchange
+        // starts only when the drain re-enters connectAndSetup. Hold them for
+        // that session; the attempt in flight is about to be discarded, and
+        // retargeting drops what a superseded queued channel had collected.
+        // Set synchronously, before any await: correctness relies on the voice_token
+        // and voice_e2ee_announce handlers resolving their dynamic imports in order.
+        this._e2ee.holdAnnouncesForQueuedJoin(channelId);
       }
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
       return;
