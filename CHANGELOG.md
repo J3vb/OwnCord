@@ -64,6 +64,7 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - Account recovery with a recovery kit now spends exactly the kit it checked, so a new kit set up at the same moment stays unspent and usable.
+
 **Chat**
 
 - Deleting a message after an edit changed who it mentions now lowers the mention badges the message actually raised. Before, it could clear someone's badge for a different, still-unread mention, or leave a badge pointing at the deleted message. Deleting an `@everyone` message now clears its badges too.
