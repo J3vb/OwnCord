@@ -93,6 +93,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   /** Track whether we've already added the local self-view tile. */
   let localTileAdded = false;
   let localScreenshareTileAdded = false;
+  /** The capture the self camera tile shows. */
+  let localCameraTrackId: string | undefined;
   /** The capture the self screen-share tile shows. */
   let localShareTrackId: string | undefined;
   let focusedTileId: number | null = null;
@@ -331,6 +333,15 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     const me = channelUsers.get(currentUserId);
     const myName = (member !== undefined ? memberDisplayName(member) : "") || me?.username;
     if (voice.localCamera) {
+      // A camera switch puts a new capture under the same publication: draw
+      // the tile again so it shows the live track, not the stopped one.
+      if (
+        localTileAdded &&
+        getLocalCameraStream()?.getVideoTracks()[0]?.id !== localCameraTrackId
+      ) {
+        videoGrid.removeStream(currentUserId);
+        localTileAdded = false;
+      }
       if (!localTileAdded) {
         const localStream = getLocalCameraStream();
         if (localStream !== null) {
@@ -345,6 +356,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
             },
           );
           localTileAdded = true;
+          localCameraTrackId = localStream.getVideoTracks()[0]?.id;
         }
       }
     } else {
