@@ -18,21 +18,56 @@ import { fileURLToPath } from "node:url";
 const SCORED = ["Killed", "Timeout", "Survived", "NoCoverage"];
 const DETECTED = ["Killed", "Timeout"];
 
-/** Pools parsed Stryker reports; throws if a file appears in more than one. */
-export function aggregate(reports) {
-  if (reports.length === 0) throw new Error("no reports to aggregate");
+const sumOf = (totals, statuses) => statuses.reduce((n, s) => n + (totals[s] ?? 0), 0);
+
+/** Totals, scored count and score for a set of `{ mutants }` file entries. */
+function tally(entries) {
   const totals = {};
+  for (const { mutants } of entries)
+    for (const { status } of mutants) totals[status] = (totals[status] ?? 0) + 1;
+  const scored = sumOf(totals, SCORED);
+  return {
+    totals,
+    files: entries.length,
+    scored,
+    score: scored ? sumOf(totals, DETECTED) / scored : 0,
+  };
+}
+
+/**
+ * Pools parsed Stryker reports; throws if a file appears in more than one.
+ * `names` (parallel to `reports`) adds perShard/perFile; a shard with no name is its index.
+ */
+export function aggregate(reports, names = []) {
+  if (reports.length === 0) throw new Error("no reports to aggregate");
   const seen = new Set();
-  for (const { files } of reports) {
-    for (const [path, { mutants }] of Object.entries(files)) {
+  const perShard = {};
+  const perFile = {};
+  const all = [];
+  reports.forEach(({ files }, i) => {
+    const shard = names[i] ?? String(i);
+    for (const path of Object.keys(files)) {
       if (seen.has(path)) throw new Error(`${path} appears in more than one shard`);
       seen.add(path);
-      for (const { status } of mutants) totals[status] = (totals[status] ?? 0) + 1;
     }
-  }
-  const sum = (statuses) => statuses.reduce((n, s) => n + (totals[s] ?? 0), 0);
-  const scored = sum(SCORED);
-  return { totals, files: seen.size, scored, score: scored ? sum(DETECTED) / scored : 0 };
+    const entries = Object.entries(files);
+    perShard[shard] = tally(entries.map(([, f]) => f));
+    for (const [path, f] of entries) {
+      const { totals, scored, score } = tally([f]);
+      perFile[path] = {
+        shard,
+        score,
+        scored,
+        killed: totals.Killed ?? 0,
+        timeout: totals.Timeout ?? 0,
+        survived: totals.Survived ?? 0,
+        noCoverage: totals.NoCoverage ?? 0,
+      };
+      all.push(f);
+    }
+  });
+  // Pooled over every mutant, never the mean of shard scores.
+  return { ...tally(all), perShard, perFile };
 }
 
 /** Writes the summary JSON, creating the parent directory (a fresh CI checkout has none). */
@@ -42,9 +77,24 @@ export function writeSummary(path, summary) {
 }
 
 /** The job-summary markdown. `revision` is the pinned dev SHA the shards ran on (the workflow run's own SHA is main's). */
-export function jobSummary({ pct, configured, files, shards, scored, totals, revision }) {
+export function jobSummary({
+  pct,
+  configured,
+  files,
+  shards,
+  scored,
+  totals,
+  revision,
+  perShard = {},
+}) {
   const rows = Object.entries(totals).map(([s, n]) => `| ${s} | ${n} |`);
-  return `## Full-surface mutation score: ${pct} %\n\nRevision: ${revision}\n\n${configured} configured files (${files} with mutants) across ${shards} shards, ${scored} scored mutants.\n\n| Status | Mutants |\n| --- | --- |\n${rows.join("\n")}\n`;
+  const shardRows = Object.keys(perShard)
+    .sort()
+    .map((n) => {
+      const { score, totals } = perShard[n];
+      return `| ${n} | ${(score * 100).toFixed(2)} % | ${totals.Survived ?? 0} | ${totals.NoCoverage ?? 0} |`;
+    });
+  return `## Full-surface mutation score: ${pct} %\n\nRevision: ${revision}\n\n${configured} configured files (${files} with mutants) across ${shards} shards, ${scored} scored mutants.\n\n| Status | Mutants |\n| --- | --- |\n${rows.join("\n")}\n\n| Shard | Score | Survived | NoCoverage |\n| --- | --- | --- | --- |\n${shardRows.join("\n")}\n`;
 }
 
 function main() {
@@ -71,7 +121,10 @@ function main() {
     }
     // The pinned dev SHA (needs.pin.outputs.sha); empty when run by hand.
     const revision = process.env.PIN_SHA ?? "";
-    const result = aggregate(paths.map((p) => JSON.parse(readFileSync(p, "utf8"))));
+    const result = aggregate(
+      paths.map((p) => JSON.parse(readFileSync(p, "utf8"))),
+      names,
+    );
     // Configured files that emit no mutants (constants.ts, protocolTypes.ts) appear in no report.
     const configured = Object.values(shards).flat().length;
     writeSummary(join(reportsDir, "summary.json"), {
@@ -97,6 +150,7 @@ function main() {
           scored: result.scored,
           totals: result.totals,
           revision,
+          perShard: result.perShard,
         }),
       );
     }
