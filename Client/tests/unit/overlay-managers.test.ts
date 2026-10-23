@@ -1355,6 +1355,41 @@ describe("createQuickSwitcherManager", () => {
     cleanup();
   });
 
+  it("a held Ctrl+K opens the switcher once and auto-repeat does not close it", async () => {
+    const manager = createQuickSwitcherManager(() => root);
+    const cleanup = manager.attach();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }));
+    await vi.dynamicImportSettled();
+    for (let i = 0; i < 3; i++) {
+      const repeat = new KeyboardEvent("keydown", {
+        key: "k",
+        ctrlKey: true,
+        repeat: true,
+        cancelable: true,
+      });
+      document.dispatchEvent(repeat);
+      expect(repeat.defaultPrevented).toBe(true);
+    }
+    await vi.dynamicImportSettled();
+
+    expect(createQuickSwitcher).toHaveBeenCalledOnce();
+    expect(mockQuickSwitcherDestroy).not.toHaveBeenCalled();
+
+    cleanup();
+  });
+
+  it("an auto-repeating Ctrl+K alone never opens the switcher", async () => {
+    const manager = createQuickSwitcherManager(() => root);
+    const cleanup = manager.attach();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, repeat: true }));
+    await vi.dynamicImportSettled();
+
+    expect(createQuickSwitcher).not.toHaveBeenCalled();
+    cleanup();
+  });
+
   it("closes quick switcher on second Ctrl+K", async () => {
     const manager = createQuickSwitcherManager(() => root);
     const cleanup = manager.attach();

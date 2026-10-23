@@ -195,11 +195,16 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       // Ctrl+M / Ctrl+D: hidden aliases from before the Ctrl+Shift keys.
       // A text field keeps its own Ctrl+D (forward-delete on macOS).
       // remove after beta.5
+      // Toggle on the press edge only: a held key must not flip it back.
       case "m":
-        if (!isTypingTarget(e.target)) run("toggle-mute", handlers.onToggleMute);
+        if (isTypingTarget(e.target)) break;
+        if (e.repeat) e.preventDefault();
+        else run("toggle-mute", handlers.onToggleMute);
         break;
       case "d":
-        if (!isTypingTarget(e.target)) run("toggle-deafen", handlers.onToggleDeafen);
+        if (isTypingTarget(e.target)) break;
+        if (e.repeat) e.preventDefault();
+        else run("toggle-deafen", handlers.onToggleDeafen);
         break;
       default:
         break;

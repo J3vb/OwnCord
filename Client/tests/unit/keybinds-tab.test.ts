@@ -113,12 +113,12 @@ describe("KeybindsTab", () => {
     expect(deafenBtn.textContent).toBe("Ctrl + Shift + D");
 
     muteBtn.click();
-    capture(document, "KeyK"); // K
-    expect(muteBtn.textContent).toBe("Ctrl + Shift + K");
+    capture(document, "KeyG"); // G
+    expect(muteBtn.textContent).toBe("Ctrl + Shift + G");
     await vi.waitFor(() =>
-      expect(mockSetKeys).toHaveBeenCalledWith({ muteVk: 0x4b, deafenVk: 0x44 }),
+      expect(mockSetKeys).toHaveBeenCalledWith({ muteVk: 0x47, deafenVk: 0x44 }),
     );
-    expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBe("75");
+    expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBe("71");
   });
 
   it("lists in-app mute and deafen on the global binding and follows a rebind", async () => {
@@ -138,9 +138,9 @@ describe("KeybindsTab", () => {
 
     await vi.waitFor(() => expect(mockSupported).toHaveBeenCalled());
     (el.querySelector("[data-testid='keybind-global-deafen']") as HTMLButtonElement).click();
-    capture(document, "KeyJ");
+    capture(document, "KeyG");
 
-    expect(commRow("Toggle Deafen").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + J");
+    expect(commRow("Toggle Deafen").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + G");
     expect(commRow("Toggle Mute").querySelector(".kbd")!.textContent).toBe("Ctrl + Shift + M");
   });
 
@@ -164,6 +164,19 @@ describe("KeybindsTab", () => {
     expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
     expect(el.textContent).toContain("already used");
     expect(mockSetKeys).not.toHaveBeenCalled();
+  });
+
+  it("rejects a fixed app key or a key a text field keeps", async () => {
+    const el = buildKeybindsTab(new AbortController().signal);
+    const muteBtn = el.querySelector("[data-testid='keybind-global-mute']") as HTMLButtonElement;
+    for (const code of ["KeyK", "KeyZ", "ArrowLeft"]) {
+      muteBtn.click();
+      capture(document, code); // quick switcher, redo, word select
+      expect(muteBtn.textContent).toBe("Ctrl + Shift + M");
+      expect(el.textContent).toContain("already used");
+    }
+    expect(mockSetKeys).not.toHaveBeenCalled();
+    expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBeNull();
   });
 
   it("ignores a capture that is not a supported key", async () => {
@@ -553,7 +566,7 @@ describe("KeybindsTab", () => {
   // --- Clear button stopPropagation ---
 
   it("clear button click does not trigger parent click handlers", async () => {
-    const el = buildKeybindsTab(new AbortController().signal);
+    buildKeybindsTab(new AbortController().signal);
     // First set a key
     localStorage.setItem("owncord:settings:pttVk", "113");
     mockVkName.mockReturnValue("F2");
@@ -1219,8 +1232,8 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
     byId(el, "keybind-global-mute").click();
     expect(byId(el, "keybind-search").textContent).toBe("Ctrl + F");
     expect(byId(el, "keybind-global-mute").textContent).toBe("Press a supported key...");
-    press("KeyK", { key: "k" });
-    expect(byId(el, "keybind-global-mute").textContent).toBe("Ctrl + Shift + K");
+    press("KeyG", { key: "g" });
+    expect(byId(el, "keybind-global-mute").textContent).toBe("Ctrl + Shift + G");
     expect(stored()).toEqual({});
   });
 
