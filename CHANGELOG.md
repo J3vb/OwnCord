@@ -79,6 +79,7 @@ and only when it changes something a contributor or fork holder must do
 
 - The default blocked upload file types now also cover the other common web page and SVG extensions (`htm`, `xhtml`, `xht`, `shtml`, `mht`, `mhtml`, `svgz`). A blocked-types list saved on the admin panel or set in `config.yaml` is kept as it is.
 - Deleting a message after an edit changed who it mentions now lowers the mention badges the message actually raised. Before, it could clear someone's badge for a different, still-unread mention, or leave a badge pointing at the deleted message. Deleting an `@everyone` message now clears its badges too.
+- Reconnecting while a channel's permissions or your role were being changed could leave the channel list out of date (a channel you lost still shown, or a new one missing) until the app was restarted. The reconnect now loads the full channel list.
 
 **Direct messages**
 

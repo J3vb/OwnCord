@@ -187,7 +187,7 @@ func TestReconnectReplay_NonTopRoleRemovedPreRegister_DoesNotKeepChannel(t *test
 	hub.SeedSeq(100)
 
 	var hookRan bool
-	handleReconnectPreRegisterRaceHook = func() {
+	handleReconnectPreSeqMuRaceHook = func() {
 		if hookRan {
 			return
 		}
@@ -199,7 +199,7 @@ func TestReconnectReplay_NonTopRoleRemovedPreRegister_DoesNotKeepChannel(t *test
 		// registered so nothing is revoked live, but the watermark moves.
 		hub.revokeUnreadableChannels(uid)
 	}
-	defer func() { handleReconnectPreRegisterRaceHook = nil }()
+	defer func() { handleReconnectPreSeqMuRaceHook = nil }()
 
 	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
@@ -213,7 +213,7 @@ func TestReconnectReplay_NonTopRoleRemovedPreRegister_DoesNotKeepChannel(t *test
 		t.Fatalf("expected ready (the watermark bump forces the full fallback), got %v", typ)
 	}
 	if !hookRan {
-		t.Fatal("handleReconnectPreRegisterRaceHook never fired: the replay tier was not reached")
+		t.Fatal("handleReconnectPreSeqMuRaceHook never fired: the replay tier was not reached")
 	}
 	if user, err := database.GetUserByID(ctx, uid); err != nil || user == nil || user.RoleID != topOnlyRoleID {
 		t.Fatalf("users.role_id = %+v, %v, want it unmoved on the top role", user, err)

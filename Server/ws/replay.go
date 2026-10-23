@@ -414,6 +414,9 @@ func (h *Hub) reconnectRegister(
 	txn := h.begin(c.userID)
 	defer txn.end()
 	h.dropOrphanVoiceGrace(ctx, c.userID)
+	if handleReconnectPreSeqMuRaceHook != nil {
+		handleReconnectPreSeqMuRaceHook()
+	}
 	h.seqMu.Lock()
 	start := time.Now()
 	switch replaySource {
@@ -455,12 +458,13 @@ func (h *Hub) reconnectRegister(
 	// this connection reachable. RefreshChannelVisibility and
 	// revokeUnreadableChannels both iterate h.clients to fan out a targeted,
 	// unsequenced channel_create/channel_delete — a snapshot this
-	// still-mid-handshake connection is absent from — and both only bump the
-	// watermark afterward. Without this re-check, a visibility change that
-	// lands anywhere between the entry check above and here is missed twice:
-	// the fan-out can't reach an unregistered client, and the entry check has
-	// already passed, so nothing else catches it before this resume commits
-	// to permissions computed before the change (OC-0206).
+	// still-mid-handshake connection is absent from. Without this re-check, a
+	// visibility change that lands anywhere between the entry check above and
+	// here is missed twice: the fan-out can't reach an unregistered client,
+	// and the entry check has already passed, so nothing else catches it
+	// before this resume commits to permissions computed before the change
+	// (OC-0206). A fan-out still in flight is caught by the targetedFanouts
+	// counter, a finished one by the watermark it bumped on the way out.
 	if h.mustFullResyncAtRegister(lastSeq, c.userID) {
 		h.observeSeqMuHold(start)
 		h.seqMu.Unlock()

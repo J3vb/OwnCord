@@ -1,5 +1,5 @@
 {
-  "nextId": 499,
+  "nextId": 500,
   "findings": [
     {
       "id": "OC-0001",
@@ -11531,6 +11531,29 @@
       "found": "2026-10-17",
       "hunt": "bughunt-2026-10-17",
       "lens": "keyboard",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-23"
+    },
+    {
+      "id": "OC-0499",
+      "title": "A reconnect during a channel visibility refresh or role-change revoke could resume by replay and keep a stale sidebar",
+      "file": "Server/ws/hub_visibility.go",
+      "line": 232,
+      "severity": "low",
+      "why": "RefreshChannelVisibility and revokeUnreadableChannels send unsequenced channel_create/channel_delete frames, bracketed only by a leading and trailing watermark bump. A client that acked a frame sequenced mid-pass and reconnected before the pass ended passed the register-time check and replayed, which never carries those frames. BroadcastChannelCreate and member timeouts were already moved to begin/endTargetedFanout; these two were left as a follow-up.",
+      "repro": "Edit a channel override (or reassign a member's role) while the member's socket drops after acking a frame sent during the fan-out; the resume replays and the sidebar keeps the old channel set until the next full ready.",
+      "evidence": "Vault issue #107; hub_visibility.go leading bump + trailing bump around the per-client loop, same shape in revokeUnreadableChannels.",
+      "suggestedFix": "Bracket both passes with beginTargetedFanout/endTargetedFanout, like BroadcastChannelCreate.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/ws/hub_visibility_reconnect_race_test.go (TestRefreshChannelVisibility_ReconnectDuringFanoutForcesFullResync, TestRevokeUnreadableChannels_ReconnectDuringPassForcesFullResync)",
+        "revertProof": "fail (without the fix the mid-pass reconnect is allowed to replay)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "concurrency",
       "finder": "nightly-bughunt",
       "fixedDate": "2026-10-23"
     }

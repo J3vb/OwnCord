@@ -203,7 +203,7 @@ func TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole(t *test
 	hub.SeedSeq(100)
 
 	var hookRan bool
-	handleReconnectPreRegisterRaceHook = func() {
+	handleReconnectPreSeqMuRaceHook = func() {
 		if hookRan {
 			return
 		}
@@ -214,7 +214,7 @@ func TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole(t *test
 		// the hazard — but its watermark bump forces the full-ready fallback.
 		hub.BroadcastMemberUpdate(uid, "harvest-demoted")
 	}
-	defer func() { handleReconnectPreRegisterRaceHook = nil }()
+	defer func() { handleReconnectPreSeqMuRaceHook = nil }()
 
 	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
@@ -231,7 +231,7 @@ func TestFreshConnectFallback_RoleReassignMidReconnect_ResolvesFreshRole(t *test
 		t.Fatalf("expected ready (forced fallback), got %v", typ)
 	}
 	if !hookRan {
-		t.Fatal("handleReconnectPreRegisterRaceHook never fired — not exercising the race window")
+		t.Fatal("handleReconnectPreSeqMuRaceHook never fired — not exercising the race window")
 	}
 
 	// The ready payload must be the demoted role's view: no revoked channel.
