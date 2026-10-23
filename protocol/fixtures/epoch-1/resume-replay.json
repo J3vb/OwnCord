@@ -51,6 +51,7 @@
           "payload": {
             "updates": [
               {
+                "activity": null,
                 "custom_status": null,
                 "status": "offline",
                 "user_id": "<id:number>"
@@ -97,6 +98,7 @@
           "payload": {
             "updates": [
               {
+                "activity": null,
                 "custom_status": "fixture custom status",
                 "status": "online",
                 "user_id": "<id:number>"
@@ -129,6 +131,7 @@
           "payload": {
             "updates": [
               {
+                "activity": null,
                 "custom_status": null,
                 "status": "offline",
                 "user_id": "<id:number>"

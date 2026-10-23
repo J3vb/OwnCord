@@ -27,6 +27,12 @@ type ClientInfo struct {
 	ReqID          string
 	VoiceChannelID int64  // 0 if not in a voice channel
 	VoiceJoinToken string // opaque join-instance token for the current voice session
+	// Activity is the connection's live game activity when the frame was
+	// read (WP 8.3a), nil when none. Frames of one connection run one at a
+	// time, so it is current for the handlers that read it: activity_update
+	// (no-op and clear checks) and presence_update (the frame it emits
+	// carries the game).
+	Activity *gameActivity
 }
 
 // ── Per-domain dependency structs ───────────────────────────────────────────

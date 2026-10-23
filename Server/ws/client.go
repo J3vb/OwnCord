@@ -181,6 +181,11 @@ type livePresence struct {
 	// stays idle, across a custom-status change and its expiry, so the AFK sweep
 	// measures one unbroken idle stretch. A reconnect re-stamps it at connect.
 	idleSince time.Time
+	// activity is the game this connection reports (WP 8.3a), nil when none.
+	// It is memory only and belongs to the connection: a replacement connection
+	// starts without one. The value is immutable; a change swaps in a new
+	// livePresence, so every writer of livePresence must carry it over.
+	activity *gameActivity
 }
 
 // afkNow is the clock the idle stamp and the AFK sweep read. A var so tests
@@ -188,10 +193,13 @@ type livePresence struct {
 var afkNow = time.Now
 
 // nextLivePresence is the presence that follows prev when the connection takes
-// status: it keeps prev.idleSince while the status stays idle and stamps now on
+// status: it keeps prev.activity, and prev.idleSince while the status stays idle and stamps now on
 // entry to idle, and leaves it zero for every other status.
 func nextLivePresence(prev *livePresence, status string, customStatus *string, expiresAt string, now time.Time) *livePresence {
 	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt}
+	if prev != nil {
+		next.activity = prev.activity
+	}
 	if !isIdleStatus(status) {
 		return next
 	}
