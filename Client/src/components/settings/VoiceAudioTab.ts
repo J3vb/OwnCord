@@ -1277,14 +1277,26 @@ function buildVoiceAudioTabInner(
     })();
   }
 
+  function previewDevice(deviceId: string): void {
+    stopCameraPreview();
+    stopNativeCameraPreview();
+    if (isLinuxDesktop()) void startNativeCameraPreview(deviceId);
+    else startCameraPreview(deviceId);
+  }
+
   videoSelect.addEventListener(
     "change",
     () => {
-      void switchVideoDevice(videoSelect.value);
-      stopCameraPreview();
-      stopNativeCameraPreview();
-      if (isLinuxDesktop()) void startNativeCameraPreview(videoSelect.value);
-      else startCameraPreview(videoSelect.value);
+      const picked = videoSelect.value;
+      void switchVideoDevice(picked).then(() => {
+        // The live camera could not use the pick and stayed on its device:
+        // show that one again.
+        const kept = loadPref<string>("videoInputDevice", "");
+        if (signal.aborted || kept === picked || videoSelect.value !== picked) return;
+        videoSelect.value = kept;
+        previewDevice(kept);
+      });
+      previewDevice(picked);
     },
     { signal },
   );

@@ -54,7 +54,7 @@ import {
 } from "../../stores/voice.store";
 import { savePref } from "../../lib/preferences";
 import { enableCamera, disableCamera } from "../../lib/screenShare";
-import { CameraSwitchUnavailable } from "./cameraSwitch";
+import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
 import { MediaControl, syncShareGrant, type MediaControlHost } from "./mediaControl";
 
 type Permissions = { canPublish: boolean; canPublishSources: number[] } | undefined;
@@ -224,6 +224,18 @@ function webTrack() {
   return track;
 }
 
+/** A native camera live on /dev/video0 whose in-place switch is refused. */
+function nativeTrack(err: Error) {
+  return {
+    capture: 1,
+    device: "/dev/video0",
+    mediaStreamTrack: { addEventListener: vi.fn() },
+    setDeviceId: vi.fn(async () => {
+      throw err;
+    }),
+  };
+}
+
 describe("switchVideoDevice", () => {
   beforeEach(() => {
     vi.mocked(savePref).mockClear();
@@ -312,6 +324,74 @@ describe("switchVideoDevice", () => {
     const { media } = setup(fakeRoom(), camera);
     await media.switchVideoDevice("/dev/video9");
     expect(disableCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it("a picked camera that gives no picture keeps the live one and says so", async () => {
+    const track = nativeTrack(new CameraDeviceUnusable("no frame"));
+    const { media, onError } = setup(fakeRoom(), { manualCameraTrack: track });
+    await media.switchVideoDevice("/dev/video2");
+    expect(enableCamera).not.toHaveBeenCalled();
+    expect(disableCamera).not.toHaveBeenCalled();
+    expect(savePref).toHaveBeenLastCalledWith("videoInputDevice", "/dev/video0");
+    expect(onError).toHaveBeenCalledExactlyOnceWith(
+      "Couldn't use that camera. Still using the previous one.",
+    );
+  });
+
+  it("a restart the picked camera fails goes back to the previous camera", async () => {
+    const camera: { manualCameraTrack: unknown } = {
+      manualCameraTrack: nativeTrack(new CameraSwitchUnavailable("busy")),
+    };
+    vi.mocked(enableCamera)
+      .mockImplementationOnce(async (_state, deps) => {
+        camera.manualCameraTrack = null;
+        deps.onError("Failed to start camera");
+      })
+      .mockImplementationOnce(async () => {
+        camera.manualCameraTrack = { capture: 3 };
+      });
+    const { media, onError } = setup(fakeRoom(), camera);
+    await media.switchVideoDevice("/dev/video2");
+    expect(enableCamera).toHaveBeenCalledTimes(2);
+    expect(savePref).toHaveBeenLastCalledWith("videoInputDevice", "/dev/video0");
+    expect(disableCamera).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledExactlyOnceWith(
+      "Couldn't use that camera. Still using the previous one.",
+    );
+    expect(bumpLocalCameraRev).toHaveBeenCalledTimes(1);
+  });
+
+  it("when the previous camera fails too, the camera goes off with the failure", async () => {
+    const camera: { manualCameraTrack: unknown } = {
+      manualCameraTrack: nativeTrack(new CameraSwitchUnavailable("busy")),
+    };
+    vi.mocked(enableCamera)
+      .mockImplementationOnce(async (_state, deps) => {
+        camera.manualCameraTrack = null;
+        deps.onError("held");
+      })
+      .mockImplementationOnce(async (_state, deps) => {
+        deps.onError("Failed to start camera");
+      });
+    const { media, onError } = setup(fakeRoom(), camera);
+    await media.switchVideoDevice("/dev/video2");
+    expect(enableCamera).toHaveBeenCalledTimes(2);
+    expect(disableCamera).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledExactlyOnceWith("Failed to start camera");
+  });
+
+  it("a restart on the picked camera that works shows no held message", async () => {
+    const camera: { manualCameraTrack: unknown } = {
+      manualCameraTrack: nativeTrack(new CameraSwitchUnavailable("busy")),
+    };
+    vi.mocked(enableCamera).mockImplementationOnce(async () => {
+      camera.manualCameraTrack = { capture: 2 };
+    });
+    const { media, onError } = setup(fakeRoom(), camera);
+    await media.switchVideoDevice("/dev/video2");
+    expect(enableCamera).toHaveBeenCalledTimes(1);
+    expect(savePref).toHaveBeenLastCalledWith("videoInputDevice", "/dev/video2");
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("falls back to a restart when the in-place switch is unavailable", async () => {
