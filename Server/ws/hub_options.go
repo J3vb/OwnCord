@@ -291,7 +291,16 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		MessageSvc: h.messageSvc,
 		Limiter:    h.limiter,
 	})
-	registerVoiceControlsV2(reg, VoiceDeps{
+	registerVoiceControlsV2(reg, h.voiceDeps())
+
+	h.refreshSettingsLocked(context.Background())
+	return h, nil
+}
+
+// voiceDeps is the dependency set the voice command handlers are registered
+// with.
+func (h *Hub) voiceDeps() VoiceDeps {
+	return VoiceDeps{
 		Voice:       h.voice,
 		Reader:      h.readers.Dispatch,
 		Limiter:     h.limiter,
@@ -300,11 +309,9 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		LiveKit:     h.livekit,
 		TokenGen:    h, // Hub delegates to h.livekit at call time
 		KeyHolder:   h,
-		Mod:         h, Settings: h.settings,
-	})
-
-	h.refreshSettingsLocked(context.Background())
-	return h, nil
+		Mod:         h,
+		Settings:    h.settings,
+	}
 }
 
 // maxColdReplayLimit returns the effective persisted-replay cap. The budget

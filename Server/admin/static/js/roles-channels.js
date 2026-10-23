@@ -808,8 +808,8 @@ const PERM_GROUPS=[
   {title:'Moderation',bits:[
     [0x40000,'Kick Members','Force-logout a lower-ranked member'],
     [0x80000,'Ban Members','Ban and unban lower-ranked members'],
-    [0x100000,'Mute Members','Server mute, deafen and disconnect in voice'],
-    [0x2000,'Move Members','Move anyone between voice channels, whatever their rank'],
+    [0x100000,'Mute Members','Server mute, deafen and disconnect, and move lower-ranked members'],
+    [0x2000,'Move Members','Move anyone between voice channels, whatever their rank (only the owner can grant)'],
   ]},
 ];
 

@@ -53,7 +53,7 @@
           "payload": {
             "afk": false,
             "can_delete_others": true,
-            "can_moderate_voice": true,
+            "can_moderate_voice": false,
             "can_pin": true,
             "can_react": true,
             "can_send": true,
@@ -80,7 +80,7 @@
           "payload": {
             "afk": false,
             "can_delete_others": true,
-            "can_moderate_voice": true,
+            "can_moderate_voice": false,
             "can_pin": true,
             "can_react": true,
             "can_send": true,

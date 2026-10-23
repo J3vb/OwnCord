@@ -21,7 +21,8 @@ const (
 	// voiceModKindMute is mute, deafen and disconnect: MUTE_MEMBERS and the
 	// strict-outranks rule.
 	voiceModKindMute voiceModKind = iota
-	// voiceModKindMove is voice_mod_move: MOVE_MEMBERS, no rank rule.
+	// voiceModKindMove is voice_mod_move: MUTE_MEMBERS with the rank rule, or
+	// MOVE_MEMBERS at any rank (see voiceModAuthorize).
 	voiceModKindMove
 )
 
@@ -47,31 +48,35 @@ func voiceOwnerMovable(ctx context.Context, d VoiceDeps) bool {
 	return service.VoiceOwnerMovable(stored)
 }
 
-// voiceOwnerGuard refuses a move of the owner while the owner switch is off.
-func voiceOwnerGuard(ctx context.Context, d VoiceDeps, move bool, targetRole *db.Role) *Result {
-	if move && permissions.IsOwner(targetRole.ID, targetRole.Position) && !voiceOwnerMovable(ctx, d) {
+// voiceOwnerGuard refuses a MOVE_MEMBERS move of the owner while the owner
+// switch is off. The MUTE_MEMBERS path never reaches an owner (rank rule).
+func voiceOwnerGuard(ctx context.Context, d VoiceDeps, viaMoveMembers bool, targetRole *db.Role) *Result {
+	if viaMoveMembers && permissions.IsOwner(targetRole.ID, targetRole.Position) && !voiceOwnerMovable(ctx, d) {
 		return &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "the owner cannot be moved"}}
 	}
 	return nil
 }
 
-// voiceModAuthorize is the gate behind voiceModTarget. For voiceModKindMove it
-// authorizes with permissions.AuthorizeVoiceMover and applies no rank rule,
-// except that a target holding the owner role is refused while the owner
-// switch is off; outranked then reports whether the move relied on that
-// missing rank rule (the target's position is at or above the actor's).
-func voiceModAuthorize(ctx context.Context, d VoiceDeps, actorID, targetID int64, kind voiceModKind) (state *db.VoiceState, outranked bool, res *Result) {
+// voiceModAuthorize is the gate behind voiceModTarget. The returned bypass is
+// true only for a move that used the MOVE_MEMBERS path against a target at or
+// above the actor's rank.
+//
+// Mute, deafen and disconnect: MUTE_MEMBERS and the strict-outranks rule.
+//
+// A move is authorized by EITHER of two paths:
+//  1. MUTE_MEMBERS through AuthorizeVoiceModerator and the strict-outranks
+//     rule, exactly the pre-8.4a behaviour (no owner switch, no per-target
+//     limit); or
+//  2. MOVE_MEMBERS through AuthorizeVoiceMover, any rank, with the owner
+//     switch and the per-target limit applied by the caller.
+//
+// Path 2 is taken when the actor's subject in the target's channel passes
+// AuthorizeVoiceMover, otherwise path 1. An actor holding neither gets the
+// same refusal whether the target is in voice or not.
+func voiceModAuthorize(ctx context.Context, d VoiceDeps, actorID, targetID int64, kind voiceModKind) (state *db.VoiceState, bypass bool, res *Result) {
 	if actorID == targetID {
 		return nil, false, &Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "cannot moderate yourself"}}
 	}
-	move := kind == voiceModKindMove
-	authorize := permissions.AuthorizeVoiceModerator
-	missingMsg := "missing MUTE_MEMBERS permission"
-	if move {
-		authorize = permissions.AuthorizeVoiceMover
-		missingMsg = "missing MOVE_MEMBERS permission"
-	}
-
 	actorRole, ok := voiceModRole(ctx, d, actorID)
 	if !ok {
 		return nil, false, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "failed to load actor role"}}
@@ -80,18 +85,15 @@ func voiceModAuthorize(ctx context.Context, d VoiceDeps, actorID, targetID int64
 	if !ok {
 		return nil, false, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "failed to load target role"}}
 	}
-	outranked = actorRole.Position <= targetRole.Position
-	// Administrator bypasses permission bits, never the hierarchy. A move is
-	// the one command with no hierarchy: its bit is the authority.
-	if !move && outranked {
-		return nil, false, &Result{Error: ClientError{
-			Code:    ErrCodeForbidden,
-			Message: "cannot moderate a user of equal or higher rank",
-		}}
+	move := kind == voiceModKindMove
+	outranked := actorRole.Position <= targetRole.Position
+	baseSub := permissions.Subject{RolePerms: actorRole.Permissions}
+	baseMover := move && permissions.AuthorizeVoiceMover(baseSub) == nil
+	// Administrator bypasses permission bits, never the hierarchy; only the
+	// MOVE_MEMBERS path of a move has no hierarchy.
+	if outranked && !baseMover {
+		return nil, false, voiceModRankRefusal()
 	}
-	// ownerGuard runs once the actor is known to hold the authority, so a
-	// caller without it learns nothing about who the owner is.
-	ownerGuard := func() *Result { return voiceOwnerGuard(ctx, d, move, targetRole) }
 
 	st, err := d.Voice.State(ctx, targetID)
 	if err != nil {
@@ -99,67 +101,99 @@ func voiceModAuthorize(ctx context.Context, d VoiceDeps, actorID, targetID int64
 		return nil, false, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read voice state"}}
 	}
 	if st == nil {
-		// Authorization before existence (follow-up to round 4, Codex review):
-		// with no session to build a channel Subject from, still run the SAME
-		// canonical authorizer (no second one) on a Subject built from just the
-		// actor's base role and a zero channel — CanModerateVoice's DM branch
-		// and channel-override layer are both no-ops against a zero Channel, so
-		// this reduces to exactly the base-bit-plus-ReadMessages/MuteMembers
-		// check the full, in-voice path would fail on for the SAME actor
-		// regardless of channel. An actor without the base bit gets the SAME
-		// 403 here as the in-voice failure below, so a target in voice and one
-		// not in voice are byte-identical refusals — probing voice presence
-		// this way learns nothing. Only a holder (who would pass the full
-		// channel check too, absent an unlucky channel-level deny) ever
-		// reaches the VoiceError below. The move authorizer is the same
-		// shape on MOVE_MEMBERS.
-		if authorize(permissions.Subject{RolePerms: actorRole.Permissions}) != nil {
-			return nil, false, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: missingMsg}}
-		}
-		if r := ownerGuard(); r != nil {
-			return nil, false, r
-		}
-		return nil, false, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
+		return nil, false, voiceModNoSession(ctx, d, move, baseMover, baseSub, targetRole)
 	}
+	return voiceModInChannel(ctx, d, actorID, st, move, outranked, targetRole)
+}
 
-	// The decision is permissions.AuthorizeVoiceModerator (AuthorizeVoiceMover
-	// for a move) over the actor's subject in the TARGET's channel (round 4,
-	// Codex review Part C — one canonical authorizer, replacing this
-	// function's own duplicate of the timeout voice half's
-	// base-bit-plus-CanModerateVoice pair): the actor's BASE role must hold
-	// the command's bit on its own, and effective MUTE_MEMBERS (MOVE_MEMBERS)
-	// in the target's channel too, so a role-layer or user-layer deny on that
-	// channel holds (SEC-02), READ_MESSAGES so a room hidden from the actor
-	// cannot be moderated, and for a DM call the actor's own membership —
-	// voice_mod_kick and friends carry no channel id from the client, so
-	// without that a moderator could reach into any two users' DM call by
-	// targeting a user id alone. The DM refusal keeps the exact shape of
-	// "target not in voice" so the actor learns nothing about a call they are
-	// not in.
+func voiceModRankRefusal() *Result {
+	return &Result{Error: ClientError{
+		Code:    ErrCodeForbidden,
+		Message: "cannot moderate a user of equal or higher rank",
+	}}
+}
+
+func voiceModMissing(move bool) *Result {
+	msg := "missing MUTE_MEMBERS permission"
+	if move {
+		msg = "missing MOVE_MEMBERS permission"
+	}
+	return &Result{Error: ClientError{Code: ErrCodeForbidden, Message: msg}}
+}
+
+func voiceModNotInVoice() *Result {
+	return &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
+}
+
+// voiceModNoSession answers a target with no voice session. Authorization
+// before existence (follow-up to round 4, Codex review): with no session to
+// build a channel Subject from, still run the SAME canonical authorizers (no
+// second one) on a Subject built from just the actor's base role and a zero
+// channel — their DM branch and channel-override layer are both no-ops
+// against a zero Channel, so this reduces to exactly the base-bit check the
+// full, in-voice path would fail on for the SAME actor regardless of channel.
+// An actor holding neither bit gets the SAME 403 here as the in-voice failure,
+// so a target in voice and one not in voice are byte-identical refusals —
+// probing voice presence this way learns nothing. Only a holder ever reaches
+// the VoiceError.
+func voiceModNoSession(ctx context.Context, d VoiceDeps, move, baseMover bool, baseSub permissions.Subject, targetRole *db.Role) *Result {
+	if !baseMover && permissions.AuthorizeVoiceModerator(baseSub) != nil {
+		return voiceModMissing(move)
+	}
+	if r := voiceOwnerGuard(ctx, d, baseMover, targetRole); r != nil {
+		return r
+	}
+	return voiceModNotInVoice()
+}
+
+// voiceModInChannel authorizes the actor in the TARGET's channel (round 4,
+// Codex review Part C — one canonical authorizer per bit): the actor's BASE
+// role must hold the command's bit on its own, and the bit must be effective
+// in the target's channel too, so a role-layer or user-layer deny on that
+// channel holds (SEC-02); READ_MESSAGES so a room hidden from the actor
+// cannot be moderated; and for a DM call the actor's own membership, since
+// voice_mod_kick and friends carry no channel id from the client. The DM
+// refusal keeps the exact shape of "target not in voice" so the actor learns
+// nothing about a call they are not in.
+func voiceModInChannel(ctx context.Context, d VoiceDeps, actorID int64, st *db.VoiceState, move, outranked bool, targetRole *db.Role) (*db.VoiceState, bool, *Result) {
 	ch, err := d.Reader.GetChannel(ctx, st.ChannelID)
 	if err != nil {
 		slog.Error("ws voiceModTarget GetChannel", "err", err, "channel_id", st.ChannelID)
 		return nil, false, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read channel"}}
 	}
 	if ch == nil {
-		return nil, false, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
+		return nil, false, voiceModNotInVoice()
 	}
 	sub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, actorID, ch, false)
 	if subErr != nil {
 		slog.Error("ws voiceModTarget channelSubject", "err", subErr, "channel_id", st.ChannelID)
 		return nil, false, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to verify channel access"}}
 	}
-	switch modErr := authorize(sub); {
+	if move {
+		moverErr := permissions.AuthorizeVoiceMover(sub)
+		if errors.Is(moverErr, permissions.ErrNotDMParticipant) {
+			return nil, false, voiceModNotInVoice()
+		}
+		if moverErr == nil {
+			// MOVE_MEMBERS path: any rank, the owner switch decides the owner.
+			if r := voiceOwnerGuard(ctx, d, true, targetRole); r != nil {
+				return nil, false, r
+			}
+			return st, outranked, nil
+		}
+	}
+	// MUTE_MEMBERS path (mute, deafen, disconnect, and a move by a MUTE_MEMBERS
+	// holder): the strict-outranks rule applies.
+	switch modErr := permissions.AuthorizeVoiceModerator(sub); {
 	case errors.Is(modErr, permissions.ErrNotDMParticipant):
-		return nil, false, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
+		return nil, false, voiceModNotInVoice()
 	case modErr != nil:
-		return nil, false, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: missingMsg}}
+		return nil, false, voiceModMissing(move)
 	}
-	if r := ownerGuard(); r != nil {
-		return nil, false, r
+	if outranked {
+		return nil, false, voiceModRankRefusal()
 	}
-
-	return st, move && outranked, nil
+	return st, false, nil
 }
 
 // requireMoverCanSee refuses a move whose destination the mover cannot view.
@@ -181,9 +215,11 @@ func requireMoverCanSee(ctx context.Context, d VoiceDeps, actorID int64, dest *d
 }
 
 // voiceModMoveTargetLimited applies the extra per-target limit to a move that
-// relies on the missing rank rule (the target ranks at or above the mover), so
-// one member cannot be bounced between rooms in a loop. Spent only once the
-// move is about to happen, so a refused move costs the target nothing.
+// relies on the MOVE_MEMBERS rank bypass (the target ranks at or above the
+// mover), so one member cannot be bounced between rooms in a loop. It is
+// spent after every other pre-flight check passes, so a refused move costs the
+// target nothing; a move that then fails at eviction (the target left, or was
+// reconnecting) still spends the token.
 func voiceModMoveTargetLimited(d VoiceDeps, bypass bool, targetID int64) *Result {
 	if !bypass || d.Limiter == nil {
 		return nil

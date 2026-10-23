@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,9 +12,10 @@ import (
 )
 
 // WP 8.4a (G1): bits in permissions.OwnerGrantOnly (MOVE_MEMBERS) are changed
-// on a role, or handed out by assigning a role that carries them, only by the
-// owner or an Administrator. MANAGE_ROLES alone, even with the bit held, is
-// not enough.
+// only by the owner or an Administrator: on a role (create, edit, delete), by
+// assigning, removing or replacing a role that carries them, and in a channel
+// or category override's allow or deny. MANAGE_ROLES or MANAGE_CHANNELS alone,
+// even with the bit held, is not enough.
 
 const (
 	ownerGrantVoiceRoleID  = int64(8) // carries MOVE_MEMBERS, position 50
@@ -149,7 +151,7 @@ func TestAddUserRole_RoleCarryingOwnerGrantOnlyBit(t *testing.T) {
 		wantErr bool
 	}{
 		{"manage-roles moderator without the bit refused", 3, true},
-		{"manage-roles holder of the bit allowed", 6, false},
+		{"manage-roles holder of the bit refused", 6, true},
 		{"owner allowed", 1, false},
 		{"non-owner administrator allowed", 2, false},
 	}
@@ -181,24 +183,20 @@ func TestRemoveUserRole_RoleCarryingOwnerGrantOnlyBit(t *testing.T) {
 	if _, err := svc.AddUserRole(ctx, 1, 5, ownerGrantVoiceRoleID); err != nil {
 		t.Fatalf("owner setup add: %v", err)
 	}
-	if _, err := svc.RemoveUserRole(ctx, 3, 5, ownerGrantVoiceRoleID); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("moderator remove err = %v, want ErrForbidden", err)
-	}
-	if _, err := svc.RemoveUserRole(ctx, 6, 5, ownerGrantVoiceRoleID); err != nil {
-		t.Fatalf("holder of the bit remove: %v", err)
-	}
-	if _, err := svc.AddUserRole(ctx, 1, 5, ownerGrantVoiceRoleID); err != nil {
-		t.Fatalf("owner re-add: %v", err)
-	}
-	found := false
-	for _, id := range heldIDs(t, database, 5) {
-		found = found || id == ownerGrantVoiceRoleID
-	}
-	if !found {
-		t.Fatal("refused removal revoked the role")
+	holds := func() bool { return slices.Contains(heldIDs(t, database, 5), ownerGrantVoiceRoleID) }
+	for name, actor := range map[string]int64{"moderator": 3, "holder of the bit": 6} {
+		if _, err := svc.RemoveUserRole(ctx, actor, 5, ownerGrantVoiceRoleID); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("%s remove err = %v, want ErrForbidden", name, err)
+		}
+		if !holds() {
+			t.Fatalf("%s: refused removal revoked the role", name)
+		}
 	}
 	if _, err := svc.RemoveUserRole(ctx, 1, 5, ownerGrantVoiceRoleID); err != nil {
 		t.Fatalf("owner remove: %v", err)
+	}
+	if holds() {
+		t.Fatal("owner removal left the role")
 	}
 }
 
@@ -207,7 +205,71 @@ func TestChangeUserRole_RoleCarryingOwnerGrantOnlyBit_NeedsTheBit(t *testing.T) 
 	if _, err := svc.ChangeUserRole(context.Background(), 3, 5, ownerGrantVoiceRoleID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("ChangeUserRole err = %v, want ErrForbidden", err)
 	}
-	if _, err := svc.ChangeUserRole(context.Background(), 6, 5, ownerGrantVoiceRoleID); err != nil {
-		t.Fatalf("holder of the bit ChangeUserRole: %v", err)
+	if _, err := svc.ChangeUserRole(context.Background(), 6, 5, ownerGrantVoiceRoleID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("holder of the bit ChangeUserRole err = %v, want ErrForbidden", err)
+	}
+}
+
+// Replacing a member's roles clears the ones they hold now: a MANAGE_ROLES
+// non-owner cannot strip a carrier role that way either.
+func TestChangeUserRole_CannotStripACarrierRole(t *testing.T) {
+	svc, database := newOwnerGrantModerationFixture(t)
+	ctx := context.Background()
+	if _, err := svc.AddUserRole(ctx, 1, 5, ownerGrantVoiceRoleID); err != nil {
+		t.Fatalf("owner setup add: %v", err)
+	}
+	if _, err := svc.ChangeUserRole(ctx, 3, 5, memberRolesHelperID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("moderator ChangeUserRole err = %v, want ErrForbidden", err)
+	}
+	if !slices.Contains(heldIDs(t, database, 5), ownerGrantVoiceRoleID) {
+		t.Fatal("refused change cleared the carrier role")
+	}
+	if _, err := svc.ChangeUserRole(ctx, 1, 5, memberRolesHelperID); err != nil {
+		t.Fatalf("owner ChangeUserRole: %v", err)
+	}
+	if slices.Contains(heldIDs(t, database, 5), ownerGrantVoiceRoleID) {
+		t.Fatal("owner change left the carrier role")
+	}
+}
+
+func TestDeleteRole_CarryingOwnerGrantOnlyBit(t *testing.T) {
+	for name, tc := range map[string]struct {
+		actor   int64
+		wantErr bool
+	}{
+		"manage-roles admin refused":      {2, true},
+		"owner allowed":                   {1, false},
+		"non-owner administrator allowed": {ownerGrantSuperUserID, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, database := newOwnerGrantRoleService(t)
+			_, _, _, err := svc.DeleteRole(context.Background(), tc.actor, ownerGrantVoiceRoleID)
+			stored, _ := database.GetRoleByID(context.Background(), ownerGrantVoiceRoleID)
+			if tc.wantErr {
+				if !errors.Is(err, ErrForbidden) || stored == nil {
+					t.Fatalf("err = %v, role present = %v; want ErrForbidden and the role kept", err, stored != nil)
+				}
+				return
+			}
+			if err != nil || stored != nil {
+				t.Fatalf("err = %v, role present = %v; want deleted", err, stored != nil)
+			}
+		})
+	}
+}
+
+// A default role that carries the bit would hand it to members left with no
+// other role, so deleting any role then needs the owner too.
+func TestDeleteRole_FallbackCarryingOwnerGrantOnlyBit(t *testing.T) {
+	svc, database := newOwnerGrantRoleService(t)
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE roles SET permissions = permissions | ? WHERE is_default = 1`, permissions.MoveMembers); err != nil {
+		t.Fatalf("set default role bit: %v", err)
+	}
+	if _, _, _, err := svc.DeleteRole(context.Background(), 2, ownerGrantPlainRoleID); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("manage-roles admin err = %v, want ErrForbidden", err)
+	}
+	if _, _, _, err := svc.DeleteRole(context.Background(), 1, ownerGrantPlainRoleID); err != nil {
+		t.Fatalf("owner: %v", err)
 	}
 }

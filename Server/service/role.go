@@ -474,6 +474,9 @@ func (s *RoleService) deleteRoleLocked(ctx context.Context, actorID, roleID int6
 		// role id that no longer exists.
 		return nil, nil, nil, fmt.Errorf("%w: no default role is configured", ErrInternal)
 	}
+	if err := requireOwnerGrantOnlyAssign(actor, role.Permissions|fallback.Permissions); err != nil {
+		return nil, nil, nil, err
+	}
 
 	movedUserIDs, err = s.st.DeleteRoleReassigning(ctx, role.ID, fallback.ID)
 	if err != nil {

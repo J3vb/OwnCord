@@ -146,8 +146,9 @@ func TestVoiceMod_Move_OwnerTarget_SwitchUnreadable_FailsClosed(t *testing.T) {
 	c, send := moveActor(t, hub, actor, fromID)
 	hub.HandleMessageForTest(c, voiceModMoveMsg(owner.ID, toID))
 
-	if code := receiveErrorCode(send, waitTimeout); code != "FORBIDDEN" {
-		t.Fatalf("error code = %q, want FORBIDDEN", code)
+	frame, ok := receiveErrorFrame(send, waitTimeout)
+	if !ok || frame.Code != "FORBIDDEN" || frame.Message != "the owner cannot be moved" {
+		t.Fatalf("error frame = %+v (ok=%v), want FORBIDDEN \"the owner cannot be moved\"", frame, ok)
 	}
 	assertStillIn(t, database, owner, fromID)
 }
@@ -185,47 +186,109 @@ func TestVoiceMod_MuteDeafenKick_HigherRankedTargetStillRefusedWithMoveMembers(t
 	}
 }
 
-func TestVoiceMod_Move_MuteMembersAloneCannotMove(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	fromID := seedVoiceChan(t, database, "vc-mv-muteonly-from")
-	toID := seedVoiceChan(t, database, "vc-mv-muteonly-to")
-	// A role with MUTE_MEMBERS and no MOVE_MEMBERS, ranked above the member.
+// insertMuteOnlyRole adds role 9 (position 50) holding MUTE_MEMBERS and no
+// MOVE_MEMBERS.
+func insertMuteOnlyRole(t *testing.T, database *db.DB) {
+	t.Helper()
 	if _, err := database.ExecContext(context.Background(),
 		`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (9, 'muter', ?, 50, 0)`,
 		permissions.ReadMessages|permissions.ConnectVoice|permissions.MuteMembers); err != nil {
 		t.Fatalf("insert role: %v", err)
 	}
+}
+
+// A MUTE_MEMBERS holder keeps moving members they outrank, exactly as before
+// MOVE_MEMBERS existed: no owner switch and no per-target limit on this path.
+func TestVoiceMod_Move_MuteMembersOnly_MovesLowerRank(t *testing.T) {
+	limiter := auth.NewRateLimiter()
+	hub, database := newVoiceModHubWithLimiter(t, limiter)
+	fromID := seedVoiceChan(t, database, "vc-mv-muteonly-from")
+	toID := seedVoiceChan(t, database, "vc-mv-muteonly-to")
+	insertMuteOnlyRole(t, database)
 	actor := seedVoiceUserWithRole(t, database, "mute-only", 9)
 	target := seedVoiceUserWithRole(t, database, "member-mute-only", 4)
+	// The per-target limit is not part of this path.
+	for range 3 {
+		limiter.Allow(auth.Key("voice_mod_move_target", target.ID), 3, 30*time.Second)
+	}
+
+	_, targetSend := joinVoice(t, hub, target, fromID)
+	c, _ := moveActor(t, hub, actor, fromID)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	assertMoved(t, database, targetSend, toID)
+}
+
+func TestVoiceMod_Move_MuteMembersOnly_CannotMoveHigherRank(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-mv-muteonly-hi-from")
+	toID := seedVoiceChan(t, database, "vc-mv-muteonly-hi-to")
+	insertMuteOnlyRole(t, database)
+	actor := seedVoiceUserWithRole(t, database, "mute-only-hi", 9)
+	target := seedVoiceUserWithRole(t, database, "admin-mute-only-hi", 2)
 
 	_, targetSend := joinVoice(t, hub, target, fromID)
 	c, send := moveActor(t, hub, actor, fromID)
 	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 
 	frame, ok := receiveErrorFrame(send, waitTimeout)
-	if !ok || frame.Code != "FORBIDDEN" || frame.Message != "missing MOVE_MEMBERS permission" {
-		t.Fatalf("error frame = %+v (ok=%v), want FORBIDDEN \"missing MOVE_MEMBERS permission\"", frame, ok)
+	if !ok || frame.Code != "FORBIDDEN" || frame.Message != "cannot moderate a user of equal or higher rank" {
+		t.Fatalf("error frame = %+v (ok=%v), want FORBIDDEN rank refusal", frame, ok)
 	}
 	if payload := receiveMsgOfType(targetSend, "voice_moved", 100*time.Millisecond); payload != nil {
 		t.Errorf("target must not receive voice_moved, got %v", payload)
 	}
 	assertStillIn(t, database, target, fromID)
+}
 
-	// The same actor can still mute.
-	hub.HandleMessageForTest(c, voiceModMuteMsg(fromID, target.ID, true))
-	waitFor(t, waitTimeout, func() bool {
-		st, err := database.GetVoiceState(context.Background(), target.ID)
-		return err == nil && st != nil && st.ServerMuted
-	}, "MUTE_MEMBERS holder to still server-mute")
+// MOVE_MEMBERS granted only by a secondary role still moves a higher-ranked
+// target: the mask is the OR of every held role.
+func TestVoiceMod_Move_MoveMembersFromSecondaryRole_MovesHigherRank(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-mv-multi-from")
+	toID := seedVoiceChan(t, database, "vc-mv-multi-to")
+	for _, r := range []struct {
+		id    int
+		name  string
+		perms int64
+		pos   int
+	}{
+		{12, "plain-top", permissions.ReadMessages | permissions.ConnectVoice, 50},
+		{13, "movers", permissions.ReadMessages | permissions.MoveMembers, 45},
+	} {
+		if _, err := database.ExecContext(context.Background(),
+			`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (?, ?, ?, ?, 0)`,
+			r.id, r.name, r.perms, r.pos); err != nil {
+			t.Fatalf("insert role %d: %v", r.id, err)
+		}
+	}
+	actor := seedVoiceUserWithRole(t, database, "multi-role-mover", 12)
+	if _, err := database.GrantUserRole(context.Background(), actor.ID, 13); err != nil {
+		t.Fatalf("GrantUserRole: %v", err)
+	}
+	target := seedVoiceUserWithRole(t, database, "admin-multi-target", 2)
+
+	_, targetSend := joinVoice(t, hub, target, fromID)
+	c, _ := moveActor(t, hub, actor, fromID)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	assertMoved(t, database, targetSend, toID)
 }
 
 // Without MOVE_MEMBERS a target who is not in voice must be indistinguishable
 // from one who is: the same refusal either way.
-func TestVoiceMod_Move_WithoutMoveMembers_CannotProbeVoicePresence(t *testing.T) {
+func TestVoiceMod_Move_WithNeitherBit_CannotProbeVoicePresence(t *testing.T) {
 	hub, database := newVoiceModHub(t)
 	fromID := seedVoiceChan(t, database, "vc-mv-probe-from")
 	toID := seedVoiceChan(t, database, "vc-mv-probe-to")
-	actor := seedVoiceUserWithRole(t, database, "no-move-probe", 4) // Member
+	// Outranks the targets and holds neither bit: the refusal must not depend
+	// on whether the target is in voice.
+	if _, err := database.ExecContext(context.Background(),
+		`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (14, 'plain', ?, 50, 0)`,
+		permissions.ReadMessages|permissions.ConnectVoice); err != nil {
+		t.Fatalf("insert role: %v", err)
+	}
+	actor := seedVoiceUserWithRole(t, database, "no-move-probe", 14)
 	inVoice := seedVoiceUserWithRole(t, database, "probe-in", 4)
 	absent := seedVoiceUserWithRole(t, database, "probe-out", 4)
 
@@ -236,7 +299,7 @@ func TestVoiceMod_Move_WithoutMoveMembers_CannotProbeVoicePresence(t *testing.T)
 	gotIn, ok1 := receiveErrorFrame(send, waitTimeout)
 	hub.HandleMessageForTest(c, voiceModMoveMsg(absent.ID, toID))
 	gotOut, ok2 := receiveErrorFrame(send, waitTimeout)
-	if !ok1 || !ok2 || gotIn != gotOut || gotIn.Code != "FORBIDDEN" {
+	if !ok1 || !ok2 || gotIn != gotOut || gotIn.Code != "FORBIDDEN" || gotIn.Message != "missing MOVE_MEMBERS permission" {
 		t.Fatalf("in-voice = %+v, absent = %+v; want identical FORBIDDEN refusals", gotIn, gotOut)
 	}
 }
@@ -305,4 +368,30 @@ func TestVoiceMod_Move_PerTargetLimit_OnlyForRankBypass(t *testing.T) {
 
 	hub.HandleMessageForTest(c, voiceModMoveMsg(lower.ID, toID))
 	assertMoved(t, database, lowerSend, toID)
+}
+
+// A target of EQUAL rank is also a bypass: the actor does not strictly outrank
+// them, so the per-target limit applies.
+func TestVoiceMod_Move_PerTargetLimit_AppliesToEqualRank(t *testing.T) {
+	limiter := auth.NewRateLimiter()
+	hub, database := newVoiceModHubWithLimiter(t, limiter)
+	fromID := seedVoiceChan(t, database, "vc-mv-eq-from")
+	toID := seedVoiceChan(t, database, "vc-mv-eq-to")
+	actor := seedVoiceUserWithRole(t, database, "mover-equal", 3)
+	peer := seedVoiceUserWithRole(t, database, "moderator-peer", 3)
+	for range 3 {
+		limiter.Allow(auth.Key("voice_mod_move_target", peer.ID), 3, 30*time.Second)
+	}
+
+	_, peerSend := joinVoice(t, hub, peer, fromID)
+	c, send := moveActor(t, hub, actor, fromID)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(peer.ID, toID))
+
+	if code := receiveErrorCode(send, waitTimeout); code != "RATE_LIMITED" {
+		t.Fatalf("equal-rank move code = %q, want RATE_LIMITED", code)
+	}
+	if payload := receiveMsgOfType(peerSend, "voice_moved", 100*time.Millisecond); payload != nil {
+		t.Errorf("rate-limited peer must not receive voice_moved, got %v", payload)
+	}
+	assertStillIn(t, database, peer, fromID)
 }
