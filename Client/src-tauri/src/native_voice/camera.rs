@@ -45,7 +45,9 @@ pub fn active_captures() -> usize {
 /// The error a camera reports when it fails before the first frame.
 pub const FAILED: &str = "camera capture failed to start";
 
-/// The error a camera reports when no first frame arrives in time.
+/// The error a camera reports when no first frame arrives in time. The webview
+/// matches this text (`CAMERA_NO_FRAME` in `nativeRoom.ts`) to keep the live
+/// camera instead of restarting onto a device that gives no picture.
 pub const TIMED_OUT: &str = "camera capture produced no frame in time";
 
 /// The error a camera reports when the requested device is gone.
@@ -60,6 +62,9 @@ const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(15);
 pub struct CameraDevice {
     pub id: String,
     pub name: String,
+    /// Offers only greyscale formats: a face-unlock infrared sensor, which
+    /// usually shares the colour camera's name and gives no usable picture.
+    pub infrared: bool,
     #[serde(skip)]
     pub index: u16,
 }
@@ -74,6 +79,31 @@ fn device_id(device: &gst::Device) -> Option<String> {
         .find_map(|key| props.get::<&str>(*key).ok().map(str::to_string))
         .filter(|id| !id.is_empty())
         .or_else(|| Some(device.display_name().to_string()))
+}
+
+/// Whether every format in `caps` is greyscale raw video (V4L2 `GREY`/`Y16`):
+/// an infrared sensor. Empty or any caps (nothing known) are not.
+fn greyscale_only(caps: &gst::CapsRef) -> bool {
+    !caps.is_empty()
+        && !caps.is_any()
+        && caps.iter().all(|s| {
+            s.name() == "video/x-raw"
+                && match s.get::<&str>("format") {
+                    Ok(f) => f.starts_with("GRAY"),
+                    Err(_) => s.get::<gst::List>("format").is_ok_and(|l| {
+                        !l.is_empty()
+                            && l.iter()
+                                .all(|v| v.get::<&str>().is_ok_and(|f| f.starts_with("GRAY")))
+                    }),
+                }
+        })
+}
+
+/// Colour cameras first, infrared sensors after, each group in monitor
+/// order: `Target::Default` opens the first one listed.
+fn colour_first(mut devices: Vec<CameraDevice>) -> Vec<CameraDevice> {
+    devices.sort_by_key(|d| d.infrared);
+    devices
 }
 
 /// Enumerate the `Video/Source` devices GStreamer knows: V4L2 cameras and
@@ -92,7 +122,7 @@ pub fn list_devices() -> Vec<CameraDevice> {
     }
     let devices = monitor.devices();
     monitor.stop();
-    devices
+    let listed = devices
         .iter()
         .enumerate()
         .filter_map(|(i, d)| {
@@ -108,10 +138,12 @@ pub fn list_devices() -> Vec<CameraDevice> {
             Some(CameraDevice {
                 id,
                 name,
+                infrared: d.caps().is_some_and(|c| greyscale_only(&c)),
                 index: i as u16,
             })
         })
-        .collect()
+        .collect();
+    colour_first(listed)
 }
 
 /// The elements every capture pipeline builds by name, plus the source
@@ -759,11 +791,13 @@ mod tests {
             CameraDevice {
                 id: "/dev/video0".into(),
                 name: "Cam A".into(),
+                infrared: false,
                 index: 0,
             },
             CameraDevice {
                 id: "/dev/video2".into(),
                 name: "Cam B".into(),
+                infrared: false,
                 index: 1,
             },
         ];
@@ -789,6 +823,7 @@ mod tests {
         let listed = vec![CameraDevice {
             id: "/dev/video0".into(),
             name: "Cam A".into(),
+            infrared: false,
             index: 0,
         }];
         for id in ["evil;id", "-evil", "", "/dev/video9"] {
@@ -986,6 +1021,54 @@ mod tests {
         assert_eq!(fit(3840, 2160, 0, 0), None, "source preset: no cap");
         assert_eq!(fit(3840, 2160, 1920, 1080), Some((1920, 1080)));
         assert_eq!(fit(2560, 1600, 1280, 720), Some((1152, 720)));
+    }
+
+    #[test]
+    fn a_greyscale_only_device_is_infrared() {
+        gst::init().unwrap();
+        let caps = |s: &str| s.parse::<gst::Caps>().unwrap();
+        assert!(greyscale_only(&caps(
+            "video/x-raw, format=GRAY8, width=640, height=360"
+        )));
+        assert!(greyscale_only(&caps(
+            "video/x-raw, format={ GRAY8, GRAY16_LE }"
+        )));
+        assert!(!greyscale_only(&caps(
+            "video/x-raw, format=YUY2; image/jpeg"
+        )));
+        assert!(!greyscale_only(&caps(
+            "video/x-raw, format=GRAY8; video/x-raw, format=YUY2"
+        )));
+        assert!(!greyscale_only(&caps("image/jpeg")));
+        assert!(!greyscale_only(&gst::Caps::new_any()));
+        assert!(!greyscale_only(&gst::Caps::new_empty()));
+    }
+
+    #[test]
+    fn infrared_sensors_list_after_colour_cameras() {
+        let cam = |id: &str, infrared: bool| CameraDevice {
+            id: id.into(),
+            name: "Integrated_Webcam_FHD: Integrat".into(),
+            infrared,
+            index: 0,
+        };
+        let ids: Vec<String> = colour_first(vec![
+            cam("/dev/video2", true),
+            cam("/dev/video0", false),
+            cam("/dev/video4", false),
+        ])
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
+        assert_eq!(ids, ["/dev/video0", "/dev/video4", "/dev/video2"]);
+        assert_eq!(
+            Target::Default.resolve_id(&colour_first(vec![
+                cam("/dev/video2", true),
+                cam("/dev/video0", false),
+            ])),
+            Some("/dev/video0".into()),
+            "the default camera is never the infrared sensor"
+        );
     }
 
     /// Device listing must not panic when there is no camera (CI), and any id

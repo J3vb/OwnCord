@@ -262,6 +262,7 @@ function projectVoiceInputs(
     currentChannelId: voice.currentChannelId,
     peerVerifications: voice.peerVerifications ?? NO_VERIFICATIONS,
     localSessionFingerprint: voice.localSessionFingerprint ?? null,
+    localSafetyNumber: voice.localSafetyNumber ?? null,
     voiceMembers,
     selfId: auth.user?.id ?? null,
     connectionStatus: ui.connectionStatus,
@@ -280,6 +281,7 @@ function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
     a.currentChannelId !== b.currentChannelId ||
     a.peerVerifications !== b.peerVerifications ||
     a.localSessionFingerprint !== b.localSessionFingerprint ||
+    a.localSafetyNumber !== b.localSafetyNumber ||
     a.selfId !== b.selfId ||
     a.connectionStatus !== b.connectionStatus ||
     a.timeout !== b.timeout ||
