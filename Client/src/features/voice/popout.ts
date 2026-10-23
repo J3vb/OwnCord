@@ -19,6 +19,7 @@
 import { createElement } from "../../lib/dom";
 import { Disposable } from "../../lib/disposable";
 import { createIcon } from "../../lib/icons";
+import { syncVideoSurface } from "../../lib/videoSurface";
 import { voiceText } from "../../i18n/voice";
 
 /** How often to check whether the window was closed (the system's close
@@ -190,6 +191,7 @@ export function openPopout(opts: PopoutOptions): Popout | null {
         ...(opts.controls === undefined ? [] : [opts.controls]),
         button,
       );
+      syncVideoSurface(opts.video);
       doc.addEventListener("fullscreenchange", () => setFullscreen(doc.fullscreenElement != null), {
         signal,
       });

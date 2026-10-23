@@ -1,5 +1,5 @@
 {
-  "nextId": 493,
+  "nextId": 495,
   "findings": [
     {
       "id": "OC-0001",
@@ -11392,6 +11392,54 @@
       "lens": "perf",
       "finder": "wp-4.2-scale-run",
       "note": "Roadmap Phase 4, WP 4.2."
+    },
+    {
+      "id": "OC-0493",
+      "title": "On Linux, remote camera and screen-share video froze on its first frames: the tile played the native renderer's canvas through canvas.captureStream(), which some WebKitGTK GPU stacks feed into a <video> only twice",
+      "file": "Client/src/features/voice/native/videoRenderer.ts",
+      "line": 138,
+      "severity": "critical",
+      "why": "Linux decodes remote video natively and draws each frame into a WebGL canvas; the tile showed it through canvas.captureStream() into a <video>. On an Intel Iris Xe laptop (Hyprland, AppImage 2.4.0-beta.1, WebKitGTK 2.52.6) the <video> received 2 frames and then held them for the whole call while the canvas kept drawing. A bare canvas -> captureStream -> <video> probe in the same webview showed the same, so the capture path is the fault, not the decoder. VP9 from a browser peer rendered black for the same reason: its first decoded frame arrived after the two captured ones.",
+      "repro": "Linux app (AppImage) on an Intel GPU, Wayland, in voice with a browser peer who turns on the camera or shares a screen: sample the tile's <video> every 5 s; getVideoPlaybackQuality().totalVideoFrames stays 2 and the picture never changes.",
+      "evidence": "Linux full test 2026-10-23 (Hyprland), F-01 and F-06: tile samples dec=2 with an identical pixel hash from 10.9 s to 126 s while the peer sent ~20 fps. Not reproducible with llvmpipe (X11 or Wayland, system or the AppImage's own GStreamer), so it needs a GPU path.",
+      "suggestedFix": "Show the renderer's canvas itself in the tile and keep the track only for identity and lifecycle.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/lib/videoSurface.test.ts, Client/src/features/voice/native/videoRenderer.test.ts (is the picture of its track, which captures no frames), Client/tests/unit/video-grid.test.ts (shows a canvas-drawn stream's canvas with its video, in the window and back), Client/src/features/voice/miniPlayer.test.ts",
+        "revertProof": "fail (without the fix the renderer captures with the default rate and no canvas is shown beside the tile's video)"
+      },
+      "note": "Needs a re-test on the reporting laptop: the GPU path does not exist in CI.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-23",
+      "hunt": "linux-full-test-2026-10-23-hyprland",
+      "lens": "platform-parity",
+      "finder": "linux-full-test",
+      "fixedDate": "2026-10-23"
+    },
+    {
+      "id": "OC-0494",
+      "title": "Closing a stream's pop-out window left its tile black in WebKitGTK: the <video> came back with no player (readyState 0, 0x0)",
+      "file": "Client/src/components/VideoGrid.ts",
+      "line": 1524,
+      "severity": "medium",
+      "why": "The pop-out moves the tile's own <video> into another window. WebKitGTK drops a media element's player with the window it played in, so the <video> moved back after the window closed stayed empty until its stream changed.",
+      "repro": "Linux app: pop out a stream, close the pop-out window: the tile stays black. Locally reproduced on WebKitGTK 2.52.6 with a canvas stream moved to a popup and back (readyState 0, videoWidth 0).",
+      "evidence": "Linux full test 2026-10-23 (Hyprland), F-07: both main tiles black, <video> 0x0, readyState 0 after 7 s.",
+      "suggestedFix": "Give the <video> its stream again when it returns with no data.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/video-grid.test.ts (gives a video that came back empty its stream again; leaves a video that still plays on its return alone)",
+        "revertProof": "fail (without the fix the returned video is never given its stream again)"
+      },
+      "note": "On Linux the canvas surface (OC-0493) already brings the picture back; this covers any <video> the pop-out moves.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-23",
+      "hunt": "linux-full-test-2026-10-23-hyprland",
+      "lens": "platform-parity",
+      "finder": "linux-full-test",
+      "fixedDate": "2026-10-23"
     }
   ]
 }

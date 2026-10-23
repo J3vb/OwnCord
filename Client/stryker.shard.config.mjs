@@ -49,7 +49,8 @@ export const shards = {
     "src/features/voice/popout.ts",
     "src/lib/h264Profile.ts",
     "src/lib/shareFps.ts",
-  ], // ~1094 mutants (estimated) + h264Profile.ts, shareFps.ts (new)
+    "src/lib/videoSurface.ts",
+  ], // ~1094 mutants (estimated) + h264Profile.ts, shareFps.ts, videoSurface.ts (new)
   "livekit-4": [
     "src/lib/livekitDiagnostics.ts",
     "src/lib/livekitE2EE.ts",

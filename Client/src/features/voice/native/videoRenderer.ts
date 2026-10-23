@@ -7,15 +7,20 @@
 // sends the next frame only after that ack, so a slow renderer skips to the
 // latest frame instead of queueing them.
 //
-// The canvas is exposed as a `MediaStreamTrack` (`canvas.captureStream()`),
-// so the video grid and track lifecycle keep consuming
-// MediaStreams exactly as they do for browser LiveKit tracks.
+// The canvas itself is the picture: it is registered as the surface of a
+// `MediaStreamTrack` (`lib/videoSurface.ts`), and every <video> given that
+// track shows the canvas in its place. The track keeps the video grid and
+// track lifecycle consuming MediaStreams exactly as they do for browser
+// LiveKit tracks, but carries no frames (`captureStream(0)`): on some
+// WebKitGTK GPU stacks a captured canvas reaches a <video> as its first frames
+// only, and remote video froze on them.
 //
 // Lifecycle (B7-11): the owner (`NativeRoom`) disposes it when the track is
 // unsubscribed or the room disconnects; dispose closes the socket, stops the
-// captured track and releases the GL context. The frame server also closes
-// every socket when the native session ends.
+// track, takes the canvas down and releases the GL context. The frame server
+// also closes every socket when the native session ends.
 import { createLogger } from "../../../lib/logger";
+import { registerVideoSurface } from "../../../lib/videoSurface";
 import { nativeCounters } from "./counters";
 
 const log = createLogger("nativeVideo");
@@ -111,7 +116,8 @@ function setup(gl: WebGL2RenderingContext): WebGLTexture[] {
 
 export class NativeVideoRenderer {
   readonly mediaStreamTrack: MediaStreamTrack;
-  private readonly canvas = document.createElement("canvas");
+  /** The picture, shown by any <video> given `mediaStreamTrack`. */
+  readonly canvas = document.createElement("canvas");
   private readonly gl: WebGL2RenderingContext | null;
   private socket: WebSocket;
   private disposed = false;
@@ -128,7 +134,9 @@ export class NativeVideoRenderer {
       // The tile stays black; everything else (audio, the call) carries on.
       log.error("native video renderer setup failed", err);
     }
-    this.mediaStreamTrack = this.canvas.captureStream().getVideoTracks()[0]!;
+    this.canvas.className = "video-surface";
+    this.mediaStreamTrack = this.canvas.captureStream(0).getVideoTracks()[0]!;
+    registerVideoSurface(this.mediaStreamTrack, this.canvas);
     this.socket = this.openSocket();
     nativeCounters.videoRenderers++;
   }
@@ -191,6 +199,7 @@ export class NativeVideoRenderer {
     }
     this.socket.close();
     this.mediaStreamTrack.stop();
+    this.canvas.remove();
     this.gl?.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }

@@ -6,6 +6,7 @@ import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/do
 import { loadPref, savePref, createToggle } from "./helpers";
 import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/shareFps";
 import { createLogger } from "@lib/logger";
+import { syncVideoSurface } from "@lib/videoSurface";
 import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../features/voice/autoPlayCameras";
 import {
   switchInputDevice,
@@ -1368,6 +1369,7 @@ function buildVoiceAudioTabInner(
       const stream = new MediaStream([renderer.mediaStreamTrack]);
       registerCamera(stream);
       previewVideo.srcObject = stream;
+      syncVideoSurface(previewVideo);
       previewLabel.hidden = true;
       const stop = (): void => {
         renderer.dispose();
@@ -1394,6 +1396,7 @@ function buildVoiceAudioTabInner(
     activeNativePreview = null;
     registerNativePreview(() => {});
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
   }
 
   // Camera teardown on overlay close is already covered by the factory's

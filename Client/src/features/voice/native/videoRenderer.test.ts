@@ -6,6 +6,7 @@ vi.mock("../../../lib/logger", () => ({
 
 import { NativeVideoRenderer, parseI420 } from "./videoRenderer";
 import { nativeCounters } from "./counters";
+import { syncVideoSurface, videoSurfaceOf } from "../../../lib/videoSurface";
 
 /** One frame-socket message, as `video.rs`'s `pack_i420` writes it. */
 function message(width: number, height: number, fill = 0): ArrayBuffer {
@@ -69,6 +70,8 @@ class FakeSocket {
 
 describe("NativeVideoRenderer", () => {
   const stop = vi.fn();
+  /** The frame rate each `captureStream` call asked for. */
+  const captures: Array<number | undefined> = [];
   const gl = {
     uploads: [] as Array<[number, number]>,
     draws: 0,
@@ -109,8 +112,13 @@ describe("NativeVideoRenderer", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
       context as unknown as RenderingContext,
     );
-    (HTMLCanvasElement.prototype as unknown as { captureStream: () => unknown }).captureStream =
-      () => ({ getVideoTracks: () => [{ stop }] });
+    captures.length = 0;
+    (
+      HTMLCanvasElement.prototype as unknown as { captureStream: (fps?: number) => unknown }
+    ).captureStream = (fps?: number) => {
+      captures.push(fps);
+      return { getVideoTracks: () => [{ stop }] };
+    };
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -160,6 +168,26 @@ describe("NativeVideoRenderer", () => {
     expect(stop).toHaveBeenCalled();
     expect(gl.lost).toBe(1);
     expect(nativeCounters.videoRenderers).toBe(0);
+  });
+
+  it("is the picture of its track, which captures no frames", () => {
+    const renderer = new NativeVideoRenderer("ws://x");
+    // WebKitGTK's canvas capture freezes after the first frames on some GPU
+    // stacks: the tile shows the canvas instead of anything captured.
+    expect(captures).toEqual([0]);
+    const tile = document.createElement("div");
+    const video = document.createElement("video");
+    video.srcObject = {
+      getVideoTracks: () => [renderer.mediaStreamTrack],
+    } as unknown as MediaStream;
+    tile.appendChild(video);
+    expect(videoSurfaceOf(video)).toBe(renderer.canvas);
+    syncVideoSurface(video);
+    expect(video.nextSibling).toBe(renderer.canvas);
+    expect(renderer.canvas.className).toBe("video-surface");
+    // Disposed, the canvas leaves the tile with it.
+    renderer.dispose();
+    expect(renderer.canvas.parentNode).toBeNull();
   });
 
   it("reopens the loopback socket after the host closes it (voice #13)", async () => {
