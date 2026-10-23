@@ -236,6 +236,7 @@ export const shards = {
     "src/lib/presence.ts",
     "src/lib/gameActivity.ts",
     "src/lib/gameActivityBridge.ts",
+    "src/lib/gameActivityPrefs.ts",
     "src/lib/read-state.ts",
     "src/lib/themes.ts",
     "src/lib/toast.ts",

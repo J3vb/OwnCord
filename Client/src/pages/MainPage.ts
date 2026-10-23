@@ -959,7 +959,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       void import("@lib/gameActivity").then(
         ({ startGameActivity }) => {
           if (tornDown) return;
-          gameActivity = startGameActivity({ ws, detect: () => desktop.gameDetector.detect() });
+          gameActivity = startGameActivity({
+            ws,
+            detect: (prefs) => desktop.gameDetector.detect(prefs),
+          });
         },
         (err: unknown) => log.warn("Game activity failed to load", { error: String(err) }),
       );

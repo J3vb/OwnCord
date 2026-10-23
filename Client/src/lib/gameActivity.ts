@@ -14,6 +14,12 @@
  *    sent again. Each connection is an epoch: a detection that began under an
  *    earlier one is dropped when it answers, never sent on the new socket (the
  *    per-attempt ownership `ws.ts` keeps with its generation counter).
+ *  - The user's own choices (WP 8.3d, `gameActivityPrefs`) apply here: manual
+ *    programs and hidden names go to the detector with every scan, a rename is
+ *    applied to the name before it is sent, and any change scans at once, so
+ *    hiding the game being shown sends the next game or `null` in one frame
+ *    (never the hidden name again). Every detected name is added to the device's history for the
+ *    Settings list.
  *  - The server limits a set to one per 10 s. A refused frame is forgotten, so
  *    the next poll sends whatever is current, even `null`. The dispatcher
  *    routes the refusal here through `gameActivityBridge` and shows no toast.
@@ -32,7 +38,15 @@ import {
 } from "./gameActivityBridge";
 import { serverSupportsGameActivity } from "./serverCapabilities";
 import type { WsClient } from "./ws";
-import type { DetectedGame } from "../platform/contracts/gameDetector";
+import {
+  GAME_PREFS_KEY,
+  displayName,
+  isHidden,
+  loadGamePrefs,
+  recordSeen,
+  toDetectPrefs,
+} from "./gameActivityPrefs";
+import type { DetectedGame, DetectPrefs } from "../platform/contracts/gameDetector";
 
 const log = createLogger("gameActivity");
 
@@ -50,10 +64,11 @@ const RETRYABLE_REFUSALS: ReadonlySet<string> = new Set([
 /** The longest name the server accepts, in characters. */
 const MAX_NAME_CHARS = 128;
 
-/** The name as the server will show it: trimmed, and cut at its limit by whole
- *  characters so a long title is shortened rather than refused. */
-function shownName(game: DetectedGame): string {
-  return Array.from(game.name.trim()).slice(0, MAX_NAME_CHARS).join("");
+/** The name as the server will show it: the user's rename if any, trimmed, and
+ *  cut at its limit by whole characters so a long title is shortened rather
+ *  than refused. */
+function shownName(name: string): string {
+  return Array.from(name.trim()).slice(0, MAX_NAME_CHARS).join("");
 }
 
 /** Frames kept for matching a refusal to its send. */
@@ -63,7 +78,7 @@ export interface GameActivityOptions {
   readonly ws: Pick<WsClient, "send" | "on" | "onStateChange" | "getState">;
   /** The running game; never rejects (a failed scan reads as null), but a
    *  rejection is handled here too. */
-  readonly detect: () => Promise<DetectedGame | null>;
+  readonly detect: (prefs: DetectPrefs) => Promise<DetectedGame | null>;
   /** Poll interval. Defaults to `GAME_ACTIVITY_POLL_MS`. */
   readonly intervalMs?: number;
   /** Whether the setting is on. Defaults to the device preference. */
@@ -92,6 +107,10 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
    *  = unknown (a refused frame), where the next poll sends the current answer
    *  even when it is "no game". */
   let lastSent: string | null | undefined = null;
+  /** The user's game choices changed while a scan was running: that scan
+   *  answered under the old ones, so its answer is dropped and one more scan
+   *  runs at once. */
+  let rescan = false;
   /** Counts connections (and drops of one). A detection that started under an
    *  older count belongs to a connection that is gone. */
   let epoch = 0;
@@ -110,9 +129,9 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
     if (sentIds.length > MAX_TRACKED_FRAMES) sentIds.shift();
   }
 
-  function transmit(game: DetectedGame | null): void {
+  /** Send the shown game (`name` is already renamed and trimmed) or the clear. */
+  function transmit(game: DetectedGame | null, name: string | null): void {
     try {
-      const name = game === null ? null : shownName(game);
       const id = ws.send({
         type: "activity_update",
         payload: {
@@ -138,7 +157,7 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
     try {
       let game: DetectedGame | null = null;
       try {
-        game = await detect();
+        game = await detect(toDetectPrefs(loadGamePrefs()));
       } catch {
         // A failed scan is "no game".
         game = null;
@@ -146,13 +165,28 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
       // The connection, the setting or the server may have changed while the
       // scan ran; a stale answer is dropped, the next poll asks again.
       if (mine !== epoch || !live() || !active()) return;
-      const name = game === null ? null : shownName(game);
+      // The choices changed under this scan: it knows nothing of them, and the
+      // scan queued below decides what is sent (one frame, not two).
+      if (rescan) return;
+      // The choices are read again: a game hidden while the scan ran (or one
+      // an older host does not skip) is not shown.
+      const prefs = loadGamePrefs();
+      if (game !== null && isHidden(prefs, game.name)) game = null;
       // A name that trims to nothing is no game.
+      const name = game === null ? null : shownName(displayName(prefs, game.name));
       if (name === "") game = null;
+      // A program added by hand is already in the list as itself.
+      if (game !== null && game.source !== "manual") recordSeen(game.name);
       if ((game === null ? null : name) === lastSent) return;
-      transmit(game);
+      transmit(game, game === null ? null : name);
     } finally {
       if (scanning === mine) scanning = null;
+      if (rescan && mine === epoch) {
+        rescan = false;
+        void poll();
+      } else if (mine !== epoch) {
+        rescan = false;
+      }
     }
   }
 
@@ -162,10 +196,20 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
     if (!enabled()) {
       // A clear is free on the server when nothing is shown, so no need to
       // know whether a game was sent.
-      if (live() && supported() && lastSent !== null) transmit(null);
+      if (live() && supported() && lastSent !== null) transmit(null, null);
       return;
     }
     void poll();
+  }
+
+  /** The user's game choices changed. A scan now answers under the new ones:
+   *  a game just hidden is replaced by the next one the host finds, or cleared,
+   *  in one frame, and the hidden name is never sent again. A scan already
+   *  running is dropped for a fresh one. */
+  function onGamePrefsChanged(): void {
+    if (destroyed || !enabled()) return;
+    if (scanning === epoch) rescan = true;
+    else void poll();
   }
 
   const unsubState = ws.onStateChange((state) => {
@@ -190,9 +234,9 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
   window.addEventListener(
     "owncord:pref-change",
     (e) => {
-      if ((e as CustomEvent<{ key?: string }>).detail?.key === GAME_ACTIVITY_PREF_KEY) {
-        onSettingChanged();
-      }
+      const key = (e as CustomEvent<{ key?: string }>).detail?.key;
+      if (key === GAME_ACTIVITY_PREF_KEY) onSettingChanged();
+      else if (key === GAME_PREFS_KEY) onGamePrefsChanged();
     },
     { signal: disposable.signal },
   );

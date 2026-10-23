@@ -2,6 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startGameActivity, GAME_ACTIVITY_POLL_MS, type GameActivityLoop } from "@lib/gameActivity";
 import { handleActivityRefusal, GAME_ACTIVITY_PREF_KEY } from "@lib/gameActivityBridge";
 import { savePref } from "@lib/preferences";
+import {
+  GAME_PREFS_KEY,
+  GAME_SEEN_KEY,
+  EMPTY_GAME_PREFS,
+  loadGamePrefs,
+  loadSeen,
+  saveGamePrefs,
+  withHidden,
+  withManual,
+  withRename,
+} from "@lib/gameActivityPrefs";
 import type { ConnectionState } from "@lib/ws";
 import type { DetectedGame } from "../../src/platform/contracts/gameDetector";
 
@@ -84,6 +95,7 @@ describe("game activity loop", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    localStorage.clear();
     current = null;
     supported = true;
     enabled = true;
@@ -346,5 +358,193 @@ describe("game activity loop", () => {
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 2);
     expect(detect).not.toHaveBeenCalled();
     expect(handleActivityRefusal("RATE_LIMITED", fake.sent[0]!.id)).toBe(false);
+  });
+});
+
+describe("game activity loop: the user's own game choices (WP 8.3d)", () => {
+  let loop: GameActivityLoop | null = null;
+  let current: DetectedGame | null;
+  const detect = vi.fn(async (_prefs: unknown) => current);
+
+  function start(fake: ReturnType<typeof fakeWs>) {
+    loop = startGameActivity({
+      ws: fake.ws,
+      detect,
+      enabled: () => true,
+      supported: () => true,
+    });
+    return loop;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    localStorage.clear();
+    current = null;
+    detect.mockClear();
+    detect.mockImplementation(async () => current);
+  });
+
+  afterEach(() => {
+    loop?.destroy();
+    loop = null;
+    vi.useRealTimers();
+  });
+
+  it("hands the manual programs and hidden names to the detector", async () => {
+    let prefs = withManual(EMPTY_GAME_PREFS, "C:\\Games\\mine.exe", "Mine")!;
+    prefs = withHidden(prefs, "Hades", true);
+    saveGamePrefs(prefs);
+    start(fakeWs());
+    await flush();
+    expect(detect).toHaveBeenCalledWith({
+      manual: [{ path: "C:\\Games\\mine.exe", name: "Mine" }],
+      hidden: ["Hades"],
+    });
+  });
+
+  it("sends the renamed name, and the detected name again once the rename is reset", async () => {
+    saveGamePrefs(withRename(EMPTY_GAME_PREFS, "Factorio", "  My Factory  "));
+    const fake = fakeWs();
+    current = factorio;
+    start(fake);
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name)).toEqual(["My Factory"]);
+
+    // A rename made while the game runs is picked up at once, not on the next beat.
+    saveGamePrefs(withRename(loadGamePrefs(), "Factorio", "Factory"));
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name)).toEqual(["My Factory", "Factory"]);
+
+    saveGamePrefs(withRename(loadGamePrefs(), "Factorio", "   "));
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name)).toEqual(["My Factory", "Factory", "Factorio"]);
+  });
+
+  it("remembers every detected name, newest first, once", async () => {
+    const fake = fakeWs();
+    current = factorio;
+    start(fake);
+    await flush();
+    current = valorant;
+    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
+    current = factorio;
+    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
+    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
+    expect(loadSeen()).toEqual(["Factorio", "VALORANT"]);
+  });
+
+  it("hiding the game being shown clears it at once when no other game runs, and never sends it again", async () => {
+    const fake = fakeWs();
+    current = factorio;
+    start(fake);
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio"]);
+
+    // The host skips a hidden game, as the real one does.
+    detect.mockImplementation(async (prefs) =>
+      (prefs as { hidden: string[] }).hidden.includes("Factorio") ? null : current,
+    );
+    saveGamePrefs(withHidden(loadGamePrefs(), "Factorio", true));
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", null]);
+
+    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 3);
+    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", null]);
+
+    // Showing it again brings it back.
+    saveGamePrefs(withHidden(loadGamePrefs(), "factorio", false));
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", null, "Factorio"]);
+  });
+
+  it("hides a game by its detected name even when it is shown under a rename", async () => {
+    saveGamePrefs(withRename(EMPTY_GAME_PREFS, "Factorio", "My Factory"));
+    const fake = fakeWs();
+    current = factorio;
+    start(fake);
+    await flush();
+    saveGamePrefs(withHidden(loadGamePrefs(), "FACTORIO", true));
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["My Factory", null]);
+  });
+
+  it("drops an answer for a game hidden while the scan ran", async () => {
+    const fake = fakeWs();
+    let release: (g: DetectedGame | null) => void = () => {};
+    detect.mockImplementation(() => new Promise((resolve) => (release = resolve)));
+    start(fake);
+    await flush();
+    saveGamePrefs(withHidden(EMPTY_GAME_PREFS, "Factorio", true));
+    release(factorio);
+    await flush();
+    expect(fake.sent).toHaveLength(0);
+  });
+
+  it("falls through to the next game the host finds once one is hidden", async () => {
+    const fake = fakeWs();
+    current = factorio;
+    start(fake);
+    await flush();
+    detect.mockImplementation(async (prefs) =>
+      (prefs as { hidden: string[] }).hidden.includes("Factorio") ? valorant : factorio,
+    );
+    saveGamePrefs(withHidden(loadGamePrefs(), "Factorio", true));
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", "VALORANT"]);
+  });
+
+  it("a hide while a scan is running drops that scan's answer and sends one frame from the next", async () => {
+    const fake = fakeWs();
+    let release: (g: DetectedGame | null) => void = () => {};
+    detect.mockImplementation(() => new Promise((resolve) => (release = resolve)));
+    start(fake);
+    await flush();
+    saveGamePrefs(withHidden(EMPTY_GAME_PREFS, "Factorio", true));
+    detect.mockImplementation(async () => valorant);
+    release(factorio);
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["VALORANT"]);
+  });
+
+  it("does not record a manual game as a detected one", async () => {
+    saveGamePrefs(withManual(EMPTY_GAME_PREFS, "/x/mine", "Mine")!);
+    const fake = fakeWs();
+    current = { name: "Mine", source: "manual", startedAtMs: 5 };
+    start(fake);
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name)).toEqual(["Mine"]);
+    expect(loadSeen()).toEqual([]);
+  });
+
+  it("works with stored choices that are malformed or from an older version", async () => {
+    const blobs: unknown[] = [
+      "garbage",
+      [1, 2, 3],
+      { manual: "x", hidden: 5, renames: [] },
+      { manual: [null, 4, { path: 1, name: 2 }, { path: "/a", name: "" }], hidden: [null, {}, ""] },
+      { version: 1, hide: ["Factorio"], names: { Factorio: "Nope" } },
+    ];
+    for (const blob of blobs) {
+      localStorage.clear();
+      savePref(GAME_PREFS_KEY, blob);
+      savePref(GAME_SEEN_KEY, blob);
+      const fake = fakeWs();
+      current = factorio;
+      detect.mockClear();
+      const l = start(fake);
+      await flush();
+      expect(
+        fake.sent.map((s) => s.activity?.name),
+        JSON.stringify(blob),
+      ).toEqual(["Factorio"]);
+      expect(detect).toHaveBeenCalledWith({ manual: [], hidden: [] });
+      l.destroy();
+    }
+    // Text that is not JSON at all.
+    localStorage.setItem("owncord:settings:" + GAME_PREFS_KEY, "{not json");
+    const fake = fakeWs();
+    start(fake);
+    await flush();
+    expect(fake.sent.map((s) => s.activity?.name)).toEqual(["Factorio"]);
   });
 });

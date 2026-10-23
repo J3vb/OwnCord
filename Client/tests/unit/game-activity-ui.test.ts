@@ -18,6 +18,16 @@ import {
 } from "@lib/serverCapabilities";
 import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
 import { loadPref } from "@lib/preferences";
+import {
+  EMPTY_GAME_PREFS,
+  loadGamePrefs,
+  recordSeen,
+  saveGamePrefs,
+  withHidden,
+  withManual,
+  withRename,
+} from "@lib/gameActivityPrefs";
+import { desktop } from "../../src/platform/desktop";
 import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
 import { dmStore } from "../../src/stores/dm.store";
 
@@ -271,5 +281,346 @@ describe("Settings > Activity", () => {
     const calls = invoke.mock.calls.length;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(invoke.mock.calls.length).toBe(calls);
+  });
+});
+
+describe("Settings > Activity > Your games", () => {
+  let signalOwner: AbortController;
+  const programs = [
+    { name: "factorio", path: "/g/factorio/bin/factorio" },
+    { name: "Hades", path: "C:\\Games\\Hades\\Hades.exe" },
+    { name: "firefox", path: "/usr/lib/firefox/firefox" },
+  ];
+
+  beforeEach(() => {
+    invoke.mockReset();
+    invoke.mockImplementation(async (cmd: string) =>
+      cmd === "list_running_programs" ? programs : null,
+    );
+    localStorage.clear();
+    signalOwner = new AbortController();
+  });
+  afterEach(() => {
+    signalOwner.abort();
+  });
+
+  function mount(): HTMLElement {
+    const host = document.createElement("div");
+    for (const el of buildGameActivityRows(signalOwner.signal)) host.appendChild(el);
+    document.body.appendChild(host);
+    return host;
+  }
+  const q = <T extends HTMLElement>(host: HTMLElement, id: string): T =>
+    host.querySelector<T>(`[data-testid="${id}"]`)!;
+  const all = (host: HTMLElement, id: string): HTMLElement[] =>
+    Array.from(host.querySelectorAll<HTMLElement>(`[data-testid="${id}"]`));
+  const names = (host: HTMLElement): string[] =>
+    all(host, "game-row-name").map((n) => n.textContent ?? "");
+  const tick = async (): Promise<void> => {
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+  };
+  function type(input: HTMLInputElement, text: string): void {
+    input.value = text;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function key(input: HTMLElement, k: string): KeyboardEvent {
+    const e = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
+    input.dispatchEvent(e);
+    return e;
+  }
+
+  it("says so when no game has been seen or added", () => {
+    const host = mount();
+    expect(q(host, "game-activity-games-empty").textContent).toContain("No games yet");
+    host.remove();
+  });
+
+  it("lists every seen and every added game, each with its shown name", () => {
+    recordSeen("Factorio");
+    recordSeen("Hades");
+    saveGamePrefs(
+      withRename(withManual(EMPTY_GAME_PREFS, "/x/mine", "Mine")!, "Hades", "Hades II"),
+    );
+    const host = mount();
+    // Added games first, then detected ones, newest first.
+    expect(names(host)).toEqual(["Mine", "Hades II", "Factorio"]);
+    expect(all(host, "game-row-note").map((n) => n.textContent)).toEqual([
+      "Added by you",
+      "Detected as Hades",
+    ]);
+    // Only the added one can be removed.
+    expect(all(host, "game-remove")).toHaveLength(1);
+    host.remove();
+  });
+
+  it("renames inline: Enter saves, Esc cancels, blank resets to the detected name", () => {
+    recordSeen("Factorio");
+    const host = mount();
+
+    q(host, "game-rename").click();
+    let input = q<HTMLInputElement>(host, "game-rename-input");
+    expect(input.value).toBe("Factorio");
+    type(input, "My Factory");
+    expect(key(input, "Enter").defaultPrevented).toBe(true);
+    expect(loadGamePrefs().renames).toEqual({ Factorio: "My Factory" });
+    expect(names(host)).toEqual(["My Factory"]);
+
+    q(host, "game-rename").click();
+    input = q<HTMLInputElement>(host, "game-rename-input");
+    expect(input.value).toBe("My Factory");
+    type(input, "Discarded");
+    // Esc ends the edit and does not reach the settings overlay's own handler.
+    const outer = vi.fn();
+    document.addEventListener("keydown", outer, { once: true });
+    key(input, "Escape");
+    document.removeEventListener("keydown", outer);
+    expect(outer).not.toHaveBeenCalled();
+    expect(loadGamePrefs().renames).toEqual({ Factorio: "My Factory" });
+    expect(host.querySelector('[data-testid="game-rename-input"]')).toBeNull();
+
+    q(host, "game-rename").click();
+    input = q<HTMLInputElement>(host, "game-rename-input");
+    type(input, "   ");
+    key(input, "Enter");
+    expect(loadGamePrefs().renames).toEqual({});
+    expect(names(host)).toEqual(["Factorio"]);
+    host.remove();
+  });
+
+  it("does not redraw under an open rename when a game is detected meanwhile", () => {
+    recordSeen("Factorio");
+    const host = mount();
+    q(host, "game-rename").click();
+    const input = q<HTMLInputElement>(host, "game-rename-input");
+    type(input, "Half typed");
+    recordSeen("Hades");
+    q(host, "game-activity-games").dispatchEvent(new Event("pointerenter"));
+    expect(q<HTMLInputElement>(host, "game-rename-input")).toBe(input);
+    expect(input.value).toBe("Half typed");
+    key(input, "Escape");
+    q(host, "game-activity-games").dispatchEvent(new Event("pointerenter"));
+    expect(names(host)).toEqual(["Hades", "Factorio"]);
+    host.remove();
+  });
+
+  it("the Show to others switch hides and shows a game", () => {
+    recordSeen("Factorio");
+    const host = mount();
+    const toggle = host.querySelector<HTMLElement>('[data-testid="game-row"] [role="switch"]')!;
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.getAttribute("aria-label")).toBe("Show Factorio to others");
+    toggle.click();
+    expect(loadGamePrefs().hidden).toEqual(["Factorio"]);
+    toggle.click();
+    expect(loadGamePrefs().hidden).toEqual([]);
+    host.remove();
+  });
+
+  it("a hidden game stays listed, switched off, so it can be shown again", () => {
+    saveGamePrefs(withHidden(EMPTY_GAME_PREFS, "Old Game", true));
+    const host = mount();
+    expect(names(host)).toEqual(["Old Game"]);
+    const toggle = host.querySelector<HTMLElement>('[data-testid="game-row"] [role="switch"]')!;
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    host.remove();
+  });
+
+  it("the picker lists running programs, filters them, and adds the one picked under its edited name", async () => {
+    const host = mount();
+    expect(q(host, "game-picker").hidden).toBe(true);
+    q(host, "game-add").click();
+    await tick();
+    expect(invoke).toHaveBeenCalledWith("list_running_programs");
+    expect(all(host, "game-picker-item").map((i) => i.firstElementChild?.textContent)).toEqual([
+      "factorio",
+      "Hades",
+      "firefox",
+    ]);
+
+    const filter = q<HTMLInputElement>(host, "game-picker-filter");
+    type(filter, "FA");
+    expect(all(host, "game-picker-item").map((i) => i.firstElementChild?.textContent)).toEqual([
+      "factorio",
+    ]);
+    type(filter, "zzz");
+    expect(all(host, "game-picker-item")).toHaveLength(0);
+    expect(q(host, "game-picker-list").textContent).toContain("No program matches");
+    type(filter, "hades");
+    all(host, "game-picker-item")[0]!.click();
+
+    const name = q<HTMLInputElement>(host, "game-picker-name");
+    expect(name.value).toBe("Hades");
+    type(name, "  Hades (mine) ");
+    q(host, "game-picker-save").click();
+
+    expect(loadGamePrefs().manual).toEqual([
+      { path: "C:\\Games\\Hades\\Hades.exe", name: "Hades (mine)" },
+    ]);
+    expect(q(host, "game-picker").hidden).toBe(true);
+    expect(names(host)).toEqual(["Hades (mine)"]);
+    // Nothing in the list reached the server or storage: only the choice did.
+    expect(JSON.stringify(Object.entries(localStorage))).not.toContain("firefox");
+    host.remove();
+  });
+
+  it("Enter in the name step saves, a blank name is refused, and Esc closes the picker", async () => {
+    const host = mount();
+    q(host, "game-add").click();
+    await tick();
+    all(host, "game-picker-item")[0]!.click();
+    const name = q<HTMLInputElement>(host, "game-picker-name");
+    type(name, "   ");
+    key(name, "Enter");
+    expect(q(host, "game-picker-error").hidden).toBe(false);
+    expect(loadGamePrefs().manual).toEqual([]);
+    type(name, "Factory");
+    key(name, "Enter");
+    expect(loadGamePrefs().manual).toEqual([{ path: "/g/factorio/bin/factorio", name: "Factory" }]);
+
+    q(host, "game-add").click();
+    await tick();
+    // The program just added is no longer offered.
+    expect(all(host, "game-picker-item").map((i) => i.firstElementChild?.textContent)).toEqual([
+      "Hades",
+      "firefox",
+    ]);
+    key(q(host, "game-picker-filter"), "Escape");
+    expect(q(host, "game-picker").hidden).toBe(true);
+    host.remove();
+  });
+
+  it("shows a plain empty state when no programs are found, or the host fails", async () => {
+    for (const impl of [
+      async () => [],
+      async (): Promise<never> => {
+        throw new Error("no host");
+      },
+    ]) {
+      invoke.mockImplementation(impl);
+      const host = mount();
+      q(host, "game-add").click();
+      await tick();
+      expect(q(host, "game-picker-empty").textContent).toContain("No programs found");
+      expect(all(host, "game-picker-item")).toHaveLength(0);
+      q(host, "game-picker-cancel").click();
+      expect(q(host, "game-picker").hidden).toBe(true);
+      host.remove();
+    }
+  });
+
+  it("a list that answers after the picker was closed does not reopen it", async () => {
+    let answer: (v: unknown) => void = () => {};
+    invoke.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+    const host = mount();
+    q(host, "game-add").click();
+    q(host, "game-add").click();
+    answer(programs);
+    await tick();
+    expect(q(host, "game-picker").hidden).toBe(true);
+    expect(all(host, "game-picker-item")).toHaveLength(0);
+    host.remove();
+  });
+
+  it("removes an added game with its rename and hide", () => {
+    saveGamePrefs(
+      withHidden(
+        withRename(withManual(EMPTY_GAME_PREFS, "/x/mine", "Mine")!, "Mine", "M"),
+        "Mine",
+        true,
+      ),
+    );
+    const host = mount();
+    expect(names(host)).toEqual(["M"]);
+    q(host, "game-remove").click();
+    expect(loadGamePrefs()).toEqual(EMPTY_GAME_PREFS);
+    expect(names(host)).toEqual([]);
+    expect(q(host, "game-activity-games-empty")).not.toBeNull();
+    host.remove();
+  });
+
+  it("moving focus through the list does not redraw it, and a pointer visit redraws only on a change", () => {
+    recordSeen("Factorio");
+    recordSeen("Hades");
+    const host = mount();
+    const list = q(host, "game-activity-games");
+    const buttons = list.querySelectorAll<HTMLElement>("button, [role='switch']");
+    const first = list.querySelector<HTMLElement>('[data-testid="game-row"]')!;
+    for (const el of buttons) {
+      el.focus();
+      el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+      expect(document.activeElement).toBe(el);
+      expect(el.isConnected).toBe(true);
+    }
+    // A visit with nothing new keeps the very same elements (and focus).
+    const toggle = list.querySelector<HTMLElement>("[role='switch']")!;
+    toggle.focus();
+    list.dispatchEvent(new Event("pointerenter"));
+    expect(document.activeElement).toBe(toggle);
+    expect(list.querySelector('[data-testid="game-row"]')).toBe(first);
+    // Something new was detected: now it redraws.
+    recordSeen("Celeste");
+    list.dispatchEvent(new Event("pointerenter"));
+    expect(names(host)).toEqual(["Celeste", "Hades", "Factorio"]);
+    host.remove();
+  });
+
+  it("puts focus back on the rename button after Enter or Esc in a rename", () => {
+    recordSeen("Factorio");
+    const host = mount();
+    q(host, "game-rename").click();
+    type(q<HTMLInputElement>(host, "game-rename-input"), "Factory");
+    key(q(host, "game-rename-input"), "Enter");
+    expect(document.activeElement).toBe(q(host, "game-rename"));
+    q(host, "game-rename").click();
+    key(q(host, "game-rename-input"), "Escape");
+    expect(document.activeElement).toBe(q(host, "game-rename"));
+    host.remove();
+  });
+
+  it("puts focus on Add a game after the picker closes, saves, or an entry is removed", async () => {
+    const host = mount();
+    const add = q(host, "game-add");
+    add.click();
+    await tick();
+    q(host, "game-picker-cancel").click();
+    expect(document.activeElement).toBe(add);
+
+    add.click();
+    await tick();
+    all(host, "game-picker-item")[0]!.click();
+    q(host, "game-picker-save").click();
+    expect(document.activeElement).toBe(add);
+
+    q(host, "game-rename").focus();
+    q(host, "game-remove").click();
+    expect(document.activeElement).toBe(add);
+    host.remove();
+  });
+
+  it("a removed added game that had run leaves no row behind", () => {
+    // A manual game is never recorded as detected, so removing it removes its row.
+    saveGamePrefs(withHidden(withManual(EMPTY_GAME_PREFS, "/x/mine", "Mine")!, "Mine", true));
+    const host = mount();
+    q(host, "game-remove").click();
+    expect(loadGamePrefs()).toEqual(EMPTY_GAME_PREFS);
+    expect(names(host)).toEqual([]);
+    host.remove();
+  });
+
+  it("is not drawn on the web build", () => {
+    const original = desktop.gameDetector.available;
+    Object.defineProperty(desktop.gameDetector, "available", { value: false, configurable: true });
+    try {
+      const host = mount();
+      expect(host.children).toHaveLength(0);
+      expect(host.querySelector('[data-testid="game-add"]')).toBeNull();
+      expect(host.querySelector('[data-testid="game-activity-games"]')).toBeNull();
+      host.remove();
+    } finally {
+      Object.defineProperty(desktop.gameDetector, "available", {
+        value: original,
+        configurable: true,
+      });
+    }
   });
 });
