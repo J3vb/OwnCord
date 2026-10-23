@@ -48,6 +48,7 @@ export const shards = {
     "src/features/voice/autoPlayCameras.ts",
     "src/lib/h264Profile.ts",
     "src/lib/shareFps.ts",
+    "src/lib/videoSurface.ts",
   ],
   "livekit-4": [
     "src/lib/livekitE2EE.ts",

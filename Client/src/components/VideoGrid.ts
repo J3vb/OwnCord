@@ -22,6 +22,7 @@ import {
 } from "@lib/livekitSession";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { loadPref, savePref } from "@lib/preferences";
+import { syncVideoSurface, videoSurfaceOf } from "@lib/videoSurface";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
 import { viewersLabel } from "./video-grid/viewers";
@@ -378,6 +379,14 @@ const ENDED_COVER_MS = 3000;
  *  meanwhile (a real stop shows its cover as soon as the owner's state says so). */
 const REPUBLISH_HOLD_MS = 2500;
 const REPUBLISH_HOLD_POLL_MS = 250;
+
+/** The picture's size, from the canvas when one draws it (Linux). */
+function sizeOf(video: HTMLVideoElement): { width: number; height: number } {
+  const surface = videoSurfaceOf(video);
+  return surface !== null
+    ? { width: surface.width, height: surface.height }
+    : { width: video.videoWidth, height: video.videoHeight };
+}
 
 /** A remote stream playing in its tile (watched, not in a pop-out window). */
 function isPlayingHere(e: CellEntry | undefined): boolean {
@@ -1330,10 +1339,7 @@ export function createVideoGrid(): VideoGridComponent {
     infoModule ??= await import("./video-grid/stream-info");
     const { chipText, renderStats, streamInfo } = infoModule;
     if (statsTile !== tileId || cells.get(tileId) !== entry) return;
-    const info =
-      sample !== null
-        ? streamInfo(sample, entry.prevSample)
-        : { width: entry.video.videoWidth, height: entry.video.videoHeight };
+    const info = sample !== null ? streamInfo(sample, entry.prevSample) : sizeOf(entry.video);
     if (sample !== null) entry.prevSample = sample;
     const chip = entry.el.querySelector<HTMLButtonElement>(".video-quality");
     const text = chipText(info);
@@ -1510,6 +1516,14 @@ export function createVideoGrid(): VideoGridComponent {
     pip?.setAttribute("aria-pressed", "false");
     if (hadFocus) pip?.focus();
     entry.el.insertBefore(entry.video, entry.el.firstChild);
+    // WebKitGTK drops a <video>'s player with the window it played in: back
+    // here it would stay empty without its stream given again.
+    if (entry.video.readyState === HTMLMediaElement.HAVE_NOTHING) {
+      const stream = entry.video.srcObject;
+      entry.video.srcObject = null;
+      entry.video.srcObject = stream;
+    }
+    syncVideoSurface(entry.video);
     if (entry.volumeOverlay !== undefined) entry.el.appendChild(entry.volumeOverlay);
     entry.video.play()?.catch(() => {});
     syncViews();
@@ -1560,6 +1574,7 @@ export function createVideoGrid(): VideoGridComponent {
           entry.mini = undefined;
           if (hadFocus) callbacks.focusFallback?.();
           entry.el.insertBefore(entry.video, entry.el.firstChild);
+          syncVideoSurface(entry.video);
           entry.video.play()?.catch(() => {});
           syncViews();
         },
@@ -1752,6 +1767,7 @@ export function createVideoGrid(): VideoGridComponent {
       existing.trackCleanup?.();
       existing.trackCleanup = undefined;
       existing.video.srcObject = null;
+      syncVideoSurface(existing.video);
       setTrackMuted(existing, false);
       if (!existing.el.classList.contains("video-cell--stopped")) {
         existing.lost = existing.mini === undefined && existing.config?.isSelf !== true;
@@ -1791,6 +1807,7 @@ export function createVideoGrid(): VideoGridComponent {
         oldTracks.every((t, i) => t.id === newTracks[i]?.id);
       if (!tracksMatch) {
         video.srcObject = stream;
+        syncVideoSurface(video);
         video.play()?.catch((err) => {
           log.debug("Video autoplay rejected (track replacement)", { userId, err });
         });
@@ -1887,6 +1904,7 @@ export function createVideoGrid(): VideoGridComponent {
     appendChildren(nav, back, pip, fullscreen);
 
     appendChildren(cell, video, select, label, nav);
+    syncVideoSurface(video);
     if (viewers !== null) cell.appendChild(viewers);
     // A click anywhere on a filmstrip thumb (not on one of its controls)
     // swaps it into focus, as the tile button does.
@@ -2150,6 +2168,7 @@ export function createVideoGrid(): VideoGridComponent {
     entry.trackCleanup?.();
     entry.trackCleanup = undefined;
     entry.video.srcObject = null;
+    syncVideoSurface(entry.video);
     // Its controls are dead now: nothing under the cover can be reached.
     for (const child of entry.el.children) child.toggleAttribute("inert", true);
     const cover = createElement(
@@ -2192,6 +2211,7 @@ export function createVideoGrid(): VideoGridComponent {
     lastInfo.delete(userId);
 
     entry.video.srcObject = null;
+    syncVideoSurface(entry.video);
 
     entry.el.remove();
     cells.delete(userId);
@@ -2404,6 +2424,7 @@ export function createVideoGrid(): VideoGridComponent {
       }
       entry.listeners.destroy();
       entry.video.srcObject = null;
+      syncVideoSurface(entry.video);
     }
     cells.clear();
     focusedTileId = null;
