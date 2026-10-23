@@ -12,6 +12,7 @@ import {
   setLocalDeafened,
   setListenOnly,
   setShareDenied,
+  bumpLocalCameraRev,
 } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/audioPipeline";
@@ -398,6 +399,7 @@ export class MediaControl {
           // publishes: restart on the new device instead.
           log.info("In-place camera switch unavailable, restarting", err);
           if (!(await restartCameraOn())) return;
+          bumpLocalCameraRev();
           log.info("Camera device switched");
           return;
         }
@@ -406,8 +408,11 @@ export class MediaControl {
         if (now !== before && state.manualCameraTrack === track && state.onCameraEnded) {
           now.addEventListener("ended", state.onCameraEnded, { once: true });
         }
-      } else if (!(await restartCameraOn())) {
-        return;
+        // The self tile holds the stopped capture: have it drawn again.
+        if (now !== before && state.manualCameraTrack === track) bumpLocalCameraRev();
+      } else {
+        if (!(await restartCameraOn())) return;
+        bumpLocalCameraRev();
       }
       log.info("Camera device switched");
     } catch (err) {

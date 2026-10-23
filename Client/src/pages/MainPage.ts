@@ -2041,7 +2041,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // and it clears the grid it was just given (OC-0207).
           let sig =
             `${String(channelId)}|` +
-            (state.localCamera ? "c" : "") +
+            (state.localCamera ? `c${String(state.localCameraRev ?? 0)}` : "") +
             (state.localScreenshare ? `s${String(state.localShareRev ?? 0)}` : "");
           if (channelId !== null) {
             const users = state.voiceUsers.get(channelId);

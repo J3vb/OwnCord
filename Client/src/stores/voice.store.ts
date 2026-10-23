@@ -114,6 +114,9 @@ export interface VoiceState {
   readonly pttGated?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
+  /** Bumped when the live camera's capture is replaced without the camera
+   *  going off (a device switch): the self tile redraws on the new track. */
+  readonly localCameraRev?: number;
   /** Bumped when the live share changes source or quality without stopping:
    *  its preview and the stream card redraw. */
   readonly localShareRev?: number;
@@ -645,6 +648,14 @@ export function setLocalScreenshare(enabled: boolean): void {
   voiceStore.setState((prev) => ({
     ...prev,
     localScreenshare: enabled,
+  }));
+}
+
+/** The live camera's capture was replaced (a device switch). */
+export function bumpLocalCameraRev(): void {
+  voiceStore.setState((prev) => ({
+    ...prev,
+    localCameraRev: (prev.localCameraRev ?? 0) + 1,
   }));
 }
 

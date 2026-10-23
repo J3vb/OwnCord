@@ -62,6 +62,7 @@ and only when it changes something a contributor or fork holder must do
 **Voice and video**
 
 - On a self-hosted LiveKit that sends webhooks, a call member whose connection had briefly dropped could be removed without the call picking a new key holder, which could leave one participant deaf and muted until the next join or leave. The call now picks a new key holder right away.
+- Switching your camera during a call left your own video tile frozen or black until you turned the camera off and on. The tile now follows the new camera straight away.
 
 ## v2.4.0-beta.1
 
