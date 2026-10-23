@@ -291,9 +291,26 @@ describe("E2EEManager", () => {
         expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
 
         mgr.holdAnnouncesForQueuedJoin(3);
-        mgr.releaseHeldAnnounces();
+        mgr.releaseHeldAnnounces(2);
         await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
         expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("hands what was held for the live channel to its exchange when released", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.clearState();
+        mgr.holdAnnouncesForQueuedJoin(5);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        mgr.releaseHeldAnnounces(5);
+        await mgr.setupKeyExchange(true, 5);
+
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+        expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
       } finally {
         mgr.clearState();
       }

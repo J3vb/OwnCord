@@ -645,9 +645,15 @@ export class E2EEManager {
     this._peers.holdAnnouncesFor(channelId);
   }
 
-  /** Stop holding announces: no queued join is going to take them. */
-  releaseHeldAnnounces(): void {
+  /** Stop holding announces: no queued join is going to take them. What was
+   *  held for `channelId` belongs to the live session on that channel, so it
+   *  goes through the normal announce path instead of being dropped. */
+  releaseHeldAnnounces(channelId: number): void {
+    const held = this._peers.takeStagedAnnounces(channelId);
     this._peers.discardStagedAnnounces();
+    for (const announce of held) {
+      void this.applyAnnounce(announce.userId, announce.publicKeyBase64, announce.signatureBase64);
+    }
   }
 
   /** The announce body, past the queued-join hold: the live path and the

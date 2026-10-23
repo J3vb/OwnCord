@@ -407,8 +407,9 @@ export class JoinOrchestration {
         logIceConnectionInfo(localRoom);
         // This attempt survived with its queued request identical to it (a
         // duplicate frame), so no queued session will take what was held:
-        // stop holding or the live session would never see another announce.
-        this._e2ee.releaseHeldAnnounces();
+        // stop holding or the live session would never see another announce,
+        // and hand what was held for this channel to the live session.
+        this._e2ee.releaseHeldAnnounces(channelId);
         // Atomic transition to "connected" — all connection fields set together.
         this.setState({
           type: "connected",

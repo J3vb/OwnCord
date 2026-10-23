@@ -229,14 +229,16 @@ describe("connectAndSetup", () => {
     expect(host.leaveVoice).toHaveBeenCalledWith(true, false);
     expect(joinRetryInMs()).toBeGreaterThan(0);
 
+    const releaseHeldAnnounces = vi.fn();
     host.getE2EE = () => ({
       clearState: vi.fn(),
       holdAnnouncesForQueuedJoin: vi.fn(),
-      releaseHeldAnnounces: vi.fn(),
+      releaseHeldAnnounces,
       setupKeyExchange: vi.fn(async () => true),
     });
     await expect(join.connectAndSetup("t", "/livekit", 7)).resolves.toBe(true);
     expect(joinRetryInMs()).toBe(0);
+    expect(releaseHeldAnnounces).toHaveBeenCalledWith(7);
   });
 
   it("does not count a second failure when the give-up finds a switch already queued", async () => {
