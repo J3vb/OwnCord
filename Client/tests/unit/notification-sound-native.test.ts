@@ -18,6 +18,7 @@ vi.mock("../../src/platform/desktop", () => ({
 }));
 vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => host.linux,
+  isWindowsDesktop: () => false,
 }));
 
 import {

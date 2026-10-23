@@ -19,7 +19,7 @@
 import { supportsH265, supportsVP9 } from "livekit-client";
 import { loadPref } from "../../lib/preferences";
 import { pickCommonCodec, type PeerDecodeLists } from "./decodeCaps";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop, isWindowsDesktop } from "./native/platform";
 import { nativeVideoCodecs } from "./native/videoCodecs";
 
 export type VideoCodecPref = "vp8" | "h264" | "vp9" | "h265" | "auto";
@@ -87,6 +87,26 @@ function isKnownNonIntel(renderer: string | null): renderer is string {
  *  hardware one is probed per publish, not here. */
 export function h265Offered(): boolean {
   return !isLinuxDesktop() && canPublishH265() && isKnownNonIntel(gpuRenderer());
+}
+
+/** Whether an H.264 publish here offers only H.264 Main and High
+ *  (`lib/h264Profile`): the Windows app, whose WebView2 encodes those on the
+ *  graphics card and Constrained Baseline only in software, on a hardware GPU
+ *  known not to be Intel's (see `isKnownNonIntel`). */
+export function h264GpuProfiles(): boolean {
+  const renderer = gpuRenderer();
+  return isWindowsDesktop() && isKnownNonIntel(renderer) && !isSoftwareRenderer(renderer);
+}
+
+/** WebView2 without GPU acceleration, or over RDP or in a VM, renders in
+ *  software: its encoders are software too, so the probe has to decide. */
+function isSoftwareRenderer(renderer: string): boolean {
+  return /swiftshader|basic render driver|llvmpipe|software/i.test(renderer);
+}
+
+/** Whether a publish of `codec` should offer only H.264 Main and High. */
+export function h264GpuPublish(codec: PublishCodec): boolean {
+  return codec === "h264" && h264GpuProfiles();
 }
 
 /** Auto's rule: H.264 only where the browser says it encodes it in hardware
@@ -165,7 +185,8 @@ export async function resolveCodecChoice(
  *  can take 1080p30 and refuse 1080p120. A saved VP8 is probed the same way at
  *  120 fps; a saved VP9 never is. A saved H.264 and a saved H.265 are probed at
  *  any rate: H.265 for H.265, H.264 for H.264, where an answer that is not
- *  hardware gives VP8 and no answer keeps the user's H.264. */
+ *  hardware gives VP8 and no answer keeps the user's H.264. A saved H.264 in
+ *  the Windows app on a non-Intel GPU is not probed (`h264GpuProfiles`). */
 async function resolvePreferredCodec(
   track: MediaStreamTrack,
   fps: number,
@@ -181,6 +202,11 @@ async function resolvePreferredCodec(
     if (pref === "vp9") return (await vp9Available()) ? "vp9" : "vp8";
     return "vp8";
   }
+  // WebView2's encodingInfo answers powerEfficient:false for every WebRTC
+  // config, so it cannot see the GPU encoder that Main/High reach. The live
+  // check in `codecSwitch` still turns a share that lands on OpenH264 into VP8;
+  // a camera has no such check and stays on the software encoder then.
+  if (pref === "h264" && h264GpuProfiles()) return "h264";
   if (pref === "h264")
     return h264PublishCodec(await probeEncoder(track, fps, bitrate, "video/H264"));
   if (pref === "h265") return (await h265Publishable(track, fps, bitrate)) ? pref : "vp8";

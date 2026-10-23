@@ -8,7 +8,10 @@ const republish = vi.hoisted(() => vi.fn());
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
 const nativeVp9 = vi.hoisted(() => ({ value: false }));
 
-vi.mock("./native/platform", () => ({ isLinuxDesktop: () => isLinuxDesktop() }));
+vi.mock("./native/platform", () => ({
+  isLinuxDesktop: () => isLinuxDesktop(),
+  isWindowsDesktop: () => false,
+}));
 vi.mock("./native/videoCodecs", () => ({
   nativeVideoCodecs: () => Promise.resolve({ h264: false, vp9: nativeVp9.value, decode: [] }),
 }));
