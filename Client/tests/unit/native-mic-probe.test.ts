@@ -21,8 +21,8 @@ vi.mock("../../src/platform/desktop", () => ({
 
 import { PROBE_WINDOW_MS, probeNativeMicrophone } from "../../src/features/voice/native/micProbe";
 
-const level = (test: number): void =>
-  handler?.({ test, event: { type: "inputLevel", rms: 0.1, open: true } });
+const level = (test: number, rms = 0.1): void =>
+  handler?.({ test, event: { type: "inputLevel", rms, open: true } });
 
 describe("native microphone probe", () => {
   let ac: AbortController;
@@ -60,6 +60,23 @@ describe("native microphone probe", () => {
     await vi.advanceTimersByTimeAsync(PROBE_WINDOW_MS);
     await expect(probe).resolves.toBe("silent");
     expect(stopMicTest).toHaveBeenCalledWith(4);
+  });
+
+  it("reports silence when a muted source reports only zero levels", async () => {
+    const probe = probeNativeMicrophone("", ac.signal);
+    await vi.advanceTimersByTimeAsync(1);
+    for (let i = 0; i < 10; i++) level(4, 0);
+    await vi.advanceTimersByTimeAsync(PROBE_WINDOW_MS);
+    await expect(probe).resolves.toBe("silent");
+  });
+
+  it("passes a quiet but live microphone", async () => {
+    const probe = probeNativeMicrophone("", ac.signal);
+    await vi.advanceTimersByTimeAsync(1);
+    level(4, 0);
+    level(4, 0.0004);
+    await vi.advanceTimersByTimeAsync(PROBE_WINDOW_MS);
+    await expect(probe).resolves.toBe("levels");
   });
 
   it("counts a level that arrived before the start resolved", async () => {
