@@ -14,45 +14,43 @@ import base from "./stryker.config.mjs";
 // safety-moderation 5615, lib-rest ~7034) was spread over its files by
 // non-comment source lines, and files are balanced across the parts by that
 // weight. Re-measure from a nightly report and rebalance if a part nears 90 min.
+//
+// Rebalanced by time, not count, after run 39926630674 (2026-10-23): three
+// shards hit 90 min and the growth since 3E-4 left others near 2-3k mutants.
+// Shards differ in speed (livekit ~16 mutants/min, transport-auth ~28), so each
+// file's cost is its instrumented mutant count over its old shard's measured
+// rate, and files moved until every shard sits at about 70 min plus the dry run.
+// The matrix names come from main's workflow, so only file lists move here.
 export const shards = {
   "livekit-1": [
     "src/features/voice/e2eeIdentity.ts",
     "src/features/voice/e2eeEpoch.ts",
     "src/features/voice/native/platform.ts",
     "src/features/voice/native/nativeRoom.ts",
-    "src/features/voice/native/videoRenderer.ts",
     "src/features/voice/releaseRoom.ts",
-    "src/features/voice/mediaLostNotice.ts",
     "src/features/voice/native/videoCodecs.ts",
-  ], // ~1093 mutants (estimated) + videoCodecs.ts (new)
+  ],
   "livekit-2": [
     "src/lib/livekitSession.ts",
     "src/features/voice/remoteTracks.ts",
-    "src/features/voice/peerDecode.ts",
     "src/features/voice/native/nativeCameraTrack.ts",
     "src/features/voice/native/screenAudioTrack.ts",
     "src/features/voice/native/screenPickerSlot.ts",
     "src/features/voice/native/screenTrack.ts",
-    "src/features/voice/miniPlayer.ts",
-  ], // ~1091 mutants (estimated) + screenAudioTrack.ts (new)
+  ],
   "livekit-3": [
     "src/lib/livekitUrlResolver.ts",
     "src/lib/screenShare.ts",
     "src/lib/appAudioTrack.ts",
-    "src/lib/appAudioShare.ts",
     "src/features/voice/joinRequest.ts",
     "src/lib/watchRequest.ts",
     "src/features/voice/cameraMenu.ts",
     "src/features/voice/autoPlayCameras.ts",
-    "src/features/voice/e2eePeerState.ts",
-    "src/features/voice/native/screenPicker.ts",
-    "src/features/voice/popout.ts",
     "src/lib/h264Profile.ts",
     "src/lib/shareFps.ts",
     "src/lib/videoSurface.ts",
-  ], // ~1094 mutants (estimated) + h264Profile.ts, shareFps.ts, videoSurface.ts (new)
+  ],
   "livekit-4": [
-    "src/lib/livekitDiagnostics.ts",
     "src/lib/livekitE2EE.ts",
     "src/features/voice/sessionState.ts",
     "src/features/voice/joinBackoff.ts",
@@ -60,9 +58,9 @@ export const shards = {
     "src/features/voice/dragMove.ts",
     "src/features/voice/videoCodec.ts",
     "src/features/voice/e2eeOffer.ts",
-  ], // ~1091 mutants (estimated)
+    "src/features/voice/peerDecode.ts",
+  ],
   "livekit-5": [
-    "src/lib/roomEventHandlers.ts",
     "src/features/voice/roomLifecycle.ts",
     "src/features/voice/screenshareChange.ts",
     "src/features/voice/shareGate.ts",
@@ -71,34 +69,36 @@ export const shards = {
     "src/features/voice/peerVerification.ts",
     "src/features/voice/uiSounds.ts",
     "src/features/voice/moveHint.ts",
-  ], // ~1094 mutants (estimated)
+    "src/features/voice/native/screenPicker.ts",
+  ],
   "livekit-6": [
     "src/lib/livekitReconnect.ts",
     "src/features/voice/joinOrchestration.ts",
     "src/features/voice/cameraSwitch.ts",
-    "src/features/voice/mediaControl.ts",
     "src/features/voice/codecSwitch.ts",
     "src/features/voice/shareSenderStats.ts",
     "src/features/voice/e2eeWorker.ts",
     "src/features/voice/native/counters.ts",
     "src/features/voice/native/devices.ts",
     "src/features/voice/native/micProbe.ts",
-  ], // ~1094 mutants (estimated)
+    "src/features/voice/mediaLostNotice.ts",
+  ],
   "audio-media-1": [
     "src/lib/micProcessor.ts",
     "src/lib/audioElements.ts",
     "src/lib/inputMode.ts",
     "src/lib/noiseFloor.ts",
     "src/lib/media-visibility.ts",
-  ], // ~987 mutants (estimated)
+  ],
   "audio-media-2": [
     "src/lib/audioPipeline.ts",
     "src/lib/virtualRange.ts",
     "src/features/members/memberModel.ts",
     "src/features/members/memberRow.view.ts",
-  ], // ~513 mutants (estimated); 664 lines + virtualRange.ts and memberModel.ts (new); ~1240 lines now
-  "audio-media-3": [
+    "src/features/voice/miniPlayer.ts",
     "src/lib/noise-suppression.ts",
+  ],
+  "audio-media-3": [
     "src/lib/publicAssets.ts",
     "src/lib/deviceManager.ts",
     "src/lib/touchInput.ts",
@@ -106,8 +106,8 @@ export const shards = {
     "src/lib/voiceTokenManager.ts",
     "src/features/channels/voiceRow.view.ts",
     "src/features/channels/voiceRowModel.ts",
-  ], // ~536 mutants (estimated); 692 lines, + voiceRow.view.ts and voiceRowModel.ts (new, ~500 lines). Split from audio-media-2, which hit the 90-minute job limit at 1003/1049 mutants.
-  "transport-auth-1": ["src/lib/api.ts", "src/lib/permissions.ts", "src/lib/hostValidation.ts"], // ~1182 mutants (estimated)
+  ],
+  "transport-auth-1": ["src/lib/api.ts", "src/lib/permissions.ts", "src/lib/hostValidation.ts"],
   "transport-auth-2": [
     "src/lib/ws.ts",
     "src/lib/rate-limiter.ts",
@@ -115,7 +115,7 @@ export const shards = {
     "src/features/connection/dispatchContext.ts",
     "src/features/connection/wsHandlers.ts",
     "src/features/messaging/reactionUsers.ts",
-  ], // ~1196 mutants (estimated)
+  ],
   "transport-auth-3": [
     "src/lib/identity.ts",
     "src/lib/credentials.ts",
@@ -126,7 +126,8 @@ export const shards = {
     "src/lib/logout.ts",
     "src/features/direct-messages/wsHandlers.ts",
     "src/features/voice/wsHandlers.ts",
-  ], // ~1182 mutants (estimated)
+    "src/lib/roomEventHandlers.ts",
+  ],
   "transport-auth-4": [
     "src/lib/dispatcher.ts",
     "src/lib/e2eeCrypto.ts",
@@ -136,7 +137,7 @@ export const shards = {
     "src/lib/session-notice.ts",
     "src/features/channels/wsHandlers.ts",
     "src/features/messaging/wsHandlers.ts",
-  ], // ~1182 mutants (estimated)
+  ],
   "lib-rest-1": [
     "src/components/message-list/avatar.ts",
     "src/lib/channel-mutes.ts",
@@ -146,6 +147,7 @@ export const shards = {
     "src/features/updates/UpdateCheckRow.ts",
     "src/features/channels/channelRow.view.ts",
     "src/features/channels/channelRowModel.ts",
+    "src/lib/nameLimits.ts",
   ], // timed out at 90 min on run 38926807609 while it still held icons.ts; the 5.4d channel row view and builders (about 525 non-comment lines) joined once icons.ts left
   "lib-rest-7": [
     "src/lib/markdown.ts",
@@ -156,14 +158,12 @@ export const shards = {
     "src/lib/hide-muted-channels.ts",
     "src/lib/statusTimer.ts",
     "src/lib/statusChoices.ts",
-    "src/lib/nameLimits.ts",
   ],
   "lib-rest-2": [
     "src/lib/autoIdle.ts",
     "src/lib/channel-navigation.ts",
     "src/lib/formatting.ts",
     "src/lib/last-channel.ts",
-    "src/lib/preferences.ts",
     "src/lib/profiles.ts",
     "src/lib/reconcile.ts",
     "src/lib/select.ts",
@@ -171,7 +171,7 @@ export const shards = {
     "src/features/whats-new/WhatsNewDialog.ts",
     "src/features/whats-new/whatsNewPrompt.ts",
     "src/lib/voiceDeafened.ts",
-  ], // ~1172 mutants (estimated)
+  ],
   "lib-rest-3": [
     "src/lib/call-ring.ts",
     "src/features/direct-messages/callAlerts.ts",
@@ -189,7 +189,7 @@ export const shards = {
     "src/lib/protocolTypes.ts",
     "src/lib/savedDrafts.ts",
     "src/lib/supportBundle.ts",
-  ], // ~1171 mutants (estimated)
+  ],
   "lib-rest-4": [
     "src/lib/appearance.ts",
     "src/lib/color-contrast.ts",
@@ -206,7 +206,8 @@ export const shards = {
     "src/features/updates/updateChecker.ts",
     "src/features/whats-new/changelogSource.ts",
     "src/lib/window-state.ts",
-  ], // ~1173 mutants (estimated)
+    "src/features/forums/NewPostDialog.ts",
+  ],
   "lib-rest-5": [
     "src/lib/avatar.ts",
     "src/lib/dom.ts",
@@ -237,11 +238,13 @@ export const shards = {
     "src/lib/themes.ts",
     "src/lib/toast.ts",
     "src/lib/trustedDomains.ts",
+    "src/features/voice/popout.ts",
+    "src/lib/notificationLevel.ts",
+    "src/lib/preferences.ts",
   ],
   "lib-rest-6": [
     "src/lib/a11y.ts",
     "src/lib/admin-panel.ts",
-    "src/lib/notificationLevel.ts",
     "src/lib/notifications.ts",
     "src/lib/soundPrefs.ts",
     "src/features/unread-badge/unreadBadge.ts",
@@ -253,7 +256,7 @@ export const shards = {
     "src/lib/keybinds.ts",
     "src/lib/keybindLabels.ts",
     "src/lib/globalKeys.ts",
-  ], // ~1171 mutants (estimated)
+  ],
   // icons.ts is a table of Lucide SVG path strings at module level. Every
   // mutant there is static, so each one re-runs the whole suite; on runs
   // 38902717516 and 38926807609 they used most of lib-rest-1's 90 minutes.
@@ -267,10 +270,9 @@ export const shards = {
     "src/features/threads/threadAgo.ts",
     "src/features/forums/view.ts",
     "src/features/forums/ForumView.ts",
-    "src/features/forums/NewPostDialog.ts",
     "src/features/forums/forumSettingsModel.ts",
     "src/features/forums/ForumSettingsSection.ts",
-  ], // the 6.5b category calls and the collapsed-name migration (about 100 lines together) joined the smallest shard; the WP 6.9d forum view and New Post dialog (about 700 lines) joined it too, its icons.ts mutants being static and skipped
+  ], // the 6.5b category calls and the collapsed-name migration (about 100 lines together) joined the smallest shard; the WP 6.9d forum view joined it too, its icons.ts mutants being static and skipped (NewPostDialog.ts moved to lib-rest-4 on 2026-10-23)
   "stores-1": [
     "src/stores/auth.store.ts",
     "src/stores/emoji.store.ts",
@@ -280,12 +282,15 @@ export const shards = {
     "src/features/messaging/attachmentTtl.ts",
     "src/features/messaging/sendQueue-loader.ts",
     "src/features/messaging/sendQueue.ts",
+    "src/features/voice/e2eePeerState.ts",
+    "src/lib/appAudioShare.ts",
   ], // timed out at 90 min on run 38957398478 while it still held voice.store.ts
   "stores-4": [
     "src/stores/voice.store.ts",
     "src/stores/threads.store.ts",
     "src/stores/followedThreads.store.ts",
     "src/stores/threadsLoader.ts",
+    "src/features/voice/mediaControl.ts",
   ],
   "stores-2": [
     "src/stores/blocks.store.ts",
@@ -294,12 +299,12 @@ export const shards = {
     "src/stores/messages.store.ts",
     "src/stores/ui.store.ts",
     "src/features/messaging/messageEdits.ts",
-  ], // ~974 mutants (estimated)
+    "src/features/messaging/markdownMarkers.ts",
+  ],
   "stores-3": [
     "src/stores/dm.store.ts",
     "src/features/messaging/messageModel.ts",
     "src/features/messaging/echoReconcile.ts",
-    "src/features/messaging/markdownMarkers.ts",
     "src/features/messaging/messageLimits.ts",
     "src/features/messaging/inlineEdit.ts",
     "src/features/messaging/inlineEditLoader.ts",
@@ -307,7 +312,7 @@ export const shards = {
     "src/features/messaging/historyWindows.ts",
     "src/features/messaging/reactionState.ts",
     "src/features/messaging/activeComposer.ts",
-  ], // ~974 mutants (estimated)
+  ],
   "safety-moderation-1": [
     "src/features/content-consent/nsfw.ts",
     "src/features/moderation/Queue.ts",
@@ -315,7 +320,8 @@ export const shards = {
     "src/features/reports/safetyPane.ts",
     "src/features/safety/SafetyTab.ts",
     "src/features/settings/status.ts",
-  ], // ~1122 mutants (estimated)
+    "src/features/members/memberPanel.ts",
+  ],
   "safety-moderation-2": [
     "src/features/content-consent/externalDialog.ts",
     "src/features/message-requests/view.ts",
@@ -325,7 +331,8 @@ export const shards = {
     "src/features/safety/Notices.ts",
     "src/features/safety/store.ts",
     "src/features/zoom/zoom.ts",
-  ], // ~1122 mutants (estimated)
+    "src/features/safety/BlockedUsers.ts",
+  ],
   "safety-moderation-3": [
     "src/features/content-consent/external.ts",
     "src/features/message-requests/sync.ts",
@@ -336,7 +343,8 @@ export const shards = {
     "src/features/safety/Appeals.ts",
     "src/features/safety/wsHandlers.ts",
     "src/features/zoom/index.ts",
-  ], // ~1125 mutants (estimated)
+    "src/features/voice/native/videoRenderer.ts",
+  ],
   "safety-moderation-4": [
     "src/features/content-consent/concealed.ts",
     "src/features/message-requests/Inbox.ts",
@@ -346,21 +354,20 @@ export const shards = {
     "src/features/moderation/view.ts",
     "src/features/reports/myReports.ts",
     "src/features/reports/openers.ts",
-  ], // ~1123 mutants (estimated)
+    "src/features/moderation/AppealDetail.ts",
+    "src/lib/livekitDiagnostics.ts",
+  ],
   "safety-moderation-5": [
     "src/features/blocks/blockActions.ts",
-    "src/features/safety/BlockedUsers.ts",
     "src/features/safety/DmPrivacy.ts",
     "src/features/message-requests/api.ts",
     "src/features/message-requests/wsHandlers.ts",
-    "src/features/moderation/AppealDetail.ts",
     "src/features/moderation/BanDialog.ts",
     "src/features/moderation/NicknameDialog.ts",
     "src/features/moderation/Evidence.ts",
     "src/features/moderation/Workflow.ts",
     "src/features/moderation/roleAssignment.ts",
     "src/features/members/memberLayout.ts",
-    "src/features/members/memberPanel.ts",
     "src/features/moderation/api.ts",
     "src/features/messaging/emojiStill.ts",
     "src/features/profiles/openUserProfilePopup.ts",
@@ -368,7 +375,7 @@ export const shards = {
     "src/features/profiles/userNotes.ts",
     "src/features/settings/logoutConfirm.ts",
     "src/features/zoom/zoomKeys.ts",
-  ], // ~1122 mutants (estimated)
+  ],
 };
 
 // The six pre-split names stay accepted until a release carries the new matrix
