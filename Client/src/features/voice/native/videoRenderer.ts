@@ -117,8 +117,13 @@ export class NativeVideoRenderer {
   private disposed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** `url`: the frame socket's `/remote/<sid>` route for one track. */
-  constructor(private readonly url: string) {
+  /** `url`: the frame socket's `/remote/<sid>` route for one track.
+   *  `onClosed`: called instead of reopening when the host closes the socket
+   *  (the settings camera preview, which picks its next source itself). */
+  constructor(
+    private readonly url: string,
+    private readonly onClosed?: () => void,
+  ) {
     this.gl = this.canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false });
     try {
       // i18n-exempt: internal WebGL guard, never rendered
@@ -145,7 +150,10 @@ export class NativeVideoRenderer {
     });
     // A dropped loopback socket (the host restarted) used to freeze the tile
     // for the rest of the call; reopen it (voice #13).
-    socket.addEventListener("close", () => this.scheduleReconnect());
+    socket.addEventListener("close", () => {
+      if (this.onClosed === undefined) this.scheduleReconnect();
+      else if (!this.disposed) this.onClosed();
+    });
     return socket;
   }
 

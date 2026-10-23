@@ -339,7 +339,8 @@ below). `NativeRoom.localParticipant.createCameraTracks` is the stand-in for
 the room exposes it, so Windows and macOS keep the web path. It starts a
 `GstDeviceMonitor`-listed `Video/Source` (V4L2 or PipeWire) through
 `v4l2src`/`pipewiresrc` (or the monitor's own element for the id) →
-`decodebin` → `videoconvert` → an I420 `appsink`, capped at the selected
+a capsfilter pinning the camera mode → `decodebin` → `videoconvert` → an I420
+`appsink`, capped at the selected
 preset's resolution (720p for the default "medium", 1080p when chosen; "source"
 is uncapped, `createCameraTracks`' `resolution` option), and returns a
 `NativeCameraTrack` whose `mediaStreamTrack` is the capture's local preview
@@ -362,7 +363,19 @@ mid-capture ends the stream; the backend sends `cameraCaptureEnded` and the
 track raises `ended`, which the shared code already handles by turning the
 camera off. The settings tab's own camera preview has no room: it starts a
 capture and its own frame socket (`native_voice_start_camera_preview`), read
-back over the same `camera` route. Screen share is phase 3 (below).
+back over the same `camera` route. During a call whose camera runs, the device
+is the call's (V4L2 refuses a second open), so the preview start returns the
+call's frame socket instead; the call's camera start drops a standalone preview
+first. Either way the preview's socket closes and the tab starts the preview
+again, which then shows whichever capture owns the camera.
+
+The camera mode is chosen, not left to the source: `v4l2src` on its own takes
+raw over MJPEG and the largest size, and a laptop webcam's 1080p YUYV mode
+often runs at 5 fps. `pick_mode` (`camera.rs`) reads the device's listed modes
+and takes one that reaches the asked rate, at the smallest size covering the
+cap (raw before MJPEG at equal size); a pinned mode that fails to negotiate
+before its first frame falls back to the source's own choice. Screen share is
+phase 3 (below).
 
 **E2EE covers video exactly as audio.** The camera is published into the same
 room, whose single key provider and `KEY_INDEX` 0 already cover every sender

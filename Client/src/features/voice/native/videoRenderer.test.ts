@@ -178,4 +178,16 @@ describe("NativeVideoRenderer", () => {
     expect(gl.draws).toBe(1);
     renderer.dispose();
   });
+
+  it("hands a host close to its owner instead of reopening, until disposed", async () => {
+    const onClosed = vi.fn();
+    const renderer = new NativeVideoRenderer("ws://x/camera", onClosed);
+    FakeSocket.last.emitClose();
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    renderer.dispose();
+    FakeSocket.last.emitClose();
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
 });
