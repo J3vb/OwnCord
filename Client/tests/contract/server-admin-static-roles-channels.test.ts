@@ -342,7 +342,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
 
     bridge.openRoleModal(null);
     const boxes = [...doc.querySelectorAll<HTMLInputElement>("#modalInner input[data-permbit]")];
-    expect(boxes.length).toBe(21);
+    expect(boxes.length).toBe(22);
     for (const box of boxes) {
       const name = doc.getElementById(box.getAttribute("aria-labelledby")!);
       const desc = doc.getElementById(box.getAttribute("aria-describedby")!);
@@ -379,7 +379,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     expect(items[1]!.textContent).toContain("your role");
     expect(items[0]!.textContent).toContain("above you");
     expect(items[2]!.textContent).toContain("Your rank · 80");
-    expect(items[3]!.textContent).toContain("12 of 21 permissions");
+    expect(items[3]!.textContent).toContain("13 of 22 permissions");
     expect(items[0]!.textContent).toContain("Administrator: every permission");
     const moves = [...items[3]!.querySelectorAll('[data-action="moveRole"]')];
     expect(moves.map((b) => b.getAttribute("aria-label"))).toEqual([
