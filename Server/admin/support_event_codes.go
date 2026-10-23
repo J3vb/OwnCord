@@ -212,8 +212,6 @@ var supportEventCodes = map[string]string{ //nolint:gosec // G101: false positiv
 	"livekit proxy: origin rejected":                                                                               "livekit_proxy_origin_rejected",
 	"livekit webhook: GetVoiceState failed, skipping rogue-participant check":                                      "livekit_webhook_getvoicestate_failed",
 	"livekit webhook: LeaveVoiceChannel exhausted retries":                                                         "livekit_webhook_leavevoicechannel_exhausted_retries",
-	"livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)":                                               "livekit_webhook_leavevoicechannelifmatch_failed_client_gone",
-	"livekit webhook: LeaveVoiceChannelIfMatch failed (stale DB row)":                                              "livekit_webhook_leavevoicechannelifmatch_failed_stale_row",
 	"livekit webhook: failed to reconcile participant permissions":                                                 "livekit_webhook_reconcile_participant_permissions_failed",
 	"livekit webhook: failed to remove rogue participant":                                                          "livekit_webhook_remove_rogue_participant_failed",
 	"livekit webhook: failed to remove stale participant":                                                          "livekit_webhook_remove_stale_participant_failed",
