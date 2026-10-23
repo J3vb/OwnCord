@@ -163,6 +163,7 @@ vi.mock("@stores/voice.store", () => ({
   clearPeerVerification: vi.fn(),
   clearPeerVerifications: vi.fn(),
   setLocalSessionFingerprint: vi.fn(),
+  setLocalSafetyNumber: vi.fn(),
   setEncryptionDegraded: vi.fn(),
 }));
 

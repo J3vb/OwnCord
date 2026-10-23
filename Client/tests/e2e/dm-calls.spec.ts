@@ -552,6 +552,23 @@ test.describe("DM calls — call panel", () => {
     );
   });
 
+  test("[F-11] your own avatar in the call shows your own safety number", async ({ page }) => {
+    await boot(page);
+    await openDm(page);
+    await page.locator("[data-testid='call-btn']").click();
+    await connectVoiceSession(page);
+    await emitWsMessage(page, inRoom(OTHER_USER_ID));
+    await expect(panel(page)).toHaveAttribute("data-state", "connected");
+
+    const own = panel(page).locator(".dcp-avatar[data-user-id='1'] .dcp-verify.own");
+    await expect(own).toBeVisible({ timeout: 10_000 });
+    await expect(own).toHaveAttribute(
+      "title",
+      /^Your safety number: [0-9A-F]{4}( [0-9A-F]{4}){7} · /,
+    );
+    await expect(own).toHaveAttribute("aria-label", /^Your safety number: /);
+  });
+
   test("Leave call from the panel leaves the DM's voice channel", async ({ page }) => {
     await boot(page);
     await openDm(page);

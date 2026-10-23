@@ -19,7 +19,7 @@ use std::time::Duration;
 use cpal::traits::HostTrait as _;
 use serde::Deserialize;
 
-use super::playout::{lock, open_once, output_devices, WatchedHost, SAMPLE_RATE};
+use super::playout::{lock, open_once, output_devices, Role, WatchedHost, SAMPLE_RATE};
 use super::session::{resolve_device, DeviceInfo};
 
 /// The most notes one sound may have.
@@ -167,7 +167,7 @@ impl<S> Sounds<S> {
 
 /// The managed registry of live app-sound streams, and the sound-server host
 /// they open on (built on the first play, off the async workers, and kept so
-/// a play does not pay a fresh connection). Cloning shares both, so the
+/// a play does not pay the host lookup and its round trips). Cloning shares both, so the
 /// removal task of each play holds its own handle.
 pub struct AppSounds<S = cpal::Stream> {
     sounds: Arc<Mutex<Sounds<S>>>,
@@ -230,7 +230,7 @@ fn start(
 ) -> Result<(cpal::Stream, Duration), String> {
     let samples = render(notes, master)?;
     let keep = Duration::from_secs_f64(samples.len() as f64 / f64::from(SAMPLE_RATE)) + DRAIN;
-    let host = host.get_or_init(WatchedHost::new);
+    let host = host.get_or_init(|| WatchedHost::new(Role::Playout));
     // A host the sound server dropped is rebuilt before it is listed.
     host.default_id(cpal::Host::default_output_device);
     let listed = host.with(output_devices);
