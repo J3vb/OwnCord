@@ -1557,6 +1557,8 @@ of another JSON type or a non-integer `started_at` is refused with
   trimming clears the activity, like `null`.
 - `started_at` is clamped to the last 24 hours: never later than now, never
   earlier than now minus 24 h.
+- While the user is timed out a set is refused with `TIMED_OUT`, like a
+  non-empty `custom_status`; a clear still applies.
 - Setting an activity is limited to 1 per 10 seconds per user, on its own
   budget; over it the frame is refused with `RATE_LIMITED` and the client
   retries on its next poll. A clear is never limited.

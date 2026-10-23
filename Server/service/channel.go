@@ -394,3 +394,11 @@ func admitReadState(ctx context.Context, st Store, perms *PermissionService, use
 	}
 	return ch, nil
 }
+
+// CheckActivityAllowed reports whether userID may publish a game activity
+// name (WP 8.3a). The name is text every member sees, so a timeout refuses
+// it with ErrTimedOut, like a custom status line; clearing one stays allowed
+// and needs no check.
+func (s *ChannelService) CheckActivityAllowed(ctx context.Context, userID int64) error {
+	return requireNotTimedOut(ctx, s.perms, userID)
+}

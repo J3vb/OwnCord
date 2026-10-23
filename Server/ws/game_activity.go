@@ -116,7 +116,7 @@ func parseActivityUpdate(userID int64, _ string, raw json.RawMessage) (Command, 
 // a clear is never limited. The swap and the broadcast happen in the applier
 // (Hub.applyActivity), which knows the live status and whether the connection
 // still owns its user's slot.
-func handleActivityUpdateV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
+func handleActivityUpdateV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	u := cmd.(ActivityUpdateCmd)
 
@@ -134,6 +134,13 @@ func handleActivityUpdateV2(_ context.Context, cmd Command, info ClientInfo, dep
 	next := &gameActivity{Name: u.Name, StartedAt: clampActivityStart(u.StartedAt, now)}
 	if sameGame(info.Activity, next) {
 		return Result{}
+	}
+	// The name is the user's own text shown to every member, so a timeout
+	// refuses a set (TIMED_OUT) the way it refuses a custom status line.
+	if d.ChannelSvc != nil {
+		if err := d.ChannelSvc.CheckActivityAllowed(ctx, info.UserID); err != nil {
+			return serviceErrorToResult(err)
+		}
 	}
 	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("activity", info.UserID), activityRateLimit, activityRateWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many requests"}}
