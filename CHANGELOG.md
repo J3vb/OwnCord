@@ -72,6 +72,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Accounts & admin**
 
+- A ban now also ends a connection that was still signing in at the moment of the ban.
 - Account recovery with a recovery kit now spends exactly the kit it checked, so a new kit set up at the same moment stays unspent and usable.
 
 **Chat**
