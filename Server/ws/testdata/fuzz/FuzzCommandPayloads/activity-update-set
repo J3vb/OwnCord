@@ -1,0 +1,3 @@
+go test fuzz v1
+string("activity_update")
+[]byte("{\"activity\":{\"name\":\"Factorio\",\"started_at\":1761206400000}}")
