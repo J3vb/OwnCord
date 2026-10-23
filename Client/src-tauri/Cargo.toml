@@ -177,6 +177,12 @@ windows-sys = { version = "0.60", features = [
     "Wdk_System_SystemServices",
     "Win32_System_SystemInformation",
     "Win32_System_Diagnostics_ToolHelp",
+    # game_activity.rs: the process list (Toolhelp, above), each process's
+    # image path and start time (OpenProcess, QueryFullProcessImageNameW,
+    # GetProcessTimes) and Steam's install folder (HKCU\Software\Valve\Steam).
+    # Features on the existing windows-sys 0.60 dependency, so no new crate.
+    "Win32_System_Threading",
+    "Win32_System_Registry",
 ] }
 # WebView2 profile permission state (windows_media.rs). Both match the
 # versions tauri/wry already build, so no new crate enters the tree.

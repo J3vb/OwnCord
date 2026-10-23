@@ -102,7 +102,7 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 27    |
 | Distinct `invoke` command names called from `Client/src/`  | 91    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 94    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 95    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -138,6 +138,7 @@ clear_call_notification
 delete_credential
 delete_identity_key
 delete_pending_messages
+detect_game
 download_and_install_update
 external_image
 external_preview
@@ -227,9 +228,10 @@ ws_disconnect
 ws_send
 ```
 
-Three registered handlers have no production platform caller:
-`get_cert_fingerprint` (native E2E), `native_voice_build_info` (native diagnostics)
-and `stop_http_proxy`. The three Windows per-app share audio commands
+Four registered handlers have no production platform caller:
+`get_cert_fingerprint` (native E2E), `native_voice_build_info` (native diagnostics),
+`stop_http_proxy` and `detect_game` (WP 8.3b, the Rust game scanner; its caller
+arrives with WP 8.3c). The three Windows per-app share audio commands
 `app_audio_available`, `start_app_audio` and `stop_app_audio` (WP 6.7a, the host
 half: they exist on every target and answer "unavailable" off Windows) have their
 caller since WP 6.7b: `src/platform/desktop/appAudio.ts`, behind the `AppAudio`
