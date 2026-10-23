@@ -1,5 +1,5 @@
 {
-  "nextId": 496,
+  "nextId": 499,
   "findings": [
     {
       "id": "OC-0001",
@@ -11462,6 +11462,76 @@
       "hunt": "linux-full-test-2026-10-23-hyprland",
       "lens": "platform-parity",
       "finder": "linux-full-test",
+      "fixedDate": "2026-10-23"
+    },
+    {
+      "id": "OC-0496",
+      "title": "Holding Ctrl+M or Ctrl+D toggled mute or deafen again on every key auto-repeat",
+      "file": "Client/src/pages/main-page/GlobalKeybinds.ts",
+      "line": 198,
+      "severity": "low",
+      "why": "The hidden Ctrl+M / Ctrl+D aliases ran the toggle on every keydown, auto-repeat included, unlike the Ctrl+Shift keys which act on the press edge only.",
+      "repro": "Hold Ctrl+M for a second: mute flips on and off several times and ends in a random state.",
+      "evidence": "Vault issue #119; GlobalKeybinds.ts alias cases had no e.repeat check.",
+      "suggestedFix": "Ignore auto-repeat on the aliases, as the Ctrl+Shift path does.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/global-keybinds.test.ts (a held Ctrl+M or Ctrl+D alias toggles once)",
+        "revertProof": "fail (without the fix the repeats toggle again)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "keyboard",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-23"
+    },
+    {
+      "id": "OC-0497",
+      "title": "Holding Ctrl+K opened and closed the Quick Switcher over and over",
+      "file": "Client/src/pages/main-page/OverlayManagers.ts",
+      "line": 241,
+      "severity": "low",
+      "why": "Both the open handler and the switcher's own close handler acted on auto-repeat keydowns, so a held Ctrl+K toggled the overlay.",
+      "repro": "Hold Ctrl+K: the Quick Switcher flickers open and closed.",
+      "evidence": "Vault issue #121; OverlayManagers.ts and QuickSwitcher.ts Ctrl+K handlers had no e.repeat check.",
+      "suggestedFix": "Ignore auto-repeat in both Ctrl+K handlers.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/overlay-managers.test.ts, Client/tests/unit/quick-switcher.test.ts (a held Ctrl+K opens once and repeats do not close it)",
+        "revertProof": "fail (without the fix the repeat closes the switcher)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "keyboard",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-23"
+    },
+    {
+      "id": "OC-0498",
+      "title": "Global mute/deafen could be rebound to a fixed or reserved Ctrl+Shift key, so one press fired two actions",
+      "file": "Client/src/lib/keybinds.ts",
+      "line": 245,
+      "severity": "low",
+      "why": "The global capture only rejected the other global key and the rebindable in-app Ctrl+Shift keys, never the fixed app keys (Ctrl+Shift+K, Ctrl+Shift+0) or the keys the OS or a text field keep (redo, word select, dev tools).",
+      "repro": "Settings > Keybinds > Toggle Mute: press K. Then Ctrl+Shift+K opens the Quick Switcher and toggles mute.",
+      "evidence": "Vault issue #120; KeybindsTab.ts passed only inAppCtrlShiftVks to shortcutConflict.",
+      "suggestedFix": "Reject every VK whose Ctrl+Shift combo keybindConflict reports as reserved or fixed (globalShortcutTakenVks).",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/voice-shortcuts.test.ts, Client/tests/unit/keybinds-tab.test.ts (rejects fixed app keys and keys a text field keeps)",
+        "revertProof": "fail (without the fix K, Z and ArrowLeft save)"
+      },
+      "note": "A key saved before this fix stays as it is; rebinding it once picks a free key.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "keyboard",
+      "finder": "nightly-bughunt",
       "fixedDate": "2026-10-23"
     }
   ]
