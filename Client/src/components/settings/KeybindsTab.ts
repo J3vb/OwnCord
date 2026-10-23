@@ -28,7 +28,7 @@ import { buildPttControls } from "./pttControls";
 import { KEYBIND_GROUPS, UNBOUND_BY_DEFAULT_ROWS, type KeybindGroupId } from "@lib/keybindCatalog";
 import {
   REBINDABLE_ACTIONS,
-  inAppCtrlShiftVks,
+  globalShortcutTakenVks,
   loadEffectiveKeybinds,
   saveKeybind,
   type RebindableId,
@@ -263,7 +263,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
             vk,
             action,
             globalKeys,
-            inAppCtrlShiftVks(loadEffectiveKeybinds()),
+            globalShortcutTakenVks(loadEffectiveKeybinds()),
           );
           if (reason !== null) {
             finish();

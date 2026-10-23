@@ -223,6 +223,8 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     // nothing.
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
     e.preventDefault();
+    // The press that opened the switcher may still be held down.
+    if (e.repeat) return;
     if (root !== null && root.parentNode !== null) {
       options.onClose();
     }

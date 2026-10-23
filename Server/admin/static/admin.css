@@ -170,6 +170,7 @@ input,select,textarea{font-family:inherit;border:none}
 .perm-item.locked{cursor:not-allowed}
 .perm-item.locked .perm-name{color:var(--text-muted)}
 @media(max-width:600px){.perm-grid{grid-template-columns:1fr}}
+.role-presets{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
 
 /* ═══ Roles & Channels (AO-5): page header, rank ladder, placement line,
    permission descriptions, typed confirm and the channel access drawer ═══ */

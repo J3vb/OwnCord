@@ -131,3 +131,16 @@ func TestClientPermissionEnumHasMoveMembers(t *testing.T) {
 		t.Error("Client/src/lib/types.ts's Permission enum has no `MOVE_MEMBERS = 0x2000` line")
 	}
 }
+
+// TestClientPermissionEnumHasManageBackups is the client half of the
+// MANAGE_BACKUPS bit (WP 8.4c): the Permission enum must carry the same value
+// the server defines.
+func TestClientPermissionEnumHasManageBackups(t *testing.T) {
+	raw, err := os.ReadFile("../../Client/src/lib/types.ts")
+	if err != nil {
+		t.Fatalf("read Client/src/lib/types.ts: %v", err)
+	}
+	if !regexp.MustCompile(`(?m)^\s*MANAGE_BACKUPS\s*=\s*0x4000\s*,?\s*$`).Match(raw) {
+		t.Error("Client/src/lib/types.ts's Permission enum has no `MANAGE_BACKUPS = 0x4000` line")
+	}
+}

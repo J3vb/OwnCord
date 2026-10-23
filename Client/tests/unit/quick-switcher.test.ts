@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
-import type { QuickSwitcherOptions } from "@components/QuickSwitcher";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { addDmToChannelsStore } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
@@ -232,6 +231,14 @@ describe("QuickSwitcher", () => {
       new KeyboardEvent("keydown", { key: "K", ctrlKey: true, bubbles: true }),
     );
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("an auto-repeating Ctrl+K (the opening press still held) does not close the switcher", () => {
+    switcher.mount(container);
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: true, repeat: true, bubbles: true }),
+    );
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("AltGr+K (ctrlKey+altKey) does not close the switcher", () => {

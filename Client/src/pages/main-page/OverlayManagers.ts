@@ -247,6 +247,11 @@ export function createQuickSwitcherManager(
     // every other app-wide shortcut respects.
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
     if (isSuspended?.() === true) return;
+    // A held Ctrl+K acts once: auto-repeat must not close what the press opened.
+    if (e.repeat) {
+      if (pendingOpen !== null || instance !== null || !dialogOpen()) e.preventDefault();
+      return;
+    }
     if (pendingOpen !== null) {
       // Still loading: the first press already asked to open, so a second one
       // must not open twice nor cancel it.
