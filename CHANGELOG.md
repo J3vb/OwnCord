@@ -62,6 +62,7 @@ and only when it changes something a contributor or fork holder must do
 **Voice and video**
 
 - Switching to another voice channel while the first was still connecting could leave you stuck on "Securing" until the call dropped. The new channel's encryption keys are now kept, so it connects.
+- Switching your camera during a call left your own video tile frozen or black until you turned the camera off and on. The tile now follows the new camera straight away.
 
 ## v2.4.0-beta.1
 
