@@ -120,7 +120,7 @@ jobs:
         with:
           name: mutation-report-${{ matrix.shard }}
           path: Client/reports/mutation/${{ matrix.shard }}/
-          retention-days: 7
+          retention-days: 30
 
   mutation-score:
     # The one full-surface score (docs/archive/plans/b7-8-mutation-baseline-2026-09-20.md):
@@ -161,7 +161,7 @@ jobs:
         with:
           name: mutation-score-summary
           path: Client/reports/mutation/summary.json
-          retention-days: 7
+          retention-days: 30
 
   mutation-permissions:
     name: Nightly permission mutation testing
