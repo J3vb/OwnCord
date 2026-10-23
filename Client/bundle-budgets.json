@@ -42,9 +42,9 @@
       "note": "The Tauri window API (@tauri-apps/api/window), imported on demand by the desktop shell."
     },
     "screenShare": {
-      "budget": 6500,
+      "budget": 7000,
       "lazy": true,
-      "note": "Screen share and the peer codec pick, shared by camera and share. Not in the startup closure."
+      "note": "Screen share, the peer codec pick and the H.264 profile hook, shared by camera and share. Not in the startup closure."
     }
   },
   "forbidEmbeddedWasm": {

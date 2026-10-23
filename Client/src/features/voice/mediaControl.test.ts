@@ -38,6 +38,9 @@ vi.mock("./codecSwitch", () => ({
     stop(): void {}
   },
 }));
+const setH264GpuProfiles = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("./videoCodec", () => ({ h264GpuPublish: (codec: string) => codec === "h264" }));
 vi.mock("../../lib/screenShare", () => ({
   enableCamera: vi.fn(async () => undefined),
   disableCamera: vi.fn(async () => undefined),
@@ -280,6 +283,17 @@ describe("switchVideoDevice", () => {
       once: true,
     });
     expect(enableCamera).not.toHaveBeenCalled();
+  });
+
+  it("carries an H.264 camera's GPU profiles over to the new capture", async () => {
+    setH264GpuProfiles.mockClear();
+    const track = webTrack();
+    const { media } = setup(fakeRoom(), {
+      manualCameraTrack: track,
+      published: "h264",
+    } as never);
+    await media.switchVideoDevice("cam-2");
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(track.mediaStreamTrack, true);
   });
 
   it("native camera on: starts the capture again on the new device", async () => {

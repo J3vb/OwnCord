@@ -47,7 +47,9 @@ export const shards = {
     "src/features/voice/e2eePeerState.ts",
     "src/features/voice/native/screenPicker.ts",
     "src/features/voice/popout.ts",
-  ], // ~1094 mutants (estimated)
+    "src/lib/h264Profile.ts",
+    "src/lib/shareFps.ts",
+  ], // ~1094 mutants (estimated) + h264Profile.ts, shareFps.ts (new)
   "livekit-4": [
     "src/lib/livekitDiagnostics.ts",
     "src/lib/livekitE2EE.ts",
