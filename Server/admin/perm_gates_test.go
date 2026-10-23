@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -22,9 +23,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// moderatorMask is migration 001's seeded Moderator role: MANAGE_MESSAGES,
-// MANAGE_CHANNELS, KICK_MEMBERS, BAN_MEMBERS (bits 16-19) and everything below.
-const moderatorMask = int64(0x000FFFFF)
+// moderatorMask is migration 001's seeded Moderator role after migration 081:
+// MANAGE_MESSAGES, MANAGE_CHANNELS, KICK_MEMBERS, BAN_MEMBERS (bits 16-19) and
+// everything below, except the unused bit 14 that 081 clears (it is
+// MANAGE_BACKUPS now, which the seeded Moderator must not hold).
+const moderatorMask = int64(0x000FBFFF)
 
 // createRoleUser upserts a role and a user holding it, returning the user id
 // and a bearer token for that user's session.
@@ -238,11 +241,8 @@ var expectedOwnerOnlyRoutes = []admin.OwnerOnlyRoute{
 	{Method: http.MethodGet, Pattern: "/tokens"},
 	{Method: http.MethodPost, Pattern: "/tokens"},
 	{Method: http.MethodDelete, Pattern: "/tokens/{id}"},
-	{Method: http.MethodPost, Pattern: "/backup"},
-	{Method: http.MethodGet, Pattern: "/backups"},
 	{Method: http.MethodDelete, Pattern: "/backups/{name}"},
 	{Method: http.MethodPost, Pattern: "/backups/{name}/restore"},
-	{Method: http.MethodPost, Pattern: "/backups/{name}/link"},
 	{Method: http.MethodGet, Pattern: "/archive"},
 	{Method: http.MethodPost, Pattern: "/archive/link"},
 	{Method: http.MethodGet, Pattern: "/updates"},
@@ -250,6 +250,16 @@ var expectedOwnerOnlyRoutes = []admin.OwnerOnlyRoute{
 	{Method: http.MethodGet, Pattern: "/config/settings"},
 	{Method: http.MethodPatch, Pattern: "/config/settings"},
 	{Method: http.MethodPost, Pattern: "/restart"},
+}
+
+// expectedOwnerOrBackupsRoutes is the exact inventory of routes the owner OR a
+// MANAGE_BACKUPS holder reaches (WP 8.4c): create a backup, list backups and
+// issue a backup download link. Every other backup route stays in
+// expectedOwnerOnlyRoutes.
+var expectedOwnerOrBackupsRoutes = []admin.OwnerOnlyRoute{
+	{Method: http.MethodPost, Pattern: "/backup"},
+	{Method: http.MethodGet, Pattern: "/backups"},
+	{Method: http.MethodPost, Pattern: "/backups/{name}/link"},
 }
 
 // sortedOwnerOnlyRoutes returns a copy of routes sorted by (Method, Pattern)
@@ -381,6 +391,63 @@ func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
 	if w := doRequest(t, handler, http.MethodGet, "/me", modToken, nil); w.Code == http.StatusForbidden {
 		t.Fatalf("GET /me (narrow AdminPerimeter role) = 403, want admitted — "+
 			"the owner-only routes' 403s must come from ownerOnlyMiddleware, not a perimeter that rejects everything; body: %s", w.Body.String())
+	}
+}
+
+// TestOwnerOrBackupsRoutes walks the routes NewAdminAPI wires behind the
+// owner-or-MANAGE_BACKUPS gate (admin.OwnerOrBackupsRoutesForTest) and compares
+// them EXACTLY to expectedOwnerOrBackupsRoutes, then checks each one: a narrow
+// perimeter role without the bit gets 403, a holder and the owner never do. No
+// route is in both inventories.
+func TestOwnerOrBackupsRoutes(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{BackupDir: t.TempDir()})
+
+	routes := admin.OwnerOrBackupsRoutesForTest(handler)
+	got, want := sortedOwnerOnlyRoutes(routes), sortedOwnerOnlyRoutes(expectedOwnerOrBackupsRoutes)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("admin.OwnerOrBackupsRoutesForTest() = %+v, want exactly %+v", got, want)
+	}
+	for _, r := range admin.OwnerOnlyRoutesForTest(handler) {
+		if slices.Contains(routes, r) {
+			t.Errorf("%s %s is registered as both owner-only and owner-or-backups", r.Method, r.Pattern)
+		}
+	}
+
+	narrowMask := permissions.ModerateMembers | permissions.KickMembers | permissions.BanMembers | permissions.MuteMembers
+	_, modToken := createRoleUser(t, database, 15, "NarrowMod", narrowMask, 60, "narrowmoduser")
+	_, holderToken := createRoleUser(t, database, 18, "Keeper", permissions.ManageBackups, 50, "keeperuser")
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "realowneruser")
+	for _, route := range routes {
+		path := ownerOnlyRoutePathParam.ReplaceAllString(route.Pattern, "x")
+		t.Run(route.Method+" "+route.Pattern, func(t *testing.T) {
+			if w := doRequest(t, handler, route.Method, path, modToken, nil); w.Code != http.StatusForbidden {
+				t.Errorf("%s %s (perimeter role without the bit) = %d, want 403; body: %s", route.Method, path, w.Code, w.Body.String())
+			}
+			for name, tok := range map[string]string{"holder": holderToken, "owner": ownerToken} {
+				if w := doRequest(t, handler, route.Method, path, tok, nil); w.Code == http.StatusForbidden || w.Code == http.StatusUnauthorized {
+					t.Errorf("%s %s (%s) = %d, want admitted; body: %s", route.Method, path, name, w.Code, w.Body.String())
+				}
+			}
+		})
+	}
+}
+
+// TestManageBackupsAloneAdmitsToThePerimeter: a role holding only MANAGE_BACKUPS
+// reaches the perimeter-level routes (it has to, to reach the backup routes
+// at all) and nothing behind a bit it lacks.
+func TestManageBackupsAloneAdmitsToThePerimeter(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, token := createRoleUser(t, database, 19, "KeeperOnly", permissions.ManageBackups, 50, "keeperonly")
+	if w := doRequest(t, handler, http.MethodGet, "/me", token, nil); w.Code != http.StatusOK {
+		t.Fatalf("GET /me (MANAGE_BACKUPS only) = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	for _, path := range []string{"/settings", "/roles", "/audit-log"} {
+		if w := doRequest(t, handler, http.MethodGet, path, token, nil); w.Code != http.StatusForbidden {
+			t.Errorf("GET %s (MANAGE_BACKUPS only) = %d, want 403", path, w.Code)
+		}
 	}
 }
 

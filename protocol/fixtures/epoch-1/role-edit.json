@@ -25,7 +25,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073733631,
+                "permissions": 1073717247,
                 "position": 80
               },
               {
@@ -35,7 +35,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15720447,
+                "permissions": 15704063,
                 "position": 60
               },
               {
@@ -92,7 +92,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073733631,
+                "permissions": 1073717247,
                 "position": 80
               },
               {
@@ -102,7 +102,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15720447,
+                "permissions": 15704063,
                 "position": 60
               },
               {
@@ -159,7 +159,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073733631,
+                "permissions": 1073717247,
                 "position": 80
               },
               {
@@ -169,7 +169,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15720447,
+                "permissions": 15704063,
                 "position": 60
               },
               {
@@ -282,7 +282,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073733631,
+                "permissions": 1073717247,
                 "position": 80
               },
               {
@@ -292,7 +292,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15720447,
+                "permissions": 15704063,
                 "position": 60
               },
               {

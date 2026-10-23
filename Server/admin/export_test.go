@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"github.com/J3vb/OwnCord/Server/updater"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -186,4 +187,24 @@ func SetDownloadAndVerify(f func(u *updater.Updater, ctx context.Context, latest
 	prev := downloadAndVerify
 	downloadAndVerify = f
 	return func() { downloadAndVerify = prev }
+}
+
+// SetBackupHoldForTest installs h to run inside api's manual backup after the
+// single-flight guard is taken and before the backup starts, the window a
+// concurrent POST /backup must be refused in. nil clears it.
+func SetBackupHoldForTest(api *AdminAPI, h func()) {
+	if h == nil {
+		api.backup.hold.Store(nil)
+		return
+	}
+	api.backup.hold.Store(&h)
+}
+
+// FreeBackupPathForTest exposes freeBackupPath.
+func FreeBackupPathForTest(dir, base string) (string, error) { return freeBackupPath(dir, base) }
+
+// OwnerOrBackupsRoutesForTest returns the routes api registered behind the
+// owner-or-MANAGE_BACKUPS gate.
+func OwnerOrBackupsRoutesForTest(api *AdminAPI) []OwnerOnlyRoute {
+	return slices.Clone(api.backup.routes)
 }

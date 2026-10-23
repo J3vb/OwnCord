@@ -95,7 +95,7 @@ async function apiRes(method,path,body,headers){
    role mask; tabs and row actions hide what it cannot use. Hiding is an
    affordance only — every route re-checks the bit server-side. */
 const PERM={MANAGE_CHANNELS:0x20000,KICK_MEMBERS:0x40000,BAN_MEMBERS:0x80000,
-  MUTE_MEMBERS:0x100000,MOVE_MEMBERS:0x2000,MANAGE_NICKNAMES:0x800000,MANAGE_ROLES:0x1000000,MANAGE_SERVER:0x2000000,
+  MUTE_MEMBERS:0x100000,MOVE_MEMBERS:0x2000,MANAGE_BACKUPS:0x4000,MANAGE_NICKNAMES:0x800000,MANAGE_ROLES:0x1000000,MANAGE_SERVER:0x2000000,
   MANAGE_INVITES:0x4000000,VIEW_AUDIT_LOG:0x8000000,ADMINISTRATOR:0x40000000};
 function can(bit){
   const p=(state.me&&state.me.permissions)||0;
@@ -150,7 +150,7 @@ const ACTION_LABEL={
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
   retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',
   config_override_change:'changed a server configuration override',server_restart_requested:'requested a server restart',
-  backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',backup_restore_applied:'finished restoring a backup',backup_restore_rolled_back:'could not restore a backup (previous data kept)',backup_restore_refused:'could not restore a backup (previous data kept)',backup_archive:'downloaded the full archive',backup_download:'downloaded a backup',
+  backup_create:'took a backup',backup_delete:'deleted a backup',backup_restore:'restored a backup',backup_restore_applied:'finished restoring a backup',backup_restore_rolled_back:'could not restore a backup (previous data kept)',backup_restore_refused:'could not restore a backup (previous data kept)',backup_archive:'downloaded the full archive',backup_link:'asked for a backup download link',backup_download:'downloaded a backup',
   log_level_debug_on:'turned on debug logging for 15 minutes',log_level_reverted:'turned debug logging off',
   update_apply:'applied a server update',update_applied:'finished a server update',update_failed:'failed to apply a server update',
   api_token_create:'created an API token',api_token_revoke:'revoked an API token',support_bundle_create:'created a support bundle',
@@ -460,7 +460,7 @@ const NAV=[
   {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged,allowed:()=>can(PERM.MANAGE_SERVER)},
   {id:'config',label:'Server configuration',icon:I.settings,unsaved:()=>state.configChanged,allowed:isOwner},
   {id:'retention',label:'Message retention',icon:I.trash,allowed:()=>can(PERM.MANAGE_SERVER)},
-  {id:'backups',label:'Backups & restore',icon:I.backup,allowed:isOwner},
+  {id:'backups',get label(){return isOwner()?'Backups & restore':'Backups'},icon:I.backup,allowed:()=>isOwner()||can(PERM.MANAGE_BACKUPS)},
   {id:'updates',label:'Updates',icon:I.updates,badge:()=>state.badges.update,badgeText:'update available',allowed:isOwner},
   {id:'whatsnew',label:'What\'s new',icon:I.star},
   {section:'Operations'},

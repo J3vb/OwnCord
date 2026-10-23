@@ -160,12 +160,36 @@ func (o *ownerOnlyRegistry) ownerOnly(r chi.Router, method, pattern string, h ht
 	r.Method(method, pattern, ownerOnlyMiddleware(h))
 }
 
+// backupGate is the state the owner-or-MANAGE_BACKUPS routes (WP 8.4c) keep
+// for one NewAdminAPI call: the routes it registered, so a test walks the exact
+// set instead of a second hand-kept list, and the single-flight guard for
+// POST /backup. Per API, not a package global, so two APIs built in one
+// process (every test does) never share a running backup.
+type backupGate struct {
+	routes []OwnerOnlyRoute
+	// running is set while a manual backup is being taken; a second POST
+	// /backup while it is set is refused with 409 BACKUP_RUNNING.
+	running atomic.Bool
+	// hold is a test seam: when set it runs inside the guard, before the
+	// backup starts. Only export_test.go assigns it.
+	hold atomic.Pointer[func()]
+}
+
+// ownerOrBackups registers h on r behind ownerOrBackupsMiddleware, the gate for
+// create, list and link of a backup, and records the (method, pattern) pair
+// for the route-walk test.
+func (g *backupGate) ownerOrBackups(r chi.Router, method, pattern string, h http.Handler) {
+	g.routes = append(g.routes, OwnerOnlyRoute{Method: method, Pattern: pattern})
+	r.Method(method, pattern, ownerOrBackupsMiddleware(h))
+}
+
 // AdminAPI is the built /admin/api router together with what NewAdminAPI
 // learned while building it. It embeds the router so it stays a chi.Routes
 // when mounted: the gendocs route walk descends into it.
 type AdminAPI struct {
 	chi.Router
-	owner ownerOnlyRegistry
+	owner  ownerOnlyRegistry
+	backup backupGate
 }
 
 // ownerOnlyRoutes is a copy of the routes this API registered through
@@ -279,6 +303,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	// no other API shares its list.
 	api := &AdminAPI{Router: r}
 	owner := &api.owner
+	backups := &api.backup
 
 	// The four services this mux routes to, named once. NewAdminAPI used to
 	// take them as four positional parameters; each B3-8 family that moved an
@@ -420,7 +445,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Put("/afk-channel", handlePutAFKChannel(channels, hub))
 			r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
 		})
-		mountBackupRoutes(r, owner, database, setupOpts, paths)
+		mountBackupRoutes(r, owner, backups, database, setupOpts, paths)
 		owner.ownerOnly(r, http.MethodGet, "/updates", handleCheckUpdate(u))
 		owner.ownerOnly(r, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version, setupOpts.Background, setupOpts.Shutdown))
 	})
@@ -428,15 +453,17 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	return api
 }
 
-// mountBackupRoutes registers the Owner-only backup, restore and archive
-// routes. They share the one backupPaths this API resolved from its
-// SetupOptions, so no handler reads a directory from process-wide state.
-func mountBackupRoutes(r chi.Router, owner *ownerOnlyRegistry, database *db.DB, setupOpts SetupOptions, paths backupPaths) {
-	owner.ownerOnly(r, http.MethodPost, "/backup", handleBackup(database, paths))
-	owner.ownerOnly(r, http.MethodGet, "/backups", handleListBackups(paths))
+// mountBackupRoutes registers the backup, restore and archive routes. Create,
+// list and link are the owner's or a MANAGE_BACKUPS holder's (WP 8.4c); delete,
+// restore and the full archive stay Owner-only. They share the one backupPaths
+// this API resolved from its SetupOptions, so no handler reads a directory
+// from process-wide state.
+func mountBackupRoutes(r chi.Router, owner *ownerOnlyRegistry, backups *backupGate, database *db.DB, setupOpts SetupOptions, paths backupPaths) {
+	backups.ownerOrBackups(r, http.MethodPost, "/backup", handleBackup(database, paths, backups))
+	backups.ownerOrBackups(r, http.MethodGet, "/backups", handleListBackups(paths))
 	owner.ownerOnly(r, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database, paths))
 	owner.ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths))
-	owner.ownerOnly(r, http.MethodPost, "/backups/{name}/link", handleBackupLink(paths))
+	backups.ownerOrBackups(r, http.MethodPost, "/backups/{name}/link", handleBackupLink(database, paths))
 	owner.ownerOnly(r, http.MethodGet, "/archive", handleArchive(database, setupOpts, paths))
 	owner.ownerOnly(r, http.MethodPost, "/archive/link", handleArchiveLink())
 }
