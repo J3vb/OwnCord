@@ -602,3 +602,24 @@ func TestAdminPerimeterExcludesManageNicknames(t *testing.T) {
 		t.Error("ManageNicknames must not admit to the admin perimeter")
 	}
 }
+
+// TestMoveMembersBit_DefinedNamedInAllPerms locks WP 8.4a's bit 13: a single
+// named bit that AllPerms keeps, that sits outside the admin perimeter, and
+// that only the owner (or an Administrator) may hand out.
+func TestMoveMembersBit_DefinedNamedInAllPerms(t *testing.T) {
+	if permissions.MoveMembers != 0x2000 {
+		t.Errorf("MoveMembers = 0x%X, want 0x2000 (bit 13)", permissions.MoveMembers)
+	}
+	if permissions.AllPerms&permissions.MoveMembers == 0 {
+		t.Error("AllPerms must include MoveMembers")
+	}
+	if got := permissions.Name(permissions.MoveMembers); got != "MOVE_MEMBERS" {
+		t.Errorf("Name(MoveMembers) = %q, want MOVE_MEMBERS", got)
+	}
+	if permissions.AdminPerimeter&permissions.MoveMembers != 0 {
+		t.Error("MoveMembers must not admit to the admin perimeter")
+	}
+	if permissions.OwnerGrantOnly&permissions.MoveMembers != permissions.MoveMembers {
+		t.Error("OwnerGrantOnly must include MoveMembers")
+	}
+}

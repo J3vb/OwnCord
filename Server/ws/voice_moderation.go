@@ -13,11 +13,13 @@ import (
 
 // Voice moderation handlers: server mute, server deafen, move, disconnect.
 //
-// All four share one authorization contract, enforced by voiceModTarget:
-// MUTE_MEMBERS on the actor's role (Administrator bypasses), the actor must
-// strictly outrank the target by role position (mirroring
+// Mute, deafen and disconnect share one authorization contract, enforced by
+// voiceModTarget: MUTE_MEMBERS on the actor's role (Administrator bypasses),
+// the actor must strictly outrank the target by role position (mirroring
 // ModerationService.requireOutranks), and the target must currently be in a
-// voice channel. Effects that reach past the acting connection — the SFU and
+// voice channel. Move has its own bit: MOVE_MEMBERS (WP 8.4a) lets the actor
+// move a member of any rank, with no rank rule; the owner is skipped while the
+// owner-only voice_owner_movable setting is off. Effects that reach past the acting connection — the SFU and
 // the target's own socket — go through VoiceDeps.Mod.
 
 // registerVoiceModerationV2 registers the four moderator voice commands.
@@ -49,90 +51,6 @@ func voiceModRole(ctx context.Context, d VoiceDeps, userID int64) (*db.Role, boo
 	}
 	// Top role identity (rank) with the OR of every held mask.
 	return role.Effective(), true
-}
-
-// voiceModTarget runs the shared gate and returns the target's live voice
-// state.
-func voiceModTarget(ctx context.Context, d VoiceDeps, actorID, targetID int64) (*db.VoiceState, *Result) {
-	if actorID == targetID {
-		return nil, &Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "cannot moderate yourself"}}
-	}
-
-	actorRole, ok := voiceModRole(ctx, d, actorID)
-	if !ok {
-		return nil, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "failed to load actor role"}}
-	}
-	targetRole, ok := voiceModRole(ctx, d, targetID)
-	if !ok {
-		return nil, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "failed to load target role"}}
-	}
-	// Administrator bypasses permission bits, never the hierarchy.
-	if actorRole.Position <= targetRole.Position {
-		return nil, &Result{Error: ClientError{
-			Code:    ErrCodeForbidden,
-			Message: "cannot moderate a user of equal or higher rank",
-		}}
-	}
-
-	state, err := d.Voice.State(ctx, targetID)
-	if err != nil {
-		slog.Error("ws voiceModTarget State", "err", err, "target_id", targetID)
-		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read voice state"}}
-	}
-	if state == nil {
-		// Authorization before existence (follow-up to round 4, Codex review):
-		// with no session to build a channel Subject from, still run the SAME
-		// canonical authorizer (no second one) on a Subject built from just the
-		// actor's base role and a zero channel — CanModerateVoice's DM branch
-		// and channel-override layer are both no-ops against a zero Channel, so
-		// this reduces to exactly the base-bit-plus-ReadMessages/MuteMembers
-		// check the full, in-voice path would fail on for the SAME actor
-		// regardless of channel. An actor without the base bit gets the SAME
-		// 403 here as the in-voice failure below, so a target in voice and one
-		// not in voice are byte-identical refusals — probing voice presence
-		// this way learns nothing. Only a holder (who would pass the full
-		// channel check too, absent an unlucky channel-level deny) ever
-		// reaches the VoiceError below.
-		if permissions.AuthorizeVoiceModerator(permissions.Subject{RolePerms: actorRole.Permissions}) != nil {
-			return nil, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing MUTE_MEMBERS permission"}}
-		}
-		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
-	}
-
-	// The decision is permissions.AuthorizeVoiceModerator over the actor's
-	// subject in the TARGET's channel (round 4, Codex review Part C — one
-	// canonical authorizer, replacing this function's own duplicate of the
-	// timeout voice half's base-bit-plus-CanModerateVoice pair): the actor's
-	// BASE role must hold MUTE_MEMBERS on its own, and effective MUTE_MEMBERS
-	// in the target's channel too, so a role-layer or user-layer deny on that
-	// channel holds (SEC-02), READ_MESSAGES so a room hidden from the actor
-	// cannot be moderated, and for a DM call the actor's own membership —
-	// voice_mod_kick and friends carry no channel id from the client, so
-	// without that a moderator could reach into any two users' DM call by
-	// targeting a user id alone. The DM refusal keeps the exact shape of
-	// "target not in voice" so the actor learns nothing about a call they are
-	// not in.
-	ch, err := d.Reader.GetChannel(ctx, state.ChannelID)
-	if err != nil {
-		slog.Error("ws voiceModTarget GetChannel", "err", err, "channel_id", state.ChannelID)
-		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to read channel"}}
-	}
-	if ch == nil {
-		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
-	}
-	sub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, actorID, ch, false)
-	if subErr != nil {
-		slog.Error("ws voiceModTarget channelSubject", "err", subErr, "channel_id", state.ChannelID)
-		return nil, &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to verify channel access"}}
-	}
-	switch modErr := permissions.AuthorizeVoiceModerator(sub); {
-	case errors.Is(modErr, permissions.ErrNotDMParticipant):
-		return nil, &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
-	case modErr != nil:
-		return nil, &Result{Error: ClientError{Code: ErrCodeForbidden, Message: "missing MUTE_MEMBERS permission"}}
-	}
-
-	return state, nil
 }
 
 // voiceModRateLimited applies the shared per-action rate limit. Each of these
@@ -412,7 +330,7 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if r := voiceModRateLimited(d, "voice_mod_move", info.UserID); r != nil {
 		return *r
 	}
-	state, r := voiceModTarget(ctx, d, info.UserID, c.TargetID)
+	state, bypass, r := voiceModAuthorize(ctx, d, info.UserID, c.TargetID, voiceModKindMove)
 	if r != nil {
 		return *r
 	}
@@ -427,6 +345,9 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	}
 	if dest == nil {
 		return Result{Error: ClientError{Code: ErrCodeNotFound, Message: "channel not found"}}
+	}
+	if r := requireMoverCanSee(ctx, d, info.UserID, dest); r != nil {
+		return *r
 	}
 	if dest.Type != "voice" {
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "destination is not a voice channel"}}
@@ -468,6 +389,9 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 
 	if d.Mod == nil {
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice moderation unavailable"}}
+	}
+	if r := voiceModMoveTargetLimited(d, bypass, c.TargetID); r != nil {
+		return *r
 	}
 	// Evict the target and, in the same membership transaction, stash their
 	// server_muted/server_deafened (already loaded by voiceModTarget above) on
