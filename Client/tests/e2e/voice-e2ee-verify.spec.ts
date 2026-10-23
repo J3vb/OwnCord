@@ -194,6 +194,23 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     expect(pins[0]).toMatchObject({ userId: "2", pin: peer.identityPublicKeyB64 });
   });
 
+  test("[F-11] your own row's shield shows your own safety number to compare", async ({ page }) => {
+    const peer = await makePeerCrypto(2);
+    await mockE2EEVoiceSession(page, { peerIdentityKeyB64: peer.identityPublicKeyB64 });
+    await page.goto("/");
+    await navigateToMainPageReady(page);
+
+    await emitPeerAnnounce(page, 2, peer);
+    await joinVoiceChannelByName(page);
+
+    const own = page.locator('.voice-user-item[data-voice-uid="1"] .vu-session-fp');
+    await expect(own).toBeVisible({ timeout: 10_000 });
+    await expect(own).toHaveAttribute(
+      "title",
+      /^Your safety number: [0-9A-F]{4}( [0-9A-F]{4}){7} · Compare it with the number they see for you · /,
+    );
+  });
+
   test("a legacy peer with no published key is accepted but shows the neutral unverified badge", async ({
     page,
   }) => {

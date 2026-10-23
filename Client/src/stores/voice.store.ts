@@ -160,6 +160,11 @@ export interface VoiceState {
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
   readonly localSessionFingerprint?: string | null;
+  /** The local user's own safety number (identity-key fingerprint), the
+   *  number peers see on our shield, so it can be compared out of band. Null
+   *  outside a voice session or when our announce went out unsigned. Optional
+   *  for the same fixture reason as peerVerifications. */
+  readonly localSafetyNumber?: string | null;
   /** The input-sensitivity gate's verdict (true = open = above the slider's
    *  threshold), or null when no gate runs (sensitivity 100).
    *  When set it, not LiveKit, drives the local speaking ring, so the ring,
@@ -779,6 +784,15 @@ export function setLocalSessionFingerprint(fingerprint: string | null): void {
     (prev.localSessionFingerprint ?? null) === fingerprint
       ? prev
       : { ...prev, localSessionFingerprint: fingerprint },
+  );
+}
+
+/** Publish (or clear, with null) the local user's own safety number. */
+export function setLocalSafetyNumber(safetyNumber: string | null): void {
+  voiceStore.setState((prev) =>
+    (prev.localSafetyNumber ?? null) === safetyNumber
+      ? prev
+      : { ...prev, localSafetyNumber: safetyNumber },
   );
 }
 

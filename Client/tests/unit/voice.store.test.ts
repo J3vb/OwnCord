@@ -25,6 +25,7 @@ import {
   clearPeerVerifications,
   getPeerVerification,
   setLocalSessionFingerprint,
+  setLocalSafetyNumber,
   setPttPollingLive,
   isPttPollingLive,
   onPttPollingLiveChange,
@@ -1172,6 +1173,18 @@ describe("voice store", () => {
       const before = voiceStore.getState();
       setLocalSessionFingerprint("fp-local");
       expect(voiceStore.getState()).toBe(before);
+    });
+  });
+
+  describe("setLocalSafetyNumber", () => {
+    it("publishes, clears, and skips an unchanged value", () => {
+      setLocalSafetyNumber("AB12 CD34");
+      expect(voiceStore.getState().localSafetyNumber).toBe("AB12 CD34");
+      const before = voiceStore.getState();
+      setLocalSafetyNumber("AB12 CD34");
+      expect(voiceStore.getState()).toBe(before);
+      setLocalSafetyNumber(null);
+      expect(voiceStore.getState().localSafetyNumber).toBeNull();
     });
   });
 

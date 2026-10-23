@@ -74,6 +74,21 @@ export function verifyPresentation(v: PeerVerification): {
   };
 }
 
+/** Tooltip for the local user's own shield: the safety number peers see for
+ *  us (F3), then the per-call session fingerprint a peer who sees us as
+ *  unverified compares against (OC-0003). Null when there is neither. */
+export function ownIdentityTitle(
+  safetyNumber: string | null,
+  sessionFingerprint: string | null,
+): string | null {
+  const parts: string[] = [];
+  if (safetyNumber !== null) parts.push(shellText("channel.ownSafetyNumber", { safetyNumber }));
+  if (sessionFingerprint !== null) {
+    parts.push(shellText("channel.ownSessionFingerprint", { fingerprint: sessionFingerprint }));
+  }
+  return parts.length === 0 ? null : parts.join(" · ");
+}
+
 // Identity-mismatch re-pin modal (F3 TOFU). One instance at a time across the
 // app, mounted on document.body; torn down on re-open and when the surface
 // that opened it (the sidebar or the DM call panel) is destroyed.
