@@ -139,7 +139,7 @@ func TestRedeemRecoveryKit_WithdrawsTheOutstandingCredential(t *testing.T) {
 	if err := database.UpsertRecoveryAssist(ctx, uid, "$argon2id$assist", 1, "in_person", time.Now().Add(15*time.Minute)); err != nil {
 		t.Fatalf("UpsertRecoveryAssist: %v", err)
 	}
-	if _, err := database.RedeemRecoveryKit(ctx, uid, "newhash", "recovery_kit_used", "by kit"); err != nil {
+	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$kit", "newhash", "recovery_kit_used", "by kit"); err != nil {
 		t.Fatalf("RedeemRecoveryKit: %v", err)
 	}
 	if a, _ := database.GetRecoveryAssist(ctx, uid); a != nil {
@@ -200,7 +200,7 @@ func TestDeleteRecoveryKit_RemovesTheKit(t *testing.T) {
 	if kit, _ := database.GetRecoveryKit(ctx, uid); kit != nil {
 		t.Fatalf("kit after deletion = %+v, want none", kit)
 	}
-	if _, err := database.RedeemRecoveryKit(ctx, uid, "newhash", "recovery_kit_used", "gone"); !errors.Is(err, db.ErrRecoveryKitSpent) {
+	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$v", "newhash", "recovery_kit_used", "gone"); !errors.Is(err, db.ErrRecoveryKitSpent) {
 		t.Fatalf("redeem after deletion = %v, want ErrRecoveryKitSpent", err)
 	}
 }

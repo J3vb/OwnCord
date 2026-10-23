@@ -335,13 +335,15 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 		revoked, err = s.st.RedeemRecoveryAssist(ctx, user.ID, target.assist.Verifier, newHash, "recovery_assist_used",
 			"account recovered with an owner-issued credential")
 	} else {
-		revoked, err = s.st.RedeemRecoveryKit(ctx, user.ID, newHash, "recovery_kit_used",
+		// Likewise only the kit the compare verified: one enrolled
+		// meanwhile is a fresh secret and stays.
+		revoked, err = s.st.RedeemRecoveryKit(ctx, user.ID, target.kit.Verifier, newHash, "recovery_kit_used",
 			"account recovered with the recovery kit")
 	}
 	if err != nil {
 		if errors.Is(err, db.ErrRecoveryKitSpent) || errors.Is(err, db.ErrRecoveryAssistSpent) {
 			// Lost the race to a concurrent redemption (or the credential
-			// expired meanwhile): it is spent now.
+			// expired or was replaced meanwhile): it is spent now.
 			s.recoveryLockout(ctx, in, user, at)
 			return nil, ErrRecoveryKitInvalid
 		}
