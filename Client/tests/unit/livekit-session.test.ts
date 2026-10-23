@@ -1290,6 +1290,155 @@ describe("LiveKitSession", () => {
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledTimes(1);
     });
 
+    describe("a channel switch while a join is still connecting", () => {
+      const B_PEER = 42;
+      const C_PEER = 43;
+      const A_PEER = 41;
+      const connectedChannel = () => {
+        const st = (session as any)._state;
+        return st.type === "connected" ? st.channelId : st.type;
+      };
+
+      /** Start a key-holder join of channel 1 and park it inside room.connect(). */
+      async function startConnectingJoinOfOne() {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        const firstConnect = createDeferred<void>();
+        mockRoom.connect
+          .mockImplementationOnce(() => firstConnect.promise)
+          .mockResolvedValue(undefined);
+        const firstJoin = session.handleVoiceToken(
+          "token-1",
+          "/livekit-one",
+          1,
+          "ws://localhost:7881",
+          true,
+        );
+        // Flush the E2EE async steps so the join is parked inside room.connect().
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockRoom.connect).toHaveBeenCalledTimes(1);
+        return { firstConnect, firstJoin };
+      }
+
+      it("keeps the new channel's key announcements, so its holder's offer is accepted", async () => {
+        const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
+
+        // The user clicks channel 2 (not a key holder there): the server moves
+        // them, sends the token, then relays channel 2's peer keys.
+        mockVoiceState.currentChannelId = 2;
+        await session.handleVoiceToken("token-2", "/livekit-two", 2, "ws://localhost:7882", false);
+        await session.handleE2EEAnnounce(B_PEER, "cGVlcg==", "sig");
+
+        firstConnect.resolve(undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        // Channel 2's exchange is running: its holder answers our announce
+        // with an offer, which is dropped unless the holder's key survived.
+        await session.handleE2EEOffer(B_PEER, "enc", "iv");
+        // Past the securing timeout: a dropped offer would eject the join here.
+        await vi.advanceTimersByTimeAsync(20_000);
+        await firstJoin;
+
+        expect(mockRoom.connect).toHaveBeenCalledTimes(2);
+        expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7882", "token-2", {
+          autoSubscribe: false,
+        });
+        expect(connectedChannel()).toBe(2);
+        expect((session as any)._peerPublicKeys.has(B_PEER)).toBe(true);
+      });
+
+      it("does not apply the old channel's announcements to the new channel", async () => {
+        const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
+
+        // Channel 1's own peer announces before the switch is requested.
+        await session.handleE2EEAnnounce(A_PEER, "b2xkcGVlcg==", "sig");
+        expect((session as any)._peerPublicKeys.has(A_PEER)).toBe(true);
+
+        mockVoiceState.currentChannelId = 2;
+        await session.handleVoiceToken("token-2", "/livekit-two", 2, "ws://localhost:7882", false);
+        await session.handleE2EEAnnounce(B_PEER, "cGVlcg==", "sig");
+
+        firstConnect.resolve(undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        await session.handleE2EEOffer(B_PEER, "enc", "iv");
+        // Past the securing timeout: a dropped offer would eject the join here.
+        await vi.advanceTimersByTimeAsync(20_000);
+        await firstJoin;
+
+        expect(connectedChannel()).toBe(2);
+        expect((session as any)._peerPublicKeys.has(B_PEER)).toBe(true);
+        expect((session as any)._peerPublicKeys.has(A_PEER)).toBe(false);
+      });
+
+      it("keeps a newer queued channel's announcements when the join before it starts its exchange", async () => {
+        let resolveCalls = 0;
+        const parkedResolve = createDeferred<string>();
+        vi.spyOn(session as any, "resolveLiveKitUrl").mockImplementation(
+          async (...args: unknown[]) =>
+            resolveCalls++ === 1 ? parkedResolve.promise : String(args[1] ?? args[0]),
+        );
+        const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
+
+        mockVoiceState.currentChannelId = 2;
+        await session.handleVoiceToken("token-2", "/livekit-two", 2, "ws://localhost:7882", true);
+        firstConnect.resolve(undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        // Channel 2's attempt is parked in URL resolution, before its key exchange.
+        expect(resolveCalls).toBe(2);
+
+        mockVoiceState.currentChannelId = 3;
+        await session.handleVoiceToken(
+          "token-3",
+          "/livekit-three",
+          3,
+          "ws://localhost:7883",
+          false,
+        );
+        await session.handleE2EEAnnounce(C_PEER, "Y3BlZXI=", "sig");
+
+        parkedResolve.resolve("ws://localhost:7882");
+        await vi.advanceTimersByTimeAsync(0);
+        await session.handleE2EEOffer(C_PEER, "enc", "iv");
+        await vi.advanceTimersByTimeAsync(20_000);
+        await firstJoin;
+
+        expect(connectedChannel()).toBe(3);
+        expect((session as any)._peerPublicKeys.has(C_PEER)).toBe(true);
+      });
+
+      it("keeps only the last channel's announcements across a rapid A to B to C switch", async () => {
+        const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
+
+        mockVoiceState.currentChannelId = 2;
+        await session.handleVoiceToken("token-2", "/livekit-two", 2, "ws://localhost:7882", false);
+        await session.handleE2EEAnnounce(B_PEER, "cGVlcg==", "sig");
+        mockVoiceState.currentChannelId = 3;
+        await session.handleVoiceToken(
+          "token-3",
+          "/livekit-three",
+          3,
+          "ws://localhost:7883",
+          false,
+        );
+        await session.handleE2EEAnnounce(C_PEER, "Y3BlZXI=", "sig");
+
+        firstConnect.resolve(undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        await session.handleE2EEOffer(C_PEER, "enc", "iv");
+        // Past the securing timeout: a dropped offer would eject the join here.
+        await vi.advanceTimersByTimeAsync(20_000);
+        await firstJoin;
+
+        // Channel 2 was never joined: one connect for 1, one for 3.
+        expect(mockRoom.connect).toHaveBeenCalledTimes(2);
+        expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7883", "token-3", {
+          autoSubscribe: false,
+        });
+        expect(connectedChannel()).toBe(3);
+        expect((session as any)._peerPublicKeys.has(C_PEER)).toBe(true);
+        expect((session as any)._peerPublicKeys.has(B_PEER)).toBe(false);
+      });
+    });
+
     // v001 regression: join generations must stay monotonic across a
     // mid-attempt reset to "idle" (e.g. leaveVoice() from a VOICE_MOVED /
     // manual-leave-then-rejoin sequence), even when a stale attempt's

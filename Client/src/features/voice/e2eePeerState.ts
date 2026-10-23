@@ -49,6 +49,13 @@ export class E2EEPeerState {
   private _retiredPeerKeys: Map<number, Set<string>> = new Map();
   /** Announces that arrived before our ECDH keypair was ready. Drained after keypair init. */
   private _pendingAnnounces: PendingAnnounce[] = [];
+  /** Announces received while a join for `_stagedChannelId` waits behind the
+   *  join in flight. They belong to that channel's future session, not the one
+   *  still live, so they are held here (one entry per peer, latest wins) and
+   *  handed to setupKeyExchange for exactly that channel. Survives the
+   *  queued-join clearState() calls; dropped by every other clearState(). */
+  private _stagedAnnounces: PendingAnnounce[] = [];
+  private _stagedChannelId: number | null = null;
   /** Announce that verifyPeerAnnounce rejected as a TOFU pin mismatch, keyed
    *  by userId — buffered so a subsequent successful rePinPeerIdentity can
    *  replay it instead of leaving the recovery a no-op for the live call
@@ -83,6 +90,41 @@ export class E2EEPeerState {
   }
   set pendingAnnounces(value: PendingAnnounce[]) {
     this._pendingAnnounces = value;
+  }
+  /** Start (or retarget) holding announces for a queued join. Retargeting to a
+   *  different channel drops what was held for the previous one: a rapid
+   *  A -> B -> C switch keeps only C's. */
+  holdAnnouncesFor(channelId: number): void {
+    if (this._stagedChannelId !== channelId) this._stagedAnnounces = [];
+    this._stagedChannelId = channelId;
+  }
+  /** Hold `announce` for the queued join. False when nothing is queued, so the
+   *  caller processes it in the live session as usual. */
+  stageAnnounce(announce: PendingAnnounce): boolean {
+    if (this._stagedChannelId === null) return false;
+    this._stagedAnnounces = this._stagedAnnounces.filter(
+      (entry) => entry.userId !== announce.userId,
+    );
+    this._stagedAnnounces.push(announce);
+    return true;
+  }
+  dropStagedAnnounce(userId: number): void {
+    this._stagedAnnounces = this._stagedAnnounces.filter((entry) => entry.userId !== userId);
+  }
+  /** Hand over what was held for `channelId` and stop holding. Anything held
+   *  for another channel is never applied to this one, and is left in place. */
+  takeStagedAnnounces(channelId: number): PendingAnnounce[] {
+    // A hold for another channel is never applied here, and can only be a
+    // NEWER queued join's (this exchange is the one that was queued earlier),
+    // so it is left alone for that join to take.
+    if (this._stagedChannelId !== channelId) return [];
+    const mine = this._stagedAnnounces;
+    this.discardStagedAnnounces();
+    return mine;
+  }
+  discardStagedAnnounces(): void {
+    this._stagedAnnounces = [];
+    this._stagedChannelId = null;
   }
   get blockedAnnounces(): Map<number, { publicKeyBase64: string; signatureBase64?: string }> {
     return this._blockedAnnounces;

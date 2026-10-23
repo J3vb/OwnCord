@@ -442,6 +442,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	threads := h.readyThreads(ctx, userID, visibleChannels, ackMap)
 	return &readyFields{
 		head: readyHead{
+			Activities:   h.readyActivities(userID),
 			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil),
 			Categories:   categories,
 			Channels:     channelPayloads,

@@ -53,6 +53,12 @@ type Result struct {
 	// ready or snapshot built after the presence frame was queued cannot miss
 	// the change.
 	SetPresence *livePresence
+	// SetActivity, if non-nil, asks the applier to swap the connection's game
+	// activity (next, nil clears it) and broadcast the presence frame that
+	// shows it, but only while the connection still holds its user's slot
+	// (activity_update, WP 8.3a). The frame is built there, not in Events,
+	// because only the applier sees the live status it must carry.
+	SetActivity *activityChange
 	// SetE2EEAnnounce, if non-nil, replaces the client's stored voice E2EE
 	// announce (ECDH key, F3 TOFU signature, WP M-4 video decode list) so the
 	// late-joiner replay, resume and grace-window paths relay it. nil means
@@ -344,10 +350,10 @@ func (e PresenceSelfEvent) Payload() []byte              { return e.payload }
 // so the broadcast excludes the owner and a second, targeted event carries
 // their real status. Every presence emitter goes through here, so no new call
 // site can leak an invisible user by forgetting the mapping.
-func presenceEvents(userID int64, status string, customStatus *string) []Event {
+func presenceEvents(userID int64, status string, customStatus *string, activity *gameActivity) []Event {
 	public := db.BroadcastStatus(status)
 	if public == status {
-		return []Event{PresenceEvent{userID: userID, payload: buildPresenceMsg(userID, status, customStatus)}}
+		return []Event{PresenceEvent{userID: userID, payload: buildPresenceMsg(userID, status, customStatus, activity)}}
 	}
 	return []Event{
 		PresenceOthersEvent{
@@ -359,11 +365,13 @@ func presenceEvents(userID int64, status string, customStatus *string) []Event {
 			// the connect/reconnect sibling of this same event, and
 			// db.MemberSummary.ForViewer, which blanks the same field the
 			// same way for the ready payload.
-			payload: buildPresenceMsg(userID, public, nil),
+			// activity is blanked for the same reason: a game on an "offline"
+			// member would give the invisible user away.
+			payload: buildPresenceMsg(userID, public, nil, nil),
 		},
 		PresenceSelfEvent{
 			targetUserID: userID,
-			payload:      buildPresenceMsg(userID, status, customStatus),
+			payload:      buildPresenceMsg(userID, status, customStatus, activity),
 		},
 	}
 }

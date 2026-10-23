@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -25,4 +26,20 @@ func cleanVisibleBounded(v string, maxRunes int, fieldName string) (string, erro
 		return "", fmt.Errorf("%w: %s must be at most %d characters", ErrBadRequest, fieldName, maxRunes)
 	}
 	return collapsed, nil
+}
+
+// MaxActivityNameLen bounds a game activity's name (WP 8.3a): one line under a
+// member's name, the same cap as a custom status.
+const MaxActivityNameLen = 128
+
+// CleanActivityName is the activity_update name rule: trimmed, then exactly
+// the custom status text rules (cleanVisibleBounded). A name that is empty
+// after the trim returns "" with no error, which the caller reads as "clear".
+// Too long or not single-line visible text wraps ErrBadRequest.
+func CleanActivityName(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	return cleanVisibleBounded(trimmed, MaxActivityNameLen, "activity name")
 }
