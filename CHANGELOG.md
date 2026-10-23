@@ -79,12 +79,17 @@ and only when it changes something a contributor or fork holder must do
 
 **Chat**
 
+- The default blocked upload file types now also cover the other common web page and SVG extensions (`htm`, `xhtml`, `xht`, `shtml`, `mht`, `mhtml`, `svgz`). A blocked-types list saved on the admin panel or set in `config.yaml` is kept as it is.
 - Deleting a message after an edit changed who it mentions now lowers the mention badges the message actually raised. Before, it could clear someone's badge for a different, still-unread mention, or leave a badge pointing at the deleted message. Deleting an `@everyone` message now clears its badges too.
 
 **Direct messages**
 
 - Deleting someone's message request and later opening the conversation yourself now counts as accepting them, so their replies reach you instead of being held as a request you can no longer see.
 - A group conversation's "call ended" notice now goes to the people in the group when the call ends.
+
+**Desktop UI**
+
+- Unsent messages kept by the desktop app for a retry are now only read and saved for the server you are signed in to, the same way as saved logins.
 
 **Voice and video**
 

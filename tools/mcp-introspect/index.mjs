@@ -201,9 +201,9 @@ server.registerTool(
     inputSchema: {
       method: z.string().describe("HTTP method: GET, POST, PATCH, PUT, DELETE"),
       path: z.string().describe("Path beginning with / (e.g. /admin/api/stats) or a full URL"),
-      query: z.record(z.string()).optional().describe("Query params"),
+      query: z.record(z.string(), z.string()).optional().describe("Query params"),
       body: z.any().optional().describe("JSON body (object or string)"),
-      headers: z.record(z.string()).optional().describe("Extra request headers"),
+      headers: z.record(z.string(), z.string()).optional().describe("Extra request headers"),
     },
   },
   async (a) => {

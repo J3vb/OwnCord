@@ -15,7 +15,9 @@
 //! host in the set. Before any login has been verified this app run the set is
 //! empty and the first-run behaviour stands, so a restart can still auto-login
 //! from a saved credential. The identity-key and identity-pin commands never
-//! run pre-session and require an exact active match.
+//! run pre-session and require an exact active match. The pending-message
+//! commands require the active host, or a verified host while no session is
+//! active, and never admit a host before a verified login.
 
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -130,6 +132,20 @@ impl ActiveSession {
             Err(format!("host {scope} is not the active session host"))
         }
     }
+
+    /// Guard a pending-message command's `host`: allowed when it matches the
+    /// active session, or — while the connection is down (queued sends,
+    /// logout discard) — when it names a host verified this app run. Unlike
+    /// `ensure`, an empty verified set admits nothing: pending messages are
+    /// only ever opened after a verified login.
+    pub fn ensure_verified_host(&self, host: &str) -> Result<(), String> {
+        let state = self.snapshot();
+        if verified_host_allowed(state.host.as_deref(), &state.verified_hosts, host) {
+            Ok(())
+        } else {
+            Err(format!("host {host} is not the active session host"))
+        }
+    }
 }
 
 /// The bare host part of an identity scope. Identity-key commands receive
@@ -167,6 +183,19 @@ fn host_access_allowed(
         return true;
     }
     verified_hosts.contains(&crate::tofu::cert_store_key(host))
+}
+
+/// Pure decision behind `ensure_verified_host`.
+fn verified_host_allowed(
+    active: Option<&str>,
+    verified_hosts: &HashSet<String>,
+    host: &str,
+) -> bool {
+    let key = crate::tofu::cert_store_key(host);
+    match active {
+        Some(a) => crate::tofu::cert_store_key(a) == key,
+        None => verified_hosts.contains(&key),
+    }
 }
 
 #[cfg(test)]
@@ -411,5 +440,30 @@ mod tests {
         session.clear_active();
         assert!(session.ensure("chat.example.com", true).is_ok());
         assert!(session.ensure("other.example", true).is_ok());
+    }
+
+    #[test]
+    fn pending_messages_need_a_verified_host() {
+        // Nothing is admitted before a verified login, not even pre-session.
+        let session = ActiveSession::new();
+        assert!(session.ensure_verified_host("chat.example.com").is_err());
+        session.set("chat.example.com");
+        assert!(session.ensure_verified_host("Chat.Example.com:443").is_ok());
+        assert!(session.ensure_verified_host("other.example").is_err());
+    }
+
+    #[test]
+    fn pending_messages_survive_a_dropped_connection_but_not_a_switch() {
+        // A dropped connection clears the slot; queued sends and the logout
+        // discard still reach the host that was verified.
+        let session = ActiveSession::new();
+        session.set("a.example");
+        session.clear_active();
+        assert!(session.ensure_verified_host("a.example").is_ok());
+        assert!(session.ensure_verified_host("b.example").is_err());
+        // With another server active, the earlier host is refused.
+        session.set("b.example");
+        assert!(session.ensure_verified_host("a.example").is_err());
+        assert!(session.ensure_verified_host("b.example").is_ok());
     }
 }

@@ -458,6 +458,9 @@ The Tauri desktop client uses the following security measures.
   - Before any login has been verified in this app run, the set is empty and
     the first-run behaviour applies. So a restart can still auto-login from a
     saved credential.
+  - The pending-message commands (unsent message text) act on the active
+    host, or while no session is active on a host in that set. They never
+    skip the set, even before the first verified login.
 
 ### Tauri Capabilities (Least Privilege)
 
