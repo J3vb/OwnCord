@@ -443,6 +443,17 @@ func CanChangeOwnerGrantOnly(rolePerms, topRoleID int64, topRolePosition int) bo
 	return IsOwner(topRoleID, topRolePosition) || HasAdmin(rolePerms)
 }
 
+// CanManageBackups reports whether a principal may create a backup, list
+// backups and issue a backup download link (and redeem it): the owner (by role
+// identity, see IsOwner, no bit needed) or anyone whose effective roles hold
+// MANAGE_BACKUPS (an Administrator passes like for every bit). Restore,
+// delete, the full archive, the backup policy, updates, tokens and config are
+// not part of it. topRoleID and topRolePosition are the principal's top role;
+// rolePerms is the OR of every role they hold.
+func CanManageBackups(rolePerms, topRoleID int64, topRolePosition int) bool {
+	return IsOwner(topRoleID, topRolePosition) || HasServerPerm(rolePerms, ManageBackups)
+}
+
 // CanReadContent is CanViewChannel plus B5-7's NSFW consent gate: a labelled
 // channel returns no content — message bodies and metadata that carries them
 // (history, around, pins, reaction users, search hits, live and replayed

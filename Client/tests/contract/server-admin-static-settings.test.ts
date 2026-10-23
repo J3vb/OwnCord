@@ -515,6 +515,8 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
     const booted = await boot(fetchCalls, respondWith());
     dom = booted.dom;
     const { document } = dom.window;
+    // The schedule is the owner's (a Manage Backups holder does not see it).
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
     await render(booted.bridge, dom.window, booted.bridge.renderBackups);
     const schedule = document.getElementById("s-backup_schedule") as HTMLSelectElement;
     const save = document.getElementById("saveBackupPolicyBtn") as HTMLButtonElement;
@@ -528,6 +530,52 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
 
     const patch = fetchCalls.find((c) => c.method === "PATCH");
     expect(patch).toMatchObject({ path: "/settings", body: { backup_schedule: "weekly" } });
+  });
+
+  // WP 8.4c: a Manage Backups holder gets the page cut down to create, list
+  // and download; the owner's view keeps everything.
+  it("shows a Manage Backups holder only create, status and Download, and the owner everything", async () => {
+    const respond = respondWith({
+      "GET /backups": { json: [{ name: BACKUP, size: 1024, date: new Date().toISOString() }] },
+      "GET /settings": { json: LOADED_SETTINGS },
+    });
+    const holderCalls: FetchCall[] = [];
+    const holder = await boot(holderCalls, respond);
+    dom = holder.dom;
+    holder.bridge.state.me = { permissions: holder.bridge.PERM.MANAGE_BACKUPS, is_owner: false };
+    const content = await render(holder.bridge, dom.window, holder.bridge.renderBackups);
+    expect(content.querySelector('[data-action="createBackup"]')).not.toBeNull();
+    expect(content.querySelector("#backupStatus")).not.toBeNull();
+    expect(content.querySelector('[data-action="downloadBackup"]')).not.toBeNull();
+    for (const action of [
+      "downloadArchive",
+      "openRestoreModal",
+      "openDeleteBackupModal",
+      "saveBackupPolicy",
+    ]) {
+      expect(content.querySelector(`[data-action="${action}"]`), action).toBeNull();
+    }
+    expect(content.querySelector("#s-backup_schedule")).toBeNull();
+    expect(content.textContent).toContain("restoring and deleting backups stay with the owner");
+    // The policy is the owner's: it is not even fetched for a holder.
+    expect(holderCalls.some((c) => c.path === "/settings")).toBe(false);
+    dom.window.close();
+
+    const owner = await boot([], respond);
+    dom = owner.dom;
+    owner.bridge.state.me = { permissions: owner.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    const full = await render(owner.bridge, dom.window, owner.bridge.renderBackups);
+    for (const action of [
+      "createBackup",
+      "downloadArchive",
+      "downloadBackup",
+      "openRestoreModal",
+      "openDeleteBackupModal",
+      "saveBackupPolicy",
+    ]) {
+      expect(full.querySelector(`[data-action="${action}"]`), action).not.toBeNull();
+    }
+    expect(full.querySelector("#s-backup_schedule")).not.toBeNull();
   });
 
   async function backupStatus(

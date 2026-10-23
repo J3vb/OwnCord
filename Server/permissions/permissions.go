@@ -15,6 +15,7 @@ const (
 	UseVideo        = int64(0x0800)     // bit 11
 	ShareScreen     = int64(0x1000)     // bit 12
 	MoveMembers     = int64(0x2000)     // bit 13 — move any member between voice channels, whatever their rank (WP 8.4a); server-wide, outside AdminPerimeter
+	ManageBackups   = int64(0x4000)     // bit 14 — create, list and download database backups (WP 8.4c); holds more than the perimeter read surface, so owner-grant-only
 	ManageMessages  = int64(0x10000)    // bit 16
 	ManageChannels  = int64(0x20000)    // bit 17
 	KickMembers     = int64(0x40000)    // bit 18
@@ -33,7 +34,7 @@ const (
 // AllPerms is the union of every defined permission bit. Use it to mask
 // externally supplied permission values so unknown bits are dropped.
 const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
-	ConnectVoice | SpeakVoice | UseVideo | ShareScreen | MoveMembers |
+	ConnectVoice | SpeakVoice | UseVideo | ShareScreen | MoveMembers | ManageBackups |
 	ManageMessages | ManageChannels | KickMembers | BanMembers | MuteMembers |
 	MentionEveryone | ModerateMembers | ManageNicknames | ManageRoles | ManageServer | ManageInvites | ViewAuditLog |
 	Administrator
@@ -49,13 +50,18 @@ const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
 // 5): a warning-only moderator must not inherit the perimeter's read surface
 // (/stats, the /users list, /me), which re-checks nothing by design — the
 // report queue lives under /api/v1, not /admin/api.
+//
+// ManageBackups is inside it (WP 8.4c) because a holder has to reach /admin/api
+// at all to use the backup routes. The backup itself holds far more than the
+// perimeter's read surface (every message and every password hash), which is
+// why the bit is owner-grant-only.
 const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
-	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers
+	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers | ManageBackups
 
 // OwnerGrantOnly is the mask of bits that only the owner or an Administrator
 // may add to or remove from a role, or hand out by assigning a role that
 // carries them. Holding ManageRoles is not enough for these.
-const OwnerGrantOnly = MoveMembers
+const OwnerGrantOnly = MoveMembers | ManageBackups
 
 // bitNames maps each single permission bit to its SCHEMA.md name. Used for
 // authorization error messages so the wording lives in one place.
@@ -69,6 +75,7 @@ var bitNames = map[int64]string{
 	UseVideo:        "USE_VIDEO",
 	ShareScreen:     "SHARE_SCREEN",
 	MoveMembers:     "MOVE_MEMBERS",
+	ManageBackups:   "MANAGE_BACKUPS",
 	ManageMessages:  "MANAGE_MESSAGES",
 	ManageChannels:  "MANAGE_CHANNELS",
 	KickMembers:     "KICK_MEMBERS",

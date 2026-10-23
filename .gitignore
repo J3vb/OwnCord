@@ -64,6 +64,7 @@ Server/owncord-server.exe
 Server/server.exe
 Server/config.yaml
 Server/data/
+Server/**/data/backups/
 # Released asset the upgrade rehearsal downloads (ci.yml, B6-8).
 Server/.rehearsal-from/
 

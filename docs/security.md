@@ -380,7 +380,7 @@ action, target and detail:
 - **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
 - **Voice moderation:** `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`, `voice_mod_kick`
 - **Profile:** `profile_update`, `identity_key_update`
-- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`, `backup_download`,
+- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`, `backup_link`, `backup_download`,
   `log_level_debug_on`, `log_level_reverted`, `update_apply`, `update_applied`,
   `update_failed`, `server_restart_requested`, `ws_connect`
 
