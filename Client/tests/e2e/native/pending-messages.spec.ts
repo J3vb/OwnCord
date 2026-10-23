@@ -26,11 +26,13 @@ async function nativeInvoke(page: Page, command: string, args: Owner & { value?:
 
 // The pending-message commands only reach the signed-in server, so each
 // launch signs in first. A preserved profile already trusts the certificate.
+// Auto connect stays off so each relaunch shows the connect page again.
 async function signIn(page: Page, host: string): Promise<void> {
   await expect(page.locator("#host")).toBeEditable();
   await page.locator("#host").fill(host);
   await page.locator("#username").fill("alice");
   await page.locator("#password").fill("OwnCord-E2E-pass-123!");
+  await page.locator("#auto-connect").uncheck();
   const submit = page.locator("button.btn-primary[type='submit']");
   const dialog = page.getByRole("dialog", { name: "New Server Certificate" });
   const layout = page.getByTestId("app-layout");
