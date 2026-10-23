@@ -17,7 +17,7 @@
       "note": "The LiveKit client SDK. Not in the startup closure; it arrives with the voice session, screen share and Settings voice chunks."
     },
     "livekitSession": {
-      "budget": 28000,
+      "budget": 28500,
       "lazy": true,
       "note": "The voice session facades (livekitSession, livekitE2EE) and the voice modules they import statically."
     },
@@ -42,9 +42,9 @@
       "note": "The Tauri window API (@tauri-apps/api/window), imported on demand by the desktop shell."
     },
     "screenShare": {
-      "budget": 6500,
+      "budget": 7000,
       "lazy": true,
-      "note": "Screen share and the peer codec pick, shared by camera and share. Not in the startup closure."
+      "note": "Screen share, the peer codec pick and the H.264 profile hook, shared by camera and share. Not in the startup closure."
     }
   },
   "forbidEmbeddedWasm": {

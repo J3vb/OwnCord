@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Changed
+
+**Voice and video**
+
+- The 120 fps screen share option is hidden for now: the Windows app's screen capture delivers about 60 fps anyway. A saved 120 fps setting shares at 60.
+
 ### Added
 
 **Server (operators)**
@@ -65,7 +71,9 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice and video**
 
+- Switching to another voice channel while the first was still connecting could leave you stuck on "Securing" until the call dropped. The new channel's encryption keys are now kept, so it connects.
 - Switching your camera during a call left your own video tile frozen or black until you turned the camera off and on. The tile now follows the new camera straight away.
+- In the Windows app, a screen share or camera set to H.264 always fell back to VP8, even on a graphics card that can encode H.264. It now stays on H.264 and is encoded on the graphics card (not on Intel graphics, which keep the old behaviour).
 
 ## v2.4.0-beta.1
 

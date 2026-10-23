@@ -4,6 +4,7 @@
 
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
+import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/shareFps";
 import { createLogger } from "@lib/logger";
 import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../features/voice/autoPlayCameras";
 import {
@@ -943,13 +944,15 @@ function buildVoiceAudioTabInner(
     style: "width:100%;margin-bottom:16px",
     "aria-label": t("voiceAudio.screenFps"),
   });
+  const fpsLabels: Record<number, string> = {
+    60: t("voiceAudio.fps.60"),
+    120: t("voiceAudio.fps.120"),
+  };
   const fpsOptions: Array<[number, string]> = [
     [30, t("voiceAudio.fps.30")],
-    [60, t("voiceAudio.fps.60")],
-    [120, t("voiceAudio.fps.120")],
+    ...SHARE_FPS_OPTIONS.map((fps): [number, string] => [fps, fpsLabels[fps] ?? String(fps)]),
   ];
-  const savedFpsRaw = loadPref<number>("screenShareFps", 30);
-  const savedFps = savedFpsRaw === 60 || savedFpsRaw === 120 ? savedFpsRaw : 30;
+  const savedFps = offeredShareFps(loadPref<number>("screenShareFps", 30));
   for (const [value, label] of fpsOptions) {
     const opt = createElement("option", { value: String(value) }, label);
     if (value === savedFps) opt.setAttribute("selected", "");

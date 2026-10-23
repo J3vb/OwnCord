@@ -502,7 +502,7 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.fps.120": "120 FPS",
   "voiceAudio.videoCodec": "Video Codec",
   "voiceAudio.videoCodecDesc":
-    "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. A 120 fps screen share uses H.264 when your graphics card can encode it, whatever you choose here. H.264 falls back to VP8 when your graphics card can't encode it. Takes effect the next time you turn on your camera or start sharing.",
+    "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. H.264 falls back to VP8 when your graphics card can't encode it. Takes effect the next time you turn on your camera or start sharing.",
   "voiceAudio.videoCodec.vp8": "VP8 (default, most compatible)",
   "voiceAudio.videoCodec.vp9": "VP9 (sharper text)",
   "voiceAudio.videoCodec.h265": "H.265 (hardware only)",
