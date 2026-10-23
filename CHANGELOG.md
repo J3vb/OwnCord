@@ -61,6 +61,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Accounts & admin**
+
+- A ban now also ends a connection that was still signing in at the moment of the ban.
+
 **Direct messages**
 
 - Deleting someone's message request and later opening the conversation yourself now counts as accepting them, so their replies reach you instead of being held as a request you can no longer see.

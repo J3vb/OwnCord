@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/coder/websocket"
+
 	"github.com/J3vb/OwnCord/Server/auth"
 )
 
@@ -240,39 +242,68 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 //
 // On a live session it also slides the session's expiry (touchSession).
 //
-// It returns true when the caller must abort the handshake instead of
-// continuing to send auth_ok/ready: c has already been torn back out of the
-// hub (mirroring unregisterFailedHandshake's post-registerNow teardown) and
-// its session is gone, so nothing behind it should be disclosed. Skips the
+// It returns a verdict other than postRegisterOK when the caller must abort
+// the handshake instead of continuing to send auth_ok/ready: c has already
+// been torn back out of the hub (mirroring unregisterFailedHandshake's
+// post-registerNow teardown) and its session is gone or its user banned, so
+// nothing behind it should be disclosed. Skips the
 // check when c carries no token (never true for a real client) and fails
 // open on a transient DB error — a failed read says nothing about the
 // session's validity, matching handleMessageSessionRecheck's identical rule
 // (OC-0211) and sweepRevokedSessions' rule for a failed batch lookup.
 //
-// Deliberately narrower than handleMessageSessionRecheck: it does not also
-// check ban status, because refreshUserSnapshot already re-reads the user
-// row earlier in this same handshake and fails closed on a ban (OC-0272) —
-// duplicating that here would just re-run the same verdict a few DB calls
-// later.
-func (h *Hub) postRegisterSessionRecheck(ctx context.Context, c *Client) bool {
+// It re-checks the ban the same way handleMessageSessionRecheck does. The
+// earlier ban check in refreshUserSnapshot (OC-0272) runs before registerNow,
+// so a ban committing between the two finds no client for DisconnectUser to
+// kick; the same before/after-registerNow argument as for the session row
+// above makes this read the one that catches it.
+func (h *Hub) postRegisterSessionRecheck(ctx context.Context, c *Client) postRegisterVerdict {
 	if c.tokenHash == "" {
-		return false
+		return postRegisterOK
 	}
 	result, err := h.readers.Dispatch.GetSessionWithBanStatus(ctx, c.tokenHash)
 	if err != nil {
 		slog.Warn("ws post-register session recheck: lookup failed, skipping", "user_id", c.userID, "err", err)
-		return false
+		return postRegisterOK
 	}
 	if result == nil || auth.IsSessionExpired(result.ExpiresAt) {
 		slog.Info("ws post-register session recheck: session revoked during handshake, aborting", "user_id", c.userID)
 		c.markTerminalKick()
 		h.unregisterFailedHandshake(ctx, c)
-		return true
+		return postRegisterRevoked
+	}
+	if sessionUserBanned(result.Banned, result.BanExpires) {
+		slog.Info("ws post-register session recheck: user banned during handshake, aborting", "user_id", c.userID)
+		c.markTerminalKick()
+		h.unregisterFailedHandshake(ctx, c)
+		return postRegisterBanned
 	}
 	// The session just proved live on a registered socket: slide its expiry
 	// (DP-05). Both handshake paths come through here.
 	h.touchSession(ctx, c)
-	return false
+	return postRegisterOK
+}
+
+// postRegisterVerdict is postRegisterSessionRecheck's answer: continue the
+// handshake, or abort it because the session or the user is no longer valid.
+type postRegisterVerdict int
+
+const (
+	postRegisterOK postRegisterVerdict = iota
+	postRegisterRevoked
+	postRegisterBanned
+)
+
+// closeAbortedHandshake closes conn after postRegisterSessionRecheck aborted
+// the handshake. A banned user gets the same BANNED frame authenticateConn
+// sends, so the client shows the ban instead of retrying.
+func closeAbortedHandshake(ctx context.Context, conn *websocket.Conn, v postRegisterVerdict) {
+	if v == postRegisterBanned {
+		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeBanned, "you are banned"))
+		_ = conn.Close(websocket.StatusPolicyViolation, "banned")
+		return
+	}
+	_ = conn.Close(websocket.StatusPolicyViolation, "session revoked")
 }
 
 func (h *Hub) unregisterNow(c *Client) bool {
@@ -319,7 +350,9 @@ type clientEvent struct {
 }
 
 // DisconnectUser forcibly disconnects the client identified by userID.
-// No-op if the user is not currently connected.
+// No-op if the user is not currently connected. Like DisconnectRevokedUser it
+// misses a handshake that has not reached registerNow yet;
+// postRegisterSessionRecheck's ban check closes that window.
 func (h *Hub) DisconnectUser(userID int64) {
 	c := h.GetClient(userID)
 	if c == nil {

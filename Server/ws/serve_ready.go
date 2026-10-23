@@ -535,11 +535,11 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// OC-0423: registerNow just above is the earliest point a revocation
 	// racing this handshake's DB work could have found this socket, so
 	// re-read the session now that c is reachable — see
-	// postRegisterSessionRecheck's doc. When it reports true it has already
+	// postRegisterSessionRecheck's doc. When it aborts it has already
 	// run the full failed-handshake teardown; only closing conn is left.
-	if h.postRegisterSessionRecheck(ctx, c) {
-		_ = conn.Close(websocket.StatusPolicyViolation, "session revoked")
-		return fmt.Errorf("handleFreshConnect: session revoked for user %d during handshake", c.userID)
+	if v := h.postRegisterSessionRecheck(ctx, c); v != postRegisterOK {
+		closeAbortedHandshake(ctx, conn, v)
+		return fmt.Errorf("handleFreshConnect: session revoked or user banned for user %d during handshake", c.userID)
 	}
 
 	// The re-read above and registerNow are not atomic: a role reassignment
