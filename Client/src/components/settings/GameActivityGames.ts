@@ -51,6 +51,11 @@ function gameRows(): GameRow[] {
   return rows;
 }
 
+/** What the list is drawn from, to redraw only when it changed. */
+function snapshot(): string {
+  return JSON.stringify([loadGamePrefs(), loadSeen()]);
+}
+
 /** The section's elements, to append after the sharing row. */
 export function buildGamesSection(signal: AbortSignal): HTMLElement[] {
   const title = createElement("div", { class: "setting-label game-list-title" }, t("games.title"));
@@ -70,9 +75,6 @@ export function buildGamesSection(signal: AbortSignal): HTMLElement[] {
 
   /** What the list was last drawn from, to redraw only when it changed. */
   let drawn = "";
-  function snapshot(): string {
-    return JSON.stringify([loadGamePrefs(), loadSeen()]);
-  }
 
   /** Put focus back on a row's rename button (the row was just redrawn). */
   function focusRename(key: string): void {
