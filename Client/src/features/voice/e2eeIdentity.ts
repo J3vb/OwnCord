@@ -3,7 +3,7 @@
 // keyring, cached per host+user scope, used to sign ephemeral announces) and
 // holds the session's ephemeral ECDH keypair. E2EEManager decides when the
 // ephemeral keypair is published or cleared; this module is where it lives.
-import { signEphemeralKey } from "../../lib/e2eeCrypto";
+import { computeKeyFingerprint, signEphemeralKey } from "../../lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair } from "../../lib/identity";
 import { authStore } from "../../stores/auth.store";
 import { createLogger } from "../../lib/logger";
@@ -78,6 +78,20 @@ export class E2EEIdentity {
     this._identityGeneration++;
     this._identityKeyPair = null;
     this._identityScope = null;
+  }
+
+  /** Our own safety number: the fingerprint of the identity key we sign
+   *  announces with, which is what a peer sees as our safety number. Null when
+   *  no identity key is loaded (the announce went out unsigned). */
+  async safetyNumber(): Promise<string | null> {
+    const pair = this._identityKeyPair;
+    if (pair === null) return null;
+    try {
+      return await computeKeyFingerprint(pair.publicKey);
+    } catch (err) {
+      log.warn("E2EE: could not compute own safety number", err);
+      return null;
+    }
   }
 
   /** Build the voice_e2ee_announce payload, signing the ephemeral public key

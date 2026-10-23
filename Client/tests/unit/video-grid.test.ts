@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 import { expectConsole } from "../helpers/console";
+import { registerVideoSurface } from "../../src/lib/videoSurface";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing VideoGrid
@@ -2241,6 +2242,73 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).contains(video)).toBe(true);
       expect(cell(SCREEN).querySelector(".video-popped")).toBeNull();
       expect(control(SCREEN, "pip").getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("gives a video that came back empty its stream again", () => {
+      // WebKitGTK drops a <video>'s player with the window it played in.
+      const stream = fakeStream();
+      grid.addStream(SCREEN, "Otto (Screen)", stream, screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+      control(SCREEN, "pip").click();
+      const given: unknown[] = [];
+      Object.defineProperty(video, "srcObject", {
+        configurable: true,
+        get: () => given.at(-1) ?? stream,
+        set: (v: unknown) => given.push(v),
+      });
+
+      popup.win.closed = true;
+      vi.advanceTimersByTime(1000);
+
+      expect(video.readyState).toBe(HTMLMediaElement.HAVE_NOTHING);
+      expect(given).toEqual([null, stream]);
+      expect(cell(SCREEN).contains(video)).toBe(true);
+    });
+
+    it("leaves a video that still plays on its return alone", () => {
+      const stream = fakeStream();
+      grid.addStream(SCREEN, "Otto (Screen)", stream, screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+      control(SCREEN, "pip").click();
+      Object.defineProperty(video, "readyState", {
+        configurable: true,
+        get: () => HTMLMediaElement.HAVE_ENOUGH_DATA,
+      });
+      const given: unknown[] = [];
+      Object.defineProperty(video, "srcObject", {
+        configurable: true,
+        get: () => stream,
+        set: (v: unknown) => given.push(v),
+      });
+
+      control(SCREEN, "pop-in").click();
+
+      expect(given).toEqual([]);
+    });
+
+    it("shows a canvas-drawn stream's canvas with its video, in the window and back", () => {
+      // Linux draws remote video into a canvas (lib/videoSurface.ts).
+      const { stream, track } = fakeStreamWithTrack();
+      const canvas = document.createElement("canvas");
+      registerVideoSurface(track as unknown as MediaStreamTrack, canvas);
+      grid.addStream(SCREEN, "Otto (Screen)", stream, screenCfg);
+      const video = cell(SCREEN).querySelector("video")!;
+      expect(video.nextSibling).toBe(canvas);
+      expect(video.dataset.surface).toBe("");
+
+      control(SCREEN, "pip").click();
+      expect(popup.doc.body.contains(canvas)).toBe(true);
+      expect(video.nextSibling).toBe(canvas);
+      expect(cell(SCREEN).contains(canvas)).toBe(false);
+
+      control(SCREEN, "pop-in").click();
+      expect(cell(SCREEN).contains(canvas)).toBe(true);
+      expect(video.nextSibling).toBe(canvas);
+
+      // Its stream gone (not watched), the canvas goes with it.
+      grid.addStream(SCREEN, "Otto (Screen)", null, screenCfg);
+      expect(canvas.parentNode).toBeNull();
+      expect(video.dataset.surface).toBeUndefined();
     });
 
     it("Bring back closes the window and returns the video", () => {

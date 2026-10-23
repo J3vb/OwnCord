@@ -25,14 +25,16 @@ const noop = (): void => {};
  *  instead is why the section is unavailable, shown as disabled text. */
 export interface VoiceModMenuOptions {
   /** Current moderator-imposed state of the target, for the toggle labels. */
-  readonly serverMuted: boolean;
-  readonly serverDeafened: boolean;
+  readonly serverMuted?: boolean;
+  readonly serverDeafened?: boolean;
   /** Voice channels the target can be moved to (the current one excluded). */
   readonly moveTargets: readonly { readonly id: number; readonly name: string }[];
-  readonly onServerMute: (muted: boolean) => void;
-  readonly onServerDeafen: (deafened: boolean) => void;
+  /** Mute, deafen and disconnect render only when their handler is present: a
+   *  Move Members-only role is given just `moveTargets` and `onMove` (WP 8.4b). */
+  readonly onServerMute?: (muted: boolean) => void;
+  readonly onServerDeafen?: (deafened: boolean) => void;
   readonly onMove: (toChannelId: number) => void;
-  readonly onDisconnect: () => void;
+  readonly onDisconnect?: () => void;
   /** Set while the actions cannot reach the server (socket not connected): the
    *  rows stay visible but greyed and inert, with this as the reason. */
   readonly disabledReason?: string;
@@ -310,20 +312,25 @@ function appendModerationSection(
     );
   }
 
-  menu.appendChild(
-    modItem(
-      mod.serverMuted ? t("volume.serverUnmute") : t("volume.serverMute"),
-      "server-mute",
-      () => mod.onServerMute(!mod.serverMuted),
-    ),
-  );
-  menu.appendChild(
-    modItem(
-      mod.serverDeafened ? t("volume.serverUndeafen") : t("volume.serverDeafen"),
-      "server-deafen",
-      () => mod.onServerDeafen(!mod.serverDeafened),
-    ),
-  );
+  const { onServerMute, onServerDeafen, onDisconnect } = mod;
+  if (onServerMute !== undefined) {
+    menu.appendChild(
+      modItem(
+        mod.serverMuted === true ? t("volume.serverUnmute") : t("volume.serverMute"),
+        "server-mute",
+        () => onServerMute(mod.serverMuted !== true),
+      ),
+    );
+  }
+  if (onServerDeafen !== undefined) {
+    menu.appendChild(
+      modItem(
+        mod.serverDeafened === true ? t("volume.serverUndeafen") : t("volume.serverDeafen"),
+        "server-deafen",
+        () => onServerDeafen(mod.serverDeafened !== true),
+      ),
+    );
+  }
 
   if (mod.moveTargets.length > 0) {
     // Hover-revealed flyout, same shape as the AdminActions role submenu. The
@@ -363,5 +370,7 @@ function appendModerationSection(
     menu.appendChild(moveWrap);
   }
 
-  menu.appendChild(modItem(t("volume.disconnect"), "voice-disconnect", mod.onDisconnect, true));
+  if (onDisconnect !== undefined) {
+    menu.appendChild(modItem(t("volume.disconnect"), "voice-disconnect", onDisconnect, true));
+  }
 }

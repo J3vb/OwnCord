@@ -275,6 +275,7 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "by_user_id": "<id:number>",
             "to_channel_id": "<id:number>"
           },
           "type": "voice_moved"

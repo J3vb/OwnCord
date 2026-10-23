@@ -24,7 +24,7 @@ beforeEach(() => {
     outputs: [{ id: "guid-spk", name: "Speakers" }],
   });
   listCameras.mockReset();
-  listCameras.mockResolvedValue([{ id: "/dev/video0", name: "HD Webcam" }]);
+  listCameras.mockResolvedValue([{ id: "/dev/video0", name: "HD Webcam", infrared: false }]);
   cameraSupport.mockReset();
   cameraSupport.mockResolvedValue({ available: true, missing: [] });
   watchDevices.mockReset();
@@ -54,6 +54,35 @@ describe("nativeCameraDevices", () => {
     await expect(nativeCameraDevices()).resolves.toEqual([
       { deviceId: "/dev/video0", label: "HD Webcam", kind: "videoinput" },
     ]);
+  });
+
+  it("marks an infrared sensor that shares the colour camera's name", async () => {
+    linux.value = true;
+    listCameras.mockResolvedValue([
+      { id: "/dev/video0", name: "Integrated_Webcam_FHD: Integrat", infrared: false },
+      { id: "/dev/video2", name: "Integrated_Webcam_FHD: Integrat", infrared: true },
+    ]);
+    await expect(nativeCameraDevices()).resolves.toEqual([
+      { deviceId: "/dev/video0", label: "Integrated_Webcam_FHD: Integrat", kind: "videoinput" },
+      {
+        deviceId: "/dev/video2",
+        label: "Integrated_Webcam_FHD: Integrat (infrared)",
+        kind: "videoinput",
+      },
+    ]);
+  });
+
+  it("numbers cameras that still share a name, leaving unique and empty ones alone", async () => {
+    linux.value = true;
+    listCameras.mockResolvedValue([
+      { id: "/dev/video0", name: "USB Camera", infrared: false },
+      { id: "/dev/video2", name: "HD Webcam", infrared: false },
+      { id: "/dev/video4", name: "USB Camera", infrared: false },
+      { id: "/dev/video6", name: "", infrared: false },
+      { id: "/dev/video8", name: "", infrared: true },
+    ]);
+    const labels = (await nativeCameraDevices())?.map((d) => d.label);
+    expect(labels).toEqual(["USB Camera (1)", "HD Webcam", "USB Camera (2)", "", ""]);
   });
 
   it("returns null off Linux so callers keep their web enumeration", async () => {

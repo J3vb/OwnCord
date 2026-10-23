@@ -9,11 +9,14 @@ const EXT_KEYS=['upload_blocked_extensions','upload_allowed_extensions'];
 const AFK_TIMEOUT_DEFAULT='300';
 const AFK_TIMEOUTS=[['60','1 minute'],['300','5 minutes'],['900','15 minutes'],['1800','30 minutes'],['3600','60 minutes']];
 const AFK_JOIN_BITS=0x202; /* READ_MESSAGES | CONNECT_VOICE: both are needed to join */
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',...EXT_KEYS];
+/* Owner-only: whether a Move Members holder may move the owner. Unset reads as
+   on, as the server does (service.VoiceOwnerMovable). */
+const OWNER_MOVABLE_KEY='voice_owner_movable';
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',OWNER_MOVABLE_KEY,...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
 function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
-function settingNorm(k,v){return k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
+function settingNorm(k,v){return k===OWNER_MOVABLE_KEY?((v==='false'||v==='0')?'false':'true'):k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
 function settingsFormValues(keys){
   const out={};
   keys.forEach(k=>{
@@ -57,6 +60,11 @@ async function renderSettings(){
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
   html+=await afkCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT);
   const owner=isOwner();
+  if(owner){
+    const movable=settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true';
+    html+=settingsCard('Voice: moving members',
+      '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+OWNER_MOVABLE_KEY+'-name">Members with Move Members can move the owner</div><div class="setting-desc" id="s-'+OWNER_MOVABLE_KEY+'-desc">Turn this off and nobody can move the owner between voice channels</div></div><div class="setting-ctrl"><button class="toggle '+(movable?'on':'')+'" id="s-'+OWNER_MOVABLE_KEY+'" role="switch" aria-checked="'+movable+'" aria-labelledby="s-'+OWNER_MOVABLE_KEY+'-name" aria-describedby="s-'+OWNER_MOVABLE_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
+  }
   const extInput=k=>'<input class="form-input" id="s-'+k+'" value="'+esc(v(k).split(',').filter(Boolean).join(', '))+'" aria-describedby="s-'+k+'-desc" data-input-action="markSettingsChanged"'+(owner?'':' disabled')+'>';
   html+=settingsCard('Upload file types',
     '<p class="setting-desc">Executables and scripts that start with a program signature are always refused by their content. These lists refuse files by their last extension, however it is capitalised, so <code>report.pdf.bat</code> is refused for <code>bat</code>. Separate extensions with commas.'+(owner?'':' Only the server owner can change the file types.')+'</p>'

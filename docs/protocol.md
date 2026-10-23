@@ -515,7 +515,7 @@ These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`/`forum`), `category`, `category_id`, `category_position`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`/`forum`), `category`, `category_id`, `category_position`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
 
 `last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
 the newest message id they have read, or `0` when they have no read state for the
@@ -572,14 +572,25 @@ channel, not of the viewer: every recipient of a frame gets the same value, so
 the shared `channel_update` carries it. An older server omits it; treat an
 absent `private` as `false`. A per-member override never changes it.
 
-`can_moderate_voice` is whether the caller may mute, deafen, move or disconnect
-voice participants in that channel. It is `permissions.AuthorizeVoiceModerator`,
+`can_moderate_voice` is whether the caller may mute, deafen or disconnect
+voice participants (and move those they outrank) in that channel. It is `permissions.AuthorizeVoiceModerator`,
 the same authorizer the voice-moderation commands enforce in the target's
 channel: the base role must hold `MUTE_MEMBERS`, and the effective permission
 after both override layers must hold `READ_MESSAGES | MUTE_MEMBERS`
 (Administrator bypasses the bits). Target rank and move-destination capacity
 are per-target and stay server-side refusals. No override data is sent. Older
 servers omit it.
+
+`can_move_voice` is whether the caller may move voice participants in that
+channel regardless of rank. It is `permissions.AuthorizeVoiceMover`: the base
+role must hold `MOVE_MEMBERS` and the effective permission after both override
+layers must hold `READ_MESSAGES | MOVE_MEMBERS` (Administrator bypasses the
+bits). It is independent of `can_moderate_voice`: a caller with only
+`MOVE_MEMBERS` gets `can_move_voice` true and `can_moderate_voice` false and may
+move but not mute, deafen or disconnect. The owner is a valid move target only
+while the owner-only setting `voice_owner_movable` is on, and each target takes
+at most 3 moves per 30 seconds; both stay server-side refusals. Older servers
+omit it; treat an absent value as "unchanged", never as `false`.
 
 `can_delete_others`, `can_pin` and `can_react` are the caller's per-channel
 message affordances, always present on every non-DM channel and absent from
@@ -2021,6 +2032,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
     "voice_max_video": 0,
     "can_send": true,
     "can_moderate_voice": false,
+    "can_move_voice": false,
     "can_delete_others": false,
     "can_pin": false,
     "can_react": true
@@ -2029,7 +2041,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
 ```
 
 Every `channel_create` is addressed to one client and carries that viewer's own
-`can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin` and `can_react`
+`can_send`, `can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin` and `can_react`
 — the same values `ready` ships per channel.
 It has no `seq` and is not replayed: a client that misses one is forced onto a
 full `ready` on resume instead. It is sent in three cases:
@@ -2047,7 +2059,7 @@ full `ready` on resume instead. It is sent in three cases:
   timeout without a reconnect.
 
 Older servers sent `channel_create` as one shared broadcast without these fields.
-**Treat an absent `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin` or `can_react` as "unchanged", never as `false`.**
+**Treat an absent `can_send`, `can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin` or `can_react` as "unchanged", never as `false`.**
 
 ### channel_update (Server -> Client, broadcast)
 
@@ -2082,7 +2094,7 @@ every viewer including the one that just turned the label on, since those
 frames carry no message content; `nsfw_acknowledged` is per-viewer and ships
 only in `ready` (above), not in this broadcast, the same reason `can_send` is
 omitted from it. None of the per-viewer fields (`can_send`,
-`can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`) ship here:
+`can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin`, `can_react`) ship here:
 this is one encoded frame for every recipient, and a single value would be
 wrong for some of them. See `PUT`/`DELETE
 /api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`) for how a client
@@ -2736,18 +2748,24 @@ Rate limited: 1 per 60 seconds. Must be in a voice channel.
 
 ## Voice Moderation
 
-Four moderator commands act on another user's voice session. All four run
-`permissions.AuthorizeVoiceModerator` against the actor in the TARGET's channel:
-the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR` bypasses the bit,
-never the hierarchy), and the effective permission after both override layers
+Four moderator commands act on another user's voice session. Mute, deafen,
+disconnect and, for a target the actor outranks, move run
+`permissions.AuthorizeVoiceModerator`; `voice_mod_move` can also be authorized
+by `MOVE_MEMBERS` through `permissions.AuthorizeVoiceMover` (see `voice_mod_move`
+below). Each runs its authorizer against the actor in the TARGET's channel:
+the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR` bypasses the bit;
+for mute, deafen and disconnect never the hierarchy, and as it also passes
+`AuthorizeVoiceMover`, an Administrator may move anyone), and the effective permission after both override layers
 must hold `READ_MESSAGES | MUTE_MEMBERS`, so a channel-level deny holds and a
 room the actor cannot see cannot be moderated. For a DM call the actor must be a
-participant. The actor must strictly outrank the target by role position, and the
-target must currently be in a voice channel. Each is rate limited to 5/sec and
+participant. The actor must strictly outrank the target by role position, except
+for a move authorized by `MOVE_MEMBERS`. The target must currently be in a voice
+channel. Each is rate limited to 5/sec and
 written to the audit log (`voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
 `voice_mod_kick`, target type `user`).
 
-Failures: `FORBIDDEN` (missing bit, or target of equal/higher rank),
+Failures: `FORBIDDEN` (missing bit, or a target of equal/higher rank on the
+`MUTE_MEMBERS` path),
 `VOICE_ERROR` (target not in voice, not in the named channel, or not
 connected), `BAD_REQUEST` (self-target, non-voice destination),
 `NOT_FOUND` (unknown destination channel), `CHANNEL_FULL` (destination at
@@ -2790,6 +2808,18 @@ the moderator did and restates it with `voice_deafen`.
 { "type": "voice_mod_move", "payload": { "user_id": 7, "to_channel_id": 12 } }
 ```
 
+Authorized by either of two paths. A `MUTE_MEMBERS` holder moves members they
+strictly outrank, exactly as before `MOVE_MEMBERS` existed (no owner switch, no
+per-target limit). A `MOVE_MEMBERS` holder (base role, effective in the target's
+channel) may move a member of any rank, the owner included; the owner is skipped
+(`FORBIDDEN`, "the owner cannot be moved") while the owner-only setting
+`voice_owner_movable` is `false` (default `true`), and a move of a member of
+equal or higher rank is further limited to 3 per 30 seconds per target (a
+move that then fails at eviction still counts). An actor holding neither bit
+gets the same refusal whether the target is in voice or not. On every move the
+mover must also be able to see the destination channel; one they cannot see
+answers `NOT_FOUND` ("channel not found"), the same as a missing one.
+
 The destination is checked against the TARGET's `CONNECT_VOICE` and, outside a
 DM, `READ_MESSAGES` (a move must not place someone where they could not go
 themselves) and against the destination's `voice_max_users` (skipped when the
@@ -2814,6 +2844,14 @@ voice instead of moved").
 
 Sent only to the moved user. The client tears down its LiveKit session and joins
 `to_channel_id`.
+
+`by_user_id` is optional: the id of the moderator who made the move, so the
+client can tell the member who moved them. It is present on a moderator move and
+absent on the AFK sweep's, which has no actor. Older servers omit it.
+
+```json
+{ "type": "voice_moved", "payload": { "to_channel_id": 12, "by_user_id": 7 } }
+```
 
 `reason` is optional and absent on a moderator move. `"afk"` means the server's
 AFK sweep moved a member who had been idle (presence `idle`) in a server voice
@@ -3522,45 +3560,45 @@ tables below add per-type behavioral notes.
 
 ### Client -> Server (28 types)
 
-| Type                  | Rate Limit                           | Notes                                                           |
-| --------------------- | ------------------------------------ | --------------------------------------------------------------- |
-| `auth`                | N/A (first message)                  | Token + optional last_seq                                       |
-| `chat_send`           | 10/sec                               | + slow mode per channel                                         |
-| `chat_forward`        | 10/sec, then 5/10sec                 | One target per frame; `client_message_id` required; no pings    |
-| `poll_create`         | 10/sec, then 5/10min                 | `client_message_id` required; no pings                          |
-| `poll_vote`           | 10/10sec (shared with `poll_end`)    | Whole selection; idempotent                                     |
-| `poll_end`            | 10/10sec (shared with `poll_vote`)   | Author, or `MANAGE_MESSAGES`; DM author only                    |
-| `chat_edit`           | 10/sec                               | Own messages only                                               |
-| `chat_delete`         | 10/sec                               | Own or mod (non-DM)                                             |
-| `reaction_add`        | 5/sec                                |                                                                 |
-| `reaction_remove`     | 5/sec                                |                                                                 |
-| `typing_start`        | 1/3sec/channel                       | Silently dropped                                                |
-| `channel_focus`       | 5/sec (deferred, see above)          | Updates read state                                              |
-| `thread_focus`        | 5/sec, own budget (`RATE_LIMITED`)   | Second focus slot for a thread; marks it read                   |
-| `thread_create`       | 5/10min                              | `RATE_LIMITED`; a retry by the owner is free                    |
-| `thread_follow`       | 5/sec, own budget (`RATE_LIMITED`)   | Follow or unfollow a thread; idempotent                         |
-| `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus; answers `read_state`   |
-| `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)   | Moves the read pointer back; answers `read_state`               |
-| `presence_update`     | 1/10sec                              |                                                                 |
-| `activity_update`     | 1/10sec, own budget (`RATE_LIMITED`) | A set only; a clear and a repeat of the current one are free    |
-| `voice_join`          | 5/sec                                |                                                                 |
-| `voice_leave`         | 5/sec                                | Empty payload                                                   |
-| `voice_mute`          | 2/sec                                | Refused with `SERVER_MUTED` while server muted                  |
-| `voice_deafen`        | 2/sec                                | Refused with `SERVER_DEAFENED` while server deafened            |
-| `voice_camera`        | 2/sec                                | Requires USE_VIDEO                                              |
-| `voice_screenshare`   | 2/sec                                | Requires SHARE_SCREEN                                           |
-| `voice_mod_mute`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
-| `voice_mod_deafen`    | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
-| `voice_mod_move`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
-| `voice_mod_kick`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
-| `voice_token_refresh` | 1/60sec                              | Must be in voice                                                |
-| `voice_e2ee_announce` | 5/sec                                | ECDH pubkey announce                                            |
-| `voice_e2ee_offer`    | 64/sec outer, 5/sec per target       | Wrapped room key to target (budgeted per key rotation)          |
-| `voice_watch`         | 10/5sec                              | Must be in voice; screen shares watched, max 16 ids             |
-| `call_ring`           | 1/3sec                               | DM participants only; fans out as `call_incoming`               |
-| `call_decline`        | 1/3sec                               | DM participants only; fans out as `call_declined`               |
-| `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
-| `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
+| Type                  | Rate Limit                                                  | Notes                                                           |
+| --------------------- | ----------------------------------------------------------- | --------------------------------------------------------------- |
+| `auth`                | N/A (first message)                                         | Token + optional last_seq                                       |
+| `chat_send`           | 10/sec                                                      | + slow mode per channel                                         |
+| `chat_forward`        | 10/sec, then 5/10sec                                        | One target per frame; `client_message_id` required; no pings    |
+| `poll_create`         | 10/sec, then 5/10min                                        | `client_message_id` required; no pings                          |
+| `poll_vote`           | 10/10sec (shared with `poll_end`)                           | Whole selection; idempotent                                     |
+| `poll_end`            | 10/10sec (shared with `poll_vote`)                          | Author, or `MANAGE_MESSAGES`; DM author only                    |
+| `chat_edit`           | 10/sec                                                      | Own messages only                                               |
+| `chat_delete`         | 10/sec                                                      | Own or mod (non-DM)                                             |
+| `reaction_add`        | 5/sec                                                       |                                                                 |
+| `reaction_remove`     | 5/sec                                                       |                                                                 |
+| `typing_start`        | 1/3sec/channel                                              | Silently dropped                                                |
+| `channel_focus`       | 5/sec (deferred, see above)                                 | Updates read state                                              |
+| `thread_focus`        | 5/sec, own budget (`RATE_LIMITED`)                          | Second focus slot for a thread; marks it read                   |
+| `thread_create`       | 5/10min                                                     | `RATE_LIMITED`; a retry by the owner is free                    |
+| `thread_follow`       | 5/sec, own budget (`RATE_LIMITED`)                          | Follow or unfollow a thread; idempotent                         |
+| `mark_read`           | 5/sec, own budget (silently dropped)                        | Updates read state without moving focus; answers `read_state`   |
+| `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)                          | Moves the read pointer back; answers `read_state`               |
+| `presence_update`     | 1/10sec                                                     |                                                                 |
+| `activity_update`     | 1/10sec, own budget (`RATE_LIMITED`)                        | A set only; a clear and a repeat of the current one are free    |
+| `voice_join`          | 5/sec                                                       |                                                                 |
+| `voice_leave`         | 5/sec                                                       | Empty payload                                                   |
+| `voice_mute`          | 2/sec                                                       | Refused with `SERVER_MUTED` while server muted                  |
+| `voice_deafen`        | 2/sec                                                       | Refused with `SERVER_DEAFENED` while server deafened            |
+| `voice_camera`        | 2/sec                                                       | Requires USE_VIDEO                                              |
+| `voice_screenshare`   | 2/sec                                                       | Requires SHARE_SCREEN                                           |
+| `voice_mod_mute`      | 5/sec                                                       | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_deafen`    | 5/sec                                                       | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_move`      | 5/sec (and 3 per 30 sec per target of equal or higher rank) | AuthorizeVoiceModerator + outranks, or AuthorizeVoiceMover      |
+| `voice_mod_kick`      | 5/sec                                                       | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_token_refresh` | 1/60sec                                                     | Must be in voice                                                |
+| `voice_e2ee_announce` | 5/sec                                                       | ECDH pubkey announce                                            |
+| `voice_e2ee_offer`    | 64/sec outer, 5/sec per target                              | Wrapped room key to target (budgeted per key rotation)          |
+| `voice_watch`         | 10/5sec                                                     | Must be in voice; screen shares watched, max 16 ids             |
+| `call_ring`           | 1/3sec                                                      | DM participants only; fans out as `call_incoming`               |
+| `call_decline`        | 1/3sec                                                      | DM participants only; fans out as `call_declined`               |
+| `chat_command`        | 5/sec                                                       | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
+| `ping`                | 2/sec (silently dropped)                                    | Heartbeat                                                       |
 
 ### Server -> Client (46 types)
 

@@ -1001,6 +1001,66 @@ describe("Server/admin/static — upload file types", () => {
   });
 });
 
+// WP 8.4b: the owner-only switch for whether Move Members holders can move the owner.
+describe("Server/admin/static — voice_owner_movable switch", () => {
+  let dom: JSDOM | undefined;
+
+  afterEach(() => {
+    dom?.window?.close();
+    dom = undefined;
+  });
+
+  const toggle = (document: Document) =>
+    document.getElementById("s-voice_owner_movable") as HTMLButtonElement | null;
+
+  it("is on when the setting is unset, and saves only the flip, as a string", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+
+    const sw = toggle(document)!;
+    expect(sw.getAttribute("role")).toBe("switch");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(document.getElementById("s-voice_owner_movable-name")?.textContent).toBe(
+      "Members with Move Members can move the owner",
+    );
+    const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    sw.click();
+    expect(save.disabled).toBe(false);
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      voice_owner_movable: "false",
+    });
+  });
+
+  it("shows a stored false as off", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /settings": { json: { ...LOADED_SETTINGS, voice_owner_movable: "false" } },
+      }),
+    );
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    expect(toggle(dom.window.document)!.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("is not shown to anyone but the owner", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: false };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    expect(toggle(dom.window.document)).toBeNull();
+  });
+});
+
 describe("Server/admin/static — Updates page when apply is blocked", () => {
   let dom: JSDOM | undefined;
   const BLOCKED = {

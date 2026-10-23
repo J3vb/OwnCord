@@ -135,6 +135,9 @@ type VoiceDeps struct {
 	TokenGen  VoiceTokenGenerator // used by voice_token_refresh V2
 	KeyHolder KeyHolderChecker    // used by voice_token_refresh V2
 	Mod       VoiceModerator      // used by the voice moderation handlers
+	// Settings backs voice_mod_move's read of the owner-only
+	// voice_owner_movable switch. Nil fails closed (the owner is not moved).
+	Settings SettingsReader
 }
 
 // ── V2 permission helpers ───────────────────────────────────────────────────

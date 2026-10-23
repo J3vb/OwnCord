@@ -17,6 +17,7 @@ mod exit_watch;
 mod external_content;
 #[cfg(not(windows))]
 mod fallback_crypto;
+mod game_activity;
 mod http_pool;
 mod http_proxy;
 mod idle;
@@ -39,6 +40,8 @@ mod mouse_buttons;
 mod notification_bus;
 #[cfg(desktop)]
 mod popout;
+#[cfg(target_os = "linux")]
+mod portal_app_id;
 #[cfg(target_os = "linux")]
 mod portal_shortcuts;
 // Public: `examples/native_voice_interop.rs` drives the same session code.
@@ -263,6 +266,8 @@ pub fn run() {
             external_content::external_preview,
             external_content::external_image,
             idle::system_idle_ms,
+            game_activity::detect_game,
+            game_activity::list_running_programs,
             windows_app_audio::app_audio_available,
             windows_app_audio::start_app_audio,
             windows_app_audio::stop_app_audio,

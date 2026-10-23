@@ -6,6 +6,7 @@ import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/do
 import { loadPref, savePref, createToggle } from "./helpers";
 import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/shareFps";
 import { createLogger } from "@lib/logger";
+import { syncVideoSurface } from "@lib/videoSurface";
 import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../features/voice/autoPlayCameras";
 import {
   switchInputDevice,
@@ -1238,12 +1239,14 @@ function buildVoiceAudioTabInner(
     // still has a source among its pending activities, and it holds the whole
     // torn-down pane alive with it. Stopping the tracks does not release it.
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
   });
 
   function stopCameraPreview(): void {
     cameraRequestId += 1;
     registerCamera(null);
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
     setText(previewLabel, t("voiceAudio.previewOff"));
     previewLabel.hidden = false;
   }
@@ -1277,14 +1280,26 @@ function buildVoiceAudioTabInner(
     })();
   }
 
+  function previewDevice(deviceId: string): void {
+    stopCameraPreview();
+    stopNativeCameraPreview();
+    if (isLinuxDesktop()) void startNativeCameraPreview(deviceId);
+    else startCameraPreview(deviceId);
+  }
+
   videoSelect.addEventListener(
     "change",
     () => {
-      void switchVideoDevice(videoSelect.value);
-      stopCameraPreview();
-      stopNativeCameraPreview();
-      if (isLinuxDesktop()) void startNativeCameraPreview(videoSelect.value);
-      else startCameraPreview(videoSelect.value);
+      const picked = videoSelect.value;
+      void switchVideoDevice(picked).then(() => {
+        // The live camera could not use the pick and stayed on its device:
+        // show that one again.
+        const kept = loadPref<string>("videoInputDevice", "");
+        if (signal.aborted || kept === picked || videoSelect.value !== picked) return;
+        videoSelect.value = kept;
+        previewDevice(kept);
+      });
+      previewDevice(picked);
     },
     { signal },
   );
@@ -1368,6 +1383,7 @@ function buildVoiceAudioTabInner(
       const stream = new MediaStream([renderer.mediaStreamTrack]);
       registerCamera(stream);
       previewVideo.srcObject = stream;
+      syncVideoSurface(previewVideo);
       previewLabel.hidden = true;
       const stop = (): void => {
         renderer.dispose();
@@ -1394,6 +1410,7 @@ function buildVoiceAudioTabInner(
     activeNativePreview = null;
     registerNativePreview(() => {});
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
   }
 
   // Camera teardown on overlay close is already covered by the factory's

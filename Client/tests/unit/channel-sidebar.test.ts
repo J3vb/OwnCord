@@ -2433,6 +2433,75 @@ describe("ChannelSidebar", () => {
     expect((await reopen())!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
+  it("offers only Move to to a role whose verdict is can_move_voice without can_moderate_voice (WP 8.4b)", async () => {
+    const cb = voiceModCallbacks();
+    const channels: ReadyChannel[] = [
+      ...testChannels.map((ch) =>
+        ch.type === "voice" ? { ...ch, can_moderate_voice: false, can_move_voice: true } : ch,
+      ),
+      {
+        id: 5,
+        name: "voice-two",
+        type: "voice",
+        category: "Voice Channels",
+        position: 1,
+        can_moderate_voice: false,
+        can_move_voice: true,
+      },
+    ];
+    const menu = await openVoiceMenuAs(Permission.MOVE_MEMBERS, {}, cb, channels, null);
+    expect(menu!.querySelector('[data-action="move-to"]')).not.toBeNull();
+    expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="server-deafen"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="voice-disconnect"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
+    const target = menu!.querySelector<HTMLElement>('[data-move-channel="5"]');
+    expect(target).not.toBeNull();
+    target!.click();
+    expect(cb.onMove).toHaveBeenCalledWith(80, 5);
+  });
+
+  it("shows the full section when can_moderate_voice is true even if can_move_voice is false", async () => {
+    const channels = testChannels.map((ch) =>
+      ch.type === "voice" ? { ...ch, can_moderate_voice: true, can_move_voice: false } : ch,
+    );
+    const menu = await openVoiceMenuAs(
+      Permission.MUTE_MEMBERS,
+      {},
+      voiceModCallbacks(),
+      channels,
+      null,
+    );
+    expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
+    expect(menu!.querySelector('[data-action="voice-disconnect"]')).not.toBeNull();
+  });
+
+  it("offers nothing when both verdicts are false", async () => {
+    const channels = testChannels.map((ch) =>
+      ch.type === "voice" ? { ...ch, can_moderate_voice: false, can_move_voice: false } : ch,
+    );
+    const menu = await openVoiceMenuAs(
+      Permission.MOVE_MEMBERS,
+      {},
+      voiceModCallbacks(),
+      channels,
+      null,
+    );
+    expect(menu!.querySelector('[data-action="move-to"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
+  });
+
+  it("says why to a role holding MOVE_MEMBERS when the server gave no verdict", async () => {
+    const menu = await openVoiceMenuAs(
+      Permission.MOVE_MEMBERS,
+      {},
+      voiceModCallbacks(),
+      testChannels,
+      null,
+    );
+    expect(menu!.querySelector('[data-action="voice-mod-unavailable"]')).not.toBeNull();
+  });
+
   it("hides the moderation section when the page wired no callbacks", async () => {
     const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS);
     expect(menu).not.toBeNull();

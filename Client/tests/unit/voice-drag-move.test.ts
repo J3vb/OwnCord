@@ -25,12 +25,19 @@ import type { ReadyChannel } from "../../src/lib/types";
 const SELF_ID = 99;
 const TARGET_ID = 80;
 
-function channels(canModerate: boolean): ReadyChannel[] {
+function channels(canModerate: boolean, canMove?: boolean): ReadyChannel[] {
   return [
     { id: 3, name: "lobby", type: "voice", category: "Voice", position: 0 },
     { id: 4, name: "gaming", type: "voice", category: "Voice", position: 1 },
     { id: 1, name: "general", type: "text", category: "Text", position: 0 },
-  ].map((ch) => ({ ...ch, can_moderate_voice: canModerate }) as ReadyChannel);
+  ].map(
+    (ch) =>
+      ({
+        ...ch,
+        can_moderate_voice: canModerate,
+        ...(canMove === undefined ? {} : { can_move_voice: canMove }),
+      }) as ReadyChannel,
+  );
 }
 
 function joinVoice(channelId: number, userId: number, username: string): void {
@@ -72,8 +79,12 @@ describe("drag a voice user onto another channel (WP 1D-8)", () => {
   let onMove: ReturnType<typeof vi.fn<(userId: number, toChannelId: number) => void>>;
   let onReorderChannel: ReturnType<typeof vi.fn<(reorders: readonly ChannelReorderData[]) => void>>;
 
-  function mount(canModerate: boolean, alsoInLobby: readonly number[] = []): void {
-    setChannels(channels(canModerate));
+  function mount(
+    canModerate: boolean,
+    alsoInLobby: readonly number[] = [],
+    canMove?: boolean,
+  ): void {
+    setChannels(channels(canModerate, canMove));
     joinVoice(3, TARGET_ID, "Target");
     for (const id of alsoInLobby) joinVoice(3, id, `User ${id}`);
     joinVoice(3, SELF_ID, "Me");
@@ -141,6 +152,20 @@ describe("drag a voice user onto another channel (WP 1D-8)", () => {
     dragTargetTo(50, 420);
     expect(onMove).not.toHaveBeenCalled();
     expect(document.querySelector(".voice-user-drag-ghost")).toBeNull();
+  });
+
+  it("makes rows draggable and sends the move with only can_move_voice (WP 8.4b)", () => {
+    mount(false, [], true);
+    expect(row(TARGET_ID).classList.contains("voice-user-draggable")).toBe(true);
+    dragTargetTo(50, 420);
+    expect(onMove).toHaveBeenCalledWith(TARGET_ID, 4);
+  });
+
+  it("does not drag when both verdicts are false", () => {
+    mount(false, [], false);
+    expect(row(TARGET_ID).classList.contains("voice-user-draggable")).toBe(false);
+    dragTargetTo(50, 420);
+    expect(onMove).not.toHaveBeenCalled();
   });
 
   it("never offers the signed-in user's own row", () => {

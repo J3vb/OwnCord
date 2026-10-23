@@ -230,6 +230,10 @@ type voiceMovedPayload struct {
 	// Reason says why the server moved the client; "afk" for the idle sweep
 	// (WP 6.10b). Omitted for a moderator move, so those bytes are unchanged.
 	Reason string `json:"reason,omitempty"`
+	// ByUserID is the moderator who made the move (WP 8.4b), so the moved
+	// client can say who moved it. Omitted for the AFK sweep, which has no
+	// actor.
+	ByUserID int64 `json:"by_user_id,omitempty"`
 }
 
 // voiceMovedReasonAFK is voice_moved's reason for a move by the AFK sweep.
@@ -629,11 +633,12 @@ func buildVoiceState(state db.VoiceState) []byte {
 
 // buildVoiceMoved constructs a voice_moved message for the moved client.
 //
-// reason is "" for a moderator move and "afk" for the AFK sweep's.
-func buildVoiceMoved(toChannelID int64, reason string) []byte {
+// reason is "" for a moderator move and "afk" for the AFK sweep's. byUserID is
+// the moderator's id, 0 (omitted) for the sweep.
+func buildVoiceMoved(toChannelID int64, reason string, byUserID int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceMoved,
-		Payload: voiceMovedPayload{ToChannelID: toChannelID, Reason: reason},
+		Payload: voiceMovedPayload{ToChannelID: toChannelID, Reason: reason, ByUserID: byUserID},
 	})
 }
 
@@ -721,6 +726,7 @@ func buildChannelCreateFor(ch *db.Channel, private bool, a channelAffordances) [
 	p := channelPayloadFrom(ch, private)
 	p.CanSend = &a.CanSend
 	p.CanModerateVoice = &a.CanModerateVoice
+	p.CanMoveVoice = &a.CanMoveVoice
 	p.CanDeleteOthers = &a.CanDeleteOthers
 	p.CanPin = &a.CanPin
 	p.CanReact = &a.CanReact

@@ -96,7 +96,7 @@ Planning documents are not trackers. Do not read a defect count out of one.
 | Phase order and gates      | [repo-health-roadmap-2026-08-23](../archive/plans/repo-health-roadmap-2026-08-23.md) |
 | Current measured baseline  | [b9-entry-baseline-2026-09-23](../archive/plans/b9-entry-baseline-2026-09-23.md)     |
 
-Current ledger summary (updated 2026-10-17): **479 fixed / 4 open / 7 declined / 1 refuted / 1 duplicate = 492**
+Current ledger summary (updated 2026-10-23): **482 fixed / 4 open / 7 declined / 1 refuted / 1 duplicate = 495**
 (The B9 exit audit is filed as `OC-0460`–`OC-0479`: thirteen findings fixed by
 PRs [#1802](https://github.com/J3vb/OwnCord/pull/1802),
 [#1798](https://github.com/J3vb/OwnCord/pull/1798) and
