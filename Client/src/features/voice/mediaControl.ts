@@ -402,9 +402,13 @@ export class MediaControl {
         if (failed()) {
           log.warn("Camera restart on the picked device failed, starting the previous one");
           const back = this.latestVideoDevice === deviceId;
-          keepPrevious();
-          // On the previous device, or on a pick made meanwhile.
+          const newer = this.latestVideoDevice;
+          // Start on the previous device. A pick made meanwhile stays the
+          // saved choice and its queued switch moves the camera on from here.
+          savePref("videoInputDevice", previous);
           await this.enableCamera();
+          if (back) keepPrevious();
+          else if (newer !== null) savePref("videoInputDevice", newer);
           if (!failed() && back) {
             this.onErrorCallback?.(voiceText("share.cameraSwitchFailed"));
           }
@@ -430,6 +434,8 @@ export class MediaControl {
         } catch (err) {
           if (err instanceof CameraDeviceUnusable) {
             log.warn("Picked camera gave no picture, keeping the live one", err);
+            // A newer pick queued meanwhile moves the camera on: no message.
+            if (this.latestVideoDevice !== deviceId) return;
             keepPrevious();
             this.onErrorCallback?.(voiceText("share.cameraSwitchFailed"));
             return;

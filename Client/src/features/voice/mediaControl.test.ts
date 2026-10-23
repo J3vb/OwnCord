@@ -361,6 +361,49 @@ describe("switchVideoDevice", () => {
     expect(bumpLocalCameraRev).toHaveBeenCalledTimes(1);
   });
 
+  it("a pick made during a failing restart still goes back to the previous camera first", async () => {
+    const camera: { manualCameraTrack: unknown } = {
+      manualCameraTrack: nativeTrack(new CameraSwitchUnavailable("busy")),
+    };
+    let media!: MediaControl;
+    const saved: string[] = [];
+    vi.mocked(savePref).mockImplementation((_key, value) => {
+      saved.push(value as string);
+    });
+    vi.mocked(enableCamera)
+      .mockImplementationOnce(async (_state, deps) => {
+        // The user picks another camera while this one is still starting.
+        void media.switchVideoDevice("/dev/video4");
+        camera.manualCameraTrack = null;
+        deps.onError("held");
+      })
+      .mockImplementationOnce(async () => {
+        camera.manualCameraTrack = { capture: 3 };
+      });
+    const made = setup(fakeRoom(), camera);
+    media = made.media;
+    await media.switchVideoDevice("/dev/video2");
+    // Back on the previous camera, with the newer pick left as the choice.
+    expect(saved).toEqual(["/dev/video2", "/dev/video4", "/dev/video0", "/dev/video4"]);
+    expect(disableCamera).not.toHaveBeenCalled();
+    expect(made.onError).not.toHaveBeenCalled();
+    vi.mocked(savePref).mockReset();
+  });
+
+  it("an unusable pick with a newer pick queued says nothing and keeps the newer choice", async () => {
+    const track = nativeTrack(new CameraDeviceUnusable("no frame"));
+    let media!: MediaControl;
+    track.setDeviceId.mockImplementationOnce(async () => {
+      void media.switchVideoDevice("/dev/video4");
+      throw new CameraDeviceUnusable("no frame");
+    });
+    const made = setup(fakeRoom(), { manualCameraTrack: track });
+    media = made.media;
+    await media.switchVideoDevice("/dev/video2");
+    expect(savePref).toHaveBeenLastCalledWith("videoInputDevice", "/dev/video4");
+    expect(made.onError).not.toHaveBeenCalled();
+  });
+
   it("when the previous camera fails too, the camera goes off with the failure", async () => {
     const camera: { manualCameraTrack: unknown } = {
       manualCameraTrack: nativeTrack(new CameraSwitchUnavailable("busy")),
