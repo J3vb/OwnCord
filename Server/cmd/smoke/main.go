@@ -5,7 +5,9 @@
 //     self-signed certificate, migrates a fresh SQLite database;
 //  2. reach healthy through the binary's own `healthcheck` subcommand;
 //  3. drain on a graceful stop and exit 0 inside the drain budget;
-//  4. restart against the SAME directory and reach healthy again.
+//  4. restart against the SAME directory and reach healthy again;
+//  5. with -browser-client, boot once more with the browser client enabled and
+//     GET / (an HTML page with a module script) and that script from /assets/.
 //
 // Phase 4 is the one phase 1 cannot cover: a non-idempotent migration, a lock
 // the drain failed to release, or state only a first boot creates. That is the
@@ -24,8 +26,13 @@
 // which is a different question from "does the new asset boot" (B6-8). Both
 // deployment modes share one fixture through the target seam in target.go.
 //
+// Phase 5 is what makes a release asset provably carry the browser client: the
+// bundle is embedded at build time, and a build that missed it still boots and
+// drains cleanly, serving a not-found note at /.
+//
 // Usage: go run ./cmd/smoke <path-to-server-binary>
 //
+//	go run ./cmd/smoke -browser-client <path-to-server-binary>
 //	go run ./cmd/smoke -upgrade -from <old-binary> <new-binary>
 //	go run ./cmd/smoke -upgrade -docker -from <old-image> <new-image>
 //	go run ./cmd/smoke -drills -data-fs <dir> <path-to-server-binary>
@@ -58,6 +65,7 @@ func main() {
 	phases := flag.String("phases", "", "which drill phases to run — any of R, C, D, S (default: all of them)")
 	dataFS := flag.String("data-fs", "", "the size-limited filesystem phase D fills; without it phase D is skipped")
 	findings := flag.String("known-findings", "", "comma-separated OPEN OC-* ledger ids a release-path run may downgrade to ::warning::; the ids are validated against the ledger, but no drill failure carries a ledger id yet, so the flag is inert until one does")
+	browserClient := flag.Bool("browser-client", false, "after the restart, boot with the browser client enabled and check the binary serves its bundle (plain standalone mode only)")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -71,13 +79,18 @@ func main() {
 		docker:     *useDocker,
 		from:       *from,
 		drillFlags: *phases != "" || *dataFS != "" || *findings != "",
+
+		browserClient: *browserClient,
 	}).validate(); err != nil {
 		usageError("%v", err)
 	}
 	args := flag.Args()
 
-	action := func() error { return run(args[0]) }
+	action := func() error { return run(args[0], *browserClient) }
 	summary := "standalone smoke passed: boot, migrate, healthy, drain, restart"
+	if *browserClient {
+		summary += ", browser client"
+	}
 	if *upgrade {
 		action = func() error { return runUpgrade(*from, args[0], *useDocker) }
 		summary = "upgrade rehearsal passed"
@@ -127,6 +140,8 @@ type invocation struct {
 	docker     bool
 	from       string
 	drillFlags bool // -phases, -data-fs or -known-findings was set
+
+	browserClient bool // -browser-client
 }
 
 // validate names the first thing wrong with the invocation, or nil. Returning
@@ -146,12 +161,14 @@ func (in invocation) validate() error {
 		return fmt.Errorf("-docker is only meaningful together with -upgrade or -drills")
 	case !in.drills && in.drillFlags:
 		return fmt.Errorf("-phases, -data-fs and -known-findings are only meaningful together with -drills")
+	case in.browserClient && (in.upgrade || in.drills || in.docker):
+		return fmt.Errorf("-browser-client is only meaningful in the plain standalone smoke, not with -upgrade, -drills or -docker")
 	}
 	return nil
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: smoke <path-to-server-binary>")
+	fmt.Fprintln(os.Stderr, "usage: smoke [-browser-client] <path-to-server-binary>")
 	fmt.Fprintln(os.Stderr, "       smoke -upgrade -from <old-binary> <new-binary>")
 	fmt.Fprintln(os.Stderr, "       smoke -upgrade -docker -from <old-image> <new-image>")
 	fmt.Fprintln(os.Stderr, `       smoke -drills [-phases RCDS] [-data-fs <dir>] [-known-findings <ids>] <path-to-server-binary>`)
@@ -167,7 +184,7 @@ func usageError(format string, args ...any) {
 	os.Exit(2)
 }
 
-func run(binArg string) error {
+func run(binArg string, browserClient bool) error {
 	bin, err := serverBinary(binArg)
 	if err != nil {
 		return err
@@ -233,7 +250,15 @@ func run(binArg string) error {
 	}
 	fmt.Println("restart: reused the existing config and database")
 
-	return second.drain("restart drain")
+	if err := second.drain("restart drain"); err != nil {
+		return err
+	}
+	if !browserClient {
+		return nil
+	}
+
+	// --- Phase 5: the binary serves the browser client ----------------------
+	return runBrowserClient(bin, dir)
 }
 
 // server is one launched instance and the log it is writing to.

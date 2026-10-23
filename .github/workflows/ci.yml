@@ -1673,6 +1673,12 @@ jobs:
         uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
       - name: Test the web portal against a real server
         run: npm run test:e2e:web
+      # The binary that run built has the web bundle embedded and is still on
+      # disk. Release smokes the shipped assets the same way, so this exercises
+      # the -browser-client path before a tag does.
+      - name: Smoke the web-embedded server binary
+        working-directory: Server/
+        run: go run ./cmd/smoke -browser-client ../Client/tests/e2e/.bin/chatserver
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:

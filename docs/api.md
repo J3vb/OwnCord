@@ -3693,10 +3693,12 @@ a given wire contract reports the same number. The version is available on the
 admin-authenticated `GET /api/v1/diagnostics/connectivity`.
 
 **`browser_client_enabled: true` does not mean a client is being served.** The
-flag reports the operator's setting; the bundle, its route and its own CSP
-arrive in B8. Until then no route is mounted and no asset is served in either
-state — `Server/api/browser_hosting_posture_test.go` proves it by route walk and
-by wire probe.
+flag reports the operator's setting, not the build. Release builds embed the
+browser client, but a build from source without the bundle answers `GET /` with
+a 404 note even when the flag is on. With the flag off, no route is mounted and
+no asset is served in any build —
+`Server/api/browser_hosting_posture_test.go` proves it by route walk and by
+wire probe.
 
 ---
 

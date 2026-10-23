@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+**Server (operators)**
+
+- Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.
+
 ## v2.4.0-beta.1
 
 **OwnCord 2.4 beta 1** (the fifth public beta) is the community release of the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds threads, forum channels, polls, message forwarding, several roles per member, nicknames, real channel categories, an AFK channel and much fuller group DMs. Chat, the member list and Settings work much more like Discord's, the Linux app catches up with Windows, and self-hosting gets sturdier: fewer ports for Docker, safer backup restores and Prometheus metrics.
