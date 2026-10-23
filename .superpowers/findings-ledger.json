@@ -1,5 +1,5 @@
 {
-  "nextId": 493,
+  "nextId": 494,
   "findings": [
     {
       "id": "OC-0001",
@@ -11392,6 +11392,29 @@
       "lens": "perf",
       "finder": "wp-4.2-scale-run",
       "note": "Roadmap Phase 4, WP 4.2."
+    },
+    {
+      "id": "OC-0493",
+      "title": "On Linux native voice opened a new sound-server connection for every device listing, device switch and watcher, and never released it, so desktop audio stopped working after a long session",
+      "file": "Client/src-tauri/src/native_voice/playout.rs",
+      "line": 361,
+      "severity": "high",
+      "why": "Each cpal host built by native voice (device lists, capture start and device changes, playout switches, and one per watcher and app-sound player, plus every rebuild) holds a PulseAudio client whose reactor thread sleeps until the server sends something. Dropping an idle host left the client, its thread and three file descriptors open until the process exited, so the sound server eventually refused new clients.",
+      "repro": "Linux desktop client with a PulseAudio or PipeWire-Pulse server: join and leave voice channels and open Settings > Voice repeatedly while counting the sound server's clients (pactl list clients) and the process's threads.",
+      "evidence": "Linux test 2026-10-23: about five clients per join that never fell; after roughly 40 minutes new streams were refused. Local PulseAudio probe: five playout start/stop cycles plus two default-sink moves left 7 clients, 7 extra threads and 21 extra fds before the fix; after it the count stays flat at one client per role in use (devices, capture, playout).",
+      "suggestedFix": "Share one host per backend and role (devices, capture, playout) for the whole process and replace it only after its connection died.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-23",
+      "hunt": "linux-test-2026-10-23",
+      "lens": "resource-leak",
+      "finder": "linux-test",
+      "fixedDate": "2026-10-23",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/playout.rs (host_pool_* tests: build once, never drop a live host, rebuild a dead one once, take a replacement stored meanwhile, racing callers build once)",
+        "revertProof": "the local PulseAudio probe above, run on dev and on the fix"
+      }
     }
   ]
 }

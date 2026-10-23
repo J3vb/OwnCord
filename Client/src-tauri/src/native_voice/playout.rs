@@ -11,7 +11,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::thread::JoinHandle as Thread;
 use std::time::Duration;
 
@@ -308,7 +308,7 @@ pub(super) fn output_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device
 }
 
 pub fn list_outputs() -> Vec<DeviceInfo> {
-    output_devices(&cpal::default_host())
+    output_devices(&shared_default_host(Role::Devices))
         .into_iter()
         .map(|(i, _)| i)
         .collect()
@@ -342,7 +342,7 @@ fn rank(id: cpal::HostId) -> usize {
 }
 
 /// The best backend among `available` when it ranks above `current`, or is
-/// `current` itself and `same_too` asks for a fresh one of it.
+/// `current` itself and `same_too` asks for a live one of it.
 fn better_backend(
     current: cpal::HostId,
     available: &[cpal::HostId],
@@ -352,26 +352,129 @@ fn better_backend(
     (rank(best) < rank(current) || (same_too && best == current)).then_some(best)
 }
 
+/// Process-wide hosts, one per backend. A PulseAudio host runs a reactor
+/// thread that sleeps until the server sends something and only then notices
+/// its handles are gone, so dropping an idle host leaves its server client,
+/// thread and three fds behind until the process exits. Every caller therefore
+/// shares one host per backend and role, and a host is replaced only after its
+/// connection died (when the reactor has already exited, so dropping it frees
+/// everything).
+pub(super) struct HostPool<K, H> {
+    slots: Mutex<Vec<(K, Arc<H>)>>,
+}
+
+impl<K, H> Default for HostPool<K, H> {
+    fn default() -> Self {
+        Self {
+            slots: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl<K: Copy + PartialEq, H> HostPool<K, H> {
+    /// The pooled host for `id`, built when the slot is empty and rebuilt
+    /// only when `alive` says its connection died. `None` when a build fails.
+    /// `alive` is a server round trip, so it runs outside the lock; a caller
+    /// that finds the slot changed meanwhile takes what another caller just
+    /// stored, so racing callers build once and a live host is never dropped.
+    pub(super) fn live(
+        &self,
+        id: K,
+        build: impl FnOnce() -> Option<H>,
+        alive: impl Fn(&H) -> bool,
+    ) -> Option<Arc<H>> {
+        let find =
+            |slots: &[(K, Arc<H>)]| slots.iter().find(|(k, _)| *k == id).map(|(_, h)| h.clone());
+        let seen = find(&lock(&self.slots));
+        if let Some(host) = seen.as_ref().filter(|h| alive(h)) {
+            return Some(host.clone());
+        }
+        let mut slots = lock(&self.slots);
+        let stored = find(&slots);
+        match (&stored, &seen) {
+            (Some(now), Some(then)) if Arc::ptr_eq(now, then) => {}
+            (Some(now), _) => return Some(now.clone()),
+            (None, _) => {}
+        }
+        // Bounded by cpal's own connect timeout.
+        let fresh = Arc::new(build()?);
+        match slots.iter_mut().find(|(k, _)| *k == id) {
+            Some(slot) => slot.1 = fresh.clone(),
+            None => slots.push((id, fresh.clone())),
+        }
+        Some(fresh)
+    }
+}
+
+/// Which pooled connection a caller shares. PulseAudio runs every stream's
+/// callbacks on its connection's one reactor thread, so capture and playout
+/// keep a connection each (as they had before the pool) and capture
+/// processing never delays what is played; listings and the hot-plug poll
+/// share a third.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Role {
+    Devices,
+    Capture,
+    Playout,
+}
+
+static HOSTS: LazyLock<HostPool<(cpal::HostId, Role), cpal::Host>> =
+    LazyLock::new(HostPool::default);
+
+/// The pooled host for backend `id`. Only a lost connection counts as dead: a
+/// live host dropped over any other error would leak again. ALSA has no
+/// connection to die.
+fn pooled_host(id: cpal::HostId, role: Role) -> Option<Arc<cpal::Host>> {
+    HOSTS.live(
+        (id, role),
+        || cpal::host_from_id(id).ok(),
+        |host| {
+            id != cpal::HostId::PulseAudio
+                || host.devices().map_or_else(
+                    |e| {
+                        !matches!(
+                            e.kind(),
+                            cpal::ErrorKind::StreamInvalidated | cpal::ErrorKind::HostUnavailable
+                        )
+                    },
+                    |_| true,
+                )
+        },
+    )
+}
+
+/// What `cpal::default_host()` picks (the best backend that is up, in cpal's
+/// own order), through the pool. Only when not even ALSA builds does it fall
+/// back to cpal's own, unpooled pick.
+pub(super) fn shared_default_host(role: Role) -> Arc<cpal::Host> {
+    let mut up = cpal::available_hosts();
+    up.sort_by_key(|h| rank(*h));
+    up.into_iter()
+        .find_map(|id| pooled_host(id, role))
+        .unwrap_or_else(|| Arc::new(cpal::default_host()))
+}
+
 /// The sound-server host a watcher polls and reopens through. A sound-server
-/// restart kills a host's connection for good, so it is rebuilt; but while
-/// the server is down cpal's default is ALSA, whose constant `default` device
-/// would hide every later move of the real default, so a rebuild never
-/// settles on a lower backend than the one in use, and a lower one in use is
-/// replaced as soon as the preferred backend is back.
-pub(super) struct WatchedHost(Mutex<cpal::Host>);
+/// restart kills a host's connection for good, so it is rebuilt (once, in the
+/// shared pool); but while the server is down cpal's default is ALSA, whose
+/// constant `default` device would hide every later move of the real default,
+/// so a rebuild never settles on a lower backend than the one in use, and a
+/// lower one in use is replaced as soon as the preferred backend is back.
+pub(super) struct WatchedHost(Mutex<Arc<cpal::Host>>, Role);
 
 impl WatchedHost {
-    pub(super) fn new() -> Arc<Self> {
-        Arc::new(Self(Mutex::new(cpal::default_host())))
+    pub(super) fn new(role: Role) -> Arc<Self> {
+        Arc::new(Self(Mutex::new(shared_default_host(role)), role))
     }
 
-    /// `f` over a fresh connection to the best backend up now, no lower than
-    /// the one in use, which then serves the polls. `None` while only a lower
-    /// backend answers (the sound server is still restarting).
+    /// `f` over a live connection to the best backend up now, no lower than
+    /// the one in use (rebuilt only if the old one died), which then serves
+    /// the polls. `None` while only a lower backend answers (the sound server
+    /// is still restarting).
     pub(super) fn reopen<R>(&self, f: impl FnOnce(&cpal::Host) -> R) -> Option<R> {
         let mut host = lock(&self.0);
         let id = better_backend(host.id(), &cpal::available_hosts(), true)?;
-        let fresh = cpal::host_from_id(id).ok()?;
+        let fresh = pooled_host(id, self.1)?;
         let result = f(&fresh);
         *host = fresh;
         Some(result)
@@ -383,8 +486,9 @@ impl WatchedHost {
     }
 
     /// The id of the default device per `default`. A host that does not
-    /// answer is rebuilt so the next poll asks a live connection, and a
-    /// fallback backend is replaced once the preferred one is back.
+    /// answer is replaced by a live one so the next poll asks a live
+    /// connection, and a fallback backend is replaced once the preferred one
+    /// is back.
     pub(super) fn default_id(
         &self,
         default: impl Fn(&cpal::Host) -> Option<cpal::Device>,
@@ -394,7 +498,7 @@ impl WatchedHost {
             .and_then(|d| d.id().ok())
             .map(|d| d.to_string());
         if let Some(better) = better_backend(host.id(), &cpal::available_hosts(), id.is_none()) {
-            if let Ok(fresh) = cpal::host_from_id(better) {
+            if let Some(fresh) = pooled_host(better, self.1) {
                 *host = fresh;
             }
         }
@@ -481,7 +585,7 @@ impl Playout {
 
     /// Open/reopen the stream for `id` (empty re-resolves the default).
     fn switch(&self, id: &str) -> Result<(), String> {
-        let host = cpal::default_host();
+        let host = shared_default_host(Role::Playout);
         let reference = self.reference.clone();
         let fell_back = switch_output(
             &mut lock(&self.output),
@@ -506,7 +610,7 @@ impl Playout {
     }
 
     fn start_watcher(&self) -> Watcher {
-        let host = WatchedHost::new();
+        let host = WatchedHost::new(Role::Playout);
         let poll_host = host.clone();
         let output = self.output.clone();
         let mixer = self.mixer.clone();
@@ -829,6 +933,141 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stand-in host: counts what the pool builds and drops, and is alive
+    /// until `dead` is set.
+    struct FakeHost {
+        dead: AtomicBool,
+        dropped: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Drop for FakeHost {
+        fn drop(&mut self) {
+            self.dropped.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[derive(Default)]
+    struct Counters {
+        built: Arc<std::sync::atomic::AtomicUsize>,
+        dropped: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Counters {
+        fn build(&self) -> Option<FakeHost> {
+            self.built.fetch_add(1, Ordering::SeqCst);
+            Some(FakeHost {
+                dead: AtomicBool::new(false),
+                dropped: self.dropped.clone(),
+            })
+        }
+        fn built(&self) -> usize {
+            self.built.load(Ordering::SeqCst)
+        }
+        fn dropped(&self) -> usize {
+            self.dropped.load(Ordering::SeqCst)
+        }
+    }
+
+    fn alive(h: &FakeHost) -> bool {
+        !h.dead.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn host_pool_builds_once_and_reuses_the_same_host() {
+        let (pool, c) = (HostPool::<u8, FakeHost>::default(), Counters::default());
+        let first = pool.live(1, || c.build(), alive).unwrap();
+        let second = pool.live(1, || c.build(), alive).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(c.built(), 1);
+        pool.live(2, || c.build(), alive).unwrap();
+        assert_eq!(c.built(), 2, "another backend gets its own slot");
+    }
+
+    #[test]
+    fn host_pool_never_drops_a_live_host() {
+        let (pool, c) = (HostPool::<u8, FakeHost>::default(), Counters::default());
+        for _ in 0..20 {
+            drop(pool.live(1, || c.build(), alive).unwrap());
+        }
+        assert_eq!((c.built(), c.dropped()), (1, 0));
+    }
+
+    #[test]
+    fn host_pool_rebuilds_a_dead_host_once_then_reuses_the_replacement() {
+        let (pool, c) = (HostPool::<u8, FakeHost>::default(), Counters::default());
+        let old = pool.live(1, || c.build(), alive).unwrap();
+        old.dead.store(true, Ordering::SeqCst);
+        let fresh = pool.live(1, || c.build(), alive).unwrap();
+        assert!(!Arc::ptr_eq(&old, &fresh));
+        assert!(Arc::ptr_eq(
+            &fresh,
+            &pool.live(1, || c.build(), alive).unwrap()
+        ));
+        assert_eq!(c.built(), 2);
+        drop(old);
+        assert_eq!(c.dropped(), 1, "only the dead host is released");
+    }
+
+    #[test]
+    fn host_pool_keeps_the_dead_host_when_the_rebuild_fails() {
+        let pool = HostPool::<u8, FakeHost>::default();
+        let c = Counters::default();
+        let old = pool.live(1, || c.build(), alive).unwrap();
+        old.dead.store(true, Ordering::SeqCst);
+        assert!(pool.live(1, || None, alive).is_none());
+        assert_eq!(c.dropped(), 0);
+        assert!(pool.live(1, || c.build(), alive).is_some());
+    }
+
+    #[test]
+    fn host_pool_returns_the_replacement_stored_while_it_checked() {
+        let (pool, c) = (HostPool::<u8, FakeHost>::default(), Counters::default());
+        let dead = pool.live(1, || c.build(), alive).unwrap();
+        dead.dead.store(true, Ordering::SeqCst);
+        // Another caller replaces the dead host while this one checks it.
+        let replaced = Mutex::new(None);
+        let got = pool
+            .live(
+                1,
+                || panic!("the replacement must be taken, not built again"),
+                |_| {
+                    *lock(&replaced) = pool.live(1, || c.build(), alive);
+                    false
+                },
+            )
+            .unwrap();
+        assert!(Arc::ptr_eq(&got, lock(&replaced).as_ref().unwrap()));
+        assert_eq!(c.built(), 2);
+    }
+
+    #[test]
+    fn host_pool_racing_callers_build_exactly_once() {
+        for dead_first in [false, true] {
+            let pool = Arc::new(HostPool::<u8, FakeHost>::default());
+            let c = Arc::new(Counters::default());
+            if dead_first {
+                pool.live(1, || c.build(), alive)
+                    .unwrap()
+                    .dead
+                    .store(true, Ordering::SeqCst);
+            }
+            let before = c.built();
+            let gate = Arc::new(std::sync::Barrier::new(8));
+            let threads: Vec<_> = (0..8)
+                .map(|_| {
+                    let (pool, c, gate) = (pool.clone(), c.clone(), gate.clone());
+                    std::thread::spawn(move || {
+                        gate.wait();
+                        pool.live(1, || c.build(), alive).unwrap()
+                    })
+                })
+                .collect();
+            let hosts: Vec<_> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+            assert_eq!(c.built() - before, 1);
+            assert!(hosts.iter().all(|h| Arc::ptr_eq(h, &hosts[0])));
+        }
+    }
 
     /// `fill_with` over the mixer and reference, as `open_output` wires them.
     fn fill<T>(
