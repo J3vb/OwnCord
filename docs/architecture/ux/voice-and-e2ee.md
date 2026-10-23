@@ -385,7 +385,15 @@ trust action entirely (a blind accept is refused).
   unmasked renderer names a non-Intel GPU, else VP8: livekit-client 2.22.3
   cannot decrypt Intel Quick Sync H.264 (livekit/client-sdk-js#2140), so a
   manual H.264 choice carries a warning. The Linux native engine always
-  publishes VP8 and the setting is hidden there.
+  publishes VP8 and the setting is hidden there. In the Windows app on a
+  non-Intel GPU an H.264 camera or share offers only H.264 Main and High
+  (`lib/h264Profile.ts`, codec preferences set on every offer): WebView2
+  encodes those on the GPU but Constrained Baseline only in software, and
+  LiveKit answers Constrained Baseline first when it is offered. A saved
+  H.264 there skips the `encodingInfo` probe, which always reports software
+  in WebView2. The 120 fps share option is hidden for now
+  (`lib/shareFps.ts`): WebView2's capture delivers about 60 fps, and a saved
+  120 reads as 60.
 - **Sensitivity gate:** `public/vad-worklet.js` on the processor's tap
   (`startVadDetector`, with a setTimeout fallback of the same timing). It
   opens after about 32 ms of sustained level, so a mouse click does not open
