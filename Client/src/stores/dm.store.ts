@@ -6,7 +6,6 @@
 import { createStore } from "@lib/store";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import { channelsStore, removeChannel } from "@stores/channels.store";
-import { membersStore } from "@stores/members.store";
 import type { Channel } from "@stores/channels.store";
 import type { DmChannelPayload } from "@lib/types";
 import { connectText } from "../i18n/connect";
@@ -76,6 +75,26 @@ export function setDmChannels(channels: readonly DmChannel[]): void {
   dmStore.setState(() => ({ channels }));
 }
 
+/** Where a DM learns the game presence already gave someone (WP 8.3). Set by
+ *  the channels' ws handlers, which own the members store; unset = unknown. */
+let knownActivity: (userId: number) => DmUser["activity"] = () => undefined;
+
+export function setDmActivityLookup(lookup: (userId: number) => DmUser["activity"]): void {
+  knownActivity = lookup;
+}
+
+/**
+ * A DM summary carries no game (WP 8.3), so a person the payload left without
+ * one keeps the game this DM already showed, else the one presence gave them.
+ * A DM opened after `ready` then shows a partner who is already playing.
+ */
+function withKnownActivity(user: DmUser, prior: DmChannel | undefined): DmUser {
+  if (user.activity !== undefined) return user;
+  const shown = prior?.participants.find((p) => p.id === user.id)?.activity;
+  const known = shown !== undefined ? shown : knownActivity(user.id);
+  return known === undefined ? user : { ...user, activity: known };
+}
+
 /**
  * Add or update a single DM channel (from a `dm_channel_open` event).
  *
@@ -88,20 +107,6 @@ export function setDmChannels(channels: readonly DmChannel[]): void {
  * messages incremented), and a genuine reopen has nothing to lose: its local
  * count is zero too.
  */
-/**
- * A DM summary carries no game (WP 8.3), so a person the payload left without
- * one keeps the game this DM already showed, else the one presence gave the
- * members store. A DM opened after `ready` then shows a partner who is already
- * playing.
- */
-function withKnownActivity(user: DmUser, prior: DmChannel | undefined): DmUser {
-  if (user.activity !== undefined) return user;
-  const shown = prior?.participants.find((p) => p.id === user.id)?.activity;
-  const known =
-    shown !== undefined ? shown : membersStore.getState().members.get(user.id)?.activity;
-  return known === undefined ? user : { ...user, activity: known };
-}
-
 export function addDmChannel(incoming: DmChannel): void {
   dmStore.setState((prev) => {
     const existing = prev.channels.find((c) => c.channelId === incoming.channelId);

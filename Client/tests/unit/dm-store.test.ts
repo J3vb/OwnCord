@@ -9,10 +9,10 @@ import {
   updateDmLastMessagePreview,
   clearDmUnread,
   updateDmParticipant,
+  setDmActivityLookup,
 } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { channelsStore } from "../../src/stores/channels.store";
-import { membersStore, resetMembersStore } from "../../src/stores/members.store";
 import type { Channel } from "../../src/stores/channels.store";
 
 function makeMirrorChannel(overrides: Partial<Channel> = {}): Channel {
@@ -86,27 +86,12 @@ describe("dmStore", () => {
 
   describe("addDmChannel", () => {
     it("seeds a new DM's partner with the game presence already gave them", () => {
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [
-            1,
-            {
-              id: 1,
-              username: "alice",
-              avatar: null,
-              role: "member",
-              status: "online",
-              activity: { name: "Factorio", startedAt: 1_000 },
-            },
-          ],
-        ]),
-      }));
+      setDmActivityLookup((id) => (id === 1 ? { name: "Factorio", startedAt: 1_000 } : undefined));
       addDmChannel(makeDm());
       const dm = dmStore.getState().channels[0]!;
       expect(dm.recipient.activity).toEqual({ name: "Factorio", startedAt: 1_000 });
       expect(dm.participants[0]?.activity).toEqual({ name: "Factorio", startedAt: 1_000 });
-      resetMembersStore();
+      setDmActivityLookup(() => undefined);
     });
 
     it("keeps the game a re-sent DM already showed", () => {

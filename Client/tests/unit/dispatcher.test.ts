@@ -1427,6 +1427,26 @@ describe("WS Dispatcher", () => {
       });
       expect(shown()?.name).toBe("Factorio");
     });
+
+    it("a DM opened after ready shows the game its partner is already playing", () => {
+      dmStore.setState(() => ({ channels: [] }));
+      mock.dispatch("ready", {
+        channels: [],
+        members: [{ id: 10, username: "bob", avatar: null, role: "member", status: "online" }],
+        activities: [{ user_id: 10, ...factorio }],
+        voice_states: [],
+        roles: [],
+      });
+      mock.dispatch("dm_channel_open", {
+        channel_id: 51,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+      expect(dmStore.getState().channels[0]?.recipient.activity?.name).toBe("Factorio");
+    });
   });
 
   it("wires user_update display_name into the member store", () => {

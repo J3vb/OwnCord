@@ -24,10 +24,16 @@ import {
   updatePresence,
   applyPresenceBatch,
   applyReadyActivities,
+  membersStore,
   toMemberActivity,
 } from "../../stores/members.store";
 import { updateVoiceUserProfile } from "../../stores/voice.store";
-import { dmStore, updateDmParticipant, type DmUser } from "../../stores/dm.store";
+import {
+  dmStore,
+  setDmActivityLookup,
+  updateDmParticipant,
+  type DmUser,
+} from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { uiStore } from "../../stores/ui.store";
 import { getChannelMessages } from "../../stores/messages.store";
@@ -295,6 +301,8 @@ export function applyReadyEmoji(api: DispatchApi | undefined): void {
 export function applyReadyGameActivities(payload: Payload<"ready">): void {
   const list = payload.activities ?? [];
   applyReadyActivities(list);
+  // A DM opened from now on takes its people's games from the members store.
+  setDmActivityLookup((userId) => membersStore.getState().members.get(userId)?.activity);
   const byUser = new Map(list.map((a) => [a.user_id, toMemberActivity(a)]));
   const partners = new Set<number>();
   for (const c of dmStore.getState().channels) {
