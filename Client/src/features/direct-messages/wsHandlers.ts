@@ -128,6 +128,13 @@ export function applyReadyBlocks(api: DispatchApi | undefined): void {
 export function handleDmChannelOpen(payload: Payload<"dm_channel_open">): void {
   log.info("DM channel opened", { channelId: payload.channel_id });
   const dm = mapDmPayload(payload);
+  // A group this client does not list yet is a fresh add or a re-add. Any
+  // roster still held for it is from an earlier membership (a call left while
+  // in it keeps the others), so it goes before the server's fresh roster,
+  // which follows this open on the same connection.
+  if (dm.isGroup && !dmStore.getState().channels.some((c) => c.channelId === dm.channelId)) {
+    clearChannelVoiceUsers(dm.channelId);
+  }
   addDmChannel(dm);
 
   // A DM's channels-store row is synthesised from the DM store, and this

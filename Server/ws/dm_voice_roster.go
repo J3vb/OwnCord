@@ -16,6 +16,11 @@ import (
 // arrives before the first state. The frames are sequenced so a reconnect
 // replay covers them. The read runs before any hub lock is taken; a failed read
 // logs and sends nothing, and the add that triggered it stays committed.
+//
+// A leave that takes its seq between the read and these sends leaves a stale
+// state behind it in the replay ring until the next full ready; the client
+// drops any earlier roster when it first learns of the group, so the window
+// is the microseconds between the two.
 func (h *Hub) SendDMVoiceRoster(ctx context.Context, userID, channelID int64) {
 	if h.voice == nil {
 		return

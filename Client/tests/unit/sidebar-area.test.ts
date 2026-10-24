@@ -1992,6 +1992,11 @@ describe("SidebarArea", () => {
     });
 
     describe("call roster when leaving a group DM", () => {
+      let mounted: ReturnType<typeof createSidebarArea> | null = null;
+      afterEach(() => {
+        if (mounted !== null) cleanup(mounted);
+        mounted = null;
+      });
       const seedRoster = (channelId: number) => {
         updateVoiceState({
           channel_id: channelId,
@@ -2007,6 +2012,7 @@ describe("SidebarArea", () => {
       };
       const closeFrom = (channelId: number, opts = defaultOpts()) => {
         const result = createSidebarArea(opts);
+        mounted = result;
         container.appendChild(result.sidebarWrapper);
         const calls = (createDmSidebar as MockedFn).mock.calls;
         calls[calls.length - 1]![0].onCloseDm(channelId);
@@ -2018,13 +2024,12 @@ describe("SidebarArea", () => {
         uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
         seedRoster(100);
 
-        const result = closeFrom(100);
+        closeFrom(100);
 
         await vi.waitFor(() => {
           voiceStore.flush();
           expect(voiceStore.getState().voiceUsers.has(100)).toBe(false);
         });
-        cleanup(result);
       });
 
       it("keeps the roster when the server refuses the leave", async () => {
@@ -2034,14 +2039,13 @@ describe("SidebarArea", () => {
         const opts = defaultOpts();
         (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
 
-        const result = closeFrom(100, opts);
+        closeFrom(100, opts);
 
         await vi.waitFor(() => {
           expect(dmStore.getState().channels.map((c) => c.channelId)).toContain(100);
         });
         voiceStore.flush();
         expect(voiceStore.getState().voiceUsers.get(100)?.size).toBe(1);
-        cleanup(result);
       });
 
       it("keeps the roster when a 1:1 DM is closed", async () => {
@@ -2050,14 +2054,13 @@ describe("SidebarArea", () => {
         seedRoster(100);
         const opts = defaultOpts();
 
-        const result = closeFrom(100, opts);
+        closeFrom(100, opts);
         await Promise.resolve();
         await Promise.resolve();
 
         voiceStore.flush();
         expect(opts.api.closeDm).toHaveBeenCalledWith(100);
         expect(voiceStore.getState().voiceUsers.get(100)?.size).toBe(1);
-        cleanup(result);
       });
     });
 

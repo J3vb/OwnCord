@@ -1727,6 +1727,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Losing a group (left, or removed) ends its ring without a missed call:
     // the server stops sending that room's voice_leave, so the 30 s timeout
     // would otherwise report a call from a group the user is no longer in.
+    // A leave the server then refuses restores the row but not the ring.
     unsubscribers.push(
       watchGroupDmExits((channelId) => {
         if (ringCtrl?.current()?.channelId === channelId) ringCtrl.cancel(channelId);

@@ -5668,6 +5668,33 @@ describe("WS Dispatcher", () => {
         leaveVoiceChannel();
         voiceStore.flush();
       });
+
+      it("drops a roster left from an earlier membership when the group is re-added", () => {
+        dmStore.setState(() => ({ channels: [dmRow(73, true)] }));
+        seedCall(73);
+        joinVoiceChannel(73);
+        voiceStore.flush();
+        mock.dispatch("dm_channel_close", { channel_id: 73 });
+        leaveVoiceChannel();
+        voiceStore.flush();
+        expect(voiceStore.getState().voiceUsers.get(73)?.size).toBe(1);
+
+        mock.dispatch("dm_channel_open", {
+          channel_id: 73,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+          name: "",
+          is_group: true,
+          owner_id: 10,
+          last_message_id: null,
+          last_message: "",
+          last_message_at: "",
+          unread_count: 0,
+        });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.has(73)).toBe(false);
+      });
     });
 
     it("falls back to another open DM when the closed DM was active", () => {
