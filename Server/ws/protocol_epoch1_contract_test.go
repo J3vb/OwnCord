@@ -1867,7 +1867,10 @@ func journeyChatPoll(t *testing.T, r *epochRig) {
 // feature and posts to a forum with one tag. The creator gets forum_post_create_ok
 // carrying the thread, its post block and the opening message; nothing is
 // broadcast to a connection that is not subscribed to the new thread or the
-// forum, so the transcript ends with the barrier.
+// forum, so the transcript ends with the barrier. The post makes a a follower,
+// and the coalescer's leading flush tells it so with a thread_follow_update on
+// the low queue. That frame races the barrier's pong, so it is read, checked
+// and left out of the transcript before the barrier is sent.
 func journeyChatForumPost(t *testing.T, r *epochRig) {
 	_, _, aliceTok, _ := r.seedBaseline(t)
 	ctx := context.Background()
@@ -1902,6 +1905,9 @@ func journeyChatForumPost(t *testing.T, r *epochRig) {
 		},
 	})
 	a.expect("forum_post_create_ok")
+	if got := a.readRaw()["type"]; got != "thread_follow_update" {
+		t.Fatalf("conn %q: expected the creator's thread_follow_update, got %q", a.name, got)
+	}
 	a.barrier()
 }
 

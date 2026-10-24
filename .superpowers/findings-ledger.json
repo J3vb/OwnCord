@@ -1,5 +1,5 @@
 {
-  "nextId": 509,
+  "nextId": 510,
   "findings": [
     {
       "id": "OC-0001",
@@ -11720,6 +11720,29 @@
     },
     {
       "id": "OC-0507",
+      "title": "The banned-members list offered Unban for members the moderator does not outrank",
+      "file": "Client/src/features/members/memberPanel.ts",
+      "line": 110,
+      "severity": "low",
+      "why": "The server refuses an unban of a member ranked at or above the actor, like every other moderation action, but the list showed the button on every row, so a click only produced an error toast.",
+      "repro": "As a moderator with Ban Members, open the member panel while someone of equal or higher rank is banned: their row offers Unban, and pressing it fails.",
+      "evidence": "Vault issue #141; ModerationService.UnbanUser calls requireOutranks, renderBanned had no rank check.",
+      "suggestedFix": "Gate the button with the same topPositionFor/outranksPosition check the member list's context menu uses, reading the users list's role_ids.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/member-panel.test.ts (offers Unban only for bans the viewer outranks)",
+        "revertProof": "fail (without the fix every banned row offers Unban)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0508",
       "title": "Rejecting a changed certificate before the first sign-in left an endless Auto-connecting spinner, and a later Accept opened an empty signed-out main page",
       "file": "Client/src/app/certPrompts.ts",
       "line": 47,
@@ -11742,7 +11765,7 @@
       "fixedDate": "2026-10-24"
     },
     {
-      "id": "OC-0508",
+      "id": "OC-0509",
       "title": "The saved-password placeholder survived a host change, so the next login ran the saved-password path against the wrong host and showed a raw native error",
       "file": "Client/src/pages/connect-page/LoginForm.ts",
       "line": 1041,
