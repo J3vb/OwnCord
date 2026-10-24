@@ -54,6 +54,9 @@ func presenceBatchHub(t *testing.T) (*Hub, *db.DB, func(name string, seen bool) 
 	h := newTestHub(t, database, limiter, service.New(database, limiter))
 	go h.Run()
 	t.Cleanup(h.Stop)
+	// awaitDispatch returns at once until Run has started, so a frame sent
+	// before then would land after the caller's drain.
+	waitUntilRunning(t, h)
 	ctx := context.Background()
 	connect := func(name string, seen bool) *Client {
 		id, err := database.CreateUser(ctx, name, "hash", 4)
