@@ -374,6 +374,8 @@ function buildCodeAndFooter(
         body.replaceChildren(buildScroll(entry.text, entry.lineCount, language));
       }
       root.classList.toggle("expanded", expanded);
+      // Collapsed hides the vertical scrollbar, so start back at line 1.
+      if (!expanded) body.scrollTop = 0;
       paint(expanded);
     });
     footer.appendChild(toggle);

@@ -152,9 +152,12 @@ describe("text preview", () => {
     expect(toggle.textContent).toContain("Collapse");
     expect(preview.classList.contains("expanded")).toBe(true);
 
+    const body = el.querySelector(".msg-textpreview-body") as HTMLElement;
+    body.scrollTop = 300;
     toggle.click();
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(preview.classList.contains("expanded")).toBe(false);
+    expect(body.scrollTop).toBe(0);
   });
 
   it.each([
