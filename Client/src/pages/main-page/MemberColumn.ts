@@ -13,9 +13,9 @@
  * narrow-window overlay: below 900 CSS px the column is a fixed panel the
  * toggle opens for the moment (never saved), so the chat keeps its room.
  *
- * While the call view is up in this window the column steps aside so the call
- * gets the width: the toggle opens it for the moment (never saved), and
- * leaving the call view puts the saved choice back.
+ * While the call view is up in this window, or a forum is on screen, the
+ * column steps aside so the call or the posts get the width: the toggle opens
+ * it for the moment (never saved), and leaving puts the saved choice back.
  *
  * This controller is the only writer of the toggle's `hidden` and
  * `aria-pressed`.
@@ -83,8 +83,8 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   const narrow = typeof window.matchMedia === "function" ? window.matchMedia(NARROW_QUERY) : null;
   let narrowOpen = false;
   let callView = false;
-  /** Opened from the toggle during the call view; not saved. */
-  let callOpen = false;
+  /** Opened from the toggle while the column steps aside; not saved. */
+  let asideOpen = false;
 
   // --- Width handle ---
   let width = clampMemberWidth(loadPref<number>(MEMBER_WIDTH_PREF, MEMBER_WIDTH_DEFAULT));
@@ -158,6 +158,11 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     body.querySelector<HTMLElement>('[data-testid="member-search"]')?.focus();
   }
 
+  /** The call view or a forum wants the width. */
+  function stepsAside(): boolean {
+    return callView || getActiveChannel()?.type === "forum";
+  }
+
   function sync(): void {
     if (destroyed) return;
     const right = loadMemberLayout() === "right";
@@ -166,8 +171,8 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     if (!right || !onScreen) narrowOpen = false;
     const wanted = overlay
       ? narrowOpen
-      : callView
-        ? callOpen
+      : stepsAside()
+        ? asideOpen
         : loadPref<boolean>(MEMBER_OPEN_PREF, true);
     const shown = right && onScreen && uiStore.getState().activeView === null && wanted;
     button.hidden = !(right && onScreen);
@@ -198,6 +203,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     (s) => s.activeChannelId,
     () => {
       narrowOpen = false;
+      asideOpen = false;
       sync();
     },
   );
@@ -262,7 +268,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     setCallView(on: boolean): void {
       if (destroyed || callView === on) return;
       callView = on;
-      callOpen = false;
+      asideOpen = false;
       sync();
     },
     toggle(): void {
@@ -273,10 +279,10 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
         if (narrowOpen) focusSearch();
         return;
       }
-      if (callView) {
-        callOpen = !callOpen;
+      if (stepsAside()) {
+        asideOpen = !asideOpen;
         sync();
-        if (callOpen) focusSearch();
+        if (asideOpen) focusSearch();
         return;
       }
       savePref(MEMBER_OPEN_PREF, !loadPref<boolean>(MEMBER_OPEN_PREF, true));

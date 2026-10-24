@@ -23,6 +23,7 @@
  */
 
 import type { ApiClient } from "@lib/api";
+import type { AvatarSubject } from "@lib/avatar";
 import type { WsClient } from "@lib/ws";
 import { buildForumView } from "../forums/view";
 import { pendingRequestCount } from "../message-requests/store";
@@ -60,6 +61,9 @@ export interface ForumViewContext {
   readonly ws: WsClient;
   /** Open a post in the thread panel beside the list. */
   readonly openPost: (threadId: number) => void;
+  /** A post author's avatar (the UI layer's builder; features may not import
+   *  it). Without one, rows show the author's initial. */
+  readonly avatar?: (subject: AvatarSubject, className: string) => HTMLElement;
 }
 
 /** Builds a view's body. Called on every open; a view is never kept while closed. */
