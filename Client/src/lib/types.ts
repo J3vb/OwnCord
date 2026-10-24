@@ -107,6 +107,7 @@ export type WsErrorCode =
   // thread is locked and only a moderator may post in or change it.
   | "THREAD_EXISTS"
   | "THREAD_LOCKED"
+  | "GAME_ACTIVITY_DISABLED"
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
   | "SESSION_REPLACED"
@@ -437,6 +438,11 @@ export interface AuthOkPayload {
   readonly replay_source?: "none" | "buffer" | "db";
   /** What the composer checks before an upload; absent on older servers. */
   readonly upload_policy?: UploadPolicy;
+  /**
+   * Whether game activity is shown on this server right now (WP 8.3e-2). Sent
+   * on every connect and resume; absent on older servers.
+   */
+  readonly game_activity_policy?: GameActivityPolicyPayload;
 }
 
 /** auth_ok's upload_policy. The server's upload route stays authoritative. */
@@ -1251,6 +1257,15 @@ export interface UploadPolicyPayload {
   readonly allowed_extensions: readonly string[];
 }
 
+/**
+ * `game_activity_policy` — an admin turned game activity on or off for the
+ * server (WP 8.3e-2). Unsequenced and not replayed; `auth_ok` carries the same
+ * value on every connect and resume.
+ */
+export interface GameActivityPolicyPayload {
+  readonly enabled: boolean;
+}
+
 export interface MemberUpdatePayload {
   readonly user_id: number;
   readonly role: string;
@@ -1683,6 +1698,7 @@ export type ServerMessage =
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
   | (WsEnvelope<UploadPolicyPayload> & { readonly type: "upload_policy" })
+  | (WsEnvelope<GameActivityPolicyPayload> & { readonly type: "game_activity_policy" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
   | (WsEnvelope<DmRequestPayload> & { readonly type: "dm_request" })

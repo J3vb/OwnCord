@@ -73,6 +73,7 @@ import {
 } from "@components/settings/settingsSearch";
 import { settingsText } from "../../src/i18n/settings";
 import { whatsNewText } from "../../src/i18n/whatsNew";
+import { gameActivityText } from "../../src/i18n/gameActivity";
 import type { SearchableTab } from "@components/settings/settingsSearch";
 
 const options = {
@@ -162,6 +163,7 @@ describe("settings search", () => {
       settingsText("accessibility.syncOsMotion.notAsking"),
       settingsText("keybinds.pttModeOff"),
       settingsText("voiceAudio.videoCodecIntel"),
+      gameActivityText("settings.serverOff"),
       whatsNewText("about.updateDescNoVersion"),
       whatsNewText("about.updateDesc", { current: "1.2.3-test" }),
     ]);

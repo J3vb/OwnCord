@@ -18,6 +18,7 @@ export const gameActivityText = defineCatalog("gameActivity", {
     "Show other members which game you are playing. While this is on, OwnCord checks the programs running on this computer for a known game and sends only the game's name. While it is off, nothing is checked or sent.",
   "settings.detected": "Detected now: {game}",
   "settings.detectedNone": "No game detected",
+  "settings.serverOff": "Game activity is turned off on this server.",
   "games.title": "Your games",
   "games.desc":
     "The games seen on this computer and the ones you added. Rename a game to show a different name, or turn Show to others off to never show it. These choices stay on this computer.",

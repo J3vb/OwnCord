@@ -4854,7 +4854,7 @@ A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
-`voice_owner_movable`.
+`voice_owner_movable`, `game_activity_enabled`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -4885,6 +4885,14 @@ mode off. Like the backup policy they need the **Owner** role (`403 FORBIDDEN` o
 can move the owner between voice channels: `true` (the default while no row
 exists) or `false`, also accepted as `1`/`0`. It is stored as `true`/`false`.
 Only the **Owner** role may change it (`403 FORBIDDEN` otherwise).
+
+`game_activity_enabled` (WP 8.3e-2) decides whether members' game activity is
+shown on this server: `true` (the default while no row exists) or `false`, also
+accepted as `1`/`0`, stored as `true`/`false`. Unlike `voice_owner_movable` it
+is not owner-only: `MANAGE_SERVER` may change it. A save hands the value to the
+running hub, which clears every shown game when it is `false` and sends the
+[`game_activity_policy`](protocol.md#game_activity_policy-server---client-broadcast)
+frame to every connected client; an unreadable row at start-up counts as `false`.
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change

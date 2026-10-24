@@ -158,8 +158,14 @@ func (h *Hub) emitPresenceSelf(_ context.Context, _ int64, ev Event) bool {
 	// newer invisible self-frame on high could be delivered before an
 	// older visible-status frame still on normal, leaving the owner's own
 	// client on a stale status (OC-0003/OC-0214).
+	//
+	// presenceMu orders the choice of payload against a game activity sweep,
+	// the way emitPresence's closure does (WP 8.3e-2).
+	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
+	payload := h.presencePayloadLocked(e.TargetUserID(), e.Payload(), e.bare)
 	if c := h.GetClient(e.TargetUserID()); c != nil {
-		c.sendPresenceMsg(e.Payload())
+		c.sendPresenceMsg(payload)
 	}
 	return true
 }
@@ -285,8 +291,12 @@ func (h *Hub) emitPresence(_ context.Context, _ int64, ev Event) bool {
 	// atomically under presenceMu (see dropQueuedPresenceAndBroadcast,
 	// OC-0005), or the pending flush (up to 300ms later) could race in
 	// between and overwrite this fresher status with the stale one.
+	//
+	// The frame is chosen inside the closure, under presenceMu: a handler
+	// that snapshotted a game before a switch-off must not re-broadcast it
+	// after the sweep cleared it (WP 8.3e-2).
 	h.dropQueuedPresenceAndBroadcast(e.userID, func() {
-		h.broadcastPresenceFrame(0, e.Payload())
+		h.broadcastPresenceFrame(0, h.presencePayloadLocked(e.userID, e.Payload(), e.bare))
 	})
 	return true
 }
@@ -298,4 +308,22 @@ func (h *Hub) emitBroadcastAll(_ context.Context, _ int64, ev Event) bool {
 	}
 	h.BroadcastToAll(e.Payload())
 	return true
+}
+
+// presencePayloadLocked picks the frame for a presence event that may carry a
+// game the handler snapshotted earlier (WP 8.3e-2). bare, the same frame with
+// a null game, is sent while game activity is off, and also when the user's
+// live activity is already nil: a sweep cleared it after the snapshot, even if
+// the switch has been turned back on since. The caller holds presenceMu.
+func (h *Hub) presencePayloadLocked(userID int64, payload, bare []byte) []byte {
+	if bare == nil {
+		return payload
+	}
+	if !h.gameActivity.on.Load() {
+		return bare
+	}
+	if c := h.GetClient(userID); c == nil || c.livePresence().activity == nil {
+		return bare
+	}
+	return payload
 }
