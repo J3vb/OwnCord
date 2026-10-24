@@ -74,4 +74,9 @@ const (
 	// ErrCodeThreadLocked refines FORBIDDEN: the thread is locked and only a
 	// moderator (MANAGE_MESSAGES) may post, react, pin or change it.
 	ErrCodeThreadLocked = "THREAD_LOCKED"
+	// ErrCodeGameActivityDisabled answers an activity_update that sets a game
+	// while an admin has turned game activity off for the server (WP 8.3e-2).
+	// A clear is never refused. The client claims it without a toast and does
+	// not resend until the game changes.
+	ErrCodeGameActivityDisabled = "GAME_ACTIVITY_DISABLED"
 )

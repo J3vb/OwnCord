@@ -37,7 +37,7 @@ import {
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { uiStore } from "../../stores/ui.store";
 import { getChannelMessages } from "../../stores/messages.store";
-import { isTextLikeChannel, type ChannelActivityEntry } from "../../lib/types";
+import { isTextLikeChannel, type ChannelActivityEntry, type ReadyActivity } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import {
   acceptReadState,
@@ -50,7 +50,9 @@ import {
   writeReadPointer,
 } from "../../lib/read-state";
 import {
+  applyGameActivityPolicy,
   applyReadyCapabilities,
+  gameActivityPolicyIsOff,
   hasReceivedReady,
   readPointerEnabled,
 } from "../../lib/serverCapabilities";
@@ -299,9 +301,37 @@ export function applyReadyEmoji(api: DispatchApi | undefined): void {
  * the key sends no games, and the members then play nothing.
  */
 export function applyReadyGameActivities(payload: Payload<"ready">): void {
-  const list = payload.activities ?? [];
+  applyGameActivityList(payload.activities ?? []);
+}
+
+/**
+ * `game_activity_policy` (WP 8.3e-2): an admin turned game activity on or off.
+ * The capability follows at once. Off also clears every shown game, so none
+ * lingers if a clearing `presence` frame is dropped; on restates nothing,
+ * since the games return with presence.
+ */
+export function handleGameActivityPolicy(payload: Payload<"game_activity_policy">): void {
+  if (applyGameActivityPolicy(payload.enabled) && !payload.enabled) applyGameActivityList([]);
+}
+
+/**
+ * `auth_ok.game_activity_policy`: the same switch on every connect and resume.
+ * A resume gets no `ready` and may have missed the frame while offline. An
+ * older server states none, and the `ready` capability decides.
+ */
+export function applyAuthOkGameActivityPolicy(payload: Payload<"auth_ok">): void {
+  if (payload.game_activity_policy !== undefined) {
+    handleGameActivityPolicy(payload.game_activity_policy);
+  }
+}
+
+/**
+ * Who plays what, restated from `list`: the roster and the DM copies of it
+ * both follow, and a DM opened from now on takes its people's games from the
+ * members store.
+ */
+function applyGameActivityList(list: readonly ReadyActivity[]): void {
   applyReadyActivities(list);
-  // A DM opened from now on takes its people's games from the members store.
   setDmActivityLookup((userId) => membersStore.getState().members.get(userId)?.activity);
   const byUser = new Map(list.map((a) => [a.user_id, toMemberActivity(a)]));
   const partners = new Set<number>();
@@ -317,29 +347,31 @@ export function handlePresence(payload: Payload<"presence">): void {
   // store treats "field absent" as "leave the text alone", which is what
   // an older server's presence event means.
   // activity follows the same rule (WP 8.3): absent leaves the shown game alone.
-  updatePresence(
-    payload.user_id,
-    payload.status,
-    payload.custom_status,
-    undefined,
-    payload.activity,
-  );
+  // While the server states game activity is off, a game on a frame that
+  // outran the off frame is not shown (WP 8.3e-2).
+  const activity = gameActivityPolicyIsOff() && payload.activity ? null : payload.activity;
+  updatePresence(payload.user_id, payload.status, payload.custom_status, undefined, activity);
   // dmStore keeps its own frozen copy of a DM partner's status for the
   // sidebar row (see buildDmConversations) — membersStore alone does not
   // reach it.
   updateDmParticipant(payload.user_id, {
     status: payload.status,
-    ...(payload.activity === undefined ? {} : { activity: toMemberActivity(payload.activity) }),
+    ...(activity === undefined ? {} : { activity: toMemberActivity(activity) }),
   });
 }
 
 export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
   const full = payload.full === true;
-  applyPresenceBatch(payload.updates, full);
+  // As in handlePresence: no game is shown while the server states it is off.
+  const off = gameActivityPolicyIsOff();
+  const updates = off
+    ? payload.updates.map((u) => (u.activity ? { ...u, activity: null } : u))
+    : payload.updates;
+  applyPresenceBatch(updates, full);
   // Only DM partners need the dmStore copy (see handlePresence); a full
   // snapshot takes a partner it leaves out offline.
-  const statuses = new Map(payload.updates.map((u) => [u.user_id, u.status]));
-  const activities = new Map(payload.updates.map((u) => [u.user_id, u.activity]));
+  const statuses = new Map(updates.map((u) => [u.user_id, u.status]));
+  const activities = new Map(updates.map((u) => [u.user_id, u.activity]));
   const partners = new Set<number>();
   for (const c of dmStore.getState().channels) {
     partners.add(c.recipient.id);
