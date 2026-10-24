@@ -387,9 +387,15 @@ func openAdminTestDB(t *testing.T) *db.DB {
 	if err != nil {
 		t.Fatalf("read 081_manage_backups.sql: %v", err)
 	}
+	// 082 clears the seven owner-type bits (WP 8.4d) the same way.
+	ownerTypeBits, err := migrations.FS.ReadFile("082_owner_type_permissions.sql")
+	if err != nil {
+		t.Fatalf("read 082_owner_type_permissions.sql: %v", err)
+	}
 	migrFS := fstest.MapFS{
-		"001_initial_schema.sql": {Data: adminSchema},
-		"081_manage_backups.sql": {Data: manageBackups},
+		"001_initial_schema.sql":         {Data: adminSchema},
+		"081_manage_backups.sql":         {Data: manageBackups},
+		"082_owner_type_permissions.sql": {Data: ownerTypeBits},
 	}
 	if err := db.MigrateFS(database, migrFS); err != nil {
 		t.Fatalf("MigrateFS: %v", err)

@@ -778,7 +778,7 @@ async function saveChannelPerms(){
 
 /* Permission checkboxes, grouped exactly as docs/schema.md's "Permission
    groups" section groups the bitfield. Keep the two in step: the doc is the
-   reference an operator reads next to this grid, and every one of the 23
+   reference an operator reads next to this grid, and every one of the 30
    defined bits must appear in exactly one group or it becomes ungrantable
    here. */
 const PERM_GROUPS=[
@@ -786,7 +786,7 @@ const PERM_GROUPS=[
     [0x20000,'Manage Channels','Create, edit and delete channels and their overrides'],
     [0x1000000,'Manage Roles','Create, edit, delete and assign roles below your own'],
     [0x4000000,'Manage Invites','Create and revoke invite codes'],
-    [0x2000000,'Manage Server','Read and change server settings, retention and the AFK channel, and approve registrations. Backups, updates, tokens and server configuration stay with the owner'],
+    [0x2000000,'Manage Server','Read and change server settings, retention and the AFK channel, and approve registrations. Restoring backups, updates, tokens and server configuration are separate permissions under Owner powers'],
     [0x8000000,'View Audit Log','Read the action history'],
     [0x400000,'Moderate Members','Warn and time out members, work the report queue'],
     [0x800000,'Manage Nicknames','Change or reset another member\'s nickname'],
@@ -813,6 +813,19 @@ const PERM_GROUPS=[
     [0x100000,'Mute Members','Server mute, deafen and disconnect, and move lower-ranked members'],
     [0x2000,'Move Members','Move anyone between voice channels, whatever their rank (only the owner can grant)'],
   ]},
+  /* The owner-type permissions (WP 8.4d): actions that were the owner's alone.
+     The first five are owner-tier: an Administrator does not hold them without
+     the bit, and only the owner can grant them. The last two an Administrator
+     already has; the owner or an Administrator can grant them. */
+  {title:'Owner powers',bits:[
+    [0x8000,'Restore Backups','Restore or delete a backup and download the full archive. A restore replaces everything since the backup (about as powerful as being the owner; only the owner can grant)'],
+    [0x4,'Manage Server Configuration','Read and change the server configuration file and restart the server (about as powerful as being the owner; only the owner can grant)'],
+    [0x8,'Manage Updates','Check for and install server updates (about as powerful as being the owner; only the owner can grant)'],
+    [0x10,'Manage API Tokens','Create, list and revoke their own API tokens (about as powerful as being the owner; only the owner can grant)'],
+    [0x80,'Issue Recovery Credentials','Give a locked-out member who ranks below them a one-time recovery credential (about as powerful as being the owner; only the owner can grant)'],
+    [0x100,'View Diagnostics','Open the server logs, change the log level, build support bundles and read the attention panel (only the owner or an Administrator can grant)'],
+    [0x10000000,'Erase Accounts','Permanently erase the account of a member who ranks below them (only the owner or an Administrator can grant)'],
+  ]},
 ];
 
 /* My own position, from GET /me — the hierarchy boundary every row respects. */
@@ -825,12 +838,21 @@ function canManageRole(role){return role.position<myPosition()}
 const OWNER_GRANT_ONLY_TITLE='Only the owner or an Administrator can change this';
 /* The bits only the owner or an Administrator may add or remove: one mask,
    mirroring permissions.OwnerGrantOnly, so a new such bit is one more term. */
-const OWNER_GRANT_ONLY_MASK=PERM.MOVE_MEMBERS|PERM.MANAGE_BACKUPS;
+const OWNER_GRANT_ONLY_MASK=PERM.MOVE_MEMBERS|PERM.MANAGE_BACKUPS|PERM.RESTORE_BACKUPS|PERM.MANAGE_CONFIG|PERM.MANAGE_UPDATES|PERM.MANAGE_TOKENS|PERM.ISSUE_RECOVERY|PERM.VIEW_DIAGNOSTICS|PERM.ERASE_ACCOUNTS;
 function isOwnerGrantOnlyBit(bit){return (bit&OWNER_GRANT_ONLY_MASK)!==0}
 function canChangeOwnerGrantOnly(){return isOwner()||can(PERM.ADMINISTRATOR)}
+/* The owner-tier subset (WP 8.4d), mirroring permissions.OwnerOnlyGrant: these
+   boxes only the owner can change, an Administrator included, because the
+   owner tier ignores ADMINISTRATOR and an Administrator could otherwise give
+   the bit to themself. */
+const OWNER_ONLY_GRANT_TITLE='Only the owner can change this';
+const OWNER_ONLY_GRANT_MASK=PERM.RESTORE_BACKUPS|PERM.MANAGE_CONFIG|PERM.MANAGE_UPDATES|PERM.MANAGE_TOKENS|PERM.ISSUE_RECOVERY;
+function isOwnerOnlyGrantBit(bit){return (bit&OWNER_ONLY_GRANT_MASK)!==0}
+function grantLockTitle(bit){return isOwnerOnlyGrantBit(bit)?OWNER_ONLY_GRANT_TITLE:OWNER_GRANT_ONLY_TITLE}
 /* True when this bit may be granted: ADMINISTRATOR grants anything, otherwise
    only bits the caller's own role holds. */
 function canGrantBit(bit){
+  if(isOwnerOnlyGrantBit(bit))return isOwner();
   if(isOwnerGrantOnlyBit(bit))return canChangeOwnerGrantOnly();
   const p=(state.me&&state.me.permissions)||0;
   if((p&PERM.ADMINISTRATOR)!==0)return true;
@@ -1064,12 +1086,12 @@ function openRoleModal(id){
          and locked otherwise. */
       const locked=!canGrantBit(bit);
       const ownerOnly=isOwnerGrantOnlyBit(bit);
-      const lockNote=ownerOnly?OWNER_GRANT_ONLY_TITLE+'.':'Locked: your own role does not have this permission.';
+      const lockNote=ownerOnly?grantLockTitle(bit)+'.':'Locked: your own role does not have this permission.';
       grid+='<label class="perm-item'+(locked?' locked':'')+'">'
-        +'<input type="checkbox" data-permbit="'+bit+'" aria-labelledby="permName'+bit+'" aria-describedby="permDesc'+bit+'" '+(granted?'checked':'')+' '+(locked?'disabled':'')+(locked&&ownerOnly?' title="'+esc(OWNER_GRANT_ONLY_TITLE)+'"':'')+'>'
+        +'<input type="checkbox" data-permbit="'+bit+'" aria-labelledby="permName'+bit+'" aria-describedby="permDesc'+bit+'" '+(granted?'checked':'')+' '+(locked?'disabled':'')+(locked&&ownerOnly?' title="'+esc(grantLockTitle(bit))+'"':'')+'>'
         +'<span class="perm-text"><span class="perm-name" id="permName'+bit+'">'+esc(label)+'</span>'
         +'<span class="perm-desc" id="permDesc'+bit+'">'+esc(desc)+(locked?'<span class="perm-lock"> '+esc(lockNote)+'</span>':'')
-        +(ownerOnly&&role&&role.is_default?'<span class="perm-hint" id="permHint'+bit+'">Giving this to the default role means only the owner or an Administrator can change members\' roles.</span>':'')+'</span></span></label>';
+        +(ownerOnly&&role&&role.is_default?'<span class="perm-hint" id="permHint'+bit+'">Giving this to the default role means only '+(isOwnerOnlyGrantBit(bit)?'the owner':'the owner or an Administrator')+' can change members\' roles.</span>':'')+'</span></span></label>';
     });
     grid+='</div></fieldset>';
   });
@@ -1092,7 +1114,7 @@ function openRoleModal(id){
       +'<div class="role-presets" role="group" aria-label="Role presets">'+ROLE_PRESETS.map(p=>'<button type="button" class="btn btn-ghost btn-sm" data-action="applyRolePreset" data-args="'+actArgs(p.id)+'">'+esc(p.label)+'</button>').join(' ')+'</div>'
       +'<div class="rc-hint" id="rolePresetNote" aria-live="polite">A preset replaces the boxes below; you can still change them.</div>'
       +grid
-      +'<div class="rc-hint">Restoring and deleting backups, updates, API tokens and server configuration stay with the owner.</div></div>'
+      +'<div class="rc-hint">Owner powers start with nobody: the owner grants each one by hand.</div></div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveRole" data-args="'+actArgs(role?role.id:null)+'">'+(role?'Save':'Create')+'</button></div>');
   renderRolePlacement();

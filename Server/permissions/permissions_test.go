@@ -509,7 +509,7 @@ func TestName_KnownAndUnknownBits(t *testing.T) {
 		t.Errorf("Name(ViewAuditLog) = %q", got)
 	}
 	// Zero, multi-bit and undefined values have no single name.
-	for _, bit := range []int64{0, permissions.KickMembers | permissions.BanMembers, 0x4} {
+	for _, bit := range []int64{0, permissions.KickMembers | permissions.BanMembers, 0x20000000} {
 		if got := permissions.Name(bit); got != "UNKNOWN" {
 			t.Errorf("Name(0x%X) = %q, want UNKNOWN", bit, got)
 		}
@@ -646,5 +646,53 @@ func TestManageBackupsBit_DefinedNamedInAllPerms(t *testing.T) {
 	}
 	if permissions.OwnerGrantOnly&permissions.MoveMembers != permissions.MoveMembers {
 		t.Error("OwnerGrantOnly must still include MoveMembers")
+	}
+}
+
+// TestOwnerTypeBits_DefinedNamedInAllPerms locks WP 8.4d's seven owner-type
+// bits: each is a single named bit that AllPerms keeps and the admin
+// perimeter admits, in OwnerGrantOnly, and the owner-tier five (and only
+// those) are also in OwnerOnlyGrant.
+func TestOwnerTypeBits_DefinedNamedInAllPerms(t *testing.T) {
+	cases := []struct {
+		name      string
+		bit       int64
+		want      int64
+		ownerTier bool
+	}{
+		{"RESTORE_BACKUPS", permissions.RestoreBackups, 0x8000, true},
+		{"MANAGE_CONFIG", permissions.ManageConfig, 0x4, true},
+		{"MANAGE_UPDATES", permissions.ManageUpdates, 0x8, true},
+		{"MANAGE_TOKENS", permissions.ManageTokens, 0x10, true},
+		{"ISSUE_RECOVERY", permissions.IssueRecovery, 0x80, true},
+		{"VIEW_DIAGNOSTICS", permissions.ViewDiagnostics, 0x100, false},
+		{"ERASE_ACCOUNTS", permissions.EraseAccounts, 0x10000000, false},
+	}
+	for _, c := range cases {
+		if c.bit != c.want {
+			t.Errorf("%s = 0x%X, want 0x%X", c.name, c.bit, c.want)
+		}
+		if got := permissions.Name(c.bit); got != c.name {
+			t.Errorf("Name(%s) = %q", c.name, got)
+		}
+		if permissions.AllPerms&c.bit != c.bit {
+			t.Errorf("AllPerms must include %s", c.name)
+		}
+		if permissions.AdminPerimeter&c.bit != c.bit {
+			t.Errorf("AdminPerimeter must include %s", c.name)
+		}
+		if permissions.OwnerGrantOnly&c.bit != c.bit {
+			t.Errorf("OwnerGrantOnly must include %s", c.name)
+		}
+		if got := permissions.OwnerOnlyGrant&c.bit == c.bit; got != c.ownerTier {
+			t.Errorf("OwnerOnlyGrant includes %s = %v, want %v", c.name, got, c.ownerTier)
+		}
+	}
+	if permissions.OwnerGrantOnly&(permissions.MoveMembers|permissions.ManageBackups) !=
+		permissions.MoveMembers|permissions.ManageBackups {
+		t.Error("OwnerGrantOnly must still include MoveMembers and ManageBackups")
+	}
+	if permissions.OwnerOnlyGrant&(permissions.MoveMembers|permissions.ManageBackups) != 0 {
+		t.Error("OwnerOnlyGrant must not include the owner-or-Administrator bits 13 and 14")
 	}
 }

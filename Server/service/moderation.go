@@ -130,7 +130,7 @@ func (s *ModerationService) ErasureBroadcastsMemberBan() bool {
 }
 
 // EraseUser is the administrator-initiated account erasure (B4-9): the same
-// implementation as self-deletion, gated on ADMINISTRATOR plus the
+// implementation as self-deletion, gated on ERASE_ACCOUNTS (ADMINISTRATOR implies it, WP 8.4d) plus the
 // actor-outranks-target hierarchy. An actor cannot erase itself here — that
 // is the password-confirmed self-service route. The last admin-class
 // account cannot be erased (Forbidden). Writes the account_deleted audit
@@ -147,9 +147,12 @@ func (s *ModerationService) EraseUser(ctx context.Context, actorID, targetID int
 	}
 
 	// Authorization before existence — see BanUser.
-	actorRole, err := s.requirePerm(ctx, actorID, permissions.Administrator)
+	actorRole, err := s.roleFor(ctx, actorID, "actor")
 	if err != nil {
 		return err
+	}
+	if !permissions.CanEraseAccounts(actorRole.Permissions) {
+		return fmt.Errorf("%w: missing %s permission", ErrForbidden, permissions.Name(permissions.EraseAccounts))
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
 	if err != nil || target == nil {

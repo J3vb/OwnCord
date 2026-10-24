@@ -386,3 +386,69 @@ func TestRecoveryAssist_AdmissionRefusalChargesNoIssuance(t *testing.T) {
 		t.Fatalf("over the per-target budget = %v, want rate limited", err)
 	}
 }
+
+// WP 8.4d: ISSUE_RECOVERY lets a non-owner issue a recovery credential, but
+// only to a member ranked strictly below them; the owner is never a target for
+// anyone else, and ADMINISTRATOR without the bit is refused.
+func TestRecoveryAssist_IssueRecoveryHolderRankRule(t *testing.T) {
+	ctx := context.Background()
+	svc, owner, user, database := newAssistFixture(t, false)
+	roles := map[int64]*db.Role{
+		30: {ID: 30, Name: "Recoverer", Permissions: permissions.ReadMessages | permissions.IssueRecovery, Position: 60},
+		31: {ID: 31, Name: "Recoverer peer", Permissions: permissions.ReadMessages, Position: 60},
+		32: {ID: 32, Name: "Senior", Permissions: permissions.ReadMessages, Position: 70},
+		33: {ID: 33, Name: "Super", Permissions: permissions.Administrator | permissions.ManageRoles, Position: 80},
+		34: {ID: 34, Name: "Lower recoverer", Permissions: permissions.ReadMessages | permissions.IssueRecovery, Position: 20},
+	}
+	for _, r := range roles {
+		seedRole(t, database, r)
+	}
+	mk := func(name string, role int64) int64 {
+		id, err := database.CreateUser(ctx, name, "hash", int(role))
+		if err != nil {
+			t.Fatalf("CreateUser(%s): %v", name, err)
+		}
+		return id
+	}
+	holder, peer, senior := mk("holder", 30), mk("peer", 31), mk("senior", 32)
+	super, lowHolder := mk("super", 33), mk("lowholder", 34)
+
+	// A member below the holder: issued, audited with the holder as actor.
+	if _, err := svc.IssueRecoveryAssist(ctx, holder, user.ID, "in_person"); err != nil {
+		t.Fatalf("holder issuing to a lower-ranked member: %v", err)
+	}
+	var actor int64
+	if err := database.QueryRowContext(ctx, `SELECT actor_id FROM audit_log WHERE action = 'recovery_assist_issued' ORDER BY id DESC LIMIT 1`).Scan(&actor); err != nil || actor != holder {
+		t.Fatalf("audit actor = %d (%v), want the holder %d", actor, err, holder)
+	}
+	for name, target := range map[string]int64{"an equal rank": peer, "a higher rank": senior, "the owner": owner.ID} {
+		if _, err := svc.IssueRecoveryAssist(ctx, holder, target, "in_person"); !errors.Is(err, ErrForbidden) {
+			t.Errorf("holder issuing to %s = %v, want forbidden", name, err)
+		}
+	}
+	// A holder ranked below the member they target is refused too.
+	if _, err := svc.IssueRecoveryAssist(ctx, lowHolder, user.ID, "in_person"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("low holder (pos 20) issuing to a position-40 member = %v, want forbidden", err)
+	}
+	// Administrator without the bit: refused, even toward a lower rank.
+	if _, err := svc.IssueRecoveryAssist(ctx, super, user.ID, "in_person"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("administrator without the bit = %v, want forbidden", err)
+	}
+	// The owner is unchanged: anyone below, no rank check.
+	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, senior, "in_person"); err != nil {
+		t.Errorf("owner issuing to a higher-ranked member: %v", err)
+	}
+	// A target carrying an owner-tier bit the holder lacks is refused, whatever
+	// the rank; the same target without it is allowed.
+	roleLow := &db.Role{ID: 35, Name: "Low with restore", Permissions: permissions.ReadMessages | permissions.RestoreBackups, Position: 20}
+	seedRole(t, database, roleLow)
+	carrier := mk("carrier", 35)
+	if _, err := svc.IssueRecoveryAssist(ctx, holder, carrier, "in_person"); !errors.Is(err, ErrForbidden) {
+		t.Errorf("holder issuing to a target carrying RESTORE_BACKUPS = %v, want forbidden", err)
+	}
+	seedRole(t, database, &db.Role{ID: 35, Name: "Low plain", Permissions: permissions.ReadMessages, Position: 20})
+
+	if _, err := svc.IssueRecoveryAssist(ctx, holder, carrier, "in_person"); err != nil {
+		t.Errorf("holder issuing to the same target without the bit: %v", err)
+	}
+}

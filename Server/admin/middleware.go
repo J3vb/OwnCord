@@ -142,21 +142,18 @@ func ownerOnlyMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// ownerOrBackupsMiddleware wraps a handler to require the Owner role or
-// MANAGE_BACKUPS (WP 8.4c) through permissions.CanManageBackups. The role is
-// the one adminAuthMiddleware resolved: the top role's identity with the OR of
-// every held role's permissions, so a second role carrying the bit counts. It
-// fails closed as unauthenticated when the context carries no role, like
-// ownerOnlyMiddleware.
-func ownerOrBackupsMiddleware(next http.Handler) http.Handler {
+// gateMiddleware gates next on g (WP 8.4d). The role is the one adminAuthMiddleware stored in the
+// request context, so no extra query runs; a request that arrives without one
+// fails closed as unauthenticated, like requirePerm and ownerOnlyMiddleware.
+func gateMiddleware(g routeGate, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		role, ok := r.Context().Value(adminRoleKey).(*db.Role)
 		if !ok || role == nil {
 			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
-		if !permissions.CanManageBackups(role.Permissions, role.ID, role.Position) {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "owner role or MANAGE_BACKUPS permission required")
+		if !g.allow(role.Permissions, role.ID, role.Position) {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", g.msg)
 			return
 		}
 		next.ServeHTTP(w, r)

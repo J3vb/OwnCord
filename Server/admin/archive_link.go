@@ -92,8 +92,10 @@ func (s *archiveLinks) redeem(token string) (archiveLink, bool) {
 // handleArchiveLink issues POST /admin/api/archive/link: a short-lived
 // single-use token the panel opens as a plain browser link, so the archive is
 // streamed to disk by the browser instead of being buffered in the page. It is
-// Owner-only (the archive holds password hashes and the key files).
-func handleArchiveLink() http.HandlerFunc {
+// for the owner or a RESTORE_BACKUPS holder (WP 8.4d; the archive holds
+// password hashes and the key files), and the issue is audited as
+// archive_link.
+func handleArchiveLink(database *db.DB) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hash, ok := linkCredentialHash(w, r)
 		if !ok {
@@ -109,6 +111,8 @@ func handleArchiveLink() http.HandlerFunc {
 		token, expires := linkStore.issue(actor, hash, "")
 		// The token is never logged — only that one was issued and for whom.
 		slog.Info("archive download link issued", "actor_id", actor, "expires_at", expires.UTC())
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "archive_link", "server", 0,
+			"issued a download link for the full archive")
 		writeJSON(w, http.StatusOK, map[string]string{
 			"path": "/admin/api/archive/download?token=" + token,
 		})
@@ -119,12 +123,13 @@ func handleArchiveLink() http.HandlerFunc {
 // single-use link's redemption. It carries no Authorization header (a plain
 // <a href> cannot send one), so the token stands in for it: random,
 // single-use and short-lived, and the credential that asked for it must
-// still resolve to a non-banned Owner. Any failure to redeem is a uniform
+// still resolve to a non-banned Owner or RESTORE_BACKUPS holder
+// (linkRestoreStillValid). Any failure to redeem is a uniform
 // 403, so a probe cannot tell unknown from expired from consumed from revoked.
 func handleArchiveDownload(database *db.DB, opts SetupOptions, paths backupPaths) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		link, ok := linkStore.redeem(r.URL.Query().Get("token"))
-		if !ok || !linkOwnerStillValid(r, database, link) {
+		if !ok || !linkRestoreStillValid(r, database, link) {
 			writeLinkInvalid(w)
 			return
 		}
@@ -143,16 +148,19 @@ func linkCredentialHash(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return hash, true
 }
 
-// linkOwnerStillValid re-resolves the credential a link was issued to: it
-// must still be a live session or token of a non-banned Owner. The full
-// archive's redemption uses it; it stays owner-only.
-func linkOwnerStillValid(r *http.Request, database *db.DB, link archiveLink) bool {
+// linkRestoreStillValid re-resolves the credential a link was issued to: it
+// must still be a live session or token of a non-banned principal who is the
+// Owner or whose roles still hold RESTORE_BACKUPS (WP 8.4d), judged on the
+// effective permissions at redemption. A holder who lost the bit, was banned
+// or was signed out since the link was issued gets nothing; an Administrator
+// without the bit never did. The full archive's redemption uses it.
+func linkRestoreStillValid(r *http.Request, database *db.DB, link archiveLink) bool {
 	return linkPrincipalStillValid(r, database, link, func(role *db.Role) bool {
-		return permissions.IsOwner(role.ID, role.Position)
+		return permissions.CanRestoreBackups(role.Permissions, role.ID, role.Position)
 	})
 }
 
-// linkBackupStillValid is linkOwnerStillValid for a single backup's link
+// linkBackupStillValid is linkRestoreStillValid for a single backup's link
 // (WP 8.4c): the credential must still be a live session or token of a
 // non-banned principal who is the Owner or whose roles still hold
 // MANAGE_BACKUPS. The role ResolveTokenHash returns carries the OR of every
