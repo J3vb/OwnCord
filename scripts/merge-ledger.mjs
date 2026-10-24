@@ -91,7 +91,10 @@ export function mergeLedgers(baseText, oursText, theirsText, upstreamTexts) {
     const o = ours.get(id);
     const b = base.get(id);
     if (o === undefined) {
-      if (b === undefined || t !== b) merged.push({ id, text: t });
+      if (b === undefined) merged.push({ id, text: t });
+      else if (t !== b) {
+        return { conflict: `${id} was changed on one side and removed on the other` };
+      }
       continue;
     }
     if (o === t) merged.push({ id, text: t });

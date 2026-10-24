@@ -108,3 +108,12 @@ test("git uses the driver: two branches appending entries merge without conflict
   );
   assert.equal(merged.nextId, 4);
 });
+
+test("a removal on either side against a change on the other is a conflict", () => {
+  const base = ledger(3, entry(1), entry(2));
+  const removed = ledger(3, entry(1));
+  const changed = ledger(3, entry(1), entry(2, { status: "fixed" }));
+  const conflict = { conflict: "OC-0002 was changed on one side and removed on the other" };
+  assert.deepEqual(mergeLedgers(base, removed, changed, null), conflict);
+  assert.deepEqual(mergeLedgers(base, changed, removed, null), conflict);
+});
