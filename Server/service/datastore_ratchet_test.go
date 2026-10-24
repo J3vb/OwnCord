@@ -66,8 +66,11 @@ const (
 	// (126 to 128): MessageAPIResponse.Sticker and MessageSearchResult.Sticker,
 	// the optional sticker block on history rows and search hits, for the same
 	// reason as 6.9a's. MessageStickerInfo lives in db/stickers.go, outside the
-	// count. Any further tag fails.
-	modelsJSONTagBaseline = 128
+	// count.
+	// WP 8.9 adds two more (128 to 130): AttachmentInfo.DurationMs and .Waveform,
+	// the voice message fields on every attachment, which has to be this struct
+	// because GetAttachmentsByMessageIDs fills it. Any further tag fails.
+	modelsJSONTagBaseline = 130
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9

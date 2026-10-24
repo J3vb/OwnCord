@@ -357,6 +357,10 @@ type AttachmentInfo struct {
 	URL      string `json:"url"`
 	Width    *int   `json:"width,omitempty"`
 	Height   *int   `json:"height,omitempty"`
+	// DurationMs and Waveform are set only on a voice message's attachment
+	// (WP 8.9): the clip length and base64url (unpadded) amplitude bytes.
+	DurationMs *int    `json:"duration_ms,omitempty"`
+	Waveform   *string `json:"waveform,omitempty"`
 }
 
 // ReactionInfo is the reaction shape in API responses.

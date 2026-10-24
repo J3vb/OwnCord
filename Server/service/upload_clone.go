@@ -119,6 +119,7 @@ func (s *UploadService) cloneOne(ctx context.Context, cloner FileCloner, userID 
 	rec := AttachmentRecord{
 		ID: newID, UploaderID: userID, Filename: a.Filename, MimeType: a.Mime,
 		Size: a.Size, Width: a.Width, Height: a.Height,
+		DurationMs: a.DurationMs, Waveform: a.Waveform,
 	}
 	if err := s.Record(ctx, rec, res); err != nil {
 		if delErr := cloner.Delete(newID); delErr != nil && !errors.Is(delErr, fs.ErrNotExist) {
