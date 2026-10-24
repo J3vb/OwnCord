@@ -62,9 +62,12 @@ const (
 	// 6.9c-a2 adds one (131 to 132): MessageAPIResponse.Thread, the optional
 	// thread summary on a starter message. 6.3c moves db.Role out of models.go
 	// into db/role_model.go (its six tags leave the count; it also gains the
-	// two hoist/mentionable wire tags, outside it), 132 to 126. Any further
-	// tag fails.
-	modelsJSONTagBaseline = 126
+	// two hoist/mentionable wire tags, outside it), 132 to 126. 8.8a adds two
+	// (126 to 128): MessageAPIResponse.Sticker and MessageSearchResult.Sticker,
+	// the optional sticker block on history rows and search hits, for the same
+	// reason as 6.9a's. MessageStickerInfo lives in db/stickers.go, outside the
+	// count. Any further tag fails.
+	modelsJSONTagBaseline = 128
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9

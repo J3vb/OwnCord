@@ -64,6 +64,7 @@
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
+              "stickers": true,
               "thread_follows": true,
               "threads": true,
               "user_notes": true
@@ -370,6 +371,7 @@
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
+              "stickers": true,
               "thread_follows": true,
               "threads": true,
               "user_notes": true

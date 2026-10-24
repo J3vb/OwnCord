@@ -1,5 +1,5 @@
 {
-  "nextId": 516,
+  "nextId": 519,
   "findings": [
     {
       "id": "OC-0001",
@@ -11926,6 +11926,75 @@
       "lens": "platform-parity",
       "finder": "linux-laptop-retest",
       "fixedDate": "2026-10-23"
+    },
+    {
+      "id": "OC-0516",
+      "title": "Chat rows that resized after drawing moved the reading position, and a channel opened while the chat was hidden showed its top",
+      "file": "Client/src/components/MessageList.ts",
+      "line": 2458,
+      "severity": "medium",
+      "why": "The resize pass ran a frame after the observer fired, anchored on the row cut by the top edge, and judged 'at the bottom' after the growth; while the chat column was hidden every scroll write was clamped to 0 and the resize pass then held that top.",
+      "repro": "Scroll up through a channel with GIFs and link previews: rows jump 40-180 px as each loads. Or, with the call grid covering the chat, switch text channel and show the chat again: it opens at the oldest loaded message.",
+      "evidence": "Playwright repro: 27 of 250 scroll-up steps moved the view by an uncompensated 40/139/179 px; mounting with the slot display:none left scrollTop 0 and 5,400 px above the bottom.",
+      "suggestedFix": "Re-apply the anchor inside the ResizeObserver callback, anchor on the first row starting in view, judge the bottom by the gap before the resize, skip passes while hidden.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/message-list-resize-anchor.test.ts",
+        "revertProof": "fail (four of the five cases fail without the fix)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-24",
+      "hunt": "user-report-2026-10-24",
+      "lens": "correctness",
+      "finder": "chat-scroll-thread",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0517",
+      "title": "Username inputs cut valid names of letters outside the BMP at 16 characters",
+      "file": "Client/src/lib/nameLimits.ts",
+      "line": 202,
+      "severity": "low",
+      "why": "attachLimitHint set maxlength to the character limit for usernames, and maxlength counts UTF-16 units. The server and checkNewUsername count characters, so a 32-letter name of supplementary-plane letters (2 units each) was truncated to 16 in the register and rename inputs.",
+      "repro": "Register form or Settings > Account > change username: paste 20 x U+1D400. The input keeps 16 and shows the limit, although the server accepts 32 characters.",
+      "evidence": "Vault issue #143; LoginForm and AccountTab called attachLimitHint for usernames without countCharacters, and LoginForm reset maxLength to 32 on switching to Register.",
+      "suggestedFix": "Pass countCharacters for both username inputs and restore the hint's own cap when Register re-bounds the field.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/name-limits.test.ts, Client/tests/unit/settings-overlay.test.ts (32-letter name outside the BMP)",
+        "revertProof": "fail (maxlength 32, name cut)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-18",
+      "hunt": "nightly-bughunt",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0518",
+      "title": "A YouTube card mounted without its thumbnail height and grew once the image arrived, moving the chat while scrolling up",
+      "file": "Client/src/styles/app/messages.css",
+      "line": 772,
+      "severity": "low",
+      "why": ".msg-embed-thumb had height:auto and no aspect ratio, so the card drew about 212 px short until the thumbnail bytes landed; each card that mounted while scrolling up was corrected twice.",
+      "repro": "Live Windows log (2026-10-24): scrolling #general up from the newest message, 22 events of -167..-238 px followed ~120 ms later by +212 px on the same row.",
+      "evidence": "message-media.spec.ts: before the image loads the thumbnail box is 0 px tall; with an 8x8 image it is 420 px tall instead of 236.",
+      "suggestedFix": "Give the thumbnail a 16:9 aspect-ratio with object-fit: cover; seed reopened lists with measured row heights.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/e2e/message-media.spec.ts",
+        "revertProof": "fail (both 'YouTube embed box' cases fail without the CSS)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-24",
+      "hunt": "user-report-2026-10-24",
+      "lens": "correctness",
+      "finder": "chat-scroll-thread",
+      "fixedDate": "2026-10-24"
     }
   ]
 }

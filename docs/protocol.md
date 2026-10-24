@@ -99,7 +99,7 @@ The sequence number system enables reconnection with state recovery.
 | Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                                                              |
 | ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                                                                   |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                                                                |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `sticker_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                                              |
 | Ephemeral          | No       | `typing`, `upload_policy` (see below), `game_activity_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
 | DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                                                                |
 | DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                                                            |
@@ -715,6 +715,25 @@ to reconstruct them:
 | `reply_ping`        | bool           | No       | With `reply_to`, `true` adds the replied-to author to `mentions`. See below.  |
 | `attachments`       | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.   |
 | `client_message_id` | string         | No       | Stable timestamp and UUID v4, scoped to the sender. See retry contract below. |
+| `sticker_id`        | number         | No       | Sends a custom sticker. See _Sticker messages_ below.                         |
+
+**Sticker messages (WP 8.8a).** `sticker_id`, a positive integer naming a row of
+`GET /api/v1/stickers`, makes the send a sticker message. A sticker send has no
+text and no attachments (`content` empty or absent, `attachments` empty), and
+`client_message_id` is required, because the message and its sticker row commit
+in one transaction with the receipt, as a poll's rows do. Any of those broken is
+`BAD_REQUEST`, as is a `sticker_id` that is not a positive integer. A sticker
+that does not exist, or was deleted after the sender last loaded the set, is
+refused with `STICKER_NOT_FOUND` (it refines `NOT_FOUND`) and nothing is stored;
+the client refreshes its picker from `sticker_update`. Every other gate is the
+ordinary send's: `SEND_MESSAGES`, the channel, DM, thread and forum checks,
+slow mode and the rate limit all apply, and `reply_to` and `reply_ping` work.
+The stored `content` is the fallback `[Sticker: <name>]`, so search, push text
+and clients that do not know the field still read something. A sticker message
+cannot be edited or forwarded (`BAD_REQUEST`); it can be deleted, replied to
+and reacted to like any message. The server advertises the `stickers`
+capability in `ready`; an older server ignores `sticker_id` and would store an
+empty send as `BAD_REQUEST`, so a client sends it only when the capability is set.
 
 `reply_ping` is optional and defaults to `false`: a send that omits it does
 not ping, so a client from before the field existed keeps its old behaviour.
@@ -1175,6 +1194,16 @@ message of `GET /channels/{id}/messages`. Votes, the end and expiry change the
 block only through `poll_update`, and the server advertises the `polls` capability
 in `ready`.
 
+A sticker message (WP 8.8a, `chat_send` with `sticker_id`) is an ordinary message
+with one more payload field, `sticker`, omitted for every other message and for a
+deleted one: `{"id": 3, "name": "Wave", "url": "/api/v1/stickers/3/image"}`.
+`content` is the fallback `[Sticker: Wave]`. `name` is the label kept from send
+time, so it survives a rename or delete of the sticker. When the sticker has been
+deleted, `id` and `url` are `null` and only `name` is left: a client shows a
+"deleted sticker" placeholder. The live frame always carries the id and url, the
+block is static, and it rides on each message in `GET /channels/{id}/messages`
+and on each search hit, where a deleted sticker already reads `null`.
+
 A group DM can also hold group event rows (WP 3B-10): `kind` is one of
 `group_add`, `group_remove`, `group_leave`, `group_rename` and `group_icon`, and
 the payload gains `group_event`, present only for these kinds. `group_event` is
@@ -1220,6 +1249,22 @@ reconnect; it raises the unread count for everyone but the pinner (the pinner's 
 mention and sends no push. Unlike a call or group row, its author or a moderator
 (MANAGE_MESSAGES in a channel, the author only in a DM) may delete it, as an
 ordinary message. It cannot be edited, replied to, reacted to or pinned.
+
+A welcome row (WP 8.6) greets a new member in the channel the admin picked with the
+`welcome_channel_id` setting: `kind` is `member_join`, the author is the new member,
+`reply_to` is null and `content` is the English fallback `alice joined the server.`
+that only clients that do not know `kind` show; a current client draws its own
+greeting line. The server writes it once the account is usable, that is after a
+`register` in invite or open mode and when an admin approves an application in approval
+mode, and only while that setting names an existing, non-archived text channel; it
+writes nothing otherwise, and a failure to write or deliver it never fails the
+registration or approval. It is a sequenced `chat_message` to the channel's readers
+with a `channel_activity` note for readers elsewhere, replayed on reconnect, raising
+the unread count for everyone but the new member (whose read state advances to the
+row), carrying no mention and sending no push. Its author or a moderator
+(MANAGE_MESSAGES) may delete it, as an ordinary message. It cannot be edited, reacted to
+or pinned, but unlike the other system rows a member may reply to it: the client's
+wave button sends an ordinary `chat_send` of `👋` with `reply_to` set to the row.
 
 The server writes one call row per DM call, from voice presence. The row is
 created when the first person joins the DM's voice channel (its author is the
@@ -2398,6 +2443,34 @@ payload, so it discloses nothing new. A role permission change that alters
 channel visibility is delivered separately, as targeted
 `channel_create`/`channel_delete` messages, and a role deletion additionally
 sends one `member_update` per reassigned member.
+
+### sticker_update (Server -> Client, broadcast)
+
+Sent to every connected client after a custom sticker is uploaded, renamed or
+deleted through `/api/v1/stickers`. Like `emoji_update` it carries the **whole**
+set, so a client replaces its list wholesale and a dropped event can never leave
+a deleted sticker in a picker.
+
+```json
+{
+  "seq": 75,
+  "type": "sticker_update",
+  "payload": {
+    "stickers": [
+      { "id": 3, "name": "Wave", "emoji": "👋", "url": "/api/v1/stickers/3/image" },
+      { "id": 7, "name": "Party Blob", "emoji": null, "url": "/api/v1/stickers/7/image" }
+    ]
+  }
+}
+```
+
+`stickers` is always an array, `[]` when the last sticker was deleted, ordered by
+name ignoring case. `emoji` is the optional related emoji (a single emoji or a
+`:shortcode:`) the picker searches by, `null` for none. `url` is a server-relative
+path that requires the session token (see api.md). Unfiltered, for the same
+reason `emoji_update` is, and, like the emoji, **not** in the `ready` payload:
+clients load the set once over `GET /api/v1/stickers` and keep it fresh from this
+event.
 
 ### emoji_update (Server -> Client, broadcast)
 
@@ -3580,6 +3653,7 @@ warm resume served by replay never waits for a permit.
 | `NOT_FOUND`                | Channel or message not found                                                                                                                                                                                                                                                     |
 | `FORBIDDEN`                | Missing required permission                                                                                                                                                                                                                                                      |
 | `NOT_KEY_HOLDER`           | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                                                                                                                                                     |
+| `STICKER_NOT_FOUND`        | A `chat_send` named a sticker that does not exist or was deleted. Nothing was stored. Refines `NOT_FOUND`.                                                                                                                                                                       |
 | `THREAD_EXISTS`            | The message already has a thread; the error carries `thread_id`                                                                                                                                                                                                                  |
 | `THREAD_LOCKED`            | The thread is locked; only a moderator may post in it or change it                                                                                                                                                                                                               |
 | `GAME_ACTIVITY_DISABLED`   | `activity_update` or `listening_update` set a game or a song while an admin has member activity switched off for the server; a clear is never refused (WP 8.3e-2, 8.10a)                                                                                                         |
@@ -3787,6 +3861,7 @@ tables below add per-type behavioral notes.
 | `member_ban`           | Yes      | All clients                                                                                            |
 | `roles_update`         | Yes      | All clients (full role list)                                                                           |
 | `emoji_update`         | Yes      | All clients (full custom-emoji set)                                                                    |
+| `sticker_update`       | Yes      | All clients (full custom-sticker set)                                                                  |
 | `upload_policy`        | No       | All clients (both upload file-type lists)                                                              |
 | `game_activity_policy` | No       | All clients (the game activity switch)                                                                 |
 | `dm_channel_open`      | No       | Direct to participant                                                                                  |

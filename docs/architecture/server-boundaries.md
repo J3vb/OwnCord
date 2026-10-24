@@ -357,6 +357,7 @@ handle-backed read seams.
 
 83 files use `db` outside `db/` and `service/` (. 3, admin 17, api 16, auth 2, cmd/gendocs 1, cmd/seed 2, internal/app 8, plugin 1, ws 33); 81 import it, 2 use the handle without importing it; 43 are type-only; 0 unlisted.
 Dispositions: adapter 55, boundary 28. Move targets: .
+
 <!-- dbinventory:end -->
 
 Reading the table:

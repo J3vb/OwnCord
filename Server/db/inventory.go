@@ -64,6 +64,7 @@ var SubjectInventory = []InventoryClass{
 	// the row, the same bare-id-plus-token shape as every actor class above.
 	{"15b invite redemptions", `SELECT COUNT(*) FROM invite_redemptions WHERE user_id = ?`, inventoryByUID},
 	{"16 emoji", `SELECT COUNT(*) FROM emoji WHERE uploaded_by = ?`, inventoryByUID},
+	{"16c stickers", `SELECT COUNT(*) FROM stickers WHERE uploaded_by = ?`, inventoryByUID},
 	{"16a private notes", `SELECT COUNT(*) FROM user_notes WHERE owner_id = ? OR target_id = ?`, inventoryBothIDs},
 	{"16b dm privacy settings", `SELECT COUNT(*) FROM user_privacy WHERE user_id = ?`, inventoryByUID},
 	{"17 blocks", `SELECT COUNT(*) FROM user_blocks WHERE blocker_id = ? OR blocked_id = ?`, inventoryBothIDs},
