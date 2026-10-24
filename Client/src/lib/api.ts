@@ -31,6 +31,7 @@ import type {
   ForumSettingsBody,
   ChannelCategory,
   EmojiResponse,
+  StickerResponse,
   InviteResponse,
   UploadResponse,
   VoiceUploadMeta,
@@ -1568,6 +1569,16 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     deleteEmoji(emojiId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/emoji/${emojiId}`, undefined, signal);
+    },
+
+    // ── Custom stickers (WP 8.8) ──────────────────────────
+    //
+    // Reading is open to any member. Upload, rename and delete are the admin
+    // panel's (Server/admin/static/js/stickers.js), which calls them itself.
+
+    /** The server's whole custom-sticker set. */
+    listStickers(signal?: AbortSignal): Promise<StickerResponse[]> {
+      return request<StickerResponse[]>("GET", "/stickers", undefined, signal);
     },
 
     // ── Direct Messages ─────────────────────────────────────

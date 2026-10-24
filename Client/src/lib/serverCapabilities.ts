@@ -17,6 +17,7 @@ export interface ReadyCapabilityFlags {
   readonly profile_banners?: boolean;
   readonly dm_privacy?: boolean;
   readonly polls?: boolean;
+  readonly stickers?: boolean;
   readonly threads?: boolean;
   readonly forums?: boolean;
   readonly multi_role?: boolean;
@@ -103,6 +104,15 @@ export function dmPrivacyEnabled(): boolean {
  */
 export function pollsEnabled(): boolean {
   return caps?.polls === true;
+}
+
+/**
+ * Whether the server has custom stickers (WP 8.8): `sticker_id` on `chat_send`,
+ * `sticker` on messages, `sticker_update` and `/api/v1/stickers`. False hides
+ * the composer's sticker button and the Stickers tab; nothing is fetched.
+ */
+export function stickersEnabled(): boolean {
+  return caps?.stickers === true;
 }
 
 /**

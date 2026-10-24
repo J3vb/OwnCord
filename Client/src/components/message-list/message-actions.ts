@@ -95,11 +95,17 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
   const canDelete = deletable && (own || (!isDm && channelBitOrRole(channel?.canDeleteOthers)));
   return {
     react: gate(on, on ? reactionLockReason(channelCanReact(msg.channelId)) : null),
-    // A forward is a snapshot and a poll is what people voted on: the server refuses to edit either.
-    edit: gate(on && own && msg.forward === undefined && msg.poll === undefined),
+    // A forward is a snapshot, a poll is what people voted on and a sticker has no text: the server refuses to edit any of them.
+    edit: gate(
+      on && own && msg.forward === undefined && msg.poll === undefined && msg.sticker === undefined,
+    ),
     // A forward would copy only the poll's fallback text and drop the voting, so the server refuses it.
+    // A sticker message cannot be forwarded either (WP 8.8).
     forward: gate(
-      on && opts.onForwardClick !== undefined && msg.poll === undefined,
+      on &&
+        opts.onForwardClick !== undefined &&
+        msg.poll === undefined &&
+        msg.sticker === undefined,
       on ? deleteLockReason() : null,
     ),
     createThread: gate(
