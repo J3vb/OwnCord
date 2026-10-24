@@ -32,6 +32,8 @@ const hoisted = vi.hoisted(() => ({
   }>,
   failOpen: false,
   clearAuth: vi.fn(),
+  abandonInFlight: vi.fn(),
+  authenticated: true,
   setTransientError: vi.fn(),
   reconnectAfterCertAccept: vi.fn(),
   logError: vi.fn(),
@@ -48,12 +50,18 @@ vi.mock("@lib/logger", () => ({
     error: hoisted.logError,
   }),
 }));
-vi.mock("@stores/auth.store", () => ({ clearAuth: hoisted.clearAuth }));
+vi.mock("@stores/auth.store", () => ({
+  authStore: { getState: () => ({ isAuthenticated: hoisted.authenticated }) },
+  clearAuth: hoisted.clearAuth,
+}));
 vi.mock("@stores/ui.store", () => ({ setTransientError: hoisted.setTransientError }));
 vi.mock("@lib/cert-reconnect", () => ({
   reconnectAfterCertAccept: hoisted.reconnectAfterCertAccept,
 }));
-vi.mock("../../src/app/session", () => ({ sessionTarget: () => hoisted.target }));
+vi.mock("../../src/app/session", () => ({
+  sessionTarget: () => hoisted.target,
+  abandonInFlight: hoisted.abandonInFlight,
+}));
 vi.mock("@components/CertMismatchModal", () => {
   const make = (kind: "first-use" | "mismatch") => (opts: ModalOptions) => {
     if (hoisted.failOpen) throw new Error("modal failed to open");
@@ -128,6 +136,7 @@ beforeEach(async () => {
   modals.length = 0;
   hoisted.failOpen = false;
   hoisted.target = null;
+  hoisted.authenticated = true;
   page = "connect";
   ws.acceptCertFingerprint.mockImplementation(() => Promise.resolve());
   installCertPrompts(ws as unknown as WsClient, () => page, navigate, rerunHealth);
@@ -438,5 +447,64 @@ describe("a mismatch drops the session only for the live session's host", () => 
     await settle();
     expect(ws.disconnect).not.toHaveBeenCalled();
     expect(hoisted.clearAuth).not.toHaveBeenCalled();
+  });
+});
+
+describe("a mismatch before the first auth_ok", () => {
+  beforeEach(() => {
+    hoisted.authenticated = false;
+    hoisted.target = { host: "a.example:8443", token: "tok" };
+  });
+
+  it("rejecting tears the attempt down and ends the spinner with the notice", async () => {
+    const m = await openMismatch();
+    m.opts.onReject();
+    expect(hoisted.clearAuth).toHaveBeenCalledTimes(1);
+    expect(hoisted.abandonInFlight).toHaveBeenCalledTimes(1);
+    expect(hoisted.setTransientError).toHaveBeenCalledExactlyOnceWith(
+      connectText("cert.notAccepted"),
+    );
+    expect(navigate).toHaveBeenCalledWith("connect");
+  });
+
+  it("a later Accept for the same host does not resume the abandoned attempt", async () => {
+    const first = await openMismatch();
+    first.opts.onReject();
+    // abandonInFlight clears the session target.
+    hoisted.target = null;
+    const second = await openMismatch();
+    second.opts.onAccept();
+    await settle();
+    expect(ws.acceptCertFingerprint).toHaveBeenCalledTimes(1);
+    expect(hoisted.reconnectAfterCertAccept).not.toHaveBeenCalled();
+    expect(ws.connect).not.toHaveBeenCalled();
+  });
+
+  it("a declined confirmation shows the notice once", async () => {
+    ws.acceptCertFingerprint.mockImplementationOnce(() =>
+      Promise.reject(new Error(CERT_NOT_ACCEPTED)),
+    );
+    const m = await openMismatch();
+    m.opts.onAccept();
+    await settle();
+    expect(hoisted.abandonInFlight).toHaveBeenCalledTimes(1);
+    expect(hoisted.setTransientError).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed with the notice when the modal cannot open", async () => {
+    hoisted.failOpen = true;
+    mismatch(EVT);
+    await settle();
+    expect(hoisted.abandonInFlight).toHaveBeenCalledTimes(1);
+    expect(hoisted.setTransientError).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves another host's attempt alone", async () => {
+    hoisted.target = { host: "b.example:8443", token: "tok" };
+    const m = await openMismatch();
+    m.opts.onReject();
+    expect(hoisted.abandonInFlight).not.toHaveBeenCalled();
+    expect(hoisted.clearAuth).not.toHaveBeenCalled();
+    expect(hoisted.setTransientError).not.toHaveBeenCalled();
   });
 });

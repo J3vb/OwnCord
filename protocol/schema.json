@@ -185,6 +185,12 @@
       "ts": "UPLOAD_POLICY",
       "note": "the upload file-type lists after the owner saves them in the admin panel"
     },
+    {
+      "wire": "game_activity_policy",
+      "go": "MsgTypeGameActivityPolicy",
+      "ts": "GAME_ACTIVITY_POLICY",
+      "note": "WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume"
+    },
     { "wire": "server_restart", "go": "MsgTypeServerRestart", "ts": "SERVER_RESTART" },
     {
       "wire": "mod_queue",

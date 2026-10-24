@@ -235,7 +235,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		Limiter:    h.limiter,
 		LiveStatus: h.LiveStatus,
 	}
-	presenceDeps := PresenceDeps{Limiter: h.limiter}
+	presenceDeps := PresenceDeps{Limiter: h.limiter, GameActivityEnabled: h.gameActivity.on.Load}
 	reactionDeps := ReactionDeps{}
 	callDeps := CallDeps{Limiter: h.limiter}
 	if svc != nil {
@@ -294,6 +294,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	registerVoiceControlsV2(reg, h.voiceDeps())
 
 	h.refreshSettingsLocked(context.Background())
+	h.initGameActivityPolicy()
 	return h, nil
 }
 

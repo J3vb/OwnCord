@@ -96,7 +96,8 @@ const (
 	MsgTypeMemberBan           = "member_ban"
 	MsgTypeRolesUpdate         = "roles_update"
 	MsgTypeEmojiUpdate         = "emoji_update"
-	MsgTypeUploadPolicy        = "upload_policy" // the upload file-type lists after the owner saves them in the admin panel
+	MsgTypeUploadPolicy        = "upload_policy"        // the upload file-type lists after the owner saves them in the admin panel
+	MsgTypeGameActivityPolicy  = "game_activity_policy" // WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume
 	MsgTypeServerRestart       = "server_restart"
 	MsgTypeModQueue            = "mod_queue"          // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
 	MsgTypeModAction           = "mod_action"         // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed

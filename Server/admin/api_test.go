@@ -1815,6 +1815,8 @@ type mockHub struct {
 	onVoiceCleanup func(channelID int64)
 	// uploadPolicyBroadcasts counts BroadcastUploadPolicy calls.
 	uploadPolicyBroadcasts int
+	// gameActivityPolicies records every ApplyGameActivityPolicy call.
+	gameActivityPolicies []bool
 }
 
 type bulkDeleteCall struct {
@@ -1929,6 +1931,10 @@ func (m *mockHub) BroadcastRolesUpdate(roles []*db.Role) {
 
 func (m *mockHub) BroadcastUploadPolicy() {
 	m.uploadPolicyBroadcasts++
+}
+
+func (m *mockHub) ApplyGameActivityPolicy(saved bool) {
+	m.gameActivityPolicies = append(m.gameActivityPolicies, saved)
 }
 
 func (m *mockHub) ClientCount() int {

@@ -142,6 +142,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeRolesUpdate:         false,
 	MsgTypeEmojiUpdate:         false,
 	MsgTypeUploadPolicy:        false,
+	MsgTypeGameActivityPolicy:  false,
 	MsgTypeServerRestart:       false,
 	MsgTypeError:               false,
 	MsgTypePong:                false,
