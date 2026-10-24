@@ -148,6 +148,18 @@ describe("MessageList — inline editor lifecycle (WP 3A-8 review)", () => {
     }
   });
 
+  it("refuses to edit a sticker message", () => {
+    setMessages([
+      makeMessage(1, {
+        content: "[Sticker: Wave]",
+        sticker: { id: null, name: "Wave", url: null },
+      }),
+    ]);
+    mount();
+    expect(list!.startEdit(1)).toBe(false);
+    expect(editor(1)).toBeNull();
+  });
+
   it("the edit box shows id tokens as @name and converts untouched spans back on save", async () => {
     applyReadyCapabilities({ id_mentions: true });
     membersStore.setState(() => ({

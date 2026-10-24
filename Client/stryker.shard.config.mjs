@@ -305,6 +305,7 @@ export const shards = {
     "src/stores/blocks.store.ts",
     "src/stores/channels.store.ts",
     "src/stores/gifFavorites.store.ts",
+    "src/stores/stickers.store.ts",
     "src/stores/messages.store.ts",
     "src/stores/ui.store.ts",
     "src/features/messaging/messageEdits.ts",

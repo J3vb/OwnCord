@@ -57,6 +57,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messages & files**
 
+- Stickers: a new sticker button in the message box. The GIF, sticker and emoji buttons now open one popup with GIFs, Stickers and Emoji tabs. Click a sticker to send it at once, in channels, threads and DMs, also as a reply. Stickers show big in chat; a sticker an admin removed shows as "Deleted sticker: name". Admins add, rename and remove stickers on the new Stickers page of the admin panel.
 - Text and code files (.txt, .log, .json, .py, .js, .ts, .sql, .go, .md and more) now show a preview in chat: the first lines in a coloured code box, with Expand and Collapse, the language and the line count. Only the first 64 KB is shown; download the file for the rest. Files marked as spoilers stay a plain download.
 
 **Accounts & admin**
@@ -75,7 +76,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Server (operators)**
 
-- Server stickers: members with Manage Server can upload up to 60 stickers (PNG, GIF or WebP, animation allowed, up to 512 KB and 320x320) under `/api/v1/stickers`, stored with the other uploads. Sending and picking stickers in the app arrives with the next client update.
+- Server stickers: members with Manage Server can upload up to 60 stickers (PNG, GIF or WebP, animation allowed, up to 512 KB and 320x320) under `/api/v1/stickers`, stored with the other uploads.
 - Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.
 
 **Desktop UI**
