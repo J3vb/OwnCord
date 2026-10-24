@@ -11,6 +11,7 @@ import {
   dmDisplayName,
 } from "../../stores/dm.store";
 import type { DmChannel } from "../../stores/dm.store";
+import { clearChannelVoiceUsers } from "../../stores/voice.store";
 import { blocksStore, setBlockedByMe, clearBlockedByThem } from "../../stores/blocks.store";
 import type { DmChannelPayload } from "../../lib/types";
 import { isTextLikeChannel } from "../../lib/types";
@@ -145,6 +146,10 @@ export function handleDmChannelOpen(payload: Payload<"dm_channel_open">): void {
 
 export function handleDmChannelClose(payload: Payload<"dm_channel_close">): void {
   log.info("DM channel closed", { channelId: payload.channel_id });
+  // A group closed on this side means the local user left or was removed; a
+  // closed 1:1 is still a participant, so only a group drops its call roster.
+  const closing = dmStore.getState().channels.find((c) => c.channelId === payload.channel_id);
+  if (closing?.isGroup === true) clearChannelVoiceUsers(payload.channel_id);
   // Delivered to a device that never ran the local close flow (closed
   // from another signed-in device) — unlike the sidebar's closeOrLeaveDm,
   // there is no "channel visited before this DM" to restore, so fall

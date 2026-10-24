@@ -45,6 +45,7 @@ import type { GameActivityLoop } from "@lib/gameActivity";
 import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { watchGroupDmExits } from "../features/direct-messages/groupExitWatch";
 import {
   voiceStore,
   isSelfMuted,
@@ -1720,6 +1721,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             }
           }
         }
+      }),
+    );
+
+    // Losing a group (left, or removed) ends its ring without a missed call:
+    // the server stops sending that room's voice_leave, so the 30 s timeout
+    // would otherwise report a call from a group the user is no longer in.
+    unsubscribers.push(
+      watchGroupDmExits((channelId) => {
+        if (ringCtrl?.current()?.channelId === channelId) ringCtrl.cancel(channelId);
+        if (outgoingCall?.current()?.channelId === channelId) outgoingCall.clear();
       }),
     );
 

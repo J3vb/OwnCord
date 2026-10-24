@@ -3082,6 +3082,66 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).toBe("none");
   });
 
+  describe("a ring for a group the user loses", () => {
+    const groupRow = (channelId: number) => ({
+      channelId,
+      recipient: { id: 10, username: "alice", avatar: "", status: "online" },
+      participants: [
+        { id: 10, username: "alice", avatar: "", status: "online" },
+        { id: 11, username: "bob", avatar: "", status: "online" },
+      ],
+      name: "Group Chat",
+      isGroup: true,
+      lastMessageId: null,
+      lastMessage: "",
+      lastMessageAt: "",
+      unreadCount: 0,
+      mentionCount: 0,
+    });
+    const banner = () =>
+      document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+
+    it("is cancelled with no missed call when the group leaves dmStore", async () => {
+      const ws = fakeWs();
+      dmStore.setState(() => ({ channels: [groupRow(50)] }));
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+      vi.mocked(alertMissedCall).mockClear();
+      vi.mocked(alertIncomingCall).mockClear();
+
+      ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+      await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
+      expect(banner().style.display).not.toBe("none");
+
+      // Left, or removed by the owner: the group drops out of the store.
+      dmStore.setState(() => ({ channels: [] }));
+      dmStore.flush();
+
+      expect(banner().style.display).toBe("none");
+      expect(alertMissedCall).not.toHaveBeenCalled();
+    });
+
+    it("is not cancelled by dmStore changes while its channel was never listed", async () => {
+      const ws = fakeWs();
+      dmStore.setState(() => ({ channels: [groupRow(60)] }));
+      page = createMainPage({ ws, api: fakeApi() });
+      page.mount(container);
+      vi.mocked(alertIncomingCall).mockClear();
+
+      // The ring beats its dm_channel_open: channel 50 is not in dmStore yet.
+      ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
+      await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
+
+      // An unrelated group goes away, then another DM changes.
+      dmStore.setState(() => ({ channels: [] }));
+      dmStore.flush();
+      dmStore.setState(() => ({ channels: [groupRow(61)] }));
+      dmStore.flush();
+
+      expect(banner().style.display).not.toBe("none");
+    });
+  });
+
   // OC-0037 / OC-0204: DND silences the tone and the popup (call-alerts.test.ts),
   // never the banner — it is the one way left to answer.
   it("DND keeps the banner", () => {

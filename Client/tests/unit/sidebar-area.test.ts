@@ -166,7 +166,12 @@ import { uiStore, setSidebarMode } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
 import { Permission } from "../../src/lib/types";
 import { membersStore } from "../../src/stores/members.store";
-import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
+import {
+  voiceStore,
+  joinVoiceChannel,
+  leaveVoiceChannel,
+  updateVoiceState,
+} from "../../src/stores/voice.store";
 import { isDmKeptForCall, resetKeptCallDms } from "../../src/features/direct-messages/keptCallDms";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { createChannelSidebar } from "@components/ChannelSidebar";
@@ -1984,6 +1989,76 @@ describe("SidebarArea", () => {
       expect(opts.api.closeDm).toHaveBeenCalledWith(100);
 
       cleanup(result);
+    });
+
+    describe("call roster when leaving a group DM", () => {
+      const seedRoster = (channelId: number) => {
+        updateVoiceState({
+          channel_id: channelId,
+          user_id: 10,
+          username: "Alice",
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: false,
+          screenshare: false,
+        });
+        voiceStore.flush();
+      };
+      const closeFrom = (channelId: number, opts = defaultOpts()) => {
+        const result = createSidebarArea(opts);
+        container.appendChild(result.sidebarWrapper);
+        const calls = (createDmSidebar as MockedFn).mock.calls;
+        calls[calls.length - 1]![0].onCloseDm(channelId);
+        return result;
+      };
+
+      it("drops the roster once the server accepts the leave", async () => {
+        addDmChannel(makeDm({ channelId: 100, isGroup: true }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        seedRoster(100);
+
+        const result = closeFrom(100);
+
+        await vi.waitFor(() => {
+          voiceStore.flush();
+          expect(voiceStore.getState().voiceUsers.has(100)).toBe(false);
+        });
+        cleanup(result);
+      });
+
+      it("keeps the roster when the server refuses the leave", async () => {
+        addDmChannel(makeDm({ channelId: 100, isGroup: true }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        seedRoster(100);
+        const opts = defaultOpts();
+        (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
+
+        const result = closeFrom(100, opts);
+
+        await vi.waitFor(() => {
+          expect(dmStore.getState().channels.map((c) => c.channelId)).toContain(100);
+        });
+        voiceStore.flush();
+        expect(voiceStore.getState().voiceUsers.get(100)?.size).toBe(1);
+        cleanup(result);
+      });
+
+      it("keeps the roster when a 1:1 DM is closed", async () => {
+        addDmChannel(makeDm({ channelId: 100, isGroup: false }));
+        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        seedRoster(100);
+        const opts = defaultOpts();
+
+        const result = closeFrom(100, opts);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        voiceStore.flush();
+        expect(opts.api.closeDm).toHaveBeenCalledWith(100);
+        expect(voiceStore.getState().voiceUsers.get(100)?.size).toBe(1);
+        cleanup(result);
+      });
     });
 
     // DP-34: the optimistic removal is rolled back when the server refuses.

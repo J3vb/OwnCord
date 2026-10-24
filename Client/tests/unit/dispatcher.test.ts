@@ -26,7 +26,7 @@ import {
 import { registerReadingAnchor } from "../../src/features/messaging/readingAnchor";
 import { membersStore } from "../../src/stores/members.store";
 import { memberTimeoutsStore, setMemberTimeouts } from "../../src/features/moderation/store";
-import { voiceStore } from "../../src/stores/voice.store";
+import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 import {
@@ -5605,6 +5605,69 @@ describe("WS Dispatcher", () => {
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
       expect(dmStore.getState().channels).toHaveLength(0);
+    });
+
+    describe("call roster of a closed DM", () => {
+      const dmRow = (channelId: number, isGroup: boolean) => ({
+        channelId,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        participants: [],
+        name: "",
+        isGroup,
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+        mentionCount: 0,
+      });
+      const seedCall = (channelId: number) => {
+        mock.dispatch("voice_state", {
+          channel_id: channelId,
+          user_id: 10,
+          username: "bob",
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: false,
+          screenshare: false,
+        });
+        voiceStore.flush();
+      };
+
+      it("drops the roster when a group DM is closed (left or removed)", () => {
+        dmStore.setState(() => ({ channels: [dmRow(70, true)] }));
+        seedCall(70);
+        expect(voiceStore.getState().voiceUsers.get(70)?.size).toBe(1);
+
+        mock.dispatch("dm_channel_close", { channel_id: 70 });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.has(70)).toBe(false);
+      });
+
+      it("keeps the roster when a 1:1 DM is closed", () => {
+        dmStore.setState(() => ({ channels: [dmRow(71, false)] }));
+        seedCall(71);
+
+        mock.dispatch("dm_channel_close", { channel_id: 71 });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.get(71)?.size).toBe(1);
+      });
+
+      it("leaves the roster to voice_leave while the local user is in that call", () => {
+        dmStore.setState(() => ({ channels: [dmRow(72, true)] }));
+        seedCall(72);
+        joinVoiceChannel(72);
+        voiceStore.flush();
+
+        mock.dispatch("dm_channel_close", { channel_id: 72 });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.get(72)?.size).toBe(1);
+        leaveVoiceChannel();
+        voiceStore.flush();
+      });
     });
 
     it("falls back to another open DM when the closed DM was active", () => {
