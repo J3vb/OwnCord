@@ -129,3 +129,70 @@ test("a missing working directory is not reported as a missing executable", () =
     rmSync(fixture, { recursive: true, force: true });
   }
 });
+
+test("--help is short and works without build tools", () => {
+  for (const flag of ["--help", "-h"]) {
+    const result = list(flag);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    assert.match(result.stdout, /usage:/);
+    assert.match(result.stdout, /--list.*--json/);
+    assert.match(result.stdout, /check:rust/);
+    assert.doesNotMatch(result.stdout, /cargo clippy|passed|FAILED/);
+  }
+});
+
+test("JSON listings expose command arguments and directories without terminal text", () => {
+  for (const args of [
+    ["--list", "check:rust", "--json"],
+    ["--list", "--json", "check:rust"],
+  ]) {
+    const result = list(...args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    const plan = JSON.parse(result.stdout);
+    assert.deepEqual(Object.keys(plan), ["check:rust"]);
+    assert.deepEqual(plan["check:rust"][1], {
+      cmd: "cargo",
+      args: ["test", "--lib"],
+      cwd: "Client/src-tauri",
+      label: "",
+    });
+  }
+});
+
+test("full JSON listings retain optional-tool metadata", () => {
+  const result = list("--list", "--json");
+  assert.equal(result.status, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  assert.ok(plan["check:server"].some((step) => step.probe === "sqlc" && step.why));
+  assert.ok(plan["check:client"].length > 0);
+});
+
+test("invalid execution arguments fail before checking the environment or running tools", () => {
+  for (const args of [["check:rust", "extra"], ["--json"], ["--help", "extra"]]) {
+    const result = list(...args);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /usage:/);
+    assert.doesNotMatch(result.stderr, /run this from|FAILED|TypeError/);
+  }
+  for (const name of ["check:typo", "toString", "__proto__"]) {
+    const result = list(name);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /unknown task:/);
+    assert.doesNotMatch(result.stderr, /run this from|TypeError/);
+  }
+});
+
+test("JSON listing rejects duplicate or unknown options without partial output", () => {
+  for (const args of [
+    ["--list", "--json", "--json"],
+    ["--list", "check:rust", "--typo"],
+  ]) {
+    const result = list(...args);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, "");
+  }
+});

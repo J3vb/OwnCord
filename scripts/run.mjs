@@ -5,6 +5,7 @@
 // know which directory each stack lives in. `node scripts/run.mjs --list`
 // prints every task and the exact commands it runs. Add a task name to list
 // only that task, for example: node scripts/run.mjs --list check:rust.
+// Add --json for a read-only command plan with argument arrays and directories.
 //
 // Two rules this file exists to keep:
 //
@@ -365,10 +366,6 @@ function onPath(cmd) {
 
 function runTask(name) {
   const steps = TASKS[name];
-  if (!steps) {
-    console.error(`unknown task: ${name}\nknown: ${Object.keys(TASKS).join(", ")}`);
-    process.exit(2);
-  }
   const describe = (s) => (s.label ? `${s.cmd} ${s.label}` : `${s.cmd} ${s.args.join(" ")}`);
   const skipped = [];
   for (const s of steps) {
@@ -423,18 +420,40 @@ function runTask(name) {
   }
 }
 
-const arg = process.argv[2];
+const argv = process.argv.slice(2);
+const arg = argv[0];
+const usage =
+  "usage: node scripts/run.mjs --list [task] [--json]\n" +
+  "       node scripts/run.mjs <task>\n" +
+  "       node scripts/run.mjs --help";
+function usageError() {
+  console.error(usage);
+  process.exit(2);
+}
+function requireTask(name) {
+  if (!Object.hasOwn(TASKS, name)) {
+    console.error(`unknown task: ${name}\nknown: ${Object.keys(TASKS).join(", ")}`);
+    process.exit(2);
+  }
+}
+if (arg === "--help" || arg === "-h") {
+  if (argv.length !== 1) usageError();
+  console.log(`${usage}\n\nTasks: ${Object.keys(TASKS).join(", ")}`);
+  process.exit(0);
+}
 if (!arg || arg === "--list") {
-  const selected = process.argv[3];
-  if (process.argv.length > 4) {
-    console.error("usage: node scripts/run.mjs --list [task]");
-    process.exit(2);
+  const options = argv.slice(1);
+  const names = options.filter((value) => value !== "--json");
+  if (names.length > 1 || options.filter((value) => value === "--json").length > 1) {
+    usageError();
   }
-  if (selected !== undefined && !Object.hasOwn(TASKS, selected)) {
-    console.error(`unknown task: ${selected}\nknown: ${Object.keys(TASKS).join(", ")}`);
-    process.exit(2);
-  }
+  const selected = names[0];
+  if (selected !== undefined) requireTask(selected);
   const entries = selected === undefined ? Object.entries(TASKS) : [[selected, TASKS[selected]]];
+  if (options.includes("--json")) {
+    console.log(JSON.stringify(Object.fromEntries(entries), null, 2));
+    process.exit(0);
+  }
   for (const [name, steps] of entries) {
     console.log(`\n${name}`);
     for (const s of steps) {
@@ -446,6 +465,8 @@ if (!arg || arg === "--list") {
   console.log("");
   process.exit(0);
 }
+if (argv.length !== 1 || arg.startsWith("-")) usageError();
+requireTask(arg);
 if (!existsSync(join(ROOT, "Server")) || !existsSync(join(ROOT, "Client"))) {
   console.error("run this from the repository root");
   process.exit(2);

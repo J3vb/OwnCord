@@ -304,17 +304,25 @@ async function fetchJobs(repo, runs, token, cacheDir) {
   return jobsByRun;
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const args = { days: 30, repo: "J3vb/OwnCord", json: "", cache: "" };
+  const flags = new Set(["--days", "--repo", "--json", "--cache"]);
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--days") args.days = Number(argv[++i]);
-    else if (argv[i] === "--repo") args.repo = argv[++i];
-    else if (argv[i] === "--json") args.json = argv[++i];
-    else if (argv[i] === "--cache") args.cache = argv[++i];
-    else throw new Error(`unknown argument ${argv[i]}`);
+    const flag = argv[i];
+    if (!flags.has(flag)) throw new Error(`unknown argument ${flag}`);
+    const value = argv[++i];
+    if (typeof value !== "string" || value.trim() === "" || value.startsWith("--")) {
+      throw new Error(`${flag} requires a value`);
+    }
+    if (flag === "--days") args.days = Number(value);
+    else if (flag === "--repo") args.repo = value;
+    else if (flag === "--json") args.json = value;
+    else args.cache = value;
   }
   if (!Number.isInteger(args.days) || args.days < 1)
     throw new Error("--days must be a positive integer");
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(args.repo))
+    throw new Error("--repo must use owner/repository form");
   return args;
 }
 
