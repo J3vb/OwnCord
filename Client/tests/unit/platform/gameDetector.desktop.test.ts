@@ -28,6 +28,17 @@ describe("gameDetector (desktop)", () => {
     expect(invoke).toHaveBeenCalledWith("detect_game");
   });
 
+  it("accepts the launcher sources the host names", async () => {
+    for (const source of ["epic", "gog", "battlenet", "lutris", "list", "manual"]) {
+      invoke.mockResolvedValue({ name: "Diablo IV", source, startedAtMs: 1 });
+      await expect(gameDetector.detect()).resolves.toEqual({
+        name: "Diablo IV",
+        source,
+        startedAtMs: 1,
+      });
+    }
+  });
+
   it("answers null when nothing is running", async () => {
     invoke.mockResolvedValue(null);
     await expect(gameDetector.detect()).resolves.toBeNull();
@@ -45,7 +56,7 @@ describe("gameDetector (desktop)", () => {
       {},
       { name: "", source: "steam", startedAtMs: 1 },
       { name: "  ", source: "steam", startedAtMs: 1 },
-      { name: "Factorio", source: "gog", startedAtMs: 1 },
+      { name: "Factorio", source: "origin", startedAtMs: 1 },
       { name: "Factorio", source: "steam", startedAtMs: "1" },
       { name: "Factorio", source: "steam", startedAtMs: Number.NaN },
     ]) {

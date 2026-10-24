@@ -8,7 +8,15 @@ import type {
   RunningProgram,
 } from "../contracts/gameDetector";
 
-const SOURCES: ReadonlySet<string> = new Set(["steam", "epic", "list", "manual"]);
+const SOURCES: ReadonlySet<string> = new Set([
+  "steam",
+  "epic",
+  "gog",
+  "battlenet",
+  "lutris",
+  "list",
+  "manual",
+]);
 
 /** The host's answer, or null for anything that is not a well-formed game. */
 function parseDetected(raw: unknown): DetectedGame | null {
