@@ -1,9 +1,11 @@
-//! Installed-game libraries: what Steam and Epic say is on this machine.
+//! Installed-game libraries: what the launchers say is on this machine.
 //!
-//! Each launcher keeps one small file per installed game with its display name
-//! and install folder. The readers here are pure functions over a root path so
-//! tests run them over fixture files; only [`load_installed`] knows where the
-//! launchers live on this OS.
+//! Steam and Epic (Windows) are read here; Heroic, GOG Galaxy, Battle.net,
+//! Lutris and Wine prefixes are read by `launchers.rs` and `wine.rs`. Each
+//! launcher keeps one small file per installed game with its display name and
+//! install folder. The readers are pure functions over a root path so tests run
+//! them over fixture files; only [`load_installed`] (and the launcher loader it
+//! calls) knows where the launchers live on this OS.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -19,10 +21,19 @@ use super::{normalize_path, GameSource};
 pub(super) struct GameDir {
     pub name: String,
     pub source: GameSource,
-    dir: String,
+    pub(super) dir: String,
 }
 
 impl GameDir {
+    /// A game whose already-normalised folder `dir` ends in `/`.
+    pub(super) fn new(name: &str, source: GameSource, dir: String) -> Self {
+        GameDir {
+            name: name.to_string(),
+            source,
+            dir,
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn dir(&self) -> &str {
         &self.dir
@@ -53,6 +64,15 @@ impl Libraries {
             .next()
             .filter(|f| !f.is_empty())?;
         Some(format!("{root}{folder}/"))
+    }
+
+    /// Add games read by another launcher reader, skipping any already known.
+    pub(super) fn extend_games(&mut self, games: impl IntoIterator<Item = GameDir>) {
+        for game in games {
+            if !self.games.contains(&game) {
+                self.games.push(game);
+            }
+        }
     }
 
     #[cfg(test)]
@@ -350,10 +370,11 @@ struct EpicItem {
     incomplete: Option<bool>,
 }
 
-/// A game from an Epic `*.item` manifest. `None` for an unreadable file, a
+/// `(name, raw InstallLocation)` from an Epic `*.item` manifest, with the
+/// location as written (a Windows path). `None` for an unreadable file, a
 /// half-finished install, an entry that is not a game (Epic tags games with
 /// the `games` category) or one with no usable install folder.
-pub(super) fn parse_epic_item(json: &str) -> Option<GameDir> {
+pub(super) fn parse_epic_raw(json: &str) -> Option<(String, String)> {
     let item: EpicItem = serde_json::from_str(json).ok()?;
     if item.incomplete == Some(true) {
         return None;
@@ -364,16 +385,43 @@ pub(super) fn parse_epic_item(json: &str) -> Option<GameDir> {
         }
     }
     let name = item.display_name?.trim().to_string();
-    let location = normalize_path(&item.install_location?);
-    let location = location.trim_end_matches('/');
-    if name.is_empty() || location.is_empty() {
+    let raw = item.install_location?;
+    if name.is_empty() || normalize_path(&raw).trim_end_matches('/').is_empty() {
         return None;
     }
+    Some((name, raw))
+}
+
+/// A game from an Epic `*.item` manifest (see [`parse_epic_raw`]).
+pub(super) fn parse_epic_item(json: &str) -> Option<GameDir> {
+    let (name, raw) = parse_epic_raw(json)?;
+    let location = normalize_path(&raw);
     Some(GameDir {
         name,
         source: GameSource::Epic,
-        dir: format!("{location}/"),
+        dir: format!("{}/", location.trim_end_matches('/')),
     })
+}
+
+/// `(name, raw InstallLocation)` of every game in an Epic manifests folder,
+/// sorted; an unreadable folder or file contributes nothing.
+#[cfg(any(target_os = "linux", test))]
+pub(super) fn read_epic_raw(manifests: &Path) -> Vec<(String, String)> {
+    let Ok(entries) = fs::read_dir(manifests) else {
+        return Vec::new();
+    };
+    let mut games: Vec<(String, String)> = entries
+        .filter_map(Result::ok)
+        .filter(|e| {
+            e.path()
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("item"))
+        })
+        .filter_map(|e| fs::read_to_string(e.path()).ok())
+        .filter_map(|text| parse_epic_raw(&text))
+        .collect();
+    games.sort();
+    games
 }
 
 /// Every game in an Epic manifests folder.
@@ -396,7 +444,7 @@ pub(super) fn read_epic(manifests: &Path) -> Vec<GameDir> {
 }
 
 /// The Epic launcher's manifests folder. Windows only: on Linux, Epic games
-/// come through Heroic or Lutris, which are a later reader.
+/// come through Heroic, Legendary or a Wine prefix (`launchers.rs`, `wine.rs`).
 fn epic_manifest_dir() -> Option<PathBuf> {
     if !cfg!(windows) {
         return None;
@@ -410,7 +458,8 @@ fn epic_manifest_dir() -> Option<PathBuf> {
 pub(super) fn load_installed() -> Libraries {
     let mut libs = read_steam(&steam_roots());
     if let Some(dir) = epic_manifest_dir() {
-        libs.games.extend(read_epic(&dir));
+        libs.extend_games(read_epic(&dir));
     }
+    libs.extend_games(super::launchers::load_launcher_games());
     libs
 }

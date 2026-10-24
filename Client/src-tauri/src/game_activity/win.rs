@@ -1,4 +1,5 @@
-//! The Windows process list and Steam's registry location.
+//! The Windows process list, Steam's registry location and the GOG and
+//! Battle.net registry keys.
 //!
 //! Uses `windows-sys` like `windows_app_audio.rs`'s Toolhelp walk, which
 //! already carries the `Win32_System_Diagnostics_ToolHelp` feature.
@@ -6,15 +7,22 @@
 use std::path::PathBuf;
 use std::ptr::null_mut;
 
-use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_MORE_DATA, FILETIME, INVALID_HANDLE_VALUE,
+};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
-use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_SZ};
+use windows_sys::Win32::System::Registry::{
+    RegCloseKey, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER,
+    HKEY_LOCAL_MACHINE, KEY_ENUMERATE_SUB_KEYS, KEY_QUERY_VALUE, KEY_WOW64_32KEY, KEY_WOW64_64KEY,
+    RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
+};
 use windows_sys::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
+use super::launchers::RegKey;
 use super::{filetime_to_unix_ms, Proc, UNKNOWN_START};
 
 /// Longest image path asked for, in UTF-16 units (the extended-length limit).
@@ -111,4 +119,134 @@ pub(super) fn steam_path_from_registry() -> Option<PathBuf> {
     let path = String::from_utf16_lossy(&buf[..units]);
     let path = path.trim_end_matches('\0');
     (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+/// The most subkeys read under one registry parent.
+const MAX_SUBKEYS: u32 = 4096;
+/// Longest registry value read, in UTF-16 units.
+const MAX_VALUE_UNITS: usize = 4096;
+
+/// Registry parents holding the games of GOG Galaxy and Battle.net, and the
+/// string values read from each of their subkeys.
+const REGISTRY_PARENTS: &[(&str, &[&str])] = &[
+    ("Software\\GOG.com\\Games", &["gameName", "path"]),
+    (
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall",
+        &[
+            "DisplayName",
+            "InstallLocation",
+            "Publisher",
+            "UninstallString",
+        ],
+    ),
+];
+
+/// A NUL-terminated UTF-16 copy of `text`.
+fn wide(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// A string value (`REG_SZ` or `REG_EXPAND_SZ`, expanded) of `subkey` under an
+/// open key; `None` when absent, not a string or too long.
+fn read_string(parent: HKEY, subkey: &[u16], value: &str) -> Option<String> {
+    let name = wide(value);
+    let mut buf = vec![0u16; MAX_VALUE_UNITS];
+    let mut bytes = (buf.len() * 2) as u32;
+    // SAFETY: `subkey` and `name` are NUL-terminated, `parent` is an open key
+    // and `buf` holds `bytes` bytes.
+    let status = unsafe {
+        RegGetValueW(
+            parent,
+            subkey.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ,
+            null_mut(),
+            buf.as_mut_ptr().cast(),
+            &mut bytes,
+        )
+    };
+    if status != 0 {
+        return None;
+    }
+    let units = (bytes as usize / 2).min(buf.len());
+    let text = String::from_utf16_lossy(&buf[..units]);
+    Some(text.trim_end_matches('\0').to_string())
+}
+
+/// The subkeys of `parent_path` under HKLM, seen through one registry view
+/// (`KEY_WOW64_32KEY` or `KEY_WOW64_64KEY`), each with the named string values.
+fn read_view(parent_path: &str, values: &[&str], view: u32) -> Vec<RegKey> {
+    let path = wide(parent_path);
+    let mut parent: HKEY = null_mut();
+    // SAFETY: `path` is NUL-terminated and `parent` outlives the call; it is
+    // closed below on every path after a successful open.
+    let status = unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            path.as_ptr(),
+            0,
+            KEY_ENUMERATE_SUB_KEYS | KEY_QUERY_VALUE | view,
+            &mut parent,
+        )
+    };
+    if status != 0 {
+        return Vec::new();
+    }
+    let mut keys = Vec::new();
+    for index in 0..MAX_SUBKEYS {
+        let mut name = vec![0u16; 256];
+        let mut len = name.len() as u32;
+        // SAFETY: `parent` is open, `name` holds `len` units, and the unused
+        // out-pointers are null as the API allows.
+        let status = unsafe {
+            RegEnumKeyExW(
+                parent,
+                index,
+                name.as_mut_ptr(),
+                &mut len,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                null_mut(),
+            )
+        };
+        // ERROR_MORE_DATA: a subkey name longer than any game's key; skip it
+        // rather than stop the walk. Anything else (ERROR_NO_MORE_ITEMS) ends it.
+        if status == ERROR_MORE_DATA {
+            continue;
+        }
+        if status != 0 {
+            break;
+        }
+        let units = (len as usize).min(name.len() - 1);
+        let sub = String::from_utf16_lossy(&name[..units]);
+        let sub_wide = wide(&sub);
+        let found: Vec<(String, String)> = values
+            .iter()
+            .filter_map(|v| Some(((*v).to_string(), read_string(parent, &sub_wide, v)?)))
+            .collect();
+        keys.push(RegKey {
+            path: format!("{parent_path}\\{sub}"),
+            values: found,
+        });
+    }
+    // SAFETY: `parent` was opened above and is closed once.
+    unsafe { RegCloseKey(parent) };
+    keys
+}
+
+/// The GOG Galaxy and Battle.net keys of HKLM, in both registry views. Keys
+/// with no readable values are kept (the pure readers skip them).
+pub(super) fn registry_keys() -> Vec<RegKey> {
+    let mut keys: Vec<RegKey> = Vec::new();
+    for (parent, values) in REGISTRY_PARENTS {
+        for view in [KEY_WOW64_32KEY, KEY_WOW64_64KEY] {
+            for key in read_view(parent, values, view) {
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+        }
+    }
+    keys
 }

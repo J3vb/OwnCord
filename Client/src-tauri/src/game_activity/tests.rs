@@ -15,10 +15,10 @@ use super::*;
 // -- fixtures --------------------------------------------------------------------
 
 /// A temp directory removed on drop.
-struct TempDir(PathBuf);
+pub(super) struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new(tag: &str) -> Self {
+    pub(super) fn new(tag: &str) -> Self {
         let dir = std::env::temp_dir().join(format!(
             "owncord-game-activity-{tag}-{}",
             std::process::id()
@@ -28,7 +28,7 @@ impl TempDir {
         TempDir(dir)
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -39,7 +39,7 @@ impl Drop for TempDir {
     }
 }
 
-fn write(path: &Path, text: &str) {
+pub(super) fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
 }
@@ -108,7 +108,7 @@ fn norm(path: &Path) -> String {
     normalize_path(&path.to_string_lossy())
 }
 
-fn proc_at(path: &str, started_at_ms: u64) -> Proc {
+pub(super) fn proc_at(path: &str, started_at_ms: u64) -> Proc {
     Proc::new(&[path], path, started_at_ms)
 }
 
