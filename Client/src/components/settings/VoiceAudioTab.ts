@@ -103,6 +103,9 @@ const MIC_NOISE_FLOOR = 0.005;
 const MIC_HEARD_HOLD_MS = 1000;
 /** DeviceManager debounces a devicechange by 500 ms, then moves the capture. */
 const DEVICE_MANAGER_SETTLE_MS = 1000;
+/** Pause before the Linux camera preview starts again after its socket
+ *  closed, so a capture that is ending has released the device. */
+const PREVIEW_RESTART_MS = 500;
 
 export interface VoiceAudioTabHandle {
   /**
@@ -1379,7 +1382,26 @@ function buildVoiceAudioTabInner(
         // nothing (stopping here would release the newer preview's capture).
         return;
       }
-      const renderer = new NativeVideoRenderer(`${started.frames}/camera`);
+      // The host closes the socket when the camera's owner changes: the
+      // call's camera turned on (it takes the device) or off, or the call
+      // ended. Start again, which shows whichever capture owns the camera now.
+      const renderer = new NativeVideoRenderer(`${started.frames}/camera`, () => {
+        if (activeNativePreview !== stop) return;
+        const closedAt = cameraRequestId;
+        renderer.dispose();
+        activeNativePreview = null;
+        registerNativePreview(() => {});
+        previewVideo.srcObject = null;
+        syncVideoSurface(previewVideo);
+        setOwnedTimeout(
+          signal,
+          () => {
+            // A camera picked meanwhile already started its own preview.
+            if (cameraRequestId === closedAt) void startNativeCameraPreview(videoSelect.value);
+          },
+          PREVIEW_RESTART_MS,
+        );
+      });
       const stream = new MediaStream([renderer.mediaStreamTrack]);
       registerCamera(stream);
       previewVideo.srcObject = stream;
