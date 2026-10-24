@@ -178,9 +178,10 @@ export function clearAnimatedStills(): void {
 export type AnimationMode = { readonly hover: HTMLElement } | "always";
 
 /**
- * Show `still` on `img` and play `animatedUrl` as `mode` says. Listeners on a
- * hover row that outlives the image drop themselves the first time they find
- * it detached.
+ * Show `still` on `img` and play `animatedUrl` as `mode` says, following the
+ * reduced-motion setting live. Listeners on a hover row that outlives the
+ * image, and the motion observer, drop themselves the first time they find
+ * the image detached.
  */
 export function bindAnimatedImage(
   img: HTMLImageElement,
@@ -206,13 +207,36 @@ export function bindAnimatedImage(
   const stop = (): void => {
     if (img.src !== still) img.src = still;
   };
-  if (mode === "always") {
-    if (motionReduced()) stop();
+  const target = mode === "always" ? null : mode.hover;
+  // The row may already be hovered or focused when the still arrives.
+  const engaged = (): boolean =>
+    target === null || target.matches(":hover") || target.matches(":focus-within");
+  const settle = (): void => {
+    if (motionReduced() || !engaged()) stop();
     else play();
-    return;
-  }
-  stop();
-  const target = mode.hover;
+  };
+  settle();
+
+  // The image may be bound before it is mounted, so only an image that was
+  // connected and then left the document counts as gone.
+  let seenConnected = img.isConnected;
+  const gone = (): boolean => {
+    if (img.isConnected) {
+      seenConnected = true;
+      return false;
+    }
+    return seenConnected;
+  };
+  const motion = new MutationObserver(() => {
+    if (gone()) {
+      motion.disconnect();
+      return;
+    }
+    settle();
+  });
+  motion.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
+  if (target === null) return;
   const handlers: Array<[string, () => void]> = [];
   const on = (type: string, fn: () => void): void => {
     const handler = (): void => {
@@ -221,6 +245,7 @@ export function bindAnimatedImage(
         return;
       }
       for (const [t, h] of handlers) target.removeEventListener(t, h);
+      motion.disconnect();
     };
     handlers.push([type, handler]);
     target.addEventListener(type, handler);

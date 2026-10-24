@@ -132,6 +132,7 @@ describe("bindAnimatedImage", () => {
   afterEach(() => {
     row.remove();
     document.documentElement.classList.remove("reduced-motion");
+    vi.restoreAllMocks();
   });
 
   it("shows the still and plays while its row is hovered", () => {
@@ -169,6 +170,40 @@ describe("bindAnimatedImage", () => {
     document.documentElement.classList.add("reduced-motion");
     bindAnimatedImage(other, "blob:anim", STILL, "always");
     expect(other.src).toBe(STILL);
+  });
+
+  it("switches a playing image to its still when motion becomes reduced, and back", async () => {
+    bindAnimatedImage(img, "blob:anim", STILL, "always");
+    expect(img.src).toBe("blob:anim");
+    document.documentElement.classList.add("reduced-motion");
+    await Promise.resolve();
+    expect(img.src).toBe(STILL);
+    document.documentElement.classList.remove("reduced-motion");
+    await Promise.resolve();
+    expect(img.src).toBe("blob:anim");
+  });
+
+  it("stops a hovered image when motion becomes reduced", async () => {
+    vi.spyOn(row, "matches").mockImplementation((sel) => sel === ":hover");
+    bindAnimatedImage(img, "blob:anim", STILL, { hover: row });
+    expect(img.src).toBe("blob:anim");
+    document.documentElement.classList.add("reduced-motion");
+    await Promise.resolve();
+    expect(img.src).toBe(STILL);
+  });
+
+  it("plays at once when its row is already hovered or focused", () => {
+    vi.spyOn(row, "matches").mockImplementation((sel) => sel === ":focus-within");
+    bindAnimatedImage(img, "blob:anim", STILL, { hover: row });
+    expect(img.src).toBe("blob:anim");
+  });
+
+  it("stops following motion changes once the image is gone", async () => {
+    bindAnimatedImage(img, "blob:anim", STILL, "always");
+    img.remove();
+    document.documentElement.classList.add("reduced-motion");
+    await Promise.resolve();
+    expect(img.src).toBe("blob:anim");
   });
 
   it("follows a source reloaded after eviction, so the next hover plays it", () => {
