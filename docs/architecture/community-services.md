@@ -110,6 +110,13 @@ reactions are, and go with the account. Counts are never stored. Voting, ending 
 expiry (WP 6.9b-b) add no data class: a vote is a row of the same table, and ending
 only sets `polls.ended_at` and bumps `polls.version`. The poll expirer keeps no
 state of its own beyond a wake signal and reads the next deadline from the table.
+**Amended 2026-10-24 (stickers):** `083_stickers.sql` adds `stickers` and
+`message_stickers` (WP 8.8a). A sticker is a server-wide asset managed with
+MANAGE_SERVER exactly as an emoji is, so it follows emoji's data class (lifecycle
+row 16c in `data-lifecycle.md`): `uploaded_by` moves to an heir on erasure and the
+image file is reclaimed with the row. `message_stickers` is a side row of an
+ordinary message, like `polls`, holds no user id, and goes with its message by
+cascade. It adds no community service.
 **Amended 2026-10-21 (threads):** `074_threads.sql` adds the thread columns to
 `channels` (WP 6.9c). A thread is a channel row under a text channel, so its
 messages, attachments, reactions and read state are the existing classes and

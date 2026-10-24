@@ -56,6 +56,7 @@ export const ServerMessageType = {
   MEMBER_BAN: "member_ban",
   ROLES_UPDATE: "roles_update",
   EMOJI_UPDATE: "emoji_update",
+  STICKER_UPDATE: "sticker_update",
   UPLOAD_POLICY: "upload_policy", // the upload file-type lists after the owner saves them in the admin panel
   GAME_ACTIVITY_POLICY: "game_activity_policy", // WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume
   SERVER_RESTART: "server_restart",
