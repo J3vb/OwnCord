@@ -419,6 +419,32 @@ test.describe("YouTube embed", () => {
   });
 });
 
+test.describe("YouTube embed box", () => {
+  test("the thumbnail holds its 16:9 box before the image loads", async ({ page }) => {
+    // No bytes for the thumbnail yet: the row must already have its height.
+    await bootMedia(page, {
+      preview: { [YOUTUBE_OEMBED_URL]: { title: "Rick Astley - Never Gonna Give You Up" } },
+    });
+    const thumb = page.locator("[data-testid='message-202'] .msg-embed-thumb");
+    await expect(thumb).toBeVisible();
+    const box = await thumb.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeCloseTo((box!.width * 9) / 16, 0);
+  });
+
+  test("a loaded thumbnail of another shape keeps the 16:9 box", async ({ page }) => {
+    await bootMedia(page, {
+      preview: { [YOUTUBE_OEMBED_URL]: { title: "Rick Astley - Never Gonna Give You Up" } },
+      image: { [`url:${YOUTUBE_THUMB_URL}`]: PNG_BYTES },
+    });
+    const thumb = page.locator("[data-testid='message-202'] .msg-embed-thumb");
+    await expect(thumb).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
+    await expect.poll(() => thumb.evaluate((el: HTMLImageElement) => el.complete)).toBe(true);
+    const box = await thumb.boundingBox();
+    expect(box!.height).toBeCloseTo((box!.width * 9) / 16, 0);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Link preview
 // ---------------------------------------------------------------------------

@@ -773,6 +773,10 @@
   display: block;
   width: 100%;
   height: auto;
+  /* YouTube thumbnails are 16:9: the row holds that box before the bytes land,
+     so it does not grow under the reader when they do. */
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
 }
 .msg-embed-play {
   position: absolute;
