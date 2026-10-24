@@ -6,7 +6,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -17,7 +16,7 @@ import (
 type routeGate struct {
 	// name is the gate's label in the route inventory (GatedRoute.Gate).
 	name  string
-	allow func(role *db.Role) bool
+	allow func(perms, roleID int64, position int) bool
 	msg   string
 }
 
@@ -28,68 +27,50 @@ type routeGate struct {
 var (
 	gateManageBackups = routeGate{
 		name:  "manage_backups",
-		allow: func(r *db.Role) bool { return permissions.CanManageBackups(r.Permissions, r.ID, r.Position) },
+		allow: permissions.CanManageBackups,
 		msg:   "owner role or MANAGE_BACKUPS permission required",
 	}
 	gateListBackups = routeGate{
 		name:  "list_backups",
-		allow: func(r *db.Role) bool { return permissions.CanListBackups(r.Permissions, r.ID, r.Position) },
+		allow: permissions.CanListBackups,
 		msg:   "owner role, MANAGE_BACKUPS or RESTORE_BACKUPS permission required",
 	}
 	gateRestoreBackups = routeGate{
 		name:  "restore_backups",
-		allow: func(r *db.Role) bool { return permissions.CanRestoreBackups(r.Permissions, r.ID, r.Position) },
+		allow: permissions.CanRestoreBackups,
 		msg:   "owner role or RESTORE_BACKUPS permission required",
 	}
 	gateManageConfig = routeGate{
 		name:  "manage_config",
-		allow: func(r *db.Role) bool { return permissions.CanManageConfig(r.Permissions, r.ID, r.Position) },
+		allow: permissions.CanManageConfig,
 		msg:   "owner role or MANAGE_CONFIG permission required",
 	}
 	gateManageUpdates = routeGate{
 		name:  "manage_updates",
-		allow: func(r *db.Role) bool { return permissions.CanManageUpdates(r.Permissions, r.ID, r.Position) },
+		allow: permissions.CanManageUpdates,
 		msg:   "owner role or MANAGE_UPDATES permission required",
 	}
 	gateManageTokens = routeGate{
 		name:  "manage_tokens",
-		allow: func(r *db.Role) bool { return permissions.CanManageTokens(r.Permissions, r.ID, r.Position) },
+		allow: permissions.CanManageTokens,
 		msg:   "owner role or MANAGE_TOKENS permission required",
 	}
 	gateIssueRecovery = routeGate{
 		name:  "issue_recovery",
-		allow: func(r *db.Role) bool { return permissions.CanIssueRecovery(r.Permissions, r.ID, r.Position) },
+		allow: permissions.CanIssueRecovery,
 		msg:   "owner role or ISSUE_RECOVERY permission required",
 	}
 	gateViewDiagnostics = routeGate{
 		name:  "view_diagnostics",
-		allow: func(r *db.Role) bool { return permissions.CanViewDiagnostics(r.Permissions) },
+		allow: func(perms, _ int64, _ int) bool { return permissions.CanViewDiagnostics(perms) },
 		msg:   "VIEW_DIAGNOSTICS permission required",
 	}
 	gateEraseAccounts = routeGate{
 		name:  "erase_accounts",
-		allow: func(r *db.Role) bool { return permissions.CanEraseAccounts(r.Permissions) },
+		allow: func(perms, _ int64, _ int) bool { return permissions.CanEraseAccounts(perms) },
 		msg:   "ERASE_ACCOUNTS permission required",
 	}
 )
-
-// wrap gates next on g. The role is the one adminAuthMiddleware stored in the
-// request context, so no extra query runs; a request that arrives without one
-// fails closed as unauthenticated, like requirePerm and ownerOnlyMiddleware.
-func (g routeGate) wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		role, ok := r.Context().Value(adminRoleKey).(*db.Role)
-		if !ok || role == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
-			return
-		}
-		if !g.allow(role) {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", g.msg)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
 
 // GatedRoute is one route registered through gateRegistry.route: the (method,
 // pattern) pair relative to NewAdminAPI's own router, and the name of the gate
@@ -114,7 +95,7 @@ type gateRegistry struct {
 // generalising the owner-or-MANAGE_BACKUPS gate of WP 8.4c.
 func (g *gateRegistry) route(r chi.Router, gate routeGate, method, pattern string, h http.Handler) {
 	g.routes = append(g.routes, GatedRoute{Method: method, Pattern: pattern, Gate: gate.name})
-	r.Method(method, pattern, gate.wrap(h))
+	r.Method(method, pattern, gateMiddleware(gate, h))
 }
 
 // gatedRoutes is a copy of the routes this API registered through the gate

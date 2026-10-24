@@ -30,7 +30,7 @@ func TestRouteGate_FailsClosedWithoutARole(t *testing.T) {
 	reached := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached = true })
 	for _, g := range []routeGate{gateManageConfig, gateViewDiagnostics} {
-		if w := gateRequest(g.wrap(next), nil); w.Code != http.StatusUnauthorized {
+		if w := gateRequest(gateMiddleware(g, next), nil); w.Code != http.StatusUnauthorized {
 			t.Errorf("gate %s without a role = %d, want 401", g.name, w.Code)
 		}
 	}
@@ -46,12 +46,12 @@ func TestRouteGate_OwnerTierIgnoresAdministrator(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	administrator := &db.Role{ID: permissions.AdminRoleID, Position: 80, Permissions: permissions.Administrator}
 	for _, g := range []routeGate{gateRestoreBackups, gateManageConfig, gateManageUpdates, gateManageTokens, gateIssueRecovery} {
-		if w := gateRequest(g.wrap(next), administrator); w.Code != http.StatusForbidden {
+		if w := gateRequest(gateMiddleware(g, next), administrator); w.Code != http.StatusForbidden {
 			t.Errorf("owner-tier gate %s admitted an Administrator without the bit (%d)", g.name, w.Code)
 		}
 	}
 	for _, g := range []routeGate{gateViewDiagnostics, gateEraseAccounts} {
-		if w := gateRequest(g.wrap(next), administrator); w.Code != http.StatusNoContent {
+		if w := gateRequest(gateMiddleware(g, next), administrator); w.Code != http.StatusNoContent {
 			t.Errorf("administrator-tier gate %s refused an Administrator (%d)", g.name, w.Code)
 		}
 	}
