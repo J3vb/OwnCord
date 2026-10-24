@@ -1,0 +1,11 @@
+-- Rollback of migration 082 (data-only): nothing to restore.
+--
+-- Cost: none. The migration cleared bits 2, 3, 4, 7, 8, 15 and 28
+-- (MANAGE_CONFIG, MANAGE_UPDATES, MANAGE_TOKENS, ISSUE_RECOVERY,
+-- VIEW_DIAGNOSTICS, RESTORE_BACKUPS, ERASE_ACCOUNTS) on every role except the
+-- owner. An older binary ignores those bits, and they were unused before 082,
+-- so the earlier value carried no meaning. Roles that were given one of them by
+-- hand after 082 keep the bit, which the older binary ignores, so such a role
+-- loses the power it was given until 082 is applied again. Re-applying 082
+-- clears the bits again on every role except the owner.
+DELETE FROM schema_versions WHERE version = '082_owner_type_permissions.sql';

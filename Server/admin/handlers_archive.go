@@ -34,7 +34,8 @@ const archiveWorkPrefix = "owncord-archive-"
 // (O3). The live SQLite file is replaced by a `VACUUM INTO` snapshot, so the
 // archive is a consistent copy even while the server runs.
 //
-// It is Owner-only: the archive holds password hashes and the key files.
+// It is for the owner or a RESTORE_BACKUPS holder (WP 8.4d): the archive holds
+// password hashes and the key files.
 // The admin panel does not call this directly; it asks for a single-use link
 // (POST /archive/link) and opens that, so the whole archive is never buffered
 // in the page (see archive_link.go). This route stays for direct API callers.

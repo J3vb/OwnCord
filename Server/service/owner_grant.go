@@ -10,12 +10,29 @@ import (
 
 // requireOwnerGrantOnly refuses a change to the bits in changed (already
 // masked to permissions.OwnerGrantOnly, added or removed) unless the actor is
-// the owner or an Administrator. It is a no-op for a zero mask.
+// the owner or an Administrator. The owner-tier subset (WP 8.4d,
+// permissions.OwnerOnlyGrant) is stricter: only the owner may change it, so an
+// Administrator cannot hand an owner-tier bit to a role and take the power the
+// owner tier withholds from ADMINISTRATOR. It is a no-op for a zero mask.
 func requireOwnerGrantOnly(actor *db.Role, changed int64) error {
+	if err := requireOwnerOnlyGrant(actor, changed); err != nil {
+		return err
+	}
 	if changed == 0 || permissions.CanChangeOwnerGrantOnly(actor.Permissions, actor.ID, actor.Position) {
 		return nil
 	}
 	return fmt.Errorf("%w: only the owner can change %s", ErrForbidden, permissions.Name(changed&-changed))
+}
+
+// requireOwnerOnlyGrant is the owner-tier half of requireOwnerGrantOnly: a
+// change touching a bit of permissions.OwnerOnlyGrant needs the owner,
+// whatever else the actor holds. Same wording as the general refusal.
+func requireOwnerOnlyGrant(actor *db.Role, changed int64) error {
+	ownerTier := changed & permissions.OwnerOnlyGrant
+	if ownerTier == 0 || permissions.CanChangeOwnerOnlyGrant(actor.ID, actor.Position) {
+		return nil
+	}
+	return fmt.Errorf("%w: only the owner can change %s", ErrForbidden, permissions.Name(ownerTier&-ownerTier))
 }
 
 // requireOwnerGrantOnlyAssign is the assignment form of the rule: only the

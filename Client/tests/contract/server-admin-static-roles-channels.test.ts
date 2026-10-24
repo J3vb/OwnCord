@@ -344,7 +344,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
 
     bridge.openRoleModal(null);
     const boxes = [...doc.querySelectorAll<HTMLInputElement>("#modalInner input[data-permbit]")];
-    expect(boxes.length).toBe(23);
+    expect(boxes.length).toBe(30);
     for (const box of boxes) {
       const name = doc.getElementById(box.getAttribute("aria-labelledby")!);
       const desc = doc.getElementById(box.getAttribute("aria-describedby")!);
@@ -359,7 +359,13 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     );
     // Each group is a named fieldset.
     const legends = [...doc.querySelectorAll("#modalInner fieldset.perm-group > legend")];
-    expect(legends.map((l) => l.textContent)).toEqual(["General", "Text", "Voice", "Moderation"]);
+    expect(legends.map((l) => l.textContent)).toEqual([
+      "General",
+      "Text",
+      "Voice",
+      "Moderation",
+      "Owner powers",
+    ]);
   });
 
   // WP 8.4b: Move Members is owner/Administrator-only to change.
@@ -420,8 +426,37 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     bridge.openRoleModal(null);
     expect(box(doc).disabled).toBe(false);
     expect(doc.getElementById("modalInner")!.textContent).toContain(
-      "Restoring and deleting backups, updates, API tokens and server configuration stay with the owner.",
+      "Owner powers start with nobody: the owner grants each one by hand.",
     );
+  });
+
+  // WP 8.4d: the five owner-tier bits are the owner's alone to change; an
+  // Administrator sees them locked. View Diagnostics / Erase Accounts keep the
+  // owner-or-Administrator rule.
+  it("locks the owner-tier boxes for everyone but the owner, and the Administrator tier for non-admins", async () => {
+    const OWNER_TIER = [0x8000, 0x4, 0x8, 0x10, 0x80];
+    const ADMIN_TIER = [0x100, 0x10000000];
+    const box = (doc: Document, bit: number) =>
+      doc.querySelector<HTMLInputElement>(`input[data-permbit="${bit}"]`)!;
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    bridge.state.me = { id: 2, permissions: ADMINISTRATOR, role_position: 80 };
+    bridge.openRoleModal(null);
+    for (const bit of OWNER_TIER) {
+      expect(box(doc, bit).disabled).toBe(true);
+      expect(box(doc, bit).title).toBe("Only the owner can change this");
+    }
+    for (const bit of ADMIN_TIER) expect(box(doc, bit).disabled).toBe(false);
+
+    bridge.state.me = { id: 5, permissions: MANAGE_ROLES, role_position: 90 };
+    bridge.openRoleModal(null);
+    for (const bit of [...OWNER_TIER, ...ADMIN_TIER]) expect(box(doc, bit).disabled).toBe(true);
+
+    bridge.state.me = { id: 1, permissions: MANAGE_ROLES, role_position: 100, is_owner: true };
+    bridge.openRoleModal(null);
+    for (const bit of [...OWNER_TIER, ...ADMIN_TIER]) expect(box(doc, bit).disabled).toBe(false);
   });
 
   const ticked = (doc: Document): number[] =>
@@ -553,7 +588,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     expect(items[1]!.textContent).toContain("your role");
     expect(items[0]!.textContent).toContain("above you");
     expect(items[2]!.textContent).toContain("Your rank · 80");
-    expect(items[3]!.textContent).toContain("14 of 23 permissions");
+    expect(items[3]!.textContent).toContain("20 of 30 permissions");
     expect(items[0]!.textContent).toContain("Administrator: every permission");
     const moves = [...items[3]!.querySelectorAll('[data-action="moveRole"]')];
     expect(moves.map((b) => b.getAttribute("aria-label"))).toEqual([

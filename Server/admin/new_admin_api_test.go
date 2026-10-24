@@ -44,24 +44,27 @@ func TestNewAdminAPI_IndependentInstances(t *testing.T) {
 		t.Errorf("A's backup dir holds %v after a backup through B, want still one", got)
 	}
 
-	// Each API lists only its own owner-only routes: building B must not have
-	// grown or reset A's list.
+	// Each API lists only its own owner-only and gated routes: building B must
+	// not have grown or reset A's list.
 	if admin.SharesOwnerOnlyRegistryForTest(apiA, apiB) {
 		t.Fatal("A and B record owner-only routes in one shared registry")
 	}
-	routesA, routesB := admin.OwnerOnlyRoutesForTest(apiA), admin.OwnerOnlyRoutesForTest(apiB)
-	want := sortedOwnerOnlyRoutes(expectedOwnerOnlyRoutes)
-	if got := sortedOwnerOnlyRoutes(routesA); !reflect.DeepEqual(got, want) {
+	if got, want := sortedOwnerOnlyRoutes(admin.OwnerOnlyRoutesForTest(apiA)), sortedOwnerOnlyRoutes(expectedOwnerOnlyRoutes); !reflect.DeepEqual(got, want) {
 		t.Errorf("A owner-only routes = %+v, want %+v", got, want)
 	}
-	if got := sortedOwnerOnlyRoutes(routesB); !reflect.DeepEqual(got, want) {
-		t.Errorf("B owner-only routes = %+v, want %+v", got, want)
+	routesA, routesB := admin.GatedRoutesForTest(apiA), admin.GatedRoutesForTest(apiB)
+	want := sortedGatedRoutes(expectedGatedRoutes)
+	if got := sortedGatedRoutes(routesA); !reflect.DeepEqual(got, want) {
+		t.Errorf("A gated routes = %+v, want %+v", got, want)
+	}
+	if got := sortedGatedRoutes(routesB); !reflect.DeepEqual(got, want) {
+		t.Errorf("B gated routes = %+v, want %+v", got, want)
 	}
 
 	// The accessor hands out a copy, so a caller cannot edit the API's list.
-	routesA[0] = admin.OwnerOnlyRoute{Method: "X", Pattern: "/tampered"}
-	if got := sortedOwnerOnlyRoutes(admin.OwnerOnlyRoutesForTest(apiA)); !reflect.DeepEqual(got, want) {
-		t.Errorf("A owner-only routes changed through the accessor's slice: %+v", got)
+	routesA[0] = admin.GatedRoute{Method: "X", Pattern: "/tampered", Gate: "none"}
+	if got := sortedGatedRoutes(admin.GatedRoutesForTest(apiA)); !reflect.DeepEqual(got, want) {
+		t.Errorf("A gated routes changed through the accessor's slice: %+v", got)
 	}
 }
 
