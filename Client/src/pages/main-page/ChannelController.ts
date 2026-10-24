@@ -1333,6 +1333,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }),
       );
       if (storedChannel?.nsfw === true) mountConsentBar();
+      // A followed post's sidebar row asked for this forum: open the post now.
+      settleThreadNavigation(channelId);
       return;
     }
 

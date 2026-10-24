@@ -89,6 +89,7 @@ and only when it changes something a contributor or fork holder must do
 - Switching channels while a jump to an older message (from search, pins, a reply or a link) was still loading could make that channel open on the old messages next time, instead of the latest ones. The late jump is now dropped.
 - An `@name` in the text of a `[text](link)` link could turn into a profile button once that member showed up, so clicking it opened their profile instead of the link. It now stays part of the link.
 - The who-reacted tooltip could name people who had since removed their reaction, or miss new ones, after you switched channels or reconnected. It now reloads the names.
+- Clicking a followed forum post in the sidebar while another channel was open showed the forum's post list but not the post. It now opens the post too.
 
 **Direct messages**
 

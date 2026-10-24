@@ -1,5 +1,5 @@
 {
-  "nextId": 511,
+  "nextId": 512,
   "findings": [
     {
       "id": "OC-0001",
@@ -11743,6 +11743,29 @@
     },
     {
       "id": "OC-0508",
+      "title": "A followed forum post's sidebar row opened the forum but not the post when clicked from another channel",
+      "file": "Client/src/pages/main-page/ChannelController.ts",
+      "line": 1333,
+      "severity": "low",
+      "why": "threadNavigation keeps the request until the parent channel mounts, but the forum branch of mountChannel returned before settleThreadNavigation, so the post never opened and the next mount dropped the request.",
+      "repro": "Write or reply to a forum post so it shows as a followed row under the forum, open another text channel, click the row: the forum's post list opens with no thread panel.",
+      "evidence": "Vault issue #147; settleThreadNavigation was only reached by non-forum mounts.",
+      "suggestedFix": "Call settleThreadNavigation(channelId) in the forum branch of mountChannel after the forum view is mounted.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/channel-controller.test.ts (opens a followed post asked for from another channel once the forum mounts)",
+        "revertProof": "fail (without the fix openById is never called)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-23",
+      "hunt": "nightly-bughunt-2026-10-23",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0509",
       "title": "Jump-to-message installed its around-window into a channel the user had already left",
       "file": "Client/src/pages/main-page/MessageJump.ts",
       "line": 121,
@@ -11765,7 +11788,7 @@
       "fixedDate": "2026-10-24"
     },
     {
-      "id": "OC-0509",
+      "id": "OC-0510",
       "title": "Mention resync turned an @name inside a masked link into a profile button",
       "file": "Client/src/components/message-list/content-parser.ts",
       "line": 742,
@@ -11788,7 +11811,7 @@
       "fixedDate": "2026-10-24"
     },
     {
-      "id": "OC-0510",
+      "id": "OC-0511",
       "title": "Who-reacted tooltip kept stale names after a channel switch or full resync",
       "file": "Client/src/features/messaging/reactionUsers.ts",
       "line": 70,
