@@ -384,6 +384,33 @@ export function deleteMessage(payload: ChatDeletedPayload): void {
 }
 
 /**
+ * A sticker_update removed stickers (WP 8.8): every loaded sticker message
+ * whose sticker is no longer in `liveIds` becomes a deleted-sticker row, the
+ * same shape the server sends for history (id and url null, name kept). Lists
+ * with nothing to change keep their identity, so only the affected channels
+ * (channel, thread and DM rows all live here) are touched.
+ */
+export function markStickersDeleted(liveIds: ReadonlySet<number>): void {
+  messagesStore.setState((prev) => {
+    let changed: Map<number, readonly Message[]> | null = null;
+    for (const [channelId, list] of prev.messagesByChannel) {
+      const stale = (m: Message): boolean =>
+        m.sticker?.id !== null && m.sticker !== undefined && !liveIds.has(m.sticker.id);
+      if (!list.some(stale)) continue;
+      const next: Map<number, readonly Message[]> = changed ?? new Map(prev.messagesByChannel);
+      changed = next;
+      next.set(
+        channelId,
+        list.map((m) =>
+          stale(m) ? { ...m, sticker: { id: null, name: m.sticker!.name, url: null } } : m,
+        ),
+      );
+    }
+    return changed === null ? prev : { ...prev, messagesByChannel: changed };
+  });
+}
+
+/**
  * Soft-delete every id in one purge. Renders exactly like a single delete —
  * the rows stay as tombstones — but touches the channel's list once instead of
  * once per message.

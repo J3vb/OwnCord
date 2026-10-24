@@ -37,7 +37,7 @@ import {
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { setStickers, stickersStore } from "../../stores/stickers.store";
 import { uiStore } from "../../stores/ui.store";
-import { getChannelMessages } from "../../stores/messages.store";
+import { getChannelMessages, markStickersDeleted } from "../../stores/messages.store";
 import { isTextLikeChannel, type ChannelActivityEntry, type ReadyActivity } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import {
@@ -731,7 +731,11 @@ export function handleEmojiUpdate(payload: Payload<"emoji_update">): void {
 // its grid, and a stale id can no longer be sent from the next open.
 export function handleStickerUpdate(payload: Payload<"sticker_update">): void {
   log.info("Custom stickers updated", { count: payload.stickers?.length ?? 0 });
-  setStickers(payload.stickers ?? []);
+  const stickers = payload.stickers ?? [];
+  setStickers(stickers);
+  // Messages already on screen still name the removed sticker: turn them into
+  // "Deleted sticker" rows (never fetching the image again).
+  markStickersDeleted(new Set(stickers.map((s) => s.id)));
 }
 
 export function handleUserUpdate(payload: Payload<"user_update">): void {

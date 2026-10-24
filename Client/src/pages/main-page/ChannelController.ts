@@ -2050,8 +2050,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // optimistic row (pending/failed) carries id 0 until the server
           // acks it, so editing it would send chat_edit for a message that
           // does not exist yet.
-          // A server-written row (a DM call log) is never editable.
-          if (m.user.id === myId && !m.deleted && m.status === "sent" && !isServerRowKind(m.kind)) {
+          // A server-written row (a DM call log) is never editable, nor is a
+          // sticker message (WP 8.8): it has no text and the server refuses it.
+          if (
+            m.user.id === myId &&
+            !m.deleted &&
+            m.status === "sent" &&
+            !isServerRowKind(m.kind) &&
+            m.sticker === undefined
+          ) {
             messageList?.startEdit(m.id);
             break;
           }

@@ -3214,6 +3214,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     // A server-written row (call log, group event) is read-only.
     if (isServerRowKind(msg.kind)) return false;
+    // A sticker message has no text to edit (WP 8.8); the server refuses it.
+    if (msg.sticker !== undefined) return false;
     if (edit?.messageId === messageId) {
       if (takeFocus) edit.session?.focusEnd();
       return true;

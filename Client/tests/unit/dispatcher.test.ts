@@ -5334,6 +5334,35 @@ describe("WS Dispatcher", () => {
     expect(listStickers()[0]!.emoji).toBe("👋");
   });
 
+  it("sticker_update turns loaded messages of a removed sticker into deleted-sticker rows", () => {
+    const msg = (id: number, sid: number): MessageResponse =>
+      ({
+        id,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: `[Sticker: S${sid}]`,
+        reply_to: null,
+        attachments: [],
+        reactions: [],
+        pinned: false,
+        edited_at: null,
+        deleted: false,
+        timestamp: "2024-01-15T12:00:00Z",
+        sticker: { id: sid, name: `S${sid}`, url: `/api/v1/stickers/${sid}/image` },
+      }) as MessageResponse;
+    setMessages(1, [msg(10, 1), msg(11, 2)], false);
+    messagesStore.flush();
+
+    mock.dispatch("sticker_update", {
+      stickers: [{ id: 1, name: "S1", emoji: null, url: "/api/v1/stickers/1/image" }],
+    });
+    messagesStore.flush();
+
+    const stored = getChannelMessages(1);
+    expect(stored.find((m) => m.id === 10)?.sticker?.id).toBe(1);
+    expect(stored.find((m) => m.id === 11)?.sticker).toEqual({ id: null, name: "S2", url: null });
+  });
+
   it("treats a sticker_update with no stickers field as an empty set", () => {
     setStickers([{ id: 1, name: "Wave", emoji: null, url: "/api/v1/stickers/1/image" }]);
     stickersStore.flush();
