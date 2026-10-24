@@ -328,4 +328,26 @@ describe("MessageList: rows resizing after they are drawn", () => {
     await frame();
     expect(contentHeight()).toBeLessThan(total);
   });
+
+  it("seeds across a scrollbar's width", async () => {
+    const total = await visitTop();
+    // The empty list has no scrollbar yet; the filled one measured 8 px less.
+    width = 908;
+    list!.mount(container);
+    await frame();
+    expect(contentHeight()).toBe(total);
+  });
+
+  it("seeds a channel opened again while hidden once it is shown", async () => {
+    const total = await visitTop();
+    view = 0;
+    width = 0;
+    list!.mount(container);
+    await frame();
+    view = 600;
+    width = 900;
+    resize();
+    await frame();
+    expect(contentHeight()).toBe(total);
+  });
 });

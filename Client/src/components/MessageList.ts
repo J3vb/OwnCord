@@ -1263,12 +1263,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }
     }
 
+    // The width these rows were laid out at, read with the heights (layout is
+    // already clean): the observer may not have reported a resize yet.
+    const measuredWidth = root?.clientWidth ?? 0;
+
     // Pass 2 — pure writes: apply all cached heights to heightCache and the
     // Fenwick tree. No DOM reads here, so no additional reflow is triggered.
     for (const { key, idx, h } of measurements) {
       heightCache.set(key, h);
-      const shared = estimateWidth === undefined ? null : rememberKey(idx);
-      if (shared !== null) rememberRowHeight(shared, estimateWidth!, h);
+      const shared = measuredWidth > 0 ? rememberKey(idx) : null;
+      if (shared !== null) rememberRowHeight(shared, measuredWidth, h);
       if (tree !== null) {
         tree.set(idx, h);
       }
@@ -2495,7 +2499,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // The text estimates wrap at the list's width: when it changes, the
       // rows nothing has measured yet are estimated again (below).
       const width = root.clientWidth;
-      const widthChanged = width > 0 && width !== (estimateWidth ?? DEFAULT_LIST_WIDTH);
+      // A list mounted hidden learns its width here, even at the default one,
+      // so the rows an earlier visit measured seed it.
+      const widthChanged = width > 0 && width !== estimateWidth;
       if (widthChanged) estimateWidth = width;
 
       // A viewport that grew (pane enlarged, window maximized) needs more

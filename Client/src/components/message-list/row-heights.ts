@@ -8,13 +8,17 @@
  * seed the next list of the same channel with the height last drawn.
  *
  * A remembered height only seeds the estimate; the row is measured again when
- * it renders. It is used at the width it was measured at only, and an edit or a
- * change of grouping is a different key.
+ * it renders. It is used near the width it was measured at only (a scrollbar
+ * appearing is within that), and an edit or a change of grouping is a
+ * different key.
  */
 
 import { registerSessionReset } from "@lib/sessionRegistry";
 
 const MAX_ROWS = 4000;
+/** An empty list has no scrollbar and a filled one does: rows measured either
+ *  way still seed each other. */
+const WIDTH_TOLERANCE = 20;
 
 interface RowHeight {
   readonly width: number;
@@ -37,10 +41,10 @@ export function rowHeightKey(
   return `${id}|${isGrouped ? 1 : 0}|${editedAt ?? ""}`;
 }
 
-/** The height last measured for `key` at `width`, if any. */
+/** The height last measured for `key` at about `width`, if any. */
 export function rememberedRowHeight(key: string, width: number): number | undefined {
   const hit = rows.get(key);
-  if (hit === undefined || Math.abs(hit.width - width) >= 1) return undefined;
+  if (hit === undefined || Math.abs(hit.width - width) > WIDTH_TOLERANCE) return undefined;
   return hit.h;
 }
 
