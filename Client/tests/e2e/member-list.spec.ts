@@ -37,6 +37,12 @@ test.describe("Member List", () => {
   });
 
   test("new member appears when member_join event is received", async ({ page }) => {
+    // The ready roster can render in more than one pass, so wait for both
+    // mocked members before taking the baseline count.
+    await expect(page.locator(".mi-name", { hasText: "otheruser" })).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(page.locator(".member-item")).toHaveCount(2);
     const membersBefore = await page.locator(".member-item").count();
 
     await emitWsMessage(page, {
@@ -55,8 +61,7 @@ test.describe("Member List", () => {
     const newMember = page.locator(".mi-name", { hasText: "newjoiner" });
     await expect(newMember).toBeVisible({ timeout: 5_000 });
 
-    const membersAfter = await page.locator(".member-item").count();
-    expect(membersAfter).toBe(membersBefore + 1);
+    await expect(page.locator(".member-item")).toHaveCount(membersBefore + 1);
   });
 
   test("member disappears when member_ban event is received", async ({ page }) => {
@@ -64,6 +69,7 @@ test.describe("Member List", () => {
     const otherUser = page.locator(".mi-name", { hasText: "otheruser" });
     await expect(otherUser).toBeVisible({ timeout: 5_000 });
 
+    await expect(page.locator(".member-item")).toHaveCount(2);
     const membersBefore = await page.locator(".member-item").count();
 
     await emitWsMessage(page, {
@@ -74,8 +80,7 @@ test.describe("Member List", () => {
     // otheruser should disappear
     await expect(otherUser).not.toBeVisible({ timeout: 5_000 });
 
-    const membersAfter = await page.locator(".member-item").count();
-    expect(membersAfter).toBe(membersBefore - 1);
+    await expect(page.locator(".member-item")).toHaveCount(membersBefore - 1);
   });
 
   test("member status updates when presence event is received", async ({ page }) => {
