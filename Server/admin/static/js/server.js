@@ -443,31 +443,42 @@ function restartingHTML(title,lead){
 /* ═══ Backups ═══ */
 const BACKUP_KEYS=['backup_schedule','backup_retention'];
 async function renderBackups(){
+  /* The owner sees everything. A MANAGE_BACKUPS holder sees the same page cut
+     down to what the server lets them do: create, list and download. The
+     schedule, the full archive, Restore and Delete are the owner's. */
+  const owner=isOwner();
+  const title=owner?'Backups &amp; restore':'Backups';
   let backups;
-  try{backups=await api('GET','/backups')}catch(e){return'<div class="page-title">Backups &amp; restore</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
-  /* The schedule is owner-only policy in the settings table (BPR-072); this
-     page is owner-only, so it is edited here rather than on Settings. */
+  try{backups=await api('GET','/backups')}catch(e){return'<div class="page-title">'+title+'</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  /* The schedule is owner-only policy in the settings table (BPR-072); only the
+     owner edits it here rather than on Settings, and nobody else reads it. */
   let policyErr='';
-  try{state._settings=await api('GET','/settings')}catch(e){policyErr=e.message}
+  if(owner){try{state._settings=await api('GET','/settings')}catch(e){policyErr=e.message}}
   const v=k=>(state._settings||{})[k]||'';
-  let html='<div class="page-head"><div><div class="page-title">Backups &amp; restore</div><div class="page-desc">Copies of the server database. Restoring one replaces everything that happened after it was taken.</div></div>'
-    +'<div class="btn-row"><button class="btn btn-ghost" data-action="downloadArchive"'+(state.archiveRunning?' disabled':'')+'>'+(state.archiveRunning?'<span class="spinner" aria-hidden="true"></span> Preparing…':I.download+' Download full archive')+'</button>'
-    +'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button></div></div>';
-  html+='<p class="card-note">The full archive holds the database, uploads, the key files and <code>config.yaml</code> — everything a restore needs. A database backup alone does not.</p>';
-  html+=backupStatusLine(backups||[],policyErr?'':(v('backup_schedule')||'off'),await backupSignal());
-  let sched;
-  if(policyErr)sched='<p style="color:var(--text-danger)">'+esc(policyErr)+'</p>';
-  else sched=settingsRow('backup_schedule','Automatic backups','A copy is taken on this schedule by the server\'s maintenance sweep','<select class="filter-select" id="s-backup_schedule" aria-describedby="s-backup_schedule-desc" data-change-action="markBackupPolicyChanged">'
-      +[['off','Off'],['daily','Daily'],['weekly','Weekly']].map(([o,l])=>'<option value="'+o+'"'+(v('backup_schedule')===o?' selected':'')+'>'+l+'</option>').join('')+'</select>')
-    +settingsRow('backup_retention','Keep backups for (days)','0 keeps every backup; otherwise 7 to 3650 days. Older backups are deleted.','<input class="form-input" id="s-backup_retention" type="number" min="0" max="3650" value="'+esc(v('backup_retention'))+'" aria-describedby="s-backup_retention-desc" data-input-action="markBackupPolicyChanged">')
-    +'<div class="card-actions"><button class="btn btn-accent" id="saveBackupPolicyBtn" data-action="saveBackupPolicy" disabled>Save schedule</button></div>';
-  html+=settingsCard('Schedule',sched);
+  const desc=owner?'Copies of the server database. Restoring one replaces everything that happened after it was taken.'
+    :'Copies of the server database. You can take a backup and download one; restoring and deleting backups stay with the owner.';
+  const createBtn='<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button>';
+  let html='<div class="page-head"><div><div class="page-title">'+title+'</div><div class="page-desc">'+desc+'</div></div>'
+    +'<div class="btn-row">'+(owner?'<button class="btn btn-ghost" data-action="downloadArchive"'+(state.archiveRunning?' disabled':'')+'>'+(state.archiveRunning?'<span class="spinner" aria-hidden="true"></span> Preparing…':I.download+' Download full archive')+'</button>':'')
+    +createBtn+'</div></div>';
+  if(owner)html+='<p class="card-note">The full archive holds the database, uploads, the key files and <code>config.yaml</code> — everything a restore needs. A database backup alone does not.</p>';
+  html+=backupStatusLine(backups||[],(owner&&!policyErr)?(v('backup_schedule')||'off'):'',await backupSignal());
+  if(owner){
+    let sched;
+    if(policyErr)sched='<p style="color:var(--text-danger)">'+esc(policyErr)+'</p>';
+    else sched=settingsRow('backup_schedule','Automatic backups','A copy is taken on this schedule by the server\'s maintenance sweep','<select class="filter-select" id="s-backup_schedule" aria-describedby="s-backup_schedule-desc" data-change-action="markBackupPolicyChanged">'
+        +[['off','Off'],['daily','Daily'],['weekly','Weekly']].map(([o,l])=>'<option value="'+o+'"'+(v('backup_schedule')===o?' selected':'')+'>'+l+'</option>').join('')+'</select>')
+      +settingsRow('backup_retention','Keep backups for (days)','0 keeps every backup; otherwise 7 to 3650 days. Older backups are deleted.','<input class="form-input" id="s-backup_retention" type="number" min="0" max="3650" value="'+esc(v('backup_retention'))+'" aria-describedby="s-backup_retention-desc" data-input-action="markBackupPolicyChanged">')
+      +'<div class="card-actions"><button class="btn btn-accent" id="saveBackupPolicyBtn" data-action="saveBackupPolicy" disabled>Save schedule</button></div>';
+    html+=settingsCard('Schedule',sched);
+  }
   html+='<section class="section-card" aria-labelledby="sc-history"><div class="section-card-header"><h3 id="sc-history">Backup history</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>File</th><th>Size</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!backups||!backups.length)html+='<tr><td colspan="4" class="tbl-empty">No backups yet. Create one now, or turn on automatic backups above.</td></tr>';
+  if(!backups||!backups.length)html+='<tr><td colspan="4" class="tbl-empty">No backups yet. Create one now'+(owner?', or turn on automatic backups above':'')+'.</td></tr>';
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?esc(new Date(b.date).toLocaleString()):'')+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" aria-label="Download '+esc(b.name)+'" data-action="downloadBackup" data-args="'+actArgs(b.name)+'">Download</button><button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" aria-label="Download '+esc(b.name)+'" data-action="downloadBackup" data-args="'+actArgs(b.name)+'">Download</button>'
+      +(owner?'<button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button>':'')+'</div></td></tr>';
   });
   html+='</tbody></table></div></section>';
   return html;

@@ -623,3 +623,28 @@ func TestMoveMembersBit_DefinedNamedInAllPerms(t *testing.T) {
 		t.Error("OwnerGrantOnly must include MoveMembers")
 	}
 }
+
+// TestManageBackupsBit_DefinedNamedInAllPerms locks WP 8.4c's bit 14: a single
+// named bit that AllPerms keeps, that admits to the admin perimeter (a holder
+// has to reach /admin/api at all), and that only the owner (or an
+// Administrator) may hand out.
+func TestManageBackupsBit_DefinedNamedInAllPerms(t *testing.T) {
+	if permissions.ManageBackups != 0x4000 {
+		t.Errorf("ManageBackups = 0x%X, want 0x4000 (bit 14)", permissions.ManageBackups)
+	}
+	if permissions.AllPerms&permissions.ManageBackups == 0 {
+		t.Error("AllPerms must include ManageBackups")
+	}
+	if got := permissions.Name(permissions.ManageBackups); got != "MANAGE_BACKUPS" {
+		t.Errorf("Name(ManageBackups) = %q, want MANAGE_BACKUPS", got)
+	}
+	if permissions.AdminPerimeter&permissions.ManageBackups != permissions.ManageBackups {
+		t.Error("AdminPerimeter must include ManageBackups")
+	}
+	if permissions.OwnerGrantOnly&permissions.ManageBackups != permissions.ManageBackups {
+		t.Error("OwnerGrantOnly must include ManageBackups")
+	}
+	if permissions.OwnerGrantOnly&permissions.MoveMembers != permissions.MoveMembers {
+		t.Error("OwnerGrantOnly must still include MoveMembers")
+	}
+}

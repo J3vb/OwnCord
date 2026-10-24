@@ -89,7 +89,7 @@ interface Bridge {
   applyRetention: () => Promise<void>;
   navigateTo: (id: string) => void;
   enterApp: () => Promise<void>;
-  nav: { id?: string }[];
+  nav: { id?: string; label?: string; allowed?: () => boolean }[];
   wiz: { step: number };
   wizStepCount: number;
   renderWizard: () => void;
@@ -1481,6 +1481,30 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
     release();
     await apply;
+  });
+
+  // WP 8.4c: a Manage Backups holder reaches the Backups page and nothing
+  // else of the owner-only group.
+  it("opens the Backups nav item to the owner and a Manage Backups holder only", async () => {
+    const booted = await boot([], () => ({ json: {} }));
+    dom = booted.dom;
+    const { bridge } = booted;
+    const item = (id: string) => bridge.nav.find((n) => n.id === id)!;
+    const MANAGE_BACKUPS = 0x4000;
+
+    bridge.state.me = { permissions: MANAGE_BACKUPS, is_owner: false };
+    expect(item("backups").allowed!()).toBe(true);
+    expect(item("backups").label).toBe("Backups");
+    for (const id of ["updates", "tokens", "config"]) {
+      expect(item(id).allowed!(), id).toBe(false);
+    }
+
+    bridge.state.me = { permissions: 0x2000000, is_owner: false }; // Manage Server only
+    expect(item("backups").allowed!()).toBe(false);
+
+    bridge.state.me = { permissions: ADMINISTRATOR, is_owner: true };
+    expect(item("backups").allowed!()).toBe(true);
+    expect(item("backups").label).toBe("Backups & restore");
   });
 
   // AO-3. The shell groups the same #hash routes, shows who and where in a

@@ -16,6 +16,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/migrations"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -379,8 +380,16 @@ func openAdminTestDB(t *testing.T) *db.DB {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
+	// 001's seeded Admin and Moderator carry bit 14 as an unused bit; migration
+	// 081 clears it, and a real server has run it (WP 8.4c), so the fixture
+	// applies the shipped file rather than a copy of its statement.
+	manageBackups, err := migrations.FS.ReadFile("081_manage_backups.sql")
+	if err != nil {
+		t.Fatalf("read 081_manage_backups.sql: %v", err)
+	}
 	migrFS := fstest.MapFS{
 		"001_initial_schema.sql": {Data: adminSchema},
+		"081_manage_backups.sql": {Data: manageBackups},
 	}
 	if err := db.MigrateFS(database, migrFS); err != nil {
 		t.Fatalf("MigrateFS: %v", err)

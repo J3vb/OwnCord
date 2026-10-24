@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Hoisted: the opener plugin is a static import of the desktop adapter, so the
-// mock factory runs before this module's own top-level code.
-const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async () => {}) }));
-vi.mock("@tauri-apps/plugin-opener", () => ({
-  openUrl,
+// Hoisted: `invoke` is a static import of the desktop adapter, so the mock
+// factory runs before this module's own top-level code. The opener is the
+// `open_external_url` command; `openUrl` records the URL it was handed.
+const { openUrl } = vi.hoisted(() => ({ openUrl: vi.fn(async (_url: string) => {}) }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (command: string, args?: { url: string }) => {
+    if (command !== "open_external_url") throw new Error(`unexpected invoke ${command}`);
+    await openUrl(args!.url);
+  },
 }));
 
 import { adminPanelUrl, openAdminPanel } from "@lib/admin-panel";

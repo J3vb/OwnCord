@@ -20,7 +20,6 @@ vi.mock("@tauri-apps/api/event", async () => ({
 const { mockOnOpenUrl } = vi.hoisted(() => ({
   mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),

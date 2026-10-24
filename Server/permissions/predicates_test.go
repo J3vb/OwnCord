@@ -206,6 +206,41 @@ func TestCanChangeOwnerGrantOnly(t *testing.T) {
 	}
 }
 
+// TestCanManageBackups pins WP 8.4c's gate for create, list and link: the
+// owner (by role identity, no bit needed), a holder of MANAGE_BACKUPS, or an
+// Administrator. MANAGE_SERVER and MANAGE_ROLES alone do not open it.
+func TestCanManageBackups(t *testing.T) {
+	cases := []struct {
+		name  string
+		perms int64
+		id    int64
+		pos   int
+		want  bool
+	}{
+		{"owner without the bit", 0, OwnerRoleID, OwnerRolePosition, true},
+		{"owner position on a renumbered role", 0, 77, OwnerRolePosition, true},
+		{"holder of the bit", ManageBackups, 9, 50, true},
+		{"holder via the OR of several roles", ReadMessages | ManageBackups, MemberRoleID, 40, true},
+		{"administrator without the bit", Administrator, AdminRoleID, 80, true},
+		{"manage server alone", ManageServer, 9, 50, false},
+		{"manage roles alone", ManageRoles, 9, 50, false},
+		{"zero perms", 0, MemberRoleID, 40, false},
+	}
+	for _, c := range cases {
+		if got := CanManageBackups(c.perms, c.id, c.pos); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestCanChangeOwnerGrantOnly_ManageBackupsHolder: holding MANAGE_BACKUPS
+// (with MANAGE_ROLES) is not enough to change it.
+func TestCanChangeOwnerGrantOnly_ManageBackupsHolder(t *testing.T) {
+	if CanChangeOwnerGrantOnly(ManageRoles|ManageBackups, ModeratorRoleID, 60) {
+		t.Error("a MANAGE_ROLES holder of MANAGE_BACKUPS must not change owner-grant-only bits")
+	}
+}
+
 // TestCanModerate pins the queue's gate: MODERATE_MEMBERS or Administrator,
 // server-wide, and — unlike every channel predicate above — never moved by a
 // channel override, because moderation authority is not a channel property.

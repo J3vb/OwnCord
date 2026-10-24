@@ -58,6 +58,8 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - New role permission Move Members: a role with it can move anyone between voice channels, whatever their rank, from the voice menu or by dragging. Only the owner or an Administrator can give it out. No role has it after the upgrade. The person moved sees who moved them. The owner can stop Move Members from moving the owner under Settings → Voice: moving members in the admin panel.
+- New role permission Manage Backups: a role with it can take a backup, see the list of backups and download one, without being the owner. Restoring or deleting a backup, the full archive, the backup schedule, updates, API tokens and server configuration stay with the owner. Only the owner or an Administrator can give it out, and no role has it after the upgrade. A link to download a backup now leaves a line in the audit log, and a second Backup now click while one is running is told to wait.
+- Roles can start from a preset in the role editor: Super admin, Server manager, Moderator or Voice moderator fill in the matching boxes, which you can still change before saving. Anything you are not allowed to give out stays unticked and is named, and a box you cannot change stays as it was and is named too.
 
 **Server (operators)**
 
