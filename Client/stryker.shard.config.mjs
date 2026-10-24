@@ -177,6 +177,7 @@ export const shards = {
     "src/lib/call-ring.ts",
     "src/features/direct-messages/callAlerts.ts",
     "src/features/direct-messages/keptCallDms.ts",
+    "src/features/direct-messages/groupExitWatch.ts",
     "src/features/direct-messages/groupMembers.ts",
     "src/features/direct-messages/groupIcon.ts",
     "src/lib/messageKind.ts",

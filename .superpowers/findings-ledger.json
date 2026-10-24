@@ -11625,6 +11625,52 @@
       "lens": "correctness",
       "finder": "nightly-bughunt",
       "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0503",
+      "title": "A member added to a group DM while its call was live never received the call's voice roster, and a member who left kept a stale one",
+      "file": "Server/api/dm_group_handler.go",
+      "line": 113,
+      "severity": "low",
+      "why": "The add fan-out sent only dm_channel_open and the group event rows. Voice-state fan-out reaches only the room's current participants and readers at the time, so the added user saw no in-call glyph and no Join strip until a full ready. The client also never dropped a group's voice roster when it was left or closed, so a re-add showed ghost participants.",
+      "repro": "Add a user to a group DM while two members are in its call: the new member gets no voice_state frames. Leave a group mid-call, have the call end, then be re-added: the old participants still show.",
+      "evidence": "Vault issue #135; ws/voice_join.go sends existing states only to the joiner; stores/dm.store.ts closeDmLocally never touches the voice store.",
+      "suggestedFix": "After the dm_channel_open fan-out of a group add, send each added user the channel's voice states as sequenced voice_state frames; drop a group's voice roster on the client when the group is left or closed.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/api/dm_group_voice_roster_test.go (TestAddMembers_AddedUserGetsVoiceRosterAfterOpen, TestAddMembers_NoVoiceRosterWhenNobodyInCall), Server/ws/dm_voice_roster_test.go, Client/tests/unit/voice.store.test.ts (clearChannelVoiceUsers), Client/tests/unit/dispatcher.test.ts (call roster of a closed DM)",
+        "revertProof": "fail (without the fix the added user receives no voice_state and the roster survives a group leave)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0504",
+      "title": "A group DM's incoming call ring survived leaving or being removed from the group, then reported a missed call",
+      "file": "Client/src/pages/MainPage.ts",
+      "line": 1697,
+      "severity": "low",
+      "why": "Once removed, the server stops sending the user that room's voice_leave, so the ring's 30 second timeout fired the missed-call toast and OS popup for a group the user was no longer in, and Accept tried a voice join the server refuses.",
+      "repro": "Receive a group call ring, then leave the group (or be removed) before answering: after 30 seconds a missed call is reported.",
+      "evidence": "Vault issue #117; createRingController is only cancelled by call_declined, voice_leave and joining the room.",
+      "suggestedFix": "Cancel the ring, with no reason so it is not a missed call, and clear the outgoing call when a group that was in dmStore leaves it; never cancel merely because the channel is absent.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/main-page.test.ts (a ring for a group the user loses), Client/src/features/direct-messages/groupExitWatch.test.ts",
+        "revertProof": "fail (without the fix the ring banner stays up and times out into a missed call)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
     }
   ]
 }

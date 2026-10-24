@@ -425,6 +425,23 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
   });
 }
 
+/**
+ * Drop the whole roster of one channel. Used when the local user loses a group
+ * DM (left or removed): the server stops sending that room's voice events, so
+ * the stale participants would otherwise outlive the membership and reappear as
+ * ghosts on a later re-add. The channel the local user is in is left alone: the
+ * server's own voice_leave and the leave path handle that roster.
+ */
+export function clearChannelVoiceUsers(channelId: number): void {
+  voiceStore.setState((prev) => {
+    if (!prev.voiceUsers.has(channelId) || prev.currentChannelId === channelId) return prev;
+    voiceRosterRevision++;
+    const voiceUsers = new Map(prev.voiceUsers);
+    voiceUsers.delete(channelId);
+    return { ...prev, voiceUsers };
+  });
+}
+
 /** No LiveKit update reaches a channel this client is no longer in, so a ring
  *  lit there as it left would never clear. */
 function withoutRings(
