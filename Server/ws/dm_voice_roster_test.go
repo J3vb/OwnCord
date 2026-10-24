@@ -53,8 +53,9 @@ type rosterFrame struct {
 
 func rosterFrames(t *testing.T, ch chan []byte) []rosterFrame {
 	t.Helper()
-	var out []rosterFrame
-	for _, raw := range drainChan(ch, 200*time.Millisecond) {
+	raws := drainChan(ch, 200*time.Millisecond)
+	out := make([]rosterFrame, 0, len(raws))
+	for _, raw := range raws {
 		var fr rosterFrame
 		if err := json.Unmarshal(raw, &fr); err != nil {
 			t.Fatalf("decode frame: %v", err)
