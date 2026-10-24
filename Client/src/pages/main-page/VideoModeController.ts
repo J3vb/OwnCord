@@ -14,6 +14,7 @@ import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { shellText } from "../../i18n/shell";
 import { buildCallPeople, type CallAvatarCache } from "./callPeople";
+import { createCallChatResize, type CallChatResize } from "../../features/voice/callChatResize";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -123,6 +124,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
   let chatBeside = false;
   /** Watches the chat column's width while the split shows. */
   let splitObserver: ResizeObserver | null = null;
+  /** The handle between the grid and the chat, made the first time the split shows. */
+  let chatResize: CallChatResize | null = null;
   const avatarCache: CallAvatarCache = new Map();
 
   function clearPeople(): void {
@@ -180,14 +183,21 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     if (!on) {
       splitObserver?.disconnect();
       splitObserver = null;
+      chatResize?.detach();
       opts.chatColumn.classList.remove("chat-area--call-chat-stacked");
       return;
     }
+    chatResize ??= createCallChatResize(opts.chatColumn);
+    chatResize.attach();
     if (splitObserver !== null || typeof ResizeObserver === "undefined") return;
     splitObserver = new ResizeObserver(([entry]) => {
       if (entry === undefined) return;
-      const narrow = entry.contentRect.width < CALL_CHAT_STACK_BELOW_PX;
-      opts.chatColumn.classList.toggle("chat-area--call-chat-stacked", narrow);
+      const width = entry.contentRect.width;
+      opts.chatColumn.classList.toggle(
+        "chat-area--call-chat-stacked",
+        width < CALL_CHAT_STACK_BELOW_PX,
+      );
+      chatResize?.refit(width);
     });
     splitObserver.observe(opts.chatColumn);
   }
@@ -442,6 +452,8 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     localTileAdded = false;
     localScreenshareTileAdded = false;
     lastChannelId = null;
+    chatResize?.destroy();
+    chatResize = null;
   }
 
   return {
