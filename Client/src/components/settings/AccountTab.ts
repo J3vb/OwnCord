@@ -1733,6 +1733,7 @@ export function buildAccountTab(
   });
   const usernameHint = attachLimitHint(editInput, {
     max: MAX_USERNAME_LEN,
+    countCharacters: true,
     hint: usernameHintText(),
     id: "username-edit-hint",
     signal,

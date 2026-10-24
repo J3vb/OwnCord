@@ -95,6 +95,10 @@ const (
 	// MANAGE_SERVER holder per minute. Lower than the attachment limit: every
 	// accepted upload fans an emoji_update out to every connected session.
 	emojiUploadRateLimitPerMinute = 10
+
+	// stickerUploadRateLimitPerMinute is the maximum custom-sticker uploads per
+	// MANAGE_SERVER holder per minute, for the same reason as the emoji limit.
+	stickerUploadRateLimitPerMinute = 10
 )
 
 // ─── Timeouts & TTLs ────────────────────────────────────────────────────────
@@ -194,6 +198,25 @@ const (
 	// emojiMultipartMemoryLimit is the in-memory limit for parsing an emoji
 	// upload. Above maxEmojiFileBytes, so a valid emoji never spills to disk.
 	emojiMultipartMemoryLimit = 1 << 20
+
+	// maxStickerFileBytes is the largest custom-sticker image accepted (512 KiB).
+	maxStickerFileBytes = 512 << 10
+
+	// maxStickerDimension caps a sticker's width and height in pixels. A
+	// sticker renders at 160px in a message, so 320px covers high-density
+	// screens without letting a full-size picture through.
+	maxStickerDimension = 320
+
+	// stickerMaxBodySize bounds the whole multipart request: the image cap
+	// plus the form's own framing.
+	stickerMaxBodySize = 1 << 20
+
+	// stickerMultipartMemoryLimit is the in-memory limit for parsing a sticker
+	// upload, above maxStickerFileBytes so a valid sticker never spills to disk.
+	stickerMultipartMemoryLimit = 1 << 20
+
+	// stickerPatchMaxBodySize bounds a rename body: a name and an emoji.
+	stickerPatchMaxBodySize = 4 << 10
 
 	// maxAvatarFileBytes is the largest avatar image accepted (2 MiB, WP 8.7).
 	// An avatar renders at 40px in a message row and 64px in the profile

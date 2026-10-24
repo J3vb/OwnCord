@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 231 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 236 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -225,6 +225,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/reports/mine`                                               |
 | GET     | `/api/v1/search`                                                     |
 | GET     | `/api/v1/server-info`                                                |
+| GET     | `/api/v1/stickers/`                                                  |
+| POST    | `/api/v1/stickers/`                                                  |
+| DELETE  | `/api/v1/stickers/{id}`                                              |
+| PATCH   | `/api/v1/stickers/{id}`                                              |
+| GET     | `/api/v1/stickers/{id}/image`                                        |
 | POST    | `/api/v1/uploads`                                                    |
 | DELETE  | `/api/v1/uploads/{id}`                                               |
 | PATCH   | `/api/v1/users/me/`                                                  |
@@ -1296,6 +1301,12 @@ omitted for every other message and for a deleted one: `{"question", "answers":
 when the poll was ended or `expires_at` has passed, even before anything marked it
 ended. The poll's `content` is a readable fallback of the question and answers. A poll
 cannot be edited or forwarded.
+
+A sticker message (`chat_send` with `sticker_id`, see `docs/protocol.md`) carries a
+`sticker` block, omitted for every other message and for a deleted one: `{"id",
+"name", "url"}`. `id` and `url` are `null` when the sticker was deleted, and `name`
+is the label kept from send time. The message's `content` is the fallback `[Sticker:
+name]`, and it cannot be edited or forwarded. Search hits carry the same block.
 
 A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
@@ -2814,6 +2825,153 @@ literal `:shortcode:` text. Broadcasts `emoji_update` on success.
 | 400    | `BAD_REQUEST` | id is not a positive integer |
 | 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER   |
 | 404    | `NOT_FOUND`   | no emoji with that id        |
+
+---
+
+## Custom Stickers
+
+Server-wide custom stickers (WP 8.8a), sent as their own message with
+`chat_send.sticker_id` (see `docs/protocol.md`).
+
+**Permission model.** The same as custom emoji: reading the set is open to any
+authenticated member, and adding, renaming and removing require
+**MANAGE_SERVER**. There is no `MANAGE_STICKERS` bit.
+
+A sticker has a `name` (2 to 30 characters of ASCII letters, digits, space,
+underscore or hyphen; the case typed is kept, trimmed, and uniqueness ignores
+case), an optional related `emoji` the picker searches by (a single emoji or a
+`:shortcode:` of a custom emoji, at most 64 bytes) and an image. A server holds
+at most 60 stickers.
+
+### GET /api/v1/stickers
+
+List every sticker, ordered by name ignoring case.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+[
+  { "id": 3, "name": "Wave", "emoji": "👋", "url": "/api/v1/stickers/3/image" },
+  { "id": 7, "name": "Party Blob", "emoji": null, "url": "/api/v1/stickers/7/image" }
+]
+```
+
+`url` is server-relative and authenticated, see GET /api/v1/stickers/{id}/image.
+
+---
+
+### POST /api/v1/stickers
+
+Upload one sticker as multipart form data.
+
+**Auth:** Required, **MANAGE_SERVER**
+**Rate limit:** 10 requests/minute per user
+**Body size limit:** 1 MiB (the image itself is capped at 512 KiB)
+**Content-Type:** `multipart/form-data`
+
+| Field   | Type   | Notes                                                         |
+| ------- | ------ | ------------------------------------------------------------- |
+| `name`  | string | 2 to 30 characters of `[A-Za-z0-9 _-]` after trimming         |
+| `emoji` | string | Optional. A single emoji or a `:shortcode:`, at most 64 bytes |
+| `file`  | file   | PNG, GIF or WebP; animated GIF and WebP are allowed           |
+
+Validation, in the order it is applied. The permission check runs before the
+multipart body is read, so a member without the bit never causes a spool to disk:
+
+1. MANAGE_SERVER, then the rate limit, then the name and emoji format.
+2. At most **512 KiB** of image bytes.
+3. The MIME type is **sniffed from the file's own bytes**, never taken from the
+   client's part header. Only `image/png`, `image/gif` and `image/webp` are
+   accepted. JPEG and SVG are refused.
+4. Dimensions are re-read from the sniffed image and must be at most
+   **320 x 320**.
+5. Names are unique ignoring case; a collision is `409 CONFLICT`. Two uploads of
+   the same name at once give one `201` and one `409`, and the loser leaves no
+   file behind.
+6. A server holds at most 60 stickers.
+
+On success the full set is broadcast as `sticker_update` (see protocol.md).
+
+#### Response 201 Created
+
+```json
+{ "id": 3, "name": "Wave", "emoji": "👋", "url": "/api/v1/stickers/3/image" }
+```
+
+#### Errors
+
+| Status | Code           | Cause                                                     |
+| ------ | -------------- | --------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | bad name or emoji, wrong format, too large, too big, full |
+| 403    | `FORBIDDEN`    | caller lacks MANAGE_SERVER                                |
+| 409    | `CONFLICT`     | a sticker with that name already exists                   |
+| 429    | `RATE_LIMITED` | upload rate limit exceeded                                |
+
+---
+
+### PATCH /api/v1/stickers/{id}
+
+Rename a sticker and set or clear its related emoji. The image never changes.
+
+**Auth:** Required, **MANAGE_SERVER**
+**Content-Type:** `application/json`
+
+```json
+{ "name": "Hello", "emoji": "" }
+```
+
+Both fields are optional. An absent `name` or `emoji` is kept, and `"emoji": ""`
+clears it. Broadcasts `sticker_update` on success. Messages that used the sticker
+keep the name they were sent with.
+
+#### Response 200 OK
+
+The updated sticker, in the shape of the list entries.
+
+#### Errors
+
+| Status | Code          | Cause                                           |
+| ------ | ------------- | ----------------------------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer, bad name or emoji |
+| 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER                      |
+| 404    | `NOT_FOUND`   | no sticker with that id                         |
+| 409    | `CONFLICT`    | another sticker already has that name           |
+
+---
+
+### GET /api/v1/stickers/{id}/image
+
+Serve one sticker's image bytes.
+
+**Auth:** Required (Bearer token)
+**Caching:** `Cache-Control: private, max-age=86400, immutable`
+
+Authenticated rather than public, for the same reason the emoji image is. A
+sticker is server-wide, so authentication is the whole check. Its bytes never
+change for a given id. Unknown ids answer 404.
+
+---
+
+### DELETE /api/v1/stickers/{id}
+
+Delete one sticker and unlink its stored file.
+
+**Auth:** Required, **MANAGE_SERVER**
+
+Messages that carried the sticker stay, with their name and a `null` `id` and
+`url` in `sticker`. Broadcasts `sticker_update` on success.
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                        |
+| ------ | ------------- | ---------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer |
+| 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER   |
+| 404    | `NOT_FOUND`   | no sticker with that id      |
 
 ---
 

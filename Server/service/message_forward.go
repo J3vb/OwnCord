@@ -151,6 +151,9 @@ func (s *MessageService) forwardSource(ctx context.Context, p ForwardParams) (*f
 			return nil, fmt.Errorf("%w: a poll cannot be forwarded", ErrBadRequest)
 		}
 	}
+	if err := s.refuseStickerMessage(ctx, msg.ID, "a sticker message cannot be forwarded"); err != nil {
+		return nil, err
+	}
 	origin := db.ForwardRow{SourceMessageID: &msg.ID, SourceChannelID: msg.ChannelID, SourceTimestamp: msg.Timestamp}
 	prior, err := s.forward.store.GetMessageForward(ctx, msg.ID)
 	if err != nil {

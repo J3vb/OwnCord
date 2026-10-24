@@ -240,6 +240,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// mounted at all (a 404 the client reads as "this server has no emoji").
 	if store != nil {
 		MountEmojiRoutes(r, svc, store, limiter, hub)
+		// Custom sticker routes (WP 8.8a), on the same storage and for the
+		// same reason. The service is nil when the store cannot hold stickers.
+		if svc.Stickers != nil {
+			MountStickerRoutes(r, svc, store, limiter, hub)
+		}
 	}
 
 	// Report intake, moderator actions and appeals (B5-8/B5-9/B5-10) —
