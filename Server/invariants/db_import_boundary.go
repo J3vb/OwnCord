@@ -99,7 +99,6 @@ var DBImportAllow = map[string]DBImportEntry{
 	"api/dm_handler.go":               {Disposition: "adapter", Note: "DM response types + pure status helpers"},
 	"api/dm_request_handler.go":       {Disposition: "adapter", Note: "message-request response types; the service owns the calls"},
 	"api/emoji_handler.go":            {Disposition: "adapter", Note: "Emoji/User types only"},
-	"api/sticker_handler.go":          {Disposition: "adapter", Note: "Sticker type only"},
 	"api/file_serve.go":               {Disposition: "adapter", Note: "AttachmentAccess/User/Role types while serving the bytes; UploadService owns the access decisions"},
 	"api/invite_handler.go":           {Disposition: "adapter", Note: "Invite/User types only"},
 	"api/middleware.go":               {Disposition: "adapter", Note: "User/Session/Role types on the context keys; SessionService owns the resolution, the touches and the expired-session discard"},

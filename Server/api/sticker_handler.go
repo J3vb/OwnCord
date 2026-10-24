@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -23,11 +22,11 @@ import (
 // every mutation the full set is pushed to every connected client so pickers
 // converge without a reconnect.
 type StickerBroadcaster interface {
-	BroadcastStickerUpdate(list []*db.Sticker)
+	BroadcastStickerUpdate(list []*service.Sticker)
 }
 
 // stickerResponse is the JSON shape of one sticker in the sticker routes.
-// Deliberately not db.Sticker: the storage id and sniffed mime type are
+// Deliberately not service.Sticker: the storage id and sniffed mime type are
 // server-side details, and `url` is what a client actually needs.
 type stickerResponse struct {
 	ID    int64   `json:"id"`
@@ -36,11 +35,11 @@ type stickerResponse struct {
 	URL   string  `json:"url"`
 }
 
-func toStickerResponse(s *db.Sticker) stickerResponse {
+func toStickerResponse(s *service.Sticker) stickerResponse {
 	return stickerResponse{ID: s.ID, Name: s.Name, Emoji: s.Emoji, URL: service.StickerImageURL(s.ID)}
 }
 
-func toStickerResponses(list []*db.Sticker) []stickerResponse {
+func toStickerResponses(list []*service.Sticker) []stickerResponse {
 	out := make([]stickerResponse, 0, len(list))
 	for _, s := range list {
 		if s == nil {
@@ -300,7 +299,7 @@ func handleDeleteSticker(svc *service.Services, store FileStore, broadcaster Sti
 // removeStickerFile unlinks the stored bytes of a deleted sticker. The row is
 // already gone, so a failed unlink leaves an orphaned blob, not a broken
 // sticker: it is logged rather than failing a successful delete.
-func removeStickerFile(store FileStore, removed *db.Sticker) {
+func removeStickerFile(store FileStore, removed *service.Sticker) {
 	if err := store.Delete(removed.StoredAs); err != nil {
 		slog.Warn("failed to remove sticker file", "stored_as", removed.StoredAs, "error", err)
 	}

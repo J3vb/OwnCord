@@ -68,6 +68,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Server (operators)**
 
+- Server stickers: members with Manage Server can upload up to 60 stickers (PNG, GIF or WebP, animation allowed, up to 512 KB and 320x320) under `/api/v1/stickers`, stored with the other uploads. Sending and picking stickers in the app arrives with the next client update.
 - Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.
 
 **Desktop UI**
