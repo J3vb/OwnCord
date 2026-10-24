@@ -269,4 +269,24 @@ describe("MessageList: rows resizing after they are drawn", () => {
     resize();
     expect(edge(shown.id)).toBeCloseTo(before, 0);
   });
+
+  it("ends at the bottom when a channel shorter than the view grows past it", async () => {
+    // A short channel's rows land before their images: the content fits, so
+    // scrolling to the bottom leaves scrollTop at 0, where the browser's own
+    // scroll anchoring does nothing once the images make it taller.
+    messagesStore.setState((s) => ({
+      ...s,
+      messagesByChannel: new Map([
+        [CHANNEL_ID, Array.from({ length: 5 }, (_, i) => makeMessage(i + 1))],
+      ]),
+    }));
+    list!.mount(container);
+    await frame();
+    expect(rootEl().scrollTop).toBe(0);
+    for (let i = 1; i <= 5; i++) grown.set(`message-${i}`, 600);
+    resize();
+    await frame();
+    expect(rootEl().scrollTop).toBeGreaterThan(0);
+    expect(gap()).toBeCloseTo(0, 0);
+  });
 });
