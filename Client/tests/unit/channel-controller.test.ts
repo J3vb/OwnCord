@@ -366,6 +366,12 @@ import {
 import { createMessageList } from "@components/MessageList";
 import { loadSavedDraft, saveDraft } from "@lib/savedDrafts";
 import {
+  clearReactionUsersCache,
+  getCachedReactionUsers,
+  loadReactionUsers,
+  setReactionUsersFetcher,
+} from "../../src/features/messaging/reactionUsers";
+import {
   NAVIGATION_DESTINATIONS,
   type ForumViewContext,
 } from "../../src/features/navigation/destinations";
@@ -585,6 +591,20 @@ describe("createChannelController", () => {
     expect(mockInvalidateWindow).toHaveBeenCalledWith(99);
     // Each mount still asks for the tail exactly once.
     expect(opts.msgCtrl.loadMessages).toHaveBeenCalledTimes(3);
+  });
+
+  it("drops cached who-reacted lists when leaving a channel, since its reaction updates stop", async () => {
+    setReactionUsersFetcher(vi.fn().mockResolvedValue([{ id: 2, username: "bob", avatar: "" }]));
+    clearReactionUsersCache();
+    const ctrl = createChannelController(makeOpts());
+    ctrl.mountChannel(42, "general");
+    await loadReactionUsers(42, 500, "👍");
+    expect(getCachedReactionUsers(500, "👍")).toHaveLength(1);
+
+    ctrl.mountChannel(99, "random");
+
+    expect(getCachedReactionUsers(500, "👍")).toBeUndefined();
+    setReactionUsersFetcher(null);
   });
 
   // UX-8: the ready-time auto-select no longer clears a badge (selecting is

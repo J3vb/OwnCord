@@ -28,6 +28,7 @@ import type {
   SentAttachment,
 } from "@components/MessageInput";
 import { endPoll, votePoll } from "../../features/messaging/pollSend";
+import { clearReactionUsersCache } from "../../features/messaging/reactionUsers";
 import { loadSendQueue, preloadSendQueue } from "../../features/messaging/sendQueue-loader";
 import type { SendQueueModule } from "../../features/messaging/sendQueue-loader";
 import type { QueuedSend, QueueDeps } from "../../features/messaging/sendQueue";
@@ -655,6 +656,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // Idempotent (no-ops once the flag is already gone), so this is safe
     // alongside mountChannel's existing invalidate of previousChannelId.
     if (currentChannelId !== null) invalidateChannelMessageWindow(currentChannelId);
+    // reaction_update stops arriving too, so a cached who-reacted list could
+    // be stale by the next visit.
+    clearReactionUsersCache();
     currentChannelId = null;
   }
 
