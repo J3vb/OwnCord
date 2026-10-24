@@ -21,6 +21,7 @@ use livekit::track::VideoQuality;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::native::frame_cryptor::EncryptionState;
+use livekit::webrtc::prelude::VideoBuffer;
 use livekit::webrtc::stats::RtcStats;
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
@@ -1164,6 +1165,20 @@ impl NativeSession {
         self.frames.set_camera(Some(capture.preview()));
         self.camera_capture = Some(CameraShare { id, capture });
         Ok((id, started))
+    }
+
+    /// The running camera's preview socket and its latest frame size (0x0
+    /// before a frame was watched), so the settings preview can show the
+    /// call's camera instead of opening the device a second time.
+    pub fn camera_preview(&self) -> Option<(String, (u32, u32))> {
+        let camera = self.camera_capture.as_ref()?;
+        let size = camera
+            .capture
+            .preview()
+            .borrow()
+            .as_ref()
+            .map_or((0, 0), |b| (b.width(), b.height()));
+        Some((self.frames.url().to_string(), size))
     }
 
     /// Publish running camera capture `capture` as the camera track. E2EE
