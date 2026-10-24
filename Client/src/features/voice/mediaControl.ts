@@ -281,11 +281,21 @@ export class MediaControl {
         }
         setListenOnly(true);
         setLocalMuted(true);
+        this.announceFallbackMute();
         log.warn("Mic re-publish failed — falling back to listen-only/muted", err);
         this.onErrorCallback?.(voiceText("mic.unavailableMuted"));
         return;
       }
     }
+  }
+
+  /** The unmute toggle already sent voice_mute{muted:false}; restate the
+   *  fallback's mute so the server row and every peer's roster match. */
+  private announceFallbackMute(): void {
+    const ws = this.ws;
+    if (ws === null || ws.getState() !== "connected") return;
+    if (this._currentChannelId === null) return;
+    ws.send({ type: "voice_mute", payload: { muted: true } });
   }
 
   async enableCamera(): Promise<void> {

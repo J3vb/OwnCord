@@ -913,6 +913,7 @@ export class LiveKitSession {
   private sweepPublications(room: Room): void {
     this._eventHandlers.handleConnected(room);
     this._remoteTracks.dropUnpublishedWatches();
+    this._remoteTracks.removeUnpublishedTiles();
   }
 
   /** Resolves once the room's disconnect has completed (the native room's,
