@@ -248,10 +248,12 @@ type readyActivityPayload struct {
 // readyActivities lists the games viewerID may see: every connected user who
 // reports one and is not offline to the viewer (db.StatusForViewer: an
 // invisible user is offline to everyone but themselves), the viewer included,
-// sorted by user id. Never nil, so the ready key is always an array.
-func (h *Hub) readyActivities(viewerID int64) []readyActivityPayload {
+// sorted by user id. Never nil, so the ready key is always an array. live is
+// one livePresences snapshot shared with readyListening, so a ready never pairs
+// a user's old game with their new song.
+func readyActivities(live map[int64]livePresence, viewerID int64) []readyActivityPayload {
 	out := []readyActivityPayload{}
-	for uid, lp := range h.livePresences() {
+	for uid, lp := range live {
 		if lp.activity == nil || lp.status == "" {
 			continue
 		}
@@ -270,9 +272,9 @@ func init() { commandConstructors[MsgTypeActivityUpdate] = parseActivityUpdate }
 // readyListening lists the songs viewerID may see, by the same rules as
 // readyActivities (connected, not offline to the viewer, own invisible copy
 // included), sorted by user id. Never nil, so the ready key is always an array.
-func (h *Hub) readyListening(viewerID int64) []readyListeningPayload {
+func readyListening(live map[int64]livePresence, viewerID int64) []readyListeningPayload {
 	out := []readyListeningPayload{}
-	for uid, lp := range h.livePresences() {
+	for uid, lp := range live {
 		if lp.listening == nil || lp.status == "" {
 			continue
 		}
