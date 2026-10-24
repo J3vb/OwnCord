@@ -321,7 +321,7 @@ type Store interface {
 	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
 
 	// ── Attachments ──
-	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
+	CreateAttachmentVoice(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height, durationMs *int, waveform *string) error
 	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
 	DeleteUnlinkedAttachment(ctx context.Context, id string, userID int64) (bool, error)
 	DiscardUnlinkedAttachment(ctx context.Context, id string, userID int64) (storedAs string, found bool, err error)

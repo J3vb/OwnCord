@@ -1,6 +1,6 @@
 -- name: CreateAttachment :exec
-INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size, width, height)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size, width, height, duration_ms, waveform)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: DeleteUnlinkedAttachment :execrows
 DELETE FROM attachments WHERE id = ? AND uploader_id = ? AND message_id IS NULL;

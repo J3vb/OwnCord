@@ -10,19 +10,21 @@ import (
 )
 
 const createAttachment = `-- name: CreateAttachment :exec
-INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size, width, height)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO attachments (id, uploader_id, filename, stored_as, mime_type, size, width, height, duration_ms, waveform)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateAttachmentParams struct {
-	ID         string `json:"id"`
-	UploaderID *int64 `json:"uploaderId"`
-	Filename   string `json:"filename"`
-	StoredAs   string `json:"storedAs"`
-	MimeType   string `json:"mimeType"`
-	Size       int64  `json:"size"`
-	Width      *int64 `json:"width"`
-	Height     *int64 `json:"height"`
+	ID         string  `json:"id"`
+	UploaderID *int64  `json:"uploaderId"`
+	Filename   string  `json:"filename"`
+	StoredAs   string  `json:"storedAs"`
+	MimeType   string  `json:"mimeType"`
+	Size       int64   `json:"size"`
+	Width      *int64  `json:"width"`
+	Height     *int64  `json:"height"`
+	DurationMs *int64  `json:"durationMs"`
+	Waveform   *string `json:"waveform"`
 }
 
 func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentParams) error {
@@ -35,6 +37,8 @@ func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentPara
 		arg.Size,
 		arg.Width,
 		arg.Height,
+		arg.DurationMs,
+		arg.Waveform,
 	)
 	return err
 }

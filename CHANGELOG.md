@@ -66,7 +66,10 @@ and only when it changes something a contributor or fork holder must do
 - Roles can start from a preset in the role editor: Super admin, Server manager, Moderator or Voice moderator fill in the matching boxes, which you can still change before saving. Anything you are not allowed to give out stays unticked and is named, and a box you cannot change stays as it was and is named too.
 - Seven more role permissions that start with nobody: Restore Backups, Manage Config, Manage Updates, Manage Tokens and Issue Recovery work like the owner's own powers, so the owner gives each one out by hand and an Administrator cannot, whatever its role holds; View Diagnostics (logs, support bundles and the attention list) and Erase Accounts can be given by the owner or an Administrator. A member with Issue Recovery can only help someone ranked below them, and API tokens a member makes are theirs alone. No role has any of them after the upgrade.
 
-**Chat**
+**Messages & files**
+
+- Server support for voice messages: an upload can carry its length (up to 5 minutes) and a small waveform, and both come back on the message's attachment, including in forwarded copies, so a client can draw the player before downloading. The server reports it as the `voice_messages` capability. No voice message exists until a client sends one.
+  **Chat**
 
 - New welcome messages: pick a text channel under Settings → Welcome messages in the admin panel and a line greets each new member there when their account is ready (after sign-up, or once an admin approves it in approval mode). It is off by default. Members can answer with a Wave to say hi! button, and a moderator can delete the line like any message.
 
