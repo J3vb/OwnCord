@@ -21,7 +21,7 @@ import { createIcon } from "@lib/icons";
 import type { ModalInstance } from "@lib/modalFactory";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
-import { isRenderableAvatar } from "./message-list/avatar";
+import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "./message-list/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
@@ -130,13 +130,15 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
   el.appendChild(letter);
   if (!isRenderableAvatar(avatar)) return;
   const resolved = resolveServerUrl(avatar);
-  void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
+  void fetchImageAsObjectUrl(resolved).then(async (objectUrl) => {
     if (objectUrl === null || !el.isConnected) return;
-    const img = createElement("img", { src: objectUrl, alt: label });
+    const img = createElement("img", { alt: label });
     recoverEvictedImage(img, { url: resolved });
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.borderRadius = "50%";
+    const current = (): boolean => el.isConnected;
+    if (!(await setAvatarSource(img, objectUrl, () => avatarAnimationMode(el), current))) return;
     letter.remove();
     el.insertBefore(img, el.firstChild);
   });

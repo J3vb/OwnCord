@@ -219,6 +219,7 @@ function buildAvatar(user: UserProfileData): HTMLDivElement {
     },
     {
       className: "upp-avatar",
+      animate: "always",
       background: user.isDeleted === true ? "#4e5058" : "var(--accent, #5865f2)",
     },
   );

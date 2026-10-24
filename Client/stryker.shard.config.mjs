@@ -214,6 +214,7 @@ export const shards = {
   ],
   "lib-rest-5": [
     "src/lib/avatar.ts",
+    "src/lib/animatedStill.ts",
     "src/lib/dom.ts",
     "src/features/messaging/fileDropGuard.ts",
     "src/features/messaging/shortcodes.ts",

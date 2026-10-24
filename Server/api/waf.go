@@ -102,6 +102,7 @@ func newCRSWAF(paranoiaLevel int, block bool, onMatch func(types.MatchedRule)) (
 				# raw image bytes) under CRS blocking mode.
 				SecRule REQUEST_URI "@beginsWith /api/v1/admin/plugins/install" "id:1002,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/avatar" "id:1003,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
+				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/banner" "id:1005,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 				SecRule REQUEST_METHOD "@streq POST" "id:1004,phase:1,pass,nolog,chain"
 					SecRule REQUEST_URI "@rx ^/api/v1/dms/[0-9]+/icon([?]|$)" "ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 
@@ -259,12 +260,13 @@ func wafInlineEngine(paranoiaLevel int) (coraza.WAF, error) {
 
 				# Exclude the other routes with a larger-than-1-MiB app-level
 				# cap too (see bodyCapExemptPrefixes in constants.go: 16 MiB
-				# plugin installs, 2 MiB avatars). Without this, coraza's
+				# plugin installs, 3 MiB avatars, 5 MiB banners). Without this, coraza's
 				# default SecRequestBodyLimitAction (Reject) 413s any body
 				# that reaches this engine's 1 MiB SecRequestBodyLimit before
 				# the app's own, larger limit is ever consulted.
 				SecRule REQUEST_URI "@beginsWith /api/v1/admin/plugins/install" "id:900004,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/avatar" "id:900005,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
+				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/banner" "id:900007,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 				SecRule REQUEST_METHOD "@streq POST" "id:900006,phase:1,pass,nolog,chain"
 					SecRule REQUEST_URI "@rx ^/api/v1/dms/[0-9]+/icon([?]|$)" "ctl:requestBodyAccess=Off"
 			`, paranoiaLevel)),

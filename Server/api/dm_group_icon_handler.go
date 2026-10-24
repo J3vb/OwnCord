@@ -51,7 +51,7 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 		}
 		defer file.Close() //nolint:errcheck
 
-		raw, mimeType, width, height, ok := readProfileImage(w, file, avatarImageLimits)
+		raw, mimeType, width, height, ok := readProfileImage(w, file, groupIconImageLimits)
 		if !ok {
 			return
 		}
