@@ -311,17 +311,6 @@ type ReferencedMessage struct {
 	IsSystem bool `json:"-"`
 }
 
-// AttachmentInfo is the attachment shape in API responses.
-type AttachmentInfo struct {
-	ID       string `json:"id"`
-	Filename string `json:"filename"`
-	Size     int64  `json:"size"`
-	Mime     string `json:"mime"`
-	URL      string `json:"url"`
-	Width    *int   `json:"width,omitempty"`
-	Height   *int   `json:"height,omitempty"`
-}
-
 // ReactionInfo is the reaction shape in API responses.
 type ReactionInfo struct {
 	Emoji string `json:"emoji"`

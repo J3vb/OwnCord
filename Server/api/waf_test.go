@@ -188,7 +188,7 @@ func TestWAFMiddleware_AllowsLargePluginInstallBody(t *testing.T) {
 }
 
 func TestWAFMiddleware_AllowsLargeAvatarUploadBody(t *testing.T) {
-	requestBody := strings.Repeat("A", 1_100_000) // >1 MiB; within the 2 MiB avatar cap
+	requestBody := strings.Repeat("A", 1_100_000) // >1 MiB; within the 3 MiB avatar envelope
 	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
 
 	called := false
@@ -218,8 +218,39 @@ func TestWAFMiddleware_AllowsLargeAvatarUploadBody(t *testing.T) {
 	}
 }
 
+func TestWAFMiddleware_AllowsLargeBannerUploadBody(t *testing.T) {
+	requestBody := strings.Repeat("A", 3<<20) // 3 MiB; within the 5 MiB banner envelope (WP 8.7)
+	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
+
+	called := false
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		if len(body) != len(requestBody) {
+			t.Fatalf("body len = %d, want %d", len(body), len(requestBody))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users/me/banner", strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "image/png")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if !called {
+		t.Fatalf("expected downstream handler to be called, got status %d body %s", rr.Code, rr.Body.String())
+	}
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestWAFMiddleware_AllowsLargeGroupIconUploadBody(t *testing.T) {
-	requestBody := strings.Repeat("A", 1_100_000) // >1 MiB; within the 2 MiB avatar cap
+	requestBody := strings.Repeat("A", 1_100_000) // >1 MiB; within the 3 MiB avatar envelope
 	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
 
 	called := false

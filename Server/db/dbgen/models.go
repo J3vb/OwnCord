@@ -35,16 +35,18 @@ type Appeal struct {
 }
 
 type Attachment struct {
-	ID         string `json:"id"`
-	MessageID  *int64 `json:"messageId"`
-	Filename   string `json:"filename"`
-	StoredAs   string `json:"storedAs"`
-	MimeType   string `json:"mimeType"`
-	Size       int64  `json:"size"`
-	UploadedAt string `json:"uploadedAt"`
-	Width      *int64 `json:"width"`
-	Height     *int64 `json:"height"`
-	UploaderID *int64 `json:"uploaderId"`
+	ID         string  `json:"id"`
+	MessageID  *int64  `json:"messageId"`
+	Filename   string  `json:"filename"`
+	StoredAs   string  `json:"storedAs"`
+	MimeType   string  `json:"mimeType"`
+	Size       int64   `json:"size"`
+	UploadedAt string  `json:"uploadedAt"`
+	Width      *int64  `json:"width"`
+	Height     *int64  `json:"height"`
+	UploaderID *int64  `json:"uploaderId"`
+	DurationMs *int64  `json:"durationMs"`
+	Waveform   *string `json:"waveform"`
 }
 
 type AuditLog struct {
