@@ -16,7 +16,9 @@ const OWNER_MOVABLE_KEY='voice_owner_movable';
    reads as on, as the server does (service.GameActivityEnabled). Manage Server
    may change it; it is not owner-only. */
 const GAME_ACTIVITY_KEY='game_activity_enabled';
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
+/* The text channel that greets each new member; empty is off (WP 8.6). */
+const WELCOME_KEY='welcome_channel_id';
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',WELCOME_KEY,OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
 function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
@@ -66,6 +68,7 @@ async function renderSettings(){
   const gameActivityOn=settingNorm(GAME_ACTIVITY_KEY,v(GAME_ACTIVITY_KEY))==='true';
   html+=settingsCard('Game activity',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+GAME_ACTIVITY_KEY+'-name">Show the games members are playing</div><div class="setting-desc" id="s-'+GAME_ACTIVITY_KEY+'-desc">Turn this off and no one sees what anyone is playing on this server. Games already shown are cleared at once, and members\' apps stop sending them</div></div><div class="setting-ctrl"><button class="toggle '+(gameActivityOn?'on':'')+'" id="s-'+GAME_ACTIVITY_KEY+'" role="switch" aria-checked="'+gameActivityOn+'" aria-labelledby="s-'+GAME_ACTIVITY_KEY+'-name" aria-describedby="s-'+GAME_ACTIVITY_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
+  html+=await welcomeCard(v(WELCOME_KEY));
   const owner=isOwner();
   if(owner){
     const movable=settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true';
@@ -136,6 +139,21 @@ async function afkCard(timeout){
       ,'<div class="afk-ctrl">'+chSel+'<span class="setting-desc" id="afkChannelState" role="status">'+(channels?'':esc((chErr||'Could not load channels')+' Choosing the AFK channel needs Manage Channels.'))+'</span></div>')
     +'<div id="afkWarnings" aria-live="polite">'+warnings+'</div>'
     +settingsRow('afk_timeout_seconds','Move after','How long a member must stay idle, on top of the 10 minutes the app waits before marking them idle',timeoutSel));
+}
+/* Welcome messages: an ordinary setting that rides the save bar. The choices
+   are Off and every non-archived text channel; a saved channel that has since
+   been archived stays listed (marked) so a save never clears it by accident.
+   GET /channels is Manage Channels, so without it the select is shown disabled
+   under another id, which keeps it out of the save: an unreadable list must not
+   read as Off. */
+async function welcomeCard(current){
+  let channels=null;
+  try{const r=await api('GET','/channels');if(Array.isArray(r))channels=r}catch(e){}
+  const hint='A line greets each new member in this channel.';
+  if(!channels)return settingsCard('Welcome messages',settingsRow('welcome_channel_unavailable','Welcome channel',hint+' Choosing it needs Manage Channels.',afkSelect('s-welcome_channel_unavailable',[['','Channels unavailable']],'',' disabled aria-describedby="s-welcome_channel_unavailable-desc"')));
+  const text=channels.filter(c=>c.type==='text'&&(!c.archived||String(c.id)===current));
+  const opts=[['','Off']].concat(text.map(c=>[String(c.id),c.name+(c.archived?' (archived)':'')]));
+  return settingsCard('Welcome messages',settingsRow(WELCOME_KEY,'Welcome channel',hint,afkSelect('s-'+WELCOME_KEY,opts,current,' aria-describedby="s-'+WELCOME_KEY+'-desc" data-change-action="markSettingsChanged"')));
 }
 async function afkWarningsHtml(ch){
   if(!ch)return'';

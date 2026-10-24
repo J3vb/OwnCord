@@ -66,6 +66,10 @@ and only when it changes something a contributor or fork holder must do
 - Roles can start from a preset in the role editor: Super admin, Server manager, Moderator or Voice moderator fill in the matching boxes, which you can still change before saving. Anything you are not allowed to give out stays unticked and is named, and a box you cannot change stays as it was and is named too.
 - Seven more role permissions that start with nobody: Restore Backups, Manage Config, Manage Updates, Manage Tokens and Issue Recovery work like the owner's own powers, so the owner gives each one out by hand and an Administrator cannot, whatever its role holds; View Diagnostics (logs, support bundles and the attention list) and Erase Accounts can be given by the owner or an Administrator. A member with Issue Recovery can only help someone ranked below them, and API tokens a member makes are theirs alone. No role has any of them after the upgrade.
 
+**Chat**
+
+- New welcome messages: pick a text channel under Settings → Welcome messages in the admin panel and a line greets each new member there when their account is ready (after sign-up, or once an admin approves it in approval mode). It is off by default. Members can answer with a Wave to say hi! button, and a moderator can delete the line like any message.
+
 **Server (operators)**
 
 - Server stickers: members with Manage Server can upload up to 60 stickers (PNG, GIF or WebP, animation allowed, up to 512 KB and 320x320) under `/api/v1/stickers`, stored with the other uploads. Sending and picking stickers in the app arrives with the next client update.

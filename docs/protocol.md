@@ -1248,6 +1248,22 @@ mention and sends no push. Unlike a call or group row, its author or a moderator
 (MANAGE_MESSAGES in a channel, the author only in a DM) may delete it, as an
 ordinary message. It cannot be edited, replied to, reacted to or pinned.
 
+A welcome row (WP 8.6) greets a new member in the channel the admin picked with the
+`welcome_channel_id` setting: `kind` is `member_join`, the author is the new member,
+`reply_to` is null and `content` is the English fallback `alice joined the server.`
+that only clients that do not know `kind` show; a current client draws its own
+greeting line. The server writes it once the account is usable, that is after a
+`register` in invite or open mode and when an admin approves an application in approval
+mode, and only while that setting names an existing, non-archived text channel; it
+writes nothing otherwise, and a failure to write or deliver it never fails the
+registration or approval. It is a sequenced `chat_message` to the channel's readers
+with a `channel_activity` note for readers elsewhere, replayed on reconnect, raising
+the unread count for everyone but the new member (whose read state advances to the
+row), carrying no mention and sending no push. Its author or a moderator
+(MANAGE_MESSAGES) may delete it, as an ordinary message. It cannot be edited, reacted to
+or pinned, but unlike the other system rows a member may reply to it: the client's
+wave button sends an ordinary `chat_send` of `👋` with `reply_to` set to the row.
+
 The server writes one call row per DM call, from voice presence. The row is
 created when the first person joins the DM's voice channel (its author is the
 first joiner), and it is sent as an ordinary sequenced `chat_message` to the DM's

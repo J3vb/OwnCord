@@ -327,10 +327,10 @@ func (q *Queries) SetMessagePinned(ctx context.Context, arg SetMessagePinnedPara
 }
 
 const softDeleteMessage = `-- name: SoftDeleteMessage :execresult
-UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind IN (0, 7)
+UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind IN (0, 7, 8)
 `
 
-// kind IN (0, 7): an ordinary message or a pin row (kind 7) may be deleted. A
+// kind IN (0, 7, 8): an ordinary message, a pin row (kind 7) or a welcome row (kind 8) may be deleted. A
 // call log row (kind 1) or a group event row (kinds 2 to 6) never is.
 func (q *Queries) SoftDeleteMessage(ctx context.Context, id int64) (sql.Result, error) {
 	return q.db.ExecContext(ctx, softDeleteMessage, id)

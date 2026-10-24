@@ -17,6 +17,7 @@ import { createMessageList } from "@components/MessageList";
 import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
 import { setInlineImageDecorator } from "@components/message-list/media";
+import { WAVE_CONTENT } from "@components/message-list/welcomeRows";
 import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
@@ -1474,6 +1475,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         if (channelAbort !== null) {
           void msgCtrl.loadMessages(channelId, channelAbort.signal);
         }
+      },
+      // The Wave button of a welcome row (WP 8.6): an ordinary 👋 message sent as
+      // a reply to the join row through the normal send path.
+      onWave: (msgId: number): boolean => {
+        const target = liveReplyTo(msgId);
+        if (target === null) return false;
+        performSend(WAVE_CONTENT, target, []);
+        return true;
       },
       onReplyClick: (msgId: number) => {
         const msgs = getChannelMessages(channelId);

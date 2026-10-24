@@ -361,7 +361,8 @@ func TestMessageKindName(t *testing.T) {
 	want := map[int64]string{
 		db.MessageKindUser: "", db.MessageKindCall: "call", db.MessageKindGroupAdd: "group_add",
 		db.MessageKindGroupRemove: "group_remove", db.MessageKindGroupLeave: "group_leave",
-		db.MessageKindGroupRename: "group_rename", db.MessageKindGroupIcon: "group_icon", 99: "",
+		db.MessageKindGroupRename: "group_rename", db.MessageKindGroupIcon: "group_icon", db.MessageKindPinAdd: "pin_add",
+		db.MessageKindMemberJoin: "member_join", 99: "",
 	}
 	for kind, name := range want {
 		if got := db.MessageKindName(kind); got != name {

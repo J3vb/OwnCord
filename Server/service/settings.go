@@ -54,6 +54,8 @@ var allowedSettingKeys = map[string]struct{}{
 	// Whether members' game activity is shown on this server (WP 8.3e-2).
 	// MANAGE_SERVER may change it; it is not owner-only.
 	GameActivityEnabledKey: {},
+	// The channel that greets each new member (WP 8.6). Empty means off.
+	WelcomeChannelKey: {},
 }
 
 // VoiceOwnerMovableKey is the settings key holding whether MOVE_MEMBERS
@@ -215,6 +217,18 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 	normalized, err := normalizeSettingUpdates(updates)
 	if err != nil {
 		return nil, fmt.Errorf("%w%.0w", err, ErrBadRequest)
+	}
+
+	if value, ok := normalized[WelcomeChannelKey]; ok {
+		canonical, err := validateWelcomeChannel(ctx, s.st, value)
+		if err != nil {
+			// A store fault is the server's, not a bad request: let it through.
+			if errors.Is(err, ErrInternal) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w%.0w", err, ErrBadRequest)
+		}
+		normalized[WelcomeChannelKey] = canonical
 	}
 
 	if err := s.validateRequire2FAUpdate(ctx, normalized); err != nil {
