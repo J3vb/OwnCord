@@ -33,15 +33,32 @@ jobs:
     timeout-minutes: 5
     outputs:
       sha: ${{ steps.dev.outputs.sha }}
+      mutate: ${{ steps.window.outputs.mutate }}
     steps:
       - id: dev
         env:
           REPO: ${{ github.repository }}
         run: echo "sha=$(git ls-remote "https://github.com/${REPO}" refs/heads/dev | cut -f1)" >> "$GITHUB_OUTPUT"
+      # GitHub can start a scheduled run hours late (2026-10-24 started at
+      # 08:17 UTC instead of 03:30). The 31-shard matrix then holds most of
+      # the 20 runner slots during working hours and queues every PR, so a
+      # schedule run that starts after 06:00 UTC skips the mutation matrix.
+      # A manual dispatch always runs it.
+      - id: window
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = schedule ] && [ "$(date -u +%-H)" -ge 6 ]; then
+            echo "Started late ($(date -u +%H:%M) UTC): skipping the mutation matrix." >> "$GITHUB_STEP_SUMMARY"
+            echo "mutate=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "mutate=true" >> "$GITHUB_OUTPUT"
+          fi
 
   mutation:
     name: Nightly mutation baseline (${{ matrix.shard }})
     needs: pin
+    if: needs.pin.outputs.mutate == 'true'
     runs-on: ubuntu-latest
     # The owner's ceiling is 90 min wall-clock per night. Shards run as parallel
     # jobs, so this bounds one shard's wall time. Stryker managed about 1500-1800
@@ -129,7 +146,7 @@ jobs:
     # Not a required status context; it only exists on the nightly.
     name: Nightly full-surface mutation score
     needs: [pin, mutation]
-    if: always()
+    if: always() && needs.pin.outputs.mutate == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
