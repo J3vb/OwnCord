@@ -73,6 +73,11 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Login & connection**
+
+- Rejecting a server's changed certificate while the app was still signing in left the Auto-connecting spinner running forever. The sign-in now stops and the login form says the certificate was not accepted.
+- After picking a server with a remembered password, switching to another server or typing a different address kept the password box filled, and Log in then failed with a raw error. The remembered password now clears when the server changes.
+
 **Accounts & admin**
 
 - A ban now also ends a connection that was still signing in at the moment of the ban.

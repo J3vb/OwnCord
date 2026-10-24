@@ -212,6 +212,12 @@
       "reason": "Ringtone timer handles; stopped by their own stop functions, not session data"
     },
     {
+      "file": "lib/serverCapabilities.ts",
+      "binding": "gameActivityPolicyListeners",
+      "category": "reset-elsewhere",
+      "reason": "Listeners for the game activity switch; each owner (the game activity loop, the Settings pane) removes its own on teardown, and the session reset deliberately keeps them"
+    },
+    {
       "file": "lib/read-state.ts",
       "binding": "threadPointers",
       "category": "reset-elsewhere",

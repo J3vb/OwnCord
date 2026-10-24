@@ -51,6 +51,9 @@ var allowedSettingKeys = map[string]struct{}{
 	AFKTimeoutKey: {},
 	// Whether a member holding MOVE_MEMBERS may move the owner (WP 8.4a).
 	VoiceOwnerMovableKey: {},
+	// Whether members' game activity is shown on this server (WP 8.3e-2).
+	// MANAGE_SERVER may change it; it is not owner-only.
+	GameActivityEnabledKey: {},
 }
 
 // VoiceOwnerMovableKey is the settings key holding whether MOVE_MEMBERS
@@ -67,6 +70,36 @@ func VoiceOwnerMovable(stored string) bool {
 	}
 	v, err := parseBooleanSettingValue(stored)
 	return err == nil && v
+}
+
+// GameActivityEnabledKey is the settings key holding whether game activity is
+// shown on this server: "true" or "false". A missing row means true.
+const GameActivityEnabledKey = "game_activity_enabled"
+
+// GameActivityEnabled reads a stored GameActivityEnabledKey value: true for an
+// unset (blank) value, the parsed boolean otherwise, and false for anything
+// unparseable so a damaged row never shows a game the admin may have hidden.
+func GameActivityEnabled(stored string) bool {
+	if strings.TrimSpace(stored) == "" {
+		return true
+	}
+	v, err := parseBooleanSettingValue(stored)
+	return err == nil && v
+}
+
+// GameActivityEnabledFromRead interprets the result of reading
+// GameActivityEnabledKey: a missing row (db.ErrNotFound) means on, a stored
+// value is parsed as GameActivityEnabled does, and any other error is a read
+// that failed: ok is false and the error is returned, for the caller to fail
+// closed on and log.
+func GameActivityEnabledFromRead(stored string, err error) (enabled, ok bool, readErr error) {
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return true, true, nil
+		}
+		return false, false, fmt.Errorf("read %s: %w", GameActivityEnabledKey, err)
+	}
+	return GameActivityEnabled(stored), true, nil
 }
 
 // AFKTimeoutKey is the settings key holding the AFK timeout in seconds.

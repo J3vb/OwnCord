@@ -12,6 +12,7 @@ import { createDmSidebar, type DmConversation } from "@components/DmSidebar";
 import { buildGameActivityRows } from "../../src/components/settings/GameActivityRows";
 import { playingForLine, playingLine } from "../../src/features/members/gameActivityLine";
 import {
+  applyGameActivityPolicy,
   applyReadyCapabilities,
   resetServerCapabilities,
   serverSupportsGameActivity,
@@ -242,6 +243,39 @@ describe("Settings > Activity", () => {
     expect(host.querySelector('[data-testid="game-activity-detected"]')?.textContent).toBe(
       "Detected now: Factorio",
     );
+  });
+
+  it("says game activity is turned off on this server while the switch is off, and hides it again when on", async () => {
+    invoke.mockResolvedValue({ name: "Factorio", source: "steam", startedAtMs: 1 });
+    applyReadyCapabilities({ game_activity: true });
+    const host = mountRows();
+    const note = host.querySelector<HTMLElement>('[data-testid="game-activity-server-off"]')!;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(note.hidden).toBe(true);
+
+    applyGameActivityPolicy(false);
+    expect(note.hidden).toBe(false);
+    expect(note.textContent).toBe("Game activity is turned off on this server.");
+
+    applyGameActivityPolicy(true);
+    expect(note.hidden).toBe(true);
+    resetServerCapabilities();
+  });
+
+  it("shows the note when a ready advertised the capability off", async () => {
+    applyReadyCapabilities({ game_activity: false });
+    const host = mountRows();
+    expect(
+      host.querySelector<HTMLElement>('[data-testid="game-activity-server-off"]')?.hidden,
+    ).toBe(false);
+    resetServerCapabilities();
+  });
+
+  it("shows no note before a ready has arrived", () => {
+    const host = mountRows();
+    expect(
+      host.querySelector<HTMLElement>('[data-testid="game-activity-server-off"]')?.hidden,
+    ).toBe(true);
   });
 
   it("shows the detected game under the name others see", async () => {
