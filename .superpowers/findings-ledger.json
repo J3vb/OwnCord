@@ -1,5 +1,5 @@
 {
-  "nextId": 503,
+  "nextId": 507,
   "findings": [
     {
       "id": "OC-0001",
@@ -11663,6 +11663,52 @@
         "commit": "pending",
         "test": "Client/tests/unit/main-page.test.ts (a ring for a group the user loses), Client/src/features/direct-messages/groupExitWatch.test.ts",
         "revertProof": "fail (without the fix the ring banner stays up and times out into a missed call)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0505",
+      "title": "A failed unmute fell back to muted locally but never told the server, so peers still saw the member unmuted",
+      "file": "Client/src/features/voice/mediaControl.ts",
+      "line": 283,
+      "severity": "low",
+      "why": "onMuteToggle sends voice_mute{muted:false} before the mic re-acquire runs. When enableMicrophone rejects, applyMicMuteState's fallback set listen-only and localMuted=true in the store only, so the server row and every peer's roster stayed unmuted until a later ready resync.",
+      "repro": "In a call, mute, turn the OS microphone privacy toggle off, then unmute: your own UI shows muted and Grant Microphone, peers see you unmuted.",
+      "evidence": "Vault issue #136; the only voice_mute senders were VoiceCallbacks and restateSelfVoiceState (join/ready).",
+      "suggestedFix": "After the fallback's setLocalMuted(true), send voice_mute{muted:true} on a connected chat socket while in a call.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/livekit-session.test.ts (a failed unmute tells the server the member is muted again)",
+        "revertProof": "fail (no voice_mute frame sent)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0506",
+      "title": "Remote video tiles survived a voice reconnect after their stream or owner was gone",
+      "file": "Client/src/features/voice/remoteTracks.ts",
+      "line": 238,
+      "severity": "low",
+      "why": "A replaced room is detached before it disconnects, and NativeRoom.releaseVideo disposes remote renderers without events, so no TrackUnpublished reached onRemoteVideoRemoved. The post-reconnect sweep only adds or refreshes tiles, so a share that ended or a user who left during the outage kept a frozen tile and the grid never auto-closed.",
+      "repro": "Watch B's screen share; drop A's LiveKit connection long enough for the app's reconnect; B stops sharing meanwhile. After reconnect B's tile is still in A's grid.",
+      "evidence": "Vault issue #122; sweepPublications ran handleConnected and dropUnpublishedWatches only.",
+      "suggestedFix": "Track the streams the grid was offered and, in sweepPublications, remove those the new room does not publish.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/features/voice/remoteTracks.test.ts (RemoteTracks.removeUnpublishedTiles)",
+        "revertProof": "fail (removed callback never fired)"
       },
       "confidence": "high",
       "status": "fixed",
