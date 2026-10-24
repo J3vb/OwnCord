@@ -892,12 +892,16 @@ export function buildTauriMockScript(opts: {
              "plugin:deep-link|get_current", "plugin:deep-link|register", "plugin:fs|mkdir", "plugin:fs|write_text_file", "plugin:fs|remove", "plugin:autostart|is_enabled",
              "plugin:notification|is_permission_granted", "plugin:notification|notify", "notify_message", "clear_call_notification",
              // plugin:dialog|save cancels; a spec that needs a real save must override it.
-             "plugin:opener|open_url", "plugin:dialog|save", "ptt_set_key", "ptt_start", "ptt_stop",
+             "open_external_url", "plugin:dialog|save", "ptt_set_key", "ptt_start", "ptt_stop",
              "voice_shortcuts_start", "voice_shortcuts_set_keys",
              "open_devtools", "frontend_ready"].includes(cmd)) return null;
         // Auto-idle's OS idle poll (DP-33): null is "the OS cannot say", so the
         // mocked app keeps the in-window idle timer it had before the poll.
         if (cmd === "system_idle_ms") return null;
+        // The game scan (WP 8.3): no game is running in the mocked app.
+        if (cmd === "detect_game") return null;
+        // The "Add a game" picker's program list: nothing is running here.
+        if (cmd === "list_running_programs") return [];
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
         if (cmd === "set_unread_badge") return null;
         if (cmd === "ptt_polling_supported") return false;

@@ -187,3 +187,24 @@ func SetDownloadAndVerify(f func(u *updater.Updater, ctx context.Context, latest
 	downloadAndVerify = f
 	return func() { downloadAndVerify = prev }
 }
+
+// SetBackupHoldForTest installs h to run inside api's manual backup after the
+// single-flight guard is taken and before the backup starts, the window a
+// concurrent POST /backup must be refused in. nil clears it.
+func SetBackupHoldForTest(api *AdminAPI, h func()) {
+	if h == nil {
+		api.backup.hold.Store(nil)
+		return
+	}
+	api.backup.hold.Store(&h)
+}
+
+// FreeBackupPathForTest exposes freeBackupPath.
+func FreeBackupPathForTest(dir, base string) (string, error) { return freeBackupPath(dir, base) }
+
+// GatedRoutesForTest returns the routes api registered behind a routeGate
+// (the owner-or-bit and administrator-or-bit routes, WP 8.4d), each with the
+// name of its gate.
+func GatedRoutesForTest(api *AdminAPI) []GatedRoute {
+	return api.gatedRoutes()
+}

@@ -199,7 +199,7 @@ async function openedUrls(page: Page): Promise<unknown[]> {
     (
       window as unknown as { __invokeLog: Array<{ cmd: string; args?: { url?: unknown } }> }
     ).__invokeLog
-      .filter((e) => e.cmd === "plugin:opener|open_url")
+      .filter((e) => e.cmd === "open_external_url")
       .map((e) => e.args?.url),
   );
 }

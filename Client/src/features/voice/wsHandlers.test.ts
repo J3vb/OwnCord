@@ -24,6 +24,7 @@ import {
 } from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
+import { membersStore } from "../../stores/members.store";
 import { noteWatchSent, resetWatchRequest } from "../../lib/watchRequest";
 import { clearAfkMove } from "./moveHint";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
@@ -431,6 +432,44 @@ describe("handleVoiceMoved toast", () => {
     // A later state frame for the same channel does not say it again.
     ack(4);
     expect(showToast).toHaveBeenCalledOnce();
+  });
+
+  it("names the moderator who moved you, at once (WP 8.4b)", async () => {
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([
+        [7, { id: 7, username: "mod", displayName: "Moddy" } as never],
+        [8, { id: 8, username: "plain", displayName: null } as never],
+      ]),
+    }));
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4, by_user_id: 7 }, clock);
+    expect(showToast).toHaveBeenCalledExactlyOnceWith("Moddy moved you to Parking", "info");
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+
+    vi.mocked(showToast).mockClear();
+    handleVoiceMoved(socket, { to_channel_id: 4, by_user_id: 8 }, clock);
+    expect(showToast).toHaveBeenCalledExactlyOnceWith("plain moved you to Parking", "info");
+  });
+
+  it("falls back to a generic message when the mover or channel is unknown", async () => {
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4, by_user_id: 999 }, clock);
+    expect(showToast).toHaveBeenCalledExactlyOnceWith("You were moved to Parking", "info");
+    vi.mocked(showToast).mockClear();
+    handleVoiceMoved(socket, { to_channel_id: 77, by_user_id: 999 }, clock);
+    expect(showToast).toHaveBeenCalledExactlyOnceWith(
+      "You were moved to another voice channel",
+      "info",
+    );
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+  });
+
+  it("does not announce a mover for the AFK sweep's move", async () => {
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk", by_user_id: 7 }, clock);
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+    expect(showToast).not.toHaveBeenCalled();
   });
 
   it("says nothing for a move with no reason, even once acknowledged", async () => {

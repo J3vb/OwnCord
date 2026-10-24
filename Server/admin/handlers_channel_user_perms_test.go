@@ -144,10 +144,10 @@ func TestPutChannelUserPermission_MasksUnknownBits(t *testing.T) {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 
-	// 0x8 is not a defined bit — it must be dropped, not persisted.
+	// 0x20000000 (bit 29) is not a defined bit — it must be dropped, not persisted.
 	w := doRequest(t, handler, http.MethodPut,
 		"/channels/"+itoa(chID)+"/user-permissions/"+itoa(target), token,
-		map[string]any{"allow": permissions.ReadMessages | 0x8, "deny": 0})
+		map[string]any{"allow": permissions.ReadMessages | 0x20000000, "deny": 0})
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 	}

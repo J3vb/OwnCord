@@ -20,6 +20,10 @@ const (
 	// voice_leave broadcast out to everyone who can see the channel.
 	voiceModRateLimit = 5
 	voiceModWindow    = time.Second
+	// Extra per-target limit on a voice_mod_move that relies on the missing
+	// rank rule (the target ranks at or above the mover).
+	voiceModMoveTargetLimit  = 3
+	voiceModMoveTargetWindow = 30 * time.Second
 )
 
 // voiceQualities maps accepted voice quality presets to their target bitrate

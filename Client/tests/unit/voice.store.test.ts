@@ -6,6 +6,7 @@ import {
   updateVoiceState,
   updateVoiceUserProfile,
   removeVoiceUser,
+  clearChannelVoiceUsers,
   joinVoiceChannel,
   leaveVoiceChannel,
   setLocalMuted,
@@ -25,6 +26,7 @@ import {
   clearPeerVerifications,
   getPeerVerification,
   setLocalSessionFingerprint,
+  setLocalSafetyNumber,
   setPttPollingLive,
   isPttPollingLive,
   onPttPollingLiveChange,
@@ -1175,6 +1177,18 @@ describe("voice store", () => {
     });
   });
 
+  describe("setLocalSafetyNumber", () => {
+    it("publishes, clears, and skips an unchanged value", () => {
+      setLocalSafetyNumber("AB12 CD34");
+      expect(voiceStore.getState().localSafetyNumber).toBe("AB12 CD34");
+      const before = voiceStore.getState();
+      setLocalSafetyNumber("AB12 CD34");
+      expect(voiceStore.getState()).toBe(before);
+      setLocalSafetyNumber(null);
+      expect(voiceStore.getState().localSafetyNumber).toBeNull();
+    });
+  });
+
   describe("subscribe", () => {
     it("notifies on state changes", () => {
       const listener = vi.fn();
@@ -1226,5 +1240,60 @@ describe("voice store", () => {
     expect(joinRetryInMs()).toBeGreaterThan(0);
     clearAuth();
     expect(joinRetryInMs()).toBe(0);
+  });
+});
+
+describe("clearChannelVoiceUsers", () => {
+  const seed = (channelId: number, ...userIds: number[]) => {
+    for (const id of userIds) {
+      updateVoiceState({
+        channel_id: channelId,
+        user_id: id,
+        username: `u${id}`,
+        muted: false,
+        deafened: false,
+        speaking: false,
+        camera: false,
+        screenshare: false,
+      });
+    }
+    voiceStore.flush();
+  };
+  const roster = (channelId: number) => voiceStore.getState().voiceUsers.get(channelId);
+
+  beforeEach(() => {
+    resetVoiceStore();
+    voiceStore.flush();
+  });
+
+  afterEach(() => {
+    leaveVoiceChannel();
+    resetVoiceStore();
+    voiceStore.flush();
+  });
+
+  it("drops one channel's roster and leaves the others", () => {
+    seed(7, 2, 3);
+    seed(8, 4);
+    clearChannelVoiceUsers(7);
+    voiceStore.flush();
+    expect(roster(7)).toBeUndefined();
+    expect(roster(8)?.size).toBe(1);
+  });
+
+  it("leaves the roster alone while the local user is in that channel", () => {
+    seed(7, 2, 3);
+    joinVoiceChannel(7);
+    voiceStore.flush();
+    clearChannelVoiceUsers(7);
+    voiceStore.flush();
+    expect(roster(7)?.size).toBe(2);
+  });
+
+  it("is a no-op for a channel with no roster", () => {
+    const before = voiceStore.getState().voiceUsers;
+    clearChannelVoiceUsers(99);
+    voiceStore.flush();
+    expect(voiceStore.getState().voiceUsers).toBe(before);
   });
 });

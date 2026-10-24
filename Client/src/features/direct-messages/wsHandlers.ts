@@ -11,6 +11,7 @@ import {
   dmDisplayName,
 } from "../../stores/dm.store";
 import type { DmChannel } from "../../stores/dm.store";
+import { clearChannelVoiceUsers } from "../../stores/voice.store";
 import { blocksStore, setBlockedByMe, clearBlockedByThem } from "../../stores/blocks.store";
 import type { DmChannelPayload } from "../../lib/types";
 import { isTextLikeChannel } from "../../lib/types";
@@ -127,6 +128,13 @@ export function applyReadyBlocks(api: DispatchApi | undefined): void {
 export function handleDmChannelOpen(payload: Payload<"dm_channel_open">): void {
   log.info("DM channel opened", { channelId: payload.channel_id });
   const dm = mapDmPayload(payload);
+  // A group this client does not list yet is a fresh add or a re-add. Any
+  // roster still held for it is from an earlier membership (a call left while
+  // in it keeps the others), so it goes before the server's fresh roster,
+  // which follows this open on the same connection.
+  if (dm.isGroup && !dmStore.getState().channels.some((c) => c.channelId === dm.channelId)) {
+    clearChannelVoiceUsers(dm.channelId);
+  }
   addDmChannel(dm);
 
   // A DM's channels-store row is synthesised from the DM store, and this
@@ -145,6 +153,10 @@ export function handleDmChannelOpen(payload: Payload<"dm_channel_open">): void {
 
 export function handleDmChannelClose(payload: Payload<"dm_channel_close">): void {
   log.info("DM channel closed", { channelId: payload.channel_id });
+  // A group closed on this side means the local user left or was removed; a
+  // closed 1:1 is still a participant, so only a group drops its call roster.
+  const closing = dmStore.getState().channels.find((c) => c.channelId === payload.channel_id);
+  if (closing?.isGroup === true) clearChannelVoiceUsers(payload.channel_id);
   // Delivered to a device that never ran the local close flow (closed
   // from another signed-in device) — unlike the sidebar's closeOrLeaveDm,
   // there is no "channel visited before this DM" to restore, so fall

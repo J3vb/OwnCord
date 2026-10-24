@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -22,9 +23,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// moderatorMask is migration 001's seeded Moderator role: MANAGE_MESSAGES,
-// MANAGE_CHANNELS, KICK_MEMBERS, BAN_MEMBERS (bits 16-19) and everything below.
-const moderatorMask = int64(0x000FFFFF)
+// moderatorMask is migration 001's seeded Moderator role after migrations 081
+// and 082: MANAGE_MESSAGES, MANAGE_CHANNELS, KICK_MEMBERS, BAN_MEMBERS (bits
+// 16-19) and everything below, except the unused bits 2, 3, 4, 7, 8, 14 and 15
+// that 081 and 082 clear (they are owner-type permissions now, which the seeded
+// Moderator must not hold).
+const moderatorMask = int64(0x000F3E63)
 
 // createRoleUser upserts a role and a user holding it, returning the user id
 // and a bearer token for that user's session.
@@ -213,6 +217,10 @@ func TestOwnerOnlyRoutes_ModeratorForbidden(t *testing.T) {
 		{http.MethodPost, "/backup"},
 		{http.MethodGet, "/updates"},
 		{http.MethodPost, "/updates/apply"},
+		{http.MethodGet, "/config/settings"},
+		{http.MethodPost, "/restart"},
+		{http.MethodGet, "/archive"},
+		{http.MethodPost, "/users/1/recovery-credential"},
 	} {
 		if w := doRequest(t, handler, tc.method, tc.path, token, nil); w.Code != http.StatusForbidden {
 			t.Errorf("%s %s = %d, want 403; body: %s", tc.method, tc.path, w.Code, w.Body.String())
@@ -226,30 +234,78 @@ func TestOwnerOnlyRoutes_ModeratorForbidden(t *testing.T) {
 // any handler touches the param.
 var ownerOnlyRoutePathParam = regexp.MustCompile(`\{[^}]+\}`)
 
-// expectedOwnerOnlyRoutes is the exact, literal inventory of owner-only
-// admin routes (P2-13 PARTIAL, Codex review round 3: a vacuity guard
-// (">= N") only catches shrinkage or emptiness, not a route silently
-// swapped for a different one, or a stray extra — an exact comparison
-// against admin.OwnerOnlyRoutesForTest() catches drift in either
-// direction). Grown deliberately, alongside admin/api.go's own ownerOnly
-// call sites, when a new owner-only route is added.
-var expectedOwnerOnlyRoutes = []admin.OwnerOnlyRoute{
-	{Method: http.MethodPost, Pattern: "/users/{id}/recovery-credential"},
-	{Method: http.MethodGet, Pattern: "/tokens"},
-	{Method: http.MethodPost, Pattern: "/tokens"},
-	{Method: http.MethodDelete, Pattern: "/tokens/{id}"},
-	{Method: http.MethodPost, Pattern: "/backup"},
-	{Method: http.MethodGet, Pattern: "/backups"},
-	{Method: http.MethodDelete, Pattern: "/backups/{name}"},
-	{Method: http.MethodPost, Pattern: "/backups/{name}/restore"},
-	{Method: http.MethodPost, Pattern: "/backups/{name}/link"},
-	{Method: http.MethodGet, Pattern: "/archive"},
-	{Method: http.MethodPost, Pattern: "/archive/link"},
-	{Method: http.MethodGet, Pattern: "/updates"},
-	{Method: http.MethodPost, Pattern: "/updates/apply"},
-	{Method: http.MethodGet, Pattern: "/config/settings"},
-	{Method: http.MethodPatch, Pattern: "/config/settings"},
-	{Method: http.MethodPost, Pattern: "/restart"},
+// expectedOwnerOnlyRoutes is the exact, literal inventory of routes wired
+// behind ownerOnly alone. It is empty since WP 8.4d: the last owner-only routes
+// (tokens, recovery credentials, updates, config, restore, delete and archive)
+// became owner-or-bit routes in expectedGatedRoutes. What stays owner-only is
+// a settings KEY check, not a route: the backup schedule and retention
+// (TestBackupPolicySettings_NonOwnerForbidden). The registry and its middleware
+// remain for the next route that is owner-only, and the empty inventory is
+// compared EXACTLY so a route added to it fails here until it is listed.
+var expectedOwnerOnlyRoutes = []admin.OwnerOnlyRoute{}
+
+// gateExpectation is what one gate lets through, for the walk in
+// TestGatedRoutes: the single bits whose holder passes, and whether an
+// Administrator who lacks the bit passes too (true for the administrator tier
+// and the older MANAGE_BACKUPS gate, false for the owner tier).
+type gateExpectation struct {
+	holders     []int64
+	adminPasses bool
+}
+
+var gateExpectations = map[string]gateExpectation{
+	"manage_backups":   {holders: []int64{permissions.ManageBackups}, adminPasses: true},
+	"list_backups":     {holders: []int64{permissions.ManageBackups, permissions.RestoreBackups}, adminPasses: true},
+	"restore_backups":  {holders: []int64{permissions.RestoreBackups}},
+	"manage_config":    {holders: []int64{permissions.ManageConfig}},
+	"manage_updates":   {holders: []int64{permissions.ManageUpdates}},
+	"manage_tokens":    {holders: []int64{permissions.ManageTokens}},
+	"issue_recovery":   {holders: []int64{permissions.IssueRecovery}},
+	"view_diagnostics": {holders: []int64{permissions.ViewDiagnostics}, adminPasses: true},
+	"erase_accounts":   {holders: []int64{permissions.EraseAccounts}, adminPasses: true},
+}
+
+// expectedGatedRoutes is the exact inventory of routes behind a routeGate
+// (WP 8.4d, generalising 8.4c's owner-or-MANAGE_BACKUPS list): owner-tier
+// routes the owner or an explicit holder reaches (an Administrator does not),
+// and administrator-tier routes an Administrator or a holder reaches.
+var expectedGatedRoutes = []admin.GatedRoute{
+	{Method: http.MethodPost, Pattern: "/backup", Gate: "manage_backups"},
+	{Method: http.MethodPost, Pattern: "/backups/{name}/link", Gate: "manage_backups"},
+	{Method: http.MethodGet, Pattern: "/backups", Gate: "list_backups"},
+	{Method: http.MethodDelete, Pattern: "/backups/{name}", Gate: "restore_backups"},
+	{Method: http.MethodPost, Pattern: "/backups/{name}/restore", Gate: "restore_backups"},
+	{Method: http.MethodGet, Pattern: "/archive", Gate: "restore_backups"},
+	{Method: http.MethodPost, Pattern: "/archive/link", Gate: "restore_backups"},
+	{Method: http.MethodGet, Pattern: "/config/settings", Gate: "manage_config"},
+	{Method: http.MethodPatch, Pattern: "/config/settings", Gate: "manage_config"},
+	{Method: http.MethodPost, Pattern: "/restart", Gate: "manage_config"},
+	{Method: http.MethodGet, Pattern: "/updates", Gate: "manage_updates"},
+	{Method: http.MethodPost, Pattern: "/updates/apply", Gate: "manage_updates"},
+	{Method: http.MethodGet, Pattern: "/tokens", Gate: "manage_tokens"},
+	{Method: http.MethodPost, Pattern: "/tokens", Gate: "manage_tokens"},
+	{Method: http.MethodDelete, Pattern: "/tokens/{id}", Gate: "manage_tokens"},
+	{Method: http.MethodPost, Pattern: "/users/{id}/recovery-credential", Gate: "issue_recovery"},
+	{Method: http.MethodPost, Pattern: "/logs/ticket", Gate: "view_diagnostics"},
+	{Method: http.MethodGet, Pattern: "/logs/level", Gate: "view_diagnostics"},
+	{Method: http.MethodPatch, Pattern: "/logs/level", Gate: "view_diagnostics"},
+	{Method: http.MethodDelete, Pattern: "/logs/level", Gate: "view_diagnostics"},
+	{Method: http.MethodPost, Pattern: "/support-bundles/preview", Gate: "view_diagnostics"},
+	{Method: http.MethodPost, Pattern: "/support-bundles/download", Gate: "view_diagnostics"},
+	{Method: http.MethodGet, Pattern: "/attention", Gate: "view_diagnostics"},
+	{Method: http.MethodDelete, Pattern: "/users/{id}", Gate: "erase_accounts"},
+}
+
+// sortedGatedRoutes returns a copy of routes sorted by (Method, Pattern).
+func sortedGatedRoutes(routes []admin.GatedRoute) []admin.GatedRoute {
+	sorted := slices.Clone(routes)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Method != sorted[j].Method {
+			return sorted[i].Method < sorted[j].Method
+		}
+		return sorted[i].Pattern < sorted[j].Pattern
+	})
+	return sorted
 }
 
 // sortedOwnerOnlyRoutes returns a copy of routes sorted by (Method, Pattern)
@@ -381,6 +437,108 @@ func TestOwnerOnlyControlsStayOwnerOnly(t *testing.T) {
 	if w := doRequest(t, handler, http.MethodGet, "/me", modToken, nil); w.Code == http.StatusForbidden {
 		t.Fatalf("GET /me (narrow AdminPerimeter role) = 403, want admitted — "+
 			"the owner-only routes' 403s must come from ownerOnlyMiddleware, not a perimeter that rejects everything; body: %s", w.Body.String())
+	}
+}
+
+// TestGatedRoutes walks the routes NewAdminAPI wires behind a routeGate
+// (admin.GatedRoutesForTest) and compares them EXACTLY to expectedGatedRoutes,
+// then checks each one against its gate: a narrow perimeter role without the
+// bit and a plain member get 403, a holder of each admitting bit and the owner
+// never do, and an Administrator WITHOUT the bit is refused on the owner tier
+// (the seeded Admin must not gain owner powers on upgrade) and admitted on the
+// administrator tier. No route is also registered owner-only.
+func TestGatedRoutes(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{BackupDir: t.TempDir()})
+
+	routes := admin.GatedRoutesForTest(handler)
+	got, want := sortedGatedRoutes(routes), sortedGatedRoutes(expectedGatedRoutes)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("admin.GatedRoutesForTest() = %+v, want exactly %+v", got, want)
+	}
+	for _, r := range routes {
+		if _, ok := gateExpectations[r.Gate]; !ok {
+			t.Fatalf("%s %s sits behind gate %q, which gateExpectations does not describe", r.Method, r.Pattern, r.Gate)
+		}
+	}
+	for _, o := range admin.OwnerOnlyRoutesForTest(handler) {
+		for _, r := range routes {
+			if r.Method == o.Method && r.Pattern == o.Pattern {
+				t.Errorf("%s %s is registered as both owner-only and gated", o.Method, o.Pattern)
+			}
+		}
+	}
+
+	narrowMask := permissions.ModerateMembers | permissions.KickMembers | permissions.BanMembers | permissions.MuteMembers
+	_, modToken := createRoleUser(t, database, 15, "NarrowMod", narrowMask, 60, "narrowmoduser")
+	_, memberToken := createRoleUser(t, database, 17, "Plain", permissions.ReadMessages|permissions.SendMessages|permissions.ViewAuditLog, 40, "plainmemberuser")
+	_, adminToken := createRoleUser(t, database, 16, "Administrator", permissions.Administrator, 90, "gateadminuser")
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "realowneruser")
+	holderTokens := map[string]string{} // bit name -> token of a role holding only that bit
+	roleID := int64(40)
+	for _, exp := range gateExpectations {
+		for _, bit := range exp.holders {
+			name := permissions.Name(bit)
+			if _, done := holderTokens[name]; done {
+				continue
+			}
+			roleID++
+			_, holderTokens[name] = createRoleUser(t, database, roleID, "Holder "+name, bit, 50, "holder"+strings.ToLower(name))
+		}
+	}
+
+	for _, route := range routes {
+		exp := gateExpectations[route.Gate]
+		path := ownerOnlyRoutePathParam.ReplaceAllString(route.Pattern, "x")
+		t.Run(route.Method+" "+route.Pattern, func(t *testing.T) {
+			refused := func(who, token string) {
+				t.Helper()
+				if w := doRequest(t, handler, route.Method, path, token, nil); w.Code != http.StatusForbidden {
+					t.Errorf("%s %s (%s) = %d, want 403; body: %s", route.Method, path, who, w.Code, w.Body.String())
+				}
+			}
+			admitted := func(who, token string) {
+				t.Helper()
+				if w := doRequest(t, handler, route.Method, path, token, nil); w.Code == http.StatusForbidden || w.Code == http.StatusUnauthorized {
+					t.Errorf("%s %s (%s) = %d, want admitted; body: %s", route.Method, path, who, w.Code, w.Body.String())
+				}
+			}
+			refused("perimeter role without the bit", modToken)
+			refused("plain member", memberToken)
+			admitted("owner", ownerToken)
+			for _, bit := range exp.holders {
+				admitted("holder of "+permissions.Name(bit), holderTokens[permissions.Name(bit)])
+			}
+			// A holder of a bit that belongs to another gate is refused.
+			for name, tok := range holderTokens {
+				if !slices.ContainsFunc(exp.holders, func(b int64) bool { return permissions.Name(b) == name }) {
+					refused("holder of the unrelated "+name, tok)
+				}
+			}
+			if exp.adminPasses {
+				admitted("Administrator without the bit", adminToken)
+			} else {
+				refused("Administrator without the bit", adminToken)
+			}
+		})
+	}
+}
+
+// TestManageBackupsAloneAdmitsToThePerimeter: a role holding only MANAGE_BACKUPS
+// reaches the perimeter-level routes (it has to, to reach the backup routes
+// at all) and nothing behind a bit it lacks.
+func TestManageBackupsAloneAdmitsToThePerimeter(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, token := createRoleUser(t, database, 19, "KeeperOnly", permissions.ManageBackups, 50, "keeperonly")
+	if w := doRequest(t, handler, http.MethodGet, "/me", token, nil); w.Code != http.StatusOK {
+		t.Fatalf("GET /me (MANAGE_BACKUPS only) = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	for _, path := range []string{"/settings", "/roles", "/audit-log"} {
+		if w := doRequest(t, handler, http.MethodGet, path, token, nil); w.Code != http.StatusForbidden {
+			t.Errorf("GET %s (MANAGE_BACKUPS only) = %d, want 403", path, w.Code)
+		}
 	}
 }
 
@@ -620,5 +778,39 @@ func TestGetMe_OwnerFlagged(t *testing.T) {
 	}
 	if me.Version != "1.0.0" {
 		t.Errorf("version = %q for the owner, want the build version", me.Version)
+	}
+}
+
+// TestVoiceOwnerMovableSetting_OwnerOnly pins WP 8.4a: the switch that lets
+// Move Members holders move the owner is the owner's alone. A MANAGE_SERVER
+// holder and a non-owner ADMINISTRATOR get 403, the Owner gets 200 and the
+// stored value is canonical, and a value that is not a boolean is a 400.
+func TestVoiceOwnerMovableSetting_OwnerOnly(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, manageToken := createRoleUser(t, database, 20, "ServerAdmin", permissions.ManageServer, 50, "voicemanageuser")
+	_, adminToken := createRoleUser(t, database, 21, "Administrator", permissions.Administrator, 90, "voiceadminuser")
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "voiceowneruser")
+
+	for name, token := range map[string]string{"MANAGE_SERVER non-owner": manageToken, "ADMINISTRATOR non-owner": adminToken} {
+		w := doRequest(t, handler, http.MethodPatch, "/settings", token, map[string]string{"voice_owner_movable": "false"})
+		if w.Code != http.StatusForbidden {
+			t.Errorf("%s PATCH voice_owner_movable = %d, want 403; body: %s", name, w.Code, w.Body.String())
+		}
+	}
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"voice_owner_movable": "0"}); w.Code != http.StatusOK {
+		t.Fatalf("Owner PATCH voice_owner_movable=0 = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if got, err := database.GetSetting(context.Background(), "voice_owner_movable"); err != nil || got != "false" {
+		t.Errorf("stored voice_owner_movable = %q, %v; want \"false\"", got, err)
+	}
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"voice_owner_movable": "TRUE"}); w.Code != http.StatusOK {
+		t.Fatalf("Owner PATCH voice_owner_movable=TRUE = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	if got, _ := database.GetSetting(context.Background(), "voice_owner_movable"); got != "true" {
+		t.Errorf("stored voice_owner_movable = %q, want \"true\"", got)
+	}
+	if w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"voice_owner_movable": "maybe"}); w.Code != http.StatusBadRequest {
+		t.Errorf("Owner PATCH voice_owner_movable=maybe = %d, want 400; body: %s", w.Code, w.Body.String())
 	}
 }

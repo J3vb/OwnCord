@@ -449,6 +449,9 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 		f, openErr := store.Open(fileID)
 		if openErr == nil {
 			cfg, _, decErr := image.DecodeConfig(f)
+			if decErr == nil && mime == "image/jpeg" && jpegSidewaysOnDisk(f) {
+				cfg.Width, cfg.Height = cfg.Height, cfg.Width
+			}
 			f.Close() //nolint:errcheck
 			if decErr == nil {
 				w2, h2 := cfg.Width, cfg.Height
@@ -461,4 +464,15 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 	}
 
 	return storedUpload{id: fileID, mime: mime, size: writtenBytes, width: width, height: height}, true
+}
+
+// jpegSidewaysOnDisk reports whether f's EXIF orientation (5-8) turns the
+// stored image a quarter turn, so the upright size swaps width and height,
+// as the thumbnail route and browsers display it.
+func jpegSidewaysOnDisk(f io.ReadSeeker) bool {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	o, _ := jpegHeader(f)
+	return o >= 5 && o <= 8
 }

@@ -1354,6 +1354,54 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("a pick the live camera could not use shows the camera it kept", async () => {
+    const stream = (label: string) =>
+      ({
+        label,
+        getTracks: () => [{ stop: vi.fn(), kind: "video" }],
+        getAudioTracks: () => [],
+      }) as unknown as MediaStream;
+    const cam1 = stream("cam-1");
+    const getUserMedia = vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
+      const video = constraints.video as { deviceId?: { exact: string } } | false | undefined;
+      if (video && constraints.audio === false) {
+        return Promise.resolve(video.deviceId?.exact === "cam-1" ? cam1 : stream("other"));
+      }
+      return Promise.resolve(stream("audio"));
+    });
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([
+          { kind: "videoinput", deviceId: "cam-1", label: "Camera 1" },
+          { kind: "videoinput", deviceId: "cam-2", label: "Camera 2" },
+        ]),
+        getUserMedia,
+      },
+    });
+    // The call's camera stays on cam-1: the saved choice goes back to it.
+    mockSwitchVideoDevice.mockImplementationOnce(async () => {
+      localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
+    });
+
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    const videoSelect = await vi.waitFor(() => {
+      const select = el.querySelector('select[aria-label="Video Device"]') as HTMLSelectElement;
+      expect(select.querySelectorAll("option").length).toBeGreaterThan(2);
+      return select;
+    });
+
+    videoSelect.value = "cam-2";
+    videoSelect.dispatchEvent(new Event("change"));
+    expect(mockSwitchVideoDevice).toHaveBeenCalledWith("cam-2");
+    await vi.waitFor(() => {
+      expect(videoSelect.value).toBe("cam-1");
+      expect((el.querySelector("video") as HTMLVideoElement).srcObject).toBe(cam1);
+    });
+    ac.abort();
+  });
+
   it("camera preview shows error when getUserMedia fails", async () => {
     localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
     const audioStream = {
@@ -1850,6 +1898,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
             portalVersion: 0,
             triggers: { ptt: null, mute: null, deafen: null },
             canConfigure: false,
+            triggersUnnamed: false,
+            sessionRefused: false,
           }),
           onStatusChange: () => () => {},
         },

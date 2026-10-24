@@ -18,6 +18,7 @@ func init() {
 		"voice reconcile: ListRooms failed, checking rooms with rows only":         "voice_reconcile_listrooms_failed",
 		"voice removed watch: ListParticipants failed, retrying next tick":         "voice_removed_watch_listparticipants_failed",
 		"voice removed watch: reading voice state failed, retrying next tick":      "voice_removed_watch_read_voice_state_failed",
+		"ws voiceModTarget owner movable setting":                                  "ws_voicemodtarget_owner_movable_setting",
 		"voice afk: sweep read failed":                                             "voice_afk_sweep_read_failed",
 		"voice removed watch: removing participant failed, retrying next tick":     "voice_removed_watch_remove_participant_failed",
 	})

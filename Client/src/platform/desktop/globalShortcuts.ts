@@ -63,6 +63,8 @@ export const globalShortcuts: GlobalShortcuts = {
         portalVersion: 0,
         triggers: { ptt: null, mute: null, deafen: null },
         canConfigure: false,
+        triggersUnnamed: false,
+        sessionRefused: false,
       };
     }
   },

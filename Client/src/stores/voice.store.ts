@@ -160,6 +160,11 @@ export interface VoiceState {
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
   readonly localSessionFingerprint?: string | null;
+  /** The local user's own safety number (identity-key fingerprint), the
+   *  number peers see on our shield, so it can be compared out of band. Null
+   *  outside a voice session or when our announce went out unsigned. Optional
+   *  for the same fixture reason as peerVerifications. */
+  readonly localSafetyNumber?: string | null;
   /** The input-sensitivity gate's verdict (true = open = above the slider's
    *  threshold), or null when no gate runs (sensitivity 100).
    *  When set it, not LiveKit, drives the local speaking ring, so the ring,
@@ -417,6 +422,23 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
     const nextWatching = new Map(watching);
     nextWatching.delete(payload.user_id);
     return { ...prev, voiceUsers: nextChannels, peerWatching: nextWatching };
+  });
+}
+
+/**
+ * Drop the whole roster of one channel. Used when the local user loses a group
+ * DM (left or removed): the server stops sending that room's voice events, so
+ * the stale participants would otherwise outlive the membership and reappear as
+ * ghosts on a later re-add. The channel the local user is in is left alone: the
+ * server's own voice_leave and the leave path handle that roster.
+ */
+export function clearChannelVoiceUsers(channelId: number): void {
+  voiceStore.setState((prev) => {
+    if (!prev.voiceUsers.has(channelId) || prev.currentChannelId === channelId) return prev;
+    voiceRosterRevision++;
+    const voiceUsers = new Map(prev.voiceUsers);
+    voiceUsers.delete(channelId);
+    return { ...prev, voiceUsers };
   });
 }
 
@@ -779,6 +801,15 @@ export function setLocalSessionFingerprint(fingerprint: string | null): void {
     (prev.localSessionFingerprint ?? null) === fingerprint
       ? prev
       : { ...prev, localSessionFingerprint: fingerprint },
+  );
+}
+
+/** Publish (or clear, with null) the local user's own safety number. */
+export function setLocalSafetyNumber(safetyNumber: string | null): void {
+  voiceStore.setState((prev) =>
+    (prev.localSafetyNumber ?? null) === safetyNumber
+      ? prev
+      : { ...prev, localSafetyNumber: safetyNumber },
   );
 }
 

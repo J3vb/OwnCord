@@ -92,8 +92,12 @@ vi.mock("@components/QuickSwitchOverlay", () => ({
 }));
 
 const mockOpenUrl = vi.fn(async (_url: string) => {});
-vi.mock("@tauri-apps/plugin-opener", () => ({
-  openUrl: (url: string) => mockOpenUrl(url),
+// The opener is the `open_external_url` command; `mockOpenUrl` records its URL.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (command: string, args?: { url: string }) => {
+    if (command !== "open_external_url") throw new Error(`unexpected invoke ${command}`);
+    return mockOpenUrl(args!.url);
+  },
 }));
 
 vi.mock("@components/EditChannelModal", () => ({

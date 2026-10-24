@@ -92,7 +92,14 @@ It moves no personal data and adds no data class here; the rows keep going with
 their user or role by cascade. **Amended 2026-10-22 (nicknames):** `078_manage_nicknames.sql`
 updates `roles.permissions` only, to give the default Moderator the Manage Nicknames bit (WP 6.4a).
 It adds no table or column and no data class: the nickname it governs is the existing
-`users.display_name`. Other historical
+`users.display_name`. **Amended 2026-10-23 (move members):** `080_move_members.sql`
+updates `roles.permissions` only, to introduce the Move Members bit by clearing it on
+every role but the Owner (WP 8.4a). **Amended 2026-10-23 (manage backups):** `081_manage_backups.sql`
+updates `roles.permissions` only, to introduce the Manage Backups bit by clearing it on every
+role but the Owner (WP 8.4c). **Amended 2026-10-23 (owner-type permissions):**
+`082_owner_type_permissions.sql` updates `roles.permissions` only, to introduce seven
+owner-type bits by clearing them on every role but the Owner (WP 8.4d). Neither migration adds
+a table or column or a data class. Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a

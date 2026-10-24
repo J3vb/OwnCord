@@ -49,6 +49,9 @@ export interface DmConversation {
   readonly avatar: string | null;
   readonly avatarColor?: string;
   readonly status?: "online" | "idle" | "dnd" | "offline";
+  /** The game the other party of a 1:1 DM is playing (WP 8.3); never set for
+   *  a group. Drawn as "Playing <game>" under the name. */
+  readonly activity?: string | null;
   /** True for a group DM: draws stacked avatars and a participant count. */
   readonly isGroup?: boolean;
   /** A group whose server reports an owner (WP 3B-10); drives the leave copy. */
@@ -281,7 +284,21 @@ function renderDmItem(
   // messages yet" fallback), so there is no time to show.
   const preview = createElement("span", { class: "dm-preview" }, convo.lastMessage);
   const body = createElement("div", { class: "dm-item-body" });
-  appendChildren(body, name, preview);
+  if (convo.activity != null && convo.isGroup !== true) {
+    const activity = createElement("span", {
+      class: "dm-activity",
+      "data-testid": `dm-activity-${convo.channelId}`,
+    });
+    const icon = createIcon("gamepad-2", 12);
+    icon.setAttribute("aria-hidden", "true");
+    icon.classList.add("dm-activity-icon");
+    const text = createElement("span", { class: "dm-activity-text" });
+    setText(text, convo.activity);
+    appendChildren(activity, icon, text);
+    appendChildren(body, name, activity, preview);
+  } else {
+    appendChildren(body, name, preview);
+  }
   const time = createElement(
     "span",
     { class: "dm-preview-time" },
@@ -449,6 +466,7 @@ function convoSignature(convo: DmConversation): string {
     convo.avatar ?? "",
     convo.avatarColor ?? "",
     convo.status ?? "",
+    convo.isGroup === true ? "" : (convo.activity ?? ""),
     convo.isGroup === true ? "g" : "",
     convo.icon ?? "",
     (convo.participants ?? []).length,

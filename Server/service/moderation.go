@@ -130,7 +130,7 @@ func (s *ModerationService) ErasureBroadcastsMemberBan() bool {
 }
 
 // EraseUser is the administrator-initiated account erasure (B4-9): the same
-// implementation as self-deletion, gated on ADMINISTRATOR plus the
+// implementation as self-deletion, gated on ERASE_ACCOUNTS (ADMINISTRATOR implies it, WP 8.4d) plus the
 // actor-outranks-target hierarchy. An actor cannot erase itself here — that
 // is the password-confirmed self-service route. The last admin-class
 // account cannot be erased (Forbidden). Writes the account_deleted audit
@@ -147,9 +147,12 @@ func (s *ModerationService) EraseUser(ctx context.Context, actorID, targetID int
 	}
 
 	// Authorization before existence — see BanUser.
-	actorRole, err := s.requirePerm(ctx, actorID, permissions.Administrator)
+	actorRole, err := s.roleFor(ctx, actorID, "actor")
 	if err != nil {
 		return err
+	}
+	if !permissions.CanEraseAccounts(actorRole.Permissions) {
+		return fmt.Errorf("%w: missing %s permission", ErrForbidden, permissions.Name(permissions.EraseAccounts))
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
 	if err != nil || target == nil {
@@ -692,20 +695,9 @@ func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64
 	return nil
 }
 
-// AuthorizeRoleChange runs every ChangeUserRole precondition — MANAGE_ROLES,
-// target existence, the actor-outranks-target rule, role existence, and the
-// assign-below-own-rank rule — without mutating anything, and in the same
-// authorization-before-existence order as every other check in this file (see
-// BanUser): an actor without MANAGE_ROLES learns nothing about which user ids
-// exist. It exists so a caller that also performs another mutation in the
-// same request (the admin PATCH /users/{id} handler, which can ban and
-// role-change in one call) can authorize the role change *before* committing
-// the other mutation: checking only at ChangeUserRole time means a refused
-// role change is discovered only after the ban already landed, leaving a
-// "failed" request half-applied (OC-0215). It returns the validated actor
-// role, target user, and target role so callers that go on to commit (like
-// ChangeUserRole) don't need to re-fetch any of them.
-func (s *ModerationService) AuthorizeRoleChange(ctx context.Context, actorID, targetID, newRoleID int64) (actorRole *db.Role, target *db.User, newRole *db.Role, err error) {
+// authorizeRoleAssignment runs the AuthorizeRoleChange checks that concern the
+// one role being assigned or removed.
+func (s *ModerationService) authorizeRoleAssignment(ctx context.Context, actorID, targetID, newRoleID int64) (actorRole *db.Role, target *db.User, newRole *db.Role, err error) {
 	if targetID <= 0 {
 		return nil, nil, nil, fmt.Errorf("%w: user_id must be positive", ErrBadRequest)
 	}
@@ -734,6 +726,12 @@ func (s *ModerationService) AuthorizeRoleChange(ctx context.Context, actorID, ta
 	// role is above every admin, so only the owner can grant it.
 	if newRole.Position >= actorRole.Position {
 		return nil, nil, nil, fmt.Errorf("%w: cannot assign a role at or above your own rank", ErrForbidden)
+	}
+	// Assigning or removing a role that carries an owner-grant-only bit
+	// (MOVE_MEMBERS) needs the owner, an Administrator, or an actor whose own
+	// mask holds every such bit the role carries.
+	if err := requireOwnerGrantOnlyAssign(actorRole, newRole.Permissions); err != nil {
+		return nil, nil, nil, err
 	}
 	return actorRole, target, newRole, nil
 }

@@ -11,7 +11,7 @@ import {
   saveGlobalShortcutVk,
   shortcutConflict,
 } from "../../src/lib/voiceShortcuts";
-import { inAppCtrlShiftVks, parseKeybinds } from "../../src/lib/keybinds";
+import { globalShortcutTakenVks, inAppCtrlShiftVks, parseKeybinds } from "../../src/lib/keybinds";
 
 function key(code: string, init: KeyboardEventInit = {}): KeyboardEvent {
   return new KeyboardEvent("keydown", { code, ...init });
@@ -111,8 +111,32 @@ describe("shortcut conflict", () => {
   });
 
   it("allows a free key, including the action's own current binding", () => {
-    expect(shortcutConflict(0x4b, "mute", current, defaultInApp)).toBeNull();
-    expect(shortcutConflict(0x4d, "mute", current, defaultInApp)).toBeNull();
+    const taken = globalShortcutTakenVks(parseKeybinds(undefined, current));
+    expect(shortcutConflict(0x47, "mute", current, taken)).toBeNull(); // G
+    expect(shortcutConflict(0x4d, "mute", current, taken)).toBeNull();
+    expect(shortcutConflict(0x44, "deafen", current, taken)).toBeNull();
+  });
+
+  it("rejects fixed app keys and keys the OS or a text field keep", () => {
+    const taken = globalShortcutTakenVks(parseKeybinds(undefined, current));
+    // K quick switcher, 0 zoom reset, Z redo, I/J dev tools, R reload,
+    // arrows/Home/End/Insert/Delete word select and edit.
+    for (const vk of [
+      0x4b, 0x30, 0x5a, 0x49, 0x4a, 0x52, 0x25, 0x26, 0x27, 0x28, 0x24, 0x23, 0x2d, 0x2e,
+    ]) {
+      expect(shortcutConflict(vk, "mute", current, taken)).toBe("reserved");
+      expect(shortcutConflict(vk, "deafen", current, taken)).toBe("reserved");
+    }
+  });
+
+  it("the taken set still holds the in-app Ctrl+Shift bindings", () => {
+    const eff = parseKeybinds(
+      { v: 1, bindings: { toggleCamera: { vk: 0x58, ctrl: true, shift: true, alt: false } } },
+      current,
+    );
+    const taken = globalShortcutTakenVks(eff);
+    expect(taken.has(0x58)).toBe(true);
+    expect(taken.has(0x56)).toBe(false);
   });
 
   it("camera moved off V frees V for mute", () => {

@@ -25,6 +25,7 @@ import { takeWatchRefusal } from "../../lib/watchRequest";
 import { noteJoinSent, takeJoinRefusal } from "./joinRequest";
 import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
 import { channelsStore } from "../../stores/channels.store";
+import { membersStore, memberDisplayName } from "../../stores/members.store";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
 import type {
   DispatchApi,
@@ -275,6 +276,23 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   );
 }
 
+// Tell the member who moved them (WP 8.4b). A moderator move is final once the
+// server sends it, so unlike the AFK notice this does not wait for the join's
+// acknowledgement. The mover's name or the channel may be unknown to this
+// client; the message degrades rather than names nobody.
+function announceModeratorMove(byUserId: number, toChannelId: number): void {
+  const channel =
+    channelsStore.getState().channels.get(toChannelId)?.name ??
+    connectText("voice.movedChannelFallback");
+  const mover = membersStore.getState().members.get(byUserId);
+  showToast(
+    mover === undefined
+      ? connectText("voice.movedGeneric", { channel })
+      : connectText("voice.movedBy", { name: memberDisplayName(mover), channel }),
+    "info",
+  );
+}
+
 // A moderator moved this client: tear the media session down and re-join the
 // destination through the ordinary join path (the server already removed us
 // from the old room and broadcast voice_leave).
@@ -293,7 +311,11 @@ export function handleVoiceMoved(
   // this frame sees the move and stays silent.
   noteVoiceMoved(payload.to_channel_id);
   if (payload.reason === "afk") noteAfkMove(payload.to_channel_id);
-  else clearAfkMove();
+  else {
+    clearAfkMove();
+    if (payload.by_user_id !== undefined)
+      announceModeratorMove(payload.by_user_id, payload.to_channel_id);
+  }
   void livekitSession().then(({ leaveVoice }) => {
     void leaveVoice(false);
     leaveVoiceChannel();

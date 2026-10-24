@@ -9,11 +9,14 @@ const EXT_KEYS=['upload_blocked_extensions','upload_allowed_extensions'];
 const AFK_TIMEOUT_DEFAULT='300';
 const AFK_TIMEOUTS=[['60','1 minute'],['300','5 minutes'],['900','15 minutes'],['1800','30 minutes'],['3600','60 minutes']];
 const AFK_JOIN_BITS=0x202; /* READ_MESSAGES | CONNECT_VOICE: both are needed to join */
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',...EXT_KEYS];
+/* Owner-only: whether a Move Members holder may move the owner. Unset reads as
+   on, as the server does (service.VoiceOwnerMovable). */
+const OWNER_MOVABLE_KEY='voice_owner_movable';
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',OWNER_MOVABLE_KEY,...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
 function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
-function settingNorm(k,v){return k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
+function settingNorm(k,v){return k===OWNER_MOVABLE_KEY?((v==='false'||v==='0')?'false':'true'):k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
 function settingsFormValues(keys){
   const out={};
   keys.forEach(k=>{
@@ -57,6 +60,11 @@ async function renderSettings(){
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
   html+=await afkCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT);
   const owner=isOwner();
+  if(owner){
+    const movable=settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true';
+    html+=settingsCard('Voice: moving members',
+      '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+OWNER_MOVABLE_KEY+'-name">Members with Move Members can move the owner</div><div class="setting-desc" id="s-'+OWNER_MOVABLE_KEY+'-desc">Turn this off and nobody can move the owner between voice channels</div></div><div class="setting-ctrl"><button class="toggle '+(movable?'on':'')+'" id="s-'+OWNER_MOVABLE_KEY+'" role="switch" aria-checked="'+movable+'" aria-labelledby="s-'+OWNER_MOVABLE_KEY+'-name" aria-describedby="s-'+OWNER_MOVABLE_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
+  }
   const extInput=k=>'<input class="form-input" id="s-'+k+'" value="'+esc(v(k).split(',').filter(Boolean).join(', '))+'" aria-describedby="s-'+k+'-desc" data-input-action="markSettingsChanged"'+(owner?'':' disabled')+'>';
   html+=settingsCard('Upload file types',
     '<p class="setting-desc">Executables and scripts that start with a program signature are always refused by their content. These lists refuse files by their last extension, however it is capitalised, so <code>report.pdf.bat</code> is refused for <code>bat</code>. Separate extensions with commas.'+(owner?'':' Only the server owner can change the file types.')+'</p>'
@@ -435,41 +443,55 @@ function restartingHTML(title,lead){
 /* ═══ Backups ═══ */
 const BACKUP_KEYS=['backup_schedule','backup_retention'];
 async function renderBackups(){
+  /* The owner sees everything. A MANAGE_BACKUPS holder sees the page cut down
+     to what the server lets them do: create, list and download. A RESTORE_BACKUPS
+     holder (WP 8.4d) sees the list, Restore, Delete and the full archive. The
+     schedule is the owner's alone. */
+  const owner=isOwner();
+  const restorer=ownerOrHolds(PERM.RESTORE_BACKUPS);
+  const keeper=owner||can(PERM.MANAGE_BACKUPS);
+  const title=restorer?'Backups &amp; restore':'Backups';
   let backups;
-  try{backups=await api('GET','/backups')}catch(e){return'<div class="page-title">Backups &amp; restore</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
-  /* The schedule is owner-only policy in the settings table (BPR-072); this
-     page is owner-only, so it is edited here rather than on Settings. */
+  try{backups=await api('GET','/backups')}catch(e){return'<div class="page-title">'+title+'</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
+  /* The schedule is owner-only policy in the settings table (BPR-072); only the
+     owner edits it here rather than on Settings, and nobody else reads it. */
   let policyErr='';
-  try{state._settings=await api('GET','/settings')}catch(e){policyErr=e.message}
+  if(owner){try{state._settings=await api('GET','/settings')}catch(e){policyErr=e.message}}
   const v=k=>(state._settings||{})[k]||'';
-  let html='<div class="page-head"><div><div class="page-title">Backups &amp; restore</div><div class="page-desc">Copies of the server database. Restoring one replaces everything that happened after it was taken.</div></div>'
-    +'<div class="btn-row"><button class="btn btn-ghost" data-action="downloadArchive"'+(state.archiveRunning?' disabled':'')+'>'+(state.archiveRunning?'<span class="spinner" aria-hidden="true"></span> Preparing…':I.download+' Download full archive')+'</button>'
-    +'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button></div></div>';
-  html+='<p class="card-note">The full archive holds the database, uploads, the key files and <code>config.yaml</code> — everything a restore needs. A database backup alone does not.</p>';
-  html+=backupStatusLine(backups||[],policyErr?'':(v('backup_schedule')||'off'),await backupSignal());
-  let sched;
-  if(policyErr)sched='<p style="color:var(--text-danger)">'+esc(policyErr)+'</p>';
-  else sched=settingsRow('backup_schedule','Automatic backups','A copy is taken on this schedule by the server\'s maintenance sweep','<select class="filter-select" id="s-backup_schedule" aria-describedby="s-backup_schedule-desc" data-change-action="markBackupPolicyChanged">'
-      +[['off','Off'],['daily','Daily'],['weekly','Weekly']].map(([o,l])=>'<option value="'+o+'"'+(v('backup_schedule')===o?' selected':'')+'>'+l+'</option>').join('')+'</select>')
-    +settingsRow('backup_retention','Keep backups for (days)','0 keeps every backup; otherwise 7 to 3650 days. Older backups are deleted.','<input class="form-input" id="s-backup_retention" type="number" min="0" max="3650" value="'+esc(v('backup_retention'))+'" aria-describedby="s-backup_retention-desc" data-input-action="markBackupPolicyChanged">')
-    +'<div class="card-actions"><button class="btn btn-accent" id="saveBackupPolicyBtn" data-action="saveBackupPolicy" disabled>Save schedule</button></div>';
-  html+=settingsCard('Schedule',sched);
+  const desc=restorer?'Copies of the server database. Restoring one replaces everything that happened after it was taken.'
+    :'Copies of the server database. You can take a backup and download one; restoring and deleting backups stay with the owner, or members they give Restore Backups.';
+  const createBtn=keeper?'<button class="btn btn-accent" data-action="createBackup"'+(state.backupRunning?' disabled':'')+'>'+(state.backupRunning?'<span class="spinner" aria-hidden="true"></span> Backing up…':I.download+' Create backup now')+'</button>':'';
+  let html='<div class="page-head"><div><div class="page-title">'+title+'</div><div class="page-desc">'+desc+'</div></div>'
+    +'<div class="btn-row">'+(restorer?'<button class="btn btn-ghost" data-action="downloadArchive"'+(state.archiveRunning?' disabled':'')+'>'+(state.archiveRunning?'<span class="spinner" aria-hidden="true"></span> Preparing…':I.download+' Download full archive')+'</button>':'')
+    +createBtn+'</div></div>';
+  if(restorer)html+='<p class="card-note">The full archive holds the database, uploads, the key files and <code>config.yaml</code> — everything a restore needs. A database backup alone does not.</p>';
+  html+=backupStatusLine(backups||[],(owner&&!policyErr)?(v('backup_schedule')||'off'):'',await backupSignal());
+  if(owner){
+    let sched;
+    if(policyErr)sched='<p style="color:var(--text-danger)">'+esc(policyErr)+'</p>';
+    else sched=settingsRow('backup_schedule','Automatic backups','A copy is taken on this schedule by the server\'s maintenance sweep','<select class="filter-select" id="s-backup_schedule" aria-describedby="s-backup_schedule-desc" data-change-action="markBackupPolicyChanged">'
+        +[['off','Off'],['daily','Daily'],['weekly','Weekly']].map(([o,l])=>'<option value="'+o+'"'+(v('backup_schedule')===o?' selected':'')+'>'+l+'</option>').join('')+'</select>')
+      +settingsRow('backup_retention','Keep backups for (days)','0 keeps every backup; otherwise 7 to 3650 days. Older backups are deleted.','<input class="form-input" id="s-backup_retention" type="number" min="0" max="3650" value="'+esc(v('backup_retention'))+'" aria-describedby="s-backup_retention-desc" data-input-action="markBackupPolicyChanged">')
+      +'<div class="card-actions"><button class="btn btn-accent" id="saveBackupPolicyBtn" data-action="saveBackupPolicy" disabled>Save schedule</button></div>';
+    html+=settingsCard('Schedule',sched);
+  }
   html+='<section class="section-card" aria-labelledby="sc-history"><div class="section-card-header"><h3 id="sc-history">Backup history</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>File</th><th>Size</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-  if(!backups||!backups.length)html+='<tr><td colspan="4" class="tbl-empty">No backups yet. Create one now, or turn on automatic backups above.</td></tr>';
+  if(!backups||!backups.length)html+='<tr><td colspan="4" class="tbl-empty">No backups yet.'+(keeper?' Create one now'+(owner?', or turn on automatic backups above':''):'')+'.</td></tr>';
   else backups.forEach(b=>{
     html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?esc(new Date(b.date).toLocaleString()):'')+'</td>';
-    html+='<td><div class="act-group" style="justify-content:flex-end"><button class="btn btn-ghost" aria-label="Download '+esc(b.name)+'" data-action="downloadBackup" data-args="'+actArgs(b.name)+'">Download</button><button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button></div></td></tr>';
+    html+='<td><div class="act-group" style="justify-content:flex-end">'+(keeper?'<button class="btn btn-ghost" aria-label="Download '+esc(b.name)+'" data-action="downloadBackup" data-args="'+actArgs(b.name)+'">Download</button>':'')
+      +(restorer?'<button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button>':'')+'</div></td></tr>';
   });
   html+='</tbody></table></div></section>';
   return html;
 }
 
 /* The answer first: when the last backup was taken and what happens next.
-   The server's own backup health signal (GET /attention, ADMINISTRATOR)
+   The server's own backup health signal (GET /attention, View Diagnostics)
    sets the icon when it is readable, so this line and the dashboard agree. */
 async function backupSignal(){
-  if(!can(PERM.ADMINISTRATOR))return null;
+  if(!can(PERM.VIEW_DIAGNOSTICS))return null;
   try{const rep=await api('GET','/attention');return((rep&&rep.signals)||[]).find(g=>g.id==='backup')||null}catch(e){return null}
 }
 function relTime(d){

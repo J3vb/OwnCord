@@ -189,6 +189,15 @@ function memberRowHtml(u){
     +'</div></td></tr>';
 }
 
+/* Issue recovery credential: the owner for anyone, or an Issue Recovery holder
+   for a member ranked strictly below them. The server enforces the same rank
+   rule and refuses the owner as a target; this only decides whether the item is
+   offered. */
+function canIssueRecoveryTo(u){
+  if(isOwner())return true;
+  return holds(PERM.ISSUE_RECOVERY)&&typeof u.role_position==='number'&&u.role_position<((state.me&&state.me.role_position)||0);
+}
+
 /* The overflow menu's actions, gated like their routes. Erasure (B4-9) is the
    only irreversible action in the panel, so it sits last behind a separator
    rather than beside Force Logout — a slip aimed at a reversible item must not
@@ -196,9 +205,9 @@ function memberRowHtml(u){
 function memberMenuItems(u){
   const banned=effectiveBan(u);const items=[];
   if(can(PERM.KICK_MEMBERS))items.push(['forceLogout','Force logout',I.disconnect,[u.id]]);
-  if(isOwner()&&!banned)items.push(['openIssueRecovery','Issue recovery credential',I.lock,[u.id,u.username]]);
+  if(canIssueRecoveryTo(u)&&!banned)items.push(['openIssueRecovery','Issue recovery credential',I.lock,[u.id,u.username]]);
   if(can(PERM.BAN_MEMBERS))items.push(banned?['unbanUser','Unban',I.check,[u.id]]:['openBanUser','Ban',I.ban,[u.id,u.username],'danger']);
-  if(can(PERM.ADMINISTRATOR))items.push(null,['openEraseUser','Erase account permanently',I.trash,[u.id,u.username],'danger']);
+  if(can(PERM.ERASE_ACCOUNTS))items.push(null,['openEraseUser','Erase account permanently',I.trash,[u.id,u.username],'danger']);
   while(items[0]===null)items.shift();
   return items;
 }

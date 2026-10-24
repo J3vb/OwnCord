@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
+import { setActivityRefusalHandler } from "../../src/lib/gameActivityBridge";
 // Vite's `?raw` suffix inlines the file's source text as a string (see
 // src/vite-env.d.ts's `vite/client` types) — used below for a structural
 // bundle-hygiene assertion, without pulling in node:fs.
@@ -25,7 +26,7 @@ import {
 import { registerReadingAnchor } from "../../src/features/messaging/readingAnchor";
 import { membersStore } from "../../src/stores/members.store";
 import { memberTimeoutsStore, setMemberTimeouts } from "../../src/features/moderation/store";
-import { voiceStore } from "../../src/stores/voice.store";
+import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 import {
@@ -1264,6 +1265,187 @@ describe("WS Dispatcher", () => {
       expect(members.get(2)?.customStatus).toBe("lunch");
       expect(members.get(3)?.status).toBe("offline");
       expect(members.get(3)?.customStatus).toBeNull();
+    });
+  });
+
+  describe("game activity (WP 8.3)", () => {
+    const factorio = { name: "Factorio", started_at: 1_761_206_400_000 };
+    const seed = (): void => {
+      membersStore.setState((prev) => {
+        const m = new Map(prev.members);
+        for (const [id, username] of [
+          [1, "alex"],
+          [2, "bea"],
+          [3, "cy"],
+        ] as const) {
+          m.set(id, { id, username, avatar: null, role: "member", status: "online" as const });
+        }
+        return { ...prev, members: m };
+      });
+    };
+    const activityOf = (id: number) => membersStore.getState().members.get(id)?.activity;
+
+    it("applies a presence frame's game and clears it on null", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+      expect(activityOf(1)).toEqual({ name: "Factorio", startedAt: 1_761_206_400_000 });
+      mock.dispatch("presence", { user_id: 1, status: "online", activity: null });
+      expect(activityOf(1)).toBeNull();
+    });
+
+    it("leaves the shown game alone when a presence frame carries no activity key", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+      mock.dispatch("presence", { user_id: 1, status: "idle" });
+      expect(activityOf(1)?.name).toBe("Factorio");
+    });
+
+    it("applies a window batch's games", () => {
+      seed();
+      mock.dispatch("presence_batch", {
+        updates: [
+          { user_id: 1, status: "online", custom_status: null, activity: factorio },
+          { user_id: 2, status: "online", custom_status: null, activity: null },
+        ],
+      });
+      expect(activityOf(1)?.name).toBe("Factorio");
+      expect(activityOf(2)).toBeNull();
+      expect(activityOf(3)).toBeUndefined();
+    });
+
+    it("a full snapshot replaces listed games and clears anyone it leaves out", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 3, status: "online", activity: factorio });
+      mock.dispatch("presence", { user_id: 2, status: "online", activity: factorio });
+      mock.dispatch("presence_batch", {
+        full: true,
+        updates: [
+          {
+            user_id: 1,
+            status: "online",
+            custom_status: null,
+            activity: { name: "Satisfactory", started_at: 1_761_206_500_000 },
+          },
+          { user_id: 2, status: "online", custom_status: null, activity: null },
+        ],
+      });
+      expect(activityOf(1)?.name).toBe("Satisfactory");
+      expect(activityOf(2)).toBeNull();
+      // Offline now, so playing nothing.
+      expect(activityOf(3)).toBeNull();
+    });
+
+    it("applies ready.activities to the roster and clears everyone else", () => {
+      mock.dispatch("ready", {
+        channels: [],
+        members: [
+          { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
+          { id: 2, username: "bea", avatar: null, role: "member", status: "online" },
+        ],
+        activities: [{ user_id: 2, ...factorio }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(activityOf(1)).toBeNull();
+      expect(activityOf(2)).toEqual({ name: "Factorio", startedAt: 1_761_206_400_000 });
+
+      // The next full ready restates the set: bea stopped playing meanwhile.
+      mock.dispatch("ready", {
+        channels: [],
+        members: [
+          { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
+          { id: 2, username: "bea", avatar: null, role: "member", status: "online" },
+        ],
+        activities: [],
+        voice_states: [],
+        roles: [],
+      });
+      expect(activityOf(2)).toBeNull();
+    });
+
+    it("a ready from a server without the key shows no games", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+      mock.dispatch("ready", {
+        channels: [],
+        members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(activityOf(1)).toBeNull();
+    });
+
+    it("copies a DM partner's game into the DM list from presence, batch and ready", () => {
+      const partner = { id: 10, username: "bob", avatar: "", status: "online" };
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: partner,
+            participants: [partner],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      const shown = () => dmStore.getState().channels[0]?.recipient.activity;
+
+      mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
+      expect(shown()?.name).toBe("Factorio");
+      // A frame without the key keeps it.
+      mock.dispatch("presence", { user_id: 10, status: "idle" });
+      expect(shown()?.name).toBe("Factorio");
+      mock.dispatch("presence_batch", {
+        updates: [{ user_id: 10, status: "online", custom_status: null, activity: null }],
+      });
+      expect(shown()).toBeNull();
+      mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
+      mock.dispatch("presence_batch", { full: true, updates: [] });
+      expect(shown()).toBeNull();
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        dm_channels: [
+          {
+            channel_id: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: null,
+            last_message: "",
+            last_message_at: "",
+            unread_count: 0,
+            mention_count: 0,
+          },
+        ],
+        activities: [{ user_id: 10, ...factorio }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(shown()?.name).toBe("Factorio");
+    });
+
+    it("a DM opened after ready shows the game its partner is already playing", () => {
+      dmStore.setState(() => ({ channels: [] }));
+      mock.dispatch("ready", {
+        channels: [],
+        members: [{ id: 10, username: "bob", avatar: null, role: "member", status: "online" }],
+        activities: [{ user_id: 10, ...factorio }],
+        voice_states: [],
+        roles: [],
+      });
+      mock.dispatch("dm_channel_open", {
+        channel_id: 51,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+      expect(dmStore.getState().channels[0]?.recipient.activity?.name).toBe("Factorio");
     });
   });
 
@@ -4454,6 +4636,23 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().transientError).toBeNull();
   });
 
+  it("lets the game activity loop claim its own refused frame without a toast (WP 8.3)", () => {
+    mockShowToast.mockClear();
+    setActivityRefusalHandler((code, id) => code === "RATE_LIMITED" && id === "act-1");
+    try {
+      mock.dispatch("error", { code: "RATE_LIMITED", message: "slow down" }, "act-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
+      expect(mockShowToast).not.toHaveBeenCalled();
+
+      // Any other frame's RATE_LIMITED still reaches the user.
+      mock.dispatch("error", { code: "RATE_LIMITED", message: "slow down" }, "chat-9");
+      expectConsole("error", /\[dispatcher\] Server error/);
+      expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
+    } finally {
+      setActivityRefusalHandler(null);
+    }
+  });
+
   it("wires error FORBIDDEN to an in-app toast with its catalog text (OC-0064)", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", {
@@ -5406,6 +5605,96 @@ describe("WS Dispatcher", () => {
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
       expect(dmStore.getState().channels).toHaveLength(0);
+    });
+
+    describe("call roster of a closed DM", () => {
+      const dmRow = (channelId: number, isGroup: boolean) => ({
+        channelId,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        participants: [],
+        name: "",
+        isGroup,
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+        mentionCount: 0,
+      });
+      const seedCall = (channelId: number) => {
+        mock.dispatch("voice_state", {
+          channel_id: channelId,
+          user_id: 10,
+          username: "bob",
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: false,
+          screenshare: false,
+        });
+        voiceStore.flush();
+      };
+
+      it("drops the roster when a group DM is closed (left or removed)", () => {
+        dmStore.setState(() => ({ channels: [dmRow(70, true)] }));
+        seedCall(70);
+        expect(voiceStore.getState().voiceUsers.get(70)?.size).toBe(1);
+
+        mock.dispatch("dm_channel_close", { channel_id: 70 });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.has(70)).toBe(false);
+      });
+
+      it("keeps the roster when a 1:1 DM is closed", () => {
+        dmStore.setState(() => ({ channels: [dmRow(71, false)] }));
+        seedCall(71);
+
+        mock.dispatch("dm_channel_close", { channel_id: 71 });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.get(71)?.size).toBe(1);
+      });
+
+      it("leaves the roster to voice_leave while the local user is in that call", () => {
+        dmStore.setState(() => ({ channels: [dmRow(72, true)] }));
+        seedCall(72);
+        joinVoiceChannel(72);
+        voiceStore.flush();
+
+        mock.dispatch("dm_channel_close", { channel_id: 72 });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.get(72)?.size).toBe(1);
+        leaveVoiceChannel();
+        voiceStore.flush();
+      });
+
+      it("drops a roster left from an earlier membership when the group is re-added", () => {
+        dmStore.setState(() => ({ channels: [dmRow(73, true)] }));
+        seedCall(73);
+        joinVoiceChannel(73);
+        voiceStore.flush();
+        mock.dispatch("dm_channel_close", { channel_id: 73 });
+        leaveVoiceChannel();
+        voiceStore.flush();
+        expect(voiceStore.getState().voiceUsers.get(73)?.size).toBe(1);
+
+        mock.dispatch("dm_channel_open", {
+          channel_id: 73,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+          name: "",
+          is_group: true,
+          owner_id: 10,
+          last_message_id: null,
+          last_message: "",
+          last_message_at: "",
+          unread_count: 0,
+        });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.has(73)).toBe(false);
+      });
     });
 
     it("falls back to another open DM when the closed DM was active", () => {

@@ -3,6 +3,7 @@ import {
   membersStore,
   setMembers,
   addMember,
+  applyReadyActivities,
   removeMember,
   updateMemberRole,
   updateMemberProfile,
@@ -117,6 +118,23 @@ describe("members store", () => {
         displayName: null,
         customStatus: null,
         identityPublicKey: null,
+      });
+    });
+
+    it("keeps a rejoining member's game, and adds no activity key for a new one (WP 8.3)", () => {
+      addMember({
+        user: { id: 12, username: "gamer", avatar: null, role: "member" },
+        status: "online",
+      });
+      expect("activity" in (membersStore.getState().members.get(12) ?? {})).toBe(false);
+      applyReadyActivities([{ user_id: 12, name: "Factorio", started_at: 5 }]);
+      addMember({
+        user: { id: 12, username: "gamer", avatar: null, role: "member" },
+        status: "online",
+      });
+      expect(membersStore.getState().members.get(12)?.activity).toEqual({
+        name: "Factorio",
+        startedAt: 5,
       });
     });
 

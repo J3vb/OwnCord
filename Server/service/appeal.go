@@ -225,6 +225,11 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 	if err != nil || action.TargetID == 0 || action.TargetID != appellantID {
 		return "", errAppealActionNotFound
 	}
+	// A self-targeted row (a moderator's own channel purge) is not a
+	// sanction, matching ListOwnModerationActions' read-side rule.
+	if action.ActorID != 0 && action.ActorID == action.TargetID {
+		return "", errAppealActionNotFound
+	}
 	if !appealableKinds[action.Kind] {
 		return "", fmt.Errorf("%w: this action cannot be appealed", ErrBadRequest)
 	}

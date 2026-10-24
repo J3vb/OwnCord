@@ -18,7 +18,7 @@ use std::time::Duration;
 use cpal::traits::HostTrait as _;
 
 use super::capture::input_devices;
-use super::playout::{lock, output_devices, WatchedHost};
+use super::playout::{lock, output_devices, Role, WatchedHost};
 use super::session::Devices;
 
 /// The Tauri event a changed device list is delivered on.
@@ -133,13 +133,13 @@ fn snapshot(answered: bool, devices: impl FnOnce() -> Devices) -> Option<Devices
 
 /// The production lister: its own `WatchedHost`, which rebuilds a dead host and
 /// never settles on a lower backend, so a restarting server reads as `None`
-/// rather than as every device unplugged (`session::list_devices` builds a
-/// fresh default host that falls back to ALSA meanwhile). The host is built on
+/// rather than as every device unplugged (`session::list_devices` asks the shared
+/// default host, which falls back to ALSA meanwhile). The host is built on
 /// the first call, inside the watcher thread, since connecting can block.
 pub(super) fn host_lister() -> impl FnMut() -> Option<Devices> + Send + 'static {
     let mut host: Option<Arc<WatchedHost>> = None;
     move || {
-        let host = host.get_or_insert_with(WatchedHost::new);
+        let host = host.get_or_insert_with(|| WatchedHost::new(Role::Devices));
         // Either default answering proves the server is up: a machine whose
         // only output (or only input) was just unplugged has no default on that
         // side, and that is a real change, not an outage.

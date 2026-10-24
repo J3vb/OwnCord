@@ -167,14 +167,16 @@ function renderAttention(rep,updateDismissed){
 /* ═══ Dashboard ═══ */
 async function renderDashboard(){
   try{state.cachedStats=await api('GET','/stats')}catch(e){return'<div class="page-title">Dashboard</div><p style="color:var(--text-danger)">Failed to load stats: '+esc(e.message)+'</p>'}
-  /* Update checks are owner-only; skip the call for everyone else instead of
-     spending a guaranteed 403 on every dashboard load. */
-  if(isOwner()){try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the strip is optional; the Updates page reports the failure */}}
+  /* Update checks are the owner's or a Manage Updates holder's; skip the call
+     for everyone else instead of spending a guaranteed 403 on every dashboard
+     load. */
+  if(ownerOrHolds(PERM.MANAGE_UPDATES)){try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the strip is optional; the Updates page reports the failure */}}
   const s=state.cachedStats;const u=state.cachedUpdate;
   let html='<div class="page-title">Dashboard</div><div class="page-desc">How your server is doing right now</div>';
-  /* Attention is server health detail: ADMINISTRATOR, like the route. */
+  /* Attention is server health detail: View Diagnostics (Administrator implies
+     it), like the route. */
   let checks='';
-  if(can(PERM.ADMINISTRATOR)){
+  if(can(PERM.VIEW_DIAGNOSTICS)){
     try{const a=renderAttention(await api('GET','/attention'),u&&u.update_available&&isDismissed('update',noticeSig(u.latest)));html+=a.head;checks=a.checks}
     catch(e){html+='<section id="attentionPanel" class="section-card"><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p><button class="btn btn-ghost" data-action="renderContent">Retry</button></div></section>'}
   }
@@ -455,9 +457,9 @@ function renderLogs(){
      filter what the client shows; this changes what the server logs.
      Admin-gated server-side, so a non-admin sees the control disabled with
      the reason rather than a silent 403. */
-  const canLevel=can(PERM.ADMINISTRATOR);
+  const canLevel=can(PERM.VIEW_DIAGNOSTICS);
   html+='<div class="log-level-bar"><span class="setting-name" id="logLevelName">Server log level</span>'
-    +'<span class="setting-desc" id="logLevelDesc">'+(canLevel?'Temporarily raise what the server logs, then it reverts on its own':'Requires an administrator account')+'</span>'
+    +'<span class="setting-desc" id="logLevelDesc">'+(canLevel?'Temporarily raise what the server logs, then it reverts on its own':'Requires the View Diagnostics permission')+'</span>'
     +'<span class="log-level-status" id="logLevelStatus" role="status"></span>'
     +'<button class="toggle '+(state.logLevel==='debug'?'on':'')+'" id="logLevelToggle" role="switch" aria-checked="'+(state.logLevel==='debug')+'" aria-labelledby="logLevelName" aria-describedby="logLevelDesc"'
     +' data-action="toggleServerLogLevel"'+(canLevel?'':' disabled')+'></button></div>';
@@ -531,7 +533,7 @@ async function connectLogStream(){
   if(state.logPaused||state.section!=='logs')return;
   const connectSeq=++state.logConnectSeq;
   let ticket;
-  try{const res=await api('POST','/logs/ticket');ticket=res.ticket}catch(err){const t=document.getElementById('logStatusText');const d=document.getElementById('logDot');const msg=(err&&err.message)||'';if(/authorization|invalid or expired session|session has expired|missing or invalid|administrator permission required/i.test(msg)){state.logPaused=true;state.logConnectSeq++;if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}state.token='';localStorage.removeItem('admin_token');if(t)t.textContent='Session expired';if(d)d.className='dot-off';showOverlay('loginOverlay');return}if(t)t.textContent='Reconnect failed';if(d)d.className='dot-off';scheduleLogReconnect();return}
+  try{const res=await api('POST','/logs/ticket');ticket=res.ticket}catch(err){const t=document.getElementById('logStatusText');const d=document.getElementById('logDot');const msg=(err&&err.message)||'';if(/authorization|invalid or expired session|session has expired|missing or invalid|administrator permission required|view_diagnostics permission required/i.test(msg)){state.logPaused=true;state.logConnectSeq++;if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}state.token='';localStorage.removeItem('admin_token');if(t)t.textContent='Session expired';if(d)d.className='dot-off';showOverlay('loginOverlay');return}if(t)t.textContent='Reconnect failed';if(d)d.className='dot-off';scheduleLogReconnect();return}
   if(connectSeq!==state.logConnectSeq||state.logPaused||state.section!=='logs')return;
   /* The server replays its whole ring-buffer backfill to every new
      subscriber with no event ids, so a (re)connect must replace the buffered
@@ -639,7 +641,7 @@ function tokenStatus(t){
 async function renderTokens(){
   let tokens;
   try{tokens=await api('GET','/tokens')}catch(e){return'<div class="page-title">API Tokens</div><p style="color:var(--text-danger)">'+esc(e.message)+'</p>'}
-  let html='<div class="page-title">API Tokens</div><div class="page-desc">Long-lived bearer tokens for bots, CI, and the introspection MCP tool. A token authenticates as its bound user. Owner only.</div>';
+  let html='<div class="page-title">API Tokens</div><div class="page-desc">Long-lived bearer tokens for bots, CI, and the introspection MCP tool. A token authenticates as its bound user. '+(isOwner()?'Owner only.':'You manage your own tokens.')+'</div>';
   /* No tokens: say what one is for and offer the one action, instead of an
      empty seven-column table. */
   if(!tokens||!tokens.length){
@@ -664,14 +666,17 @@ async function renderTokens(){
 function openCreateTokenModal(){
   openModal('<div class="modal-header"><h3>Create API Token</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'+
     '<div class="modal-body"><div class="form-group"><label class="form-label" for="tokLabel">Label</label><input id="tokLabel" class="form-input" placeholder="ci-bot" autofocus></div>'+
-    '<div class="form-group"><label class="form-label" for="tokUser">User <span style="color:var(--text-muted)">(optional)</span></label><input id="tokUser" class="form-input" placeholder="owner (default)"></div>'+
+    /* A Manage Tokens holder who is not the owner mints for themself only
+       (WP 8.4d), so the field would only invite a refusal. */
+    (isOwner()?'<div class="form-group"><label class="form-label" for="tokUser">User <span style="color:var(--text-muted)">(optional)</span></label><input id="tokUser" class="form-input" placeholder="owner (default)"></div>':'<p class="card-note">This token acts as you.</p>')+
     '<div class="form-group"><label class="form-label" for="tokExpires">Expires in hours <span style="color:var(--text-muted)">(0 = never)</span></label><input id="tokExpires" class="form-input" type="number" min="0" value="0"></div></div>'+
     '<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="createToken">Create</button></div>');
 }
 
 async function createToken(){
   const label=document.getElementById('tokLabel').value.trim();
-  const user=document.getElementById('tokUser').value.trim();
+  const userBox=document.getElementById('tokUser');
+  const user=userBox?userBox.value.trim():'';
   const expires=parseInt(document.getElementById('tokExpires').value,10)||0;
   if(!label){showToast('Label is required','error');return}
   try{

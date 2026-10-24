@@ -25,7 +25,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073741823,
+                "permissions": 805248611,
                 "position": 80
               },
               {
@@ -35,7 +35,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15728639,
+                "permissions": 15670883,
                 "position": 60
               },
               {
@@ -92,7 +92,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073741823,
+                "permissions": 805248611,
                 "position": 80
               },
               {
@@ -102,7 +102,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15728639,
+                "permissions": 15670883,
                 "position": 60
               },
               {
@@ -159,7 +159,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073741823,
+                "permissions": 805248611,
                 "position": 80
               },
               {
@@ -169,7 +169,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15728639,
+                "permissions": 15670883,
                 "position": 60
               },
               {
@@ -195,6 +195,7 @@
             "afk": false,
             "can_delete_others": false,
             "can_moderate_voice": false,
+            "can_move_voice": false,
             "can_pin": false,
             "can_react": true,
             "can_send": false,
@@ -222,6 +223,7 @@
             "afk": false,
             "can_delete_others": false,
             "can_moderate_voice": false,
+            "can_move_voice": false,
             "can_pin": false,
             "can_react": true,
             "can_send": false,
@@ -280,7 +282,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073741823,
+                "permissions": 805248611,
                 "position": 80
               },
               {
@@ -290,7 +292,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15728639,
+                "permissions": 15670883,
                 "position": 60
               },
               {

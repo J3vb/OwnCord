@@ -3993,38 +3993,47 @@ Authorization is two-layered:
 1. **Perimeter.** The request is rejected with `403 FORBIDDEN` unless the
    principal's role holds at least one bit of `permissions.AdminPerimeter`
    (`ADMINISTRATOR`, `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_SERVER`,
-   `VIEW_AUDIT_LOG`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`). Banned
+   `VIEW_AUDIT_LOG`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`,
+   `MANAGE_BACKUPS`, and the seven owner-type bits `RESTORE_BACKUPS`,
+   `MANAGE_CONFIG`, `MANAGE_UPDATES`, `MANAGE_TOKENS`, `ISSUE_RECOVERY`,
+   `VIEW_DIAGNOSTICS`, `ERASE_ACCOUNTS`). Banned
    users are rejected here even while their session is still valid.
 2. **Per-route bit.** Route groups then require the specific permission below.
-   `ADMINISTRATOR` bypasses every one of them; owner-only routes gate on the
-   Owner role itself (`permissions.IsOwner`: role id 1 **or** role position
-   `>= 100`) instead of on a bit, so not even `ADMINISTRATOR` substitutes for
-   being the owner.
+   `ADMINISTRATOR` bypasses every one of them except the **owner tier** (WP
+   8.4d): restore, config, updates, tokens and recovery gate on the Owner role
+   itself (`permissions.IsOwner`: role id 1 **or** role position `>= 100`) **or**
+   the bit held explicitly, so not even `ADMINISTRATOR` substitutes for the owner
+   or for the bit. Only the owner can grant an owner-tier bit. The
+   **administrator tier** (`VIEW_DIAGNOSTICS`, `ERASE_ACCOUNTS`) passes
+   `ADMINISTRATOR` like any other bit. Every use by a non-owner leaves an audit
+   row. Only the backup schedule and retention stay Owner-only, as settings keys.
 
-| Route                                                                                                                                                | Requires                                                                                     |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `GET /admin/api/me`                                                                                                                                  | perimeter only                                                                               |
-| `GET /admin/api/stats`                                                                                                                               | perimeter only                                                                               |
-| `GET /admin/api/users`                                                                                                                               | perimeter only                                                                               |
-| `PATCH /admin/api/users/{id}`                                                                                                                        | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
-| `PUT/DELETE /admin/api/users/{id}/roles/{roleId}`                                                                                                    | perimeter; `MANAGE_ROLES` (checked in the service) — WP 6.3c                                 |
-| `DELETE /admin/api/users/{id}/sessions`                                                                                                              | `KICK_MEMBERS`                                                                               |
-| `DELETE /admin/api/users/{id}`                                                                                                                       | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
-| `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                            |
-| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                               |
-| `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                             |
-| `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                              |
-| `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                              |
-| `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
-| `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
-| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                                                           | `MANAGE_SERVER`                                                                              |
-| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                                                          | `ADMINISTRATOR`                                                                              |
-| `GET/PATCH/DELETE /admin/api/logs/level`                                                                                                             | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
-| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                                                                | `ADMINISTRATOR`                                                                              |
-| `GET /admin/api/attention`                                                                                                                           | `ADMINISTRATOR` — RI-07                                                                      |
-| `/api/v1/admin/plugins…`                                                                                                                             | `ADMINISTRATOR`                                                                              |
-| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                                                                 | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
+| Route                                                                                                                                                | Requires                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /admin/api/me`                                                                                                                                  | perimeter only                                                                                                                                                                                                                                                                                               |
+| `GET /admin/api/stats`                                                                                                                               | perimeter only                                                                                                                                                                                                                                                                                               |
+| `GET /admin/api/users`                                                                                                                               | perimeter only                                                                                                                                                                                                                                                                                               |
+| `PATCH /admin/api/users/{id}`                                                                                                                        | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service)                                                                                                                                                                                                                 |
+| `PUT/DELETE /admin/api/users/{id}/roles/{roleId}`                                                                                                    | perimeter; `MANAGE_ROLES` (checked in the service) — WP 6.3c                                                                                                                                                                                                                                                 |
+| `DELETE /admin/api/users/{id}/sessions`                                                                                                              | `KICK_MEMBERS`                                                                                                                                                                                                                                                                                               |
+| `DELETE /admin/api/users/{id}`                                                                                                                       | `ERASE_ACCOUNTS` (`ADMINISTRATOR` passes); the actor must outrank the target (checked in the service) — B4-9, WP 8.4d                                                                                                                                                                                        |
+| `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role **or** `ISSUE_RECOVERY` (`permissions.CanIssueRecovery`; `ADMINISTRATOR` does not pass); a holder who is not the owner can only issue to a member ranked strictly below them, never the owner — B4-6, WP 8.4d                                                                                     |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                                                                                                                                                                                                                                            |
+| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                                                                                                                                                                                                                                               |
+| `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                                                                                                                                                                                                                                             |
+| `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
+| `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
+| `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role **or** `MANAGE_CONFIG` (`permissions.CanManageConfig`; `ADMINISTRATOR` does not pass) — WP 8.4d                                                                                                                                                                                                   |
+| `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                                                                                                                                                                                                                                      |
+| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                                                           | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
+| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                                                          | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes); the stream re-checks it on every write — WP 8.4d                                                                                                                                                                                                                |
+| `GET/PATCH/DELETE /admin/api/logs/level`                                                                                                             | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — the running level and a timed debug boost, SRE-07                                                                                                                                                                                                              |
+| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                                                                | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
+| `GET /admin/api/attention`                                                                                                                           | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — RI-07                                                                                                                                                                                                                                                          |
+| `/api/v1/admin/plugins…`                                                                                                                             | `ADMINISTRATOR`                                                                                                                                                                                                                                                                                              |
+| `/admin/api/tokens…`, `/admin/api/updates…`                                                                                                          | `/admin/api/tokens…`: Owner role **or** `MANAGE_TOKENS` (`permissions.CanManageTokens`; a holder who is not the owner sees, creates and revokes only their own tokens); `/admin/api/updates…`: Owner role **or** `MANAGE_UPDATES` (`permissions.CanManageUpdates`); `ADMINISTRATOR` passes neither — WP 8.4d |
+| `DELETE /admin/api/backups/{name}`, `POST /admin/api/backups/{name}/restore`, `GET /admin/api/archive`, `POST /admin/api/archive/link`               | Owner role **or** `RESTORE_BACKUPS` (`permissions.CanRestoreBackups`; `ADMINISTRATOR` does not pass); the archive link is re-checked when opened — WP 8.4d                                                                                                                                                   |
+| `POST /admin/api/backup`, `GET /admin/api/backups`, `POST /admin/api/backups/{name}/link` (and its `/download`)                                      | Owner role **or** `MANAGE_BACKUPS` (`permissions.CanManageBackups`; `ADMINISTRATOR` passes) — WP 8.4c; `GET /admin/api/backups` also admits `RESTORE_BACKUPS`, so a restorer can pick a backup (WP 8.4d)                                                                                                     |
 
 Moderation routes additionally enforce the **role hierarchy**: the actor must
 strictly outrank the target (`actor.position > target.position`), and a role
@@ -4147,6 +4156,11 @@ during the first run (B11-8); the secret is returned once as
 `recovery_kit_secret` and only its verifier is stored. Pass
 `"recovery_kit": false` to skip it.
 
+A TLS choice the next boot could not serve answers 400 before the account is
+created, as the admin panel refuses the same change: `tls_mode` `manual` when
+the configured `tls.cert_file`/`tls.key_file` pair does not load or has
+expired, and `tls_mode` `acme` with `port` 80.
+
 #### Response 200 OK
 
 ```json
@@ -4221,7 +4235,7 @@ run); this route only reads that state. Thresholds and hysteresis are in
 [server-configuration.md](server-configuration.md#admin-attention-panel-attention).
 Nothing here is exported off the host.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Response 200 OK
 
@@ -4478,7 +4492,7 @@ admin-class account cannot be erased, and the action is audited as
 `account_deleted` with the actor and the target unlinked to the deletion
 marker's token (B4-10). Connected clients receive `member_ban`.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `ERASE_ACCOUNTS` (`ADMINISTRATOR` passes), WP 8.4d
 
 #### Response 204 No Content
 
@@ -4505,8 +4519,10 @@ kit withdraws it.
 Refused for the caller's own account, a banned or pending account and an
 anonymised row; budgeted at 5 issuances per owner and 3 per account per hour.
 Audited as `recovery_assist_issued` with the verification wording only.
+A holder of `ISSUE_RECOVERY` who is not the owner can issue only to a member
+ranked strictly below them (`403` for an equal or higher rank and for the owner).
 
-**Auth:** Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`); `ADMINISTRATOR` does not substitute
+**Auth:** Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`) **or** `ISSUE_RECOVERY` (`permissions.CanIssueRecovery`); `ADMINISTRATOR` does not substitute
 
 #### Request
 
@@ -4837,7 +4853,8 @@ audited as `setting_change`.
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
-`upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`.
+`upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
+`voice_owner_movable`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -4863,6 +4880,11 @@ dot after its leading ones, a path or stream separator or an invisible
 character, or is longer than 32 bytes, is refused with `400`. A saved row
 replaces the matching config.yaml list; an empty allowed list turns allow-only
 mode off. Like the backup policy they need the **Owner** role (`403 FORBIDDEN` otherwise).
+
+`voice_owner_movable` (WP 8.4a) decides whether a member holding `MOVE_MEMBERS`
+can move the owner between voice channels: `true` (the default while no row
+exists) or `false`, also accepted as `1`/`0`. It is stored as `true`/`false`.
+Only the **Owner** role may change it (`403 FORBIDDEN` otherwise).
 
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change
@@ -4985,15 +5007,19 @@ Settings page shows until the owner saves its own.
 
 ## API Tokens
 
-Owner-only: minting a long-lived bearer credential over the network is the one
-admin action that, via a hijacked session, would outlive a password change or an
+Owner role or `MANAGE_TOKENS` (WP 8.4d; `ADMINISTRATOR` does not pass): minting a
+long-lived bearer credential over the network is the one admin action that, via a hijacked session, would outlive a password change or an
 admin force-logout (API tokens deliberately live outside the session table;
 sign-out-everywhere and account recovery do revoke them). These
-routes are the HTTP equivalent of the `server token create|list|revoke` CLI.
+routes are the HTTP equivalent of the `server token create|list|revoke` CLI. A
+holder who is not the owner sees only the tokens bound to them, creates tokens
+only for their own account (an empty `username` is themself; another username is
+`403`) and revokes only their own (another's is `404`, like an unknown id). The
+owner is unchanged.
 
 ### GET /admin/api/tokens
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_TOKENS` (own tokens only for a holder)
 
 #### Response 200 OK
 
@@ -5018,7 +5044,7 @@ Token hashes are never returned.
 
 ### POST /admin/api/tokens
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_TOKENS` (own tokens only for a holder)
 
 #### Request
 
@@ -5050,7 +5076,7 @@ The raw token is shown exactly once and is never recoverable.
 
 ### DELETE /admin/api/tokens/{id}
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_TOKENS` (own tokens only for a holder)
 
 #### Response 204 No Content
 
@@ -5060,14 +5086,22 @@ The raw token is shown exactly once and is never recoverable.
 
 ## Backups
 
-All backup routes are Owner-only. Backups are SQLite snapshots (`VACUUM INTO`)
-stored under `data/backups/`.
+Backups are SQLite snapshots (`VACUUM INTO`) stored under `data/backups/`. Create,
+list and download (the link and its redemption) are for the Owner or a holder
+of `MANAGE_BACKUPS` (`ADMINISTRATOR` passes like for every bit); restore, delete
+and the full archive are for the Owner or a holder of `RESTORE_BACKUPS` (WP
+8.4d; `ADMINISTRATOR` does not pass), who can also list backups. The backup
+schedule and retention stay Owner-only. A backup holds every message and every
+password hash, which is why only the owner or an Administrator can grant
+`MANAGE_BACKUPS`.
 
 ### POST /admin/api/backup
 
-Create a backup named `chatserver_<UTC timestamp>.db`.
+Create a backup named `chatserver_<UTC timestamp>.db`. One manual backup runs
+at a time: a second request while one is in flight is `409 BACKUP_RUNNING` and
+starts nothing.
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5082,9 +5116,9 @@ Create a backup named `chatserver_<UTC timestamp>.db`.
 
 ### GET /admin/api/backups
 
-List backups, newest first.
+List backups, newest first. This is every `.db` file in the backup directory, including the `pre_restore_` safety copies a restore writes.
 
-**Auth:** Owner role
+**Auth:** Owner role, `MANAGE_BACKUPS` or `RESTORE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5096,7 +5130,7 @@ List backups, newest first.
 
 ### DELETE /admin/api/backups/{name}
 
-**Auth:** Owner role
+**Auth:** Owner role or `RESTORE_BACKUPS`
 
 `name` is validated against path traversal. Returns `204 No Content`, or
 `404 NOT_FOUND` if the file does not exist.
@@ -5106,9 +5140,9 @@ List backups, newest first.
 ### POST /admin/api/backups/{name}/link
 
 Issue a short-lived, single-use link to download one backup file, on the same
-terms as the [archive link](#post-adminapiarchivelink).
+terms as the [archive link](#post-adminapiarchivelink). Audited as `backup_link`.
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5118,7 +5152,7 @@ terms as the [archive link](#post-adminapiarchivelink).
 }
 ```
 
-The token is random, bound to the requesting owner and to this one file,
+The token is random, bound to the requesting credential and to this one file,
 valid for about a minute and consumable once. It is never logged. `400` for a
 name that fails the path-traversal check, `404 NOT_FOUND` when no such `.db`
 backup exists.
@@ -5129,7 +5163,8 @@ backup exists.
 
 Redeem a single-use backup link. **Auth:** the `token` query parameter, as for
 [`GET /admin/api/archive/download`](#get-adminapiarchivedownload); the
-credential that asked for it must still be a signed-in, non-banned Owner, and
+credential that asked for it must still be a signed-in, non-banned Owner or
+holder of `MANAGE_BACKUPS` (the bit is re-checked when the link is opened), and
 `{name}` must be the file the link was issued for. `200
 application/octet-stream` streamed from disk as an attachment, audited as
 `backup_download`; `403 FORBIDDEN` for an unknown, expired, already-used or
@@ -5146,7 +5181,7 @@ restarts itself through the normal shutdown. The database that is running is
 not written. The next start swaps the staged copy in before the database
 opens, checks it, and keeps the previous database if the check fails.
 
-**Auth:** Owner role
+**Auth:** Owner role or `RESTORE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5174,7 +5209,7 @@ The admin panel does not call this route; it asks for a single-use link
 disk instead of being buffered in the page. This route stays for direct API
 callers that send the `Authorization` header themselves.
 
-**Auth:** Owner role
+**Auth:** Owner role or `RESTORE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5191,7 +5226,7 @@ volume below `server.min_free_disk_mb`, otherwise `500 INTERNAL_ERROR`.
 Issue a short-lived, single-use link to the full archive, for the panel to
 open as a plain browser download.
 
-**Auth:** Owner role
+**Auth:** Owner role or `RESTORE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5221,12 +5256,12 @@ sent.
 
 ## Server Updates
 
-Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see
+Self-update from GitHub Releases, for the Owner or a holder of `MANAGE_UPDATES` (WP 8.4d; `ADMINISTRATOR` does not pass) (minisign/Ed25519-verified; see
 `docs/security.md`).
 
 ### GET /admin/api/updates
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_UPDATES`
 
 #### Response 200 OK
 
@@ -5272,7 +5307,7 @@ Download, verify and apply the latest release. On success the server responds
 first, then broadcasts a restart notice, swaps the binary (with staged-hash
 re-verification against TOCTOU swaps), spawns the new process and shuts down.
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_UPDATES`
 
 #### Response 200 OK
 
@@ -5305,7 +5340,7 @@ an `Authorization` header.
 
 Issue a single-use ticket (30 s TTL) bound to the calling bearer credential.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Response 200 OK
 
@@ -5320,7 +5355,7 @@ Issue a single-use ticket (30 s TTL) bound to the calling bearer credential.
 Server-Sent Events stream of structured log records: on connect the in-memory
 ring buffer (capacity 2000) is replayed as backfill, then new entries stream
 live, with a keepalive every 15 s. The ticket is consumed on connect; the
-`ADMINISTRATOR` bit is re-checked throughout the stream, and revoking the
+`VIEW_DIAGNOSTICS` bit (or `ADMINISTRATOR`) is re-checked throughout the stream, and revoking the
 underlying session or API token (or banning the user) mid-stream cuts it.
 The server ends every open stream as its shutdown begins, so an open stream
 does not hold up a restart; reconnect with a fresh ticket once it is back.
@@ -5340,7 +5375,7 @@ Each event's data is one JSON record:
 The log level the server is running at, the level it started with (and
 reverts to), and when a debug boost reverts.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Response 200 OK
 
@@ -5364,7 +5399,7 @@ Raise the server's log level to `debug` for 15 minutes. The server reverts to
 `base_level` on its own when the window ends; a second PATCH restarts the
 window. Recorded in the audit log as `log_level_debug_on`.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Request
 
@@ -5390,7 +5425,7 @@ Both fields are required and only these values are accepted.
 Revert to `base_level` at once and cancel a pending boost. Recorded in the
 audit log as `log_level_reverted`.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Response 200 OK -- same shape as `GET /admin/api/logs/level`.
 
@@ -5813,6 +5848,7 @@ server's authorization predicates:
 | `add_reaction`   | `CanAddReaction`                                          |
 | `join_voice`     | `CanJoinVoice`                                            |
 | `moderate_voice` | `AuthorizeVoiceModerator` (base `MUTE_MEMBERS` + channel) |
+| `move_voice`     | `AuthorizeVoiceMover` (base `MOVE_MEMBERS` + channel)     |
 
 The decision is the predicate's own verdict over the member's live state —
 role bits, both override layers, active timeout and NSFW acknowledgement,

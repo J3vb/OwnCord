@@ -651,6 +651,7 @@ const ACCESS_ACTIONS=[
   ['add_reaction','Add reactions'],
   ['join_voice','Join voice'],
   ['moderate_voice','Moderate voice'],
+  ['move_voice','Move voice'],
 ];
 function accessActionLabel(a){const f=ACCESS_ACTIONS.find(x=>x[0]===a);return f?f[1]:a}
 function accessVerdict(ok){return ok?'<span style="color:var(--text-positive)">Allowed</span>':'<span style="color:var(--text-danger)">Denied</span>'}
@@ -777,7 +778,7 @@ async function saveChannelPerms(){
 
 /* Permission checkboxes, grouped exactly as docs/schema.md's "Permission
    groups" section groups the bitfield. Keep the two in step: the doc is the
-   reference an operator reads next to this grid, and every one of the 21
+   reference an operator reads next to this grid, and every one of the 30
    defined bits must appear in exactly one group or it becomes ungrantable
    here. */
 const PERM_GROUPS=[
@@ -785,11 +786,12 @@ const PERM_GROUPS=[
     [0x20000,'Manage Channels','Create, edit and delete channels and their overrides'],
     [0x1000000,'Manage Roles','Create, edit, delete and assign roles below your own'],
     [0x4000000,'Manage Invites','Create and revoke invite codes'],
-    [0x2000000,'Manage Server','Read and change server settings'],
+    [0x2000000,'Manage Server','Read and change server settings, retention and the AFK channel, and approve registrations. Restoring backups, updates, tokens and server configuration are separate permissions under Owner powers'],
     [0x8000000,'View Audit Log','Read the action history'],
     [0x400000,'Moderate Members','Warn and time out members, work the report queue'],
     [0x800000,'Manage Nicknames','Change or reset another member\'s nickname'],
-    [0x40000000,'Administrator','Bypasses every permission check'],
+    [0x4000,'Manage Backups','Create, list and download database backups. A backup holds every message and password hash (only the owner can grant)'],
+    [0x40000000,'Administrator','Bypasses every permission check and channel override, never the rank rule: it cannot touch a role at or above its own'],
   ]},
   {title:'Text',bits:[
     [0x2,'Read Messages','View messages in text channels'],
@@ -808,7 +810,21 @@ const PERM_GROUPS=[
   {title:'Moderation',bits:[
     [0x40000,'Kick Members','Force-logout a lower-ranked member'],
     [0x80000,'Ban Members','Ban and unban lower-ranked members'],
-    [0x100000,'Mute Members','Server mute, deafen, move and disconnect in voice'],
+    [0x100000,'Mute Members','Server mute, deafen and disconnect, and move lower-ranked members'],
+    [0x2000,'Move Members','Move anyone between voice channels, whatever their rank (only the owner can grant)'],
+  ]},
+  /* The owner-type permissions (WP 8.4d): actions that were the owner's alone.
+     The first five are owner-tier: an Administrator does not hold them without
+     the bit, and only the owner can grant them. The last two an Administrator
+     already has; the owner or an Administrator can grant them. */
+  {title:'Owner powers',bits:[
+    [0x8000,'Restore Backups','Restore or delete a backup and download the full archive. A restore replaces everything since the backup (about as powerful as being the owner; only the owner can grant)'],
+    [0x4,'Manage Server Configuration','Read and change the server configuration file and restart the server (about as powerful as being the owner; only the owner can grant)'],
+    [0x8,'Manage Updates','Check for and install server updates (about as powerful as being the owner; only the owner can grant)'],
+    [0x10,'Manage API Tokens','Create, list and revoke their own API tokens (about as powerful as being the owner; only the owner can grant)'],
+    [0x80,'Issue Recovery Credentials','Give a locked-out member who ranks below them a one-time recovery credential (about as powerful as being the owner; only the owner can grant)'],
+    [0x100,'View Diagnostics','Open the server logs, change the log level, build support bundles and read the attention panel (only the owner or an Administrator can grant)'],
+    [0x10000000,'Erase Accounts','Permanently erase the account of a member who ranks below them (only the owner or an Administrator can grant)'],
   ]},
 ];
 
@@ -816,12 +832,65 @@ const PERM_GROUPS=[
 function myPosition(){return (state.me&&state.me.role_position)||0}
 /* True when the signed-in principal may manage this role at all. */
 function canManageRole(role){return role.position<myPosition()}
+/* Move Members can be given or taken away only by the owner or an
+   Administrator, whatever other role permissions the viewer holds (the server
+   refuses anyone else, so the box is shown greyed rather than left to fail). */
+const OWNER_GRANT_ONLY_TITLE='Only the owner or an Administrator can change this';
+/* The bits only the owner or an Administrator may add or remove: one mask,
+   mirroring permissions.OwnerGrantOnly, so a new such bit is one more term. */
+const OWNER_GRANT_ONLY_MASK=PERM.MOVE_MEMBERS|PERM.MANAGE_BACKUPS|PERM.RESTORE_BACKUPS|PERM.MANAGE_CONFIG|PERM.MANAGE_UPDATES|PERM.MANAGE_TOKENS|PERM.ISSUE_RECOVERY|PERM.VIEW_DIAGNOSTICS|PERM.ERASE_ACCOUNTS;
+function isOwnerGrantOnlyBit(bit){return (bit&OWNER_GRANT_ONLY_MASK)!==0}
+function canChangeOwnerGrantOnly(){return isOwner()||can(PERM.ADMINISTRATOR)}
+/* The owner-tier subset (WP 8.4d), mirroring permissions.OwnerOnlyGrant: these
+   boxes only the owner can change, an Administrator included, because the
+   owner tier ignores ADMINISTRATOR and an Administrator could otherwise give
+   the bit to themself. */
+const OWNER_ONLY_GRANT_TITLE='Only the owner can change this';
+const OWNER_ONLY_GRANT_MASK=PERM.RESTORE_BACKUPS|PERM.MANAGE_CONFIG|PERM.MANAGE_UPDATES|PERM.MANAGE_TOKENS|PERM.ISSUE_RECOVERY;
+function isOwnerOnlyGrantBit(bit){return (bit&OWNER_ONLY_GRANT_MASK)!==0}
+function grantLockTitle(bit){return isOwnerOnlyGrantBit(bit)?OWNER_ONLY_GRANT_TITLE:OWNER_GRANT_ONLY_TITLE}
 /* True when this bit may be granted: ADMINISTRATOR grants anything, otherwise
    only bits the caller's own role holds. */
 function canGrantBit(bit){
+  if(isOwnerOnlyGrantBit(bit))return isOwner();
+  if(isOwnerGrantOnlyBit(bit))return canChangeOwnerGrantOnly();
   const p=(state.me&&state.me.permissions)||0;
   if((p&PERM.ADMINISTRATOR)!==0)return true;
   return (p&bit)===bit;
+}
+
+/* Role presets: a starting point for the role editor. Each one REPLACES the
+   ticked permission boxes with the member basics plus the bits of its job; the
+   name, colour and rank are left alone and every box stays editable. A bit the
+   viewer cannot grant stays as it is and is named in a note. */
+const ROLE_PRESET_BASE=0x1|0x2|0x20|0x40|0x200|0x400|0x800|0x1000;
+const ROLE_PRESETS=[
+  {id:'super',label:'Super admin',bits:PERM.ADMINISTRATOR},
+  {id:'manager',label:'Server manager',bits:PERM.MANAGE_SERVER|PERM.MANAGE_CHANNELS|PERM.MANAGE_INVITES|PERM.VIEW_AUDIT_LOG},
+  {id:'moderator',label:'Moderator',bits:0x10000|PERM.KICK_MEMBERS|PERM.BAN_MEMBERS|PERM.MUTE_MEMBERS|0x400000|PERM.MANAGE_NICKNAMES|PERM.VIEW_AUDIT_LOG},
+  {id:'voice',label:'Voice moderator',bits:PERM.MUTE_MEMBERS|PERM.MOVE_MEMBERS},
+];
+function permLabel(bit){
+  for(const g of PERM_GROUPS){const b=g.bits.find(x=>x[0]===bit);if(b)return b[1]}
+  return'';
+}
+function applyRolePreset(id){
+  const preset=ROLE_PRESETS.find(p=>p.id===id);
+  if(!preset)return;
+  const want=ROLE_PRESET_BASE|preset.bits;
+  const skipped=[],kept=[];
+  /** @type {NodeListOf<HTMLInputElement>} */(document.querySelectorAll('#modalInner input[data-permbit]')).forEach(box=>{
+    const bit=parseInt(box.getAttribute('data-permbit'),10);
+    if(!canGrantBit(bit)){
+      const why=isOwnerGrantOnlyBit(bit)?'only the owner can ':'your own role cannot ';
+      if((want&bit)===bit&&!box.checked)skipped.push(permLabel(bit)+' ('+(isOwnerGrantOnlyBit(bit)?'only the owner can grant':'your own role does not have it')+')');
+      else if((want&bit)!==bit&&box.checked)kept.push(permLabel(bit)+' ('+why+'change it)');
+      return;
+    }
+    box.checked=(want&bit)===bit;
+  });
+  const note=document.getElementById('rolePresetNote');
+  if(note)note.textContent='Applied the '+preset.label+' preset; adjust any box before saving.'+(skipped.length?' Not applied: '+skipped.join(', ')+'.':'')+(kept.length?' Kept: '+kept.join(', ')+'.':'');
 }
 
 /* How many of the grid's permissions a mask grants, for the ladder's summary. */
@@ -1016,10 +1085,13 @@ function openRoleModal(id){
          server allows, but the panel keeps the rule to one sentence), unchecked
          and locked otherwise. */
       const locked=!canGrantBit(bit);
+      const ownerOnly=isOwnerGrantOnlyBit(bit);
+      const lockNote=ownerOnly?grantLockTitle(bit)+'.':'Locked: your own role does not have this permission.';
       grid+='<label class="perm-item'+(locked?' locked':'')+'">'
-        +'<input type="checkbox" data-permbit="'+bit+'" aria-labelledby="permName'+bit+'" aria-describedby="permDesc'+bit+'" '+(granted?'checked':'')+' '+(locked?'disabled':'')+'>'
+        +'<input type="checkbox" data-permbit="'+bit+'" aria-labelledby="permName'+bit+'" aria-describedby="permDesc'+bit+'" '+(granted?'checked':'')+' '+(locked?'disabled':'')+(locked&&ownerOnly?' title="'+esc(grantLockTitle(bit))+'"':'')+'>'
         +'<span class="perm-text"><span class="perm-name" id="permName'+bit+'">'+esc(label)+'</span>'
-        +'<span class="perm-desc" id="permDesc'+bit+'">'+esc(desc)+(locked?'<span class="perm-lock"> Locked: your own role does not have this permission.</span>':'')+'</span></span></label>';
+        +'<span class="perm-desc" id="permDesc'+bit+'">'+esc(desc)+(locked?'<span class="perm-lock"> '+esc(lockNote)+'</span>':'')
+        +(ownerOnly&&role&&role.is_default?'<span class="perm-hint" id="permHint'+bit+'">Giving this to the default role means only '+(isOwnerOnlyGrantBit(bit)?'the owner':'the owner or an Administrator')+' can change members\' roles.</span>':'')+'</span></span></label>';
     });
     grid+='</div></fieldset>';
   });
@@ -1038,7 +1110,11 @@ function openRoleModal(id){
     +'<div class="form-group"><div class="form-label">Display</div>'
       +'<label class="perm-item" for="roleHoist"><input type="checkbox" id="roleHoist" '+(role&&role.hoist?'checked':'')+'><span class="perm-text"><span class="perm-name">Show members separately</span><span class="perm-desc">List members with this as their top role in their own group in the member list.</span></span></label>'
       +'<label class="perm-item" for="roleMentionable"><input type="checkbox" id="roleMentionable" '+(role&&role.mentionable?'checked':'')+'><span class="perm-text"><span class="perm-name">Allow anyone to @mention this role</span><span class="perm-desc">Without it, only members who can mention everyone can ping this role.</span></span></label></div>'
-    +'<div class="form-group"><div class="form-label">Permissions</div>'+grid+'</div>'
+    +'<div class="form-group"><div class="form-label">Permissions</div>'
+      +'<div class="role-presets" role="group" aria-label="Role presets">'+ROLE_PRESETS.map(p=>'<button type="button" class="btn btn-ghost btn-sm" data-action="applyRolePreset" data-args="'+actArgs(p.id)+'">'+esc(p.label)+'</button>').join(' ')+'</div>'
+      +'<div class="rc-hint" id="rolePresetNote" aria-live="polite">A preset replaces the boxes below; you can still change them.</div>'
+      +grid
+      +'<div class="rc-hint">Owner powers start with nobody: the owner grants each one by hand.</div></div>'
     +'</div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveRole" data-args="'+actArgs(role?role.id:null)+'">'+(role?'Save':'Create')+'</button></div>');
   renderRolePlacement();
@@ -1215,5 +1291,5 @@ async function deleteEmoji(id){
 
 Object.assign(ACTIONS,{forumTagAdd,forumTagMove,forumTagRemove,onChannelTypeChange,saveForumSettings,openCategoryPermsModal,openCategoryPermsPicker,saveCategoryPerms,syncChannelPerms,clearPermOverride,confirmDeleteChannel,confirmDeleteEmoji,confirmDeleteRole,createChannel,
   deleteEmoji,explainAccess,moveRole,onPermTargetChange,openChannelEditModal,openChannelModal,openChannelPermsModal,openDeleteChannel,
-  openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderRolePlacement,
+  applyRolePreset,openDeleteRole,openRoleModal,placeRoleAboveDefault,previewPermChange,renderRolePlacement,
   saveChannelEdit,saveChannelPerms,saveRole,selectChannelTab,syncTypedConfirm,uploadEmoji});

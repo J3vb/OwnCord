@@ -27,6 +27,7 @@ import { serverScope } from "./serverScope";
 import { settings } from "./settings";
 import { socket } from "./socket";
 import { systemIdle } from "./systemIdle";
+import { gameDetector } from "./gameDetector";
 import { trayStatus } from "./trayStatus";
 import { updater } from "./updater";
 import { urlOpener } from "./urlOpener";
@@ -44,6 +45,7 @@ export const desktop: Platform = {
   devTools,
   externalContent,
   fileSaver,
+  gameDetector,
   http,
   identity,
   logFiles,

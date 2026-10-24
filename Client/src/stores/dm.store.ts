@@ -17,6 +17,9 @@ export interface DmUser {
   readonly status: string;
   /** Nickname to render instead of `username`. "" = unset. */
   readonly displayName?: string;
+  /** The game this person is playing (WP 8.3), copied from presence like
+   *  `status`. Null or undefined = none. */
+  readonly activity?: { readonly name: string; readonly startedAt: number } | null;
 }
 
 export interface DmChannel {
@@ -72,6 +75,26 @@ export function setDmChannels(channels: readonly DmChannel[]): void {
   dmStore.setState(() => ({ channels }));
 }
 
+/** Where a DM learns the game presence already gave someone (WP 8.3). Set by
+ *  the channels' ws handlers, which own the members store; unset = unknown. */
+let knownActivity: (userId: number) => DmUser["activity"] = () => undefined;
+
+export function setDmActivityLookup(lookup: (userId: number) => DmUser["activity"]): void {
+  knownActivity = lookup;
+}
+
+/**
+ * A DM summary carries no game (WP 8.3), so a person the payload left without
+ * one keeps the game this DM already showed, else the one presence gave them.
+ * A DM opened after `ready` then shows a partner who is already playing.
+ */
+function withKnownActivity(user: DmUser, prior: DmChannel | undefined): DmUser {
+  if (user.activity !== undefined) return user;
+  const shown = prior?.participants.find((p) => p.id === user.id)?.activity;
+  const known = shown !== undefined ? shown : knownActivity(user.id);
+  return known === undefined ? user : { ...user, activity: known };
+}
+
 /**
  * Add or update a single DM channel (from a `dm_channel_open` event).
  *
@@ -84,10 +107,15 @@ export function setDmChannels(channels: readonly DmChannel[]): void {
  * messages incremented), and a genuine reopen has nothing to lose: its local
  * count is zero too.
  */
-export function addDmChannel(channel: DmChannel): void {
+export function addDmChannel(incoming: DmChannel): void {
   dmStore.setState((prev) => {
-    const existing = prev.channels.find((c) => c.channelId === channel.channelId);
-    const filtered = prev.channels.filter((c) => c.channelId !== channel.channelId);
+    const existing = prev.channels.find((c) => c.channelId === incoming.channelId);
+    const filtered = prev.channels.filter((c) => c.channelId !== incoming.channelId);
+    const channel: DmChannel = {
+      ...incoming,
+      recipient: withKnownActivity(incoming.recipient, existing),
+      participants: incoming.participants.map((p) => withKnownActivity(p, existing)),
+    };
     const merged: DmChannel =
       existing === undefined
         ? channel

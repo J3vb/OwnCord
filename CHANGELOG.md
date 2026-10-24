@@ -55,33 +55,64 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Accounts & admin**
+
+- New role permission Move Members: a role with it can move anyone between voice channels, whatever their rank, from the voice menu or by dragging. Only the owner or an Administrator can give it out. No role has it after the upgrade. The person moved sees who moved them. The owner can stop Move Members from moving the owner under Settings → Voice: moving members in the admin panel.
+- New role permission Manage Backups: a role with it can take a backup, see the list of backups and download one, without being the owner. The backup schedule stays with the owner. Only the owner or an Administrator can give it out, and no role has it after the upgrade. A link to download a backup now leaves a line in the audit log, and a second Backup now click while one is running is told to wait.
+- Roles can start from a preset in the role editor: Super admin, Server manager, Moderator or Voice moderator fill in the matching boxes, which you can still change before saving. Anything you are not allowed to give out stays unticked and is named, and a box you cannot change stays as it was and is named too.
+- Seven more role permissions that start with nobody: Restore Backups, Manage Config, Manage Updates, Manage Tokens and Issue Recovery work like the owner's own powers, so the owner gives each one out by hand and an Administrator cannot, whatever its role holds; View Diagnostics (logs, support bundles and the attention list) and Erase Accounts can be given by the owner or an Administrator. A member with Issue Recovery can only help someone ranked below them, and API tokens a member makes are theirs alone. No role has any of them after the upgrade.
+
 **Server (operators)**
 
 - Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.
+
+**Desktop UI**
+
+- The member list, profile and DMs show the game someone is playing ("Playing VALORANT · for 42 min"). The desktop app finds it from your Steam and Epic libraries and a built-in list. To turn it off, use Settings → Advanced → Activity.
+- Under Settings → Advanced → Activity, Your games lets you add any running program as a game, rename a game, or keep one game from showing. These choices stay on your computer.
 
 ### Fixed
 
 **Accounts & admin**
 
+- A ban now also ends a connection that was still signing in at the moment of the ban.
 - Account recovery with a recovery kit now spends exactly the kit it checked, so a new kit set up at the same moment stays unspent and usable.
+- A moderator could file an appeal against their own channel purge, which then showed in the moderation queue as an appeal against a sanction. A purge is not a sanction, so it can no longer be appealed.
+- The first-run setup wizard could save a TLS choice the server then could not start with: manual certificates when none were in place, or ACME on port 80. The wizard now refuses those choices, as the admin panel already did.
 
 **Chat**
 
+- The default blocked upload file types now also cover the other common web page and SVG extensions (`htm`, `xhtml`, `xht`, `shtml`, `mht`, `mhtml`, `svgz`). A blocked-types list saved on the admin panel or set in `config.yaml` is kept as it is.
 - Deleting a message after an edit changed who it mentions now lowers the mention badges the message actually raised. Before, it could clear someone's badge for a different, still-unread mention, or leave a badge pointing at the deleted message. Deleting an `@everyone` message now clears its badges too.
+- Reconnecting while a channel's permissions or your role were being changed could leave the channel list out of date (a channel you lost still shown, or a new one missing) until the app was restarted. The reconnect now loads the full channel list.
+- A portrait photo from a phone showed small, in a landscape-shaped box with blank space beside it. Photos uploaded from now on get a box in their upright shape.
 
 **Direct messages**
 
 - Deleting someone's message request and later opening the conversation yourself now counts as accepting them, so their replies reach you instead of being held as a request you can no longer see.
 - A group conversation's "call ended" notice now goes to the people in the group when the call ends.
+- Someone added to a group while its call was running now sees who is in the call, with the in-call marker and the Join strip. And after you leave a group, or are removed from it, the people you saw in its call no longer stay on screen as ghosts if you are added back.
+- A group call that was ringing when you left the group, or were removed from it, no longer reports a missed call afterwards.
+
+**Desktop UI**
+
+- Unsent messages kept by the desktop app for a retry are now only read and saved for the server you are signed in to, the same way as saved logins.
+- Holding Ctrl+M or Ctrl+D toggled mute or deafen over and over, and holding Ctrl+K opened and closed the Quick Switcher. A held key now acts once.
+- The global mute and deafen shortcuts could be set to a Ctrl+Shift key the app or a text field already uses (Ctrl+Shift+K, redo, word select), so one press did two things. Settings now refuses those keys.
+- The banned members list showed Unban next to people ranked at or above you, which the server always refused. It now shows Unban only where it can work.
 
 **Voice and video**
 
 - On a self-hosted LiveKit that sends webhooks, a call member whose connection had briefly dropped could be removed without the call picking a new key holder, which could leave one participant deaf and muted until the next join or leave. The call now picks a new key holder right away.
 - Switching to another voice channel while the first was still connecting could leave you stuck on "Securing" until the call dropped. The new channel's encryption keys are now kept, so it connects.
 - Switching your camera during a call left your own video tile frozen or black until you turned the camera off and on. The tile now follows the new camera straight away.
+- In the Linux app, every voice join, device change and visit to the voice settings left a sound-server connection open, until after a long session no app on the desktop could play or record sound and the call went silent. The app now keeps a few shared connections and reuses them.
 - In the Windows app, a screen share or camera set to H.264 always fell back to VP8, even on a graphics card that can encode H.264. It now stays on H.264 and is encoded on the graphics card (not on Intel graphics, which keep the old behaviour).
 - In the Linux app, your camera could send only about 5 frames a second on some laptop webcams. It now picks a camera mode that keeps 30 fps.
 - In the Linux app, Settings > Voice & Video showed "Camera unavailable" during a call with your camera on. The preview now shows your call camera.
+- In the Linux app, someone else's camera or screen share could show one picture and then freeze for the rest of the call, and a VP9 camera could stay black. Their video now keeps playing. Closing a stream's pop-out window also no longer leaves its tile black.
+- When unmuting failed because the microphone could not be opened, the app switched you back to muted, but everyone else still saw you as unmuted. They now see you muted too.
+- After the call reconnected, a camera or screen share that ended during the drop, or belonged to someone who left meanwhile, stayed in the video grid as a frozen tile. Those tiles are now removed.
 
 ## v2.4.0-beta.1
 

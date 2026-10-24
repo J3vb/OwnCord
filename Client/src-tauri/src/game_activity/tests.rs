@@ -15,10 +15,10 @@ use super::*;
 // -- fixtures --------------------------------------------------------------------
 
 /// A temp directory removed on drop.
-struct TempDir(PathBuf);
+pub(super) struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new(tag: &str) -> Self {
+    pub(super) fn new(tag: &str) -> Self {
         let dir = std::env::temp_dir().join(format!(
             "owncord-game-activity-{tag}-{}",
             std::process::id()
@@ -28,7 +28,7 @@ impl TempDir {
         TempDir(dir)
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -39,7 +39,7 @@ impl Drop for TempDir {
     }
 }
 
-fn write(path: &Path, text: &str) {
+pub(super) fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
 }
@@ -108,7 +108,7 @@ fn norm(path: &Path) -> String {
     normalize_path(&path.to_string_lossy())
 }
 
-fn proc_at(path: &str, started_at_ms: u64) -> Proc {
+pub(super) fn proc_at(path: &str, started_at_ms: u64) -> Proc {
     Proc::new(&[path], path, started_at_ms)
 }
 
@@ -313,7 +313,9 @@ fn steam_background_apps_are_not_games_and_do_not_beat_the_game() {
         1,
     );
     let hades = proc_at(&format!("{root}/steamapps/common/hades/hades"), 9_000);
-    let game = pick(&[wallpaper, hades], &libs, &[], "linux").game.unwrap();
+    let game = pick(&[wallpaper, hades], &libs, &[], &Prefs::default(), "linux")
+        .game
+        .unwrap();
     assert_eq!(game.name, "Hades");
 }
 
@@ -326,7 +328,15 @@ fn start_time_is_remembered_while_the_same_game_keeps_running() {
     let path = format!("{root_norm}/steamapps/common/hades/hades");
     let mut state = None;
     let started = |state: &mut Option<State>, ms: u64| {
-        detect_with(&[proc_at(&path, ms)], state, load, &[], "linux").map(|g| g.started_at_ms)
+        detect_with(
+            &[proc_at(&path, ms)],
+            state,
+            load,
+            &[],
+            &Prefs::default(),
+            "linux",
+        )
+        .map(|g| g.started_at_ms)
     };
     assert_eq!(started(&mut state, 1_000), Some(1_000));
     // The OS later will not say when it started: the answer does not move.
@@ -335,10 +345,16 @@ fn start_time_is_remembered_while_the_same_game_keeps_running() {
     // A quick restart between two polls reports its own known start.
     assert_eq!(started(&mut state, 40_000), Some(40_000));
     // The game quits, then it starts again: its own time is used.
-    assert_eq!(detect_with(&[], &mut state, load, &[], "linux"), None);
+    assert_eq!(
+        detect_with(&[], &mut state, load, &[], &Prefs::default(), "linux"),
+        None
+    );
     assert_eq!(started(&mut state, 50_000), Some(50_000));
     // First seen with no known start: "now", then kept.
-    assert_eq!(detect_with(&[], &mut state, load, &[], "linux"), None);
+    assert_eq!(
+        detect_with(&[], &mut state, load, &[], &Prefs::default(), "linux"),
+        None
+    );
     let first = started(&mut state, UNKNOWN_START).unwrap();
     assert!(first > 50_000 && first < UNKNOWN_START);
     assert_eq!(started(&mut state, UNKNOWN_START), Some(first));
@@ -458,7 +474,7 @@ fn entry(name: &str, exe: &[&str], args: Option<&str>, os: &[&str]) -> ListEntry
 }
 
 fn list_game(entries: &[ListEntry], procs: &[Proc], os: &str) -> Option<DetectedGame> {
-    pick(procs, &Libraries::default(), entries, os).game
+    pick(procs, &Libraries::default(), entries, &Prefs::default(), os).game
 }
 
 #[test]
@@ -560,7 +576,7 @@ fn a_library_game_is_found_by_its_folder_and_named_from_the_manifest() {
     let libs = steam_libs(tmp.path());
     let root = norm(&tmp.path().join("steam"));
     let exe = format!("{root}/steamapps/common/elden ring/game/eldenring.exe");
-    let found = pick(&[proc_at(&exe, 42)], &libs, &[], "linux");
+    let found = pick(&[proc_at(&exe, 42)], &libs, &[], &Prefs::default(), "linux");
     assert_eq!(
         found.game,
         Some(DetectedGame {
@@ -595,7 +611,7 @@ fn helper_processes_in_a_game_folder_do_not_count() {
     ] {
         let path = format!("{root}/steamapps/common/elden ring/{helper}");
         assert_eq!(
-            pick(&[proc_at(&path, 1)], &libs, &[], "linux").game,
+            pick(&[proc_at(&path, 1)], &libs, &[], &Prefs::default(), "linux").game,
             None,
             "{helper} counted as the game"
         );
@@ -607,6 +623,7 @@ fn helper_processes_in_a_game_folder_do_not_count() {
         &[proc_at(&crash, 1), proc_at(&game, 9)],
         &libs,
         &[],
+        &Prefs::default(),
         "linux",
     );
     assert_eq!(found.game.map(|g| g.started_at_ms), Some(9));
@@ -627,7 +644,7 @@ fn games_with_helper_words_inside_their_names_still_count() {
     ] {
         let path = format!("{root}/steamapps/common/elden ring/{game}");
         assert!(
-            pick(&[proc_at(&path, 1)], &libs, &[], "linux")
+            pick(&[proc_at(&path, 1)], &libs, &[], &Prefs::default(), "linux")
                 .game
                 .is_some(),
             "{game} was dropped as a helper"
@@ -646,7 +663,7 @@ fn games_with_helper_words_inside_their_names_still_count() {
     ] {
         let path = format!("{root}/steamapps/common/elden ring/{helper}");
         assert_eq!(
-            pick(&[proc_at(&path, 1)], &libs, &[], "linux").game,
+            pick(&[proc_at(&path, 1)], &libs, &[], &Prefs::default(), "linux").game,
             None,
             "{helper} counted as the game"
         );
@@ -664,11 +681,17 @@ fn a_rejected_helper_does_not_hide_the_game_beside_it() {
     );
     let game = proc_at(&format!("{root}/steamapps/common/elden ring/e.exe"), 5);
     // The helper started first and comes first; the game is still found.
-    let found = pick(&[helper.clone(), game.clone()], &libs, &[], "linux");
+    let found = pick(
+        &[helper.clone(), game.clone()],
+        &libs,
+        &[],
+        &Prefs::default(),
+        "linux",
+    );
     assert_eq!(found.game.map(|g| g.started_at_ms), Some(5));
     // A helper-named program that the own list knows is still a list match.
     let entries = [entry("Odd", &["crashpad_handler"], None, &["linux"])];
-    let found = pick(&[helper], &libs, &entries, "linux").game;
+    let found = pick(&[helper], &libs, &entries, &Prefs::default(), "linux").game;
     assert_eq!(found.map(|g| g.name), Some("Odd".into()));
 }
 
@@ -697,7 +720,13 @@ fn steam_tool_folders_are_not_games() {
     let libs = steam_libs(tmp.path());
     let root = norm(&tmp.path().join("steam"));
     let loader = format!("{root}/steamapps/common/proton 9.0/files/bin/wine64-preloader");
-    let found = pick(&[proc_at(&loader, 1)], &libs, &[], "linux");
+    let found = pick(
+        &[proc_at(&loader, 1)],
+        &libs,
+        &[],
+        &Prefs::default(),
+        "linux",
+    );
     assert_eq!(found.game, None);
     assert_eq!(
         found.unknown_dirs,
@@ -723,7 +752,9 @@ fn among_several_games_the_one_started_first_wins() {
         [&hades, &knight, &elden],
     ] {
         let procs: Vec<Proc> = order.iter().map(|p| (*p).clone()).collect();
-        let game = pick(&procs, &libs, &[], "linux").game.unwrap();
+        let game = pick(&procs, &libs, &[], &Prefs::default(), "linux")
+            .game
+            .unwrap();
         assert_eq!(game.name, "Hades");
         assert_eq!(game.started_at_ms, 1_000);
     }
@@ -737,9 +768,15 @@ fn a_library_game_beats_an_earlier_list_game() {
     let entries = [entry("Listed", &["listed.exe"], None, &["linux"])];
     let listed = proc_at("/opt/listed.exe", 1);
     let steam = proc_at(&format!("{root}/steamapps/common/hades/hades"), 9_999);
-    let game = pick(&[listed, steam], &libs, &entries, "linux")
-        .game
-        .unwrap();
+    let game = pick(
+        &[listed, steam],
+        &libs,
+        &entries,
+        &Prefs::default(),
+        "linux",
+    )
+    .game
+    .unwrap();
     assert_eq!(
         (game.name.as_str(), game.source),
         ("Hades", GameSource::Steam)
@@ -765,9 +802,15 @@ fn among_list_games_the_earliest_start_wins() {
 fn nothing_running_is_none() {
     let tmp = TempDir::new("none");
     let libs = steam_libs(tmp.path());
-    assert_eq!(pick(&[], &libs, &list(), "linux").game, None);
+    assert_eq!(
+        pick(&[], &libs, &list(), &Prefs::default(), "linux").game,
+        None
+    );
     let idle = [proc_at("/usr/bin/bash", 1), proc_at("/usr/bin/firefox", 2)];
-    assert_eq!(pick(&idle, &libs, &list(), "linux").game, None);
+    assert_eq!(
+        pick(&idle, &libs, &list(), &Prefs::default(), "linux").game,
+        None
+    );
 }
 
 #[test]
@@ -779,7 +822,9 @@ fn epic_games_match_by_install_location() {
         r"C:\Program Files\Epic Games\rocketleague\Binaries\Win64\RocketLeague.exe",
         7,
     );
-    let game = pick(&[exe], &libs, &[], "windows").game.unwrap();
+    let game = pick(&[exe], &libs, &[], &Prefs::default(), "windows")
+        .game
+        .unwrap();
     assert_eq!(
         (game.name.as_str(), game.source),
         ("Rocket League", GameSource::Epic)
@@ -803,9 +848,15 @@ fn libraries_are_read_once_and_again_only_for_a_new_library_folder() {
 
     // Known game: one read, no re-read, on any number of scans.
     for _ in 0..3 {
-        assert!(
-            detect_with(std::slice::from_ref(&hades), &mut state, load, &[], "linux").is_some()
-        );
+        assert!(detect_with(
+            std::slice::from_ref(&hades),
+            &mut state,
+            load,
+            &[],
+            &Prefs::default(),
+            "linux"
+        )
+        .is_some());
     }
     assert_eq!(loads.get(), 1);
 
@@ -815,17 +866,38 @@ fn libraries_are_read_once_and_again_only_for_a_new_library_folder() {
         &acf(1, "Brand New", "Brand New"),
     );
     let fresh = proc_at(&format!("{root_norm}/steamapps/common/brand new/new"), 5);
-    let found = detect_with(std::slice::from_ref(&fresh), &mut state, load, &[], "linux");
+    let found = detect_with(
+        std::slice::from_ref(&fresh),
+        &mut state,
+        load,
+        &[],
+        &Prefs::default(),
+        "linux",
+    );
     assert_eq!(found.map(|g| g.name), Some("Brand New".into()));
     assert_eq!(loads.get(), 2);
-    detect_with(std::slice::from_ref(&fresh), &mut state, load, &[], "linux");
+    detect_with(
+        std::slice::from_ref(&fresh),
+        &mut state,
+        load,
+        &[],
+        &Prefs::default(),
+        "linux",
+    );
     assert_eq!(loads.get(), 2);
 
     // A folder no manifest explains costs one re-read, not one per scan.
     let tool = proc_at(&format!("{root_norm}/steamapps/common/mystery/bin"), 5);
     for _ in 0..3 {
         assert_eq!(
-            detect_with(std::slice::from_ref(&tool), &mut state, load, &[], "linux"),
+            detect_with(
+                std::slice::from_ref(&tool),
+                &mut state,
+                load,
+                &[],
+                &Prefs::default(),
+                "linux"
+            ),
             None
         );
     }
@@ -875,7 +947,14 @@ mod linux {
 
     fn scan(root: &Path, list: &[ListEntry]) -> Option<DetectedGame> {
         let procs = read_proc_tree(root, own_uid(root), TICKS).unwrap();
-        pick(&procs, &Libraries::default(), list, "linux").game
+        pick(
+            &procs,
+            &Libraries::default(),
+            list,
+            &Prefs::default(),
+            "linux",
+        )
+        .game
     }
 
     #[test]
@@ -888,7 +967,9 @@ mod linux {
         add_proc(&root, 100, &["bash"], Some("/usr/bin/bash"), 10);
         add_proc(&root, 200, &["./Hades"], Some(&game), 1_000);
         let procs = read_proc_tree(&root, own_uid(&root), TICKS).unwrap();
-        let found = pick(&procs, &libs, &[], "linux").game.unwrap();
+        let found = pick(&procs, &libs, &[], &Prefs::default(), "linux")
+            .game
+            .unwrap();
         assert_eq!(found.name, "Hades");
         assert_eq!(found.source, GameSource::Steam);
         assert_eq!(found.started_at_ms, BOOT * 1000 + 1_000 * 1000 / TICKS);
@@ -913,7 +994,9 @@ mod linux {
             500,
         );
         let procs = read_proc_tree(&root, own_uid(&root), TICKS).unwrap();
-        let found = pick(&procs, &libs, &[], "linux").game.unwrap();
+        let found = pick(&procs, &libs, &[], &Prefs::default(), "linux")
+            .game
+            .unwrap();
         assert_eq!(
             (found.name.as_str(), found.source),
             ("ELDEN RING", GameSource::Steam)
@@ -929,7 +1012,10 @@ mod linux {
         let root = proc_root(tmp.path());
         add_proc(&root, 400, &[&crash], Some(&crash), 5);
         let procs = read_proc_tree(&root, own_uid(&root), TICKS).unwrap();
-        assert_eq!(pick(&procs, &libs, &[], "linux").game, None);
+        assert_eq!(
+            pick(&procs, &libs, &[], &Prefs::default(), "linux").game,
+            None
+        );
     }
 
     #[test]
@@ -1029,7 +1115,7 @@ mod linux {
         let me = own_uid(&root);
         let started = Instant::now();
         let procs = read_proc_tree(&root, me, TICKS).unwrap();
-        let found = pick(&procs, &libs, &entries, "linux").game;
+        let found = pick(&procs, &libs, &entries, &Prefs::default(), "linux").game;
         let elapsed = started.elapsed();
         assert_eq!(procs.len(), 300);
         assert_eq!(found.map(|g| g.name), Some("Hades".into()));
@@ -1050,8 +1136,344 @@ fn matching_three_hundred_processes_in_memory_is_fast() {
         })
         .collect();
     let started = Instant::now();
-    let found = pick(&procs, &libs, &entries, "linux");
+    let found = pick(&procs, &libs, &entries, &Prefs::default(), "linux");
     let elapsed = started.elapsed();
     assert_eq!(found.game, None);
     assert!(elapsed.as_millis() < 200, "match took {elapsed:?}");
+}
+
+// -- manual entries, hidden games and the picker (WP 8.3d) ---------------------------
+
+fn prefs(manual: &[(&str, &str)], hidden: &[&str]) -> Prefs {
+    Prefs::new(&DetectPrefs {
+        manual: manual
+            .iter()
+            .map(|(path, name)| ManualGame {
+                path: (*path).into(),
+                name: (*name).into(),
+            })
+            .collect(),
+        hidden: hidden.iter().map(|n| (*n).into()).collect(),
+    })
+}
+
+#[test]
+fn detect_prefs_read_camel_case_and_tolerate_missing_fields() {
+    let parsed: DetectPrefs = serde_json::from_str(
+        r#"{"manual":[{"path":"C:\\G\\g.exe","name":"G"}],"hidden":["Hades"]}"#,
+    )
+    .unwrap();
+    assert_eq!((parsed.manual.len(), parsed.hidden.len()), (1, 1));
+    let empty: DetectPrefs = serde_json::from_str("{}").unwrap();
+    assert!(empty.manual.is_empty() && empty.hidden.is_empty());
+    assert_eq!(
+        serde_json::to_string(&GameSource::Manual).unwrap(),
+        "\"manual\""
+    );
+}
+
+#[test]
+fn a_manual_entry_wins_over_library_and_list_matches() {
+    let tmp = TempDir::new("manual-wins");
+    let libs = steam_libs(tmp.path());
+    let root = norm(&tmp.path().join("steam"));
+    let entries = [entry("Listed", &["listed.exe"], None, &["linux"])];
+    let steam = proc_at(&format!("{root}/steamapps/common/hades/hades"), 1);
+    let listed = proc_at("/opt/listed.exe", 2);
+    let mine = proc_at("/home/me/tools/mygame", 9_999);
+    let p = prefs(&[("/home/me/tools/mygame", "  My Game ")], &[]);
+    let game = pick(
+        &[steam.clone(), listed.clone(), mine],
+        &libs,
+        &entries,
+        &p,
+        "linux",
+    )
+    .game
+    .unwrap();
+    assert_eq!(
+        (game.name.as_str(), game.source, game.started_at_ms),
+        ("My Game", GameSource::Manual, 9_999)
+    );
+    // Without the entry the earlier library game is the answer again.
+    let game = pick(
+        &[steam, listed],
+        &libs,
+        &entries,
+        &Prefs::default(),
+        "linux",
+    )
+    .game
+    .unwrap();
+    assert_eq!(game.source, GameSource::Steam);
+}
+
+#[test]
+fn a_manual_entry_marks_a_library_programs_name_instead_of_the_manifests() {
+    let tmp = TempDir::new("manual-claims");
+    let libs = steam_libs(tmp.path());
+    let root = norm(&tmp.path().join("steam"));
+    let exe = format!("{root}/steamapps/common/hades/hades");
+    let p = prefs(&[(&exe, "My Hades")], &[]);
+    let game = pick(&[proc_at(&exe, 1)], &libs, &[], &p, "linux")
+        .game
+        .unwrap();
+    assert_eq!(game.name, "My Hades");
+}
+
+#[test]
+fn manual_paths_match_case_insensitively_on_windows_style_paths() {
+    let libs = Libraries::default();
+    let proc = proc_at(r"C:\Games\Cool Game\CoolGame.EXE", 5);
+    for saved in [
+        r"c:\games\cool game\coolgame.exe",
+        r"C:\GAMES\COOL GAME\COOLGAME.EXE",
+        r#""C:\Games\Cool Game\CoolGame.exe""#,
+        "C:/Games/Cool Game/CoolGame.exe",
+    ] {
+        let p = prefs(&[(saved, "Cool")], &[]);
+        let game = pick(std::slice::from_ref(&proc), &libs, &[], &p, "windows").game;
+        assert_eq!(game.map(|g| g.name), Some("Cool".to_string()), "{saved}");
+    }
+    let other = prefs(&[(r"C:\Games\Other\other.exe", "Other")], &[]);
+    assert_eq!(pick(&[proc], &libs, &[], &other, "windows").game, None);
+}
+
+#[test]
+fn a_hidden_game_falls_through_to_the_next_candidate() {
+    let tmp = TempDir::new("hidden");
+    let libs = steam_libs(tmp.path());
+    let root = norm(&tmp.path().join("steam"));
+    let entries = [entry("Listed", &["listed.exe"], None, &["linux"])];
+    let hades = proc_at(&format!("{root}/steamapps/common/hades/hades"), 1);
+    let elden = proc_at(&format!("{root}/steamapps/common/elden ring/e.exe"), 2);
+    let listed = proc_at("/opt/listed.exe", 3);
+    let procs = [hades, elden, listed];
+    let name = |p: &Prefs| {
+        pick(&procs, &libs, &entries, p, "linux")
+            .game
+            .map(|g| g.name)
+    };
+    assert_eq!(name(&Prefs::default()).as_deref(), Some("Hades"));
+    // Case does not matter, and the next started wins.
+    assert_eq!(name(&prefs(&[], &["hADES"])).as_deref(), Some("ELDEN RING"));
+    assert_eq!(
+        name(&prefs(&[], &["Hades", "Elden Ring"])).as_deref(),
+        Some("Listed")
+    );
+    assert_eq!(name(&prefs(&[], &["Hades", "Elden Ring", "Listed"])), None);
+}
+
+#[test]
+fn a_hidden_manual_game_is_skipped_and_does_not_come_back_as_another_name() {
+    let tmp = TempDir::new("hidden-manual");
+    let libs = steam_libs(tmp.path());
+    let root = norm(&tmp.path().join("steam"));
+    let exe = format!("{root}/steamapps/common/hades/hades");
+    let p = prefs(&[(&exe, "My Hades")], &["my hades"]);
+    assert_eq!(
+        pick(&[proc_at(&exe, 1)], &libs, &[], &p, "linux").game,
+        None
+    );
+}
+
+#[test]
+fn a_hidden_game_keeps_the_first_started_rule_for_the_rest() {
+    let entries = [
+        entry("A", &["a.exe"], None, &["linux"]),
+        entry("B", &["b.exe"], None, &["linux"]),
+        entry("C", &["c.exe"], None, &["linux"]),
+    ];
+    let procs = [
+        proc_at("/x/a.exe", 10),
+        proc_at("/x/b.exe", 30),
+        proc_at("/x/c.exe", 20),
+    ];
+    let game = pick(
+        &procs,
+        &Libraries::default(),
+        &entries,
+        &prefs(&[], &["a"]),
+        "linux",
+    )
+    .game
+    .unwrap();
+    assert_eq!((game.name.as_str(), game.started_at_ms), ("C", 20));
+}
+
+#[test]
+fn a_manual_game_with_an_unknown_start_borrows_the_start_already_shown() {
+    let p = prefs(&[("/x/mine", "Mine")], &[]);
+    let load = Libraries::default;
+    let mut state = None;
+    let first = detect_with(
+        &[proc_at("/x/mine", UNKNOWN_START)],
+        &mut state,
+        load,
+        &[],
+        &p,
+        "linux",
+    )
+    .unwrap();
+    assert_ne!(first.started_at_ms, UNKNOWN_START);
+    let again = detect_with(
+        &[proc_at("/x/mine", UNKNOWN_START)],
+        &mut state,
+        load,
+        &[],
+        &p,
+        "linux",
+    )
+    .unwrap();
+    assert_eq!(again.started_at_ms, first.started_at_ms);
+}
+
+#[test]
+fn prefs_drop_entries_that_cannot_match() {
+    let p = prefs(&[("", "Empty path"), ("/x/y", "   ")], &[]);
+    assert!(p.manual.is_empty());
+}
+
+fn program(path: &str) -> Proc {
+    proc_at(path, 1)
+}
+
+#[test]
+fn programs_are_named_by_file_stem_sorted_and_deduplicated_by_path() {
+    let procs = [
+        program(r"C:\Games\Zed\Zed.exe"),
+        program(r"C:\Games\alpha\alpha.exe"),
+        // The same program twice (two instances), once in another case.
+        program(r"C:\Games\Zed\Zed.exe"),
+        program(r"c:\games\zed\zed.EXE"),
+        program(r"D:\Other\Beta.exe"),
+        program("/usr/bin/python3.12"),
+        program("/opt/noext"),
+    ];
+    let listed = list_programs(&procs, None);
+    let names: Vec<&str> = listed.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["alpha", "Beta", "noext", "python3", "Zed"]);
+    assert_eq!(listed[0].path, r"C:\Games\alpha\alpha.exe");
+}
+
+#[test]
+fn programs_leave_out_helpers_and_the_windows_directory() {
+    let procs = [
+        program(r"C:\Windows\System32\svchost.exe"),
+        program(r"c:\windows\explorer.exe"),
+        program(r"C:\Windowsish\game.exe"),
+        program(r"C:\Games\Game\CrashReportClient.exe"),
+        program(r"C:\Games\Game\Launcher.exe"),
+        program(r"C:\Games\Game\Game.exe"),
+    ];
+    let windows = Some(
+        normalize_path(r"C:\Windows")
+            .trim_end_matches('/')
+            .to_string(),
+    );
+    let listed = list_programs(&procs, windows.as_deref());
+    let names: Vec<&str> = listed.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Game", "game"]);
+}
+
+#[test]
+fn programs_are_capped_at_three_hundred() {
+    let procs: Vec<Proc> = (0..450)
+        .map(|i| program(&format!("/opt/app{i:03}/prog{i:03}")))
+        .collect();
+    let listed = list_programs(&procs, None);
+    assert_eq!(listed.len(), MAX_PROGRAMS);
+    assert_eq!(listed[0].name, "prog000");
+    assert_eq!(listed[MAX_PROGRAMS - 1].name, "prog299");
+}
+
+#[test]
+fn a_proton_process_is_listed_by_its_windows_path_not_the_loader() {
+    let proc = Proc::new(
+        &[
+            r"Z:\home\u\games\Cool\cool.exe",
+            "/usr/lib/wine/wine64-preloader",
+        ],
+        "",
+        1,
+    );
+    let listed = list_programs(&[proc], None);
+    assert_eq!(
+        listed,
+        [RunningProgram {
+            name: "cool".into(),
+            path: r"Z:\home\u\games\Cool\cool.exe".into()
+        }]
+    );
+}
+
+#[test]
+fn a_listed_path_matches_back_as_a_manual_entry() {
+    // Whatever the picker hands out is what detect_game later matches.
+    for raw in [r"C:\Games\Cool\Cool.exe", "/opt/cool/cool"] {
+        let proc = program(raw);
+        let listed = list_programs(std::slice::from_ref(&proc), None);
+        let p = prefs(&[(&listed[0].path, "Cool")], &[]);
+        assert!(p.manual_name(&proc).is_some(), "{raw}");
+    }
+}
+
+#[test]
+fn the_cap_keeps_the_most_recently_started_programs_then_sorts_by_name() {
+    // `zzz` programs start last; the alphabet must not decide who is cut.
+    let mut procs: Vec<Proc> = (0..250)
+        .map(|i| proc_at(&format!("/opt/a{i:03}/aaa{i:03}"), 10 + i))
+        .collect();
+    procs.extend((0..100).map(|i| proc_at(&format!("/opt/z{i:03}/zzz{i:03}"), 1_000 + i)));
+    // An unknown start is the oldest.
+    procs.push(proc_at("/opt/unknown/aaa-unknown", UNKNOWN_START));
+    let listed = list_programs(&procs, None);
+    assert_eq!(listed.len(), MAX_PROGRAMS);
+    let names: Vec<&str> = listed.iter().map(|p| p.name.as_str()).collect();
+    assert!(names.contains(&"zzz000") && names.contains(&"zzz099"));
+    assert!(!names.contains(&"aaa-unknown"));
+    // 350 candidates, 50 dropped: the oldest of the aaa group.
+    assert!(!names.contains(&"aaa000") && !names.contains(&"aaa049"));
+    assert!(names.contains(&"aaa050") && names.contains(&"aaa249"));
+    let mut sorted = names.clone();
+    sorted.sort_by_key(|n| n.to_lowercase());
+    assert_eq!(names, sorted);
+}
+
+#[test]
+fn duplicates_and_filtered_programs_do_not_use_up_the_cap() {
+    let mut procs: Vec<Proc> = (0..400).map(|i| proc_at("/opt/same/same", 1 + i)).collect();
+    procs.extend((0..400).map(|i| proc_at(&format!("/opt/h{i}/crashpad_handler{i}"), 5)));
+    procs.push(proc_at("/opt/zed/zed", 1));
+    let names: Vec<String> = list_programs(&procs, None)
+        .into_iter()
+        .map(|p| p.name)
+        .collect();
+    assert_eq!(names, ["same", "zed"]);
+}
+
+#[test]
+fn a_hidden_library_game_does_not_fall_through_to_a_list_match_for_the_same_process() {
+    let tmp = TempDir::new("hidden-no-list");
+    let libs = steam_libs(tmp.path());
+    let root = norm(&tmp.path().join("steam"));
+    // The list also knows this very program, under another name.
+    let entries = [
+        entry("Listed Hades", &["hades"], None, &["linux"]),
+        entry("Other", &["other.exe"], None, &["linux"]),
+    ];
+    let hades = proc_at(&format!("{root}/steamapps/common/hades/hades"), 1);
+    let name = |procs: &[Proc], hidden: &[&str]| {
+        pick(procs, &libs, &entries, &prefs(&[], hidden), "linux")
+            .game
+            .map(|g| g.name)
+    };
+    assert_eq!(
+        name(std::slice::from_ref(&hades), &[]).as_deref(),
+        Some("Hades")
+    );
+    assert_eq!(name(std::slice::from_ref(&hades), &["Hades"]), None);
+    // A different process can still win.
+    let other = proc_at("/opt/other.exe", 9);
+    assert_eq!(name(&[hades, other], &["hades"]).as_deref(), Some("Other"));
 }

@@ -54,6 +54,10 @@ interface StatsTrack {
   >;
 }
 
+function streamKey(userId: number, isScreenshare: boolean): string {
+  return `${userId}:${isScreenshare ? "screenshare" : "camera"}`;
+}
+
 export class RemoteTracks {
   onRemoteVideoCallback: RemoteVideoCallback | null = null;
   onRemoteVideoRemovedCallback: RemoteVideoRemovedCallback | null = null;
@@ -62,6 +66,10 @@ export class RemoteTracks {
   /** Cameras the viewer chose Stop watching for, kept until leave: with
    *  auto-play on, every other camera is watched. */
   private readonly stopped = new Set<string>();
+  /** The remote streams the grid was handed a tile for, as
+   *  `${userId}:${type}`, so a room swap can remove the ones that did not
+   *  survive it. */
+  private readonly offered = new Set<string>();
 
   /** Told the sorted user ids whose screen share is watched, whenever that
    *  set changes (a camera never counts). */
@@ -75,10 +83,16 @@ export class RemoteTracks {
   ) {}
 
   setOnRemoteVideo(cb: RemoteVideoCallback): void {
-    this.onRemoteVideoCallback = cb;
+    this.onRemoteVideoCallback = (userId, stream, isScreenshare) => {
+      this.offered.add(streamKey(userId, isScreenshare));
+      cb(userId, stream, isScreenshare);
+    };
   }
   setOnRemoteVideoRemoved(cb: RemoteVideoRemovedCallback): void {
-    this.onRemoteVideoRemovedCallback = cb;
+    this.onRemoteVideoRemovedCallback = (userId, isScreenshare) => {
+      this.offered.delete(streamKey(userId, isScreenshare));
+      cb(userId, isScreenshare);
+    };
   }
 
   clearOnRemoteVideo(): void {
@@ -138,6 +152,7 @@ export class RemoteTracks {
   clearWatched(): void {
     this.watched.clear();
     this.stopped.clear();
+    this.offered.clear();
     this.reportWatching();
   }
 
@@ -208,6 +223,18 @@ export class RemoteTracks {
       if (this.publication(Number(userId), type) === undefined) this.watched.delete(key);
     }
     this.reportWatching();
+  }
+
+  /** Remove the tiles whose stream the room does not publish. A replaced
+   *  room is detached before it disconnects, so it raises no unpublish for a
+   *  stream that ended or a user who left while the call reconnected. */
+  removeUnpublishedTiles(): void {
+    for (const key of this.offered) {
+      const [userId, type] = key.split(":") as [string, "camera" | "screenshare"];
+      if (this.publication(Number(userId), type) !== undefined) continue;
+      this.offered.delete(key);
+      this.onRemoteVideoRemovedCallback?.(Number(userId), type === "screenshare");
+    }
   }
 
   /** A user's publication of a source, or of the camera or screen share. */

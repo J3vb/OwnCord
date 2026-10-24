@@ -183,6 +183,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* WP 8.3: a 1:1 partner's game, between the name and the last message. */
+.dm-item-body .dm-activity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.dm-item-body .dm-activity-icon {
+  flex: none;
+}
+.dm-item-body .dm-activity-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .dm-item.active .dm-preview {
   color: var(--text-faint);
 }

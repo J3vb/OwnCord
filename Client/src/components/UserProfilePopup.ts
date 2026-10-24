@@ -26,6 +26,7 @@ import { paintBanner } from "../features/profiles/banner";
 import { bannerImages } from "./bannerImages";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
+import { playingForLine } from "../features/members/gameActivityLine";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +44,8 @@ export interface UserProfileData {
   readonly about?: string | null;
   /** Free-text status line, shown under the name. */
   readonly customStatus?: string | null;
+  /** The game being played (WP 8.3), shown as "Playing <game> · for N min". */
+  readonly activity?: { readonly name: string; readonly startedAt: number } | null;
   readonly joinDate?: string | null;
   /** Banner image path and colour (WP 6.11); absent or null = the gradient. */
   readonly banner?: string | null;
@@ -310,6 +313,21 @@ export function createUserProfilePopup(
     const customStatusEl = createElement("div", { class: "upp-custom-status" });
     if (typeof user.customStatus === "string" && user.customStatus.length > 0) {
       setText(customStatusEl, user.customStatus);
+    }
+
+    // The game being played, under the custom status (WP 8.3). Empty (and
+    // hidden by CSS) when there is none.
+    const activityEl = createElement("div", {
+      class: "upp-activity",
+      "data-testid": "upp-activity",
+    });
+    if (user.activity != null && user.isDeleted !== true) {
+      const icon = createIcon("gamepad-2", 14);
+      icon.setAttribute("aria-hidden", "true");
+      icon.classList.add("upp-activity-icon");
+      const text = createElement("span", { class: "upp-activity-text" });
+      setText(text, playingForLine(user.activity, Date.now()));
+      appendChildren(activityEl, icon, text);
     }
 
     // Role badge, or the role picker for a viewer who may change it.
@@ -851,6 +869,7 @@ export function createUserProfilePopup(
       nameEl,
       handleEl,
       customStatusEl,
+      activityEl,
       roleHolder,
       statusLine,
       aboutSection,

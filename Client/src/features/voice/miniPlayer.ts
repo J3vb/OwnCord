@@ -10,6 +10,7 @@
 import { createElement } from "../../lib/dom";
 import { Disposable } from "../../lib/disposable";
 import { createIcon, type IconName } from "../../lib/icons";
+import { syncVideoSurface } from "../../lib/videoSurface";
 import { voiceText } from "../../i18n/voice";
 
 /** How far one arrow key press moves the player. */
@@ -94,6 +95,7 @@ export function openMiniPlayer(opts: MiniPlayerOptions): MiniPlayer {
   control(voiceText("tile.stopWatching"), "eye-off", "stop", opts.onStopWatching);
 
   root.append(opts.video, name, controls, hint);
+  syncVideoSurface(opts.video);
   document.body.appendChild(root);
   void opts.video.play()?.catch(() => {});
 

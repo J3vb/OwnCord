@@ -335,7 +335,7 @@ removes `.tmp` files a killed backup left untouched for a day. Because the backu
 upload's quota charge (writer I/O under the quota mutex) no longer waits for
 it; that is how PERF-10 is satisfied. **Uploads are not
 in a backup** (`docs/trust-model.md`, "At rest"), and neither is `totp.key`
-(O7). The owner-only full archive (`GET /admin/api/archive`,
+(O7). The full archive (owner or Restore Backups holder) (`GET /admin/api/archive`,
 `Server/admin/handlers_archive.go`) is the one download that carries both: a
 zip of the whole data directory and `config.yaml`, with a `VACUUM INTO`
 snapshot in place of the live database file.

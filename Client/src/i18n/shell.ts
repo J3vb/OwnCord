@@ -113,6 +113,8 @@ export const shellText = defineCatalog("shell", {
   "channel.locallyMuted": "Muted for you",
   "channel.ownSessionFingerprint":
     "Your session fingerprint (changes every call — not an identity): {fingerprint}",
+  "channel.ownSafetyNumber":
+    "Your safety number: {safetyNumber} · Compare it with the number they see for you",
   "channel.empty": "No channels yet",
   "channel.emptyHint": "Ask a moderator to create a channel",
   "channel.markAllRead": "Mark Server as Read",

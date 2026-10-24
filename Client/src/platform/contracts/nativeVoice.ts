@@ -159,6 +159,9 @@ export interface NativeVoiceCameraOptions {
 export interface NativeVoiceCameraDevice {
   id: string;
   name: string;
+  /** Offers only greyscale formats: a face-unlock infrared sensor, listed
+   *  after the colour cameras. */
+  infrared: boolean;
 }
 
 /** Whether the host can capture cameras at all: GStreamer initialises and the

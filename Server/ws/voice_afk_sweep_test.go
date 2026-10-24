@@ -55,12 +55,17 @@ func TestLivePresence_IdleSinceKeptAcrossCustomStatusAndExpiry(t *testing.T) {
 
 func TestBuildVoiceMoved_ModeratorBytesUnchanged(t *testing.T) {
 	const want = `{"type":"voice_moved","payload":{"to_channel_id":5}}`
-	if got := string(buildVoiceMoved(5, "")); got != want {
+	if got := string(buildVoiceMoved(5, "", 0)); got != want {
 		t.Fatalf("moderator voice_moved = %s, want %s", got, want)
 	}
 	const wantAFK = `{"type":"voice_moved","payload":{"to_channel_id":5,"reason":"afk"}}`
-	if got := string(buildVoiceMoved(5, voiceMovedReasonAFK)); got != wantAFK {
+	if got := string(buildVoiceMoved(5, voiceMovedReasonAFK, 0)); got != wantAFK {
 		t.Fatalf("afk voice_moved = %s, want %s", got, wantAFK)
+	}
+	// A moderator move names the mover (WP 8.4b); the AFK sweep names nobody.
+	const wantBy = `{"type":"voice_moved","payload":{"to_channel_id":5,"by_user_id":9}}`
+	if got := string(buildVoiceMoved(5, "", 9)); got != wantBy {
+		t.Fatalf("moderator voice_moved with mover = %s, want %s", got, wantBy)
 	}
 }
 

@@ -163,6 +163,7 @@ vi.mock("@stores/voice.store", () => ({
   clearPeerVerification: vi.fn(),
   clearPeerVerifications: vi.fn(),
   setLocalSessionFingerprint: vi.fn(),
+  setLocalSafetyNumber: vi.fn(),
   setEncryptionDegraded: vi.fn(),
 }));
 
@@ -2037,6 +2038,7 @@ describe("LiveKitSession", () => {
               ["TR_a", publication],
               ["TR_v", camera],
             ]),
+            getTrackPublication: (source: string) => (source === "camera" ? camera : undefined),
           },
         ],
       ]);
@@ -2084,6 +2086,7 @@ describe("LiveKitSession", () => {
               ["TR_a", publication],
               ["TR_v", camera],
             ]),
+            getTrackPublication: (source: string) => (source === "camera" ? camera : undefined),
           },
         ],
       ]);
@@ -2909,7 +2912,7 @@ describe("LiveKitSession", () => {
   describe("setMuted (with active room)", () => {
     beforeEach(async () => {
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
+      session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
       await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
       vi.clearAllMocks();
     });
@@ -3004,6 +3007,35 @@ describe("LiveKitSession", () => {
       expect(setLocalMuted).toHaveBeenCalledWith(true);
       expect(errorCb).toHaveBeenCalled();
       expect(errorCb.mock.calls[0]?.[0]).toEqual(expect.stringMatching(/microphone/i));
+    });
+
+    // The toggle sent voice_mute{muted:false} before the re-enable failed, so
+    // the fallback has to restate the mute or peers keep seeing it unmuted.
+    it("a failed unmute tells the server the member is muted again", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      session.setWsClient(ws as any);
+      mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(
+        new DOMException("Permission denied", "NotAllowedError"),
+      );
+
+      session.setMuted(false);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+    });
+
+    it("a failed unmute sends nothing while the chat socket is down", async () => {
+      const ws = { send: vi.fn(), getState: () => "reconnecting" };
+      session.setWsClient(ws as any);
+      mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(
+        new DOMException("Permission denied", "NotAllowedError"),
+      );
+
+      session.setMuted(false);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(setLocalMuted).toHaveBeenCalledWith(true);
+      expect(ws.send).not.toHaveBeenCalled();
     });
   });
 
