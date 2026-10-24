@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 const runner = fileURLToPath(new URL("./run.mjs", import.meta.url));
@@ -194,5 +194,68 @@ test("JSON listing rejects duplicate or unknown options without partial output",
     const result = list(...args);
     assert.equal(result.status, 2);
     assert.equal(result.stdout, "");
+  }
+});
+
+test("piped JSON, help and validation errors finish writing before exit", () => {
+  // Pipes may write asynchronously. Defer writes deterministically so this
+  // regression is portable instead of depending on pipe capacity or the OS.
+  const delayedOutput =
+    "data:text/javascript," +
+    encodeURIComponent(
+      "for (const stream of [process.stdout, process.stderr]) {" +
+        " const write = stream.write.bind(stream);" +
+        " stream.write = (...args) => { setTimeout(() => write(...args), 10); return true; };" +
+        "}",
+    );
+  for (const args of [["--list", "check:rust", "--json"], ["--help"], ["--list", "check:typo"]]) {
+    const result = spawnSync(process.execPath, ["--import", delayedOutput, runner, ...args], {
+      env,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    if (args.includes("--json")) {
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(Object.keys(JSON.parse(result.stdout)), ["check:rust"]);
+    } else if (args.includes("--help")) {
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /usage:/);
+      assert.match(result.stdout, /Tasks:.*check:rust/);
+    } else {
+      assert.equal(result.status, 2);
+      assert.match(result.stderr, /unknown task: check:typo/);
+      assert.match(result.stderr, /known:.*check:rust/);
+    }
+  }
+});
+
+test("a failing check preserves its exit code and stops later steps", () => {
+  const fixture = mkdtempSync(join(tmpdir(), "owncord-runner-"));
+  try {
+    mkdirSync(join(fixture, "scripts"));
+    mkdirSync(join(fixture, "Server"));
+    mkdirSync(join(fixture, "Client"));
+    copyFileSync(runner, join(fixture, "scripts", "run.mjs"));
+    writeFileSync(join(fixture, "scripts", "check-doc-counts.mjs"), "process.exitCode = 7;");
+    const marker = join(fixture, "unexpected-next-step");
+    writeFileSync(
+      join(fixture, "scripts", "check-doc-citations.test.mjs"),
+      `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "ran");`,
+    );
+    const result = spawnSync(
+      process.execPath,
+      [join(fixture, "scripts", "run.mjs"), "check:docs"],
+      {
+        env: { ...env, PATH: dirname(process.execPath) },
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+    assert.equal(result.status, 7, result.stderr);
+    assert.match(result.stderr, /FAILED: node scripts\/check-doc-counts.mjs exited 7/);
+    assert.equal(existsSync(marker), false, "later check did not run");
+    assert.doesNotMatch(result.stdout, /check:docs: passed/);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
   }
 });

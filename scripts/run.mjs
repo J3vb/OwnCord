@@ -380,7 +380,7 @@ function runTask(name) {
     const attempt = `${describe(s)}${where || "  [in repository root]"}`;
     if (!existsSync(cwd)) {
       console.error(`\nFAILED: ${attempt}: working directory does not exist (${cwd}).`);
-      process.exit(1);
+      return 1;
     }
     // With shell:true Node deprecates a separate args array (DEP0190), because it
     // concatenates without escaping. So concatenate deliberately instead: the only
@@ -400,15 +400,15 @@ function runTask(name) {
         });
     if (r.error && r.error.code !== "ENOENT") {
       console.error(`\nFAILED: ${attempt} could not be started: ${r.error.code}`);
-      process.exit(1);
+      return 1;
     }
     if (r.error && r.error.code === "ENOENT") {
       console.error(`\nFAILED: ${attempt}: executable is not installed or not on PATH.`);
-      process.exit(1);
+      return 1;
     }
     if (r.status !== 0) {
       console.error(`\nFAILED: ${describe(s)}${where} exited ${r.status}`);
-      process.exit(r.status ?? 1);
+      return r.status ?? 1;
     }
   }
   if (skipped.length) {
@@ -418,57 +418,63 @@ function runTask(name) {
   } else {
     console.log(`\n${name}: passed`);
   }
+  return 0;
 }
 
-const argv = process.argv.slice(2);
-const arg = argv[0];
-const usage =
-  "usage: node scripts/run.mjs --list [task] [--json]\n" +
-  "       node scripts/run.mjs <task>\n" +
-  "       node scripts/run.mjs --help";
-function usageError() {
-  console.error(usage);
-  process.exit(2);
-}
-function requireTask(name) {
-  if (!Object.hasOwn(TASKS, name)) {
-    console.error(`unknown task: ${name}\nknown: ${Object.keys(TASKS).join(", ")}`);
-    process.exit(2);
+// Return an exit code so piped stdout/stderr can drain before Node exits.
+function main(argv) {
+  const arg = argv[0];
+  const usage =
+    "usage: node scripts/run.mjs --list [task] [--json]\n" +
+    "       node scripts/run.mjs <task>\n" +
+    "       node scripts/run.mjs --help";
+  function usageError() {
+    console.error(usage);
+    return 2;
   }
-}
-if (arg === "--help" || arg === "-h") {
-  if (argv.length !== 1) usageError();
-  console.log(`${usage}\n\nTasks: ${Object.keys(TASKS).join(", ")}`);
-  process.exit(0);
-}
-if (!arg || arg === "--list") {
-  const options = argv.slice(1);
-  const names = options.filter((value) => value !== "--json");
-  if (names.length > 1 || options.filter((value) => value === "--json").length > 1) {
-    usageError();
-  }
-  const selected = names[0];
-  if (selected !== undefined) requireTask(selected);
-  const entries = selected === undefined ? Object.entries(TASKS) : [[selected, TASKS[selected]]];
-  if (options.includes("--json")) {
-    console.log(JSON.stringify(Object.fromEntries(entries), null, 2));
-    process.exit(0);
-  }
-  for (const [name, steps] of entries) {
-    console.log(`\n${name}`);
-    for (const s of steps) {
-      const where = s.cwd === "." ? "" : `   (in ${s.cwd})`;
-      const label = s.label ? `${s.cmd} ${s.label}` : `${s.cmd} ${s.args.join(" ")}`;
-      console.log(`  ${s.probe ? "[optional] " : ""}${label}${where}`);
+  function requireTask(name) {
+    if (!Object.hasOwn(TASKS, name)) {
+      console.error(`unknown task: ${name}\nknown: ${Object.keys(TASKS).join(", ")}`);
+      return false;
     }
+    return true;
   }
-  console.log("");
-  process.exit(0);
+  if (arg === "--help" || arg === "-h") {
+    if (argv.length !== 1) return usageError();
+    console.log(`${usage}\n\nTasks: ${Object.keys(TASKS).join(", ")}`);
+    return 0;
+  }
+  if (!arg || arg === "--list") {
+    const options = argv.slice(1);
+    const names = options.filter((value) => value !== "--json");
+    if (names.length > 1 || options.filter((value) => value === "--json").length > 1) {
+      return usageError();
+    }
+    const selected = names[0];
+    if (selected !== undefined && !requireTask(selected)) return 2;
+    const entries = selected === undefined ? Object.entries(TASKS) : [[selected, TASKS[selected]]];
+    if (options.includes("--json")) {
+      console.log(JSON.stringify(Object.fromEntries(entries), null, 2));
+      return 0;
+    }
+    for (const [name, steps] of entries) {
+      console.log(`\n${name}`);
+      for (const s of steps) {
+        const where = s.cwd === "." ? "" : `   (in ${s.cwd})`;
+        const label = s.label ? `${s.cmd} ${s.label}` : `${s.cmd} ${s.args.join(" ")}`;
+        console.log(`  ${s.probe ? "[optional] " : ""}${label}${where}`);
+      }
+    }
+    console.log("");
+    return 0;
+  }
+  if (argv.length !== 1 || arg.startsWith("-")) return usageError();
+  if (!requireTask(arg)) return 2;
+  if (!existsSync(join(ROOT, "Server")) || !existsSync(join(ROOT, "Client"))) {
+    console.error("run this from the repository root");
+    return 2;
+  }
+  return runTask(arg);
 }
-if (argv.length !== 1 || arg.startsWith("-")) usageError();
-requireTask(arg);
-if (!existsSync(join(ROOT, "Server")) || !existsSync(join(ROOT, "Client"))) {
-  console.error("run this from the repository root");
-  process.exit(2);
-}
-runTask(arg);
+
+process.exitCode = main(process.argv.slice(2));
