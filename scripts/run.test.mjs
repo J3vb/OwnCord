@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const runner = fileURLToPath(new URL("./run.mjs", import.meta.url));
@@ -75,4 +78,54 @@ test("--list rejects extra arguments rather than silently ignoring them", () => 
   assert.equal(result.status, 2);
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /usage:.*--list.*task/);
+});
+
+test("a missing executable reports the command and working directory", () => {
+  const fixture = mkdtempSync(join(tmpdir(), "owncord-runner-"));
+  try {
+    mkdirSync(join(fixture, "scripts"));
+    mkdirSync(join(fixture, "Server"));
+    mkdirSync(join(fixture, "Client", "src-tauri"), { recursive: true });
+    copyFileSync(runner, join(fixture, "scripts", "run.mjs"));
+    const result = spawnSync(
+      process.execPath,
+      [join(fixture, "scripts", "run.mjs"), "check:rust"],
+      {
+        env,
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /FAILED: cargo fmt --all -- --check\s+\[in Client\/src-tauri\]/);
+    assert.match(result.stderr, /not installed or not on PATH/);
+    assert.doesNotMatch(result.stderr, /working directory does not exist/);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test("a missing working directory is not reported as a missing executable", () => {
+  const fixture = mkdtempSync(join(tmpdir(), "owncord-runner-"));
+  try {
+    mkdirSync(join(fixture, "scripts"));
+    mkdirSync(join(fixture, "Server"));
+    mkdirSync(join(fixture, "Client"));
+    copyFileSync(runner, join(fixture, "scripts", "run.mjs"));
+    const result = spawnSync(
+      process.execPath,
+      [join(fixture, "scripts", "run.mjs"), "check:rust"],
+      {
+        env,
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /FAILED: cargo fmt --all -- --check\s+\[in Client\/src-tauri\]/);
+    assert.match(result.stderr, /working directory does not exist/);
+    assert.doesNotMatch(result.stderr, /not installed or not on PATH/);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });

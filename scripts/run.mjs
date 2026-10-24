@@ -379,6 +379,12 @@ function runTask(name) {
     }
     const where = s.cwd === "." ? "" : `  [in ${s.cwd}]`;
     console.log(`\n--- ${describe(s)}${where}`);
+    const cwd = join(ROOT, s.cwd);
+    const attempt = `${describe(s)}${where || "  [in repository root]"}`;
+    if (!existsSync(cwd)) {
+      console.error(`\nFAILED: ${attempt}: working directory does not exist (${cwd}).`);
+      process.exit(1);
+    }
     // With shell:true Node deprecates a separate args array (DEP0190), because it
     // concatenates without escaping. So concatenate deliberately instead: the only
     // commands that take this branch are the npm shims, and no argument in this
@@ -386,21 +392,21 @@ function runTask(name) {
     const shell = needsShell(s.cmd);
     const r = shell
       ? spawnSync([bin(s.cmd), ...s.args].join(" "), {
-          cwd: join(ROOT, s.cwd),
+          cwd,
           stdio: "inherit",
           shell: true,
         })
       : spawnSync(s.cmd, s.args, {
-          cwd: join(ROOT, s.cwd),
+          cwd,
           stdio: "inherit",
           shell: false,
         });
     if (r.error && r.error.code !== "ENOENT") {
-      console.error(`\nFAILED: ${s.cmd} could not be started: ${r.error.code}`);
+      console.error(`\nFAILED: ${attempt} could not be started: ${r.error.code}`);
       process.exit(1);
     }
     if (r.error && r.error.code === "ENOENT") {
-      console.error(`\nFAILED: ${s.cmd} is not installed or not on PATH.`);
+      console.error(`\nFAILED: ${attempt}: executable is not installed or not on PATH.`);
       process.exit(1);
     }
     if (r.status !== 0) {
