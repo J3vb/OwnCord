@@ -1952,6 +1952,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       });
       popup = opened;
       root?.appendChild(opened.element);
+      // Focus starts inside the popup, so Escape closes it even before the
+      // lazy picker has mounted and moved focus to its search box.
+      opened.element.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
       const dismiss = new Disposable();
       popupDismiss = dismiss;
       // Defer so the click that opened the popup doesn't immediately close it.
