@@ -577,6 +577,9 @@ test("native and browser peers decode each other's video with the same key", asy
   let resources: Record<string, number> = {};
   let closed: Record<string, unknown> = {};
   const threads: Array<{ phase: string; count: number }> = [];
+  // Every peer event with its arrival time, so a run where the native side
+  // decodes nothing says whether its watch never opened or opened and starved.
+  const timeline: Array<{ type: unknown; at: number }> = [];
   const peer = runNativePeer(
     [
       "--url",
@@ -593,6 +596,7 @@ test("native and browser peers decode each other's video with the same key", asy
       "5",
     ],
     ({ event }) => {
+      timeline.push({ type: event.type, at: Date.now() });
       if (event.type === "threads")
         threads.push(event as unknown as { phase: string; count: number });
       if (event.type === "video")
@@ -634,7 +638,8 @@ test("native and browser peers decode each other's video with the same key", asy
   const fromBrowser = nativeVideo.filter((v) => v.identity === "user-1" && v.at >= settledAt);
   const perSecond = fromBrowser.map((v) => v.frames);
   console.log(`native decoded browser video, frames/s after settle: ${perSecond.join(",")}`);
-  expect(fromBrowser.length).toBeGreaterThan(0);
+  const seen = timeline.map((e) => `${String(e.type)}@${e.at - settledAt}ms`).join(" ");
+  expect(fromBrowser.length, `native peer events relative to settle: ${seen}`).toBeGreaterThan(0);
   expect(Math.max(...perSecond)).toBeGreaterThan(10);
   expect(fromBrowser.at(-1)!.width).toBeGreaterThan(0);
   // The frame socket: loopback-bound, refuses a wrong or missing token, and
