@@ -173,7 +173,7 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 		if store != nil {
 			r.With(MaxBodySize(avatarMaxBodySize)).
 				Post("/avatar", handleUploadAvatar(svc, store, limiter, broadcaster))
-			r.With(MaxBodySize(avatarMaxBodySize)).
+			r.With(MaxBodySize(bannerMaxBodySize)).
 				Post("/banner", handleUploadBanner(svc, store, limiter, broadcaster))
 		}
 
@@ -219,10 +219,10 @@ func validateIdentityKey(key string) error {
 	return nil
 }
 
-// allowedAvatarMIME is the set of image types an avatar may be, matched against
-// the type sniffed from the file's own bytes. GIF is absent (an animated
-// avatar in every message row is a distraction the renderer cannot opt out of)
-// and so is SVG, for the same reason emoji refuse it: it is markup with script
+// allowedAvatarMIME is the set of still image types an avatar, banner or group
+// icon may be, matched against the type sniffed from the file's own bytes.
+// GIF is added per surface (imageLimits.AllowGIF, WP 8.7) where the client
+// freezes it to its first frame until hovered. SVG is absent, for the same reason emoji refuse it: it is markup with script
 // and external-fetch capability, and an avatar is rendered inline by
 // definition.
 var allowedAvatarMIME = map[string]bool{
