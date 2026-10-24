@@ -214,6 +214,7 @@ export const messagingText = defineCatalog("messaging", {
   "forward.loadFailed": "Couldn't open Forward",
   "header.threads": "Threads",
   "thread.panelLoadFailed": "Couldn't open the thread",
+  "thread.resizePanel": "Resize thread panel",
   "thread.open": "Open thread {name}",
   "thread.count": { one: "{count} message", other: "{count} messages" },
   "thread.countCapped": "{count}+ messages",

@@ -55,6 +55,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Messages & files**
+
+- Text and code files (.txt, .log, .json, .py, .js, .ts, .sql, .go, .md and more) now show a preview in chat: the first lines in a coloured code box, with Expand and Collapse, the language and the line count. Only the first 64 KB is shown; download the file for the rest. Files marked as spoilers stay a plain download.
+
 **Accounts & admin**
 
 - New role permission Move Members: a role with it can move anyone between voice channels, whatever their rank, from the voice menu or by dragging. Only the owner or an Administrator can give it out. No role has it after the upgrade. The person moved sees who moved them. The owner can stop Move Members from moving the owner under Settings → Voice: moving members in the admin panel.

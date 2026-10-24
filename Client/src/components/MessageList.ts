@@ -938,6 +938,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     setScrollTop(root.scrollHeight);
   }
 
+  /** Distance from the bottom at the last scroll event or resize pass: what the
+   *  resize observer judges "at the bottom" by, since by the time it runs a
+   *  grown row has already pushed the bottom further away. */
+  let bottomGapBeforeResize = 0;
+
+  function bottomGap(m?: ScrollMetrics): number {
+    if (root === null) return 0;
+    const { scrollTop, scrollHeight, clientHeight } = m ?? readMetrics(root);
+    return scrollHeight - scrollTop - clientHeight;
+  }
+
   /** What the pill shows now, so a scroll burst writes the DOM only on a change. */
   let btnShownKey = "";
 
@@ -969,7 +980,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   /** Move the view to the NEW divider once one exists. Does not force a row rebuild (R2). */
   function openAtDividerIfReady(): boolean {
-    if (!openAtDividerPending || root === null) return false;
+    // Hidden, the scroller cannot move: the resize observer places it once shown.
+    if (!openAtDividerPending || root === null || root.clientHeight === 0) return false;
     const idx = virtualItems.findIndex((item) => item.kind === "new-divider");
     if (idx === -1) return false;
     openAtDividerPending = false;
@@ -1330,6 +1342,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // The last jumped-to message, re-centred from the resize callback while
   // content above it is still sizing.
   let jumpTarget: { readonly messageId: number; readonly until: number } | null = null;
+
+  /** Index of the message a recent jump is still centring, or -1. */
+  function activeJumpIndex(): number {
+    if (jumpTarget === null || Date.now() >= jumpTarget.until) return -1;
+    const { messageId } = jumpTarget;
+    return virtualItems.findIndex(
+      (item) => item.kind === "message" && item.message.id === messageId,
+    );
+  }
 
   let renderWindowCount = 0;
   let renderWindowResetTimer = 0;
@@ -1834,6 +1855,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }
     }
     dropGoneEdit(editHadFocus);
+    // The rows changed under the reader without a scroll event: a newer page
+    // landing below a reader near the bottom of a detached window leaves them
+    // where they were, so the resize pass must not pull them down to it.
+    bottomGapBeforeResize = bottomGap();
     return true;
   }
 
@@ -2003,6 +2028,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         }
       }
       dropGoneEdit(editHadFocus);
+      bottomGapBeforeResize = bottomGap();
       log.debug("renderAll END");
     } finally {
       renderAllRunning = false;
@@ -2098,7 +2124,6 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  is a distance, so it must be recomputed when the viewport grows or shrinks. */
   let lastViewportHeight = 0;
   let resizeObserver: ResizeObserver | null = null;
-  // resizeDirty tracking removed — resize observer batches via RAF directly
   function handleScroll(): void {
     if (root === null) return;
 
@@ -2109,6 +2134,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // second layout.
     const m = readMetrics(root);
     scrollSnapshot = m;
+    if (m.clientHeight > 0) bottomGapBeforeResize = bottomGap(m);
     const nearTop =
       m.scrollTop < Math.max(SCROLL_TOP_THRESHOLD, m.clientHeight * SCROLL_TOP_VIEWPORTS);
     if (!nearTop) olderRetryAt = 0;
@@ -2442,62 +2468,92 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     );
 
     // Watch for height changes in rendered items (images loading, embeds expanding).
-    // Batched via RAF with anchor-based scroll preservation.
+    // A plain re-measure runs inside the observer callback, which comes after
+    // layout and before paint: deferring it to the next frame painted one frame
+    // with the rows below a grown image or card shifted, then snapped them back.
+    // A pass that may build rows (a resized viewport, a jump settling, the NEW
+    // divider still to place) resizes the observed content itself, so it waits
+    // for the next frame instead of looping the observer.
+    const resizePass = (): void => {
+      if (root === null || contentContainer === null) return;
+      // The text estimates wrap at the list's width: when it changes, the
+      // rows nothing has measured yet are estimated again (below).
+      const width = root.clientWidth;
+      const widthChanged = width > 0 && width !== (estimateWidth ?? DEFAULT_LIST_WIDTH);
+      if (widthChanged) estimateWidth = width;
+
+      // A viewport that grew (pane enlarged, window maximized) needs more
+      // rows than the window holds, with no scroll event to say so.
+      const viewportHeight = root.clientHeight;
+      if (viewportHeight !== lastViewportHeight) renderWindow();
+
+      const jumpIdx = activeJumpIndex();
+      if (jumpIdx !== -1) {
+        if (widthChanged) reseedUnmeasured();
+        measureRendered();
+        updateSpacers();
+        centreOnIndex(jumpIdx);
+        return;
+      }
+
+      // Where the reader was before the content changed size: a row near the
+      // bottom that grew past the threshold has already moved the bottom away
+      // by the time this runs, which must not unpin a reader who was at it.
+      const atBottom = isNearBottom() || bottomGapBeforeResize < SCROLL_BOTTOM_THRESHOLD;
+
+      // Capture anchor: the first item that starts in view, and its offset
+      // from the viewport top. Not the item straddling the top edge: growth
+      // inside it (an image box settling below its header) would then move
+      // every row the reader is looking at.
+      const { scrollTop, clientHeight } = readMetrics(root);
+      let anchorIdx = offsetToIndex(scrollTop);
+      if (
+        offsetBefore(anchorIdx) < scrollTop &&
+        anchorIdx + 1 < renderedEnd &&
+        offsetBefore(anchorIdx + 1) < scrollTop + clientHeight
+      ) {
+        anchorIdx++;
+      }
+      const anchorOffset = scrollTop - offsetBefore(anchorIdx);
+
+      // The anchor above was read against the old estimates; the restore
+      // below reads the new ones, so the reading position holds.
+      if (widthChanged) reseedUnmeasured();
+
+      // Re-measure rendered elements
+      measureRendered();
+
+      // Update spacer heights with new measurements
+      updateSpacers();
+
+      // Restore scroll position using anchor
+      if (atBottom) {
+        // A list mounted while hidden still owes the reader its NEW divider.
+        if (!openAtDividerIfReady()) scrollToBottom();
+      } else {
+        setScrollTop(offsetBefore(anchorIdx) + anchorOffset);
+      }
+      bottomGapBeforeResize = bottomGap();
+      keepEditorCaretInView();
+    };
     resizeObserver = new ResizeObserver(() => {
       if (root === null || contentContainer === null) return;
+      // Hidden (the call grid has the chat column, display: none): nothing is
+      // laid out, so there is nothing to measure, and the position from before
+      // it was hidden is what showing it again restores.
+      if (root.clientHeight === 0) return;
+      const buildsRows =
+        root.clientHeight !== lastViewportHeight ||
+        activeJumpIndex() !== -1 ||
+        openAtDividerPending;
+      if (!buildsRows) {
+        if (resizeRafId === 0) resizePass();
+        return;
+      }
       if (resizeRafId !== 0) return;
-
       resizeRafId = requestAnimationFrame(() => {
         resizeRafId = 0;
-        if (root === null || contentContainer === null) return;
-        // The text estimates wrap at the list's width: when it changes, the
-        // rows nothing has measured yet are estimated again (below).
-        const width = root.clientWidth;
-        const widthChanged = width > 0 && width !== (estimateWidth ?? DEFAULT_LIST_WIDTH);
-        if (widthChanged) estimateWidth = width;
-
-        // A viewport that grew (pane enlarged, window maximized) needs more
-        // rows than the window holds, with no scroll event to say so.
-        const viewportHeight = root.clientHeight;
-        if (viewportHeight !== lastViewportHeight) renderWindow();
-
-        const jumpIdx =
-          jumpTarget !== null && Date.now() < jumpTarget.until
-            ? virtualItems.findIndex(
-                (item) => item.kind === "message" && item.message.id === jumpTarget?.messageId,
-              )
-            : -1;
-        if (jumpIdx !== -1) {
-          if (widthChanged) reseedUnmeasured();
-          measureRendered();
-          updateSpacers();
-          centreOnIndex(jumpIdx);
-          return;
-        }
-
-        const atBottom = isNearBottom();
-
-        // Capture anchor: topmost visible item and its offset from viewport top
-        const anchorIdx = offsetToIndex(root.scrollTop);
-        const anchorOffset = root.scrollTop - offsetBefore(anchorIdx);
-
-        // The anchor above was read against the old estimates; the restore
-        // below reads the new ones, so the reading position holds.
-        if (widthChanged) reseedUnmeasured();
-
-        // Re-measure rendered elements
-        measureRendered();
-
-        // Update spacer heights with new measurements
-        updateSpacers();
-
-        // Restore scroll position using anchor
-        if (atBottom) {
-          scrollToBottom();
-        } else {
-          setScrollTop(offsetBefore(anchorIdx) + anchorOffset);
-        }
-        keepEditorCaretInView();
+        if (root !== null && root.clientHeight > 0) resizePass();
       });
     });
     resizeObserver.observe(contentContainer);

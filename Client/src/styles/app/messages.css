@@ -1021,28 +1021,34 @@
 
 /* Syntax highlighting — hues come from theme tokens so custom themes and the
    light theme recolour along with everything else. */
-.msg-codeblock .tok-comment {
+.msg-codeblock .tok-comment,
+.msg-textpreview-code .tok-comment {
   color: var(--text-micro);
   font-style: italic;
 }
 
-.msg-codeblock .tok-string {
+.msg-codeblock .tok-string,
+.msg-textpreview-code .tok-string {
   color: var(--green);
 }
 
-.msg-codeblock .tok-number {
+.msg-codeblock .tok-number,
+.msg-textpreview-code .tok-number {
   color: var(--yellow);
 }
 
-.msg-codeblock .tok-keyword {
+.msg-codeblock .tok-keyword,
+.msg-textpreview-code .tok-keyword {
   color: var(--text-link);
 }
 
-.msg-codeblock .tok-inserted {
+.msg-codeblock .tok-inserted,
+.msg-textpreview-code .tok-inserted {
   color: var(--green);
 }
 
-.msg-codeblock .tok-deleted {
+.msg-codeblock .tok-deleted,
+.msg-textpreview-code .tok-deleted {
   color: var(--red);
 }
 
@@ -1600,6 +1606,100 @@ ul.md-list-nested {
 .msg-file-download:hover {
   background: var(--bg-hover);
   color: var(--text-normal);
+}
+
+/* Text and code file preview (8.5): the file header, the first lines of the
+   file in a code box, and an Expand/Collapse footer. Collapsed it shows six
+   lines; the loading state reserves the same height so the row does not jump. */
+.msg-textpreview {
+  --tp-body-h: calc(6 * 1.5 * var(--font-size-sm) + 24px);
+  max-width: 520px;
+  background: var(--bg-secondary);
+}
+.msg-textpreview-view {
+  position: relative;
+}
+.msg-textpreview-body {
+  max-height: var(--tp-body-h);
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+.msg-textpreview.loading .msg-textpreview-view {
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  height: var(--tp-body-h);
+}
+.msg-textpreview.has-more:not(.expanded) .msg-textpreview-view::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 3em;
+  background: linear-gradient(to bottom, transparent, var(--bg-tertiary));
+  pointer-events: none;
+}
+.msg-textpreview.expanded .msg-textpreview-body {
+  max-height: 400px;
+  overflow: auto;
+}
+.msg-textpreview-scroll {
+  display: flex;
+  min-width: max-content;
+}
+.msg-textpreview-gutter {
+  position: sticky;
+  left: 0;
+  padding: 12px 8px 12px 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-micro);
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+}
+.msg-textpreview-code {
+  flex: 1;
+  padding: 12px 12px 12px 8px;
+  white-space: pre;
+}
+.msg-textpreview-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 33px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-textpreview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  padding: 4px 6px;
+  margin-left: -6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-link);
+  font-size: inherit;
+  cursor: pointer;
+}
+.msg-textpreview-toggle:hover {
+  background: var(--bg-hover);
+}
+.msg-textpreview-foot > :first-child:not(.msg-textpreview-toggle) {
+  margin-left: auto;
+}
+.msg-textpreview-note {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
 }
 
 /* Inline video attachment — shares the .msg-image box so a video is capped to
