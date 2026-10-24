@@ -36,6 +36,10 @@ import {
 import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
 import { renderInlineImage } from "../../src/components/message-list/media";
 import { getImageBox, setImageBox } from "../../src/components/message-list/image-sizes";
+import {
+  rememberRowHeight,
+  rememberedRowHeight,
+} from "../../src/components/message-list/row-heights";
 import { discardMedia, observeMedia } from "../../src/lib/media-visibility";
 import {
   EXTERNAL_CONSENT_PREF,
@@ -353,6 +357,15 @@ const PROBES: readonly Probe[] = [
       expect(getImageBox("https://cdn.example/box-probe.png")).toEqual({ w: 40, h: 30 });
     },
     isInitial: () => getImageBox("https://cdn.example/box-probe.png") === undefined,
+  },
+  {
+    // Row heights measured on one server never seed the next one's lists.
+    name: "message-list:row-heights",
+    mutate: () => {
+      rememberRowHeight("row-probe", 800, 140);
+      expect(rememberedRowHeight("row-probe", 800)).toBe(140);
+    },
+    isInitial: () => rememberedRowHeight("row-probe", 800) === undefined,
   },
   {
     // A cached GIF still shows as an instant swap for the next row of that GIF.

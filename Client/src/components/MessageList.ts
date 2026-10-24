@@ -85,6 +85,7 @@ import {
 } from "./message-list/image-sizes";
 import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
+import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./message-list/row-heights";
 import type { PollOutcome } from "../features/messaging/pollSend";
 import { messagingText } from "../i18n/messaging";
 import {
@@ -850,7 +851,23 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function getItemHeight(index: number): number {
     const cached = heightCache.get(itemKey(index));
     if (cached !== undefined) return cached;
-    return estimateItemHeight(virtualItems[index]!, estimateWidth);
+    return estimateRow(index);
+  }
+
+  /** A message row's height key across lists; null for rows that are not a
+   *  confirmed message. */
+  function rememberKey(index: number): string | null {
+    const item = virtualItems[index];
+    if (item === undefined || item.kind !== "message" || item.message.id === 0) return null;
+    return rowHeightKey(item.message.id, item.isGrouped, item.message.editedAt);
+  }
+
+  /** An unmeasured row: the height an earlier list of this channel drew it at,
+   *  else the estimate. */
+  function estimateRow(index: number): number {
+    const key = estimateWidth === undefined ? null : rememberKey(index);
+    const remembered = key === null ? undefined : rememberedRowHeight(key, estimateWidth!);
+    return remembered ?? estimateItemHeight(virtualItems[index]!, estimateWidth);
   }
 
   function totalHeight(): number {
@@ -1250,6 +1267,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Fenwick tree. No DOM reads here, so no additional reflow is triggered.
     for (const { key, idx, h } of measurements) {
       heightCache.set(key, h);
+      const shared = estimateWidth === undefined ? null : rememberKey(idx);
+      if (shared !== null) rememberRowHeight(shared, estimateWidth!, h);
       if (tree !== null) {
         tree.set(idx, h);
       }
@@ -1606,8 +1625,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function reseedUnmeasured(): void {
     if (tree === null) return;
     for (let i = 0; i < virtualItems.length; i++) {
-      if (!heightCache.has(itemKey(i)))
-        tree.set(i, estimateItemHeight(virtualItems[i]!, estimateWidth));
+      if (!heightCache.has(itemKey(i))) tree.set(i, estimateRow(i));
     }
   }
 
@@ -2558,6 +2576,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     resizeObserver.observe(root);
 
     parentContainer.appendChild(region);
+    // Estimate at the real width from the first render, so rows an earlier
+    // visit measured seed it rather than a reseed after the observer fires.
+    if (root.clientWidth > 0) estimateWidth = root.clientWidth;
 
     openAtDividerPending = unreadOnOpen > 0;
     renderAll();
