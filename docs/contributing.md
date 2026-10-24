@@ -252,6 +252,11 @@ Turn them on once per clone, from the repository root:
 npm run hooks:install    # runs: git config core.hooksPath .githooks
 ```
 
+It also registers the findings-ledger merge driver (`scripts/merge-ledger.mjs`,
+named in `.gitattributes`), so merging `dev` into a branch that added ledger
+entries keeps both sides' entries instead of conflicting. If both sides took the
+same new id, the branch's entry is renumbered and the driver prints the rename.
+
 **`pre-commit`** looks only at staged files:
 
 - Go files staged: `gofmt` and `go vet`.

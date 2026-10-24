@@ -128,7 +128,8 @@
    left column, and messages, typing and the composer stack in a right column. */
 .chat-area--call-chat {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  /* --call-chat-width is the drag handle's (features/voice/callChatResize.ts). */
+  grid-template-columns: minmax(0, 1fr) var(--call-chat-width, 360px);
   grid-template-rows: auto minmax(0, 1fr) auto auto;
 }
 .chat-area--call-chat > .chat-header {
@@ -152,6 +153,40 @@
   grid-row: 4;
 }
 
+/* The handle on the chat's left edge, over the slots in that column. */
+.call-chat-resize {
+  display: none;
+}
+.chat-area--call-chat > .call-chat-resize {
+  display: block;
+  grid-column: 2;
+  grid-row: 2 / 5;
+  justify-self: start;
+  z-index: 2;
+  width: 8px;
+  margin-left: -4px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.chat-area--call-chat > .call-chat-resize::after {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 100%;
+  margin-left: 4px;
+  background: var(--border);
+}
+.chat-area--call-chat > .call-chat-resize:hover::after,
+.chat-area--call-chat > .call-chat-resize:focus-visible::after {
+  width: 2px;
+  margin-left: 3px;
+  background: var(--accent);
+}
+.chat-area--call-chat > .call-chat-resize:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 /* Set while the chat column is narrower than the split needs (side panels
    included): the chat stacks under the grid. */
 .chat-area--call-chat-stacked {
@@ -173,6 +208,9 @@
 .chat-area--call-chat-stacked > .input-slot {
   grid-column: 1;
   grid-row: 5;
+}
+.chat-area--call-chat-stacked > .call-chat-resize {
+  display: none;
 }
 
 /* ── Slot wrappers (inside .chat-area flex column) ── */
