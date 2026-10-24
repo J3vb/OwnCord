@@ -118,6 +118,8 @@ and only when it changes something a contributor or fork holder must do
 - Switching your camera during a call left your own video tile frozen or black until you turned the camera off and on. The tile now follows the new camera straight away.
 - In the Linux app, every voice join, device change and visit to the voice settings left a sound-server connection open, until after a long session no app on the desktop could play or record sound and the call went silent. The app now keeps a few shared connections and reuses them.
 - In the Windows app, a screen share or camera set to H.264 always fell back to VP8, even on a graphics card that can encode H.264. It now stays on H.264 and is encoded on the graphics card (not on Intel graphics, which keep the old behaviour).
+- In the Linux app, your camera could send only about 5 frames a second on some laptop webcams. It now picks a camera mode that keeps 30 fps.
+- In the Linux app, Settings > Voice & Video showed "Camera unavailable" during a call with your camera on. The preview now shows your call camera.
 - In the Linux app, someone else's camera or screen share could show one picture and then freeze for the rest of the call, and a VP9 camera could stay black. Their video now keeps playing. Closing a stream's pop-out window also no longer leaves its tile black.
 - When unmuting failed because the microphone could not be opened, the app switched you back to muted, but everyone else still saw you as unmuted. They now see you muted too.
 - After the call reconnected, a camera or screen share that ended during the drop, or belonged to someone who left meanwhile, stayed in the video grid as a frozen tile. Those tiles are now removed.

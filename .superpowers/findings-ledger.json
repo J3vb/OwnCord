@@ -1,5 +1,5 @@
 {
-  "nextId": 515,
+  "nextId": 517,
   "findings": [
     {
       "id": "OC-0001",
@@ -11881,6 +11881,54 @@
     },
     {
       "id": "OC-0514",
+      "title": "On Linux the native camera captured at about 5 fps on a laptop webcam",
+      "file": "Client/src-tauri/src/native_voice/camera.rs",
+      "line": 1,
+      "severity": "medium",
+      "why": "The capture pipeline let v4l2src fixate its own caps. It prefers raw over MJPEG and the largest size, so a webcam whose 1080p raw YUYV mode runs at 5 fps captured at 5 fps, and the call camera reached peers at that rate.",
+      "repro": "Linux app with an integrated webcam that lists YUYV 1080p at 5 fps and MJPEG at 30 fps; turn the camera on in a call and count the frames a peer decodes.",
+      "evidence": "Laptop re-test 2026-10-23: the browser peer decoded the Linux camera at 17 -> 167 frames in 30 s.",
+      "suggestedFix": "Read the device's modes and pin one that reaches the asked rate at the smallest size that covers the cap.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/camera.rs (the_call_camera_takes_a_mode_that_keeps_its_rate, a_camera_without_a_fast_mode_gets_its_fastest_one, camera_modes_lists_each_fixed_size_at_each_rate, a_pinned_mode_reaches_the_appsink)",
+        "revertProof": "not applicable (the mode picker is new; without it no mode is pinned)"
+      },
+      "note": "A real-camera frame rate check on the reporting laptop follows the merge.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-23",
+      "hunt": "linux-video-retest-2026-10-23",
+      "lens": "platform-parity",
+      "finder": "linux-laptop-retest",
+      "fixedDate": "2026-10-23"
+    },
+    {
+      "id": "OC-0515",
+      "title": "On Linux the settings camera preview showed Camera unavailable during a call with the camera on",
+      "file": "Client/src-tauri/src/native_voice/mod.rs",
+      "line": 1,
+      "severity": "low",
+      "why": "The settings preview always started its own capture of the device, which the call's capture already held; V4L2 refuses the second open, so the preview failed while the camera worked.",
+      "repro": "Linux app: join voice, turn the camera on, open Settings > Voice & Video; the preview says Camera unavailable.",
+      "evidence": "Laptop re-test 2026-10-23: during the call the preview <video> was 0x0 with readyState 0 and the label read Camera unavailable.",
+      "suggestedFix": "Show the call camera's own preview socket during a call, and restart the preview when the camera's owner changes.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/voice-audio-tab.test.ts (starts the native preview again when the host closes its socket), Client/src/features/voice/native/videoRenderer.test.ts (hands a host close to its owner instead of reopening, until disposed)",
+        "revertProof": "pass (the tab test fails without the VoiceAudioTab change)"
+      },
+      "note": "The Rust side (reusing the call's socket) needs a live room and has no unit test; the laptop re-test covers it.",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-23",
+      "hunt": "linux-video-retest-2026-10-23",
+      "lens": "platform-parity",
+      "finder": "linux-laptop-retest",
+      "fixedDate": "2026-10-23"
+    },
+    {
+      "id": "OC-0516",
       "title": "Username inputs cut valid names of letters outside the BMP at 16 characters",
       "file": "Client/src/lib/nameLimits.ts",
       "line": 202,

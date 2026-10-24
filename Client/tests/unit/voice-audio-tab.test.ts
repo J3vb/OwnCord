@@ -1835,6 +1835,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   const unsubscribeTest = vi.fn();
   /** The mic test's event handler, as the host would call it. */
   let testHandler: ((envelope: NativeMicTestEnvelope) => void) | null = null;
+  /** Every preview renderer the tab made, oldest first. */
+  const renderers: Array<{ url: string; onClosed?: () => void; disposed: boolean }> = [];
   beforeEach(async () => {
     vi.resetModules();
     startMicTest.mockReset().mockResolvedValue(7);
@@ -1903,11 +1905,20 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         },
       },
     }));
+    renderers.length = 0;
     vi.doMock("../../src/features/voice/native/videoRenderer", () => ({
       NativeVideoRenderer: class {
         readonly mediaStreamTrack = { stop: vi.fn(), dispatchEvent: vi.fn() };
-        constructor(readonly url: string) {}
-        dispose() {}
+        disposed = false;
+        constructor(
+          readonly url: string,
+          readonly onClosed?: () => void,
+        ) {
+          renderers.push(this);
+        }
+        dispose() {
+          this.disposed = true;
+        }
       },
     }));
     localStorage.clear();
@@ -2736,6 +2747,45 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       [...sel.options].some((o) => o.value === "cam-1"),
     );
     expect(videoSelect).toBeDefined();
+  });
+
+  it("starts the native preview again when the host closes its socket", async () => {
+    // The call's camera turning on takes the device from the preview (or off,
+    // handing it back): the host closes the preview socket, and the tab asks
+    // again for whichever capture owns the camera now.
+    vi.stubGlobal(
+      "MediaStream",
+      class {
+        constructor(readonly tracks: unknown[] = []) {}
+        getTracks(): unknown[] {
+          return this.tracks;
+        }
+      },
+    );
+    startCameraPreview
+      .mockResolvedValueOnce({ width: 320, height: 180, frames: "ws://127.0.0.1:9/own" })
+      .mockResolvedValue({ width: 1280, height: 720, frames: "ws://127.0.0.1:9/call" });
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const ac = new AbortController();
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    await vi.waitFor(() => expect(renderers).toHaveLength(1));
+    const first = renderers[0]!;
+    expect(first.url).toBe("ws://127.0.0.1:9/own/camera");
+
+    first.onClosed?.();
+    expect(first.disposed).toBe(true);
+    await vi.waitFor(() => expect(renderers).toHaveLength(2));
+    expect(startCameraPreview).toHaveBeenCalledTimes(2);
+    expect(renderers[1]!.url).toBe("ws://127.0.0.1:9/call/camera");
+    // The closed preview had nothing left to release on the host.
+    expect(stopCameraPreview).not.toHaveBeenCalled();
+
+    // A close after the tab is gone starts nothing.
+    ac.abort();
+    renderers[1]!.onClosed?.();
+    await new Promise((r) => setTimeout(r, 600));
+    expect(startCameraPreview).toHaveBeenCalledTimes(2);
   });
 
   it("does not let a superseded native preview stop the newer capture", async () => {

@@ -102,17 +102,17 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 28    |
 | Distinct `invoke` command names called from `Client/src/`  | 94    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 97    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 98    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 56    |
 
-The handler count covers the 97 distinct registrations
+The handler count covers the 98 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]` and the forty-three `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 96 on Linux
-and 53 elsewhere. The one environment-detection helper is
+behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 97 on Linux
+and 54 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -139,6 +139,7 @@ delete_credential
 delete_identity_key
 delete_pending_messages
 detect_game
+detect_media
 download_and_install_update
 external_image
 external_preview
@@ -238,7 +239,14 @@ caller since WP 8.3c: `src/platform/desktop/gameDetector.ts`, behind the
 game" and hides the setting. WP 8.3d gives it a second command,
 `list_running_programs` (the user's own running programs for the "Add a game"
 picker; the list is shown only in that local picker and never stored or sent),
-and an optional `{ manual, hidden }` argument to `detect_game`. The three Windows per-app share audio commands
+and an optional `{ manual, hidden }` argument to `detect_game`. `detect_media`
+(WP 8.10b, the Rust reader of the song playing in the OS media session: GSMTC
+on Windows, MPRIS on Linux, nothing playing elsewhere; it takes `{ hidden }`
+and answers a tagged `{ state: "playing", title, artist, player, playerId,
+positionMs, durationMs }`, `{ state: "none" }` or `{ state: "unknown" }`, where
+unknown is a failed, timed-out or still-running read that the caller must not
+treat as a stop; the player shown last stays while it still plays, else the OS's
+current session goes first) has no production caller until WP 8.10c. The three Windows per-app share audio commands
 `app_audio_available`, `start_app_audio` and `stop_app_audio` (WP 6.7a, the host
 half: they exist on every target and answer "unavailable" off Windows) have their
 caller since WP 6.7b: `src/platform/desktop/appAudio.ts`, behind the `AppAudio`
