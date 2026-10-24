@@ -188,18 +188,37 @@ func (h *Hub) applyActivity(c *Client, next *gameActivity) {
 
 // applyActivityLocked is applyActivity's body. The caller holds presenceMu.
 func (h *Hub) applyActivityLocked(c *Client, next *gameActivity) {
+	h.swapActivityLocked(c, func(lp *livePresence) bool {
+		if sameActivity(lp.activity, next) {
+			return false
+		}
+		lp.activity = next
+		return true
+	})
+}
+
+// swapActivityLocked is the shared body of the game and listening appliers:
+// it copies c's live presence, lets edit change the copy (false = nothing to
+// change), swaps it in by compare-and-swap and broadcasts the presence frame
+// that carries the result, game and song together. It does nothing unless c
+// still holds its user's slot and has a stamped presence. The caller holds
+// presenceMu.
+func (h *Hub) swapActivityLocked(c *Client, edit func(lp *livePresence) bool) {
 	if h.GetClient(c.userID) != c {
 		return
 	}
-	var cur *livePresence
+	var cur, updated *livePresence
 	for {
 		cur = c.presence.Load()
-		if cur == nil || sameActivity(cur.activity, next) {
+		if cur == nil {
 			return
 		}
-		updated := *cur
-		updated.activity = next
-		if c.presence.CompareAndSwap(cur, &updated) {
+		next := *cur
+		if !edit(&next) {
+			return
+		}
+		updated = &next
+		if c.presence.CompareAndSwap(cur, updated) {
 			break
 		}
 	}
@@ -209,12 +228,12 @@ func (h *Hub) applyActivityLocked(c *Client, next *gameActivity) {
 		// one per game start or stop is itself a sign the user is online. Only
 		// the player hears it; nothing public changed, so a queued connect
 		// entry stays as it is.
-		c.sendPresenceMsg(buildPresenceMsg(c.userID, cur.status, text, next))
+		c.sendPresenceMsg(buildPresenceMsg(c.userID, cur.status, text, updated.activity, updated.listening))
 		return
 	}
 	// Like every user-chosen presence, this supersedes a queued connect entry.
 	h.dropQueuedPresenceLocked(c.userID)
-	for _, ev := range presenceEvents(c.userID, cur.status, text, next) {
+	for _, ev := range presenceEvents(c.userID, cur.status, text, updated.activity, updated.listening) {
 		h.enqueueExpiredPresence(c, ev)
 	}
 }
@@ -229,10 +248,12 @@ type readyActivityPayload struct {
 // readyActivities lists the games viewerID may see: every connected user who
 // reports one and is not offline to the viewer (db.StatusForViewer: an
 // invisible user is offline to everyone but themselves), the viewer included,
-// sorted by user id. Never nil, so the ready key is always an array.
-func (h *Hub) readyActivities(viewerID int64) []readyActivityPayload {
+// sorted by user id. Never nil, so the ready key is always an array. live is
+// one livePresences snapshot shared with readyListening, so a ready never pairs
+// a user's old game with their new song.
+func readyActivities(live map[int64]livePresence, viewerID int64) []readyActivityPayload {
 	out := []readyActivityPayload{}
-	for uid, lp := range h.livePresences() {
+	for uid, lp := range live {
 		if lp.activity == nil || lp.status == "" {
 			continue
 		}
@@ -247,3 +268,43 @@ func (h *Hub) readyActivities(viewerID int64) []readyActivityPayload {
 
 // command.go sits at its size ceiling, so the constructor registers itself.
 func init() { commandConstructors[MsgTypeActivityUpdate] = parseActivityUpdate }
+
+// readyListening lists the songs viewerID may see, by the same rules as
+// readyActivities (connected, not offline to the viewer, own invisible copy
+// included), sorted by user id. Never nil, so the ready key is always an array.
+func readyListening(live map[int64]livePresence, viewerID int64) []readyListeningPayload {
+	out := []readyListeningPayload{}
+	for uid, lp := range live {
+		if lp.listening == nil || lp.status == "" {
+			continue
+		}
+		if db.StatusForViewer(lp.status, uid, viewerID) == db.StatusOffline {
+			continue
+		}
+		out = append(out, readyListeningPayload{UserID: uid, listeningActivity: *lp.listening})
+	}
+	slices.SortFunc(out, func(a, b readyListeningPayload) int { return cmp.Compare(a.UserID, b.UserID) })
+	return out
+}
+
+// clearActivityAndListeningLocked clears c's game and song in one swap, so the
+// server switch going off sends one presence frame per user, not two. The
+// caller holds presenceMu.
+func (h *Hub) clearActivityAndListeningLocked(c *Client) {
+	h.swapActivityLocked(c, func(lp *livePresence) bool {
+		if lp.activity == nil && lp.listening == nil {
+			return false
+		}
+		lp.activity, lp.listening = nil, nil
+		return true
+	})
+}
+
+// bareActivityFrame is the presence frame without its game and song, built
+// only when there is something to leave out (nil otherwise).
+func bareActivityFrame(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []byte {
+	if activity == nil && listening == nil {
+		return nil
+	}
+	return buildPresenceMsg(userID, status, customStatus, nil, nil)
+}

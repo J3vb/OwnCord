@@ -55,6 +55,7 @@
               "dm_privacy": true,
               "forums": true,
               "game_activity": true,
+              "listening_activity": true,
               "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
@@ -125,6 +126,7 @@
               }
             ],
             "dm_channels": [],
+            "listening": [],
             "member_timeouts": [],
             "members": [
               {
@@ -241,6 +243,7 @@
               {
                 "activity": null,
                 "custom_status": "fixture custom status",
+                "listening": null,
                 "status": "online",
                 "user_id": "<id:number>"
               }
@@ -281,6 +284,7 @@
               {
                 "activity": null,
                 "custom_status": null,
+                "listening": null,
                 "status": "online",
                 "user_id": "<id:number>"
               }
@@ -358,6 +362,7 @@
               "dm_privacy": true,
               "forums": true,
               "game_activity": true,
+              "listening_activity": true,
               "manage_nicknames": true,
               "message_deduplication": true,
               "message_retry_floor_ms": 0,
@@ -428,6 +433,7 @@
               }
             ],
             "dm_channels": [],
+            "listening": [],
             "member_timeouts": [],
             "members": [
               {
@@ -542,6 +548,7 @@
               {
                 "activity": null,
                 "custom_status": null,
+                "listening": null,
                 "status": "online",
                 "user_id": "<id:number>"
               }

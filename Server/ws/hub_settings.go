@@ -185,8 +185,8 @@ func (h *Hub) ApplyGameActivityPolicy(saved bool) {
 	}
 }
 
-// clearAllGameActivity clears every connection's shown game through the
-// ordinary clear path (applyActivityLocked): sequenced presence for a visible
+// clearAllGameActivity clears every connection's shown game and song (WP
+// 8.10a) through the ordinary clear path (swapActivityLocked): sequenced presence for a visible
 // user, the user's own frame only for an invisible one, and a queued connect
 // entry superseded. presenceMu is held across the whole sweep so no set or
 // older presence frame lands between two clears; nothing under it does I/O.
@@ -194,7 +194,7 @@ func (h *Hub) clearAllGameActivity() {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
 	for _, c := range h.clientSnapshot() {
-		h.applyActivityLocked(c, nil)
+		h.clearActivityAndListeningLocked(c)
 	}
 }
 
