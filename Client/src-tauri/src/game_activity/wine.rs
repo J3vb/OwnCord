@@ -422,18 +422,26 @@ pub(super) fn lutris_games(config: &LutrisConfig, home: &Path) -> Vec<GameDir> {
     if is_launcher_exe(file_of(exe)) || is_launcher_name(name) {
         return Vec::new();
     }
-    let dir = config
-        .working_dir
-        .as_deref()
-        .or_else(|| parent_of(exe))
-        .unwrap_or("");
     let roots: Vec<String> = config
         .prefix
         .iter()
         .map(|p| normalize_path(&expand_home(p, home).to_string_lossy()))
         .map(|p| p.trim_end_matches('/').to_string())
         .collect();
-    game_dirs(name, GameSource::Lutris, dir, &roots)
+    // Matching compares executable paths, so the exe's own folder always
+    // counts; a working_dir elsewhere (a sibling `Ship/`) is added beside it.
+    let mut games = Vec::new();
+    for dir in parent_of(exe)
+        .into_iter()
+        .chain(config.working_dir.as_deref())
+    {
+        for game in game_dirs(name, GameSource::Lutris, dir, &roots) {
+            if !games.contains(&game) {
+                games.push(game);
+            }
+        }
+    }
+    games
 }
 
 /// Every Lutris game config in the given folders: the direct games and the Wine

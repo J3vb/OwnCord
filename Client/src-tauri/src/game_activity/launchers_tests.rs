@@ -418,7 +418,7 @@ fn lutris_config_reads_name_and_game_block_with_quotes() {
 }
 
 #[test]
-fn lutris_game_uses_working_dir_else_the_exe_folder_with_the_drive_alias() {
+fn lutris_game_uses_the_exe_folder_and_the_working_dir_with_the_drive_alias() {
     let home = Path::new("/home/u");
     let config = parse_lutris_config(LUTRIS_YML);
     let found: Vec<String> = lutris_games(&config, home)
@@ -428,10 +428,24 @@ fn lutris_game_uses_working_dir_else_the_exe_folder_with_the_drive_alias() {
     assert_eq!(
         found,
         [
+            "/home/u/games/hades2/drive_c/games/hades ii/",
+            "/games/hades ii/",
             "/home/u/games/hades2/drive_c/games/hades ii/ship/",
             "/games/hades ii/ship/",
         ]
     );
+    // The game's own exe resolves, in both the Linux and the C: spelling,
+    // although working_dir is a sibling folder.
+    for exe in [
+        "/home/u/Games/hades2/drive_c/Games/Hades II/Hades2.exe",
+        r"C:\Games\Hades II\Hades2.exe",
+    ] {
+        let path = normalize_path(exe);
+        assert!(
+            found.iter().any(|dir| path.starts_with(dir.as_str())),
+            "{exe}"
+        );
+    }
     let no_working = LutrisConfig {
         working_dir: None,
         ..parse_lutris_config(LUTRIS_YML)
