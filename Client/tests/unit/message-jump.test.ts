@@ -433,6 +433,33 @@ describe("createMessageJumper", () => {
     ).toEqual([20]);
   });
 
+  it("a jump response for a channel the user already left does not install its window", async () => {
+    const scrollToMessage = vi.fn().mockReturnValue(false);
+    const ctrl = {
+      currentChannelId: 1,
+      messageList: { scrollToMessage },
+    } as unknown as ReturnType<typeof fakeCtrl>["ctrl"];
+    let resolveAround: (v: unknown) => void = () => {};
+    const getMessagesAround = vi.fn(() => new Promise((resolve) => (resolveAround = resolve)));
+    const jumper = createMessageJumper({
+      api: fakeApi(getMessagesAround),
+      getChannelCtrl: () => ctrl,
+      nextFrame: immediateFrame,
+    });
+
+    const jump = jumper.jumpTo(1, 42);
+    // The user opens another channel before the around-window arrives.
+    (ctrl as { currentChannelId: number }).currentChannelId = 2;
+    resolveAround({ messages: [response(42)], has_more_before: true, has_more_after: true });
+
+    await expect(jump).resolves.toBe(false);
+    const state = messagesStore.getState();
+    expect(state.loadedChannels.has(1)).toBe(false);
+    expect(state.detachedChannels.has(1)).toBe(false);
+    expect(state.messagesByChannel.get(1)).toBeUndefined();
+    expect(scrollToMessage).not.toHaveBeenCalledWith(42);
+  });
+
   it("a target shown by live rows survives the channel's history load landing after the jump", async () => {
     // A freshly opened channel already renders the target from live rows,
     // but its mount-time tail fetch is still in flight.
