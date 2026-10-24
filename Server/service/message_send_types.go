@@ -31,6 +31,11 @@ type SendMessageParams struct {
 	// Content and AttachmentIDs are the raw text and uploads, so the receipt
 	// hash covers the forum, the title, the tags, the text and the uploads.
 	ForumPost string
+	// StickerID is the sticker a sticker message carries (WP 8.8a), 0 for an
+	// ordinary send. A sticker send has no text and no attachments, and needs a
+	// ClientMessageID so the message and its sticker row commit with the
+	// receipt.
+	StickerID int64
 }
 
 // ReferencedMessage is the reply-parent snippet a chat_message frame carries.
@@ -132,4 +137,8 @@ type SendMessageResult struct {
 	// after the commit (the poll then shows as its fallback text until the next
 	// history read).
 	Poll *db.PollInfo
+
+	// Sticker is the sticker block of the broadcast, set only for a sticker
+	// message.
+	Sticker *db.MessageStickerInfo
 }

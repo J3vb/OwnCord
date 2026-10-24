@@ -245,14 +245,15 @@ type ReactionCount struct {
 
 // MessageSearchResult is a row returned by the FTS5 message search.
 type MessageSearchResult struct {
-	MessageID        int64      `json:"message_id"`
-	ChannelID        int64      `json:"channel_id"`
-	ChannelName      string     `json:"channel_name"`
-	User             UserPublic `json:"user"`
-	Content          string     `json:"content"`
-	Timestamp        string     `json:"timestamp"`
-	Mentions         []int64    `json:"mentions"`
-	MentionsEveryone bool       `json:"mentions_everyone"`
+	MessageID        int64               `json:"message_id"`
+	ChannelID        int64               `json:"channel_id"`
+	ChannelName      string              `json:"channel_name"`
+	User             UserPublic          `json:"user"`
+	Content          string              `json:"content"`
+	Timestamp        string              `json:"timestamp"`
+	Mentions         []int64             `json:"mentions"`
+	MentionsEveryone bool                `json:"mentions_everyone"`
+	Sticker          *MessageStickerInfo `json:"sticker,omitempty"` // WP 8.8a
 }
 
 // SearchPage selects one page of full-text search results. The zero values
@@ -311,6 +312,8 @@ type MessageAPIResponse struct {
 	// Poll is set only on a poll (6.9b), Thread only on a thread starter (6.9c).
 	Poll   *PollInfo   `json:"poll,omitempty"`
 	Thread *ThreadInfo `json:"thread,omitempty"`
+	// Sticker is set only on a sticker message (8.8a). See MessageStickerInfo.
+	Sticker *MessageStickerInfo `json:"sticker,omitempty"`
 }
 
 // GroupEventInfo is the group_event block of a group DM row. Which fields are

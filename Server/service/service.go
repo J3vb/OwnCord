@@ -46,6 +46,9 @@ type Services struct {
 	Settings    *SettingsService
 	Uploads     *UploadService
 	Voice       *VoiceService
+	// Stickers is the custom sticker set (WP 8.8a), gated like Emoji. Nil when
+	// the store cannot hold stickers.
+	Stickers *StickerService
 	// ChannelPrivacy is the channel-level private flag (3D-6).
 	ChannelPrivacy *ChannelPrivacyService
 	Tokens         *TokenService
@@ -165,7 +168,13 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	if ps, ok := st.(PrivacyStore); ok {
 		privacy = NewPrivacyService(ps)
 	}
+	emoji := NewEmojiService(st, permSvc)
+	var stickers *StickerService
+	if ss, ok := st.(StickerStore); ok {
+		stickers = NewStickerService(ss, emoji)
+	}
 	return &Services{
+		Stickers:        stickers,
 		UserNotes:       userNotes,
 		Privacy:         privacy,
 		CallLog:         callLog,
@@ -184,7 +193,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 		Blocks:          blocks,
 		Moderation:      moderation,
 		Roles:           NewRoleService(st, permSvc),
-		Emoji:           NewEmojiService(st, permSvc),
+		Emoji:           emoji,
 		Settings:        NewSettingsService(st),
 		Uploads:         uploads,
 		Voice:           voice,

@@ -899,6 +899,9 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 	if err := d.attachPolls(ctx, msgs, requestingUserID); err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages polls: %w", err)
 	}
+	if err := d.attachStickers(ctx, msgs); err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages stickers: %w", err)
+	}
 	if err := d.attachThreads(ctx, msgs); err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages threads: %w", err)
 	}

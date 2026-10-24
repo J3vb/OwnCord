@@ -82,6 +82,11 @@ func BroadcastEmojiSetForTest(ctx context.Context, svc *service.Services, broadc
 	broadcastEmojiSet(ctx, svc, broadcaster)
 }
 
+// BroadcastStickerSetForTest exposes broadcastStickerSet for external tests.
+func BroadcastStickerSetForTest(ctx context.Context, svc *service.Services, broadcaster StickerBroadcaster) {
+	broadcastStickerSet(ctx, svc, broadcaster)
+}
+
 // SetGIFUpstreamForTest points the GIF proxy at a stub upstream and returns a
 // restore func.
 //

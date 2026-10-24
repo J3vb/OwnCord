@@ -68,6 +68,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Server (operators)**
 
+- Server stickers: members with Manage Server can upload up to 60 stickers (PNG, GIF or WebP, animation allowed, up to 512 KB and 320x320) under `/api/v1/stickers`, stored with the other uploads. Sending and picking stickers in the app arrives with the next client update.
 - Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.
 
 **Desktop UI**
@@ -88,6 +89,7 @@ and only when it changes something a contributor or fork holder must do
 - Account recovery with a recovery kit now spends exactly the kit it checked, so a new kit set up at the same moment stays unspent and usable.
 - A moderator could file an appeal against their own channel purge, which then showed in the moderation queue as an appeal against a sanction. A purge is not a sanction, so it can no longer be appealed.
 - The first-run setup wizard could save a TLS choice the server then could not start with: manual certificates when none were in place, or ACME on port 80. The wizard now refuses those choices, as the admin panel already did.
+- The username box on the register form and in Settings → Account cut a name made of letters outside the Basic Multilingual Plane (some CJK ideographs, mathematical letters) at 16 characters. It now takes the full 32 characters the server allows.
 
 **Chat**
 

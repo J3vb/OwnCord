@@ -33,8 +33,15 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		return nil, err
 	}
 	isDM := ch.Type == "dm"
+	var stickerRef *db.StickerRef
+	if p.StickerID != 0 {
+		// A sticker send stores the fallback text; the gates above already ran.
+		if stickerRef, content, err = s.resolveSticker(ctx, p); err != nil {
+			return nil, err
+		}
+	}
 	if delivery != nil {
-		delivery.Content = content
+		delivery.Content, delivery.Sticker = content, stickerRef
 	}
 	replyRef, err := s.checkReplyTarget(ctx, p)
 	if err != nil {
@@ -78,6 +85,10 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		ThreadJoined:         msg.ThreadJoined,
 	}
 	mentions.fill(result)
+	if stickerRef != nil {
+		id := stickerRef.ID
+		result.Sticker = db.NewMessageStickerInfo(&id, stickerRef.Name)
+	}
 	if p.ReplyTo != nil {
 		// The message is committed; a failed snippet read only costs the
 		// snippet, so it must not fail the send.
@@ -139,41 +150,6 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 
 	slog.Debug("message sent", "user", p.Username, "channel_id", p.ChannelID, "msg_id", msgID)
 	return result, nil
-}
-
-// sendMessagePrecheck runs every gate a new send must clear before anything
-// is written: channel lookup, send permission, content sanitization, and
-// attachment permission. It returns the resolved channel and the sanitized
-// content for the caller to persist.
-func (s *MessageService) sendMessagePrecheck(ctx context.Context, p SendMessageParams) (*db.Channel, string, error) {
-	ch, err := s.st.GetChannel(ctx, p.ChannelID)
-	if err != nil || ch == nil {
-		return nil, "", fmt.Errorf("%w: channel not found", ErrNotFound)
-	}
-
-	isDM := ch.Type == "dm"
-
-	// Permission check. Also refuses a write against an archived channel — see
-	// requireChannelWritable in message_perms.go, the shared gate every
-	// message write sink routes through.
-	if err := s.checkSendPermission(ctx, p.UserID, ch); err != nil {
-		return nil, "", err
-	}
-
-	// Validate and sanitize content.
-	content, err := sanitizeContent(p.Content, len(p.AttachmentIDs) > 0)
-	if err != nil {
-		return nil, "", err
-	}
-
-	// Attachment permission (non-DM).
-	if !isDM && len(p.AttachmentIDs) > 0 {
-		if !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.AttachFiles) {
-			return nil, "", fmt.Errorf("%w: missing ATTACH_FILES permission", ErrForbidden)
-		}
-	}
-
-	return ch, content, nil
 }
 
 // sendMessageLinkAttachments links the requested uploads to the message row
@@ -394,6 +370,10 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 
 	if accessErr := s.editMessageCheckAccess(ctx, userID, ch); accessErr != nil {
 		return nil, accessErr
+	}
+
+	if err := s.refuseStickerMessage(ctx, msgID, "a sticker message cannot be edited"); err != nil {
+		return nil, err
 	}
 
 	// EditMessage checks ownership internally and returns the updated row via
