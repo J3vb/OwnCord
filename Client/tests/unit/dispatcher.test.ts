@@ -2787,6 +2787,27 @@ describe("WS Dispatcher", () => {
       expect(getChannelMessages(1)).toHaveLength(1);
     });
 
+    it("drops every cached who-reacted list on a second ready, which replays no reaction_update", async () => {
+      const fetcher = vi.fn().mockResolvedValue([{ id: 1, username: "alice", avatar: "" }]);
+      setReactionUsersFetcher(fetcher as never);
+      clearReactionUsersCache();
+      await loadReactionUsers(1, 200, "👍");
+
+      const ready = {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      };
+      mock.dispatch("ready", ready);
+      expect(getCachedReactionUsers(200, "👍")).toHaveLength(1);
+
+      mock.dispatch("ready", ready);
+      expect(getCachedReactionUsers(200, "👍")).toBeUndefined();
+      setReactionUsersFetcher(null);
+    });
+
     it("carries a failed optimistic row through the resync invalidation", () => {
       cleanup();
       const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
