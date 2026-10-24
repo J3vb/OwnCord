@@ -297,6 +297,7 @@ vi.mock("@stores/dm.store", async () => {
       }),
     },
     dmDisplayName: actual.dmDisplayName,
+    clearDmUnread: vi.fn(),
   };
 });
 
@@ -335,6 +336,19 @@ vi.mock("@stores/blocks.store", () => ({
   dmComposerBlockReason: mockDmComposerBlockReason,
 }));
 
+const { mockThreadOpenById } = vi.hoisted(() => ({ mockThreadOpenById: vi.fn() }));
+
+// Only tests that pass a threadSlot get a thread panel host.
+vi.mock("../../src/pages/main-page/ThreadPanelHost", () => ({
+  createThreadPanelHost: vi.fn(() => ({
+    open: vi.fn(),
+    openById: mockThreadOpenById,
+    close: vi.fn(),
+    openThreadId: null,
+    destroy: vi.fn(),
+  })),
+}));
+
 // ---------------------------------------------------------------------------
 // Imports
 // ---------------------------------------------------------------------------
@@ -369,6 +383,7 @@ import {
   NAVIGATION_DESTINATIONS,
   type ForumViewContext,
 } from "../../src/features/navigation/destinations";
+import { requestOpenThread } from "../../src/features/threads/threadNavigation";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -4658,6 +4673,29 @@ describe("a forum channel (WP 6.9d)", () => {
     expect(mockMarkChannelRead).not.toHaveBeenCalledWith(FORUM);
     expect(mockLeaveChannel).not.toHaveBeenCalledWith(FORUM);
     ctrl.destroyChannel();
+  });
+
+  it("opens a followed post asked for from another channel once the forum mounts", () => {
+    const opts = makeOpts({
+      slots: { ...makeSlots(), threadSlot: document.createElement("div") as HTMLDivElement },
+    });
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(TEXT, "general", "text");
+    requestOpenThread(77, FORUM);
+    expect(mockThreadOpenById).not.toHaveBeenCalled();
+
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+    expect(mockThreadOpenById).toHaveBeenCalledTimes(1);
+    const [threadId, parentId, signal] = mockThreadOpenById.mock.calls[0]!;
+    expect(threadId).toBe(77);
+    expect(parentId).toBe(FORUM);
+    expect(signal).toBe(built[0]!.signal);
+
+    // The request is spent: the next mount opens nothing.
+    ctrl.mountChannel(TEXT, "general", "text");
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+    expect(mockThreadOpenById).toHaveBeenCalledTimes(1);
+    ctrl.destroy();
   });
 
   it("puts a labelled forum behind the consent gate, mounting nothing of the forum", async () => {
