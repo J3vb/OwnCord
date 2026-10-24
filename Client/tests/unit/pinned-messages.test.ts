@@ -4,6 +4,8 @@ const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
 vi.mock("@components/message-list/attachments", () => ({
   fetchImageAsObjectUrl,
+  // No cached bytes: every avatar here is a still picture (WP 8.7).
+  cachedImageBytes: () => null,
   recoverEvictedImage: () => {},
   isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
   resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),

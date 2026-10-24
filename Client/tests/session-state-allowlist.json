@@ -122,6 +122,12 @@
       "reason": "Lookup built from the bundled unicode catalog"
     },
     {
+      "file": "lib/animatedStill.ts",
+      "binding": "stills",
+      "category": "reset-elsewhere",
+      "reason": "Keyed by image-cache blob: URLs; clearAttachmentCaches clears it with them under the attachments:caches session reset"
+    },
+    {
       "file": "features/messaging/emojiStill.ts",
       "binding": "stills",
       "category": "pure-cache",

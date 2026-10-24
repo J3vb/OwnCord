@@ -365,6 +365,37 @@ func makePNGBytes(t *testing.T, width, height int) []byte {
 	return buf.Bytes()
 }
 
+// makeAnimatedGIFBytes encodes a two-frame GIF of the given size, padded with
+// a comment extension until it is at least minBytes long (0: no padding).
+func makeAnimatedGIFBytes(t *testing.T, width, height, minBytes int) []byte {
+	t.Helper()
+	pal := color.Palette{color.Black, color.White}
+	anim := &gif.GIF{
+		Image: []*image.Paletted{image.NewPaletted(image.Rect(0, 0, width, height), pal), image.NewPaletted(image.Rect(0, 0, width, height), pal)},
+		Delay: []int{10, 10},
+	}
+	var buf bytes.Buffer
+	if err := gif.EncodeAll(&buf, anim); err != nil {
+		t.Fatalf("gif.EncodeAll: %v", err)
+	}
+	raw := buf.Bytes()
+	if len(raw) >= minBytes {
+		return raw
+	}
+	// A comment extension (0x21 0xFE) of 255-byte sub-blocks, inserted
+	// before the trailer, keeps the file a valid GIF at any size.
+	var pad bytes.Buffer
+	pad.Write([]byte{0x21, 0xFE})
+	for pad.Len() < minBytes-len(raw)+2 {
+		pad.WriteByte(255)
+		pad.Write(make([]byte, 255))
+	}
+	pad.WriteByte(0)
+	out := append([]byte{}, raw[:len(raw)-1]...)
+	out = append(out, pad.Bytes()...)
+	return append(out, raw[len(raw)-1])
+}
+
 func doUpload(t *testing.T, router http.Handler, token, fieldName, filename string, content []byte) *httptest.ResponseRecorder {
 	t.Helper()
 	body, contentType := makeMultipartFile(t, fieldName, filename, content)

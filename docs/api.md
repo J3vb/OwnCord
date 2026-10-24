@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` and `/api/v1/users/me/banner` (2 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), `/api/v1/users/me/avatar` and `/api/v1/dms/{id}/icon` (3 MiB envelope), and `/api/v1/users/me/banner` (5 MiB envelope).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -925,16 +925,17 @@ Not registered when the server has no working storage backend.
 
 `multipart/form-data` with a single `file` part.
 
-| Rule       | Value                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
-| Size       | 1 MiB                                                                                                                 |
-| Dimensions | 1024x1024, measured from the sniffed image                                                                            |
+| Rule       | Value                                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg`, `image/webp` or `image/gif`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 2 MiB                                                                                                                              |
+| Dimensions | 1024x1024, measured from the sniffed image                                                                                         |
 
-GIF is refused (an animated avatar renders in every message row), and so is
-SVG — it is markup with script and external-fetch capability, and an avatar is
-rendered inline by definition. The server does not re-encode or crop; the
-client is expected to downscale and square-crop before uploading.
+An animated GIF, WebP or PNG is accepted as-is (WP 8.7): clients show its first
+frame and play it on hover, never under reduced motion. SVG is refused — it is
+markup with script and external-fetch capability, and an avatar is rendered
+inline by definition. The server does not re-encode or crop; the client is
+expected to downscale a still picture before uploading.
 
 #### Response 201 Created
 
@@ -994,14 +995,15 @@ Not registered when the server has no working storage backend.
 
 `multipart/form-data` with a single `file` part.
 
-| Rule       | Value                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
-| Size       | 1 MiB                                                                                                                 |
-| Dimensions | At most 1920x960, measured from the sniffed image                                                                     |
+| Rule       | Value                                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg`, `image/webp` or `image/gif`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 4 MiB                                                                                                                              |
+| Dimensions | At most 1920x960, measured from the sniffed image                                                                                  |
 
-GIF and SVG are refused for the reasons given for avatars. The server does not
-re-encode or crop; the client is expected to crop and scale before uploading.
+Animated pictures are accepted and shown as for avatars; SVG is refused. The
+server does not re-encode or crop; the client crops and scales a still picture
+before uploading and sends an animated one unchanged.
 
 #### Response 201 Created
 
@@ -2261,10 +2263,10 @@ Set a group DM's icon. Any member may.
 #### Request
 
 `multipart/form-data` with one `file` part, under the same rules as an avatar
-(`POST /api/v1/users/me/avatar`): at most 1 MiB, a PNG, JPEG or WebP image
-(sniffed from the bytes, never from the filename or the client's type), at most
-1024 x 1024 pixels, and it counts against the uploader's storage quota. The
-request body is capped at 2 MiB. Crop to a square client-side.
+(`POST /api/v1/users/me/avatar`) except that it stays still: at most 1 MiB, a
+PNG, JPEG or WebP image (no GIF; sniffed from the bytes, never from the filename
+or the client's type), at most 1024 x 1024 pixels, and it counts against the
+uploader's storage quota. The request body is capped at 3 MiB. Crop to a square client-side.
 
 #### Response 200 OK
 
