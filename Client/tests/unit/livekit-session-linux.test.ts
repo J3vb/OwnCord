@@ -311,7 +311,12 @@ describe("LiveKitSession on the Linux native backend", () => {
       ...prev,
       channels: new Map([[1, { id: 1, type: "voice" } as never]]),
     }));
-    session.setWsClient({ send: vi.fn(), on: vi.fn(), getState: () => "connected" } as never);
+    session.setWsClient({
+      send: vi.fn(),
+      on: vi.fn(),
+      getState: () => "connected",
+      ping: async () => {},
+    } as never);
     session.setServerHost("chat.example");
     // MainPage registers the screen-share dialog through the layer slot
     // (ARCH-06); mirror that here so the native share path reaches the real
@@ -572,6 +577,7 @@ describe("LiveKitSession on the Linux native backend", () => {
         send: vi.fn(() => "req-1"),
         on: vi.fn(),
         getState: () => "connected",
+        ping: async () => {},
       } as never);
     });
     afterEach(() => {
