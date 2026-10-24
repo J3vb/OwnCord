@@ -90,6 +90,8 @@ and only when it changes something a contributor or fork holder must do
 
 - Deleting someone's message request and later opening the conversation yourself now counts as accepting them, so their replies reach you instead of being held as a request you can no longer see.
 - A group conversation's "call ended" notice now goes to the people in the group when the call ends.
+- Someone added to a group while its call was running now sees who is in the call, with the in-call marker and the Join strip. And after you leave a group, or are removed from it, the people you saw in its call no longer stay on screen as ghosts if you are added back.
+- A group call that was ringing when you left the group, or were removed from it, no longer reports a missed call afterwards.
 
 **Desktop UI**
 
