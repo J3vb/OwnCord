@@ -14,6 +14,7 @@ import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
+import { clearRowHeights } from "@components/message-list/row-heights";
 
 const CHANNEL_ID = 1;
 const ROW = 100;
@@ -47,6 +48,7 @@ describe("MessageList: rows resizing after they are drawn", () => {
   const saved: Record<string, PropertyDescriptor | undefined> = {};
   /** The scroller's height; 0 while it is hidden (display: none). */
   let view = 600;
+  let width = 900;
 
   const rootEl = (): HTMLDivElement => container.querySelector(".messages-container")!;
   /** Two animation frames and the tasks after them, however loaded the run is. */
@@ -91,6 +93,7 @@ describe("MessageList: rows resizing after they are drawn", () => {
   beforeEach(() => {
     observers.length = 0;
     grown.clear();
+    clearRowHeights();
     vi.stubGlobal(
       "ResizeObserver",
       class {
@@ -128,7 +131,7 @@ describe("MessageList: rows resizing after they are drawn", () => {
     });
     Object.defineProperty(HTMLElement.prototype, "clientWidth", {
       configurable: true,
-      get: () => 900,
+      get: () => width,
     });
     Object.defineProperty(HTMLElement.prototype, "clientHeight", {
       configurable: true,
@@ -160,7 +163,11 @@ describe("MessageList: rows resizing after they are drawn", () => {
     setActiveChannel(null);
     container = document.createElement("div");
     document.body.appendChild(container);
-    list = createMessageList({
+    list = makeList();
+  });
+
+  const makeList = (): ReturnType<typeof createMessageList> =>
+    createMessageList({
       channelId: CHANNEL_ID,
       channelName: "general",
       currentUserId: 1,
@@ -174,12 +181,12 @@ describe("MessageList: rows resizing after they are drawn", () => {
       onReactionClick: vi.fn(),
       onPinClick: vi.fn(),
     });
-  });
 
   afterEach(() => {
     list?.destroy?.();
     list = null;
     view = 600;
+    width = 900;
     container.remove();
     vi.unstubAllGlobals();
     for (const [name, d] of Object.entries(saved)) {
@@ -288,5 +295,59 @@ describe("MessageList: rows resizing after they are drawn", () => {
     await frame();
     expect(rootEl().scrollTop).toBeGreaterThan(0);
     expect(gap()).toBeCloseTo(0, 0);
+  });
+
+  /** Open the channel, read the oldest rows (drawn taller than estimated, like
+   *  loaded link cards), and leave it: the height the next visit seeds from. */
+  const visitTop = async (): Promise<number> => {
+    for (let i = 1; i <= 8; i++) grown.set(`message-${i}`, 240);
+    list!.mount(container);
+    await frame();
+    await scrollTo(0);
+    await frame();
+    await scrollTo(contentHeight());
+    const total = contentHeight();
+    list!.destroy?.();
+    list = makeList();
+    return total;
+  };
+
+  it("seeds a channel opened again with the row heights its last visit measured", async () => {
+    const total = await visitTop();
+    list!.mount(container);
+    await frame();
+    // Without them the oldest rows are estimated as plain text again, and the
+    // spacer corrects itself under the reader while they scroll up.
+    expect(contentHeight()).toBe(total);
+  });
+
+  it("does not seed from heights measured at another width", async () => {
+    const total = await visitTop();
+    width = 500;
+    list!.mount(container);
+    await frame();
+    expect(contentHeight()).toBeLessThan(total);
+  });
+
+  it("seeds across a scrollbar's width", async () => {
+    const total = await visitTop();
+    // The empty list has no scrollbar yet; the filled one measured 8 px less.
+    width = 908;
+    list!.mount(container);
+    await frame();
+    expect(contentHeight()).toBe(total);
+  });
+
+  it("seeds a channel opened again while hidden once it is shown", async () => {
+    const total = await visitTop();
+    view = 0;
+    width = 0;
+    list!.mount(container);
+    await frame();
+    view = 600;
+    width = 900;
+    resize();
+    await frame();
+    expect(contentHeight()).toBe(total);
   });
 });

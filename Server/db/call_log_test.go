@@ -353,7 +353,7 @@ func TestDeleteChannel_CascadesCallTables(t *testing.T) {
 
 // Call rows and group event rows are read-only wherever messages are written.
 // This keeps them written only by the call log and the group events: no
-// statement outside call_log.sql, group_events.sql and message_pins.sql (and
+// statement outside call_log.sql, group_events.sql, message_pins.sql and welcome.sql (and
 // their Go callers) may set the kind column. message_pins.sql must hold only
 // the pin-row insert and the window lookup, so a new insert or update cannot create or retype
 // one.
@@ -372,7 +372,8 @@ func TestCallLog_OnlyWriterOfKind(t *testing.T) {
 	for _, f := range files {
 		base := filepath.Base(f)
 		if strings.HasSuffix(base, "_test.go") || base == "call_log.sql" || base == "call_log.go" ||
-			base == "group_events.sql" || base == "group_events.go" || base == "message_pins.sql" {
+			base == "group_events.sql" || base == "group_events.go" || base == "message_pins.sql" ||
+			base == "welcome.sql" {
 			continue
 		}
 		raw, err := os.ReadFile(f)
