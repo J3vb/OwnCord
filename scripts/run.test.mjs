@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -255,6 +263,77 @@ test("a failing check preserves its exit code and stops later steps", () => {
     assert.match(result.stderr, /FAILED: node scripts\/check-doc-counts.mjs exited 7/);
     assert.equal(existsSync(marker), false, "later check did not run");
     assert.doesNotMatch(result.stdout, /check:docs: passed/);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test("Windows npm and npx launch without a shell and preserve argument boundaries", () => {
+  const fixture = mkdtempSync(join(tmpdir(), "owncord runner spaces "));
+  try {
+    const scripts = join(fixture, "scripts");
+    const cliDir = join(fixture, "npm installation", "bin");
+    mkdirSync(scripts);
+    mkdirSync(cliDir, { recursive: true });
+    mkdirSync(join(fixture, "Server"));
+    mkdirSync(join(fixture, "Client"));
+    copyFileSync(runner, join(scripts, "run.mjs"));
+    const record = join(fixture, "arguments.json");
+    const cli = `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(record)}, JSON.stringify(process.argv.slice(2))); process.exitCode = 7;`;
+    writeFileSync(join(cliDir, "npm-cli.js"), cli);
+    writeFileSync(join(cliDir, "npx-cli.js"), cli);
+    const filename = "Client/src/assets/logo with spaces & symbols.svg";
+    const preload =
+      "data:text/javascript," +
+      encodeURIComponent(
+        'import cp from "node:child_process"; import { syncBuiltinESMExports } from "node:module";' +
+          'Object.defineProperty(process, "platform", { value: "win32" });' +
+          "const spawn = cp.spawnSync;" +
+          'cp.spawnSync = (cmd, args, options) => cmd === "git" ? {status:0, stdout:' +
+          JSON.stringify(filename + "\0") +
+          "} : spawn(cmd, args, options); syncBuiltinESMExports();",
+      );
+    const options = {
+      env: { ...env, npm_execpath: join(cliDir, "npm-cli.js") },
+      encoding: "utf8",
+      timeout: 10_000,
+    };
+    const npx = spawnSync(
+      process.execPath,
+      ["--import", preload, join(scripts, "run.mjs"), "check:hygiene"],
+      options,
+    );
+    assert.equal(npx.status, 7, npx.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), [
+      "prettier",
+      "--check",
+      "--ignore-unknown",
+      filename,
+    ]);
+    const npm = spawnSync(
+      process.execPath,
+      ["--import", preload, join(scripts, "run.mjs"), "bootstrap"],
+      options,
+    );
+    assert.equal(npm.status, 7, npm.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), ["ci"]);
+    rmSync(record);
+    const hideCli =
+      "data:text/javascript," +
+      encodeURIComponent(
+        'import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module";' +
+          "const exists = fs.existsSync;" +
+          'fs.existsSync = (p) => String(p).endsWith("npm-cli.js") || String(p).endsWith("npx-cli.js") ? false : exists(p);' +
+          "syncBuiltinESMExports();",
+      );
+    const missing = spawnSync(
+      process.execPath,
+      ["--import", preload, "--import", hideCli, join(scripts, "run.mjs"), "bootstrap"],
+      options,
+    );
+    assert.equal(missing.status, 1, missing.stderr);
+    assert.match(missing.stderr, /cannot locate npm's JavaScript CLI/);
+    assert.equal(existsSync(record), false);
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }

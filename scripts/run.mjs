@@ -23,20 +23,28 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WIN = process.platform === "win32";
 
-// npm and npx are batch shims on Windows; everything else is a real binary.
-const bin = (c) => (WIN && (c === "npm" || c === "npx") ? `${c}.cmd` : c);
-
-// Node refuses to spawn a .cmd/.bat with shell:false (the CVE-2024-27980
-// mitigation): it fails with EINVAL and a null exit status. So the Windows npm
-// shims need a shell, and only they do -- every other command here is a real
-// binary, and a shell would put its quoting rules between us and the arguments.
-const needsShell = (c) => WIN && (c === "npm" || c === "npx");
+// On Windows, bypass npm's .cmd shims and launch its JS entry point with Node.
+// A shell splits tracked paths containing spaces or metacharacters. Keep the
+// argument array intact instead of maintaining a second shell-quoting system.
+function npmCliPath(command) {
+  const entry = `${command}-cli.js`;
+  const candidates = [];
+  const npmExecPath = process.env.npm_execpath;
+  if (npmExecPath && basename(npmExecPath) === "npm-cli.js") {
+    candidates.push(join(dirname(npmExecPath), entry));
+  }
+  for (const dir of (process.env.PATH || "").split(";")) {
+    if (dir) candidates.push(join(dir.replace(/^"|"$/g, ""), "node_modules", "npm", "bin", entry));
+  }
+  candidates.push(join(dirname(process.execPath), "node_modules", "npm", "bin", entry));
+  return candidates.find((candidate) => existsSync(candidate));
+}
 
 /** A step that always runs. `label`, when set, replaces the dumped argv in the
  *  printed banner — used by the chunked prettier steps, whose argument list is
@@ -382,22 +390,19 @@ function runTask(name) {
       console.error(`\nFAILED: ${attempt}: working directory does not exist (${cwd}).`);
       return 1;
     }
-    // With shell:true Node deprecates a separate args array (DEP0190), because it
-    // concatenates without escaping. So concatenate deliberately instead: the only
-    // commands that take this branch are the npm shims, and no argument in this
-    // file contains a space.
-    const shell = needsShell(s.cmd);
-    const r = shell
-      ? spawnSync([bin(s.cmd), ...s.args].join(" "), {
-          cwd,
-          stdio: "inherit",
-          shell: true,
-        })
-      : spawnSync(s.cmd, s.args, {
-          cwd,
-          stdio: "inherit",
-          shell: false,
-        });
+    const npmCommand = WIN && (s.cmd === "npm" || s.cmd === "npx");
+    const npmCli = npmCommand ? npmCliPath(s.cmd) : undefined;
+    if (npmCommand && !npmCli) {
+      console.error(
+        `\nFAILED: ${attempt}: cannot locate ${s.cmd}'s JavaScript CLI. Install npm on PATH.`,
+      );
+      return 1;
+    }
+    const r = spawnSync(npmCli ? process.execPath : s.cmd, npmCli ? [npmCli, ...s.args] : s.args, {
+      cwd,
+      stdio: "inherit",
+      shell: false,
+    });
     if (r.error && r.error.code !== "ENOENT") {
       console.error(`\nFAILED: ${attempt} could not be started: ${r.error.code}`);
       return 1;
