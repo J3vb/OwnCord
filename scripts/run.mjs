@@ -3,7 +3,8 @@
 //
 // One entry point for the checks CI runs, so a contributor does not have to
 // know which directory each stack lives in. `node scripts/run.mjs --list`
-// prints every task and the exact commands it runs.
+// prints every task and the exact commands it runs. Add a task name to list
+// only that task, for example: node scripts/run.mjs --list check:rust.
 //
 // Two rules this file exists to keep:
 //
@@ -255,6 +256,7 @@ const PRETTIER_TRACKED = (() => {
 // Lint check, and by .githooks/pre-commit on staged files.
 const CHECK_HYGIENE = [
   ...PRETTIER_TRACKED,
+  step("node", ["--test", "scripts/run.test.mjs"], "."),
   optional(
     "shellcheck",
     "shellcheck",
@@ -417,7 +419,17 @@ function runTask(name) {
 
 const arg = process.argv[2];
 if (!arg || arg === "--list") {
-  for (const [name, steps] of Object.entries(TASKS)) {
+  const selected = process.argv[3];
+  if (process.argv.length > 4) {
+    console.error("usage: node scripts/run.mjs --list [task]");
+    process.exit(2);
+  }
+  if (selected !== undefined && !Object.hasOwn(TASKS, selected)) {
+    console.error(`unknown task: ${selected}\nknown: ${Object.keys(TASKS).join(", ")}`);
+    process.exit(2);
+  }
+  const entries = selected === undefined ? Object.entries(TASKS) : [[selected, TASKS[selected]]];
+  for (const [name, steps] of entries) {
     console.log(`\n${name}`);
     for (const s of steps) {
       const where = s.cwd === "." ? "" : `   (in ${s.cwd})`;
