@@ -37,7 +37,7 @@ import {
 import {
   TEXT_PREVIEW_CACHE_MAX,
   TEXT_PREVIEW_MAX_LINES,
-} from "../../src/components/message-list/text-preview";
+} from "../../src/features/messaging/textPreview";
 import type { Attachment } from "@lib/types";
 
 const MAX = 65536;

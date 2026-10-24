@@ -13,13 +13,12 @@
  * synchronously at its final height.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
-import { createIcon } from "@lib/icons";
-import { registerSessionReset } from "@lib/sessionRegistry";
-import type { Attachment } from "@lib/types";
-import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
+import { createElement, appendChildren, setText } from "../../lib/dom";
+import { createIcon } from "../../lib/icons";
+import { registerSessionReset } from "../../lib/sessionRegistry";
+import type { Attachment } from "../../lib/types";
+import { isSpoilerFilename } from "./spoilerAttachment";
 import { messageStatusText } from "../../i18n/messageStatus";
-import { highlightCode, resolveLanguage } from "./syntax-highlight";
 
 /** Bytes requested, and the most that is ever decoded. */
 export const TEXT_PREVIEW_MAX_BYTES = 65536;
@@ -30,6 +29,13 @@ const COLLAPSED_LINES = 6;
 /** Most lines Expand builds, so a 64 KB file of newlines is not 65k nodes. */
 export const TEXT_PREVIEW_MAX_LINES = 2000;
 
+/** One highlighted run, as the message list's code-block highlighter returns it. */
+export interface HighlightToken {
+  readonly text: string;
+  readonly cls: string | null;
+  readonly ansi?: string;
+}
+
 /** What the preview needs from `attachments.ts`. */
 export interface TextPreviewDeps {
   /** Authenticated fetch of a server file, with extra request headers. */
@@ -37,6 +43,8 @@ export interface TextPreviewDeps {
   readonly buildFileMeta: (att: Attachment, resolvedUrl: string) => HTMLElement;
   readonly buildDownloadButton: (att: Attachment, resolvedUrl: string) => HTMLElement;
   readonly renderFileChip: (att: Attachment, resolvedUrl: string) => HTMLDivElement;
+  /** The message list's code-block highlighter, for a fence tag (null = plain). */
+  readonly highlight: (code: string, tag: string | null) => readonly HighlightToken[];
 }
 
 type LangId =
@@ -294,9 +302,14 @@ function firstLines(text: string, n: number): { text: string; count: number } {
 }
 
 /** The gutter and highlighted code for `text`, which holds `lines` lines. */
-function buildScroll(text: string, lines: number, language: Language): HTMLElement {
+function buildScroll(
+  text: string,
+  lines: number,
+  language: Language,
+  highlight: TextPreviewDeps["highlight"],
+): HTMLElement {
   const code = createElement("div", { class: "msg-textpreview-code" });
-  for (const token of highlightCode(text, resolveLanguage(language.tag))) {
+  for (const token of highlight(text, language.tag)) {
     if (token.cls === null && token.ansi === undefined) {
       code.appendChild(document.createTextNode(token.text));
       continue;
@@ -323,6 +336,7 @@ function buildCodeAndFooter(
   entry: TextEntry,
   att: Attachment,
   language: Language,
+  highlight: TextPreviewDeps["highlight"],
 ): HTMLElement[] {
   const more = entry.lineCount > COLLAPSED_LINES;
   const head = more ? firstLines(entry.text, COLLAPSED_LINES) : null;
@@ -332,8 +346,8 @@ function buildCodeAndFooter(
   });
   body.appendChild(
     head === null
-      ? buildScroll(entry.text, entry.lineCount, language)
-      : buildScroll(head.text, head.count, language),
+      ? buildScroll(entry.text, entry.lineCount, language, highlight)
+      : buildScroll(head.text, head.count, language, highlight),
   );
   const view = createElement("div", { class: "msg-textpreview-view" });
   view.appendChild(body);
@@ -371,7 +385,7 @@ function buildCodeAndFooter(
       const expanded = !root.classList.contains("expanded");
       if (expanded && !built) {
         built = true;
-        body.replaceChildren(buildScroll(entry.text, entry.lineCount, language));
+        body.replaceChildren(buildScroll(entry.text, entry.lineCount, language, highlight));
       }
       root.classList.toggle("expanded", expanded);
       // Collapsed hides the vertical scrollbar, so start back at line 1.
@@ -433,7 +447,7 @@ export function renderTextPreview(
     root.classList.remove("loading", "has-more", "expanded");
     root.replaceChildren(
       root.firstElementChild ?? buildHeader(att, resolvedUrl, deps),
-      ...buildCodeAndFooter(root, entry, att, language),
+      ...buildCodeAndFooter(root, entry, att, language, deps.highlight),
     );
   };
 

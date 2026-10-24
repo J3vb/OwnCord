@@ -42,12 +42,13 @@ import {
   type ImageBox,
 } from "./image-sizes";
 import type { ImageMenuTarget } from "./image-menu";
+import { highlightCode, resolveLanguage } from "./syntax-highlight";
 import {
   clearTextPreviewCache,
   isTextPreviewable,
   renderTextPreview,
   type TextPreviewDeps,
-} from "./text-preview";
+} from "../../features/messaging/textPreview";
 
 /** One image of a message's lightbox sequence. `url` is the resolved server URL. */
 export interface LightboxGalleryItem {
@@ -502,6 +503,7 @@ const textPreviewDeps: TextPreviewDeps = {
   buildFileMeta,
   buildDownloadButton,
   renderFileChip,
+  highlight: (code, tag) => highlightCode(code, resolveLanguage(tag)),
 };
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */
