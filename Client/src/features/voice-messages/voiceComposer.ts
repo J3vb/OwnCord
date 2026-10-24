@@ -15,6 +15,7 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { VoiceUploadMeta } from "@lib/types";
 import { authStore } from "@stores/auth.store";
+import { ATTACHMENT_TTL_MS } from "../messaging/attachmentTtl";
 import { voiceMessagesText } from "../../i18n/voiceMessages";
 import {
   createVoiceRecorder,
@@ -144,6 +145,7 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
   let clip: VoiceClip | null = null;
   let file: File | null = null;
   let uploaded: VoiceUploadResult | null = null;
+  let uploadedAt = 0;
   let session: Disposable | null = null;
   let uploadOwner: Disposable | null = null;
   let recent: number[] = [];
@@ -197,6 +199,15 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
     options.root.classList.remove("voice-active");
   }
 
+  /** Withdraw an upload nothing will use, freeing its quota now. Best effort. */
+  function withdraw(id: string): void {
+    try {
+      void options.discardUpload?.(id)?.catch(() => {});
+    } catch {
+      // A withdrawal that cannot start leaves the server's sweep to clean up.
+    }
+  }
+
   /** Drop the recording, the clip and the bar; the composer is back to typing. */
   function reset(notify: boolean): void {
     const wasOpen = bar !== null;
@@ -206,6 +217,8 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
     recorder = null;
     clip = null;
     file = null;
+    // A retained upload that was not sent is withdrawn (a send clears it first).
+    if (uploaded !== null) withdraw(uploaded.id);
     uploaded = null;
     recent = [];
     phase = "idle";
@@ -352,6 +365,12 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
       setStatus(refusal);
       return;
     }
+    // The server sweeps an unsent upload after about an hour: a retained id
+    // that old is withdrawn and the held clip uploads again.
+    if (uploaded !== null && Date.now() - uploadedAt >= ATTACHMENT_TTL_MS) {
+      withdraw(uploaded.id);
+      uploaded = null;
+    }
     const max = authStore.getState().uploadPolicy?.max_upload_bytes;
     if (uploaded === null && max !== undefined && max > 0 && heldFile.size > max) {
       blocked = true;
@@ -373,10 +392,11 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
         );
         if (uploadOwner !== owner || !alive || clip !== held) {
           // Discarded while it ran: nothing will use this upload.
-          void options.discardUpload?.(result.id)?.catch(() => {});
+          withdraw(result.id);
           return;
         }
         uploaded = result;
+        uploadedAt = Date.now();
       } catch {
         if (uploadOwner !== owner || !alive || clip !== held || owner.signal.aborted) return;
         phase = "failed";
@@ -397,6 +417,7 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
     }
     const posted = uploaded;
     if (posted === null) return;
+    uploaded = null; // handed to the message: reset() must not withdraw it
     reset(true);
     options.send({ id: posted.id, filename: posted.filename, file: heldFile });
   }

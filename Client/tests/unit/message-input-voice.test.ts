@@ -14,6 +14,7 @@ vi.mock("@components/GifPicker", () => ({
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import type { VoiceUploadMeta } from "@lib/types";
+import { ATTACHMENT_TTL_MS } from "../../src/features/messaging/attachmentTtl";
 import { authStore } from "@stores/auth.store";
 import { FakeAudioContext, FakeMediaRecorder, FakeStream, resetFakes } from "../helpers/voiceFakes";
 
@@ -265,6 +266,77 @@ describe("edge case 1: a failed upload keeps the clip", () => {
     q<HTMLButtonElement>('[data-testid="voice-cancel"]')!.click();
     expect(q('[data-testid="voice-bar"]')).toBeNull();
     expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("a retained upload", () => {
+  /** Record, send, and gate the composer while the upload runs so the finished upload is kept. */
+  async function retain(overrides: Partial<MessageInputOptions> = {}) {
+    let n = 0;
+    let finish: () => void = () => {};
+    const onUploadFile = vi.fn(
+      (file: File, _signal?: AbortSignal, _progress?: unknown, _voice?: VoiceUploadMeta) =>
+        new Promise<Uploaded>((resolve) => {
+          const id = `up-${++n}`;
+          finish = () => resolve({ id, url: `/f/${id}`, filename: file.name });
+        }),
+    );
+    const onDiscardUpload = vi.fn(async () => {});
+    const onSend = vi.fn();
+    const comp = mountComposer({ onUploadFile, onDiscardUpload, onSend, ...overrides });
+    await record();
+    q<HTMLButtonElement>('[data-testid="voice-send"]')!.click();
+    await flush();
+    comp.setDisabled("Offline");
+    finish();
+    await flush();
+    expect(onSend).not.toHaveBeenCalled();
+    return { comp, onUploadFile, onDiscardUpload, onSend, finish: () => finish() };
+  }
+
+  it("is withdrawn when the clip is discarded", async () => {
+    const { onDiscardUpload } = await retain();
+    q<HTMLButtonElement>('[data-testid="voice-cancel"]')!.click();
+    expect(onDiscardUpload).toHaveBeenCalledExactlyOnceWith("up-1");
+  });
+
+  it("is withdrawn when Escape discards it", async () => {
+    const { onDiscardUpload } = await retain();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    expect(onDiscardUpload).toHaveBeenCalledExactlyOnceWith("up-1");
+  });
+
+  it("is withdrawn when the composer is destroyed", async () => {
+    const { comp, onDiscardUpload } = await retain();
+    comp.destroy?.();
+    expect(onDiscardUpload).toHaveBeenCalledExactlyOnceWith("up-1");
+  });
+
+  it("is reused by Retry while fresh and is not withdrawn by the send", async () => {
+    const { comp, onUploadFile, onDiscardUpload, onSend } = await retain();
+    comp.setDisabled(null);
+    q<HTMLButtonElement>('[data-testid="voice-send"]')!.click();
+    await flush();
+    expect(onUploadFile).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0]?.[2]).toEqual(["up-1"]);
+    expect(onDiscardUpload).not.toHaveBeenCalled();
+  });
+
+  it("is withdrawn and uploaded again by Retry once it is older than the sweep margin", async () => {
+    const { comp, onUploadFile, onDiscardUpload, onSend, finish } = await retain();
+    await vi.advanceTimersByTimeAsync(ATTACHMENT_TTL_MS + 1_000);
+    comp.setDisabled(null);
+    q<HTMLButtonElement>('[data-testid="voice-send"]')!.click();
+    await flush();
+    expect(onDiscardUpload).toHaveBeenCalledExactlyOnceWith("up-1");
+    expect(onUploadFile).toHaveBeenCalledTimes(2);
+    expect(onUploadFile.mock.calls[1]?.[3]).toMatchObject({ durationMs: 2_000 });
+    finish();
+    await flush();
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend.mock.calls[0]?.[2]).toEqual(["up-2"]);
+    expect(onDiscardUpload).toHaveBeenCalledTimes(1);
   });
 });
 
