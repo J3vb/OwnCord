@@ -213,6 +213,62 @@ for (const theme of ["dark", "light"] as const) {
       await shot(page, theme, "05-older-posts");
     });
 
+    test("switches between the four post layouts, remembers the pick, and the member list steps aside", async ({
+      page,
+    }) => {
+      await setup(page, theme);
+      await page.locator("[data-testid='channel-9']").click();
+      await expect(page.getByTestId("forum-post-1")).toBeVisible();
+      await expect(page.getByTestId("member-column")).toBeHidden();
+      await expect(page.getByTestId("forum-view")).toHaveClass(/forum-view--grid/);
+      await expect(page.getByTestId("forum-layout-grid")).toHaveAttribute("aria-pressed", "true");
+      await shot(page, theme, "10-layout-grid");
+
+      for (const layout of ["list", "feed"] as const) {
+        await page.getByTestId(`forum-layout-${layout}`).click();
+        await expect(page.getByTestId("forum-view")).toHaveClass(
+          new RegExp(`forum-view--${layout}`),
+        );
+        await shot(page, theme, `11-layout-${layout}`);
+      }
+
+      await page.getByTestId("forum-layout-split").click();
+      await page.getByTestId("forum-post-2").click();
+      await expect(page.getByTestId("thread-panel")).toBeVisible();
+      await expect(page.getByTestId("forum-post-2")).toHaveAttribute("aria-current", "true");
+      // The reader takes the rest of the row: wider than the list beside it.
+      const panel = await page.getByTestId("thread-panel").boundingBox();
+      const list = await page.getByTestId("forum-view").boundingBox();
+      expect((panel?.width ?? 0) > (list?.width ?? 0)).toBe(true);
+      await shot(page, theme, "12-layout-split-open");
+
+      await page.reload();
+      await navigateToMainPage(page);
+      await page.locator("[data-testid='channel-9']").click();
+      await expect(page.getByTestId("forum-view")).toHaveClass(/forum-view--split/);
+    });
+
+    test("a post opens in a panel the user can widen", async ({ page }) => {
+      await setup(page, theme);
+      await page.locator("[data-testid='channel-9']").click();
+      await page.getByTestId("forum-layout-list").click();
+      await page.getByTestId("forum-post-1").click();
+      const panel = page.getByTestId("thread-panel");
+      await expect(panel).toBeVisible();
+      const before = (await panel.boundingBox())?.width ?? 0;
+      const handle = page.getByTestId("thread-panel-resize");
+      const box = await handle.boundingBox();
+      if (box === null) throw new Error("no handle");
+      await page.mouse.move(box.x + box.width / 2, box.y + 200);
+      await page.mouse.down();
+      await page.mouse.move(box.x - 150, box.y + 200, { steps: 5 });
+      await page.mouse.up();
+      await expect
+        .poll(async () => (await panel.boundingBox())?.width ?? 0)
+        .toBeGreaterThan(before + 100);
+      await shot(page, theme, "13-post-panel-widened");
+    });
+
     test("filters by tag with a repeatable tag parameter", async ({ page }) => {
       await setup(page, theme);
       await page.locator("[data-testid='channel-9']").click();
