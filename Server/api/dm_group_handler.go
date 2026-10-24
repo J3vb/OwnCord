@@ -33,6 +33,34 @@ type groupEventSink interface {
 
 var _ groupEventSink = (*ws.Hub)(nil)
 
+// dmVoiceRosterSender is the DMBroadcaster capability that tells one user who is
+// in a DM's call right now. Reached by type assertion for the same reason as
+// groupEventSink; the production broadcaster must keep satisfying it, or a
+// member added mid-call silently stops seeing the call's roster.
+type dmVoiceRosterSender interface {
+	SendDMVoiceRoster(ctx context.Context, userID, channelID int64)
+}
+
+var _ dmVoiceRosterSender = (*ws.Hub)(nil)
+
+// sendAddedVoiceRoster hands each newly added member the group call's current
+// voice states. It runs after fanOutGroupChange so, on each connection, the
+// user's dm_channel_open precedes the first state. A broadcaster without the
+// capability sends nothing.
+func sendAddedVoiceRoster(ctx context.Context, broadcaster DMBroadcaster, channelID int64, added []int64) {
+	if broadcaster == nil || len(added) == 0 {
+		return
+	}
+	rs, ok := broadcaster.(dmVoiceRosterSender)
+	if !ok {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	for _, uid := range added {
+		rs.SendDMVoiceRoster(ctx, uid, channelID)
+	}
+}
+
 // addGroupMembersRequest is the JSON body for POST /api/v1/dms/{channelId}/members.
 type addGroupMembersRequest struct {
 	UserIDs []int64 `json:"user_ids"`
@@ -111,6 +139,7 @@ func handleAddGroupMembers(svc *service.Services, broadcaster DMBroadcaster, lim
 			return
 		}
 		fanOutGroupChange(r.Context(), svc, broadcaster, channelID, change.Audience, change.Rows)
+		sendAddedVoiceRoster(r.Context(), broadcaster, channelID, change.Added)
 		writeGroupSummary(w, r, svc, user.ID, channelID)
 	}
 }
