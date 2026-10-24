@@ -32,3 +32,7 @@ var _ service.AppealUnbanBroadcaster = (*ws.Hub)(nil)
 // without this a renamed hub method would leave saved file-type lists
 // reaching clients only on reconnect, and nothing would fail.
 var _ uploadPolicyBroadcaster = (*ws.Hub)(nil)
+
+// handlePatchSettings reaches ApplyGameActivityPolicy the same way; a renamed
+// hub method would leave a switched-off game activity showing on open clients.
+var _ gameActivityPolicyApplier = (*ws.Hub)(nil)

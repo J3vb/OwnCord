@@ -13,6 +13,11 @@
 import { createElement, appendChildren, setOwnedTimeout, setText } from "@lib/dom";
 import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
 import { displayName, loadGamePrefs, toDetectPrefs } from "@lib/gameActivityPrefs";
+import {
+  hasReceivedReady,
+  onGameActivityPolicy,
+  serverSupportsGameActivity,
+} from "@lib/serverCapabilities";
 import { savePref } from "@lib/preferences";
 import { desktop } from "../../platform/desktop";
 import { gameActivityText as t } from "../../i18n/gameActivity";
@@ -21,6 +26,11 @@ import { createToggle } from "./helpers";
 
 /** How often the line re-checks; the same beat as the loop that sends it. */
 const REFRESH_MS = 15_000;
+
+/** Whether the server has said game activity is off (WP 8.3e-2). */
+function serverOffNow(): boolean {
+  return hasReceivedReady() && !serverSupportsGameActivity();
+}
 
 /** The section's rows, or none where this build cannot detect a game (the web build). */
 export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
@@ -36,7 +46,13 @@ export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
     "data-testid": "game-activity-detected",
     role: "status",
   });
-  appendChildren(info, label, desc, detected);
+  // WP 8.3e-2: an admin turned game activity off for this server.
+  const serverOff = createElement(
+    "div",
+    { class: "setting-desc", "data-testid": "game-activity-server-off", role: "status" },
+    t("settings.serverOff"),
+  );
+  appendChildren(info, label, desc, serverOff, detected);
 
   // A scan that answers after the switch went off, or after the pane closed,
   // must not paint: `scan` numbers them and only the newest may.
@@ -46,7 +62,9 @@ export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
   function refresh(): void {
     cancelRefresh?.();
     const mine = ++scan;
-    if (!isGameActivityShared()) {
+    serverOff.hidden = !serverOffNow();
+    // While the server shows no games, what this device detects is not shown.
+    if (!isGameActivityShared() || serverOffNow()) {
       setText(detected, "");
       detected.hidden = true;
       return;
@@ -76,6 +94,8 @@ export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
   });
   appendChildren(row, info, toggle);
   signal.addEventListener("abort", () => cancelRefresh?.(), { once: true });
+  const unsubPolicy = onGameActivityPolicy(refresh);
+  signal.addEventListener("abort", unsubPolicy, { once: true });
   refresh();
 
   return [

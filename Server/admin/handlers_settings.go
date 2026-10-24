@@ -124,6 +124,14 @@ type uploadPolicyBroadcaster interface {
 	BroadcastUploadPolicy()
 }
 
+// gameActivityPolicyApplier is the hub capability that makes the hub follow
+// the saved game activity switch (WP 8.3e-2): it clears every shown game when
+// the switch is off and sends game_activity_policy to connected clients.
+// *ws.Hub implements it (hub_wiring_test.go pins that).
+type gameActivityPolicyApplier interface {
+	ApplyGameActivityPolicy(saved bool)
+}
+
 func handlePatchSettings(settings *service.SettingsService, retention *service.RetentionService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
@@ -171,6 +179,19 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 		if errors.Is(err, service.ErrBadRequest) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
+		}
+		// Turning game activity off must clear the games already shown and
+		// tell open clients, not wait for their next connect. It runs before
+		// the error check: Patch can fail after its commit (the response read
+		// on a cancelled request), and the hub re-reads the stored value
+		// itself, so a save that did land still reaches it.
+		if value, changing := updates[service.GameActivityEnabledKey]; changing {
+			if a, ok := hub.(gameActivityPolicyApplier); ok {
+				if stored, read := all[service.GameActivityEnabledKey]; read {
+					value = stored
+				}
+				a.ApplyGameActivityPolicy(service.GameActivityEnabled(value))
+			}
 		}
 		if err != nil {
 			slog.ErrorContext(r.Context(), "settings patch failed", "error", err)

@@ -12,11 +12,15 @@ const AFK_JOIN_BITS=0x202; /* READ_MESSAGES | CONNECT_VOICE: both are needed to 
 /* Owner-only: whether a Move Members holder may move the owner. Unset reads as
    on, as the server does (service.VoiceOwnerMovable). */
 const OWNER_MOVABLE_KEY='voice_owner_movable';
-const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',OWNER_MOVABLE_KEY,...EXT_KEYS];
+/* Whether members' game activity is shown on this server (WP 8.3e-2). Unset
+   reads as on, as the server does (service.GameActivityEnabled). Manage Server
+   may change it; it is not owner-only. */
+const GAME_ACTIVITY_KEY='game_activity_enabled';
+const SETTINGS_KEYS=['server_name','motd','registration_mode','require_2fa','afk_timeout_seconds',OWNER_MOVABLE_KEY,GAME_ACTIVITY_KEY,...EXT_KEYS];
 /* An extension list as the server stores it: lower case, no dots, deduped,
    comma-separated; so a respelled but equal list is not a change. */
 function extListNorm(v){return[...new Set(String(v||'').split(/[\s,]+/).map(x=>x.replace(/^\.+/,'').toLowerCase()).filter(Boolean))].join(',')}
-function settingNorm(k,v){return k===OWNER_MOVABLE_KEY?((v==='false'||v==='0')?'false':'true'):k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
+function settingNorm(k,v){return k===OWNER_MOVABLE_KEY||k===GAME_ACTIVITY_KEY?((v==='false'||v==='0')?'false':'true'):k==='afk_timeout_seconds'?(v||AFK_TIMEOUT_DEFAULT):k==='require_2fa'?((v==='1'||v==='true')?'true':'false'):EXT_KEYS.includes(k)?extListNorm(v):(v||'')}
 function settingsFormValues(keys){
   const out={};
   keys.forEach(k=>{
@@ -59,6 +63,9 @@ async function renderSettings(){
   html+=settingsCard('Security',
     '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-require_2fa-name">Require two-factor authentication</div><div class="setting-desc" id="s-require_2fa-desc">Every member must turn on 2FA before they can use the server</div></div><div class="setting-ctrl"><button class="toggle '+(on?'on':'')+'" id="s-require_2fa" role="switch" aria-checked="'+on+'" aria-labelledby="s-require_2fa-name" aria-describedby="s-require_2fa-desc" data-action="toggleSetting"></button></div></div>');
   html+=await afkCard(v('afk_timeout_seconds')||AFK_TIMEOUT_DEFAULT);
+  const gameActivityOn=settingNorm(GAME_ACTIVITY_KEY,v(GAME_ACTIVITY_KEY))==='true';
+  html+=settingsCard('Game activity',
+    '<div class="setting-row"><div class="setting-info"><div class="setting-name" id="s-'+GAME_ACTIVITY_KEY+'-name">Show the games members are playing</div><div class="setting-desc" id="s-'+GAME_ACTIVITY_KEY+'-desc">Turn this off and no one sees what anyone is playing on this server. Games already shown are cleared at once, and members\' apps stop sending them</div></div><div class="setting-ctrl"><button class="toggle '+(gameActivityOn?'on':'')+'" id="s-'+GAME_ACTIVITY_KEY+'" role="switch" aria-checked="'+gameActivityOn+'" aria-labelledby="s-'+GAME_ACTIVITY_KEY+'-name" aria-describedby="s-'+GAME_ACTIVITY_KEY+'-desc" data-action="toggleSetting"></button></div></div>');
   const owner=isOwner();
   if(owner){
     const movable=settingNorm(OWNER_MOVABLE_KEY,v(OWNER_MOVABLE_KEY))==='true';

@@ -96,15 +96,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                          |
-| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                               |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                            |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                            |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                        |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                                                  |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                       |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                                                                   |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                                                                |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), `game_activity_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                                                                |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                                                            |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                                                                                      |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                                           |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -218,10 +218,20 @@ keeps it until one authenticates.
       "max_upload_bytes": 104857600,
       "blocked_extensions": ["bat", "cmd", "ps1", "vbs", "js", "hta"],
       "thumbnails": true
-    }
+    },
+    "game_activity_policy": { "enabled": true }
   }
 }
 ```
+
+`game_activity_policy.enabled` (WP 8.3e-2) is whether game activity is shown on
+this server right now. It rides every `auth_ok`, connect and resume alike: a
+resume gets no `ready`, and the unsequenced
+[`game_activity_policy`](#game_activity_policy-server---client-broadcast)
+frame is not replayed, so a switch flipped while the client was offline
+reaches it here. A client treats this value, when present, as the answer to
+"is game activity supported", ahead of `ready.capabilities.game_activity`; a
+server that omits it leaves the answer to `ready`.
 
 `display_name`, `about`, `custom_status`, `banner` and `banner_color` are the
 signed-in user's own profile fields, `null` when unset. `display_name` is what clients render
@@ -510,7 +520,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "game_activity": true, "thread_follows": true }`. `game_activity` means the server understands `activity_update` and carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`; a client that does not see it sends no `activity_update` and shows no game. `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "game_activity": true, "thread_follows": true }`. `game_activity` means the server understands `activity_update`, carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`, and has game activity switched on right now (WP 8.3e-2: an admin can turn it off, and the flag is then `false`, like `threads` tracking whether threads are available); a client that does not see it sends no `activity_update` and shows no game. The runtime switch is [`game_activity_policy`](#game_activity_policy-server---client-broadcast). `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -653,7 +663,7 @@ every reconnect; the ready payload now ships the stored value. A DM's
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name of the member's top role), `role_ids` (every role the member holds, top role first, always an array with at least one id; absent on an older server, where `role` is the only role), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
 
-**activities[]:** The games connected members are playing, as `{user_id, name, started_at}` (`started_at` in unix milliseconds), sorted by `user_id`; always an array, `[]` when nobody is playing. It lists every connected member who reports a game and is not offline to this viewer, the viewer included: an invisible member appears only in their own `ready`. It is a separate array, not a field of `members[]`, and is the first key of the payload. It is absent on a server without the `game_activity` capability; a client then treats every member as not playing. Later changes arrive as `presence`.
+**activities[]:** The games connected members are playing, as `{user_id, name, started_at}` (`started_at` in unix milliseconds), sorted by `user_id`; always an array, `[]` when nobody is playing. It lists every connected member who reports a game and is not offline to this viewer, the viewer included: an invisible member appears only in their own `ready`. It is a separate array, not a field of `members[]`, and is the first key of the payload. It is `[]` while an admin has game activity switched off, and absent on a server without the `game_activity` capability; a client then treats every member as not playing. Later changes arrive as `presence`.
 
 **member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
 
@@ -1570,6 +1580,16 @@ of another JSON type or a non-integer `started_at` is refused with
   earlier than now minus 24 h.
 - While the user is timed out a set is refused with `TIMED_OUT`, like a
   non-empty `custom_status`; a clear still applies.
+- While an admin has game activity switched off for the server (WP 8.3e-2) a
+  set is refused with `GAME_ACTIVITY_DISABLED`, before the rate limit, so the
+  refusal spends no budget; a clear still applies (with nothing set it does
+  nothing). The client takes the refusal quietly and asks again on its next
+  poll, so its game shows once the switch is back on; a refusal never overrides
+  the policy the server last stated (it can arrive after a newer `true`). Turning the switch
+  off clears every shown game on the server: every connected client gets a
+  `presence` frame with `activity: null` about each affected visible user (an
+  invisible user's goes to that user's own connection only), and `presence`
+  frames sent afterwards carry no game.
 - Setting an activity is limited to 1 per 10 seconds per user, on its own
   budget; over it the frame is refused with `RATE_LIMITED` and the client
   retries on its next poll. A clear is never limited.
@@ -1609,7 +1629,8 @@ the current value, so a status change, a custom status expiry or an idle flip
 keeps showing the game. For an invisible user, everyone else gets `activity:
 null` (the same rule that blanks `custom_status`) and only the user's own copy
 carries the game; an `activity_update` while invisible reaches only the user,
-and going back online shows it again. A server without the
+and going back online shows it again. While game activity is switched off for the server the value is always
+`null`. A server without the
 `game_activity` capability omits the key.
 
 `custom_status` is always present (`null` when unset), so "cleared it" is
@@ -2351,6 +2372,40 @@ Unsequenced and never replayed: auth_ok carries the current lists on every
 connect and resume, so a replayed older frame could only overwrite them. A
 client whose send queue is full is disconnected instead, and its next auth_ok
 carries the current lists.
+
+### game_activity_policy (Server -> Client, broadcast)
+
+Sent to every connected client after an admin with `MANAGE_SERVER` saves the
+`game_activity_enabled` setting in the admin panel (`PATCH
+/admin/api/settings`). The setting is `true` while no row exists.
+
+```json
+{
+  "type": "game_activity_policy",
+  "payload": { "enabled": false }
+}
+```
+
+`enabled` is whether game activity is shown on this server. Turning it off
+clears the server's state first (every connection's shown game, see
+`activity_update`) and then sends this frame; turning it on sends only the
+frame, and the games return as clients send them again. The clearing `presence`
+frames ride the sequenced broadcast queue and this frame is sent directly, so
+their wire order against each other is not guaranteed: a client treats `false`
+as clearing every game itself and ignores a game that arrives on `presence`
+afterwards. A client that sees `false` sends no `activity_update` and
+shows no game; on `true` it sends its current game at once.
+
+Unfiltered, unsequenced and never replayed, like
+[`upload_policy`](#upload_policy-server---client-broadcast): `auth_ok` carries
+the same value as `game_activity_policy` on every connect and resume, so a
+replayed older frame could only overwrite a newer one. A client whose send
+queue is full is disconnected instead, and its next `auth_ok` carries the
+current value. For operators: if the setting cannot be read at server start the
+switch starts off (the server logs `game_activity_policy_unreadable`); saving
+it again in the admin panel recovers. A client that connects at the moment of the switch may keep
+asking once per poll; the server refuses each set with
+`GAME_ACTIVITY_DISABLED`, so nothing is shown.
 
 ### user_update (Server -> Client, broadcast)
 
@@ -3440,6 +3495,7 @@ warm resume served by replay never waits for a permit.
 | `NOT_KEY_HOLDER`           | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                                                                                                                                                     |
 | `THREAD_EXISTS`            | The message already has a thread; the error carries `thread_id`                                                                                                                                                                                                                  |
 | `THREAD_LOCKED`            | The thread is locked; only a moderator may post in it or change it                                                                                                                                                                                                               |
+| `GAME_ACTIVITY_DISABLED`   | `activity_update` set a game while an admin has game activity switched off for the server; a clear is never refused (WP 8.3e-2)                                                                                                                                                  |
 | `RATE_LIMITED`             | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                                                        |
 | `ALREADY_JOINED`           | Already in this voice channel                                                                                                                                                                                                                                                    |
 | `CHANNEL_FULL`             | Voice channel at capacity                                                                                                                                                                                                                                                        |
@@ -3644,6 +3700,7 @@ tables below add per-type behavioral notes.
 | `roles_update`         | Yes      | All clients (full role list)                                                                           |
 | `emoji_update`         | Yes      | All clients (full custom-emoji set)                                                                    |
 | `upload_policy`        | No       | All clients (both upload file-type lists)                                                              |
+| `game_activity_policy` | No       | All clients (the game activity switch)                                                                 |
 | `dm_channel_open`      | No       | Direct to participant                                                                                  |
 | `dm_channel_close`     | No       | Direct to participant                                                                                  |
 | `dm_request`           | No       | Direct to recipient (B5-6)                                                                             |
