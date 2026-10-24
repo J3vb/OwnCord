@@ -130,6 +130,13 @@ func handleActivityUpdateV2(ctx context.Context, cmd Command, info ClientInfo, d
 		return Result{SetActivity: &activityChange{}}
 	}
 
+	// An admin turned game activity off for the server (WP 8.3e-2). Refused
+	// before the limiter so the refusal costs no budget; the authoritative
+	// check is applyActivity's, under presenceMu.
+	if d.GameActivityEnabled != nil && !d.GameActivityEnabled() {
+		return Result{Error: ClientError{Code: ErrCodeGameActivityDisabled, Message: "game activity is turned off on this server"}}
+	}
+
 	now := time.Now()
 	next := &gameActivity{Name: u.Name, StartedAt: clampActivityStart(u.StartedAt, now)}
 	if sameGame(info.Activity, next) {
@@ -164,9 +171,23 @@ func clampActivityStart(startedAt int64, now time.Time) int64 {
 // enqueues. The compare-and-swap runs under presenceMu, so a racing status
 // change either swaps first (this retries on top of it) or emits after this
 // frame with the activity it read, which is the same one.
+//
+// A set is dropped while the server's game activity switch is off. The flag is
+// read under presenceMu, after ApplyGameActivityPolicy stored it and before
+// its sweep takes the same lock: a set that gets here after the sweep is
+// dropped, and one that got here first is cleared by the sweep. A clear is
+// always applied.
 func (h *Hub) applyActivity(c *Client, next *gameActivity) {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
+	if next != nil && !h.gameActivity.on.Load() {
+		return
+	}
+	h.applyActivityLocked(c, next)
+}
+
+// applyActivityLocked is applyActivity's body. The caller holds presenceMu.
+func (h *Hub) applyActivityLocked(c *Client, next *gameActivity) {
 	if h.GetClient(c.userID) != c {
 		return
 	}

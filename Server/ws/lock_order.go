@@ -63,6 +63,9 @@
 //	                                                          at a time (role_refresh.go:24-30)
 //	3 S   Hub.uploadPolicyMu         hub.go:224               a DB read, then Hub.settingsMu, then Hub.mu (R),
 //	                                                          then Client.mu (hub_settings.go:93-113)
+//	3 S   gameActivityState.mu       hub_settings.go:128      a DB read, then Hub.presenceMu (the game activity
+//	      (Hub.gameActivity)                                  sweep), Hub.mu (R), then Client.mu
+//	                                                          (hub_settings.go)
 //	3 S   Client.focusMu             client.go:86             Client.mu, PubSub.mu, DB reads (focus_defer.go:21,
 //	                                                          focus_defer.go:132, handlers.go:281-325)
 //	3 S   admissionMu (local)        serve.go:62              Hub.mu (R) via ClientCount (serve.go:73,83)

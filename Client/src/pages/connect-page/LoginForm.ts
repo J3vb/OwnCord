@@ -410,6 +410,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     hostInput.addEventListener(
       "input",
       () => {
+        // A typed address is a different host, and the saved password is not its.
+        clearSavedPasswordPlaceholder();
         updateRegistrationUi();
         scheduleHostSettled();
         onHostInput?.(hostInput.value.trim());
@@ -1036,9 +1038,13 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // Event handlers
   // ---------------------------------------------------------------------------
 
-  /** Every write of the host goes through here: a new host ends a busy retry for the old one. */
+  /** Every write of the host goes through here: a new host ends the old one's busy retry and saved password. */
   function writeHost(host: string): void {
-    if (host !== hostInput.value.trim()) cancelAuthBusyRetry?.();
+    if (host !== hostInput.value.trim()) {
+      cancelAuthBusyRetry?.();
+      // The saved password belongs to the old host's stored credential.
+      clearSavedPasswordPlaceholder();
+    }
     hostInput.value = host;
   }
 

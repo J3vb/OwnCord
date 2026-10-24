@@ -18,6 +18,9 @@
         "dir": "s2c",
         "frame": {
           "payload": {
+            "game_activity_policy": {
+              "enabled": true
+            },
             "motd": "Welcome!",
             "replay_source": "buffer",
             "server_name": "OwnCord Server",
