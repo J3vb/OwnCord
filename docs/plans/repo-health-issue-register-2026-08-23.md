@@ -79,12 +79,12 @@ baselines and scorecards.
 
 | Status    |   Count |
 | --------- | ------: |
-| Fixed     |     495 |
+| Fixed     |     498 |
 | Open      |       4 |
 | Declined  |       7 |
 | Refuted   |       1 |
 | Duplicate |       1 |
-| **Total** | **508** |
+| **Total** | **511** |
 
 As of 2026-09-28 the only open finding is `OC-0476`
 (low, not B9-tagged); `OC-0481` (the operational tls-off upload-phase

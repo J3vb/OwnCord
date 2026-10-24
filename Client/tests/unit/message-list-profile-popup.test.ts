@@ -224,6 +224,53 @@ describe("MessageList profile popup", () => {
     expect(chip?.hasAttribute("data-user-id")).toBe(false);
   });
 
+  it("keeps a masked-link @name that resolves only later as link content, not a profile control", async () => {
+    messagesStore.setState((prev) => ({
+      ...prev,
+      messagesByChannel: new Map([
+        [1, [makeMessage({ id: 3, content: "[@bob read this](https://example.com/x)" })]],
+      ]),
+    }));
+    list.destroy?.();
+    container.replaceChildren();
+    list = createMessageList({
+      channelId: 1,
+      channelName: "general",
+      currentUserId: 1,
+      onScrollTop: vi.fn(),
+      onReplyClick: vi.fn(),
+      onEditClick: vi.fn(),
+      onEditSave: vi.fn(() => true),
+      onEmptyEdit: vi.fn(),
+      onDeleteClick: vi.fn(),
+      onReactionClick: vi.fn(),
+      onPinClick: vi.fn(),
+    });
+    list.mount(container);
+    const link = container.querySelector<HTMLAnchorElement>('a[target="_blank"]');
+    // bob is not a member yet, so the label renders as plain text.
+    expect(link?.querySelector(".mention")).toBeNull();
+
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map([...prev.members, [11, member(11, "bob")]]),
+      roleRevision: (prev.roleRevision ?? 0) + 1,
+    }));
+    membersStore.flush();
+    await flush();
+
+    const chip = container.querySelector<HTMLElement>('a[target="_blank"] .mention');
+    expect(chip).not.toBeNull();
+    expect(chip?.hasAttribute("role")).toBe(false);
+    expect(chip?.hasAttribute("tabindex")).toBe(false);
+    expect(chip?.hasAttribute("data-user-id")).toBe(false);
+
+    createPopupMock.mockClear();
+    chip?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await flush();
+    expect(createPopupMock).not.toHaveBeenCalled();
+  });
+
   it("ignores @everyone chips, which name no user", async () => {
     // Rendered only when the server honoured it; either way it must never open a profile.
     container.querySelector<HTMLElement>(".mention-everyone")?.click();
