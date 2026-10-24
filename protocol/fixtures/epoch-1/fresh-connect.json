@@ -173,7 +173,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073717247,
+                "permissions": 805248611,
                 "position": 80
               },
               {
@@ -183,7 +183,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15704063,
+                "permissions": 15670883,
                 "position": 60
               },
               {
@@ -472,7 +472,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Admin",
-                "permissions": 1073717247,
+                "permissions": 805248611,
                 "position": 80
               },
               {
@@ -482,7 +482,7 @@
                 "is_default": false,
                 "mentionable": false,
                 "name": "Moderator",
-                "permissions": 15704063,
+                "permissions": 15670883,
                 "position": 60
               },
               {

@@ -147,7 +147,7 @@ func (s *supportBundles) preview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	session, ok := supportSession(r)
 	if !ok {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "sign in with an administrator account to preview diagnostics")
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "requires the View Diagnostics permission or an administrator account")
 		return
 	}
 	if !supportJSON(w, r, &struct{}{}) {
@@ -177,7 +177,7 @@ func (s *supportBundles) download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	session, ok := supportSession(r)
 	if !ok {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "sign in with an administrator account to download diagnostics")
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "requires the View Diagnostics permission or an administrator account")
 		return
 	}
 	var req struct {

@@ -33,7 +33,13 @@ func requireGrantableChannelOverride(actorRole *db.Role, allow, deny int64) erro
 	// An owner-grant-only bit (MOVE_MEMBERS) may not be added to or removed
 	// from an override's allow or deny by anyone but the owner or an
 	// Administrator; the union below also covers clearing an existing one.
-	if changed := (allow | deny) & permissions.OwnerGrantOnly; changed != 0 &&
+	// An owner-tier bit (WP 8.4d) needs the owner alone.
+	changed := (allow | deny) & permissions.OwnerGrantOnly
+	if ownerTier := changed & permissions.OwnerOnlyGrant; ownerTier != 0 &&
+		!permissions.CanChangeOwnerOnlyGrant(actorRole.ID, actorRole.Position) {
+		return fmt.Errorf("only the owner can change %s%.0w", permissions.Name(ownerTier&-ownerTier), ErrForbidden)
+	}
+	if changed != 0 &&
 		!permissions.CanChangeOwnerGrantOnly(actorRole.Permissions, actorRole.ID, actorRole.Position) {
 		return fmt.Errorf("only the owner can change %s%.0w", permissions.Name(changed&-changed), ErrForbidden)
 	}

@@ -90,6 +90,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	"admin/helpers.go":                   {Disposition: "adapter", Note: "Role/User types in response helpers"},
 	"admin/loglevel.go":                  {Disposition: "boundary", Note: "audits the log-level boost and revert with WriteAudit; no other calls"},
 	"admin/logstream.go":                 {Disposition: "boundary", Note: "handle threaded to the SSE stream's auth check; no calls of its own", Hands: calls{"auth.ResolveTokenHash": 2}},
+	"admin/gates.go":                     {Disposition: "adapter", Note: "Role type in the route gate predicates; the gates read the role adminAuthMiddleware resolved"},
 	"admin/middleware.go":                {Disposition: "adapter", Note: "Role/User/Session types in the request context; SessionService resolves the bearer token"},
 	"admin/types.go":                     {Disposition: "adapter", Note: "response DTOs only — its GetRoleByID went with the user family"},
 	"admin/update_handlers.go":           {Disposition: "boundary", Note: "audits the binary swap (OC-0391) with WriteAudit/LogAudit; no other calls", Calls: calls{"LogAudit": 1}},

@@ -97,6 +97,16 @@ func ActorIDFromContext(ctx context.Context) int64 {
 	return user.ID
 }
 
+// actorUserFromContext returns the authenticated principal's *db.User stored in
+// the request context by adminAuthMiddleware, or nil outside that middleware.
+func actorUserFromContext(r *http.Request) *db.User {
+	user, ok := r.Context().Value(adminUserKey).(*db.User)
+	if !ok {
+		return nil
+	}
+	return user
+}
+
 // actorRoleFromContext returns the authenticated principal's *db.Role stored
 // in the request context by adminAuthMiddleware. Returns nil if called
 // outside that middleware (should not happen in production) so callers can

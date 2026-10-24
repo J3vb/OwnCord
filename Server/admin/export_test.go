@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"github.com/J3vb/OwnCord/Server/updater"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -203,8 +202,9 @@ func SetBackupHoldForTest(api *AdminAPI, h func()) {
 // FreeBackupPathForTest exposes freeBackupPath.
 func FreeBackupPathForTest(dir, base string) (string, error) { return freeBackupPath(dir, base) }
 
-// OwnerOrBackupsRoutesForTest returns the routes api registered behind the
-// owner-or-MANAGE_BACKUPS gate.
-func OwnerOrBackupsRoutesForTest(api *AdminAPI) []OwnerOnlyRoute {
-	return slices.Clone(api.backup.routes)
+// GatedRoutesForTest returns the routes api registered behind a routeGate
+// (the owner-or-bit and administrator-or-bit routes, WP 8.4d), each with the
+// name of its gate.
+func GatedRoutesForTest(api *AdminAPI) []GatedRoute {
+	return api.gatedRoutes()
 }

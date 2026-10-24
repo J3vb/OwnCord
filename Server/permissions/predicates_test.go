@@ -441,3 +441,138 @@ func TestVoiceMoverBase(t *testing.T) {
 		}
 	}
 }
+
+// ownerTypeCase is one row of the WP 8.4d predicate tables.
+type ownerTypeCase struct {
+	name  string
+	perms int64
+	id    int64
+	pos   int
+	want  bool
+}
+
+// ownerTierRows are the rows every owner-tier predicate shares, parameterised
+// by its own bit: the owner by identity, the explicit holder, and the
+// Administrator WITHOUT the bit, who must be refused (the seeded Admin has
+// ADMINISTRATOR, and these actions were owner-only before they were bits).
+func ownerTierRows(bit int64) []ownerTypeCase {
+	return []ownerTypeCase{
+		{"owner without the bit", 0, OwnerRoleID, OwnerRolePosition, true},
+		{"owner position on a renumbered role", 0, 77, OwnerRolePosition, true},
+		{"holder of the bit", bit, 9, 50, true},
+		{"holder via the OR of several roles", ReadMessages | bit, MemberRoleID, 40, true},
+		{"administrator without the bit", Administrator, AdminRoleID, 80, false},
+		{"administrator with every other bit", AllPerms &^ bit, AdminRoleID, 80, false},
+		{"manage roles and server alone", ManageRoles | ManageServer, 9, 50, false},
+		{"zero perms", 0, MemberRoleID, 40, false},
+	}
+}
+
+func TestOwnerTierPredicates(t *testing.T) {
+	preds := []struct {
+		name string
+		bit  int64
+		fn   func(int64, int64, int) bool
+	}{
+		{"CanRestoreBackups", RestoreBackups, CanRestoreBackups},
+		{"CanManageConfig", ManageConfig, CanManageConfig},
+		{"CanManageUpdates", ManageUpdates, CanManageUpdates},
+		{"CanManageTokens", ManageTokens, CanManageTokens},
+		{"CanIssueRecovery", IssueRecovery, CanIssueRecovery},
+	}
+	for _, p := range preds {
+		for _, c := range ownerTierRows(p.bit) {
+			if got := p.fn(c.perms, c.id, c.pos); got != c.want {
+				t.Errorf("%s %s: got %v, want %v", p.name, c.name, got, c.want)
+			}
+		}
+		// A different owner-tier bit never opens this predicate.
+		for _, other := range []int64{RestoreBackups, ManageConfig, ManageUpdates, ManageTokens, IssueRecovery, ManageBackups} {
+			if other == p.bit {
+				continue
+			}
+			if p.fn(other, 9, 50) {
+				t.Errorf("%s opened by unrelated bit 0x%X", p.name, other)
+			}
+		}
+	}
+}
+
+func TestCanListBackups(t *testing.T) {
+	cases := []ownerTypeCase{
+		{"owner", 0, OwnerRoleID, OwnerRolePosition, true},
+		{"manage backups holder", ManageBackups, 9, 50, true},
+		{"restore backups holder", RestoreBackups, 9, 50, true},
+		{"administrator without either bit", Administrator, AdminRoleID, 80, true},
+		{"manage config alone", ManageConfig, 9, 50, false},
+		{"zero perms", 0, MemberRoleID, 40, false},
+	}
+	for _, c := range cases {
+		if got := CanListBackups(c.perms, c.id, c.pos); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestAdministratorTierPredicates: VIEW_DIAGNOSTICS and ERASE_ACCOUNTS keep
+// the Administrator bypass (an Administrator already had both powers) and the
+// bit lets a role without ADMINISTRATOR do just that one thing.
+func TestAdministratorTierPredicates(t *testing.T) {
+	preds := []struct {
+		name string
+		bit  int64
+		fn   func(int64) bool
+	}{
+		{"CanViewDiagnostics", ViewDiagnostics, CanViewDiagnostics},
+		{"CanEraseAccounts", EraseAccounts, CanEraseAccounts},
+	}
+	for _, p := range preds {
+		for _, c := range []struct {
+			name  string
+			perms int64
+			want  bool
+		}{
+			{"holder of the bit", p.bit, true},
+			{"administrator without the bit", Administrator, true},
+			{"manage server alone", ManageServer, false},
+			{"the other tier's bit", (ViewDiagnostics | EraseAccounts) &^ p.bit, false},
+			{"zero perms", 0, false},
+		} {
+			if got := p.fn(c.perms); got != c.want {
+				t.Errorf("%s %s: got %v, want %v", p.name, c.name, got, c.want)
+			}
+		}
+	}
+}
+
+// TestCanChangeOwnerOnlyGrant: only the owner changes an owner-tier bit; an
+// Administrator, a MANAGE_ROLES holder and a holder of the bit do not.
+func TestCanChangeOwnerOnlyGrant(t *testing.T) {
+	if !CanChangeOwnerOnlyGrant(OwnerRoleID, OwnerRolePosition) {
+		t.Error("the owner must be able to change owner-only grant bits")
+	}
+	if !CanChangeOwnerOnlyGrant(77, OwnerRolePosition) {
+		t.Error("the owner position must be able to change owner-only grant bits")
+	}
+	for _, c := range []struct {
+		name string
+		id   int64
+		pos  int
+	}{{"administrator role", AdminRoleID, 80}, {"moderator role", ModeratorRoleID, 60}, {"custom role", 9, 50}} {
+		if CanChangeOwnerOnlyGrant(c.id, c.pos) {
+			t.Errorf("%s must not change owner-only grant bits", c.name)
+		}
+	}
+}
+
+// TestCanChangeOwnerGrantOnly_AdministratorTierBits: an Administrator may
+// change VIEW_DIAGNOSTICS and ERASE_ACCOUNTS (they sit in OwnerGrantOnly) but
+// a MANAGE_ROLES holder may not.
+func TestCanChangeOwnerGrantOnly_AdministratorTierBits(t *testing.T) {
+	if !CanChangeOwnerGrantOnly(Administrator, AdminRoleID, 80) {
+		t.Error("an Administrator must be able to change administrator-tier bits")
+	}
+	if CanChangeOwnerGrantOnly(ManageRoles|ViewDiagnostics|EraseAccounts, ModeratorRoleID, 60) {
+		t.Error("a MANAGE_ROLES holder of the bits must not change administrator-tier bits")
+	}
+}
