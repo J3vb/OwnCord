@@ -100,8 +100,8 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 28    |
-| Distinct `invoke` command names called from `Client/src/`  | 94    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 29    |
+| Distinct `invoke` command names called from `Client/src/`  | 95    |
 | `#[tauri::command]` handlers in `Client/src-tauri/`        | 98    |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
@@ -246,7 +246,10 @@ and answers a tagged `{ state: "playing", title, artist, player, playerId,
 positionMs, durationMs }`, `{ state: "none" }` or `{ state: "unknown" }`, where
 unknown is a failed, timed-out or still-running read that the caller must not
 treat as a stop; the player shown last stays while it still plays, else the OS's
-current session goes first) has no production caller until WP 8.10c. The three Windows per-app share audio commands
+current session goes first) has its caller since WP 8.10c:
+`src/platform/desktop/mediaDetector.ts`, behind the `MediaDetector` contract, a
+twenty-ninth importer; a failed call or an odd answer reads as unknown, and the
+web build reads nothing and hides the setting. The three Windows per-app share audio commands
 `app_audio_available`, `start_app_audio` and `stop_app_audio` (WP 6.7a, the host
 half: they exist on every target and answer "unavailable" off Windows) have their
 caller since WP 6.7b: `src/platform/desktop/appAudio.ts`, behind the `AppAudio`

@@ -900,6 +900,8 @@ export function buildTauriMockScript(opts: {
         if (cmd === "system_idle_ms") return null;
         // The game scan (WP 8.3): no game is running in the mocked app.
         if (cmd === "detect_game") return null;
+        // The song read (WP 8.10): nothing is playing in the mocked app.
+        if (cmd === "detect_media") return { state: "none" };
         // The "Add a game" picker's program list: nothing is running here.
         if (cmd === "list_running_programs") return [];
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
