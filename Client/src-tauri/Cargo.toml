@@ -163,6 +163,12 @@ windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Data_Xml_Dom",
     "UI_Notifications",
+    # The song being played (media_activity/win.rs): Global System Media
+    # Transport Controls sessions, with the Foundation types (TimeSpan,
+    # DateTime) and collections they return.
+    "Media_Control",
+    "Foundation",
+    "Foundation_Collections",
 ] }
 # DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
 # fallback in secret_store, and the window lookup that hides WebView2's

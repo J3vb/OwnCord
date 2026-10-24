@@ -63,14 +63,19 @@ function cloudStart(setup) {
     cwd: dir,
     encoding: "utf8",
   }).stdout.trim();
+  const ledgerDriver = spawnSync("git", ["config", "merge.findings-ledger.driver"], {
+    cwd: dir,
+    encoding: "utf8",
+  }).stdout.trim();
   rmSync(dir, { recursive: true, force: true });
-  return { ...run, hooksPath };
+  return { ...run, hooksPath, ledgerDriver };
 }
 
 test("cloud session-start installs the git hooks", () => {
   const run = cloudStart();
   assert.equal(run.status, 0);
   assert.equal(run.hooksPath, ".githooks");
+  assert.equal(run.ledgerDriver, "node scripts/merge-ledger.mjs %O %A %B %P");
   assert.doesNotMatch(run.stdout, /hooks are not installed/);
 });
 
