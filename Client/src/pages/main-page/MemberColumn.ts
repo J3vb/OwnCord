@@ -13,6 +13,10 @@
  * narrow-window overlay: below 900 CSS px the column is a fixed panel the
  * toggle opens for the moment (never saved), so the chat keeps its room.
  *
+ * While the call view is up in this window the column steps aside so the call
+ * gets the width: the toggle opens it for the moment (never saved), and
+ * leaving the call view puts the saved choice back.
+ *
  * This controller is the only writer of the toggle's `hidden` and
  * `aria-pressed`.
  */
@@ -59,6 +63,8 @@ export interface MemberColumn {
   toggle(): void;
   /** Close the narrow overlay (the sidebar drawer opening). No-op otherwise. */
   closeOverlay(): void;
+  /** The call view is up in this window (on) or gone (off). */
+  setCallView(on: boolean): void;
   destroy(): void;
 }
 
@@ -76,6 +82,9 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   // jsdom has no matchMedia; without one the column is never an overlay.
   const narrow = typeof window.matchMedia === "function" ? window.matchMedia(NARROW_QUERY) : null;
   let narrowOpen = false;
+  let callView = false;
+  /** Opened from the toggle during the call view; not saved. */
+  let callOpen = false;
 
   // --- Width handle ---
   let width = clampMemberWidth(loadPref<number>(MEMBER_WIDTH_PREF, MEMBER_WIDTH_DEFAULT));
@@ -155,7 +164,11 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     const onScreen = guildChannelOnScreen();
     const overlay = narrow?.matches === true;
     if (!right || !onScreen) narrowOpen = false;
-    const wanted = overlay ? narrowOpen : loadPref<boolean>(MEMBER_OPEN_PREF, true);
+    const wanted = overlay
+      ? narrowOpen
+      : callView
+        ? callOpen
+        : loadPref<boolean>(MEMBER_OPEN_PREF, true);
     const shown = right && onScreen && uiStore.getState().activeView === null && wanted;
     button.hidden = !(right && onScreen);
     button.setAttribute("aria-pressed", String(shown));
@@ -246,12 +259,24 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
       narrowOpen = false;
       sync();
     },
+    setCallView(on: boolean): void {
+      if (destroyed || callView === on) return;
+      callView = on;
+      callOpen = false;
+      sync();
+    },
     toggle(): void {
       if (destroyed) return;
       if (narrow?.matches === true) {
         narrowOpen = !narrowOpen;
         sync();
         if (narrowOpen) focusSearch();
+        return;
+      }
+      if (callView) {
+        callOpen = !callOpen;
+        sync();
+        if (callOpen) focusSearch();
         return;
       }
       savePref(MEMBER_OPEN_PREF, !loadPref<boolean>(MEMBER_OPEN_PREF, true));
