@@ -43,6 +43,13 @@ import {
   type ImageBox,
 } from "./image-sizes";
 import type { ImageMenuTarget } from "./image-menu";
+import { highlightCode, resolveLanguage } from "./syntax-highlight";
+import {
+  clearTextPreviewCache,
+  isTextPreviewable,
+  renderTextPreview,
+  type TextPreviewDeps,
+} from "../../features/messaging/textPreview";
 
 /** One image of a message's lightbox sequence. `url` is the resolved server URL. */
 export interface LightboxGalleryItem {
@@ -383,6 +390,7 @@ export function clearAttachmentCaches(): void {
   videoDims.clear();
   clearStillCache();
   clearAnimatedStills();
+  clearTextPreviewCache();
 }
 // The image/video/audio caches pin blob: URLs; they end with the session.
 void registerSessionReset("attachments:caches", clearAttachmentCaches, { phase: "cache" }); // app-lifetime
@@ -483,12 +491,15 @@ function isTokenBearingServerPath(pathname: string): boolean {
  * go through the external-content broker (`fetchExternalImage`), and anything
  * else is refused here rather than handed to a general-purpose client.
  */
-async function fetchServerFile(url: string): Promise<Response> {
+async function fetchServerFile(
+  url: string,
+  extraHeaders: Readonly<Record<string, string>> = {},
+): Promise<Response> {
   // i18n-exempt: internal guard, logged by the caller, never rendered
   if (!isServerUrl(url)) throw new Error("external URLs are fetched only through the broker");
   const parsed = new URL(url);
   const origin = await ensureHttpProxy(parsed.host);
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...extraHeaders };
   const token = getToken();
   if (token !== null && isTokenBearingServerPath(parsed.pathname)) {
     // i18n-exempt: HTTP wire header value, never rendered
@@ -496,6 +507,15 @@ async function fetchServerFile(url: string): Promise<Response> {
   }
   return desktop.http.fetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
 }
+
+/** What the text preview borrows from this module (it cannot import it). */
+const textPreviewDeps: TextPreviewDeps = {
+  fetchFile: fetchServerFile,
+  buildFileMeta,
+  buildDownloadButton,
+  renderFileChip,
+  highlight: (code, tag) => highlightCode(code, resolveLanguage(tag)),
+};
 
 /** In-flight fetch promises to prevent duplicate concurrent requests. */
 const inFlight = new Map<string, Promise<string | null>>();
@@ -1562,6 +1582,9 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
     }
 
     return wrap;
+  }
+  if (inlineable && isServerUrl(resolvedUrl) && isTextPreviewable(att)) {
+    return renderTextPreview(att, resolvedUrl, textPreviewDeps);
   }
   return renderFileChip(att, resolvedUrl);
 }

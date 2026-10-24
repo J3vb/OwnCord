@@ -1330,6 +1330,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
                 slots.messagesSlot.querySelector<HTMLElement>(`[data-post-id="${threadId}"]`) ??
                 slots.messagesSlot.querySelector<HTMLElement>('[data-testid="forum-new-post"]'),
             ),
+          avatar: (subject, className) =>
+            createAvatarElement(subject, {
+              className,
+              background: pickAvatarColor(subject.username),
+              decorative: true,
+              deferUntilVisible: true,
+            }),
         }),
       );
       if (storedChannel?.nsfw === true) mountConsentBar();

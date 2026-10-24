@@ -872,6 +872,9 @@ jobs:
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
 
+      - name: Self-test the findings-ledger merge driver
+        run: node --test scripts/merge-ledger.test.mjs
+
       - name: Self-test the CI cost report
         run: node --test scripts/ci-cost-report.test.mjs
 

@@ -69,6 +69,7 @@ const queries = (): URLSearchParams[] =>
   listThreads.mock.calls.map((c) => new URLSearchParams(c[1] as string));
 
 beforeEach(() => {
+  localStorage.clear();
   ac = new AbortController();
   listThreads = vi.fn();
   openPost = vi.fn();
@@ -117,6 +118,54 @@ describe("ForumView list", () => {
     toggle.click();
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(q('[data-testid="forum-guidelines-body"]').hidden).toBe(true);
+  });
+
+  it("remembers the collapsed guidelines for the next forum", async () => {
+    mount();
+    await flush();
+    q<HTMLButtonElement>('[data-testid="forum-guidelines-toggle"]').click();
+    expect(localStorage.getItem("owncord:settings:forumGuidelinesOpen")).toBe("false");
+    root.remove();
+    mount();
+    await flush();
+    expect(q('[data-testid="forum-guidelines-body"]').hidden).toBe(true);
+    expect(q('[data-testid="forum-guidelines-toggle"]').getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+
+  it("starts in cards, switches layout from the toolbar and remembers it", async () => {
+    serve({ "0:": page([makePost(1)]) });
+    mount();
+    await vi.waitFor(() => expect(titles()).toHaveLength(1));
+    expect(root.classList.contains("forum-view--grid")).toBe(true);
+    expect(q('[data-testid="forum-layout-grid"]').getAttribute("aria-pressed")).toBe("true");
+
+    q<HTMLButtonElement>('[data-testid="forum-layout-feed"]').click();
+    expect(root.classList.contains("forum-view--feed")).toBe(true);
+    expect(root.classList.contains("forum-view--grid")).toBe(false);
+    expect(q('[data-testid="forum-layout-feed"]').getAttribute("aria-pressed")).toBe("true");
+    expect(localStorage.getItem("owncord:settings:forumLayout")).toBe('"feed"');
+    // A layout switch redraws nothing from the server.
+    expect(listThreads).toHaveBeenCalledTimes(2);
+
+    root.remove();
+    mount();
+    expect(root.classList.contains("forum-view--feed")).toBe(true);
+  });
+
+  it("gives each row the author's avatar and a reply count, and marks the open post", async () => {
+    serve({ "0:": page([makePost(1, { message_count: 4 }), makePost(2)]) });
+    mount();
+    await vi.waitFor(() => expect(titles()).toHaveLength(2));
+    const row = q('[data-testid="forum-post-1"]');
+    expect(row.querySelector(".forum-post-avatar")?.textContent).toBe("A");
+    expect(row.querySelector(".forum-post-count")?.textContent).toBe("3");
+
+    threadsStore.setState((prev) => ({ ...prev, focusedThreadId: 1 }));
+    threadsStore.flush();
+    expect(row.getAttribute("aria-current")).toBe("true");
+    expect(q('[data-testid="forum-post-2"]').hasAttribute("aria-current")).toBe(false);
   });
 
   it("opens a post on click", async () => {

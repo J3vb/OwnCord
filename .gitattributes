@@ -9,6 +9,14 @@
 # scripts/check-doc-counts.mjs read the file.
 CHANGELOG.md merge=union
 
+# Every hunt fix appends to the ledger's findings array and bumps nextId, so
+# parallel PRs conflict there on every dev merge. The findings-ledger driver
+# (scripts/merge-ledger.mjs) merges by finding id and recomputes nextId. Git
+# needs it registered per clone: `npm run hooks:install` does that, and the
+# Claude Code session-start hook does it in cloud sessions. Without it, git
+# falls back to the ordinary text merge.
+.superpowers/findings-ledger.json merge=findings-ledger
+
 # Binary assets
 *.png binary
 *.ico binary
