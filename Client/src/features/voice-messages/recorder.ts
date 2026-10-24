@@ -42,12 +42,7 @@ export interface VoiceClip {
 }
 
 export type VoiceRecordErrorKind =
-  | "denied"
-  | "no-device"
-  | "unsupported"
-  | "suspended"
-  | "failed"
-  | "cancelled";
+  "denied" | "no-device" | "unsupported" | "suspended" | "failed" | "cancelled";
 
 export class VoiceRecordError extends Error {
   readonly kind: VoiceRecordErrorKind;

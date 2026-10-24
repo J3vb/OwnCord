@@ -1020,9 +1020,8 @@ function isLiveImageUrl(objectUrl: string): boolean {
  *  caches and the TOFU proxy, anything else through the broker. */
 function reloadImage(source: ExternalImageSource): Promise<ExternalContentResult<string>> {
   if (!("url" in source) || !isServerUrl(source.url)) return loadExternalImage(source);
-  return fetchImageAsObjectUrl(source.url).then(
-    (value): ExternalContentResult<string> =>
-      value === null ? { ok: false, failure: "unavailable" } : { ok: true, value },
+  return fetchImageAsObjectUrl(source.url).then((value): ExternalContentResult<string> =>
+    value === null ? { ok: false, failure: "unavailable" } : { ok: true, value },
   );
 }
 
