@@ -593,6 +593,9 @@ const EXEMPT: readonly string[] = [
   // Its reset is not observable: a kept DM needs the live voice session on that
   // channel, and the voice reset that follows prunes the set anyway.
   "dm:kept-calls",
+  // Playing <audio> elements, not store state; features/voice-messages/player.test.ts
+  // ("pauses every playing clip when the session ends") runs the reset.
+  "voice-messages:player",
   // Per-subscriber names built from a counter in auth.store (onAuthCleared);
   // page-scoped callers only, each removes its own entry with its disposer.
   "auth-cleared#${authClearedSeq}",

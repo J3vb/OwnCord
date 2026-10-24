@@ -49,6 +49,7 @@ export {
 } from "./content-parser";
 
 export { setServerHost } from "./attachments";
+import { isVoiceAttachment } from "../../features/voice-messages/player";
 
 // -- Imports for composite functions ------------------------------------------
 
@@ -514,6 +515,13 @@ function sendErrorReason(code: string | null): string {
   }
 }
 
+/** A message that is nothing but voice messages (WP 8.9): no empty text line above the player. */
+function isVoiceOnly(msg: Message): boolean {
+  return (
+    msg.content === "" && msg.attachments.length > 0 && msg.attachments.every(isVoiceAttachment)
+  );
+}
+
 /** Append a message's attachments. Its inline images form one lightbox
  *  sequence, in attachment order (3A-10c); an unconfirmed row (id 0) has none,
  *  and a lone image opens as it always did. */
@@ -724,7 +732,7 @@ export function renderMessage(
       wrap.style.display = "contents";
       wrap.appendChild(body);
       box.appendChild(wrap);
-    } else box.appendChild(body);
+    } else if (!isVoiceOnly(msg)) box.appendChild(body);
     if (msg.editedAt !== null) {
       box.appendChild(
         createElement(

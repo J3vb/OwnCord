@@ -23,6 +23,7 @@ export interface ReadyCapabilityFlags {
   readonly manage_nicknames?: boolean;
   readonly id_mentions?: boolean;
   readonly thread_follows?: boolean;
+  readonly voice_messages?: boolean;
   readonly game_activity?: boolean;
 }
 
@@ -156,6 +157,14 @@ export function idMentionsEnabled(): boolean {
  */
 export function threadFollowsEnabled(): boolean {
   return caps?.thread_follows === true && caps.threads === true;
+}
+
+/**
+ * Whether the server keeps a voice message's length and waveform on the upload
+ * and its attachment (WP 8.9). False hides the composer's mic button.
+ */
+export function voiceMessagesEnabled(): boolean {
+  return caps?.voice_messages === true;
 }
 
 /**
