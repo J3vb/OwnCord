@@ -69,7 +69,7 @@ and only when it changes something a contributor or fork holder must do
 **Messages & files**
 
 - Server support for voice messages: an upload can carry its length (up to 5 minutes) and a small waveform, and both come back on the message's attachment, including in forwarded copies, so a client can draw the player before downloading. The server reports it as the `voice_messages` capability. No voice message exists until a client sends one.
-**Chat**
+  **Chat**
 
 - New welcome messages: pick a text channel under Settings → Welcome messages in the admin panel and a line greets each new member there when their account is ready (after sign-up, or once an admin approves it in approval mode). It is off by default. Members can answer with a Wave to say hi! button, and a moderator can delete the line like any message.
 
