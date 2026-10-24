@@ -15,6 +15,7 @@ func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity bool) m
 		"profile_banners":              true,
 		"dm_privacy":                   true,
 		"polls":                        true,
+		"stickers":                     true,         // WP 8.8a: sticker_id on chat_send, chat_message.sticker and sticker_update
 		"threads":                      threads,      // WP 6.9c: thread_* commands and frames
 		"forums":                       forums,       // WP 6.9d: forum_post_create and a forum's posts
 		"multi_role":                   true,         // WP 6.3c: role_ids, hoist, role add/remove

@@ -247,6 +247,13 @@ CREATE TABLE IF NOT EXISTS poll_votes (
     PRIMARY KEY (message_id, user_id, answer_id)
 );
 
+-- History and search reads look up the sticker block (migration 083).
+CREATE TABLE IF NOT EXISTS message_stickers (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    sticker_id INTEGER,
+    name       TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, id DESC);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(

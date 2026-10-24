@@ -253,6 +253,7 @@ type MessageSearchResult struct {
 	Timestamp        string     `json:"timestamp"`
 	Mentions         []int64    `json:"mentions"`
 	MentionsEveryone bool       `json:"mentions_everyone"`
+	MessageSticker
 }
 
 // SearchPage selects one page of full-text search results. The zero values
@@ -309,8 +310,9 @@ type MessageAPIResponse struct {
 	// Forward is set only on a forwarded message (WP 6.9a). See ForwardInfo.
 	Forward *ForwardInfo `json:"forward,omitempty"`
 	// Poll is set only on a poll (6.9b), Thread only on a thread starter (6.9c).
-	Poll   *PollInfo   `json:"poll,omitempty"`
-	Thread *ThreadInfo `json:"thread,omitempty"`
+	Poll           *PollInfo   `json:"poll,omitempty"`
+	Thread         *ThreadInfo `json:"thread,omitempty"`
+	MessageSticker             // sticker (WP 8.8a), embedded: models.go's tag count is pinned
 }
 
 // GroupEventInfo is the group_event block of a group DM row. Which fields are

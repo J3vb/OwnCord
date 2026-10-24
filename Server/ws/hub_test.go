@@ -1999,7 +1999,7 @@ CREATE TABLE IF NOT EXISTS attachments (
     width       INTEGER,
     height      INTEGER
 );
-`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"), mustMigration("064_call_log.sql"), mustMigration("065_group_dm_owner.sql"), mustMigration("066_group_dm_icon.sql"), mustMigration("069_profile_notes_banners.sql"), mustMigration("071_message_forwards.sql"), mustMigration("073_polls.sql")))
+`), mustMigration("057_member_generation.sql"), mustMigration("061_member_generation_about.sql"), mustMigration("062_custom_status_expiry.sql"), mustMigration("063_mention_receipts.sql"), mustMigration("064_call_log.sql"), mustMigration("065_group_dm_owner.sql"), mustMigration("066_group_dm_icon.sql"), mustMigration("069_profile_notes_banners.sql"), mustMigration("071_message_forwards.sql"), mustMigration("073_polls.sql"), mustMigration("083_stickers.sql")))
 
 // mustMigration returns a shipped migration file's SQL.
 func mustMigration(name string) []byte {
