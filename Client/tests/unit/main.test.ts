@@ -38,7 +38,6 @@ vi.mock("@tauri-apps/api/event", async () => ({
 const { mockOnOpenUrl } = vi.hoisted(() => ({
   mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
@@ -2031,6 +2030,12 @@ describe("main.ts pending-approval notice (DP-54)", () => {
 });
 
 describe("main.ts external links (C16)", () => {
+  // Links open through the `open_external_url` command (external_open.rs).
+  const openedUrls = (): string[] =>
+    mockInvoke.mock.calls
+      .filter((call) => call[0] === "open_external_url")
+      .map((call) => (call[1] as { url: string }).url);
+
   async function clickLink(attrs: { href: string; masked: boolean }): Promise<void> {
     const a = document.createElement("a");
     a.href = attrs.href;
@@ -2051,38 +2056,35 @@ describe("main.ts external links (C16)", () => {
   });
 
   it("opens a plain link directly, with no dialog", async () => {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    vi.mocked(openUrl).mockClear();
+    mockInvoke.mockClear();
 
     await clickLink({ href: "https://example.com/a", masked: false });
 
-    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://example.com/a");
+    expect(openedUrls()).toEqual(["https://example.com/a"]);
     expect(document.querySelector('[data-testid="masked-link-dialog"]')).toBeNull();
   });
 
   it("holds a masked link behind the dialog until Go to site", async () => {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    vi.mocked(openUrl).mockClear();
+    mockInvoke.mockClear();
 
     await clickLink({ href: "https://masked.example/p", masked: true });
 
-    expect(openUrl).not.toHaveBeenCalled();
+    expect(openedUrls()).toEqual([]);
     expect(document.querySelector('[data-testid="masked-link-url"]')?.textContent).toBe(
       "https://masked.example/p",
     );
     document.querySelector<HTMLButtonElement>('[data-testid="masked-link-go"]')!.click();
-    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://masked.example/p");
+    expect(openedUrls()).toEqual(["https://masked.example/p"]);
   });
 
   it("opens a masked link to a trusted domain without the dialog", async () => {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
     const { trustDomain } = await import("@lib/trustedDomains");
-    vi.mocked(openUrl).mockClear();
+    mockInvoke.mockClear();
     trustDomain("trusted.example");
 
     await clickLink({ href: "https://trusted.example/x", masked: true });
 
-    expect(openUrl).toHaveBeenCalledExactlyOnceWith("https://trusted.example/x");
+    expect(openedUrls()).toEqual(["https://trusted.example/x"]);
     expect(document.querySelector('[data-testid="masked-link-dialog"]')).toBeNull();
   });
 });

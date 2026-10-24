@@ -209,10 +209,16 @@ libc = "0.2"
 dbus = "0.9"
 # System-wide input idle on Wayland compositors without a Mutter or
 # ScreenSaver idle source (KDE Plasma, wlroots): the ext-idle-notify-v1
-# protocol (idle.rs). Pure-Rust wire backend, so no libwayland link; Smithay
-# crates, exact-pinned like the other Linux deps.
-wayland-client = "=0.31.15"
+# protocol (idle.rs); and window_activation.rs, which raises the window with
+# xdg-activation-v1 on GDK's own connection. That needs the `system` backend
+# (libwayland-client, which GTK already links, so no new runtime library):
+# the pure-Rust backend cannot adopt GDK's wl_display. Smithay crates,
+# exact-pinned like the other Linux deps.
+wayland-client = { version = "=0.31.15", features = ["system"] }
 wayland-protocols = { version = "=0.32.13", features = ["client", "staging"] }
+# GDK's wl_display and the window's wl_surface (window_activation.rs). Same
+# version tao already builds, pinned like it.
+gdkwayland-sys = "=0.18.2"
 # Desktop id of an integrated AppImage's launcher entry (unread_badge.rs).
 md-5 = "=0.10.6"
 # Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships

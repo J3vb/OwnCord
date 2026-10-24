@@ -15,6 +15,7 @@ mod dpapi;
 #[cfg(target_os = "linux")]
 mod exit_watch;
 mod external_content;
+mod external_open;
 #[cfg(not(windows))]
 mod fallback_crypto;
 mod game_activity;
@@ -56,6 +57,8 @@ mod tofu;
 mod tray;
 mod unread_badge;
 mod update_commands;
+#[cfg(target_os = "linux")]
+mod window_activation;
 #[cfg(desktop)]
 mod window_prefs;
 // Command set exists on every target (unavailable off Windows); only the
@@ -142,6 +145,8 @@ fn should_restore_on_second_launch(installer_launching: bool) -> bool {
 pub fn run() {
     // First, so a panic anywhere after the log plugin starts reaches the log.
     diagnostics::install_panic_hook();
+    #[cfg(target_os = "linux")]
+    window_activation::stash_launch_token();
     let builder = tauri::Builder::default();
 
     // The single-instance plugin MUST be registered first: a second launch is
@@ -156,7 +161,11 @@ pub fn run() {
             update_commands::update_in_progress()
         );
         if should_restore_on_second_launch(launching) {
-            message_notification::focus_main_window(app);
+            #[cfg(target_os = "linux")]
+            let token = window_activation::take_forwarded_token();
+            #[cfg(not(target_os = "linux"))]
+            let token = None;
+            message_notification::focus_main_window_with(app, token);
         }
     }));
 
@@ -288,6 +297,7 @@ pub fn run() {
             windows_app_audio::start_app_audio,
             windows_app_audio::stop_app_audio,
             tray::open_log_folder,
+            external_open::open_external_url,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_build_info,
             #[cfg(target_os = "linux")]

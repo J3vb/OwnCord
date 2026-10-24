@@ -22,7 +22,6 @@ vi.mock("@tauri-apps/api/event", async () => ({
 const { mockOnOpenUrl } = vi.hoisted(() => ({
   mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn() }));
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
