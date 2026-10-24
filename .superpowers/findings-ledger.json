@@ -1,5 +1,5 @@
 {
-  "nextId": 509,
+  "nextId": 510,
   "findings": [
     {
       "id": "OC-0001",
@@ -11762,6 +11762,29 @@
       "hunt": "nightly-bughunt-2026-10-23",
       "lens": "correctness",
       "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0509",
+      "title": "Chat rows that resized after drawing moved the reading position, and a channel opened while the chat was hidden showed its top",
+      "file": "Client/src/components/MessageList.ts",
+      "line": 2458,
+      "severity": "medium",
+      "why": "The resize pass ran a frame after the observer fired, anchored on the row cut by the top edge, and judged 'at the bottom' after the growth; while the chat column was hidden every scroll write was clamped to 0 and the resize pass then held that top.",
+      "repro": "Scroll up through a channel with GIFs and link previews: rows jump 40-180 px as each loads. Or, with the call grid covering the chat, switch text channel and show the chat again: it opens at the oldest loaded message.",
+      "evidence": "Playwright repro: 27 of 250 scroll-up steps moved the view by an uncompensated 40/139/179 px; mounting with the slot display:none left scrollTop 0 and 5,400 px above the bottom.",
+      "suggestedFix": "Re-apply the anchor inside the ResizeObserver callback, anchor on the first row starting in view, judge the bottom by the gap before the resize, skip passes while hidden.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/message-list-resize-anchor.test.ts",
+        "revertProof": "fail (four of the five cases fail without the fix)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-24",
+      "hunt": "user-report-2026-10-24",
+      "lens": "correctness",
+      "finder": "chat-scroll-thread",
       "fixedDate": "2026-10-24"
     }
   ]
