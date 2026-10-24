@@ -132,11 +132,9 @@ func TestUploadAvatar_RejectsNonImageAndOversizedDimensions(t *testing.T) {
 	if rr := doAvatarUpload(t, router, token, "me.png", []byte("this is plain text, not a PNG")); rr.Code != http.StatusBadRequest {
 		t.Errorf("text-as-png status = %d, want 400", rr.Code)
 	}
-	// GIF is a real image and still refused: an animated avatar in every
-	// message row is a distraction the renderer cannot opt out of.
-	gif := []byte("GIF89a")
-	if rr := doAvatarUpload(t, router, token, "me.gif", gif); rr.Code != http.StatusBadRequest {
-		t.Errorf("gif status = %d, want 400", rr.Code)
+	// A GIF header with no image in it is not a picture.
+	if rr := doAvatarUpload(t, router, token, "me.gif", []byte("GIF89a")); rr.Code != http.StatusBadRequest {
+		t.Errorf("bare gif header status = %d, want 400", rr.Code)
 	}
 	// Too many pixels for any surface that renders it.
 	if rr := doAvatarUpload(t, router, token, "huge.png", makePNGBytes(t, 2000, 100)); rr.Code != http.StatusBadRequest {

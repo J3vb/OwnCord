@@ -113,9 +113,12 @@ var bodyCapExemptPrefixes = []string{
 	"/api/v1/uploads",
 	// 16 MiB plugin envelope enforced by the handler's own MaxBytesReader.
 	"/api/v1/admin/plugins/install",
-	// 2 MiB avatar envelope: route-scoped MaxBodySize(avatarMaxBodySize)
+	// 3 MiB avatar envelope: route-scoped MaxBodySize(avatarMaxBodySize)
 	// plus the handler's re-wrap enforce it.
 	"/api/v1/users/me/avatar",
+	// 5 MiB banner envelope (WP 8.7), enforced the same way with
+	// bannerMaxBodySize.
+	"/api/v1/users/me/banner",
 }
 
 // bodyCapExemptPattern names the upload route that carries an id in the middle
@@ -192,11 +195,16 @@ const (
 	// upload. Above maxEmojiFileBytes, so a valid emoji never spills to disk.
 	emojiMultipartMemoryLimit = 1 << 20
 
-	// maxAvatarFileBytes is the largest avatar image accepted (1 MiB). An
-	// avatar renders at 40px in a message row and 64px in the profile popup,
-	// so this is already generous; the client downscales before uploading and
-	// the cap is what stops it being used as free file hosting.
-	maxAvatarFileBytes = 1 << 20
+	// maxAvatarFileBytes is the largest avatar image accepted (2 MiB, WP 8.7).
+	// An avatar renders at 40px in a message row and 64px in the profile
+	// popup, so a still picture never comes near it; the room is for an
+	// animated GIF or WebP, which the client uploads as-is. The cap is what
+	// stops it being used as free file hosting.
+	maxAvatarFileBytes = 2 << 20
+
+	// maxGroupIconFileBytes is the largest group DM icon accepted (1 MiB). A
+	// group icon is always still, so it keeps the pre-8.7 avatar cap.
+	maxGroupIconFileBytes = 1 << 20
 
 	// maxAvatarDimension caps an avatar's stored width and height. Bigger than
 	// any surface renders it, so a retina display still has pixels to spare
@@ -204,25 +212,32 @@ const (
 	// client that sees the user post.
 	maxAvatarDimension = 1024
 
-	// avatarMaxBodySize bounds the whole multipart avatar request: the image
-	// cap plus room for the form's boundaries and headers.
-	avatarMaxBodySize = 2 << 20
+	// avatarMaxBodySize bounds the whole multipart avatar (and group icon)
+	// request: the image cap plus room for the form's boundaries and headers.
+	avatarMaxBodySize = maxAvatarFileBytes + 1<<20
 
 	// avatarMultipartMemoryLimit is the in-memory limit for parsing an avatar
 	// upload. Above maxAvatarFileBytes, so a valid avatar never spills to disk.
-	avatarMultipartMemoryLimit = 2 << 20
+	avatarMultipartMemoryLimit = avatarMaxBodySize
 
 	// avatarUploadRateLimitPerMinute is the maximum avatar uploads per user per
 	// minute. Lower than the attachment limit: every accepted upload fans a
 	// user_update out to every connected session and orphans the previous file.
 	avatarUploadRateLimitPerMinute = 5
 
-	// maxBannerFileBytes is the largest profile banner image accepted (1 MiB),
-	// and maxBannerWidth by maxBannerHeight the largest it may measure (WP
-	// 6.11b). The client crops to 5:2 and scales down before uploading.
-	maxBannerFileBytes = 1 << 20
+	// maxBannerFileBytes is the largest profile banner image accepted (4 MiB,
+	// WP 8.7), and maxBannerWidth by maxBannerHeight the largest it may
+	// measure (WP 6.11b). The client crops a still picture to 5:2 and scales
+	// it down before uploading; an animated one goes up as-is, which is what
+	// the room above the old 1 MiB is for.
+	maxBannerFileBytes = 4 << 20
 	maxBannerWidth     = 1920
 	maxBannerHeight    = 960
+
+	// bannerMaxBodySize and bannerMultipartMemoryLimit are the banner's
+	// avatarMaxBodySize and avatarMultipartMemoryLimit.
+	bannerMaxBodySize          = maxBannerFileBytes + 1<<20
+	bannerMultipartMemoryLimit = bannerMaxBodySize
 
 	// maxBannerColorLen is the longest valid banner colour (#rrggbb).
 	maxBannerColorLen = 7

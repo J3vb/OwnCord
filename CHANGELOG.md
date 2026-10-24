@@ -70,6 +70,7 @@ and only when it changes something a contributor or fork holder must do
 
 - The member list, profile and DMs show the game someone is playing ("Playing VALORANT · for 42 min"). The desktop app finds it from your Steam and Epic libraries and a built-in list. To turn it off, use Settings → Advanced → Activity.
 - Under Settings → Advanced → Activity, Your games lets you add any running program as a game, rename a game, or keep one game from showing. These choices stay on your computer.
+- Avatars and profile banners can be animated: upload a GIF, animated WebP or animated PNG. It shows its first frame and plays while you hover the message, member or DM row; the profile card plays it straight away. With reduced motion on it never plays. Avatars may now be up to 2 MB and banners up to 4 MB; group DM icons stay still.
 
 ### Fixed
 

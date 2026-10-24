@@ -5,6 +5,7 @@ const images: BannerImages = {
   fetch: (url) => fetchImageAsObjectUrl(url) as Promise<string | null>,
   resolve: (path) => `https://server.test${path}`,
   recover: () => undefined,
+  still: () => Promise.resolve(null),
 };
 
 import { isBannerColor, paintBanner, type BannerImages } from "../../src/features/profiles/banner";
@@ -115,5 +116,38 @@ describe("paintBanner", () => {
     await flush();
     expect(strip.childElementCount).toBe(0);
     expect(card.style.getPropertyValue("--upp-banner-h")).toBe("");
+  });
+
+  it("plays an animated banner, and shows its first frame under reduced motion (WP 8.7)", async () => {
+    const STILL = "data:image/png;base64,U1RJTEw=";
+    const animated: BannerImages = { ...images, still: () => Promise.resolve(STILL) };
+    fetchImageAsObjectUrl.mockResolvedValue("blob:anim");
+    paintBanner(strip, { banner: "/api/v1/files/8" }, card, animated);
+    await flush();
+    expect(strip.querySelector("img.banner-img")?.getAttribute("src")).toBe("blob:anim");
+
+    document.documentElement.classList.add("reduced-motion");
+    try {
+      paintBanner(strip, { banner: "/api/v1/files/9" }, card, animated);
+      await flush();
+      expect(strip.querySelector("img.banner-img")?.getAttribute("src")).toBe(STILL);
+    } finally {
+      document.documentElement.classList.remove("reduced-motion");
+    }
+  });
+
+  it("drops an animated banner repainted while its still was drawn", async () => {
+    let finishStill!: (still: string | null) => void;
+    const slow: BannerImages = {
+      ...images,
+      still: () => new Promise<string | null>((r) => (finishStill = r)),
+    };
+    fetchImageAsObjectUrl.mockResolvedValue("blob:anim");
+    paintBanner(strip, { banner: "/api/v1/files/1" }, card, slow);
+    await flush();
+    paintBanner(strip, { banner: null }, card, slow);
+    finishStill("data:image/png;base64,U1RJTEw=");
+    await flush();
+    expect(strip.childElementCount).toBe(0);
   });
 });

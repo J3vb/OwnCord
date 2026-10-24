@@ -29,6 +29,7 @@ import { messagingText } from "../../i18n/messaging";
 import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { clearStillCache } from "../../features/messaging/emojiStill";
+import { clearAnimatedStills } from "@lib/animatedStill";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import { sniffImageBlob } from "@lib/imageHeader";
 import {
@@ -255,7 +256,10 @@ function liveBlobUrls(): Set<string> {
  *  URL a mounted `<img>` still shows is never evicted (the cap then bounds the
  *  unreferenced part), so a window wider than the cache is not re-fetched. */
 class ObjectUrlCache {
-  private readonly entries = new Map<string, { objectUrl: string; bytes: number }>();
+  private readonly entries = new Map<
+    string,
+    { objectUrl: string; bytes: number; blob: Blob | undefined }
+  >();
   private bytes = 0;
 
   constructor(
@@ -274,15 +278,21 @@ class ObjectUrlCache {
   }
 
   holds(objectUrl: string): boolean {
-    for (const entry of this.entries.values()) {
-      if (entry.objectUrl === objectUrl) return true;
-    }
-    return false;
+    return this.blobOf(objectUrl) !== null;
   }
 
-  set(key: string, objectUrl: string, bytes: number): void {
+  /** The Blob behind a held URL (undefined when it was not kept), or null
+   *  when the URL is not held. */
+  blobOf(objectUrl: string): Blob | undefined | null {
+    for (const entry of this.entries.values()) {
+      if (entry.objectUrl === objectUrl) return entry.blob;
+    }
+    return null;
+  }
+
+  set(key: string, objectUrl: string, bytes: number, blob?: Blob): void {
     this.drop(key);
-    this.entries.set(key, { objectUrl, bytes });
+    this.entries.set(key, { objectUrl, bytes, blob });
     this.bytes += bytes;
     if (!this.overCap()) return;
     const live = this.keepMounted ? liveBlobUrls() : null;
@@ -372,6 +382,7 @@ export function clearAttachmentCaches(): void {
   mediaInFlight.clear();
   videoDims.clear();
   clearStillCache();
+  clearAnimatedStills();
 }
 // The image/video/audio caches pin blob: URLs; they end with the session.
 void registerSessionReset("attachments:caches", clearAttachmentCaches, { phase: "cache" }); // app-lifetime
@@ -776,7 +787,9 @@ export function fetchImageAsObjectUrl(
       revokeObjectUrl(objectUrl);
       return null;
     }
-    imageCache.set(url, objectUrl, blob.size);
+    // The Blob is pinned by its URL already; keeping the reference costs
+    // nothing and lets an animated avatar read its frames (WP 8.7).
+    imageCache.set(url, objectUrl, blob.size, blob);
     if (stored === null && scope !== null) void idbPut(scope, url, blob);
     return objectUrl;
   })();
@@ -789,6 +802,16 @@ export function fetchImageAsObjectUrl(
   });
 
   return promise;
+}
+
+/** A reader for the bytes behind a blob: URL `fetchImageAsObjectUrl`
+ *  returned, while the image cache still holds it; null when it does not. A
+ *  blob: URL cannot be fetched back (the CSP's connect-src does not list
+ *  blob:), so this is how an animated avatar learns it has frames (WP 8.7). */
+export function cachedImageBytes(objectUrl: string): (() => Promise<Uint8Array | null>) | null {
+  const blob = imageCache.blobOf(objectUrl);
+  if (blob === undefined || blob === null) return null;
+  return () => blob.arrayBuffer().then((buf) => new Uint8Array(buf));
 }
 
 /** 4. Network fetch through the Rust HTTP TOFU proxy (cert-pinned, same trust
