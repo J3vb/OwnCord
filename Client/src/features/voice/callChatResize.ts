@@ -7,8 +7,8 @@
  * shows and refits it when the chat column resizes.
  */
 
-import { Disposable } from "@lib/disposable";
-import { loadPref, savePref } from "@lib/preferences";
+import { Disposable } from "../../lib/disposable";
+import { loadPref, savePref } from "../../lib/preferences";
 import { shellText } from "../../i18n/shell";
 
 export const CALL_CHAT_WIDTH_PREF = "callChatWidth";
@@ -73,15 +73,22 @@ export function createCallChatResize(chatColumn: HTMLElement): CallChatResize {
     apply();
   }
 
-  function endDrag(e: PointerEvent): void {
-    if (dragPointer === null || e.pointerId !== dragPointer) return;
+  /** Finish the drag in progress (if any) and save where it ended. */
+  function finishDrag(): void {
+    if (dragPointer === null) return;
+    const pointer = dragPointer;
     dragPointer = null;
     try {
-      handle.releasePointerCapture(e.pointerId);
+      handle.releasePointerCapture(pointer);
     } catch {
       // Capture was already released (the pointer went away).
     }
     savePref(CALL_CHAT_WIDTH_PREF, wanted);
+  }
+
+  function endDrag(e: PointerEvent): void {
+    if (dragPointer === null || e.pointerId !== dragPointer) return;
+    finishDrag();
   }
 
   owner.onEvent(handle, "pointerdown", (e) => {
@@ -126,6 +133,9 @@ export function createCallChatResize(chatColumn: HTMLElement): CallChatResize {
       apply();
     },
     detach(): void {
+      // A removed capture target's lostpointercapture goes to the document,
+      // not the handle, so the drag is finished here.
+      finishDrag();
       handle.remove();
       chatColumn.style.removeProperty("--call-chat-width");
     },

@@ -14,7 +14,7 @@ import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { shellText } from "../../i18n/shell";
 import { buildCallPeople, type CallAvatarCache } from "./callPeople";
-import { createCallChatResize, type CallChatResize } from "./callChatResize";
+import { createCallChatResize, type CallChatResize } from "../../features/voice/callChatResize";
 
 // ---------------------------------------------------------------------------
 // Types

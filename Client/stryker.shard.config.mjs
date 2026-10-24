@@ -29,6 +29,7 @@ export const shards = {
     "src/features/voice/native/nativeRoom.ts",
     "src/features/voice/releaseRoom.ts",
     "src/features/voice/native/videoCodecs.ts",
+    "src/features/voice/callChatResize.ts",
   ],
   "livekit-2": [
     "src/lib/livekitSession.ts",

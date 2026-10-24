@@ -128,7 +128,7 @@
    left column, and messages, typing and the composer stack in a right column. */
 .chat-area--call-chat {
   display: grid;
-  /* --call-chat-width is the drag handle's (callChatResize.ts). */
+  /* --call-chat-width is the drag handle's (features/voice/callChatResize.ts). */
   grid-template-columns: minmax(0, 1fr) var(--call-chat-width, 360px);
   grid-template-rows: auto minmax(0, 1fr) auto auto;
 }

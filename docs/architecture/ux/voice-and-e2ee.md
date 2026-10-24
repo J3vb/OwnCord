@@ -155,7 +155,7 @@ its chat mounts as for any channel, and the grid sits left of it with the chat
 in a column on the right (stacked under the grid at narrow width). The chat
 column is 360px by default; the handle on its left edge resizes it (drag, or
 the arrow keys, Home and End) from 280px to 640px, always leaving the grid
-360px, and the width is saved (`pages/main-page/callChatResize.ts`). While the
+360px, and the width is saved (`features/voice/callChatResize.ts`). While the
 call view is up the member column steps aside so the grid gets its width; the
 Member List toggle opens it for the moment without changing the saved choice,
 and leaving the call view puts that choice back (`MemberColumn.setCallView`). The

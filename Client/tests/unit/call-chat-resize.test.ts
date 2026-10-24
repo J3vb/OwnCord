@@ -4,7 +4,7 @@ import {
   clampCallChatWidth,
   createCallChatResize,
   type CallChatResize,
-} from "../../src/pages/main-page/callChatResize";
+} from "../../src/features/voice/callChatResize";
 import { savePref } from "../../src/lib/preferences";
 
 describe("clampCallChatWidth", () => {
@@ -75,6 +75,27 @@ describe("createCallChatResize", () => {
     pointer("pointermove", 900);
     expect(width()).toBe("640px");
     spy.mockRestore();
+  });
+
+  it("detach mid-drag ends the drag and saves, so the next split's drag works", () => {
+    resize = createCallChatResize(column);
+    resize.attach();
+    const h = handle();
+    if (h === null) throw new Error("no handle");
+    h.setPointerCapture = vi.fn();
+    h.releasePointerCapture = vi.fn();
+    pointer("pointerdown", 700);
+    pointer("pointermove", 620);
+    resize.detach();
+    expect(localStorage.getItem(`owncord:settings:${CALL_CHAT_WIDTH_PREF}`)).toBe("440");
+
+    resize.attach();
+    expect(width()).toBe("440px");
+    pointer("pointermove", 500);
+    expect(width()).toBe("440px");
+    pointer("pointerdown", 700);
+    pointer("pointermove", 680);
+    expect(width()).toBe("460px");
   });
 
   it("arrow keys step by 16 and save; Home and End jump", () => {
