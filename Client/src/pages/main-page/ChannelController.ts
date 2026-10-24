@@ -1471,9 +1471,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       // The Wave button of a welcome row (WP 8.6): an ordinary 👋 message sent as
       // a reply to the join row through the normal send path.
-      onWave: (msgId: number) => {
+      onWave: (msgId: number): boolean => {
         const target = liveReplyTo(msgId);
-        if (target !== null) performSend(WAVE_CONTENT, target, []);
+        if (target === null) return false;
+        performSend(WAVE_CONTENT, target, []);
+        return true;
       },
       onReplyClick: (msgId: number) => {
         const msgs = getChannelMessages(channelId);

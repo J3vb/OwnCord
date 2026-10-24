@@ -56,7 +56,7 @@ function setWaveLabel(button: HTMLButtonElement, done: boolean): void {
  */
 export function renderWaveButton(
   messageId: number,
-  onWave: (messageId: number) => void,
+  onWave: (messageId: number) => boolean,
   signal: AbortSignal,
 ): HTMLButtonElement {
   const button = createElement("button", {
@@ -70,11 +70,10 @@ export function renderWaveButton(
   button.addEventListener(
     "click",
     () => {
-      if (hasWaved(messageId)) return;
+      if (hasWaved(messageId) || !onWave(messageId)) return;
       markWaved(messageId);
       button.disabled = true;
       setWaveLabel(button, true);
-      onWave(messageId);
     },
     { signal },
   );

@@ -2,6 +2,9 @@ package db_test
 
 import (
 	"context"
+	"os"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -50,5 +53,25 @@ func TestGetReferencedMessages_WelcomeRowIsRepliable(t *testing.T) {
 	refs, err := database.GetReferencedMessages(ctx, ch, []int64{row.MessageID})
 	if err != nil || refs[row.MessageID] == nil || refs[row.MessageID].IsSystem {
 		t.Fatalf("welcome ref = %+v err=%v, want a repliable (not IsSystem) target", refs[row.MessageID], err)
+	}
+}
+
+// welcome.sql is exempt from TestCallLog_OnlyWriterOfKind, so it must hold
+// only the kind-8 insert: a later query there cannot create or retype rows.
+func TestWelcomeSQL_HoldsOnlyTheKind8Insert(t *testing.T) {
+	raw, err := os.ReadFile("queries/sqlite/welcome.sql")
+	if err != nil {
+		t.Fatalf("read welcome.sql: %v", err)
+	}
+	src := string(raw)
+	if n := strings.Count(src, "-- name:"); n != 1 {
+		t.Fatalf("welcome.sql holds %d queries, want 1", n)
+	}
+	if !strings.Contains(src, "-- name: InsertWelcomeMessage :one") ||
+		!regexp.MustCompile(`(?is)INSERT\s+INTO\s+messages\s*\([^)]*\bkind\)\s*VALUES\s*\([^)]*,\s*8\)`).MatchString(src) {
+		t.Errorf("welcome.sql must hold only the kind-8 InsertWelcomeMessage insert:\n%s", src)
+	}
+	if regexp.MustCompile(`(?i)\bUPDATE\s+messages\b`).MatchString(src) {
+		t.Errorf("welcome.sql must not update messages:\n%s", src)
 	}
 }

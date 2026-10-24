@@ -171,7 +171,7 @@ export interface MessageListOptions {
    */
   readonly onJumpToPresent?: () => void;
   /** Send the 👋 reply to a welcome row (WP 8.6). Absent, the row has no Wave button. */
-  readonly onWave?: (messageId: number) => void;
+  readonly onWave?: (messageId: number) => boolean;
   /** Open the pinned-messages panel ("pinned messages" link of a pin row). It never closes an open panel. */
   readonly onOpenPins?: () => void;
   /** Join the DM call a live call log row stands for (WP 3B-9c). No Join button without it. */

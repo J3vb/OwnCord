@@ -36,7 +36,7 @@ function welcomeRow(over: Partial<Message> = {}): Message {
   });
 }
 
-function render(msg: Message, opts = makeOpts({ onWave: vi.fn() })): HTMLElement {
+function render(msg: Message, opts = makeOpts({ onWave: vi.fn(() => true) })): HTMLElement {
   return renderMessage(msg, false, [msg], opts, new AbortController().signal);
 }
 const textOf = (el: HTMLElement): string => el.textContent?.replace(/\s+/g, " ").trim() ?? "";
@@ -129,7 +129,7 @@ describe("the Wave button", () => {
   });
 
   it("sends the wave once, as a reply to the row, then disables", () => {
-    const onWave = vi.fn();
+    const onWave = vi.fn(() => true);
     const el = render(
       welcomeRow({ user: { id: OTHER, username: "alice", avatar: null } }),
       makeOpts({ onWave }),
@@ -142,6 +142,19 @@ describe("the Wave button", () => {
     button.click();
     expect(onWave).toHaveBeenCalledOnce();
     expect(hasWaved(20)).toBe(true);
+  });
+
+  it("stays enabled when the wave could not be sent", () => {
+    const onWave = vi.fn(() => false);
+    const el = render(
+      welcomeRow({ user: { id: OTHER, username: "alice", avatar: null } }),
+      makeOpts({ onWave }),
+    );
+    const button = waveButton(el)!;
+    button.click();
+    expect(onWave).toHaveBeenCalledOnce();
+    expect(button.disabled).toBe(false);
+    expect(hasWaved(20)).toBe(false);
   });
 
   it("stays disabled when the row repaints, and resets with the session", () => {
