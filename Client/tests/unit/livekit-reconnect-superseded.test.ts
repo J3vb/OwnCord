@@ -34,7 +34,7 @@ describe("attemptAutoReconnect: superseded before the slow-phase token refresh",
       // Old enough that every slow attempt wants a fresh token.
       tokenAgeMs: () => 10 * 60_000,
       canKeepRetrying: () => true,
-      serverMembership: () => "held",
+      serverMembership: async () => "held",
       leaveVoice: vi.fn(),
       onError: vi.fn(),
     } as unknown as ReconnectDeps;

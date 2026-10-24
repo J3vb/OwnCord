@@ -518,8 +518,20 @@ export class LiveKitSession {
         (channelsStore.getState().channels.has(channelId) ||
           dmStore.getState().channels.some((dm) => dm.channelId === channelId) ||
           isDmKeptForCall(channelId)),
-      serverMembership: () => {
-        if (this.ws?.getState() !== "connected") return "unknown";
+      serverMembership: async () => {
+        const ws = this.ws;
+        if (ws?.getState() !== "connected") return "unknown";
+        // The socket reads "connected" from its auth_ok, before its ready or
+        // resume replay restates the roster: a stale "held" would reconnect
+        // to a call the server already ended. The server sends both before
+        // it answers a ping, so a pong means the roster is current. A ping the
+        // server drops (2/s per user) times out as "unknown": one attempt waits.
+        try {
+          await ws.ping(signal);
+        } catch {
+          return "unknown";
+        }
+        if (this.ws !== ws || ws.getState() !== "connected") return "unknown";
         const self = authStore.getState().user?.id ?? 0;
         return voiceStore.getState().voiceUsers.get(channelId)?.has(self) === true
           ? "held"
