@@ -23,6 +23,31 @@ has more detail there.
 | `.claude/`, `.codex/`, `.agents/` | Setup for AI coding agents, plus `.no-mistakes.yaml`. Human contributors can ignore these. The rules in `AGENTS.md` and `CLAUDE.md` apply to everyone. |
 | [.superpowers/](../.superpowers/) | The shared bug-hunt findings ledger and its renderer.                                                                                                  |
 
+## Starting a change
+
+Find the owner below before following dependencies. The checks are starting
+points for iteration, not a replacement for the full [testing requirements](#testing)
+or required CI checks.
+
+| Task                               | Start here                                                                                                                                                                           | Find the relevant checks                                                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Server REST or WebSocket behaviour | [api/](../Server/api/), [ws/](../Server/ws/), then the owning [service/](../Server/service/)                                                                                         | Tests beside the Go package; see [Server commands](#server-go).                                                                            |
+| Desktop UI or feature behaviour    | [features/](../Client/src/features/), [components/](../Client/src/components/), [pages/](../Client/src/pages/); use the [client architecture](architecture/client.md) for ownership. | Client unit/integration tests and the feature's browser or E2E tests; see [Client commands](#client-tauri-v2).                             |
+| Native desktop behaviour           | [src-tauri/src/](../Client/src-tauri/src/) and its caller in [platform/desktop/](../Client/src/platform/desktop/)                                                                    | Rust tests plus the relevant native E2E suite. Check platform-specific code on its target OS.                                              |
+| Server admin panel                 | [admin/static/js/](../Server/admin/static/js/); action registration is in [core.js](../Server/admin/static/js/core.js).                                                              | Server admin tests, Client contract tests and admin E2E; see [contract ownership](#what-belongs-in-testscontract).                         |
+| Database query or schema           | Hand-written [queries/](../Server/db/queries/) or a new [migration](../Server/migrations/); sqlc output is generated.                                                                | Regeneration/drift checks, migration tests and the consuming service tests.                                                                |
+| WebSocket message-type constants   | [protocol/schema.json](../protocol/schema.json), then the Go and TypeScript consumers                                                                                                | Protocol regeneration/drift checks and the affected server/client tests. The schema generates constants, not complete payload definitions. |
+| Check, build or CI behaviour       | [run.mjs](../scripts/run.mjs), [ci-select.mjs](../scripts/ci-select.mjs) and the affected [workflow](../.github/workflows/)                                                          | Adjacent script tests and the affected gate. Cross-component inputs can select checks outside the changed folder.                          |
+
+From the repository root, `node scripts/run.mjs --list` prints the existing
+check commands and their working directories. Server-only contributors can
+use the [Go commands directly](#server-go) without Node.
+
+For a failure, keep the command, working directory, failing test and relevant
+error together; use the full log when the excerpt is insufficient. A skipped
+tool or a platform you could not exercise is a verification limitation, not
+a passing check.
+
 ## Development Setup
 
 ### Prerequisites
