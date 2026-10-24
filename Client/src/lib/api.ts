@@ -1565,42 +1565,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     // ── Custom stickers (WP 8.8) ──────────────────────────
     //
-    // Reading is open to any member; upload, rename and delete require
-    // MANAGE_SERVER and are refused server-side with 403.
+    // Reading is open to any member. Upload, rename and delete are the admin
+    // panel's (Server/admin/static/js/stickers.js), which calls them itself.
 
     /** The server's whole custom-sticker set. */
     listStickers(signal?: AbortSignal): Promise<StickerResponse[]> {
       return request<StickerResponse[]>("GET", "/stickers", undefined, signal);
-    },
-
-    /**
-     * Upload one custom sticker (PNG/GIF/WebP, at most 512 KiB and 320x320).
-     * `emoji` is the optional related emoji that search matches.
-     */
-    uploadSticker(
-      name: string,
-      emoji: string,
-      file: File,
-      signal?: AbortSignal,
-    ): Promise<StickerResponse> {
-      const formData = new FormData();
-      formData.append("name", name);
-      if (emoji !== "") formData.append("emoji", emoji);
-      formData.append("file", file);
-      return request<StickerResponse>("POST", "/stickers", formData, signal, { multipart: true });
-    },
-
-    /** Rename a sticker and/or change its related emoji ("" clears it). */
-    updateSticker(
-      stickerId: number,
-      patch: { readonly name?: string; readonly emoji?: string },
-      signal?: AbortSignal,
-    ): Promise<StickerResponse> {
-      return request<StickerResponse>("PATCH", `/stickers/${stickerId}`, patch, signal);
-    },
-
-    deleteSticker(stickerId: number, signal?: AbortSignal): Promise<void> {
-      return request<void>("DELETE", `/stickers/${stickerId}`, undefined, signal);
     },
 
     // ── Direct Messages ─────────────────────────────────────

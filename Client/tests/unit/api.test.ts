@@ -1154,40 +1154,6 @@ describe("API Client", () => {
       expect(fetchCallOpts().method).toBe("GET");
       expect(result).toEqual([sticker]);
     });
-
-    it("uploadSticker POSTs multipart with name, emoji and file", async () => {
-      mockFetch.mockResolvedValue(jsonResponse(sticker, 201));
-      const file = new File(["png"], "wave.png", { type: "image/png" });
-      await api.uploadSticker("Wave", "👋", file);
-      const opts = fetchCallOpts();
-      expect(opts.method).toBe("POST");
-      const body = opts.body as FormData;
-      expect(body.get("name")).toBe("Wave");
-      expect(body.get("emoji")).toBe("👋");
-      expect(body.get("file")).toBe(file);
-      expect((opts.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
-    });
-
-    it("uploadSticker leaves the emoji field out when there is none", async () => {
-      mockFetch.mockResolvedValue(jsonResponse(sticker, 201));
-      await api.uploadSticker("Wave", "", new File(["png"], "w.png", { type: "image/png" }));
-      expect((fetchCallOpts().body as FormData).has("emoji")).toBe(false);
-    });
-
-    it("updateSticker PATCHes the name and emoji", async () => {
-      mockFetch.mockResolvedValue(jsonResponse(sticker));
-      await api.updateSticker(3, { name: "Wave 2", emoji: "" });
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/stickers/3");
-      expect(fetchCallOpts().method).toBe("PATCH");
-      expect(JSON.parse(fetchCallOpts().body as string)).toEqual({ name: "Wave 2", emoji: "" });
-    });
-
-    it("deleteSticker calls DELETE /stickers/{id}", async () => {
-      mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
-      await api.deleteSticker(3);
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/stickers/3");
-      expect(fetchCallOpts().method).toBe("DELETE");
-    });
   });
 
   describe("DM endpoints", () => {
