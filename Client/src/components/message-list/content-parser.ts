@@ -737,7 +737,15 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
       const parent = textNode.parentElement;
       if (parent === null || parent.closest(MENTION_OPAQUE_SELECTOR) !== null) continue;
       const wrapped = wrapResolvedMentions(textNode.nodeValue ?? "", info);
-      if (wrapped !== null) textNode.replaceWith(wrapped);
+      if (wrapped === null) continue;
+      // A token in a masked link's label that resolves only now stays plain
+      // link content too, or a click on it would open a profile, not the link.
+      if (parent.closest("a.msg-link.masked") !== null) {
+        for (const chip of wrapped.querySelectorAll<HTMLElement>(".mention")) {
+          stripMentionControl(chip);
+        }
+      }
+      textNode.replaceWith(wrapped);
     }
   }
 }
