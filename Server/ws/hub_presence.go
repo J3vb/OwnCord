@@ -20,13 +20,14 @@ type presenceBatchPayload struct {
 }
 
 // presenceBatchEntry is one user's presence in a batch or snapshot.
-// CustomStatus and Activity follow presencePayload's rule: always present,
-// null when unset.
+// CustomStatus, Activity and Listening follow presencePayload's rule: always
+// present, null when unset.
 type presenceBatchEntry struct {
-	UserID       int64         `json:"user_id"`
-	Status       string        `json:"status"`
-	CustomStatus *string       `json:"custom_status"`
-	Activity     *gameActivity `json:"activity"`
+	UserID       int64              `json:"user_id"`
+	Status       string             `json:"status"`
+	CustomStatus *string            `json:"custom_status"`
+	Activity     *gameActivity      `json:"activity"`
+	Listening    *listeningActivity `json:"listening"`
 }
 
 // memberPayloadFor is the member_join user object: what a client's member
@@ -133,8 +134,9 @@ type pendingPresence struct {
 	// activity is nil from every caller today: a connect is a new connection,
 	// which starts without a game, and a disconnect ends it (WP 8.3a). An
 	// activity change is a live presence frame, not a coalesced entry.
-	activity *gameActivity
-	member   *memberJoinUser
+	activity  *gameActivity
+	listening *listeningActivity // nil from every caller, like activity (WP 8.10a)
+	member    *memberJoinUser
 }
 
 // QueuePresence coalesces connect/disconnect presence: the latest state per
@@ -307,9 +309,9 @@ func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[
 		if h.tombstones.erased(uid) {
 			continue
 		}
-		e := presenceBatchEntry{UserID: uid, Status: db.BroadcastStatus(p.status), CustomStatus: p.customStatus, Activity: p.activity}
+		e := presenceBatchEntry{UserID: uid, Status: db.BroadcastStatus(p.status), CustomStatus: p.customStatus, Activity: p.activity, Listening: p.listening}
 		if e.Status != p.status {
-			e.CustomStatus, e.Activity = nil, nil
+			e.CustomStatus, e.Activity, e.Listening = nil, nil, nil
 		}
 		entries = append(entries, e)
 	}
@@ -324,7 +326,7 @@ func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[
 			continue
 		}
 		own := slices.Clone(entries)
-		own[i].Status, own[i].CustomStatus, own[i].Activity = p.status, p.customStatus, p.activity
+		own[i].Status, own[i].CustomStatus, own[i].Activity, own[i].Listening = p.status, p.customStatus, p.activity, p.listening
 		if private == nil {
 			private = make(map[int64][]byte)
 		}
@@ -400,7 +402,7 @@ func (h *Hub) deliverPresenceSnapshots() {
 	public := make([]presenceBatchEntry, 0, len(live))
 	for uid, p := range live {
 		if s := db.BroadcastStatus(p.status); s != "" && s != db.StatusOffline {
-			public = append(public, presenceBatchEntry{UserID: uid, Status: s, CustomStatus: p.customStatus, Activity: p.activity})
+			public = append(public, presenceBatchEntry{UserID: uid, Status: s, CustomStatus: p.customStatus, Activity: p.activity, Listening: p.listening})
 		}
 	}
 	slices.SortFunc(public, func(a, b presenceBatchEntry) int { return cmp.Compare(a.UserID, b.UserID) })
@@ -410,7 +412,7 @@ func (h *Hub) deliverPresenceSnapshots() {
 		msg := shared
 		i, listed := slices.BinarySearchFunc(public, c.userID, func(e presenceBatchEntry, uid int64) int { return cmp.Compare(e.UserID, uid) })
 		if p := live[c.userID]; !listed && p.status != "" && p.status != db.StatusOffline {
-			own := slices.Insert(slices.Clone(public), i, presenceBatchEntry{UserID: c.userID, Status: p.status, CustomStatus: p.customStatus, Activity: p.activity})
+			own := slices.Insert(slices.Clone(public), i, presenceBatchEntry{UserID: c.userID, Status: p.status, CustomStatus: p.customStatus, Activity: p.activity, Listening: p.listening})
 			msg = buildPresenceBatchMsg(own, true)
 		}
 		c.sendPresenceMsg(msg)

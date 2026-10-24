@@ -451,6 +451,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 			Categories:   categories,
 			Channels:     channelPayloads,
 			DMChannels:   dmChannels,
+			Listening:    h.readyListening(userID),
 
 			MemberTimeouts: timeouts.entries,
 		},

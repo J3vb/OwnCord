@@ -50,6 +50,10 @@ type readyHead struct {
 	Categories *[]channelCategoryPayload `json:"categories,omitempty"`
 	Channels   []map[string]any          `json:"channels"`
 	DMChannels []db.DMChannelInfo        `json:"dm_channels"`
+	// Listening (WP 8.10a) lists the songs connected members are listening
+	// to, as the viewer may see them. Always present; "listening" sorts
+	// between "dm_channels" and "member_timeouts", so key order holds.
+	Listening []readyListeningPayload `json:"listening"`
 	// MemberTimeouts is the viewer's member_timeouts view (WP 3C-7c); "member_timeouts"
 	// sorts before "members", so it is the last head field and key order holds.
 	MemberTimeouts []memberTimeoutEntry `json:"member_timeouts"`

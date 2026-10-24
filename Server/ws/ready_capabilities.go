@@ -20,6 +20,7 @@ func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity bool) m
 		"multi_role":                   true,         // WP 6.3c: role_ids, hoist, role add/remove
 		"manage_nicknames":             true,         // WP 6.4: PUT /api/v1/moderation/users/{id}/nickname
 		"game_activity":                gameActivity, // WP 8.3a: activity_update, presence.activity and ready.activities; WP 8.3e-2: false while an admin has it off
+		"listening_activity":           gameActivity, // WP 8.10a: listening_update, presence.listening and ready.listening; follows the same switch as game_activity
 		"thread_follows":               threads,      // WP 6.9c: thread_follow, thread_follow_update and ready.threads
 	}
 }
