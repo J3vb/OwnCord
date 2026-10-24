@@ -1,5 +1,5 @@
 {
-  "nextId": 507,
+  "nextId": 508,
   "findings": [
     {
       "id": "OC-0001",
@@ -11714,6 +11714,29 @@
       "status": "fixed",
       "found": "2026-10-17",
       "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0507",
+      "title": "Username inputs cut valid names of letters outside the BMP at 16 characters",
+      "file": "Client/src/lib/nameLimits.ts",
+      "line": 202,
+      "severity": "low",
+      "why": "attachLimitHint set maxlength to the character limit for usernames, and maxlength counts UTF-16 units. The server and checkNewUsername count characters, so a 32-letter name of supplementary-plane letters (2 units each) was truncated to 16 in the register and rename inputs.",
+      "repro": "Register form or Settings > Account > change username: paste 20 x U+1D400. The input keeps 16 and shows the limit, although the server accepts 32 characters.",
+      "evidence": "Vault issue #143; LoginForm and AccountTab called attachLimitHint for usernames without countCharacters, and LoginForm reset maxLength to 32 on switching to Register.",
+      "suggestedFix": "Pass countCharacters for both username inputs and restore the hint's own cap when Register re-bounds the field.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/name-limits.test.ts, Client/tests/unit/settings-overlay.test.ts (32-letter name outside the BMP)",
+        "revertProof": "fail (maxlength 32, name cut)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-18",
+      "hunt": "nightly-bughunt",
       "lens": "correctness",
       "finder": "nightly-bughunt",
       "fixedDate": "2026-10-24"

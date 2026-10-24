@@ -830,10 +830,21 @@ describe("SettingsOverlay", () => {
 
   it("bounds the rename input and shows the rule", () => {
     const { overlay, editInput } = openUsernameEditor();
-    expect(editInput.maxLength).toBe(32);
+    expect(editInput.maxLength).toBe(64); // 2 units per character; the 32-character cap is by count
     const hintId = editInput.getAttribute("aria-describedby")!.split(" ").at(-1)!;
     const hint = container.querySelector<HTMLElement>(`#${hintId}`)!;
     expect(hint.textContent).toContain("2–32 characters");
+    overlay.destroy?.();
+  });
+
+  it("fits and sends a 32-letter rename outside the BMP", async () => {
+    const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
+    const { overlay, editInput, saveBtn } = openUsernameEditor(onUpdateProfile);
+    const bold = "\u{1D400}".repeat(32); // 2 UTF-16 units per letter
+    expect(bold.length).toBeLessThanOrEqual(editInput.maxLength);
+    editInput.value = bold;
+    saveBtn.click();
+    await vi.waitFor(() => expect(onUpdateProfile).toHaveBeenCalledWith({ username: bold }));
     overlay.destroy?.();
   });
 
