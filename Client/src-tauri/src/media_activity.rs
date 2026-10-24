@@ -94,7 +94,7 @@ impl<'a> BusyGuard<'a> {
     fn acquire(flag: &'a AtomicBool) -> Option<Self> {
         flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_ok()
-            .then_some(Self(flag))
+            .then(|| Self(flag))
     }
 }
 

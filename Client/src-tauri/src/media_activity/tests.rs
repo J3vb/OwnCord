@@ -348,6 +348,8 @@ fn a_second_poll_while_one_runs_is_refused() {
     let first = BusyGuard::acquire(&flag);
     assert!(first.is_some());
     assert!(BusyGuard::acquire(&flag).is_none());
+    assert!(BusyGuard::acquire(&flag).is_none());
+    assert!(flag.load(Ordering::Acquire));
     drop(first);
     assert!(BusyGuard::acquire(&flag).is_some());
 }
