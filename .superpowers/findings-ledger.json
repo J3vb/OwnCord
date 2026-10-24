@@ -1,5 +1,5 @@
 {
-  "nextId": 500,
+  "nextId": 503,
   "findings": [
     {
       "id": "OC-0001",
@@ -11556,6 +11556,75 @@
       "lens": "concurrency",
       "finder": "nightly-bughunt",
       "fixedDate": "2026-10-23"
+    },
+    {
+      "id": "OC-0500",
+      "title": "A moderator could appeal their own channel purge, which then sat in the moderation queue as a sanction appeal",
+      "file": "Server/service/appeal.go",
+      "line": 227,
+      "severity": "low",
+      "why": "A channel purge writes a removal ledger row with target_id = actor_id. ListOwnModerationActions leaves self-targeted rows out because they are not sanctions, but AppealService.Submit only checked that the caller was the target and that removal is appealable.",
+      "repro": "As a moderator, purge messages in a channel, then POST /appeals against the purge's moderation action id; the appeal was accepted and an open mod_queue frame went out.",
+      "evidence": "Vault issue #111; db/message_queries.go PurgeChannelMessagesWithAction records removal(actor, actor); moderation_actions.sql ListOwnModerationActions filters actor_id IS NOT target_id.",
+      "suggestedFix": "Refuse a self-targeted action in Submit with the same not-found answer as a foreign one.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/appeal_test.go (TestAppeal_SelfTargetedPurgeRowIsNotAppealable)",
+        "revertProof": "fail (without the fix the appeal is accepted)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0501",
+      "title": "The setup wizard saved TLS choices the next boot could not serve (manual without a pair, acme on port 80)",
+      "file": "Server/admin/setup_wizard_tls.go",
+      "line": 1,
+      "severity": "low",
+      "why": "The wizard validated only the mode's spelling, the port range and the acme domain. The panel's guardManualTLS and guardAcmeTLS checks for the same keys never ran, so the wizard could write a config whose next boot aborts on a missing certificate pair or never obtains an ACME certificate.",
+      "repro": "On a server running with tls.mode off, finish the setup wizard with tls_mode manual; the restart fails loading the cert/key pair. Or pick acme with port 80; the HTTPS listener takes the ACME challenge port.",
+      "evidence": "Vault issue #133; admin/setup_wizard.go wizardValidateNetwork, admin/config_guards.go guardManualTLS/guardAcmeTLS.",
+      "suggestedFix": "Run the panel's manual pair check and the acme/port-80 refusal in setupPrecheck, before the owner account is created.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/setup_wizard_tls_test.go (TestSetupWizard_RefusesTLSTheNextBootCannotServe, TestSetupWizard_ManualTLSWithAValidPairIsSaved)",
+        "revertProof": "fail (without the fix both choices are saved and answer 201)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0502",
+      "title": "Uploaded EXIF-rotated JPEGs recorded their stored (sideways) size, so portrait phone photos got a landscape box",
+      "file": "Server/api/upload_handler.go",
+      "line": 451,
+      "severity": "low",
+      "why": "uploadStoreFile took width and height from image.DecodeConfig, which ignores EXIF orientation, while the thumbnail route and browsers show the image upright. Clients size the image box from the recorded size, so orientation 5-8 photos had swapped axes.",
+      "repro": "Upload a phone portrait photo (stored 4032x3024, orientation 6) and send it; the message reserves a 400x300 box and the upright image shows at about 225x300.",
+      "evidence": "Vault issue #140; api/thumbnail.go jpegHeader/orient swap sides for orientations 5-8.",
+      "suggestedFix": "For image/jpeg, read the orientation with jpegHeader and swap width and height for orientations 5-8.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/api/upload_handler_test.go (TestUpload_JPEGDimensionsHonourEXIFOrientation)",
+        "revertProof": "fail (orientations 6 and 8 recorded 40x30)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
     }
   ]
 }

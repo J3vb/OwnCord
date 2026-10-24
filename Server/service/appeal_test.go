@@ -223,6 +223,37 @@ func TestAppeal_OnlyTheTargetMaySubmit(t *testing.T) {
 	}
 }
 
+// A moderator's own channel purge writes a removal row targeting
+// themself. It is not a sanction, so it cannot be appealed.
+func TestAppeal_SelfTargetedPurgeRowIsNotAppealable(t *testing.T) {
+	f := newAppealFixture(t)
+	ctx := context.Background()
+
+	if _, err := f.database.CreateMessage(ctx, fixtureChannel, fixtureMember, "old", nil); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := f.database.PurgeChannelMessagesWithAction(ctx, fixtureChannel, 0, 10, fixtureMod, nil); err != nil {
+		t.Fatalf("PurgeChannelMessagesWithAction: %v", err)
+	}
+	rows, err := f.database.ListModerationActionsForTarget(ctx, fixtureMod)
+	if err != nil {
+		t.Fatalf("ListModerationActionsForTarget: %v", err)
+	}
+	var actionID int64
+	for i := range rows {
+		if r := &rows[i]; r.Kind == "removal" && r.ActorID == fixtureMod {
+			actionID = r.ID
+		}
+	}
+	if actionID == 0 {
+		t.Fatal("purge wrote no self-targeted removal row")
+	}
+
+	if _, err := f.appeals.Submit(ctx, fixtureMod, actionID, "appeal my own purge"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("submit against own purge row: want ErrNotFound, got %v", err)
+	}
+}
+
 // vanishingActionStore wraps a real Store and deletes actionID's row for
 // real (simulating the target's account erasure cascading it away) the
 // FIRST time GetModerationAction resolves it — placing the vanish exactly
