@@ -49,12 +49,6 @@ type MessageStickerInfo struct {
 	URL  *string `json:"url"`
 }
 
-// MessageSticker is embedded in the message shapes that can carry a sticker, so
-// the json tag lives here and not in models.go, whose tag count is pinned.
-type MessageSticker struct {
-	Sticker *MessageStickerInfo `json:"sticker,omitempty"`
-}
-
 // NewMessageStickerInfo builds the sticker block of a message. A nil stickerID
 // means the sticker was deleted, and the block carries no id or url.
 func NewMessageStickerInfo(stickerID *int64, name string) *MessageStickerInfo {
