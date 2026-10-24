@@ -63,7 +63,7 @@ func TestListeningUpdate_Parse(t *testing.T) {
 		{"blank player", ok1("x", "x", "   "), true, ListeningUpdateCmd{}},
 		{"line break in title", ok1("a\nb", "x", "p"), true, ListeningUpdateCmd{}},
 		{"control char in artist", ok1("x", "a\u0007b", "p"), true, ListeningUpdateCmd{}},
-		{"bidi override in player", ok1("x", "x", "a‮b"), true, ListeningUpdateCmd{}},
+		{"bidi override in player", ok1("x", "x", "a\u202eb"), true, ListeningUpdateCmd{}},
 		{"invisible filler in title", ok1("aㅤb", "x", "p"), true, ListeningUpdateCmd{}},
 		{"empty title clears", ok1("", "x", "p"), false, ListeningUpdateCmd{Clear: true}},
 		{"blank title clears", ok1("   ", "x", "p"), false, ListeningUpdateCmd{Clear: true}},
@@ -569,6 +569,7 @@ func TestListening_SurvivesEveryOtherPresenceWriterAndKeepsTheGame(t *testing.T)
 	setStatus := func(payload string) {
 		t.Helper()
 		h.limiter.Reset(ctx, auth.Key("presence", uid))
+		//nolint:contextcheck // handleMessage is the read-pump entry and takes no context by design.
 		h.handleMessage(player, []byte(`{"type":"presence_update","payload":`+payload+`}`))
 		if err := h.awaitDispatch(ctx); err != nil {
 			t.Fatal(err)
@@ -752,7 +753,6 @@ func readyListeningFor(t *testing.T, h *Hub, database *db.DB, userID int64) ([]r
 		t.Fatalf("ready has no listening array: %s", raw[:min(len(raw), 300)])
 	}
 	// Top-level key order must stay sorted (the head/tail splice contract).
-	var keys []string
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	var top map[string]json.RawMessage
 	if err := dec.Decode(&top); err != nil {
@@ -762,6 +762,7 @@ func readyListeningFor(t *testing.T, h *Hub, database *db.DB, userID int64) ([]r
 	if err := json.Unmarshal(top["payload"], &payload); err != nil {
 		t.Fatal(err)
 	}
+	keys := make([]string, 0, len(payload))
 	for k := range payload {
 		keys = append(keys, k)
 	}
