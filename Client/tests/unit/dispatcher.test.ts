@@ -36,6 +36,12 @@ import {
   listCustomEmoji,
   resolveEmoji,
 } from "../../src/stores/emoji.store";
+import {
+  stickersStore,
+  setStickers,
+  clearStickers,
+  listStickers,
+} from "../../src/stores/stickers.store";
 import { uiStore, setTransientError, setUpdateRequiredHost } from "../../src/stores/ui.store";
 import { PROTOCOL_EPOCH } from "../../src/lib/protocolTypes";
 import { safetyText } from "../../src/i18n/safety";
@@ -277,6 +283,8 @@ describe("WS Dispatcher", () => {
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
     clearCustomEmoji();
     emojiStore.flush();
+    clearStickers();
+    stickersStore.flush();
 
     mock = createMockWs();
     cleanup = wireDispatcher(mock.ws);
@@ -5304,6 +5312,114 @@ describe("WS Dispatcher", () => {
     await Promise.resolve();
     emojiStore.flush();
     expect(resolveEmoji("wave")?.id).toBe(4);
+  });
+
+  it("wires sticker_update to replace the custom-sticker set", () => {
+    setStickers([
+      { id: 1, name: "Wave", emoji: null, url: "/api/v1/stickers/1/image" },
+      { id: 2, name: "Gone", emoji: null, url: "/api/v1/stickers/2/image" },
+    ]);
+    stickersStore.flush();
+
+    // The deleted sticker must not survive the replace.
+    mock.dispatch("sticker_update", {
+      stickers: [
+        { id: 1, name: "Wave", emoji: "👋", url: "/api/v1/stickers/1/image" },
+        { id: 3, name: "Party", emoji: null, url: "/api/v1/stickers/3/image" },
+      ],
+    });
+    stickersStore.flush();
+
+    expect(listStickers().map((x) => x.name)).toEqual(["Wave", "Party"]);
+    expect(listStickers()[0]!.emoji).toBe("👋");
+  });
+
+  it("treats a sticker_update with no stickers field as an empty set", () => {
+    setStickers([{ id: 1, name: "Wave", emoji: null, url: "/api/v1/stickers/1/image" }]);
+    stickersStore.flush();
+    mock.dispatch("sticker_update", {} as never);
+    stickersStore.flush();
+    expect(listStickers()).toEqual([]);
+  });
+
+  it("on ready loads the stickers only when the server advertises the capability", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    const listStickersApi = vi
+      .fn()
+      .mockResolvedValue([{ id: 4, name: "Wave", emoji: null, url: "/api/v1/stickers/4/image" }]);
+    cleanup = wireDispatcher(mock.ws, { listBlocks, listStickers: listStickersApi });
+
+    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    expect(listStickersApi).not.toHaveBeenCalled();
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      capabilities: { stickers: true },
+    });
+    expect(listStickersApi).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    stickersStore.flush();
+    expect(listStickers().map((x) => x.id)).toEqual([4]);
+  });
+
+  it("refetches the stickers on a resumed connection, which gets no ready", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    const listStickersApi = vi.fn().mockResolvedValue([]);
+    cleanup = wireDispatcher(mock.ws, { listBlocks, listStickers: listStickersApi });
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      capabilities: { stickers: true },
+    });
+    listStickersApi.mockClear();
+
+    mock.dispatch("auth_ok", {
+      user: { id: 1, username: "alex", avatar: null, role: "admin" },
+      server_name: "TestServer",
+      motd: "",
+      replay_source: "buffer",
+    } as never);
+    expect(listStickersApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a ready-time sticker list that a fresher sticker_update overtook", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    let resolveList: (v: unknown[]) => void = () => {};
+    const listStickersApi = vi.fn(
+      () =>
+        new Promise<unknown[]>((r) => {
+          resolveList = r;
+        }),
+    );
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks,
+      listStickers: listStickersApi as never,
+    });
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      capabilities: { stickers: true },
+    });
+    mock.dispatch("sticker_update", {
+      stickers: [{ id: 9, name: "Fresh", emoji: null, url: "/api/v1/stickers/9/image" }],
+    });
+    stickersStore.flush();
+    resolveList([{ id: 1, name: "Stale", emoji: null, url: "/api/v1/stickers/1/image" }]);
+    await Promise.resolve();
+    await Promise.resolve();
+    stickersStore.flush();
+    expect(listStickers().map((x) => x.name)).toEqual(["Fresh"]);
   });
 
   // OC-0251: the ready-time GET /emoji and an `emoji_update` broadcast can

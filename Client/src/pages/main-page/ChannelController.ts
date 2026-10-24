@@ -75,6 +75,8 @@ import type { DmChannel } from "@stores/dm.store";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { buildGroupAvatarStack } from "@components/DmSidebar";
 import { canManageMessages } from "@lib/permissions";
+import { findSticker } from "@stores/stickers.store";
+import { stickersText } from "../../i18n/stickers";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
@@ -412,6 +414,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // 3A-12: the reply's @ON/@OFF, part of the retry fingerprint, so a
       // retry resends the same value.
       replyPing?: boolean;
+      // WP 8.8: a sticker send, kept so a retry posts the same sticker.
+      sticker?: { readonly id: number; readonly name: string };
       // Each file with its name (and picked File, when there is one), so a
       // file the server did not attach can go back into the composer (2A-3).
       attachments: readonly SentAttachment[];
@@ -904,8 +908,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       files: readonly SentAttachment[],
       existingClientMessageId?: string,
       replyPing = false,
-      sendOptions: { readonly queued?: boolean } = {},
+      sendOptions: {
+        readonly queued?: boolean;
+        readonly sticker?: { readonly id: number; readonly name: string };
+      } = {},
     ): void {
+      const sticker = sendOptions.sticker;
       const attachments = files.map((f) => f.id);
       const user = currentMessageUser();
       // A queued send (3A-9) was built by this mount but may post after the
@@ -925,7 +933,25 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           : undefined);
       // Set only for a send with a recoverable logical identity: plain text
       // with a client_message_id, no reply and no attachments.
-      const persistId = replyTo === null && attachments.length === 0 ? clientMessageId : undefined;
+      const persistId =
+        replyTo === null && attachments.length === 0 && sticker === undefined
+          ? clientMessageId
+          : undefined;
+      // A sticker send commits with its receipt, so the server requires the id.
+      if (sticker !== undefined && clientMessageId === undefined) {
+        if (owns()) showToast(stickersText("send.unsupported"), "error");
+        return;
+      }
+      // The optimistic row's text is the server's fallback for the sticker.
+      const rowContent = sticker === undefined ? content : `[Sticker: ${sticker.name}]`;
+      const live = sticker === undefined ? null : findSticker(sticker.id);
+      const rowSticker =
+        live === null ? undefined : { id: live.id, name: live.name, url: live.url };
+      const rowFields = {
+        content: rowContent,
+        ...(rowSticker === undefined ? {} : { sticker: rowSticker }),
+      };
+      const draftSticker = sticker === undefined ? {} : { sticker };
       /** Persist before handing text to the socket, so a process crash after
        *  commit but before ACK can recover the same logical identity. Resolves
        *  false when the write did not land: callers that send regardless only
@@ -954,12 +980,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           clientMessageId,
           channelId,
           user,
-          content,
+          ...rowFields,
           replyTo,
           timestamp,
         });
         draftByCorrelation.set(cid, {
           content,
+          ...draftSticker,
           replyTo,
           ...(replyTo === null ? {} : { replyPing }),
           attachments: files,
@@ -985,7 +1012,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           type: "chat_send",
           payload: {
             channel_id: channelId,
-            content,
+            content: sticker === undefined ? content : "",
+            ...(sticker === undefined ? {} : { sticker_id: sticker.id }),
             reply_to: replyTo,
             ...(replyTo === null ? {} : { reply_ping: replyPing }),
             attachments,
@@ -997,12 +1025,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           clientMessageId,
           channelId,
           user,
-          content,
+          ...rowFields,
           replyTo,
           timestamp,
         });
         draftByCorrelation.set(cid, {
           content,
+          ...draftSticker,
           replyTo,
           ...(replyTo === null ? {} : { replyPing }),
           attachments: files,
@@ -1092,8 +1121,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       draftByCorrelation.delete(correlationId);
       clearSendTimer(correlationId);
       removeOptimistic(correlationId);
+      const retrySticker = "sticker" in draft ? draft.sticker : undefined;
+      const stickerOpts = retrySticker === undefined ? {} : { sticker: retrySticker };
       if (refusedReply) {
-        performSend(draft.content, null, draft.attachments);
+        performSend(draft.content, null, draft.attachments, undefined, false, stickerOpts);
         return;
       }
       performSend(
@@ -1102,6 +1133,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draft.attachments,
         draft.clientMessageId,
         draft.replyPing === true,
+        stickerOpts,
       );
     }
 
@@ -1661,6 +1693,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         const ping = reply !== null && replyPing === true;
         if (queued === undefined) performSend(content, reply, files, undefined, ping);
         else enqueueSend(content, reply, ping, queued);
+      },
+      onSendSticker: (sticker, replyTo, replyPing) => {
+        const reply = liveReplyTo(replyTo);
+        performSend("", reply, [], undefined, reply !== null && replyPing, { sticker });
       },
       onUploadFile: uploadFile,
       onDiscardUpload: async (id: string) => {

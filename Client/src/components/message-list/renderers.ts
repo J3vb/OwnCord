@@ -12,6 +12,7 @@ import { groupRowIcon, groupRowText } from "./groupRows";
 import { renderPinRowText } from "./pinRows";
 import { endForwardBlock, startForwardBlock } from "./forwardBlock";
 import { renderPollCard } from "./pollCard";
+import { renderStickerBody, stickerReplyPreview, stickerReplyText } from "./sticker";
 import { renderThreadChip } from "./threadChip";
 import { threadOfMessage } from "@stores/threads.store";
 import { connectionLockReason, messageActionGates } from "./message-actions";
@@ -20,6 +21,7 @@ import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { messagingText } from "../../i18n/messaging";
+import { stickersText } from "../../i18n/stickers";
 import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
@@ -274,9 +276,12 @@ function renderReplyRef(
     bar.classList.add("msg-reply-ref--blocked");
     setText(bar, messagingText("blocked.message"));
   } else if (ref) {
-    const plain = Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
-      .slice(0, 100)
-      .join("");
+    // A sticker message has no text of its own: say what it is (WP 8.8).
+    const plain =
+      stickerReplyText(ref.sticker, ref.content) ??
+      Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
+        .slice(0, 100)
+        .join("");
     // A message that is only an attachment (or only a spoiler) has no plain
     // text; show a placeholder rather than an empty preview (F24).
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
@@ -299,7 +304,9 @@ function renderReplyRef(
     const author = resolveAuthor(referenced.user);
     const roleColor = userRoleColorVar(referenced.user.id);
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
-    const plain = markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
+    const plain =
+      stickerReplyPreview(referenced.content) ??
+      markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
     appendChildren(
       bar,
       createAvatarElement(author, {
@@ -468,6 +475,8 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.recovered");
     case "BAD_REQUEST":
       return messagingText("send.rejected");
+    case "STICKER_NOT_FOUND":
+      return stickersText("send.notFound");
     case "UPLOAD_FAILED":
       return messagingText("send.uploadFailed");
     case "UPLOAD_CANCELLED":
@@ -669,6 +678,14 @@ export function renderMessage(
     // A poll's card takes the body's place (the server's fallback text is for
     // clients that predate polls); it has no files or embeds, and reactions stay.
     el.appendChild(renderPollCard(msg, opts, signal));
+    if (msg.reactions.length > 0) {
+      el.appendChild(renderReactions(msg, opts, signal));
+    }
+  } else if (msg.sticker !== undefined) {
+    // A sticker stands alone (WP 8.8): the server's "[Sticker: name]" fallback
+    // is for clients that predate stickers. It has no files or embeds, and
+    // reactions stay.
+    el.appendChild(renderStickerBody(msg.sticker, signal));
     if (msg.reactions.length > 0) {
       el.appendChild(renderReactions(msg, opts, signal));
     }

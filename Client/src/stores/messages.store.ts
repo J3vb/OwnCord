@@ -23,6 +23,7 @@ import type {
   MessageUser,
   Attachment,
   MessageResponse,
+  MessageStickerInfo,
 } from "@lib/types";
 import { chatPayloadToMessage, INITIAL_STATE } from "../features/messaging/messageModel";
 import type { Message, MessagesState, PendingReaction } from "../features/messaging/messageModel";
@@ -113,6 +114,8 @@ export function addOptimisticMessage(params: {
   content: string;
   replyTo: number | null;
   attachments?: readonly Attachment[];
+  /** A sticker send (WP 8.8): the row shows the image at once; `content` is the server's fallback text. */
+  sticker?: MessageStickerInfo;
   timestamp: string;
   /** "uploading" for a send queued behind its files; absent means "pending". */
   status?: "uploading";
@@ -133,6 +136,7 @@ export function addOptimisticMessage(params: {
     correlationId: params.correlationId,
     clientMessageId: params.clientMessageId,
     errorCode: null,
+    ...(params.sticker !== undefined && { sticker: params.sticker }),
   };
   messagesStore.setState((prev) => reduceAddOptimisticMessage(prev, params, optimistic));
 }

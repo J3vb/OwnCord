@@ -2219,3 +2219,25 @@ ul.md-list-nested {
     min-height: 44px;
   }
 }
+
+/* ── Sticker messages (WP 8.8) ── */
+.msg-sticker {
+  width: 160px;
+  height: 160px;
+  margin-top: 2px;
+}
+.msg-sticker-img {
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+}
+.msg-sticker-deleted {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-style: italic;
+}

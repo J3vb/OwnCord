@@ -462,6 +462,7 @@ const NAV=[
   {id:'channels',label:'Channels',icon:I.channels,allowed:()=>can(PERM.MANAGE_CHANNELS)},
   {id:'invites',label:'Invites',icon:I.key,allowed:()=>can(PERM.MANAGE_INVITES)},
   {id:'emoji',label:'Emoji',icon:I.smile,allowed:()=>can(PERM.MANAGE_SERVER)},
+  {id:'stickers',label:'Stickers',icon:I.smile,allowed:()=>can(PERM.MANAGE_SERVER)},
   {section:'Moderation'},
   {id:'audit',label:'Audit log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
   {section:'Server'},
@@ -657,7 +658,7 @@ function dismissButton(id,sig,what){return'<button class="notice-dismiss" aria-l
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,config:renderServerConfig,retention:renderRetention,backups:renderBackups,updates:renderUpdates,whatsnew:renderWhatsNew};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,stickers:renderStickers,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,config:renderServerConfig,retention:renderRetention,backups:renderBackups,updates:renderUpdates,whatsnew:renderWhatsNew};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" data-action="navigateTo" data-args="'+actArgs('dashboard')+'">Back to Dashboard</button>';return}
