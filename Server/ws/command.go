@@ -36,6 +36,9 @@ type ChatSendCmd struct {
 	// ReplyPing is true only when the client sent reply_ping=true on a reply.
 	ReplyPing   bool
 	attachments []string
+	// StickerID is the sticker a sticker message carries (WP 8.8a), 0 for an
+	// ordinary send.
+	StickerID int64
 }
 
 func (c ChatSendCmd) Type() string          { return MsgTypeChatSend }
@@ -342,51 +345,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		return PingCmd{userID: userID}, nil
 	},
 
-	MsgTypeChatSend: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {
-		var p struct {
-			ClientMessageID string      `json:"client_message_id"`
-			ChannelID       json.Number `json:"channel_id"`
-			Content         string      `json:"content"`
-			ReplyTo         *int64      `json:"reply_to"`
-			ReplyPing       *bool       `json:"reply_ping"`
-			Attachments     []string    `json:"attachments"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("invalid chat_send payload: %w", err)
-		}
-		chID, err := p.ChannelID.Int64()
-		if err != nil {
-			return nil, fmt.Errorf("channel_id must be integer: %w", err)
-		}
-		if len(p.Attachments) > 10 {
-			return nil, fmt.Errorf("too many attachments (max 10)")
-		}
-		// These are upload IDs (UUIDs from POST /api/v1/uploads), NOT URLs: the
-		// client renders an attachment by resolving its id to /api/v1/files/{id},
-		// and SendMessage links each id through LinkAttachmentsToMessage, which
-		// keeps only ids that name a real upload owned by the sender and still
-		// unlinked. A javascript:/data: string is therefore never stored or
-		// echoed — it simply matches no row and is dropped. A scheme check would
-		// be wrong here (it would reject the legitimate UUID ids); the only
-		// bound that applies is length.
-		for i, id := range p.Attachments {
-			if len(id) > 2048 {
-				return nil, fmt.Errorf("attachment[%d] id too long (max 2048)", i)
-			}
-		}
-		attachments := make([]string, len(p.Attachments))
-		copy(attachments, p.Attachments)
-		return ChatSendCmd{
-			ClientMessageID: p.ClientMessageID,
-			userID:          userID,
-			ReqID:           reqID,
-			ChannelID:       chID,
-			Content:         p.Content,
-			ReplyTo:         p.ReplyTo,
-			ReplyPing:       p.ReplyTo != nil && p.ReplyPing != nil && *p.ReplyPing,
-			attachments:     attachments,
-		}, nil
-	},
+	MsgTypeChatSend: parseChatSend,
 
 	MsgTypeChatForward: parseChatForward,
 	MsgTypePollCreate:  parsePollCreate,

@@ -307,6 +307,12 @@ type MessageRoleMention struct {
 	RoleID    int64 `json:"roleId"`
 }
 
+type MessageSticker struct {
+	MessageID int64  `json:"messageId"`
+	StickerID *int64 `json:"stickerId"`
+	Name      string `json:"name"`
+}
+
 type MessagesFt struct {
 	Content string `json:"content"`
 }
@@ -525,6 +531,16 @@ type Session struct {
 type Setting struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+}
+
+type Sticker struct {
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Emoji      *string `json:"emoji"`
+	Filename   string  `json:"filename"`
+	MimeType   string  `json:"mimeType"`
+	UploadedBy int64   `json:"uploadedBy"`
+	CreatedAt  string  `json:"createdAt"`
 }
 
 type ThreadMember struct {

@@ -91,6 +91,7 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	// another user's, so it survives with the row, and only the user link is cut.
 	exec(`INSERT INTO invite_redemptions (invite_id, user_id) SELECT id, ? FROM invites WHERE code = 'other-invite'`, uid)
 	exec(`INSERT INTO emoji (shortcode, filename, uploaded_by) VALUES ('wave', 'emoji-wave', ?)`, uid)
+	exec(`INSERT INTO stickers (name, filename, mime_type, uploaded_by) VALUES ('Wave', 'sticker-wave', 'image/png', ?)`, uid)
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, uid, other)
 	exec(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)`, other, uid)
 	exec(`INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 1, 0)`, chID, uid)
@@ -321,6 +322,9 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM emoji WHERE shortcode = 'wave' AND uploaded_by = ?`, sub.other); n != 1 {
 		t.Errorf("emoji not reassigned to the remaining admin")
+	}
+	if n := count(`SELECT COUNT(*) FROM stickers WHERE name = 'Wave' AND uploaded_by = ?`, sub.other); n != 1 {
+		t.Errorf("sticker not reassigned to the remaining admin")
 	}
 	if n := count(`SELECT COUNT(*) FROM recovery_assists WHERE user_id = ? AND issued_by = 0`, sub.other); n != 1 {
 		t.Errorf("assisted credential issued by the subject: want kept with issued_by = 0")
@@ -773,6 +777,9 @@ func TestEraseAccount_SoleAccountAssetsAreDeleted(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `INSERT INTO emoji (shortcode, filename, uploaded_by) VALUES ('solo', 'emoji-solo', ?)`, uid); err != nil {
 		t.Fatalf("seed emoji: %v", err)
 	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO stickers (name, filename, mime_type, uploaded_by) VALUES ('Solo', 'sticker-solo', 'image/png', ?)`, uid); err != nil {
+		t.Fatalf("seed sticker: %v", err)
+	}
 	job, err := database.EraseAccount(ctx, uid, "")
 	if err != nil {
 		t.Fatalf("EraseAccount: %v", err)
@@ -781,8 +788,11 @@ func TestEraseAccount_SoleAccountAssetsAreDeleted(t *testing.T) {
 	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM emoji`).Scan(&left); err != nil || left != 0 {
 		t.Errorf("assets left = %d (%v), want 0", left, err)
 	}
-	if len(job.Files) != 1 || job.Files[0] != "emoji-solo" {
-		t.Errorf("job files = %v, want the emoji file", job.Files)
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM stickers`).Scan(&left); err != nil || left != 0 {
+		t.Errorf("stickers left = %d (%v), want 0", left, err)
+	}
+	if len(job.Files) != 2 || job.Files[0] != "emoji-solo" || job.Files[1] != "sticker-solo" {
+		t.Errorf("job files = %v, want the emoji and sticker files", job.Files)
 	}
 }
 
@@ -827,8 +837,11 @@ func TestReferencedStoredFiles(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `INSERT INTO emoji (shortcode, filename, uploaded_by) VALUES ('e', 'stored-emoji', ?)`, uid); err != nil {
 		t.Fatalf("seed emoji: %v", err)
 	}
-	names := make([]string, 0, 453)
-	names = append(names, "stored-att", "stored-emoji", "stranded")
+	if _, err := database.ExecContext(ctx, `INSERT INTO stickers (name, filename, mime_type, uploaded_by) VALUES ('Ref', 'stored-sticker', 'image/png', ?)`, uid); err != nil {
+		t.Fatalf("seed sticker: %v", err)
+	}
+	names := make([]string, 0, 454)
+	names = append(names, "stored-att", "stored-emoji", "stored-sticker", "stranded")
 	// Past one chunk, so the batching runs more than once.
 	for i := range 450 {
 		names = append(names, fmt.Sprintf("unknown-%d", i))
@@ -837,8 +850,8 @@ func TestReferencedStoredFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReferencedStoredFiles: %v", err)
 	}
-	if len(got) != 2 || !got["stored-att"] || !got["stored-emoji"] {
-		t.Errorf("referenced = %v, want the two named by rows", got)
+	if len(got) != 3 || !got["stored-att"] || !got["stored-emoji"] || !got["stored-sticker"] {
+		t.Errorf("referenced = %v, want the three named by rows", got)
 	}
 	if empty, err := database.ReferencedStoredFiles(ctx, nil); err != nil || len(empty) != 0 {
 		t.Errorf("ReferencedStoredFiles(nil) = %v, %v", empty, err)
