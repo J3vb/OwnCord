@@ -1762,6 +1762,33 @@ func TestServeThumb_JPEGHonoursEXIFOrientation(t *testing.T) {
 	}
 }
 
+// A sideways-stored phone photo records its upright size, so clients
+// reserve a portrait box for it.
+func TestUpload_JPEGDimensionsHonourEXIFOrientation(t *testing.T) {
+	database := newUploadTestDB(t)
+	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+	token := uploadCreateToken(t, database, "dimsexif", 4)
+	for _, tc := range []struct {
+		orientation, wantW, wantH int
+	}{{1, 40, 30}, {3, 40, 30}, {6, 30, 40}, {8, 30, 40}} {
+		content := withEXIFOrientation(encodeJPEG(t, solidImage(40, 30)), uint16(tc.orientation))
+		rr := doUpload(t, router, token, "file", "phone.jpg", content)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("orientation %d: upload %d; body: %s", tc.orientation, rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("orientation %d: decode: %v", tc.orientation, err)
+		}
+		if resp.Width != tc.wantW || resp.Height != tc.wantH {
+			t.Errorf("orientation %d: %dx%d, want %dx%d", tc.orientation, resp.Width, resp.Height, tc.wantW, tc.wantH)
+		}
+	}
+}
+
 // Anything the server does not thumbnail — an image already inside the box,
 // an animated GIF — is passed through as the original bytes.
 func TestServeThumb_PassesThroughSmallImagesAndGIFs(t *testing.T) {

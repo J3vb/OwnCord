@@ -4150,6 +4150,11 @@ during the first run (B11-8); the secret is returned once as
 `recovery_kit_secret` and only its verifier is stored. Pass
 `"recovery_kit": false` to skip it.
 
+A TLS choice the next boot could not serve answers 400 before the account is
+created, as the admin panel refuses the same change: `tls_mode` `manual` when
+the configured `tls.cert_file`/`tls.key_file` pair does not load or has
+expired, and `tls_mode` `acme` with `port` 80.
+
 #### Response 200 OK
 
 ```json

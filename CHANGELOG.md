@@ -76,12 +76,15 @@ and only when it changes something a contributor or fork holder must do
 
 - A ban now also ends a connection that was still signing in at the moment of the ban.
 - Account recovery with a recovery kit now spends exactly the kit it checked, so a new kit set up at the same moment stays unspent and usable.
+- A moderator could file an appeal against their own channel purge, which then showed in the moderation queue as an appeal against a sanction. A purge is not a sanction, so it can no longer be appealed.
+- The first-run setup wizard could save a TLS choice the server then could not start with: manual certificates when none were in place, or ACME on port 80. The wizard now refuses those choices, as the admin panel already did.
 
 **Chat**
 
 - The default blocked upload file types now also cover the other common web page and SVG extensions (`htm`, `xhtml`, `xht`, `shtml`, `mht`, `mhtml`, `svgz`). A blocked-types list saved on the admin panel or set in `config.yaml` is kept as it is.
 - Deleting a message after an edit changed who it mentions now lowers the mention badges the message actually raised. Before, it could clear someone's badge for a different, still-unread mention, or leave a badge pointing at the deleted message. Deleting an `@everyone` message now clears its badges too.
 - Reconnecting while a channel's permissions or your role were being changed could leave the channel list out of date (a channel you lost still shown, or a new one missing) until the app was restarted. The reconnect now loads the full channel list.
+- A portrait photo from a phone showed small, in a landscape-shaped box with blank space beside it. Photos uploaded from now on get a box in their upright shape.
 
 **Direct messages**
 

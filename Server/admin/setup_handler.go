@@ -297,6 +297,11 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return req, "", false
 		}
+		// A TLS choice the next boot cannot serve is refused the same way.
+		if err := wizardTLSRefusal(req.Wizard, running); err != nil {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			return req, "", false
+		}
 	}
 
 	return req, host, true
