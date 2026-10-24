@@ -1,5 +1,5 @@
 {
-  "nextId": 510,
+  "nextId": 513,
   "findings": [
     {
       "id": "OC-0001",
@@ -11766,6 +11766,75 @@
     },
     {
       "id": "OC-0509",
+      "title": "Jump-to-message installed its around-window into a channel the user had already left",
+      "file": "Client/src/pages/main-page/MessageJump.ts",
+      "line": 121,
+      "severity": "low",
+      "why": "jumpTo checked only for a newer jump after awaiting getMessagesAround. A channel switch during the fetch had already dropped the old channel's loaded flag, so the late window marked it loaded and detached again and the next visit skipped the tail fetch.",
+      "repro": "Click a search hit or pinned item whose target is not loaded, switch to another channel before the around-window arrives, then reopen the first channel: it shows the old history window, not the latest messages, and no NEW divider.",
+      "evidence": "Vault issue #129; ChannelController destroyChannel/mountChannel invalidate the window before the response lands; MessageController.loadMessages returns early on isChannelLoaded.",
+      "suggestedFix": "After the await, bail out unless the mounted channel is still the jump's channel.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/message-jump.test.ts (a jump response for a channel the user already left does not install its window)",
+        "revertProof": "fail (channel 1 left loaded and detached)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0510",
+      "title": "Mention resync turned an @name inside a masked link into a profile button",
+      "file": "Client/src/components/message-list/content-parser.ts",
+      "line": 742,
+      "severity": "low",
+      "why": "resyncMentions wrapped plain @tokens that newly resolved with buildMentionNode, which adds role, tabindex and data-user-id. First render strips those inside a masked link, the resync did not, so the chip swallowed the link click and added a tab stop.",
+      "repro": "Render [@bob read this](https://example.com) while bob is not in the member store, then let bob join; clicking @bob opens his profile instead of the link.",
+      "evidence": "Vault issue #130; buildMaskedLink calls stripMentionControl, the resync text-node loop did not.",
+      "suggestedFix": "Strip the control from wrapped chips whose text node sits inside a.msg-link.masked.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/message-list-profile-popup.test.ts (keeps a masked-link @name that resolves only later as link content, not a profile control)",
+        "revertProof": "fail (chip kept role=button)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0511",
+      "title": "Who-reacted tooltip kept stale names after a channel switch or full resync",
+      "file": "Client/src/features/messaging/reactionUsers.ts",
+      "line": 70,
+      "severity": "low",
+      "why": "The reactor-list cache was only cleared when MainPage was built. reaction_update reaches only the focused channel and a full-ready resync replays none, so a list cached before leaving a channel stayed in use after the pill count changed.",
+      "repro": "Hover a reaction in #general, switch to #random, have someone remove that reaction, switch back and hover again: the tooltip still names them.",
+      "evidence": "Vault issue #124; clearReactionUsersCache had one caller (MainPage setup).",
+      "suggestedFix": "Clear the cache in ChannelController.destroyChannel and on a full-ready resync.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/channel-controller.test.ts (drops cached who-reacted lists when leaving a channel...), Client/tests/unit/dispatcher.test.ts (drops every cached who-reacted list on a second ready...)",
+        "revertProof": "fail (cached list survived both)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0512",
       "title": "A voice reconnect after a long drop could rejoin the media room on the old token while the server had ended the membership",
       "file": "Client/src/lib/livekitSession.ts",
       "line": 521,
