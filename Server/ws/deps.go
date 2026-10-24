@@ -62,6 +62,10 @@ type PresenceDeps struct {
 	// exactly like MessageService.dmAudience's own nil-messageRequests
 	// fallback for the other DM frame paths.
 	MessageSvc *service.MessageService
+	// GameActivityEnabled reports the per-server game activity switch
+	// (WP 8.3e-2): activity_update refuses a set while it is false. nil means
+	// on (a test built without a hub).
+	GameActivityEnabled func() bool
 }
 
 // ReactionDeps holds dependencies for reaction handlers.

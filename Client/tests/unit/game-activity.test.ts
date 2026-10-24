@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startGameActivity, GAME_ACTIVITY_POLL_MS, type GameActivityLoop } from "@lib/gameActivity";
 import { handleActivityRefusal, GAME_ACTIVITY_PREF_KEY } from "@lib/gameActivityBridge";
+import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/serverCapabilities";
 import { savePref } from "@lib/preferences";
 import {
   GAME_PREFS_KEY,
@@ -283,6 +284,103 @@ describe("game activity loop", () => {
     expect(handleActivityRefusal("BAD_REQUEST", fake.sent[0]!.id)).toBe(true);
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 2);
     expect(fake.sent).toHaveLength(1);
+  });
+
+  it("asks again on the next poll after a set refused because the switch is off", async () => {
+    const fake = fakeWs();
+    current = factorio;
+    start(fake);
+    await flush();
+    expect(fake.sent).toHaveLength(1);
+    // The dispatcher routes the refusal here; the loop claims it (no toast).
+    expect(handleActivityRefusal("GAME_ACTIVITY_DISABLED", fake.sent[0]!.id)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 3);
+    // One retry; the server held it this time, so nothing more is sent.
+    expect(fake.sent.map((s) => s.activity?.name)).toEqual(["Factorio", "Factorio"]);
+  });
+
+  describe("the per-server switch (WP 8.3e-2)", () => {
+    afterEach(() => resetServerCapabilities());
+
+    it("sends nothing, not even a null, when the switch goes off, and stops scanning", async () => {
+      const fake = fakeWs();
+      current = factorio;
+      start(fake);
+      await flush();
+      expect(fake.sent).toHaveLength(1);
+
+      // The server cleared the game itself; the dispatcher turns the capability off.
+      supported = false;
+      applyGameActivityPolicy(false);
+      await flush();
+      const scans = detect.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 3);
+      expect(fake.sent).toHaveLength(1);
+      expect(detect.mock.calls.length).toBe(scans);
+    });
+
+    it("polls at once when the switch comes back on, and sends the game again", async () => {
+      const fake = fakeWs();
+      current = factorio;
+      start(fake);
+      await flush();
+      supported = false;
+      applyGameActivityPolicy(false);
+      await flush();
+      expect(fake.sent).toHaveLength(1);
+
+      supported = true;
+      applyGameActivityPolicy(true);
+      await flush();
+      // No timer advanced: the server holds nothing for us, so the set is sent again.
+      expect(fake.sent.map((s) => s.activity?.name)).toEqual(["Factorio", "Factorio"]);
+    });
+
+    it("sends the game again after the switch cycled even if it never saw the off frame", async () => {
+      const fake = fakeWs();
+      current = factorio;
+      start(fake);
+      await flush();
+      // The set was refused while off; the off frame itself was missed, and
+      // the true frame that follows is no change for this client.
+      handleActivityRefusal("GAME_ACTIVITY_DISABLED", fake.sent[0]!.id);
+      applyGameActivityPolicy(true);
+      await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
+      expect(fake.sent).toHaveLength(2);
+    });
+
+    it("drops a scan that answers after the switch went off", async () => {
+      const fake = fakeWs();
+      let release: (g: DetectedGame | null) => void = () => undefined;
+      detect.mockImplementationOnce(
+        () =>
+          new Promise<DetectedGame | null>((resolve) => {
+            release = resolve;
+          }),
+      );
+      start(fake);
+      await flush();
+      supported = false;
+      applyGameActivityPolicy(false);
+      release(factorio);
+      await flush();
+      expect(fake.sent).toHaveLength(0);
+    });
+
+    it("stops listening when destroyed", async () => {
+      const fake = fakeWs();
+      current = factorio;
+      start(fake);
+      await flush();
+      loop?.destroy();
+      loop = null;
+      const scans = detect.mock.calls.length;
+      applyGameActivityPolicy(false);
+      applyGameActivityPolicy(true);
+      await flush();
+      expect(detect.mock.calls.length).toBe(scans);
+    });
   });
 
   it("re-sends the current game after every reconnect", async () => {

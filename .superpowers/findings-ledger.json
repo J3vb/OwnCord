@@ -1,5 +1,5 @@
 {
-  "nextId": 513,
+  "nextId": 515,
   "findings": [
     {
       "id": "OC-0001",
@@ -11835,6 +11835,52 @@
     },
     {
       "id": "OC-0512",
+      "title": "Rejecting a changed certificate before the first sign-in left an endless Auto-connecting spinner, and a later Accept opened an empty signed-out main page",
+      "file": "Client/src/app/certPrompts.ts",
+      "line": 47,
+      "severity": "low",
+      "why": "dropSessionOnMismatch only called ws.disconnect, clearAuth and navigate. Before the first auth_ok isAuthenticated was already false, so the logout subscriber that clears the session target and overlay never fired, and the pre-auth deadline was already cleared. The spinner stayed, and a re-raised mismatch's Accept reconnected with the stale token while the API client had none.",
+      "repro": "Auto-login to a host whose certificate changed since it was pinned, click Reject on the mismatch prompt: the Auto-connecting overlay spins forever. When the health check re-raises the prompt, Accept lands on an empty main page.",
+      "evidence": "Vault issue #108; app/session.ts installLogoutTeardown only acts on an isAuthenticated change.",
+      "suggestedFix": "Before auth, tear the attempt down with abandonInFlight and end the spinner with the cert.notAccepted error.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/app-certPrompts.test.ts (a mismatch before the first auth_ok)",
+        "revertProof": "fail (abandonInFlight and the notice never called)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0513",
+      "title": "The saved-password placeholder survived a host change, so the next login ran the saved-password path against the wrong host and showed a raw native error",
+      "file": "Client/src/pages/connect-page/LoginForm.ts",
+      "line": 1041,
+      "severity": "low",
+      "why": "usingSavedPassword was cleared only by a password edit, a mode toggle or setCredentials without a saved password. writeHost and the host input listener never cleared it, and a server row with no saved username never calls setCredentials.",
+      "repro": "Click a saved server with a remembered password, then click a profile added through Add Server (no username) or type a different host, and press Log in: the form shows 'no stored credential for this host'.",
+      "evidence": "Vault issue #139; ConnectPage selectServer calls setCredentials only when a username is known.",
+      "suggestedFix": "Clear the placeholder in writeHost when the host changes and in the host input listener.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/connect-page.test.ts (drops the saved password when switching to a server with no saved username / when the user types a different host)",
+        "revertProof": "fail (isUsingSavedPassword stayed true)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-17",
+      "hunt": "bughunt-2026-10-17",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0514",
       "title": "Chat rows that resized after drawing moved the reading position, and a channel opened while the chat was hidden showed its top",
       "file": "Client/src/components/MessageList.ts",
       "line": 2458,

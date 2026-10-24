@@ -68,6 +68,10 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 			"motd":          motd,
 			"replay_source": replaySource,
 			"upload_policy": h.cachedUploadPolicy(ctx),
+			// WP 8.3e-2: the runtime game activity switch. A resume gets no
+			// ready, and the unsequenced game_activity_policy frame is not
+			// replayed, so every auth_ok restores the state.
+			"game_activity_policy": gameActivityPolicyPayload{Enabled: h.gameActivity.on.Load()},
 		},
 	})
 }
@@ -443,7 +447,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 	return &readyFields{
 		head: readyHead{
 			Activities:   h.readyActivities(userID),
-			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil),
+			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil, h.gameActivity.on.Load()),
 			Categories:   categories,
 			Channels:     channelPayloads,
 			DMChannels:   dmChannels,
