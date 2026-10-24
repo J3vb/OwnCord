@@ -6,7 +6,8 @@
 
 /** Which source named the game: an installed library, the built-in list or a
  *  program the user added by hand. */
-export type DetectedGameSource = "steam" | "epic" | "list" | "manual";
+export type DetectedGameSource =
+  "steam" | "epic" | "gog" | "battlenet" | "lutris" | "list" | "manual";
 
 export interface DetectedGame {
   readonly name: string;
