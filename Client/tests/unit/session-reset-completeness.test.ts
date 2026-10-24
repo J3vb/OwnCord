@@ -6,6 +6,7 @@
  * commented EXEMPT list: a registration added in any module fails the
  * completeness test until it gets a probe or an exemption.
  */
+import { hasWaved, markWaved } from "@components/message-list/welcomeRows";
 import {
   claimForwardRequest,
   isForwardRequest,
@@ -199,6 +200,11 @@ const mentionChannel: Channel = {
 let threadsJobRan = false;
 
 const PROBES: readonly Probe[] = [
+  {
+    name: "welcomeRows:waved",
+    mutate: () => markWaved(77),
+    isInitial: () => !hasWaved(77),
+  },
   {
     name: "voice:store",
     mutate: () => voiceStore.setState((s) => ({ ...s, currentChannelId: 3, voiceStatus: "idle" })),

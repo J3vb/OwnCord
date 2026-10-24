@@ -4854,7 +4854,7 @@ A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
-`voice_owner_movable`, `game_activity_enabled`.
+`voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -4907,6 +4907,13 @@ before the AFK channel may take them: one of `60`, `300`, `900`, `1800` or
 `3600`, anything else is refused with `400`. A server with no row uses `300`.
 Which channel is the AFK channel is not a setting: see
 [`PUT /admin/api/afk-channel`](#put-adminapiafk-channel).
+
+`welcome_channel_id` (WP 8.6) names the text channel that greets each new member
+with a `member_join` row (see `docs/protocol.md`): the id of an existing,
+non-archived `text` channel, or the empty string to turn welcome messages off (the
+default while no row exists). A voice, archived, missing or non-numeric id is refused
+with `400`. It needs only `MANAGE_SERVER`. The pointer can dangle later (the channel
+deleted or archived): registration then writes no row and still succeeds.
 
 `server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
 held to the same limits the first-run setup wizard enforces.

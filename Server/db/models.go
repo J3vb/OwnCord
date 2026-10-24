@@ -192,7 +192,7 @@ type Message struct {
 }
 
 // The stored values of messages.kind. 0 is a message a user wrote, 1 a call
-// log row (WP 3B-9) and 2 to 6 the group DM event rows (WP 3B-10), 7 a pin row (WP 6.12).
+// log row (WP 3B-9) and 2 to 6 the group DM event rows (WP 3B-10), 7 a pin row (WP 6.12), 8 a welcome row (WP 8.6).
 // MessageKindName gives their wire names (protocol enum chat_message.kind).
 const (
 	MessageKindUser        int64 = 0
@@ -203,6 +203,7 @@ const (
 	MessageKindGroupRename int64 = 5
 	MessageKindGroupIcon   int64 = 6
 	MessageKindPinAdd      int64 = 7
+	MessageKindMemberJoin  int64 = 8
 
 	MessageKindNameCall = "call"
 )
@@ -225,6 +226,8 @@ func MessageKindName(kind int64) string {
 		return "group_icon"
 	case MessageKindPinAdd:
 		return "pin_add"
+	case MessageKindMemberJoin:
+		return "member_join"
 	}
 	return ""
 }
@@ -340,8 +343,9 @@ type ReferencedMessage struct {
 	Deleted        bool        `json:"deleted"`
 	HasAttachments bool        `json:"has_attachments"`
 	// IsSystem marks a server-written row (a call log or group event row, any
-	// kind other than MessageKindUser). It is server-side only: a reply to one
-	// is refused, so it never reaches the wire.
+	// kind other than MessageKindUser and the welcome row a member waves at).
+	// It is server-side only: a reply to one is refused, so it never reaches
+	// the wire.
 	IsSystem bool `json:"-"`
 }
 

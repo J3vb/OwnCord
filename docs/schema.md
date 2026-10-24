@@ -741,6 +741,15 @@ written by `SetMessagePinned` in the pin's own transaction, once per message per
 10 minutes and never for a re-pin. Unlike kinds 1 to 6 it is soft-deletable and
 purgeable like a message (`kind IN (0, 7)`).
 
+Kind 8 is the welcome row `member_join` (WP 8.6, no migration). Its author is the new
+member, `reply_to` is null and `content` is the English fallback
+`<username> joined the server.`. It is written by `InsertWelcomeRow` after the account
+commits (never in its transaction), into the channel named by the `welcome_channel_id`
+setting when that is an existing, non-archived text channel, and the new member's
+`read_states` row is advanced past it in the same transaction. It is soft-deletable and
+purgeable like a pin row (`kind IN (0, 7, 8)`) and, unlike the other system rows, a
+valid `reply_to` target.
+
 `channels.dm_owner_id` (migration 065) names a group DM's owner. A group with at
 least one member always has an owner who is a member: create sets it to the
 creator, a leave runs one statement that gives a missing or departed owner to

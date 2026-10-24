@@ -363,6 +363,12 @@
           "go": "MessageKindPinAdd",
           "ts": "PIN_ADD",
           "note": "a row saying a member pinned a message; reply_to names the pinned message; written only by the server"
+        },
+        {
+          "wire": "member_join",
+          "go": "MessageKindMemberJoin",
+          "ts": "MEMBER_JOIN",
+          "note": "a welcome row: the author just joined the server; written only by the server into the admin-chosen welcome channel"
         }
       ]
     }
