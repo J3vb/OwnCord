@@ -1959,6 +1959,8 @@ export interface AdminUser {
   readonly avatar?: string | null;
   readonly role_id: number;
   readonly role_name: string;
+  /** Every held role, top role first; only the users list sends it. */
+  readonly role_ids?: readonly number[];
   readonly status: UserStatus;
   readonly created_at: string;
   readonly last_seen?: string;
