@@ -36,7 +36,7 @@ import {
 } from "../../stores/dm.store";
 import { blocksStore, setUserBlockedByThem } from "../../stores/blocks.store";
 import type { ConnectionState } from "../../lib/ws";
-import { invalidateReactionUsers } from "./reactionUsers";
+import { clearReactionUsersCache, invalidateReactionUsers } from "./reactionUsers";
 import { parseTimestamp } from "@lib/formatting";
 import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/mentions";
@@ -437,6 +437,9 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
   // already loaded would otherwise keep a permanent, silent hole in its
   // history — invalidate them and refetch the one actually on screen.
   if (clock.hasReceivedReadyBefore) {
+    // Missed reaction_update frames are not replayed either, so every cached
+    // who-reacted list may be stale.
+    clearReactionUsersCache();
     const activeAfterReady = channelsStore.select((s) => s.activeChannelId);
     const getMessages = api?.getMessages;
     // Only invalidate when the refetch below can actually happen — api is

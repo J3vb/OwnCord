@@ -87,6 +87,9 @@ and only when it changes something a contributor or fork holder must do
 - Deleting a message after an edit changed who it mentions now lowers the mention badges the message actually raised. Before, it could clear someone's badge for a different, still-unread mention, or leave a badge pointing at the deleted message. Deleting an `@everyone` message now clears its badges too.
 - Reconnecting while a channel's permissions or your role were being changed could leave the channel list out of date (a channel you lost still shown, or a new one missing) until the app was restarted. The reconnect now loads the full channel list.
 - A portrait photo from a phone showed small, in a landscape-shaped box with blank space beside it. Photos uploaded from now on get a box in their upright shape.
+- Switching channels while a jump to an older message (from search, pins, a reply or a link) was still loading could make that channel open on the old messages next time, instead of the latest ones. The late jump is now dropped.
+- An `@name` in the text of a `[text](link)` link could turn into a profile button once that member showed up, so clicking it opened their profile instead of the link. It now stays part of the link.
+- The who-reacted tooltip could name people who had since removed their reaction, or miss new ones, after you switched channels or reconnected. It now reloads the names.
 - Clicking a followed forum post in the sidebar while another channel was open showed the forum's post list but not the post. It now opens the post too.
 
 **Direct messages**
