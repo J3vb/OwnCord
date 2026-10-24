@@ -773,6 +773,10 @@
   display: block;
   width: 100%;
   height: auto;
+  /* YouTube thumbnails are 16:9: the row holds that box before the bytes land,
+     so it does not grow under the reader when they do. */
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
 }
 .msg-embed-play {
   position: absolute;
@@ -2019,6 +2023,64 @@ ul.md-list-nested {
   text-decoration: underline;
 }
 .pin-row .pr-time {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+/* Welcome row (WP 8.6): the joiner's avatar, a greeting line and a Wave button */
+.message.welcome-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.welcome-row .wr-avatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: #fff;
+}
+.welcome-row .wr-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.welcome-row .wr-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+.welcome-row .wr-wave {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+.welcome-row .wr-wave:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.welcome-row .wr-wave:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+.welcome-row .wr-time {
+  flex: none;
+  white-space: nowrap;
   font-size: var(--font-size-xs);
   color: var(--text-muted);
   margin-left: auto;

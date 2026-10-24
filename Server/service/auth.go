@@ -305,6 +305,9 @@ type AuthService struct {
 	erasure *ErasureService
 	// admissionWait bounds acquireAdmission's queue wait (P5-S02).
 	admissionWait time.Duration
+	// welcome greets a new member once their account exists (WP 8.6); nil
+	// greets nobody.
+	welcome *WelcomeService
 }
 
 // NewAuthService wires the auth slice. limiter is the shared auth rate
@@ -338,6 +341,12 @@ func (s *AuthService) UseErasure(e *ErasureService) {
 	if e != nil {
 		s.erasure = e
 	}
+}
+
+// UseWelcome makes Register greet each new member through w (WP 8.6). A nil w
+// greets nobody.
+func (s *AuthService) UseWelcome(w *WelcomeService) {
+	s.welcome = w
 }
 
 // RegistrationPolicy reports whether registration is currently permitted. It
@@ -507,6 +516,10 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	slog.Info("user registered", "username", in.Username, "user_id", uid, "ip", in.IP, "mode", string(mode))
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, uid, "user_register", "user", uid,
 		"new account created ("+string(mode)+" registration)")
+	// The account is committed: greet it. Best effort on a context detached
+	// from the request, so a dropped client still gets its welcome and a
+	// failure never fails the registration.
+	s.welcome.Greet(ctx, uid)
 
 	user, err := s.st.GetUserByID(ctx, uid)
 	if err != nil || user == nil {

@@ -8,7 +8,7 @@ import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/de
 import { channelBitOrRole } from "@lib/permissions";
 import { threadsEnabled } from "@lib/serverCapabilities";
 import { authorityChannelId, threadOfMessage } from "@stores/threads.store";
-import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
+import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/messageKind";
 import { formatMessageLink } from "@lib/deep-link";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -78,9 +78,9 @@ function createThreadAllowed(msg: Message, opts: MessageListOptions): boolean {
 export function messageActionGates(msg: Message, opts: MessageListOptions): MessageActionGates {
   const sent = isActionableMessage(msg);
   // A server row (call log, group event) is read-only: only Copy ID (developer mode) applies.
-  // A pin row additionally offers Delete under the ordinary rule (the server accepts it).
+  // A pin row and a welcome row additionally offer Delete under the ordinary rule (the server accepts it).
   const on = sent && !isServerRowKind(msg.kind);
-  const deletable = on || (sent && isPinRowKind(msg.kind));
+  const deletable = on || (sent && (isPinRowKind(msg.kind) || isWelcomeRowKind(msg.kind)));
   const own = msg.user.id === opts.currentUserId;
   // A thread has no roles or overrides of its own: its parent answers.
   const channel = channelsStore.getState().channels.get(authorityChannelId(msg.channelId));

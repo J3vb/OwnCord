@@ -7,9 +7,10 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
+import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/messageKind";
 import { groupRowIcon, groupRowText } from "./groupRows";
 import { renderPinRowText } from "./pinRows";
+import { canWaveIn, renderWaveButton, welcomeGreeting } from "./welcomeRows";
 import { endForwardBlock, startForwardBlock } from "./forwardBlock";
 import { renderPollCard } from "./pollCard";
 import { renderStickerBody, stickerReplyPreview, stickerReplyText } from "./sticker";
@@ -452,6 +453,40 @@ function renderPinRow(msg: Message, opts: MessageListOptions, signal: AbortSigna
   return el;
 }
 
+/**
+ * A welcome row (WP 8.6): the joiner's avatar, one greeting line picked by the
+ * row id, and a Wave button for everyone else who can post in the channel.
+ */
+function renderWelcomeRow(
+  msg: Message,
+  opts: MessageListOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const author = resolveAuthor(msg.user);
+  const el = createElement("div", {
+    class: "message welcome-row",
+    "data-testid": `message-${msg.id}`,
+  });
+  const avatar = createAvatarElement(author, {
+    className: "wr-avatar",
+    background: pickAvatarColor(author.username),
+    attrs: { "data-user-id": String(msg.user.id) },
+  });
+  const text = createElement("span", { class: "wr-text" });
+  setText(text, welcomeGreeting(msg.id, resolveDisplayName(author)));
+  const time = createElement(
+    "span",
+    { class: "wr-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
+  appendChildren(el, avatar, text);
+  if (opts.onWave !== undefined && msg.user.id !== opts.currentUserId && canWaveIn(msg.channelId)) {
+    el.appendChild(renderWaveButton(msg.id, opts.onWave, signal));
+  }
+  el.appendChild(time);
+  return el;
+}
+
 /** Map a send-failure error code to a short, user-facing reason. */
 function sendErrorReason(code: string | null): string {
   switch (code) {
@@ -566,6 +601,7 @@ export function renderMessage(
       return renderCallRow(msg, msg.call, opts, signal);
     }
     if (isPinRowKind(msg.kind)) return renderPinRow(msg, opts, signal);
+    if (isWelcomeRowKind(msg.kind)) return renderWelcomeRow(msg, opts, signal);
     const groupText = groupRowText(msg, opts.currentUserId);
     if (groupText !== null) return renderGroupRow(msg, groupText);
     const fallback = renderSystemMessage(msg);

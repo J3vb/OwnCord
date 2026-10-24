@@ -84,7 +84,9 @@ func (d *DB) GetReferencedMessages(ctx context.Context, channelID int64, ids []i
 			r.Content = string(runes[:referencedSnippetRunes])
 		}
 		r.HasAttachments = hasAtt != 0
-		r.IsSystem = kind != MessageKindUser
+		// A welcome row (WP 8.6) is the one system row a member may reply to: the
+		// wave button answers it.
+		r.IsSystem = kind != MessageKindUser && kind != MessageKindMemberJoin
 		r.User = &UserPublic{ID: *uid, Username: *username, Avatar: avatar}
 		out[r.ID] = &r
 	}

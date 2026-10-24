@@ -6,6 +6,7 @@
  * commented EXEMPT list: a registration added in any module fails the
  * completeness test until it gets a probe or an exemption.
  */
+import { hasWaved, markWaved } from "@components/message-list/welcomeRows";
 import {
   claimForwardRequest,
   isForwardRequest,
@@ -37,6 +38,10 @@ import {
 import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
 import { renderInlineImage } from "../../src/components/message-list/media";
 import { getImageBox, setImageBox } from "../../src/components/message-list/image-sizes";
+import {
+  rememberRowHeight,
+  rememberedRowHeight,
+} from "../../src/components/message-list/row-heights";
 import { discardMedia, observeMedia } from "../../src/lib/media-visibility";
 import {
   EXTERNAL_CONSENT_PREF,
@@ -201,6 +206,11 @@ const mentionChannel: Channel = {
 let threadsJobRan = false;
 
 const PROBES: readonly Probe[] = [
+  {
+    name: "welcomeRows:waved",
+    mutate: () => markWaved(77),
+    isInitial: () => !hasWaved(77),
+  },
   {
     name: "voice:store",
     mutate: () => voiceStore.setState((s) => ({ ...s, currentChannelId: 3, voiceStatus: "idle" })),
@@ -368,6 +378,15 @@ const PROBES: readonly Probe[] = [
       expect(getImageBox("https://cdn.example/box-probe.png")).toEqual({ w: 40, h: 30 });
     },
     isInitial: () => getImageBox("https://cdn.example/box-probe.png") === undefined,
+  },
+  {
+    // Row heights measured on one server never seed the next one's lists.
+    name: "message-list:row-heights",
+    mutate: () => {
+      rememberRowHeight("row-probe", 800, 140);
+      expect(rememberedRowHeight("row-probe", 800)).toBe(140);
+    },
+    isInitial: () => rememberedRowHeight("row-probe", 800) === undefined,
   },
   {
     // A cached GIF still shows as an instant swap for the next row of that GIF.
