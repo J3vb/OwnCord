@@ -15,7 +15,7 @@ import { parseTimestamp } from "@lib/formatting";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { currentUserRoleHasPermission } from "@lib/permissions";
+import { currentUserRoleHasPermission, topPositionFor } from "@lib/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
@@ -26,6 +26,7 @@ import type { BlockDeps } from "../blocks/blockActions";
 import {
   addMemberRole,
   changeMemberRole,
+  outranksPosition,
   removeMemberRole,
   type RoleChangeDeps,
   type RoleMembershipDeps,
@@ -107,9 +108,17 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
     bannedSection.appendChild(
       createElement("div", { class: "banned-header" }, shellText("members.bannedHeading")),
     );
+    // The server refuses an unban of a member ranked at or above the actor, as
+    // it does every other moderation; offer the button only where it can work.
+    const roles = channelsStore.getState().roles;
+    const actor = authStore.getState().user;
+    const actorPosition = topPositionFor(roles, actor?.role_ids, actor?.role ?? "member");
     for (const user of bannedUsers) {
       const row = createElement("div", { class: "banned-row" });
       row.appendChild(createElement("span", { class: "banned-name" }, user.username));
+      bannedSection.appendChild(row);
+      const targetPosition = topPositionFor(roles, user.role_ids, user.role_name);
+      if (!outranksPosition(actorPosition, targetPosition)) continue;
       const unbanBtn = createElement(
         "button",
         { class: "banned-unban-btn", "data-testid": "unban-member" },
@@ -119,7 +128,6 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
         void unbanMember(user.id, user.username);
       });
       row.appendChild(unbanBtn);
-      bannedSection.appendChild(row);
     }
   }
 

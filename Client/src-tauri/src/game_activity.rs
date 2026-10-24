@@ -1,8 +1,9 @@
 //! Which game is running, for the "Playing <game>" status (WP 8.3b).
 //!
 //! The scanner lists the user's own processes, matches them against the games
-//! installed in the Steam and Epic libraries on this machine and against a
-//! small list we write ourselves (`resources/games.json`), and answers with
+//! installed through Steam, Epic, Heroic (Epic and GOG), GOG Galaxy,
+//! Battle.net and Lutris on this machine (Linux: also those launchers' Wine
+//! prefixes) and against a small list we write ourselves (`resources/games.json`), and answers with
 //! one game or `None`. The process list never leaves this module: only a
 //! [`DetectedGame`] (the display name, where the name came from and when the
 //! game started) crosses IPC, and process names are not logged.
@@ -21,8 +22,9 @@
 //! 0. A process whose path equals a program the user added by hand (a
 //!    [`ManualGame`] in the prefs passed to `detect_game`), named as the user
 //!    named it. A manual entry beats every automatic match.
-//! 1. A process whose path is inside an installed Steam or Epic game's folder
-//!    (`<library>/steamapps/common/<installdir>/`), unless its name is a
+//! 1. A process whose path is inside an installed game's folder (Steam's
+//!    `<library>/steamapps/common/<installdir>/`, an Epic, Heroic, GOG,
+//!    Battle.net or Lutris install folder), unless its name is a
 //!    launcher, crash reporter or other helper ([`is_helper`]).
 //! 2. A process matching an entry of the own list: the path tails of the
 //!    process (`cs2.exe`, `win64/cs2.exe`, ...), also with `64`, `x64` and
@@ -34,6 +36,9 @@
 //! process under a library's `steamapps/common/` folder it has not seen
 //! before (a game installed while OwnCord runs). There is no file watching.
 
+mod launchers;
+#[cfg(test)]
+mod launchers_tests;
 mod libraries;
 #[cfg(target_os = "linux")]
 mod proc_linux;
@@ -41,6 +46,8 @@ mod proc_linux;
 mod tests;
 #[cfg(windows)]
 mod win;
+#[cfg(any(target_os = "linux", test))]
+mod wine;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -55,6 +62,9 @@ use libraries::{GameDir, Libraries};
 pub enum GameSource {
     Steam,
     Epic,
+    Gog,
+    Battlenet,
+    Lutris,
     List,
     Manual,
 }

@@ -102,6 +102,7 @@ and only when it changes something a contributor or fork holder must do
 - Unsent messages kept by the desktop app for a retry are now only read and saved for the server you are signed in to, the same way as saved logins.
 - Holding Ctrl+M or Ctrl+D toggled mute or deafen over and over, and holding Ctrl+K opened and closed the Quick Switcher. A held key now acts once.
 - The global mute and deafen shortcuts could be set to a Ctrl+Shift key the app or a text field already uses (Ctrl+Shift+K, redo, word select), so one press did two things. Settings now refuses those keys.
+- The banned members list showed Unban next to people ranked at or above you, which the server always refused. It now shows Unban only where it can work.
 
 **Voice and video**
 
