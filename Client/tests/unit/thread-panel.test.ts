@@ -415,6 +415,27 @@ describe("ThreadPanelHost", () => {
     expect(focusFrames()).toHaveLength(1);
   });
 
+  it("puts a width handle on the open panel; a key step is saved and kept on the next open", async () => {
+    localStorage.removeItem("owncord:settings:threadPanelWidth");
+    const { host, slot } = await makeHost();
+    host.open(getThread(THREAD)!);
+    const handle = slot.querySelector<HTMLElement>('[data-testid="thread-panel-resize"]');
+    expect(handle?.getAttribute("role")).toBe("separator");
+    expect(handle?.getAttribute("aria-label")).toBe("Resize thread panel");
+    expect(slot.style.getPropertyValue("--thread-panel-width")).toBe("380px");
+
+    handle?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    expect(slot.style.getPropertyValue("--thread-panel-width")).toBe("396px");
+    expect(localStorage.getItem("owncord:settings:threadPanelWidth")).toBe("396");
+
+    host.close();
+    expect(slot.querySelector('[data-testid="thread-panel-resize"]')).toBeNull();
+    host.open(getThread(THREAD)!);
+    expect(slot.querySelector('[data-testid="thread-panel-resize"]')).not.toBeNull();
+    expect(slot.style.getPropertyValue("--thread-panel-width")).toBe("396px");
+    host.close();
+  });
+
   it("switching to another thread closes the first and focuses the second", async () => {
     upsertThread(makeThread({ id: 92, parent_id: PARENT, starter_message_id: 2 }));
     const { host, slot } = await makeHost();

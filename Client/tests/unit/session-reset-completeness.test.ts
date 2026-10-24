@@ -559,6 +559,11 @@ const PROBES: readonly Probe[] = [
  * Adding to this list is a review decision: say where the behaviour is tested.
  */
 const EXEMPT: readonly string[] = [
+  // Probing it means rendering a row, whose fetch would disturb the shared
+  // fetch mock the attachments:caches probe counts. clearAttachmentCaches
+  // (probed above) calls the same reset, and attachments-text-preview.test.ts
+  // pins that a reset drops the cache and an in-flight result.
+  "attachments:text-preview",
   // main.ts is not loaded here; session-isolation.test.ts drives it and pins
   // that it runs before the domain resets.
   "main:pending-and-api",
