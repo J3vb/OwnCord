@@ -28,6 +28,7 @@
     "args": null,
     "os": ["windows", "linux"]
   },
+  { "name": "StarCraft", "exe": ["starcraft.exe"], "args": null, "os": ["windows", "linux"] },
   {
     "name": "Heroes of the Storm",
     "exe": ["heroesofthestorm.exe", "heroesofthestorm_x64.exe"],
