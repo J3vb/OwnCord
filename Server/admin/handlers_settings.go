@@ -124,6 +124,14 @@ type uploadPolicyBroadcaster interface {
 	BroadcastUploadPolicy()
 }
 
+// gameActivityPolicyApplier is the hub capability that makes the hub follow
+// the saved game activity switch (WP 8.3e-2): it clears every shown game when
+// the switch is off and sends game_activity_policy to connected clients.
+// *ws.Hub implements it (hub_wiring_test.go pins that).
+type gameActivityPolicyApplier interface {
+	ApplyGameActivityPolicy(saved bool)
+}
+
 func handlePatchSettings(settings *service.SettingsService, retention *service.RetentionService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
@@ -185,6 +193,13 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 		if blocked || allowed {
 			if b, ok := hub.(uploadPolicyBroadcaster); ok {
 				b.BroadcastUploadPolicy()
+			}
+		}
+		// Turning game activity off must clear the games already shown and
+		// tell open clients, not wait for their next connect.
+		if _, changing := updates[service.GameActivityEnabledKey]; changing {
+			if a, ok := hub.(gameActivityPolicyApplier); ok {
+				a.ApplyGameActivityPolicy(service.GameActivityEnabled(all[service.GameActivityEnabledKey]))
 			}
 		}
 		writeJSON(w, http.StatusOK, all)

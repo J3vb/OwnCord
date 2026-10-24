@@ -301,9 +301,14 @@ func (e TypingDMEvent) Payload() []byte              { return e.payload }
 // PresenceEvent is a presence update broadcast to all connected clients.
 // userID identifies whose presence this is, so EmitEvents can invalidate any
 // stale entry the connect/disconnect coalescer still holds for that user.
+//
+// bare, set only when payload carries a game, is the same frame with the game
+// null. emitPresence sends it when game activity was switched off after the
+// handler snapshotted the activity (WP 8.3e-2).
 type PresenceEvent struct {
 	userID  int64
 	payload []byte
+	bare    []byte
 }
 
 func (e PresenceEvent) EventType() string            { return MsgTypePresence }
@@ -333,9 +338,13 @@ func (e PresenceOthersEvent) Payload() []byte              { return e.payload }
 // only to them. Without it a user who went invisible would be told they are
 // offline by the very broadcast that hid them, and would re-announce online on
 // the next reconnect.
+//
+// bare is PresenceEvent's: the same frame with a null game, or nil when the
+// frame carries none.
 type PresenceSelfEvent struct {
 	targetUserID int64
 	payload      []byte
+	bare         []byte
 }
 
 func (e PresenceSelfEvent) EventType() string            { return MsgTypePresence }
@@ -353,7 +362,11 @@ func (e PresenceSelfEvent) Payload() []byte              { return e.payload }
 func presenceEvents(userID int64, status string, customStatus *string, activity *gameActivity) []Event {
 	public := db.BroadcastStatus(status)
 	if public == status {
-		return []Event{PresenceEvent{userID: userID, payload: buildPresenceMsg(userID, status, customStatus, activity)}}
+		return []Event{PresenceEvent{
+			userID:  userID,
+			payload: buildPresenceMsg(userID, status, customStatus, activity),
+			bare:    bareActivityFrame(userID, status, customStatus, activity),
+		}}
 	}
 	return []Event{
 		PresenceOthersEvent{
@@ -372,8 +385,18 @@ func presenceEvents(userID int64, status string, customStatus *string, activity 
 		PresenceSelfEvent{
 			targetUserID: userID,
 			payload:      buildPresenceMsg(userID, status, customStatus, activity),
+			bare:         bareActivityFrame(userID, status, customStatus, activity),
 		},
 	}
+}
+
+// bareActivityFrame is the presence frame without its game, built only when
+// there is a game to leave out (nil otherwise).
+func bareActivityFrame(userID int64, status string, customStatus *string, activity *gameActivity) []byte {
+	if activity == nil {
+		return nil
+	}
+	return buildPresenceMsg(userID, status, customStatus, nil)
 }
 
 // VoiceStateEvent is a voice state update fanned out to the clients whose role

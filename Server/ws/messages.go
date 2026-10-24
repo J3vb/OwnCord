@@ -145,6 +145,20 @@ type emojiUpdatePayload struct {
 	Emoji []emojiInfo `json:"emoji"`
 }
 
+// gameActivityPolicyPayload is game_activity_policy's payload and the shape of
+// auth_ok's game_activity_policy key.
+type gameActivityPolicyPayload struct {
+	Enabled bool `json:"enabled"`
+}
+
+// buildGameActivityPolicy constructs a game_activity_policy broadcast.
+func buildGameActivityPolicy(enabled bool) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeGameActivityPolicy,
+		Payload: gameActivityPolicyPayload{Enabled: enabled},
+	})
+}
+
 // uploadPolicyPayload is upload_policy's payload: the file-type lists in
 // force, as auth_ok's upload_policy carries them.
 type uploadPolicyPayload struct {

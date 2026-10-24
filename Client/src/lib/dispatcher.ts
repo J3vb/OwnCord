@@ -50,6 +50,8 @@ import {
   handlePresence,
   handlePresenceBatch,
   applyReadyGameActivities,
+  applyAuthOkGameActivityPolicy,
+  handleGameActivityPolicy,
   handleRolesUpdate,
   handleUserUpdate,
   markReadyActiveChannelRead,
@@ -188,6 +190,9 @@ export function wireDispatcher(
   unsubs.push(
     ws.on(S.AUTH_OK, (payload) => {
       handleAuthOk(ws, clock, payload);
+      // Every connect and resume restates the game activity switch; a resume
+      // gets no ready, and the frame is not replayed (WP 8.3e-2).
+      applyAuthOkGameActivityPolicy(payload);
       refreshSafetyOnResume(api, payload);
       // thread_focus is not carried across a connection: say it again, and
       // refetch the open panel's history (it missed frames while down).
@@ -349,6 +354,9 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.UPLOAD_POLICY, handleUploadPolicy));
 
+  // game_activity_policy: an admin turned game activity on or off (WP 8.3e-2).
+  unsubs.push(ws.on(S.GAME_ACTIVITY_POLICY, handleGameActivityPolicy));
+
   unsubs.push(ws.on(S.USER_UPDATE, handleUserUpdate));
 
   // ── Voice ─────────────────────────────────────────────
@@ -407,6 +415,10 @@ export function wireDispatcher(
       if (handleConnectionError(ws, payload)) return;
       // The game activity loop's own refused activity_update (RATE_LIMITED,
       // TIMED_OUT, ...): it retries on its next poll, and nothing is toasted.
+      // GAME_ACTIVITY_DISABLED is also the server stating the switch is off: a
+      // client that missed the off frame treats it as that frame, so a later
+      // true is a change and the loop sends its game again (WP 8.3e-2).
+      if (payload.code === "GAME_ACTIVITY_DISABLED") handleGameActivityPolicy({ enabled: false });
       if (handleActivityRefusal(payload.code, id)) return;
       // A server that does not know voice_watch answers with an error: ignore it.
       if (handleVoiceWatchError(payload, id)) return;

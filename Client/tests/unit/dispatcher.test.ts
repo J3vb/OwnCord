@@ -46,6 +46,11 @@ import {
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
 import { setMarkReadSender } from "../../src/lib/read-state";
+import {
+  onGameActivityPolicy,
+  resetServerCapabilities,
+  serverSupportsGameActivity,
+} from "../../src/lib/serverCapabilities";
 import { createPresenceSender, setActivePresenceSender } from "../../src/lib/presence";
 import { createPresenceLimiter } from "../../src/lib/rate-limiter";
 import { loadCustomStatus, saveCustomStatus } from "../../src/lib/userStatus";
@@ -1446,6 +1451,167 @@ describe("WS Dispatcher", () => {
         unread_count: 0,
       });
       expect(dmStore.getState().channels[0]?.recipient.activity?.name).toBe("Factorio");
+    });
+
+    describe("the per-server switch (WP 8.3e-2)", () => {
+      const user = { id: 1, username: "alex", avatar: null, role: "admin" };
+      const partner = { id: 10, username: "bob", avatar: "", status: "online" };
+      afterEach(() => resetServerCapabilities());
+
+      it("game_activity_policy false clears every shown game and turns the capability off", () => {
+        seed();
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          activities: [{ user_id: 1, ...factorio }],
+          voice_states: [],
+          roles: [],
+        });
+        dmStore.setState(() => ({
+          channels: [
+            {
+              channelId: 50,
+              recipient: partner,
+              participants: [partner],
+              name: "",
+              isGroup: false,
+              lastMessageId: null,
+              lastMessage: "",
+              lastMessageAt: "",
+              unreadCount: 0,
+              mentionCount: 0,
+            },
+          ],
+        }));
+        mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
+        expect(activityOf(1)?.name).toBe("Factorio");
+        expect(serverSupportsGameActivity()).toBe(true);
+
+        mock.dispatch("game_activity_policy", { enabled: false });
+        expect(activityOf(1)).toBeNull();
+        expect(dmStore.getState().channels[0]?.recipient.activity).toBeNull();
+        expect(serverSupportsGameActivity()).toBe(false);
+
+        // On again: the capability returns, the games come back with presence.
+        mock.dispatch("game_activity_policy", { enabled: true });
+        expect(serverSupportsGameActivity()).toBe(true);
+        expect(activityOf(1)).toBeNull();
+      });
+
+      it("auth_ok's game_activity_policy applies on a full connect and on a resume", () => {
+        seed();
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          activities: [{ user_id: 1, ...factorio }],
+          voice_states: [],
+          roles: [],
+        });
+        // A resume gets no ready: the policy a missed frame carried arrives here.
+        mock.dispatch("auth_ok", {
+          user,
+          server_name: "S",
+          motd: "",
+          replay_source: "buffer",
+          game_activity_policy: { enabled: false },
+        });
+        expect(serverSupportsGameActivity()).toBe(false);
+        expect(activityOf(1)).toBeNull();
+
+        mock.dispatch("auth_ok", {
+          user,
+          server_name: "S",
+          motd: "",
+          replay_source: "none",
+          game_activity_policy: { enabled: true },
+        });
+        expect(serverSupportsGameActivity()).toBe(true);
+      });
+
+      it("ignores a game on a presence frame or batch that outran the off frame", () => {
+        seed();
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          voice_states: [],
+          roles: [],
+        });
+        mock.dispatch("game_activity_policy", { enabled: false });
+        mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+        expect(activityOf(1) ?? null).toBeNull();
+        mock.dispatch("presence_batch", {
+          updates: [{ user_id: 1, status: "online", custom_status: null, activity: factorio }],
+        });
+        expect(activityOf(1) ?? null).toBeNull();
+
+        // On again: games show.
+        mock.dispatch("game_activity_policy", { enabled: true });
+        mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+        expect(activityOf(1)?.name).toBe("Factorio");
+      });
+
+      it("still shows games from a ready and presence before any policy is stated", () => {
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          activities: [{ user_id: 1, ...factorio }],
+          voice_states: [],
+          roles: [],
+        });
+        expect(activityOf(1)?.name).toBe("Factorio");
+      });
+
+      it("treats a GAME_ACTIVITY_DISABLED refusal as the off frame, so a later true is a change", () => {
+        seed();
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          activities: [{ user_id: 1, ...factorio }],
+          voice_states: [],
+          roles: [],
+        });
+        // auth_ok said on and the off frame was missed.
+        mock.dispatch("auth_ok", {
+          user,
+          server_name: "S",
+          motd: "",
+          replay_source: "none",
+          game_activity_policy: { enabled: true },
+        });
+        expect(serverSupportsGameActivity()).toBe(true);
+
+        // The running loop claims its own refused frame (no toast).
+        setActivityRefusalHandler(() => true);
+        onTestFinished(() => setActivityRefusalHandler(null));
+        mock.dispatch("error", { code: "GAME_ACTIVITY_DISABLED", message: "off" }, "act-1");
+        expectConsole("error", /\[dispatcher\] Server error/);
+        expect(serverSupportsGameActivity()).toBe(false);
+        expect(activityOf(1)).toBeNull();
+
+        const seen: boolean[] = [];
+        const off = onGameActivityPolicy((v) => seen.push(v));
+        mock.dispatch("game_activity_policy", { enabled: true });
+        off();
+        expect(seen).toEqual([true]);
+        expect(serverSupportsGameActivity()).toBe(true);
+      });
+
+      it("an auth_ok without the key (an older server) leaves the capability to ready", () => {
+        mock.dispatch("auth_ok", { user, server_name: "S", motd: "", replay_source: "none" });
+        mock.dispatch("ready", {
+          channels: [],
+          members: [],
+          capabilities: { game_activity: true },
+          voice_states: [],
+          roles: [],
+        });
+        expect(serverSupportsGameActivity()).toBe(true);
+      });
     });
   });
 

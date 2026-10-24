@@ -20,6 +20,12 @@
  *    hiding the game being shown sends the next game or `null` in one frame
  *    (never the hidden name again). Every detected name is added to the device's history for the
  *    Settings list.
+ *  - An admin can turn game activity off for the whole server (WP 8.3e-2). The
+ *    server clears every shown game itself, so the loop sends nothing, not even
+ *    a `null`: it stops scanning, forgets what it sent, and sends the current
+ *    game again at once when the switch comes back on. A set that arrives
+ *    while it is off is refused with `GAME_ACTIVITY_DISABLED`, which is not
+ *    retried: nothing is resent until the game changes or the switch is on.
  *  - The server limits a set to one per 10 s. A refused frame is forgotten, so
  *    the next poll sends whatever is current, even `null`. The dispatcher
  *    routes the refusal here through `gameActivityBridge` and shows no toast.
@@ -36,7 +42,7 @@ import {
   isGameActivityShared,
   setActivityRefusalHandler,
 } from "./gameActivityBridge";
-import { serverSupportsGameActivity } from "./serverCapabilities";
+import { onGameActivityPolicy, serverSupportsGameActivity } from "./serverCapabilities";
 import type { WsClient } from "./ws";
 import {
   GAME_PREFS_KEY,
@@ -241,6 +247,19 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
   const unsubReady = ws.on(S.READY, () => {
     void poll();
   });
+
+  // An admin turned game activity off or on for the server (WP 8.3e-2). Off:
+  // the server already cleared the game, so nothing is sent, not even a null;
+  // `supported` reads false and the loop stops scanning. Either way the server
+  // holds nothing for this connection, so the shown game is forgotten and, on
+  // true, sent again at once. Read-only: this handler only starts a poll.
+  const unsubPolicy = onGameActivityPolicy((nowOn) => {
+    if (destroyed) return;
+    lastSent = null;
+    lastDetected = null;
+    if (nowOn) void poll();
+  });
+  disposable.addCleanup(unsubPolicy);
 
   const timer = setInterval(() => void poll(), options.intervalMs ?? GAME_ACTIVITY_POLL_MS);
 
