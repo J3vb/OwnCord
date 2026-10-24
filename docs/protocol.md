@@ -1583,9 +1583,9 @@ of another JSON type or a non-integer `started_at` is refused with
 - While an admin has game activity switched off for the server (WP 8.3e-2) a
   set is refused with `GAME_ACTIVITY_DISABLED`, before the rate limit, so the
   refusal spends no budget; a clear still applies (with nothing set it does
-  nothing). The client takes the refusal quietly, treats it as the server
-  stating the switch is off (as if `game_activity_policy` `false` had arrived),
-  and sends its game again when the switch comes back on. Turning the switch
+  nothing). The client takes the refusal quietly and asks again on its next
+  poll, so its game shows once the switch is back on; a refusal never overrides
+  the policy the server last stated (it can arrive after a newer `true`). Turning the switch
   off clears every shown game on the server: every connected client gets a
   `presence` frame with `activity: null` about each affected visible user (an
   invisible user's goes to that user's own connection only), and `presence`
@@ -2404,7 +2404,7 @@ queue is full is disconnected instead, and its next `auth_ok` carries the
 current value. For operators: if the setting cannot be read at server start the
 switch starts off (the server logs `game_activity_policy_unreadable`); saving
 it again in the admin panel recovers. A client that connects at the moment of the switch may keep
-sending until its next connect; the server refuses each set with
+asking once per poll; the server refuses each set with
 `GAME_ACTIVITY_DISABLED`, so nothing is shown.
 
 ### user_update (Server -> Client, broadcast)

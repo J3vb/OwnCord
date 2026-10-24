@@ -180,6 +180,19 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
 		}
+		// Turning game activity off must clear the games already shown and
+		// tell open clients, not wait for their next connect. It runs before
+		// the error check: Patch can fail after its commit (the response read
+		// on a cancelled request), and the hub re-reads the stored value
+		// itself, so a save that did land still reaches it.
+		if value, changing := updates[service.GameActivityEnabledKey]; changing {
+			if a, ok := hub.(gameActivityPolicyApplier); ok {
+				if stored, read := all[service.GameActivityEnabledKey]; read {
+					value = stored
+				}
+				a.ApplyGameActivityPolicy(service.GameActivityEnabled(value))
+			}
+		}
 		if err != nil {
 			slog.ErrorContext(r.Context(), "settings patch failed", "error", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update settings")
@@ -193,13 +206,6 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 		if blocked || allowed {
 			if b, ok := hub.(uploadPolicyBroadcaster); ok {
 				b.BroadcastUploadPolicy()
-			}
-		}
-		// Turning game activity off must clear the games already shown and
-		// tell open clients, not wait for their next connect.
-		if _, changing := updates[service.GameActivityEnabledKey]; changing {
-			if a, ok := hub.(gameActivityPolicyApplier); ok {
-				a.ApplyGameActivityPolicy(service.GameActivityEnabled(all[service.GameActivityEnabledKey]))
 			}
 		}
 		writeJSON(w, http.StatusOK, all)

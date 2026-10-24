@@ -24,8 +24,8 @@
  *    server clears every shown game itself, so the loop sends nothing, not even
  *    a `null`: it stops scanning, forgets what it sent, and sends the current
  *    game again at once when the switch comes back on. A set that arrives
- *    while it is off is refused with `GAME_ACTIVITY_DISABLED`, which is not
- *    retried: nothing is resent until the game changes or the switch is on.
+ *    while it is off (a client that missed the off frame) is refused with
+ *    `GAME_ACTIVITY_DISABLED` and asked again on the next poll.
  *  - The server limits a set to one per 10 s. A refused frame is forgotten, so
  *    the next poll sends whatever is current, even `null`. The dispatcher
  *    routes the refusal here through `gameActivityBridge` and shows no toast.
@@ -65,6 +65,11 @@ const RETRYABLE_REFUSALS: ReadonlySet<string> = new Set([
   "RATE_LIMITED",
   "TIMED_OUT",
   "REQUEST_TIMEOUT",
+  // The switch is off (WP 8.3e-2) but this client missed the off frame: the
+  // next poll asks again, so the game shows once the switch is back on. It is
+  // not taken as the policy itself, since a refusal can arrive after a newer
+  // game_activity_policy true.
+  "GAME_ACTIVITY_DISABLED",
 ]);
 
 /** The longest name the server accepts, in characters. */

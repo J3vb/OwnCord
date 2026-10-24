@@ -415,10 +415,6 @@ export function wireDispatcher(
       if (handleConnectionError(ws, payload)) return;
       // The game activity loop's own refused activity_update (RATE_LIMITED,
       // TIMED_OUT, ...): it retries on its next poll, and nothing is toasted.
-      // GAME_ACTIVITY_DISABLED is also the server stating the switch is off: a
-      // client that missed the off frame treats it as that frame, so a later
-      // true is a change and the loop sends its game again (WP 8.3e-2).
-      if (payload.code === "GAME_ACTIVITY_DISABLED") handleGameActivityPolicy({ enabled: false });
       if (handleActivityRefusal(payload.code, id)) return;
       // A server that does not know voice_watch answers with an error: ignore it.
       if (handleVoiceWatchError(payload, id)) return;

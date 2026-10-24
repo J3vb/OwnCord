@@ -286,7 +286,7 @@ describe("game activity loop", () => {
     expect(fake.sent).toHaveLength(1);
   });
 
-  it("does not retry a set the server refused because the switch is off", async () => {
+  it("asks again on the next poll after a set refused because the switch is off", async () => {
     const fake = fakeWs();
     current = factorio;
     start(fake);
@@ -296,7 +296,8 @@ describe("game activity loop", () => {
     expect(handleActivityRefusal("GAME_ACTIVITY_DISABLED", fake.sent[0]!.id)).toBe(true);
 
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 3);
-    expect(fake.sent).toHaveLength(1);
+    // One retry; the server held it this time, so nothing more is sent.
+    expect(fake.sent.map((s) => s.activity?.name)).toEqual(["Factorio", "Factorio"]);
   });
 
   describe("the per-server switch (WP 8.3e-2)", () => {
@@ -341,12 +342,11 @@ describe("game activity loop", () => {
       current = factorio;
       start(fake);
       await flush();
-      // The set was refused while off; the off frame itself was missed.
+      // The set was refused while off; the off frame itself was missed, and
+      // the true frame that follows is no change for this client.
       handleActivityRefusal("GAME_ACTIVITY_DISABLED", fake.sent[0]!.id);
-      applyGameActivityPolicy(false);
-      supported = true;
       applyGameActivityPolicy(true);
-      await flush();
+      await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
       expect(fake.sent).toHaveLength(2);
     });
 

@@ -47,7 +47,6 @@ import {
 } from "../../src/features/messaging/reactionUsers";
 import { setMarkReadSender } from "../../src/lib/read-state";
 import {
-  onGameActivityPolicy,
   resetServerCapabilities,
   serverSupportsGameActivity,
 } from "../../src/lib/serverCapabilities";
@@ -1565,7 +1564,7 @@ describe("WS Dispatcher", () => {
         expect(activityOf(1)?.name).toBe("Factorio");
       });
 
-      it("treats a GAME_ACTIVITY_DISABLED refusal as the off frame, so a later true is a change", () => {
+      it("a GAME_ACTIVITY_DISABLED refusal never overrides the policy the server stated", () => {
         seed();
         mock.dispatch("ready", {
           channels: [],
@@ -1575,7 +1574,7 @@ describe("WS Dispatcher", () => {
           voice_states: [],
           roles: [],
         });
-        // auth_ok said on and the off frame was missed.
+        // auth_ok said on; a refusal sent before a later on frame arrives after it.
         mock.dispatch("auth_ok", {
           user,
           server_name: "S",
@@ -1590,15 +1589,8 @@ describe("WS Dispatcher", () => {
         onTestFinished(() => setActivityRefusalHandler(null));
         mock.dispatch("error", { code: "GAME_ACTIVITY_DISABLED", message: "off" }, "act-1");
         expectConsole("error", /\[dispatcher\] Server error/);
-        expect(serverSupportsGameActivity()).toBe(false);
-        expect(activityOf(1)).toBeNull();
-
-        const seen: boolean[] = [];
-        const off = onGameActivityPolicy((v) => seen.push(v));
-        mock.dispatch("game_activity_policy", { enabled: true });
-        off();
-        expect(seen).toEqual([true]);
         expect(serverSupportsGameActivity()).toBe(true);
+        expect(activityOf(1)?.name).toBe("Factorio");
       });
 
       it("an auth_ok without the key (an older server) leaves the capability to ready", () => {
