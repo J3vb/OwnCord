@@ -10,6 +10,9 @@ For the detail agents and maintainers need (rules, gotchas), read
 [CLAUDE.md](CLAUDE.md). For the full command list, read
 [docs/contributing.md](../docs/contributing.md#client-tauri-v2).
 
+For a task-to-code map across the server, client, native code and admin panel,
+start with [Starting a change](../docs/contributing.md#starting-a-change).
+
 ## Folder map
 
 | Folder                   | What is in it                                                                           |
