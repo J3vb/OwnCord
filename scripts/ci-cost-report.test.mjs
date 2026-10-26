@@ -2,9 +2,13 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
+import fs, { mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { syncBuiltinESMExports } from "node:module";
 import {
   CI_WORKFLOW,
+  fetchJobs,
   parseArgs,
   minutesBetween,
   nativeTimeoutFromWorkflow,
@@ -256,4 +260,74 @@ test("invalid report CLI arguments fail before making any GitHub request", () =>
     assert.match(result.stderr, /requires a value|owner\/repository|positive integer/);
     assert.doesNotMatch(result.stderr, /UNEXPECTED_NETWORK/);
   }
+});
+
+function cacheFixture(t, contents) {
+  const dir = mkdtempSync(join(tmpdir(), "owncord-jobs-cache-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "jobs-123-1.json");
+  writeFileSync(file, contents);
+  return { dir, file };
+}
+
+const cacheRun = [{ id: 123, run_attempt: 1 }];
+const cacheJob = job("fixture job", 0, 2);
+
+test("a valid jobs cache avoids every request, including an empty job list", async (t) => {
+  for (const rows of [[cacheJob], []]) {
+    const { dir } = cacheFixture(t, JSON.stringify(rows));
+    const result = await fetchJobs("fixture/repo", cacheRun, "", dir, () =>
+      assert.fail("cache hit made a request"),
+    );
+    assert.deepEqual(result.get(123), rows);
+  }
+});
+
+for (const contents of ['{"partial":', "{}", "[null]", '[{"name":123}]']) {
+  test(`invalid jobs cache is refetched: ${contents}`, async (t) => {
+    const { dir, file } = cacheFixture(t, contents);
+    let requests = 0;
+    const result = await fetchJobs("fixture/repo", cacheRun, "", dir, async () => {
+      requests++;
+      return { jobs: [cacheJob] };
+    });
+    assert.equal(requests, 1);
+    assert.deepEqual(result.get(123), [cacheJob]);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), [cacheJob]);
+    assert.deepEqual(readdirSync(dir), ["jobs-123-1.json"]);
+  });
+}
+
+test("cache repair publishes only complete paginated data", async (t) => {
+  const { dir, file } = cacheFixture(t, "broken");
+  let page = 0;
+  const result = await fetchJobs("fixture/repo", cacheRun, "", dir, async () => {
+    assert.equal(readFileSync(file, "utf8"), "broken", "cache replaced before the read completed");
+    return { jobs: ++page === 1 ? Array(100).fill(cacheJob) : [cacheJob] };
+  });
+  assert.equal(page, 2);
+  assert.equal(result.get(123).length, 101);
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).length, 101);
+});
+
+test("failed atomic replacement keeps the original and removes its temporary file", async (t) => {
+  const { dir, file } = cacheFixture(t, "broken");
+  const original = fs.renameSync;
+  t.mock.method(fs, "renameSync", (source, destination) => {
+    if (destination !== file) return original(source, destination);
+    assert.deepEqual(JSON.parse(readFileSync(source, "utf8")), [cacheJob]);
+    assert.equal(readFileSync(file, "utf8"), "broken");
+    throw Object.assign(new Error("fixture replacement denied"), { code: "EACCES" });
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  await assert.rejects(
+    fetchJobs("fixture/repo", cacheRun, "", dir, async () => ({ jobs: [cacheJob] })),
+    /fixture replacement denied/,
+  );
+  assert.equal(readFileSync(file, "utf8"), "broken");
+  assert.deepEqual(readdirSync(dir), ["jobs-123-1.json"]);
 });
