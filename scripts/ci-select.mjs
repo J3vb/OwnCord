@@ -283,6 +283,15 @@ export function classify(paths) {
     const path = normalise(raw);
     if (path === null) return allCapabilities(); // unparseable entry: be safe
 
+    // This exact self-test is executed by always-on Hygiene and Docs & Ledger.
+    // Its only traced consumers are scripts/run.mjs and ci.yml's hook-test step;
+    // it is not an application input. Keep workflow-security auditing selected.
+    // Do not generalise to *.test.mjs: other scripts have cross-component readers.
+    if (path === "scripts/claude-hook.test.mjs") {
+      add("workflows");
+      continue;
+    }
+
     // A shared CI input: the workflow files themselves, the scripts every job
     // runs, and the repository-root build files. The blast radius of a change
     // here is not knowable from the path, so it selects every capability.
