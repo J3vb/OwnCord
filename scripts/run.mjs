@@ -297,6 +297,7 @@ const CHECK_HYGIENE = [
   // OC-0448. Execute the release verification/promotion shell with a fake
   // registry and assert that no release tag moves before verification passes.
   step("node", ["--test", "scripts/check-release-docker.test.mjs"], "."),
+  step("node", ["--test", "tools/mcp-introspect/transport.test.mjs"], "."),
   // Claude Code Bash hook: `cd` in compounds and `.env` reads.
   step("node", ["--test", "scripts/claude-hook.test.mjs"], "."),
   // B7-2 / RL-17. `engine-strict=true` makes `engines` a hard failure but does
