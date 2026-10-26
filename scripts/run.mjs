@@ -15,7 +15,7 @@
 //   2. The facade orchestrates, it never becomes the only path. Each step
 //      prints the command it runs, in the directory it runs it in, so a
 //      Go-only contributor can read the output and type those commands
-//      instead â€” and never needs Node to work on the server.
+//      instead — and never needs Node to work on the server.
 //
 // Dependency-free by design: Node's standard library only, like
 // .superpowers/render-ledger.mjs. Adding a dependency here would mean
@@ -42,7 +42,30 @@ function npmCliPath(command) {
   for (const dir of (process.env.PATH || "").split(";")) {
     if (dir) candidates.push(join(dir.replace(/^"|"$/g, ""), "node_modules", "npm", "bin", entry));
   }
-  candidates.push(join(dirname(…296 tokens truncated…dout.split("\0").filter(Boolean) : [];
+  candidates.push(join(dirname(process.execPath), "node_modules", "npm", "bin", entry));
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+/** A step that always runs. `label`, when set, replaces the dumped argv in the
+ *  printed banner — used by the chunked prettier steps, whose argument list is
+ *  thousands of paths. */
+const step = (cmd, args, cwd = ".", label = "") => ({ cmd, args, cwd, label });
+
+/**
+ * A step that is skipped, with a printed reason, when `probe` is not on PATH.
+ * Used for tools CI installs but a contributor may not have: golangci-lint has
+ * no wrapper in this repo at all, and sqlc is pinned by Server/sqlc.version.
+ */
+const optional = (probe, cmd, args, cwd, why) => ({ cmd, args, cwd, probe, why });
+
+/**
+ * Tracked files matching `patterns`. shellcheck and actionlint take file lists,
+ * and the only correct list is the tracked one: `.claude/worktrees/` holds
+ * gitignored copies of the tree that a filesystem glob would happily lint.
+ */
+const tracked = (...patterns) => {
+  const r = spawnSync("git", ["ls-files", "-z", ...patterns], { cwd: ROOT, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.split("\0").filter(Boolean) : [];
 };
 
 // `git diff --exit-code` after regenerating is what `make protocol-verify` and
@@ -80,7 +103,7 @@ const SQLC_VERIFY = [
     "sqlc",
     ["generate"],
     "Server",
-    "sqlc not on PATH â€” install the version in Server/sqlc.version",
+    "sqlc not on PATH — install the version in Server/sqlc.version",
   ),
   optional("sqlc", "git", ["diff", "--exit-code", "db/dbgen"], "Server", "sqlc not on PATH"),
 ];
@@ -117,7 +140,7 @@ const CHECK_SERVER = [
     "golangci-lint",
     ["run", "./..."],
     "Server",
-    "golangci-lint not on PATH â€” CI pins v2.14.0",
+    "golangci-lint not on PATH — CI pins v2.14.0",
   ),
   ...PROTOCOL_VERIFY,
   ...SQLC_VERIFY,
@@ -147,7 +170,7 @@ const CHECK_CLIENT = [
   step("npm", ["run", "test:coverage"], "Client"),
   // B7-7 bundle budgets: scratch --manifest build (dist-budget/, never the
   // shipped dist/) then the gate. Node zlib, not the gzip CLI, so it runs
-  // identically on every platform â€” no optional() probe needed.
+  // identically on every platform — no optional() probe needed.
   step("npm", ["run", "build:budget"], "Client"),
   step("npm", ["run", "check:budgets"], "Client"),
 ];
@@ -161,7 +184,7 @@ const CHECK_RUST = [
 ];
 
 // RL-07. FINDINGS.md is not tracked, so there is no committed rendering to
-// drift â€” the gate is that generation must succeed. Rendering subsumes
+// drift — the gate is that generation must succeed. Rendering subsumes
 // `--check`: main() validates and exits 1 on a schema problem before it writes.
 // It also leaves the contributor a readable copy, which is the point of running
 // it locally. CI additionally renders twice and compares, to prove the output
@@ -184,7 +207,7 @@ const CHECK_DOCS = [
   step("node", ["scripts/check-doc-citations.mjs"], "."),
   // OC-0395. A shipped migration is immutable: migrate.go tracks one by
   // filename and keeps no content hash, so editing it changes nothing for any
-  // installation that already applied it. Nothing else can see that â€” a fresh
+  // installation that already applied it. Nothing else can see that — a fresh
   // database applies the new text and every test passes. `step`, not
   // `optional`: it is Node, and this file is Node.
   step("node", ["--test", "scripts/check-migrations.test.mjs"], "."),
@@ -249,14 +272,14 @@ const CHECK_HYGIENE = [
     "shellcheck",
     tracked("*.sh", ".githooks/pre-commit", ".githooks/pre-push"),
     ".",
-    "shellcheck not on PATH â€” no clean Windows install; CI runs it",
+    "shellcheck not on PATH — no clean Windows install; CI runs it",
   ),
   optional(
     "actionlint",
     "actionlint",
     tracked(".github/workflows/*.yml"),
     ".",
-    "actionlint not on PATH â€” no clean Windows install; CI runs it",
+    "actionlint not on PATH — no clean Windows install; CI runs it",
   ),
   // L-16. actionlint validates expression syntax and action inputs; it has no
   // concept of who a condition admits or how long a job may run. This asserts
@@ -286,7 +309,7 @@ const CHECK_HYGIENE = [
   step("node", ["--test", "scripts/check-node-policy.test.mjs"], "."),
   step("node", ["scripts/check-node-policy.mjs"], "."),
   // The change selector decides which of the OTHER jobs run at all, so a wrong
-  // rule here is a test that silently did not execute â€” the same shape of
+  // rule here is a test that silently did not execute — the same shape of
   // failure as the two guards above, and for the same reason it is self-tested
   // on every PR rather than only at release. `ci-select.mjs` cannot check
   // itself: its own path selects every capability, so this step always runs.
@@ -326,7 +349,7 @@ const TASKS = {
       "sqlc",
       ["generate"],
       "Server",
-      "sqlc not on PATH â€” install the version in Server/sqlc.version",
+      "sqlc not on PATH — install the version in Server/sqlc.version",
     ),
     // After sqlc: gendocs compiles the api package, which imports db/dbgen.
     step("go", ["run", "-tags", "otel,wazero", "./cmd/gendocs"], "Server"),
