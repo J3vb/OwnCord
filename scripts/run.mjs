@@ -266,6 +266,7 @@ const PRETTIER_TRACKED = (() => {
 const CHECK_HYGIENE = [
   ...PRETTIER_TRACKED,
   step("node", ["--test", "scripts/run.test.mjs"], "."),
+  step("node", ["--test", "scripts/protocol-n1-compat.test.mjs"], "."),
   optional(
     "shellcheck",
     "shellcheck",
