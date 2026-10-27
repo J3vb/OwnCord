@@ -23,9 +23,9 @@ ARG TARGETARCH
 # with ws.DefaultLiveKitVersion and the livekit image in docker-compose.yml
 # (digests: the release's checksums.txt; TestDockerfileBundlesPinnedLiveKit
 # pins the version match).
-ARG LIVEKIT_VERSION=1.13.7
-ARG LIVEKIT_SHA256_AMD64=6634aeeb2fb1366b6723708ae4320b9d5408106a4c63457c5e845ae3979c90e2
-ARG LIVEKIT_SHA256_ARM64=5d167fdf52cf43c0c72972f25325364479f41f854bfef651056eab2504da5de9
+ARG LIVEKIT_VERSION=1.13.10
+ARG LIVEKIT_SHA256_AMD64=c25a3e45fb922e9a93c6443d10c0ed041ba64342097e38632331736630283165
+ARG LIVEKIT_SHA256_ARM64=ff60607e1931ff078576882fa11c087aa5821d635ac0c47f56ff77e203e32006
 RUN set -eu; \
     case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
       amd64) sha="${LIVEKIT_SHA256_AMD64}" ;; \
