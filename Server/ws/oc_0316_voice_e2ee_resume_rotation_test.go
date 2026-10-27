@@ -45,7 +45,7 @@ func TestRegisterNow_ReannouncesOwnKeyOnResume(t *testing.T) {
 	peer.voice.voiceChID = chanID
 	peer.voice.e2ee.key = "peer-pub-key-b64"
 	hub.mu.Lock()
-	hub.clients[peerID] = peer
+	hub.clients[peerID] = []*Client{peer}
 	hub.mu.Unlock()
 	hub.pubsub.Subscribe(peer, VoiceTopic(chanID))
 
@@ -59,7 +59,7 @@ func TestRegisterNow_ReannouncesOwnKeyOnResume(t *testing.T) {
 	old.voice.voiceJoinCompleted = true
 	old.voice.e2ee = e2eeAnnounce{key: "user-pub-key-b64", sig: "user-sig"}
 	hub.mu.Lock()
-	hub.clients[userID] = old
+	hub.clients[userID] = []*Client{old}
 	hub.mu.Unlock()
 
 	// The resuming connection: lastSeq > 0 marks this as a network reconnect

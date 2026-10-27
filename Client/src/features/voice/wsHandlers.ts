@@ -134,27 +134,24 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
     // acknowledgement: that move was abandoned, so it earns no toast.
     clearAfkMove();
 
-    // Defense-in-depth: if the ready payload shows us in a voice channel
-    // but we have no LiveKit session (e.g. after F5 reload), send
-    // voice_leave to clean up the stale state. The server should have
-    // already cleaned this up, but this handles edge cases.
+    // A self row in `ready` while this device holds no call (voiceStatus
+    // "idle") is another device's call: one account keeps a connection per
+    // device and the server broadcasts the user's voice rows to all of them.
+    // Do not send voice_leave and do not leaveVoiceChannel() — that would end
+    // the other device's call. The server already retires this device's own
+    // stale call when it connects afresh (e.g. after an F5 reload), so no
+    // defensive leave is needed here; the row stays in the roster only.
     //
-    // livekitSession is lazily imported, so instead of the synchronous
-    // isVoiceConnected() the check reads the voice store's lifecycle
-    // status: "idle" means no live or pending LiveKit session (a fresh
-    // reload always starts idle — exactly the stale case), while any other
-    // status means livekitSession is driving a session right now.
+    // The store's lifecycle status stands in for livekitSession (lazily
+    // imported): any status but "idle" means this device is driving a
+    // session right now.
     const currentUserId = authStore.getState().user?.id ?? 0;
     const selfVoiceState =
       currentUserId !== 0
         ? payload.voice_states.find((vs) => vs.user_id === currentUserId)
         : undefined;
     const voiceSessionActive = voiceStore.getState().voiceStatus !== "idle";
-    if (selfVoiceState !== undefined && !voiceSessionActive) {
-      log.warn("Stale voice state detected in ready payload — sending voice_leave");
-      ws.send({ type: "voice_leave", payload: {} });
-      leaveVoiceChannel();
-    } else if (selfVoiceState !== undefined) {
+    if (selfVoiceState !== undefined && voiceSessionActive) {
       // A LiveKit session survived a WS drop that outlived it (nothing
       // tears voice down on a socket drop alone) — OC-0014: this full
       // resync is the only place a moderator mute/deafen issued while we
@@ -255,6 +252,10 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   const prevServerDeafened = isSelf ? (voiceStore.getState().localServerDeafened ?? false) : false;
   updateVoiceState(payload);
   if (!isSelf) return;
+  // A self row while this device holds no call is another device's call (one
+  // account, one call, one device): the roster is updated, nothing else. This
+  // device's own join moves voiceStatus off "idle" before the server's answer.
+  if (voiceStore.getState().voiceStatus === "idle") return;
   joinVoiceChannel(payload.channel_id);
   // The server's answer to the join that followed an AFK move: only now is
   // the move real, so only now does the user hear why.

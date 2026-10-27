@@ -55,8 +55,8 @@ func TestSweepRevokedSessions_MissingVerdictFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	answered := newClient(h, nil, &db.User{ID: 1, Username: "answered"}, "hash-answered-live", 0, ctx)
 	unanswered := newClient(h, nil, &db.User{ID: 2, Username: "unanswered"}, "hash-nobody-answered-for", 0, ctx)
-	h.clients[answered.userID] = answered
-	h.clients[unanswered.userID] = unanswered
+	h.clients[answered.userID] = []*Client{answered}
+	h.clients[unanswered.userID] = []*Client{unanswered}
 
 	h.sweepRevokedSessions(context.Background())
 

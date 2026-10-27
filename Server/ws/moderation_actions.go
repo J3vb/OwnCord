@@ -159,7 +159,7 @@ const timeoutExpiryRefreshSlack = time.Second
 func (h *Hub) RefreshUserChannels(userID int64) {
 	h.MarkVisibilityChanged()
 	defer h.bumpVisibilityWatermark()
-	if h.db == nil || h.GetClient(userID) == nil {
+	if h.db == nil || !h.isConnected(userID) {
 		return
 	}
 	ctx := context.Background()
@@ -183,15 +183,21 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 			continue
 		}
 		// Re-resolved per send, like RefreshChannelVisibility: a reconnect
-		// can replace the client during the lookups above.
-		live := h.GetClient(userID)
-		if live == nil {
+		// can replace a client during the lookups above; every device gets it.
+		conns := h.clientsOf(userID)
+		if len(conns) == 0 {
 			return
 		}
-		if !live.sendsChannel(ch.Type) {
-			continue
+		var frame []byte
+		for _, live := range conns {
+			if !live.sendsChannel(ch.Type) {
+				continue
+			}
+			if frame == nil {
+				frame = buildChannelCreateFor(ch, privacy.PrivateOf(ch), affordancesFor(sub))
+			}
+			live.sendMsg(frame)
 		}
-		live.sendMsg(buildChannelCreateFor(ch, privacy.PrivateOf(ch), affordancesFor(sub)))
 	}
 }
 

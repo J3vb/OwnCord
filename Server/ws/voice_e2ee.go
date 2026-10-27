@@ -51,10 +51,10 @@ func (h *Hub) updateKeyHolder(channelID int64) {
 	h.mu.RLock()
 	var minUserID int64
 	found := false
-	for uid, c := range h.clients {
+	for _, c := range h.allClientsLocked() {
 		if c.voice.channel() == channelID {
-			if !found || uid < minUserID {
-				minUserID = uid
+			if !found || c.userID < minUserID {
+				minUserID = c.userID
 				found = true
 			}
 		}
@@ -88,8 +88,8 @@ func (h *Hub) IsVoiceKeyHolder(channelID, userID int64) bool {
 func (h *Hub) computeIsKeyHolder(channelID, userID int64) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	for uid, c := range h.clients {
-		if c.voice.channel() == channelID && uid < userID {
+	for _, c := range h.allClientsLocked() {
+		if c.voice.channel() == channelID && c.userID < userID {
 			return false
 		}
 	}
@@ -269,8 +269,8 @@ func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, targetUserID int64, msg
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	target, ok := h.clients[targetUserID]
-	if !ok {
+	targets := h.clients[targetUserID]
+	if len(targets) == 0 {
 		// Undeliverable key offer can leave the peer unable to decrypt — the
 		// payload is dropped, but log (IDs only, never the encrypted key) so
 		// the failure is diagnosable rather than silent.
@@ -278,13 +278,19 @@ func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, targetUserID int64, msg
 			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID)
 		return
 	}
-	if target.voice.channel() != voiceChannelID {
-		slog.Debug("e2ee: key offer dropped, target not in expected voice channel",
-			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID,
-			"target_voice_channel_id", target.voice.channel())
-		return
+	// The offer is for the device that holds the call; the user's other
+	// connections have no slot in it and never see the wrapped key.
+	delivered := false
+	for _, target := range targets {
+		if target.voice.channel() == voiceChannelID {
+			target.sendMsg(msg)
+			delivered = true
+		}
 	}
-	target.sendMsg(msg)
+	if !delivered {
+		slog.Debug("e2ee: key offer dropped, target not in expected voice channel",
+			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID)
+	}
 }
 
 // sendToVoiceChannelExcept sends a message to all clients in the given voice
@@ -302,18 +308,13 @@ func (h *Hub) sendToVoiceChannelExcept(channelID int64, excludeUserID int64, msg
 
 // getClientE2EEAnnounce returns the stored announce (ECDH public key, identity
 // signature, video decode list) for a connected user; the zero value if none.
-// I-6 fix: Copy the values while h.mu.RLock is still held so the client
-// cannot be garbage collected between the lookup and the key read.
 func (h *Hub) getClientE2EEAnnounce(userID int64) e2eeAnnounce {
-	h.mu.RLock()
-	c, ok := h.clients[userID]
-	if !ok {
-		h.mu.RUnlock()
+	// The announce lives on the connection that holds the call.
+	c := h.voiceClient(userID)
+	if c == nil {
 		return e2eeAnnounce{}
 	}
-	a := c.getE2EEAnnounce()
-	h.mu.RUnlock()
-	return a
+	return c.getE2EEAnnounce()
 }
 
 // GetClientE2EEPubKeyForTest is an exported wrapper for tests.
@@ -328,9 +329,15 @@ func (h *Hub) voiceChannelPeerUserIDs(channelID, excludeUserID int64) []int64 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	var ids []int64
-	for uid, c := range h.clients {
-		if uid != excludeUserID && c.voice.channel() == channelID {
-			ids = append(ids, uid)
+	for uid, conns := range h.clients {
+		if uid == excludeUserID {
+			continue
+		}
+		for _, c := range conns {
+			if c.voice.channel() == channelID {
+				ids = append(ids, uid)
+				break
+			}
 		}
 	}
 	return ids

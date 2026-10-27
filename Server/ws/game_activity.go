@@ -167,7 +167,7 @@ func clampActivityStart(startedAt int64, now time.Time) int64 {
 // speak for the user) and has a stamped presence to carry the frame's status.
 //
 // Lock order is CustomStatusExpired's: presenceMu, then h.mu (read, in
-// GetClient), then the client's atomic presence pointer, then the non-blocking
+// isRegistered), then the client's atomic presence pointer, then the non-blocking
 // enqueues. The compare-and-swap runs under presenceMu, so a racing status
 // change either swaps first (this retries on top of it) or emits after this
 // frame with the activity it read, which is the same one.
@@ -201,10 +201,12 @@ func (h *Hub) applyActivityLocked(c *Client, next *gameActivity) {
 // it copies c's live presence, lets edit change the copy (false = nothing to
 // change), swaps it in by compare-and-swap and broadcasts the presence frame
 // that carries the result, game and song together. It does nothing unless c
-// still holds its user's slot and has a stamped presence. The caller holds
+// is still registered (a same-session reconnect replaced it: the replacement
+// carries its own activity, so a late frame from the replaced connection must
+// not speak for the user) and has a stamped presence. The caller holds
 // presenceMu.
 func (h *Hub) swapActivityLocked(c *Client, edit func(lp *livePresence) bool) {
-	if h.GetClient(c.userID) != c {
+	if !h.isRegistered(c) {
 		return
 	}
 	var cur, updated *livePresence
@@ -222,18 +224,30 @@ func (h *Hub) swapActivityLocked(c *Client, edit func(lp *livePresence) bool) {
 			break
 		}
 	}
-	text := visibleCustomStatus(cur.customStatus, cur.customStatusExpiresAt, time.Now())
-	if db.BroadcastStatus(cur.status) != cur.status {
+	// The frame speaks for the user, not for c: the status and text are the
+	// user's merged presence (the most recent setter's) and the activity is
+	// the merged one, so a game stopped on one device does not blank another
+	// device's still-running game.
+	conns := h.clientsOf(c.userID)
+	merged := mergeLivePresence(conns)
+	if merged.status == "" {
+		return
+	}
+	text := visibleCustomStatus(merged.customStatus, merged.customStatusExpiresAt, time.Now())
+	if db.BroadcastStatus(merged.status) != merged.status {
 		// Invisible: others would only get another blank "offline" frame, and
 		// one per game start or stop is itself a sign the user is online. Only
-		// the player hears it; nothing public changed, so a queued connect
-		// entry stays as it is.
-		c.sendPresenceMsg(buildPresenceMsg(c.userID, cur.status, text, updated.activity, updated.listening))
+		// the player hears it, on every device; nothing public changed, so a
+		// queued connect entry stays as it is.
+		frame := buildPresenceMsg(c.userID, merged.status, text, merged.activity, merged.listening)
+		for _, own := range conns {
+			own.sendPresenceMsg(frame)
+		}
 		return
 	}
 	// Like every user-chosen presence, this supersedes a queued connect entry.
 	h.dropQueuedPresenceLocked(c.userID)
-	for _, ev := range presenceEvents(c.userID, cur.status, text, updated.activity, updated.listening) {
+	for _, ev := range presenceEvents(c.userID, merged.status, text, merged.activity, merged.listening) {
 		h.enqueueExpiredPresence(c, ev)
 	}
 }

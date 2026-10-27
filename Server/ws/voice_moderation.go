@@ -412,7 +412,7 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	blockVoiceRejoin(d.Mod, c.TargetID, state.ChannelID)
-	if !d.Mod.SendToUser(c.TargetID, buildVoiceMoved(c.ToChannelID, "", info.UserID)) {
+	if !d.Mod.SendToVoiceDevice(c.TargetID, buildVoiceMoved(c.ToChannelID, "", info.UserID)) {
 		clearPendingModFlags(d.Mod, c.TargetID)
 		writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_kick", c.TargetID,
 			fmt.Sprintf("disconnected from channel %d (reconnecting, not moved to channel %d)", state.ChannelID, c.ToChannelID))
@@ -454,7 +454,7 @@ func handleVoiceModKickV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	blockVoiceRejoin(d.Mod, c.TargetID, state.ChannelID)
-	d.Mod.SendToUser(c.TargetID,
+	d.Mod.SendToVoiceDevice(c.TargetID,
 		buildVoiceDisconnected(state.ChannelID, "You were disconnected from voice by a moderator"))
 
 	writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_kick", c.TargetID,
@@ -547,11 +547,16 @@ func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, 
 func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 	txn := h.begin(userID)
 	defer txn.end()
-	c := h.GetClient(userID)
+	// The call is on one device: that connection is the one that leaves. With
+	// no connection holding a call the only membership left may be a parked one.
+	c := h.voiceClient(userID)
 	if c == nil {
-		return h.leaveParkedVoice(ctx, txn, txn.takeParked(0), voiceLeaveReasonModerator)
+		h.noteModeratorExit(userID, nil)
+		left := h.leaveParkedVoice(ctx, txn, txn.takeParked(0), voiceLeaveReasonModerator)
+		return left || h.isConnected(userID)
 	}
 	h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonModerator)
+	h.noteModeratorExit(userID, c)
 	return true
 }
 
@@ -567,15 +572,20 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool {
 	txn := h.begin(userID)
 	defer txn.end()
-	c := h.GetClient(userID)
+	c := h.voiceClient(userID)
 	if c == nil {
+		h.noteModeratorExit(userID, nil)
 		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), reason)
 	}
-	return h.handleVoiceLeaveIfStillIn(ctx, txn, c, channelID, reason)
+	left := h.handleVoiceLeaveIfStillIn(ctx, txn, c, channelID, reason)
+	if left {
+		h.noteModeratorExit(userID, c)
+	}
+	return left
 }
 
 // SetPendingVoiceModFlags stashes a moderator-imposed mute/deafen on
-// userID's live connection, satisfying voicePendingModFlagsSetter, under the
+// userID's voice connection, satisfying voicePendingModFlagsSetter, under the
 // member lock. Reports false when the user has no connection on this node —
 // the same "nothing to do here" case DisconnectFromVoiceInChannel reports,
 // since without a live *Client there is nowhere to stash the flags and no
@@ -583,9 +593,18 @@ func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelI
 func (h *Hub) SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
 	txn := h.begin(userID)
 	defer txn.end()
-	c := h.GetClient(userID)
+	// The stash rides the connection that holds the call: its eviction and the
+	// target's own re-join are what consume it.
+	c := h.voiceClient(userID)
 	if c == nil {
-		return false
+		// No device holds a call: the newest connection takes the stash, as
+		// the single connection did; the next voice_join from any device
+		// collects it (voiceJoinMoveCall / voiceJoinLeaveCurrent).
+		conns := h.clientsOf(userID)
+		if len(conns) == 0 {
+			return false
+		}
+		c = conns[len(conns)-1]
 	}
 	txn.stashModFlags(c, serverMuted, serverDeafened, serverMutedBy)
 	return true

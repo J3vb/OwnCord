@@ -54,9 +54,69 @@ type voiceGraceState struct {
 	mu      syncutil.Ranked[lockRankLeaf]
 	entries map[int64]*voiceGraceEntry
 	closed  bool // set by close at shutdown: put arms nothing from then on
+	// moved remembers, per device session, a parked call another device took
+	// over (voiceJoinMoveCall): the parking session was never told, so it is
+	// told when it next registers. Entries are consumed by takeMoved, dropped
+	// when stale (movedNoteTTL) and capped (movedNoteCap).
+	moved map[movedKey]movedNote
 	// expiring counts expiry teardowns past takeForExpiry, so close can wait
 	// for one already writing to the database.
 	expiring sync.WaitGroup
+}
+
+// movedKey names the device session a moved-away parked call belonged to.
+type movedKey struct {
+	userID    int64
+	tokenHash string
+}
+
+// movedNote is the channel of the call that was moved away, and when.
+type movedNote struct {
+	chID int64
+	at   time.Time
+}
+
+const (
+	// movedNoteTTL bounds how long a session may be away and still be told its
+	// parked call moved; past it the client has long since given the call up.
+	movedNoteTTL = 10 * time.Minute
+	movedNoteCap = 1024
+)
+
+// markMoved records that tokenHash's parked call in chID was moved to another
+// device.
+func (s *voiceGraceState) markMoved(userID int64, tokenHash string, chID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if s.moved == nil {
+		s.moved = map[movedKey]movedNote{}
+	}
+	for k, n := range s.moved {
+		if now.Sub(n.at) > movedNoteTTL {
+			delete(s.moved, k)
+		}
+	}
+	if len(s.moved) >= movedNoteCap {
+		clear(s.moved)
+	}
+	s.moved[movedKey{userID, tokenHash}] = movedNote{chID: chID, at: now}
+}
+
+// takeMoved returns and clears the moved-call channel for the session, or 0.
+func (s *voiceGraceState) takeMoved(userID int64, tokenHash string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := movedKey{userID, tokenHash}
+	n, ok := s.moved[k]
+	if !ok {
+		return 0
+	}
+	delete(s.moved, k)
+	if time.Since(n.at) > movedNoteTTL {
+		return 0
+	}
+	return n.chID
 }
 
 // isClosed reports whether close has run.
@@ -74,6 +134,7 @@ func (s *voiceGraceState) isClosed() bool {
 func (s *voiceGraceState) close() {
 	s.mu.Lock()
 	s.closed = true
+	clear(s.moved)
 	for uid, e := range s.entries {
 		e.timer.Stop()
 		delete(s.entries, uid)
@@ -282,19 +343,28 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 // gone, so inheriting and tearing down can never both run. It returns the
 // inherited channel id, or 0.
 //
+// Only the same session (token hash) inherits or discards a parked entry.
+//
 // Skipped when the old-client transfer already supplied a session (c is in a
 // voice channel) — a reconnect that beat the drop teardown. A fresh connect
 // (lastSeq == 0) is a deliberate reload rather than a blip, so it discards any
 // parked entry instead.
 func (t *voiceTxn) inherit(c *Client) int64 {
+	// Only the session that parked the call may take it back. Another device's
+	// parked call stays parked for its own device (and expires on its own):
+	// this connection just joins alongside it.
+	e := t.h.voiceReg.voiceGrace.get(c.userID)
+	if e == nil || e.client.tokenHash != c.tokenHash {
+		return 0
+	}
 	if c.lastSeq == 0 {
-		t.takeParked(0)
+		t.takeParked(0) // the entry is this session's (checked above)
 		return 0
 	}
 	if c.voice.channel() != 0 {
 		return 0
 	}
-	e := t.takeParked(0)
+	e = t.takeParked(0)
 	if e == nil || !t.adoptParked(c, e.snap) {
 		return 0
 	}

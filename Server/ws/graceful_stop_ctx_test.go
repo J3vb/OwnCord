@@ -28,7 +28,7 @@ func TestGracefulStopContext_BudgetBoundsNoticeWait(t *testing.T) {
 	send := make(chan []byte, 8)
 	h := &Hub{stop: make(chan struct{})}
 	c := &Client{hub: h, send: send, sendHigh: send, sendLow: send}
-	h.clients = map[int64]*Client{1: c}
+	h.clients = map[int64][]*Client{1: {c}}
 	h.pubsub = NewPubSub()
 	h.pubsub.Subscribe(c, TopicGlobal)
 
@@ -53,7 +53,7 @@ func TestGracefulStopContext_StopsLiveKitAfterSocketsClose(t *testing.T) {
 	send := make(chan []byte, 8)
 	h := &Hub{stop: make(chan struct{}), broadcast: make(chan broadcastMsg, 8)}
 	c := &Client{hub: h, send: send, sendHigh: send, sendLow: send}
-	h.clients = map[int64]*Client{1: c}
+	h.clients = map[int64][]*Client{1: {c}}
 	h.pubsub = NewPubSub()
 	h.pubsub.Subscribe(c, TopicGlobal)
 
@@ -105,7 +105,7 @@ func TestGracefulStopContext_StoppedUsersSurviveTeardownUnregister(t *testing.T)
 	send := make(chan []byte, 8)
 	h := &Hub{stop: make(chan struct{}), broadcast: make(chan broadcastMsg, 8)}
 	c := &Client{hub: h, userID: uid, send: send, sendHigh: send, sendLow: send}
-	h.clients = map[int64]*Client{uid: c}
+	h.clients = map[int64][]*Client{uid: {c}}
 	h.pubsub = NewPubSub()
 	h.pubsub.Subscribe(c, TopicGlobal)
 

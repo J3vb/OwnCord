@@ -1,19 +1,10 @@
 import { test, expect } from "./fixtures";
-import { mockTauriFullSessionWithVoice, navigateToMainPage, emitWsMessage } from "./helpers";
-
-const VOICE_STATE_EVENT = {
-  type: "voice_state" as const,
-  payload: {
-    user_id: 1,
-    username: "testuser",
-    channel_id: 10,
-    muted: false,
-    deafened: false,
-    speaking: false,
-    camera: false,
-    screenshare: false,
-  },
-};
+import {
+  mockTauriFullSessionWithVoice,
+  navigateToMainPage,
+  emitWsMessage,
+  joinVoiceChannelByName,
+} from "./helpers";
 
 test.describe("Voice Widget", () => {
   test("is hidden by default when user has no voice state", async ({ page }) => {
@@ -28,12 +19,12 @@ test.describe("Voice Widget", () => {
     await expect(widget).not.toBeVisible();
   });
 
-  test("appears with full UI when voice_state event is received", async ({ page }) => {
+  test("appears with full UI after joining voice", async ({ page }) => {
     await mockTauriFullSessionWithVoice(page);
     await page.goto("/");
     await navigateToMainPage(page);
 
-    await emitWsMessage(page, VOICE_STATE_EVENT);
+    await joinVoiceChannelByName(page);
 
     const widget = page.locator("[data-testid='voice-widget'].visible");
     await expect(widget).toBeVisible({ timeout: 5_000 });
@@ -50,7 +41,7 @@ test.describe("Voice Widget", () => {
     await page.goto("/");
     await navigateToMainPage(page);
 
-    await emitWsMessage(page, VOICE_STATE_EVENT);
+    await joinVoiceChannelByName(page);
     await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5_000 });
 
     const muteBtn = page.locator(".user-bar button[aria-label='Mute']");
@@ -65,7 +56,7 @@ test.describe("Voice Widget", () => {
     await page.goto("/");
     await navigateToMainPage(page);
 
-    await emitWsMessage(page, VOICE_STATE_EVENT);
+    await joinVoiceChannelByName(page);
     await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5_000 });
 
     const deafenBtn = page.locator(".user-bar button[aria-label='Deafen']");
@@ -82,7 +73,7 @@ test.describe("Voice Widget", () => {
     await page.goto("/");
     await navigateToMainPage(page);
 
-    await emitWsMessage(page, VOICE_STATE_EVENT);
+    await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget'].visible");
     await expect(widget).toBeVisible({ timeout: 5_000 });
 
@@ -123,7 +114,7 @@ test.describe("Voice Widget", () => {
     await page.goto("/");
     await navigateToMainPage(page);
 
-    await emitWsMessage(page, VOICE_STATE_EVENT);
+    await joinVoiceChannelByName(page);
     const widget = page.locator("[data-testid='voice-widget'].visible");
     await expect(widget).toBeVisible({ timeout: 5_000 });
 

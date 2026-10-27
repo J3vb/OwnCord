@@ -90,9 +90,10 @@ func TestReconnect_ReplaysOwnVoiceRoomOutsideReadableChannels(t *testing.T) {
 	// session across the resume (registerNow transfers it when lastSeq > 0).
 	oldClient := NewTestClient(hub, userID, make(chan []byte, 64))
 	oldClient.user = user
+	oldClient.tokenHash = auth.HashToken(token) // the same device session, as a real resume's old socket is
 	oldClient.voice.setState(vcID, vs.JoinedAt)
 	hub.mu.Lock()
-	hub.clients[userID] = oldClient
+	hub.clients[userID] = []*Client{oldClient}
 	hub.mu.Unlock()
 
 	// Ring buffer: everything is scoped to the unreadable voice room. seq 99

@@ -34,7 +34,7 @@ func newGraceRoom(t *testing.T) *graceRoom {
 	h := newTestHubWith(t, HubOptions{DB: database})
 	c := NewTestClient(h, uid, make(chan []byte, 64))
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 	f := &txnFixture{h: h, c: c, uid: uid, chID: chID}
 	r := &graceRoom{txnFixture: f}
@@ -45,7 +45,7 @@ func newGraceRoom(t *testing.T) *graceRoom {
 	r.otherSend = make(chan []byte, 64)
 	r.other = NewTestClient(f.h, r.otherUID, r.otherSend)
 	f.h.mu.Lock()
-	f.h.clients[r.otherUID] = r.other
+	f.h.clients[r.otherUID] = []*Client{r.other}
 	f.h.mu.Unlock()
 	txn := f.h.begin(r.otherUID)
 	state, err := txn.persistJoin(context.Background(), r.other, f.chID, 0)

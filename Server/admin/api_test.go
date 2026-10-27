@@ -1937,7 +1937,7 @@ func (m *mockHub) ApplyGameActivityPolicy(saved bool) {
 	m.gameActivityPolicies = append(m.gameActivityPolicies, saved)
 }
 
-func (m *mockHub) ClientCount() int {
+func (m *mockHub) UserCount() int {
 	return m.clientCount
 }
 

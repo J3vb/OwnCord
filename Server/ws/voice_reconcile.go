@@ -201,13 +201,18 @@ func (h *Hub) reconcileRemoveOrphans(ctx context.Context, channelID int64, ident
 func (h *Hub) reconcileReap(ctx context.Context, channelID int64, userID int64, joinedAt string) {
 	txn := h.begin(userID)
 	defer txn.end()
-	if c := h.GetClient(userID); c != nil {
+	var reaped *Client
+	for _, c := range h.clientsOf(userID) {
 		if txn.clearExact(c, channelID, joinedAt) {
-			tailCtx, cancelTail := h.sweepTailCtx(ctx)
-			defer cancelTail()
-			h.finishVoiceLeave(tailCtx, txn, c, channelID, joinedAt, voiceLeaveReasonReconciled)
-			return
+			reaped = c
+			break
 		}
+	}
+	if reaped != nil {
+		tailCtx, cancelTail := h.sweepTailCtx(ctx)
+		defer cancelTail()
+		h.finishVoiceLeave(tailCtx, txn, reaped, channelID, joinedAt, voiceLeaveReasonReconciled)
+		return
 	}
 	// No client holds this exact instance (it left, reconnected, or moved).
 	// Delete the row if it still matches, then broadcast the leave for any

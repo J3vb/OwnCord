@@ -20,8 +20,8 @@
  * it (the held message opens the conversation), then blocks the same sender
  * from the member menu and the composer gates on the block. BPR-060.
  *
- * Journey D (session displacement): a second device signs in, displaces the
- * first, and "Use here" takes the session back. BPR-090 lifecycle.
+ * Journey D (second device): a second device signs in alongside the first;
+ * the first stays connected and keeps receiving messages. BPR-090 lifecycle.
  *
  * Journey E (recovery): bob enrols a recovery kit in the client, logs out, and
  * recovers the account from the connect page with the kit secret and a new
@@ -596,16 +596,16 @@ test.describe("B9-26 first-contact journey (real server)", () => {
   });
 });
 
-test.describe("B9-26 session-switching journey (real server)", () => {
-  test("a sign-in on a second device displaces the first, and 'Use here' takes it back", async ({
+test.describe("B9-26 several-devices journey (real server)", () => {
+  test("a sign-in on a second device leaves the first connected and receiving", async ({
     browser,
     bob,
     server,
   }) => {
     // A second device is a real second client: a new context with its own
-    // transport and login. The server keeps one live socket per account, so
-    // signing in there displaces the first device rather than opening a
-    // second session.
+    // transport and login. The server keeps one live socket per device
+    // session, so signing in there opens a second connection and leaves the
+    // first alone.
     const context = await browser.newContext({ baseURL: "http://localhost:4173" });
     const page = await context.newPage();
     const transport = await installRealTransport(page, server);
@@ -613,18 +613,17 @@ test.describe("B9-26 session-switching journey (real server)", () => {
       await login(page, server, "bob");
       await expect(page.getByTestId("app-layout")).toBeVisible();
 
-      // The first device is told, not left silently dead: it shows the
-      // displaced-session banner with the recovery action.
-      const useHere = bob.getByRole("button", { name: "Use here" });
-      await expect(useHere).toBeVisible({ timeout: 30_000 });
-      await expect(bob.locator(".reconnecting-banner")).toContainText("Signed in elsewhere");
-
-      // Taking the session back reconnects this device; the notice clears and
-      // the conversation is usable. The second device is now the displaced one.
-      await useHere.click();
-      await expect(bob.locator(".reconnecting-banner")).toBeHidden({ timeout: 30_000 });
-      await composer(bob).fill(`back here ${crypto.randomUUID()}`);
+      // The first device is not told anything: no displaced-session banner and
+      // no "Use here" action, and it stays usable.
+      await bob.waitForTimeout(2_000);
+      await expect(bob.getByRole("button", { name: "Use here" })).toHaveCount(0);
+      await expect(bob.locator(".reconnecting-banner")).toBeHidden();
       await expect(composer(bob)).toBeEnabled();
+
+      // Both devices are live: a message sent from the second reaches the first.
+      const text = `from device two ${crypto.randomUUID()}`;
+      await send(page, text);
+      await expect(bob.locator(".msg-text", { hasText: text })).toBeVisible({ timeout: 30_000 });
       expect(transport.errors).toEqual([]);
     } finally {
       await transport.close();

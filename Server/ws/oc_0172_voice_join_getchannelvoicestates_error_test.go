@@ -52,7 +52,7 @@ func TestVoiceJoin_GetChannelVoiceStatesError_RollsBackAndNotifiesClient(t *test
 	c := NewTestClient(h, uid, send)
 	c.user = &db.User{ID: uid, Username: "join-0172-victim"}
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 
 	// Fault-inject the GetChannelVoiceStates call inside voiceJoinComplete.

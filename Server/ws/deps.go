@@ -94,8 +94,12 @@ type VoiceModerator interface {
 	// DisconnectFromVoice runs the voice-leave routine for the target's
 	// connection. Reports false when the target has no connection on this node.
 	DisconnectFromVoice(ctx context.Context, userID int64) bool
-	// SendToUser delivers one server->client frame to the target.
-	SendToUser(userID int64, msg []byte) bool
+	// SendToVoiceDevice delivers one call-related server->client frame
+	// (voice_moved, voice_disconnected) to the target's device that held the
+	// call, which is the connection the voice-leave routine just took it from.
+	// The user's other devices never see it. Reports false when there is none
+	// (the call was parked for a reconnect).
+	SendToVoiceDevice(userID int64, msg []byte) bool
 }
 
 // KeyHolderChecker reports whether a user is the E2EE key holder for a voice channel.

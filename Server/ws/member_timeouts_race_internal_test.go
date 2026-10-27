@@ -64,7 +64,7 @@ func changeRole(t *testing.T, f *timeoutViewFixture, userID, roleID int64) {
 // its own-only list and its flag is down.
 func TestPublishMemberTimeouts_RevokeAfterResolve_SendsOwnOnly(t *testing.T) {
 	f := roleChangeFixture(t)
-	f.hub.GetClient(f.modID).timeouts.full.Store(true) // as its ready set it
+	f.hub.ClientForTest(f.modID).timeouts.full.Store(true) // as its ready set it
 	setTimeoutViewResolvedHook(t, func() { changeRole(t, f, f.modID, 4) })
 
 	f.hub.publishMemberTimeouts(f.targetID)
@@ -73,7 +73,7 @@ func TestPublishMemberTimeouts_RevokeAfterResolve_SendsOwnOnly(t *testing.T) {
 	if len(fr) == 0 || len(fr[len(fr)-1]) != 0 {
 		t.Fatalf("demoted moderator frames = %v, want the last one own-only (empty)", fr)
 	}
-	if f.hub.GetClient(f.modID).timeouts.full.Load() {
+	if f.hub.ClientForTest(f.modID).timeouts.full.Load() {
 		t.Error("timeouts.full still set on the demoted moderator")
 	}
 	// The remaining moderator still ends on the full list.
@@ -113,7 +113,7 @@ func TestPublishMemberTimeouts_ReplacedClientGetsFrame(t *testing.T) {
 func TestPublishMemberTimeouts_RepeatedRoleRefreshes_ModeratorsKeepFullList(t *testing.T) {
 	f := roleChangeFixture(t)
 	for _, id := range []int64{f.adminID, f.modID} {
-		f.hub.GetClient(id).timeouts.full.Store(true)
+		f.hub.ClientForTest(id).timeouts.full.Store(true)
 	}
 	var calls atomic.Int32
 	timeoutViewResolvedHook = func() {
@@ -133,7 +133,7 @@ func TestPublishMemberTimeouts_RepeatedRoleRefreshes_ModeratorsKeepFullList(t *t
 		if len(fr) == 0 || !reflect.DeepEqual(entryIDs(fr[len(fr)-1]), []int64{f.targetID}) {
 			t.Errorf("moderator %d frames = %v, want the last one to be the full list", id, fr)
 		}
-		if !f.hub.GetClient(id).timeouts.full.Load() {
+		if !f.hub.ClientForTest(id).timeouts.full.Load() {
 			t.Errorf("moderator %d not flagged full", id)
 		}
 	}
@@ -150,7 +150,7 @@ func TestPublishMemberTimeouts_RepeatedRoleRefreshes_ModeratorsKeepFullList(t *t
 // it keeps the full list it holds instead of being narrowed to its own entry.
 func TestRoleRefresh_VerdictLookupError_LeavesModeratorAlone(t *testing.T) {
 	f := roleChangeFixture(t)
-	f.hub.GetClient(f.modID).timeouts.full.Store(true) // as its ready set it
+	f.hub.ClientForTest(f.modID).timeouts.full.Store(true) // as its ready set it
 	timeoutVerdictLookupHook = func(userID int64) error {
 		if userID == f.modID {
 			return errors.New("injected lookup failure")
@@ -164,7 +164,7 @@ func TestRoleRefresh_VerdictLookupError_LeavesModeratorAlone(t *testing.T) {
 	if fr := timeoutFrames(t, drainChan(f.sends[f.modID], 100*time.Millisecond)); len(fr) != 0 {
 		t.Errorf("moderator with an unknown verdict got %v, want nothing", fr)
 	}
-	if !f.hub.GetClient(f.modID).timeouts.full.Load() {
+	if !f.hub.ClientForTest(f.modID).timeouts.full.Load() {
 		t.Error("timeouts.full cleared on a moderator whose verdict was unknown")
 	}
 	// The refresh still reached the user it could evaluate.
@@ -316,7 +316,7 @@ func readUntilIdle(inbox <-chan []byte) [][]byte {
 // liveClient returns userID's registered client, failing the test if none.
 func liveClient(t *testing.T, h *Hub, userID int64) *Client {
 	t.Helper()
-	c := h.GetClient(userID)
+	c := h.ClientForTest(userID)
 	if c == nil {
 		t.Fatalf("user %d has no registered client", userID)
 	}
@@ -430,7 +430,7 @@ func fanoutInFlightAtResolve(t *testing.T, h *Hub) *atomic.Bool {
 	var forced atomic.Bool
 	setTimeoutViewResolvedHook(t, func() {
 		h.seqMu.Lock()
-		forced.Store(h.mustFullResyncAtRegister(1<<62, 1<<40))
+		forced.Store(h.mustFullResyncAtRegister(1<<62, 1<<40, ""))
 		h.seqMu.Unlock()
 	})
 	return &forced

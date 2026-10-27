@@ -43,7 +43,7 @@ func newJoinNoteHub(t *testing.T, name string) (*Hub, *joinNoteRecorder, *Client
 	c := NewTestClient(h, uid, send)
 	c.user = &db.User{ID: uid, Username: name}
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 	return h, rec, c, chID, send
 }

@@ -86,7 +86,7 @@ func (f *rrFixture) addUser(name string, role int, held int64) int64 {
 	send := make(chan []byte, 1024)
 	c := NewTestClientWithUser(f.hub, u, held, send)
 	f.hub.mu.Lock()
-	f.hub.clients[id] = c
+	f.hub.clients[id] = []*Client{c}
 	f.hub.mu.Unlock()
 	f.hub.pubsub.Subscribe(c, TopicGlobal)
 	f.hub.pubsub.Subscribe(c, UserTopic(id))
@@ -255,7 +255,7 @@ func TestRoleRefresh_EditDuringRoundIsRefreshedAgain(t *testing.T) {
 	if last != MsgTypeChannelDelete {
 		t.Errorf("last sidebar frame for the channel = %q, want channel_delete after the demotion", last)
 	}
-	if slices.Contains(f.hub.pubsub.TopicsForClient(u), ChannelTopic(f.chA)) {
+	if slices.Contains(f.hub.pubsub.TopicsForUser(u), ChannelTopic(f.chA)) {
 		t.Error("the demoted user still holds the channel topic after round 2")
 	}
 	if f.hub.roleRefresh.covers(u) {
@@ -280,7 +280,7 @@ func TestRoleRefresh_RevokesHeldTopicsBeforeSending(t *testing.T) {
 	var focus int64
 	var queued []rrFrame
 	g := func(uid int64) {
-		topics = f.hub.pubsub.TopicsForClient(uid)
+		topics = f.hub.pubsub.TopicsForUser(uid)
 		f.clients[uid].mu.Lock()
 		focus = f.clients[uid].channelID
 		f.clients[uid].mu.Unlock()
@@ -405,8 +405,8 @@ func TestRoleRefresh_AllConnectedCoversEveryUser(t *testing.T) {
 func TestRoleRefresh_TimeoutViewsOnlyForAffected(t *testing.T) {
 	f := roleChangeFixture(t)
 	ctx := context.Background()
-	f.hub.GetClient(f.modID).timeouts.full.Store(true) // as its ready set it
-	f.hub.GetClient(f.adminID).timeouts.full.Store(true)
+	f.hub.ClientForTest(f.modID).timeouts.full.Store(true) // as its ready set it
+	f.hub.ClientForTest(f.adminID).timeouts.full.Store(true)
 	if err := f.database.UpdateUserRole(ctx, f.byID, rrModRole); err != nil {
 		t.Fatalf("promote: %v", err)
 	}

@@ -35,7 +35,7 @@ func handleGetStats(users *service.UserService, hub HubBroadcaster) http.Handler
 			return
 		}
 		if hub != nil {
-			stats.OnlineCount = hub.ClientCount()
+			stats.OnlineCount = hub.UserCount()
 		}
 		resp := statsResponse{ServerStats: stats, TLSMode: tlsMode}
 		resp.CertificateFingerprint = servedCert().Fingerprint

@@ -15,7 +15,7 @@ func TestTopicLimit_PerSender_FifthUserReceivesEveryFrame(t *testing.T) {
 	const chID = 7
 	send := make(chan []byte, 1024)
 	c := NewTestClientWithChannel(h, 5, chID, send)
-	h.clients[5] = c
+	h.clients[5] = []*Client{c}
 	h.pubsub.Subscribe(c, ChannelTopic(chID))
 
 	// chat 10/s + edit 10/s + delete 10/s + reactions 5/s per sender.

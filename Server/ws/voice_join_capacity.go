@@ -32,6 +32,13 @@ func voiceJoinCapacity(sub permissions.Subject, maxUsers int) int {
 // has already sent the error frame and returns false.
 func (h *Hub) voiceJoinSwitchCapacityOK(ctx context.Context, c *Client, channelID int64, maxUsers int, reqID string) bool {
 	cur := c.voice.channel()
+	if cur == 0 {
+		// The user's call may be on another of their devices: joining here
+		// moves it (voiceJoinMoveCall), which is the same destructive leave.
+		if holder := h.voiceClient(c.userID); holder != nil && holder != c {
+			cur = holder.voice.channel()
+		}
+	}
 	if cur <= 0 || cur == channelID || maxUsers <= 0 {
 		return true
 	}

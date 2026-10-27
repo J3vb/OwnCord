@@ -4140,11 +4140,34 @@ describe("WS Dispatcher", () => {
     });
   });
 
-  it("wires voice_state and auto-joins if current user", () => {
+  it("wires voice_state to the roster only when this device holds no call", () => {
     authStore.setState((prev) => ({
       ...prev,
       user: { id: 5, username: "me", avatar: null, role: "member" },
     }));
+
+    mock.dispatch("voice_state", {
+      channel_id: 3,
+      user_id: 5,
+      username: "me",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+    expect(voiceStore.getState().voiceStatus).toBe("idle");
+    expect(voiceStore.getState().voiceUsers.get(3)?.has(5)).toBe(true);
+  });
+
+  it("wires voice_state and adopts the channel if current user and this device is joining", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
 
     mock.dispatch("voice_state", {
       channel_id: 3,
@@ -4438,6 +4461,7 @@ describe("WS Dispatcher", () => {
       ...prev,
       user: { id: 5, username: "me", avatar: null, role: "member" },
     }));
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
 
     mock.dispatch("voice_state", {
       channel_id: 3,
@@ -4474,6 +4498,7 @@ describe("WS Dispatcher", () => {
         ...prev,
         user: { id: 5, username: "me", avatar: null, role: "member" },
       }));
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
     });
 
     function dispatchSelfVoiceState(flags: {
@@ -6597,8 +6622,9 @@ describe("WS Dispatcher", () => {
     }).not.toThrow();
   });
 
-  it("ready sends voice_leave when user appears in voice_states but LiveKit is disconnected", () => {
-    // A fresh reload always starts with an idle voice session — the stale case.
+  it("ready leaves another device's call alone when this device is idle", () => {
+    // This device holds no call: the self row is another device's, so there is
+    // nothing to clean up and a voice_leave would end that call.
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "idle" }));
 
     // Set up auth so the current user ID is 42
@@ -6618,13 +6644,9 @@ describe("WS Dispatcher", () => {
       dm_channels: [],
     });
 
-    // The dispatcher should detect stale voice state and send voice_leave
-    expectConsole("warn", /\[dispatcher\] Stale voice state detected in ready payload/);
-    expect(mock.ws.send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "voice_leave", payload: {} }),
-    );
-    // And clear the local voice channel
+    expect(mock.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_leave" }));
     expect(voiceStore.getState().currentChannelId).toBeNull();
+    expect(voiceStore.getState().voiceUsers.get(10)?.has(42)).toBe(true);
   });
 
   it("ready does NOT send voice_leave when LiveKit IS connected", () => {

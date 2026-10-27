@@ -100,7 +100,7 @@ func TestReconnect_RingMiss_TailEvictedBeforeRegisterCountsFull(t *testing.T) {
 	}
 
 	e.pushRing(21, 30) // evicts every frame at or below the persisted tail
-	if _, ok, _ := e.hub.reconnectRegister(ctx, c, 10, allowed, readable, source, tail, maxSeq); ok {
+	if _, ok := e.hub.reconnectRegister(ctx, c, 10, allowed, readable, source, tail, maxSeq); ok {
 		t.Fatal("reconnectRegister succeeded although the ring no longer covers the tail")
 	}
 	buffer, dbTier, full, misses := e.tiers()

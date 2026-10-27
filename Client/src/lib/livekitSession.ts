@@ -526,6 +526,10 @@ export class LiveKitSession {
         // to a call the server already ended. The server sends both before
         // it answers a ping, so a pong means the roster is current. A ping the
         // server drops (2/s per user) times out as "unknown": one attempt waits.
+        // This also covers a call moved to another device while this socket was
+        // away: registerNow queues voice_disconnected ahead of the pong, which
+        // ends this session before the roster (which keeps the other device's
+        // self row) is read.
         try {
           await ws.ping(signal);
         } catch {

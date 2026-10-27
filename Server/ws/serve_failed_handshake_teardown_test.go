@@ -77,7 +77,7 @@ func TestFailedHandshake_TearsDownTransferredVoiceSession(t *testing.T) {
 	// own supersession guards) — see OC-0270 — so registerNow is expected to
 	// transfer it on this network reconnect.
 	oldClient.voice.markCompletedIfMatch(vcID, vs.JoinedAt)
-	h.clients[userID] = oldClient
+	h.clients[userID] = []*Client{oldClient}
 	h.updateKeyHolder(vcID)
 
 	newClient := NewTestClient(h, userID, make(chan []byte, 64))

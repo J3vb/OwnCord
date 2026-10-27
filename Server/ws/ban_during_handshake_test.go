@@ -73,9 +73,9 @@ func assertNotLiveClient(t *testing.T, hub *Hub, uid int64) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		hub.mu.RLock()
-		c, registered := hub.clients[uid]
+		c := hub.newestLocked(uid)
 		hub.mu.RUnlock()
-		if !registered || c.isSendClosed() {
+		if c == nil || c.isSendClosed() {
 			return
 		}
 		if time.Now().After(deadline) {
