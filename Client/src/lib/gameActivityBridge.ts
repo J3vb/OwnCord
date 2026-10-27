@@ -19,19 +19,29 @@ export function isGameActivityShared(): boolean {
  * reaches the generic error toast: sharing a game is passive, and a server
  * limit the user did not cause is not theirs to read about. No handler
  * registered (browser build, setting never started) claims nothing.
+ *
+ * The music loop (WP 8.10) has its own slot: both loops run side by side, and
+ * each claims only the envelope ids of its own frames.
  */
 
 /** Claims a refusal (`code`, envelope `id`) of one of the loop's own frames. */
 export type ActivityRefusalHandler = (code: string, id: string | undefined) => boolean;
 
 let handler: ActivityRefusalHandler | null = null;
+let musicHandler: ActivityRefusalHandler | null = null;
 
 /** Register the running loop's handler, or `null` on its teardown. */
 export function setActivityRefusalHandler(next: ActivityRefusalHandler | null): void {
   handler = next;
 }
 
-/** Whether the running loop claimed this refusal. */
+/** Register the running music loop's handler, or `null` on its teardown. */
+export function setMusicRefusalHandler(next: ActivityRefusalHandler | null): void {
+  musicHandler = next;
+}
+
+/** Whether a running loop claimed this refusal. */
 export function handleActivityRefusal(code: string, id: string | undefined): boolean {
-  return handler !== null && handler(code, id);
+  if (handler !== null && handler(code, id)) return true;
+  return musicHandler !== null && musicHandler(code, id);
 }

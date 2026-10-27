@@ -17,7 +17,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
-import { createIcon } from "@lib/icons";
+import { createIcon, type IconName } from "@lib/icons";
 import type { ModalInstance } from "@lib/modalFactory";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
@@ -49,9 +49,12 @@ export interface DmConversation {
   readonly avatar: string | null;
   readonly avatarColor?: string;
   readonly status?: "online" | "idle" | "dnd" | "offline";
-  /** The game the other party of a 1:1 DM is playing (WP 8.3); never set for
-   *  a group. Drawn as "Playing <game>" under the name. */
+  /** The game the other party of a 1:1 DM is playing (WP 8.3), or else the
+   *  music they listen to (WP 8.10); never set for a group. Drawn as "Playing
+   *  <game>" or "Listening to <player>" under the name. */
   readonly activity?: string | null;
+  /** The icon for `activity`; the controller when absent. */
+  readonly activityIcon?: IconName;
   /** True for a group DM: draws stacked avatars and a participant count. */
   readonly isGroup?: boolean;
   /** A group whose server reports an owner (WP 3B-10); drives the leave copy. */
@@ -291,7 +294,7 @@ function renderDmItem(
       class: "dm-activity",
       "data-testid": `dm-activity-${convo.channelId}`,
     });
-    const icon = createIcon("gamepad-2", 12);
+    const icon = createIcon(convo.activityIcon ?? "gamepad-2", 12);
     icon.setAttribute("aria-hidden", "true");
     icon.classList.add("dm-activity-icon");
     const text = createElement("span", { class: "dm-activity-text" });
@@ -468,7 +471,7 @@ function convoSignature(convo: DmConversation): string {
     convo.avatar ?? "",
     convo.avatarColor ?? "",
     convo.status ?? "",
-    convo.isGroup === true ? "" : (convo.activity ?? ""),
+    convo.isGroup === true ? "" : `${convo.activityIcon ?? ""}|${convo.activity ?? ""}`,
     convo.isGroup === true ? "g" : "",
     convo.icon ?? "",
     (convo.participants ?? []).length,

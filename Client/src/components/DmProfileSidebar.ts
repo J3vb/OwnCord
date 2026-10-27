@@ -30,6 +30,8 @@ import { bannerImages } from "./bannerImages";
 import { shellText, statusLabel } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";
 import { playingForLine } from "../features/members/gameActivityLine";
+import { mountListeningCard } from "../features/members/listeningCard";
+import type { ListeningSong } from "../features/members/listeningLine";
 import {
   NOTE_MAX_LENGTH,
   createNoteBinding,
@@ -51,6 +53,8 @@ export interface DmProfileData {
   readonly status: UserStatus;
   /** The game being played (WP 8.3): "Playing <game> · for N min" under the status. */
   readonly activity?: { readonly name: string; readonly startedAt: number } | null;
+  /** The song being listened to (WP 8.10), with a progress bar that ticks while open. */
+  readonly listening?: ListeningSong | null;
   readonly about?: string | null;
   readonly joinDate?: string | null;
   /** Banner image path and colour; absent or null = no strip (WP 6.11d). */
@@ -164,6 +168,9 @@ export function createDmProfileSidebar(
   let statusDotInlineNode: HTMLSpanElement | null = null;
   let statusTextNode: HTMLSpanElement | null = null;
   let activityNode: HTMLDivElement | null = null;
+  let listeningNode: HTMLDivElement | null = null;
+  /** Stops the song card's clock; null when no card is drawn. */
+  let stopListening: (() => void) | null = null;
 
   /** Draw (or clear) the "Playing <game> · for N min" line from `user`. */
   function paintActivity(): void {
@@ -176,6 +183,16 @@ export function createDmProfileSidebar(
     const text = createElement("span", { class: "dps-activity-text" });
     setText(text, playingForLine(user.activity, Date.now()));
     appendChildren(activityNode, icon, text);
+  }
+
+  /** Draw (or clear) the song card from `user`, restarting its clock. */
+  function paintListening(): void {
+    stopListening?.();
+    stopListening = null;
+    if (listeningNode === null) return;
+    listeningNode.replaceChildren();
+    if (user.listening == null) return;
+    stopListening = mountListeningCard(listeningNode, user.listening, { prefix: "dps" });
   }
 
   function isOpen(): boolean {
@@ -293,7 +310,14 @@ export function createDmProfileSidebar(
     activityNode = activityLine;
     paintActivity();
 
-    appendChildren(content, nameEl, statusLine, activityLine);
+    const listeningLine = createElement("div", {
+      class: "dps-listening",
+      "data-testid": "dps-listening",
+    });
+    listeningNode = listeningLine;
+    paintListening();
+
+    appendChildren(content, nameEl, statusLine, activityLine, listeningLine);
 
     // About section
     if (user.about !== undefined && user.about !== null && user.about.length > 0) {
@@ -510,6 +534,9 @@ export function createDmProfileSidebar(
     statusDotInlineNode = null;
     statusTextNode = null;
     activityNode = null;
+    stopListening?.();
+    stopListening = null;
+    listeningNode = null;
   }
 
   function update(nextUser: DmProfileData): void {
@@ -546,6 +573,7 @@ export function createDmProfileSidebar(
     }
     if (statusTextNode !== null) setText(statusTextNode, label);
     paintActivity();
+    paintListening();
 
     // A changed avatar swaps the face (letter or picture); an unchanged one
     // only refreshes the fallback letter, if it is still showing, since the

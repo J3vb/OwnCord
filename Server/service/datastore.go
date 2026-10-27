@@ -21,6 +21,7 @@ import (
 type Store interface {
 	CallLogStore // the DM call log worker's reads and writes (WP 3B-9)
 	GroupDMStore // group DM membership and its system rows (WP 3B-10)
+	EmojiStore   // the custom emoji set (R-2)
 	// ── Second-factor state (B4-3) ──
 	// The durable backend behind the auth service's partial-auth, pending
 	// enrolment and used-code stores, plus the recovery-code rows; stdlib
@@ -227,13 +228,6 @@ type Store interface {
 	DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID int64) ([]int64, error)
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	CountRoleMembers(ctx context.Context) (map[int64]int, error)
-
-	// ── Emoji ──
-	ListEmoji(ctx context.Context) ([]*db.Emoji, error)
-	GetEmoji(ctx context.Context, id int64) (*db.Emoji, error)
-	GetEmojiByShortcode(ctx context.Context, shortcode string) (*db.Emoji, error)
-	CreateEmoji(ctx context.Context, shortcode, storedAs, mimeType string, uploadedBy int64) (*db.Emoji, error)
-	DeleteEmoji(ctx context.Context, id int64) (bool, error)
 
 	// ── Invites ──
 	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)

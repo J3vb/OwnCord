@@ -36,7 +36,7 @@ import {
   type MemberItemModel,
 } from "../features/members/memberRow.view";
 import { shellText } from "../i18n/shell";
-import { playingLine } from "../features/members/gameActivityLine";
+import { rowActivity } from "../features/members/listeningLine";
 import {
   buildModel,
   flattenModel,
@@ -207,7 +207,10 @@ function kindOf(item: ListItem): number {
   if (item.kind === "header") return HEADER;
   if (item.kind === "empty") return EMPTY;
   const custom = item.member.customStatus;
-  const hasLine = (typeof custom === "string" && custom.length > 0) || item.member.activity != null;
+  const hasLine =
+    (typeof custom === "string" && custom.length > 0) ||
+    item.member.activity != null ||
+    item.member.listening != null;
   return hasLine ? ROW_STATUS : ROW;
 }
 
@@ -273,6 +276,9 @@ function itemModel(item: ListItem): MemberItemModel {
   const { member } = item;
   const custom = member.customStatus;
   const customStatus = typeof custom === "string" && custom.length > 0 ? custom : null;
+  // The custom status wins the line, then a game, then music; the full card
+  // shows in the profile.
+  const shown = customStatus === null ? rowActivity(member.activity, member.listening) : null;
   return {
     kind: "row",
     id: member.id,
@@ -281,9 +287,8 @@ function itemModel(item: ListItem): MemberItemModel {
     avatarColor: pickAvatarColor(member.username),
     avatarUrl: member.avatar,
     customStatus,
-    // The custom status wins the line; the game shows in the profile card.
-    activity:
-      customStatus === null && member.activity != null ? playingLine(member.activity) : null,
+    activity: shown === null ? null : shown.text,
+    activityIcon: shown === null ? "gamepad-2" : shown.icon,
     colorVar: item.colorVar,
     status: member.status,
     away: isAwayStatus(member.status),

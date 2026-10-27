@@ -24,13 +24,16 @@ import {
   updatePresence,
   applyPresenceBatch,
   applyReadyActivities,
+  applyReadyListening,
   membersStore,
   toMemberActivity,
+  toMemberListening,
 } from "../../stores/members.store";
 import { updateVoiceUserProfile } from "../../stores/voice.store";
 import {
   dmStore,
   setDmActivityLookup,
+  setDmListeningLookup,
   updateDmParticipant,
   type DmUser,
 } from "../../stores/dm.store";
@@ -38,7 +41,12 @@ import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
 import { setStickers, stickersStore } from "../../stores/stickers.store";
 import { uiStore } from "../../stores/ui.store";
 import { getChannelMessages, markStickersDeleted } from "../../stores/messages.store";
-import { isTextLikeChannel, type ChannelActivityEntry, type ReadyActivity } from "../../lib/types";
+import {
+  isTextLikeChannel,
+  type ChannelActivityEntry,
+  type ReadyActivity,
+  type ReadyListening,
+} from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import {
   acceptReadState,
@@ -317,12 +325,13 @@ export function applyReadyStickers(api: DispatchApi | undefined): void {
 }
 
 /**
- * `ready.activities` (WP 8.3): who plays what right now. Applied after the
- * roster and the DM list are in, so it reaches both copies; a server without
- * the key sends no games, and the members then play nothing.
+ * `ready.activities` (WP 8.3) and `ready.listening` (WP 8.10): who plays what
+ * and who listens to what right now. Applied after the roster and the DM list
+ * are in, so it reaches both copies; a server without the key sends none, and
+ * the members then play and listen to nothing.
  */
 export function applyReadyGameActivities(payload: Payload<"ready">): void {
-  applyGameActivityList(payload.activities ?? []);
+  applyGameActivityList(payload.activities ?? [], payload.listening ?? []);
 }
 
 /**
@@ -332,7 +341,7 @@ export function applyReadyGameActivities(payload: Payload<"ready">): void {
  * since the games return with presence.
  */
 export function handleGameActivityPolicy(payload: Payload<"game_activity_policy">): void {
-  if (applyGameActivityPolicy(payload.enabled) && !payload.enabled) applyGameActivityList([]);
+  if (applyGameActivityPolicy(payload.enabled) && !payload.enabled) applyGameActivityList([], []);
 }
 
 /**
@@ -351,16 +360,27 @@ export function applyAuthOkGameActivityPolicy(payload: Payload<"auth_ok">): void
  * both follow, and a DM opened from now on takes its people's games from the
  * members store.
  */
-function applyGameActivityList(list: readonly ReadyActivity[]): void {
+function applyGameActivityList(
+  list: readonly ReadyActivity[],
+  songs: readonly ReadyListening[],
+): void {
   applyReadyActivities(list);
+  applyReadyListening(songs);
   setDmActivityLookup((userId) => membersStore.getState().members.get(userId)?.activity);
+  setDmListeningLookup((userId) => membersStore.getState().members.get(userId)?.listening);
   const byUser = new Map(list.map((a) => [a.user_id, toMemberActivity(a)]));
+  const songByUser = new Map(songs.map((l) => [l.user_id, toMemberListening(l)]));
   const partners = new Set<number>();
   for (const c of dmStore.getState().channels) {
     partners.add(c.recipient.id);
     for (const p of c.participants) partners.add(p.id);
   }
-  for (const id of partners) updateDmParticipant(id, { activity: byUser.get(id) ?? null });
+  for (const id of partners) {
+    updateDmParticipant(id, {
+      activity: byUser.get(id) ?? null,
+      listening: songByUser.get(id) ?? null,
+    });
+  }
 }
 
 export function handlePresence(payload: Payload<"presence">): void {
@@ -370,14 +390,25 @@ export function handlePresence(payload: Payload<"presence">): void {
   // activity follows the same rule (WP 8.3): absent leaves the shown game alone.
   // While the server states game activity is off, a game on a frame that
   // outran the off frame is not shown (WP 8.3e-2).
-  const activity = gameActivityPolicyIsOff() && payload.activity ? null : payload.activity;
-  updatePresence(payload.user_id, payload.status, payload.custom_status, undefined, activity);
+  const off = gameActivityPolicyIsOff();
+  const activity = off ? null : payload.activity;
+  // The same switch covers the song (WP 8.10).
+  const listening = off ? null : payload.listening;
+  updatePresence(
+    payload.user_id,
+    payload.status,
+    payload.custom_status,
+    undefined,
+    activity,
+    listening,
+  );
   // dmStore keeps its own frozen copy of a DM partner's status for the
   // sidebar row (see buildDmConversations) — membersStore alone does not
   // reach it.
   updateDmParticipant(payload.user_id, {
     status: payload.status,
     ...(activity === undefined ? {} : { activity: toMemberActivity(activity) }),
+    ...(listening === undefined ? {} : { listening: toMemberListening(listening) }),
   });
 }
 
@@ -386,13 +417,14 @@ export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
   // As in handlePresence: no game is shown while the server states it is off.
   const off = gameActivityPolicyIsOff();
   const updates = off
-    ? payload.updates.map((u) => (u.activity ? { ...u, activity: null } : u))
+    ? payload.updates.map((u) => ({ ...u, activity: null, listening: null }))
     : payload.updates;
   applyPresenceBatch(updates, full);
   // Only DM partners need the dmStore copy (see handlePresence); a full
   // snapshot takes a partner it leaves out offline.
   const statuses = new Map(updates.map((u) => [u.user_id, u.status]));
   const activities = new Map(updates.map((u) => [u.user_id, u.activity]));
+  const songs = new Map(updates.map((u) => [u.user_id, u.listening]));
   const partners = new Set<number>();
   for (const c of dmStore.getState().channels) {
     partners.add(c.recipient.id);
@@ -403,12 +435,19 @@ export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
     const status = statuses.get(id) ?? (full ? "offline" : undefined);
     if (status === undefined) continue;
     const activity = activities.get(id);
-    // A partner the snapshot leaves out plays nothing; an entry without the
-    // field (an older server) leaves the shown game alone.
+    const song = songs.get(id);
+    // A partner the snapshot leaves out plays and listens to nothing; an entry
+    // without the field (an older server) leaves what is shown alone.
     const patch: Partial<DmUser> = { status };
-    if (!listed) updateDmParticipant(id, { ...patch, activity: null });
-    else if (activity === undefined) updateDmParticipant(id, patch);
-    else updateDmParticipant(id, { ...patch, activity: toMemberActivity(activity) });
+    if (!listed) {
+      updateDmParticipant(id, { ...patch, activity: null, listening: null });
+      continue;
+    }
+    updateDmParticipant(id, {
+      ...patch,
+      ...(activity === undefined ? {} : { activity: toMemberActivity(activity) }),
+      ...(song === undefined ? {} : { listening: toMemberListening(song) }),
+    });
   }
 }
 

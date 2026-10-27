@@ -55,6 +55,7 @@ import { setMarkReadSender } from "../../src/lib/read-state";
 import {
   resetServerCapabilities,
   serverSupportsGameActivity,
+  serverSupportsListeningActivity,
 } from "../../src/lib/serverCapabilities";
 import { createPresenceSender, setActivePresenceSender } from "../../src/lib/presence";
 import { createPresenceLimiter } from "../../src/lib/rate-limiter";
@@ -1612,6 +1613,263 @@ describe("WS Dispatcher", () => {
         });
         expect(serverSupportsGameActivity()).toBe(true);
       });
+    });
+  });
+
+  describe("listening activity (WP 8.10)", () => {
+    const song = {
+      title: "Blue in Green",
+      artist: "Miles Davis",
+      player: "Spotify",
+      started_at: 1_761_206_400_000,
+      duration_ms: 337_000,
+    };
+    const shownSong = {
+      title: "Blue in Green",
+      artist: "Miles Davis",
+      player: "Spotify",
+      startedAt: 1_761_206_400_000,
+      durationMs: 337_000,
+    };
+    const seed = (): void => {
+      membersStore.setState((prev) => {
+        const m = new Map(prev.members);
+        for (const [id, username] of [
+          [1, "alex"],
+          [2, "bea"],
+          [3, "cy"],
+        ] as const) {
+          m.set(id, { id, username, avatar: null, role: "member", status: "online" as const });
+        }
+        return { ...prev, members: m };
+      });
+    };
+    const listeningOf = (id: number) => membersStore.getState().members.get(id)?.listening;
+    const partner = { id: 10, username: "bob", avatar: "", status: "online" };
+    const seedDm = (): void => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: partner,
+            participants: [partner],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+    };
+    afterEach(() => resetServerCapabilities());
+
+    it("applies a presence frame's song and clears it on null", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      expect(listeningOf(1)).toEqual(shownSong);
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: null });
+      expect(listeningOf(1)).toBeNull();
+    });
+
+    it("leaves the shown song alone when a presence frame carries no listening key", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      mock.dispatch("presence", { user_id: 1, status: "idle" });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+    });
+
+    it("keeps the game and the song apart", () => {
+      seed();
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        activity: { name: "Factorio", started_at: 1 },
+        listening: song,
+      });
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        activity: null,
+        listening: song,
+      });
+      const member = membersStore.getState().members.get(1);
+      expect(member?.activity).toBeNull();
+      expect(member?.listening?.player).toBe("Spotify");
+    });
+
+    it("applies a presence_batch and lets a full snapshot clear the members it leaves out", () => {
+      seed();
+      mock.dispatch("presence_batch", {
+        updates: [
+          { user_id: 1, status: "online", custom_status: null, listening: song },
+          { user_id: 2, status: "online", custom_status: null, listening: null },
+        ],
+      });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+      expect(listeningOf(2)).toBeNull();
+      expect(listeningOf(3)).toBeUndefined();
+
+      mock.dispatch("presence", { user_id: 3, status: "online", listening: song });
+      mock.dispatch("presence_batch", {
+        full: true,
+        updates: [{ user_id: 1, status: "online", custom_status: null, listening: song }],
+      });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+      expect(listeningOf(3)).toBeNull();
+    });
+
+    it("applies ready.listening to the roster and clears everyone else", () => {
+      const members = [
+        { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
+        { id: 2, username: "bea", avatar: null, role: "member", status: "online" },
+      ];
+      mock.dispatch("ready", {
+        channels: [],
+        members,
+        listening: [{ user_id: 2, ...song }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(listeningOf(1)).toBeNull();
+      expect(listeningOf(2)).toEqual(shownSong);
+
+      // The next full ready restates the set: bea stopped meanwhile.
+      mock.dispatch("ready", {
+        channels: [],
+        members,
+        listening: [],
+        voice_states: [],
+        roles: [],
+      });
+      expect(listeningOf(2)).toBeNull();
+    });
+
+    it("keeps an unknown length as 0 and drops a blank title or player", () => {
+      seed();
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        listening: { ...song, duration_ms: 0 },
+      });
+      expect(listeningOf(1)?.durationMs).toBe(0);
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        listening: { ...song, title: " " },
+      });
+      expect(listeningOf(1)).toBeNull();
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        listening: { ...song, player: "" },
+      });
+      expect(listeningOf(1)).toBeNull();
+    });
+
+    it("copies a DM partner's song into the DM list from presence, batch and ready", () => {
+      seedDm();
+      const shown = () => dmStore.getState().channels[0]?.recipient.listening;
+
+      mock.dispatch("presence", { user_id: 10, status: "online", listening: song });
+      expect(shown()?.title).toBe("Blue in Green");
+      mock.dispatch("presence", { user_id: 10, status: "idle" });
+      expect(shown()?.title).toBe("Blue in Green");
+      mock.dispatch("presence_batch", {
+        updates: [{ user_id: 10, status: "online", custom_status: null, listening: null }],
+      });
+      expect(shown()).toBeNull();
+      mock.dispatch("presence", { user_id: 10, status: "online", listening: song });
+      mock.dispatch("presence_batch", { full: true, updates: [] });
+      expect(shown()).toBeNull();
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        dm_channels: [
+          {
+            channel_id: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: null,
+            last_message: "",
+            last_message_at: "",
+            unread_count: 0,
+            mention_count: 0,
+          },
+        ],
+        listening: [{ user_id: 10, ...song }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(shown()?.title).toBe("Blue in Green");
+    });
+
+    it("a DM opened after ready shows the song its partner is already playing", () => {
+      dmStore.setState(() => ({ channels: [] }));
+      mock.dispatch("ready", {
+        channels: [],
+        members: [{ id: 10, username: "bob", avatar: null, role: "member", status: "online" }],
+        listening: [{ user_id: 10, ...song }],
+        voice_states: [],
+        roles: [],
+      });
+      mock.dispatch("dm_channel_open", {
+        channel_id: 51,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+      expect(dmStore.getState().channels[0]?.recipient.listening?.player).toBe("Spotify");
+    });
+
+    it("the per-server switch off clears every shown song and ignores a late one", () => {
+      seed();
+      mock.dispatch("ready", {
+        channels: [],
+        members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+        capabilities: { game_activity: true, listening_activity: true },
+        listening: [{ user_id: 1, ...song }],
+        voice_states: [],
+        roles: [],
+      });
+      seedDm();
+      mock.dispatch("presence", { user_id: 10, status: "online", listening: song });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+      expect(serverSupportsListeningActivity()).toBe(true);
+
+      mock.dispatch("game_activity_policy", { enabled: false });
+      expect(listeningOf(1)).toBeNull();
+      expect(dmStore.getState().channels[0]?.recipient.listening).toBeNull();
+      expect(serverSupportsListeningActivity()).toBe(false);
+
+      // A frame that outran the off frame shows nothing.
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      expect(listeningOf(1) ?? null).toBeNull();
+      mock.dispatch("presence_batch", {
+        updates: [{ user_id: 1, status: "online", custom_status: null, listening: song }],
+      });
+      expect(listeningOf(1) ?? null).toBeNull();
+
+      mock.dispatch("game_activity_policy", { enabled: true });
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+      expect(serverSupportsListeningActivity()).toBe(true);
+    });
+
+    it("an older server (no listening_activity flag) never supports music, even with a policy", () => {
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        capabilities: { game_activity: true },
+        voice_states: [],
+        roles: [],
+      });
+      mock.dispatch("game_activity_policy", { enabled: true });
+      expect(serverSupportsListeningActivity()).toBe(false);
     });
   });
 
