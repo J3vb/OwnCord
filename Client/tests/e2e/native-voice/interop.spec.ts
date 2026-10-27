@@ -59,7 +59,9 @@ const livekitDist = resolve("node_modules/livekit-client/dist");
 
 const KEY_ID = "e2e-key";
 const API_SECRET = "e2e-secret-at-least-32-characters-long";
-const ROOM = "native-interop";
+/** One room per test: tests reuse the same identities against one server, and
+ *  a previous test's peers can still be in the room when the next one joins. */
+let room = "native-interop";
 /** 440 Hz sine, amplitude 8000 of 32768: RMS = 8000/32768/sqrt(2). */
 const EXPECTED_SINE_RMS = 8000 / 32768 / Math.SQRT2;
 /** The per-user volume the native peer plays the browser peer at. */
@@ -86,7 +88,7 @@ function joinToken(identity: string): string {
       sub: identity,
       nbf: now - 10,
       exp: now + 600,
-      video: { room: ROOM, roomJoin: true, canPublish: true, canSubscribe: true },
+      video: { room, roomJoin: true, canPublish: true, canSubscribe: true },
     }),
   );
   const signature = b64url(
@@ -146,6 +148,10 @@ test.beforeAll(async () => {
   );
   livekit = startProcess(resolve(livekitBinary!), ["--config", config], dataDir);
   await waitForHttp(`http://127.0.0.1:${livekitPort}`, livekit);
+});
+
+test.beforeEach(({}, testInfo) => {
+  room = `native-interop-${testInfo.testId}-${testInfo.retry}`;
 });
 
 test.afterAll(async () => {
