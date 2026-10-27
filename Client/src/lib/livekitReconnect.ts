@@ -57,8 +57,10 @@ export interface ReconnectDeps {
   canKeepRetrying: () => boolean;
   /** Whether the server still holds the membership the old token belongs to,
    *  read from the voice roster — "unknown" while the chat socket is not
-   *  connected, since the roster cannot update then. */
-  serverMembership: () => "held" | "released" | "unknown";
+   *  connected, since the roster cannot update then. Resolves only once the
+   *  socket's own ready or resume replay is applied: a socket reads
+   *  "connected" from its auth_ok, while the roster still shows the drop. */
+  serverMembership: () => Promise<"held" | "released" | "unknown">;
   /** Tear the session down and send voice_join for the same channel, so the
    *  ordinary join path (E2EE, device prefs) resumes the call. Only called
    *  once serverMembership() reads "released". */
@@ -172,9 +174,15 @@ export async function attemptAutoReconnect(
         return;
       }
       // OC-0014: the attempt after this delay must carry a live token.
-      if (deps.serverMembership() === "held" && deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS) {
+      if (deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS) {
+        // oxlint-disable-next-line no-await-in-loop -- the refresh decision needs the current roster
+        const held = (await deps.serverMembership()) === "held";
+        if (superseded()) {
+          log.info("Auto-reconnect aborted — user left or channel changed");
+          return;
+        }
         // oxlint-disable-next-line no-await-in-loop -- the attempt must wait for the fresh token it connects with
-        await deps.refreshTokenAndWait();
+        if (held) await deps.refreshTokenAndWait();
       }
     }
     log.info("Auto-reconnect attempt", { attempt });
@@ -190,7 +198,12 @@ export async function attemptAutoReconnect(
     // The old token is only good for a membership the server still holds:
     // wait out a chat socket that cannot say, and rejoin one it released
     // (RT-8 grace expiry, an RT-3 reap, a restart).
-    const membership = deps.serverMembership();
+    // oxlint-disable-next-line no-await-in-loop -- each attempt reads the roster as it is now
+    const membership = await deps.serverMembership();
+    if (superseded()) {
+      log.info("Auto-reconnect aborted — user left or channel changed");
+      return;
+    }
     if (membership === "unknown") continue;
     if (membership === "released") {
       log.info("Auto-reconnect: server membership gone — rejoining", { channelId });

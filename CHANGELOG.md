@@ -138,6 +138,7 @@ and only when it changes something a contributor or fork holder must do
 - In the Linux app, someone else's camera or screen share could show one picture and then freeze for the rest of the call, and a VP9 camera could stay black. Their video now keeps playing. Closing a stream's pop-out window also no longer leaves its tile black.
 - When unmuting failed because the microphone could not be opened, the app switched you back to muted, but everyone else still saw you as unmuted. They now see you muted too.
 - After the call reconnected, a camera or screen share that ended during the drop, or belonged to someone who left meanwhile, stayed in the video grid as a frozen tile. Those tiles are now removed.
+- After a network drop longer than about 15 seconds, the call could come back as "Voice Connected" with your camera off, and nobody else listed you in the channel. The app now waits until it knows whether the server still has you in the call, and rejoins properly when it does not, so the camera comes back on.
 
 ## v2.4.0-beta.1
 
