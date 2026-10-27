@@ -131,7 +131,7 @@ func ilocV2(entries ...[3]uint32) func(uint32) []byte {
 func (l hlayout) build() []byte {
 	ftyp := isoBox("ftyp", []byte("heic"), be32(0), []byte("mif1heic"))
 	mdat := isoBox("mdat", l.data)
-	var iinf []byte
+	iinf := make([]byte, 0, 32*len(l.items))
 	for _, it := range l.items {
 		iinf = append(iinf, infeBox(it.id, it.typ)...)
 	}
@@ -161,10 +161,10 @@ func gridLayout(t *testing.T, rows, cols int, canvasW, canvasH int) hlayout {
 	tile := l.data
 	n := rows * cols
 	l.data = nil
-	var entries [][3]uint32
+	entries := make([][3]uint32, 0, n+1)
 	l.items = nil
-	var to []byte
-	var ids []int
+	to := make([]byte, 0, 2*n)
+	ids := make([]int, 0, n)
 	for i := range n {
 		l.data = append(l.data, tile...)
 		id := i + 1
@@ -174,7 +174,7 @@ func gridLayout(t *testing.T, rows, cols int, canvasW, canvasH int) hlayout {
 		ids = append(ids, id)
 	}
 	gridID := n + 1
-	desc := []byte{0, 0, byte(rows - 1), byte(cols - 1)}
+	desc := append(make([]byte, 0, 8), 0, 0, byte(rows-1), byte(cols-1))
 	desc = append(desc, u16(canvasW)...)
 	desc = append(desc, u16(canvasH)...)
 	entries = append(entries, [3]uint32{uint32(gridID), uint32(len(l.data)), uint32(len(desc))})
@@ -183,7 +183,7 @@ func gridLayout(t *testing.T, rows, cols int, canvasW, canvasH int) hlayout {
 	l.iloc = ilocV0(entries...)
 	l.iref = isoBox("iref", be32(0), isoBox("dimg", u16(gridID), u16(n), to))
 	l.props = append(l.props, isoBox("ispe", be32(0), be32(uint32(canvasW)), be32(uint32(canvasH))))
-	assoc := [][]int{}
+	assoc := make([][]int, 0, len(ids)+1)
 	for _, id := range ids {
 		assoc = append(assoc, []int{id, 1, 2})
 	}
@@ -402,7 +402,7 @@ func TestHEICLayout_Refusals(t *testing.T) {
 		"locations with zero-size fields": func() []byte {
 			l := plain()
 			l.iloc = func(uint32) []byte {
-				body := []byte{1, 0, 0, 0, 0x00, 0x00, 0, 200}
+				body := append(make([]byte, 0, 8+8*200), 1, 0, 0, 0, 0x00, 0x00, 0, 200)
 				for i := range 200 {
 					body = append(body, u16(i+1)...)
 					body = append(body, 0, 0, 0, 0, 0xff, 0xff)
@@ -415,7 +415,7 @@ func TestHEICLayout_Refusals(t *testing.T) {
 		"item data in a construction method the layout does not allow": func() []byte {
 			l := plain()
 			l.iloc = func(uint32) []byte {
-				body := []byte{1, 0, 0, 0, 0x44, 0x00, 0, 1, 0, 1, 0, 2, 0, 0, 0, 1}
+				body := append(make([]byte, 0, 24), 1, 0, 0, 0, 0x44, 0x00, 0, 1, 0, 1, 0, 2, 0, 0, 0, 1)
 				body = append(body, be32(0)...)
 				body = append(body, be32(8)...)
 				return isoBox("iloc", body)
@@ -439,7 +439,7 @@ func TestHEICLayout_Refusals(t *testing.T) {
 		},
 		"a parameter set inside the item data": func() []byte {
 			l := plain()
-			sps := []byte{0, 0, 0, 4, 0x42, 0x01, 0xAA, 0xBB}
+			sps := append(make([]byte, 0, 8+len(l.data)), 0, 0, 0, 4, 0x42, 0x01, 0xAA, 0xBB)
 			l.data = append(sps, l.data...)
 			l.iloc = ilocV0([3]uint32{1, 0, uint32(len(l.data))})
 			return l.build()

@@ -53,12 +53,13 @@ func splitBoxes(b []byte, limit int) ([]isoBox, error) {
 			return nil, refuse("malformed boxes")
 		}
 		size, hdr := uint64(binary.BigEndian.Uint32(b)), uint64(8)
-		if size == 1 {
+		switch size {
+		case 1:
 			if len(b) < 16 {
 				return nil, refuse("malformed boxes")
 			}
 			size, hdr = binary.BigEndian.Uint64(b[8:]), 16
-		} else if size == 0 {
+		case 0:
 			size = uint64(len(b))
 		}
 		if size < hdr || size > uint64(len(b)) {
@@ -74,6 +75,9 @@ func splitBoxes(b []byte, limit int) ([]isoBox, error) {
 // returns the payload of its meta box. Only ftyp (first), meta, mdat, free and
 // skip may appear: a movie, fragment or any other box is refused.
 func heicTopLevel(r io.ReaderAt, size int64) (meta []byte, err error) {
+	if size < 0 {
+		return nil, refuse("negative size")
+	}
 	var pos uint64
 	total := uint64(size)
 	for n := 0; pos < total; n++ {
@@ -89,12 +93,13 @@ func heicTopLevel(r io.ReaderAt, size int64) (meta []byte, err error) {
 			return nil, refuse("unreadable header")
 		}
 		boxSize, hdrLen := uint64(binary.BigEndian.Uint32(hdr[:])), uint64(8)
-		if boxSize == 1 {
+		switch boxSize {
+		case 1:
 			if got < 16 {
 				return nil, refuse("malformed boxes")
 			}
 			boxSize, hdrLen = binary.BigEndian.Uint64(hdr[8:]), 16
-		} else if boxSize == 0 {
+		case 0:
 			boxSize = total - pos
 		}
 		if boxSize < hdrLen || boxSize > total-pos {
@@ -205,7 +210,7 @@ func validateHEIC(r io.ReaderAt, size int64) (heicInfo, error) {
 		return heicInfo{}, refuse("no coded image")
 	}
 	if m.types[m.primary] == "grid" {
-		if err := m.checkGrid(r, m.primary, &budget); err != nil {
+		if err := m.checkGrid(r, m.primary); err != nil {
 			return heicInfo{}, err
 		}
 	}
@@ -271,32 +276,10 @@ func (m *heicMeta) isAlpha(id uint32) bool {
 }
 
 // checkGrid reads a grid's descriptor and holds its tiles to it.
-func (m *heicMeta) checkGrid(r io.ReaderAt, id uint32, budget *heicBudget) error {
-	ext, located := m.extents[id]
-	total := extentsTotal(ext)
-	if !located || (total != 8 && total != 12) {
-		return refuse("grid descriptor")
-	}
-	var desc [12]byte
-	if m.inIdat[id] {
-		// Phones keep the descriptor in the idat box: its extents are
-		// offsets into that box's body, as the decoder reads them.
-		d := desc[:0]
-		for _, e := range ext {
-			d = append(d, m.idat[e.off:e.off+e.length]...)
-		}
-	} else if err := extentsAt(r, ext, 0, desc[:total]); err != nil {
+func (m *heicMeta) checkGrid(r io.ReaderAt, id uint32) error {
+	rows, cols, gw, gh, err := m.gridDescriptor(r, id)
+	if err != nil {
 		return err
-	}
-	rows, cols := uint64(desc[2])+1, uint64(desc[3])+1
-	var gw, gh uint64
-	switch {
-	case desc[0] != 0 || desc[1]&^1 != 0 || (desc[1]&1 == 1) != (total == 12):
-		return refuse("grid descriptor")
-	case total == 12:
-		gw, gh = uint64(binary.BigEndian.Uint32(desc[4:])), uint64(binary.BigEndian.Uint32(desc[8:]))
-	default:
-		gw, gh = uint64(binary.BigEndian.Uint16(desc[4:])), uint64(binary.BigEndian.Uint16(desc[6:]))
 	}
 	tiles := m.dimg[id]
 	if gw == 0 || gh == 0 || gw > 1<<16 || gh > 1<<16 || gw*gh > heicMaxPixels ||
@@ -313,6 +296,36 @@ func (m *heicMeta) checkGrid(r io.ReaderAt, id uint32, budget *heicBudget) error
 		seen[t] = true
 	}
 	return nil
+}
+
+// gridDescriptor reads a grid's descriptor: exactly 8 or 12 bytes, in the file
+// body or, as phones write it, in the idat box (the extents are then offsets
+// into that box's body, as the decoder reads them).
+func (m *heicMeta) gridDescriptor(r io.ReaderAt, id uint32) (rows, cols, gw, gh uint64, err error) {
+	ext, located := m.extents[id]
+	total := extentsTotal(ext)
+	if !located || (total != 8 && total != 12) {
+		return 0, 0, 0, 0, refuse("grid descriptor")
+	}
+	var desc [12]byte
+	if m.inIdat[id] {
+		d := desc[:0]
+		for _, e := range ext {
+			d = append(d, m.idat[e.off:e.off+e.length]...)
+		}
+	} else if err := extentsAt(r, ext, 0, desc[:total]); err != nil {
+		return 0, 0, 0, 0, err
+	}
+	rows, cols = uint64(desc[2])+1, uint64(desc[3])+1
+	switch {
+	case desc[0] != 0 || desc[1]&^1 != 0 || (desc[1]&1 == 1) != (total == 12):
+		return 0, 0, 0, 0, refuse("grid descriptor")
+	case total == 12:
+		gw, gh = uint64(binary.BigEndian.Uint32(desc[4:])), uint64(binary.BigEndian.Uint32(desc[8:]))
+	default:
+		gw, gh = uint64(binary.BigEndian.Uint16(desc[4:])), uint64(binary.BigEndian.Uint16(desc[6:]))
+	}
+	return rows, cols, gw, gh, nil
 }
 
 // extentsAt reads len(buf) bytes at pos of the data the extents make up in

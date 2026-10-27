@@ -354,12 +354,12 @@ func sequenceOnlyHEIC(t *testing.T, n int) []byte {
 	binary.BigEndian.PutUint16(entry[6:], 1)
 	binary.BigEndian.PutUint16(entry[24:], 16)
 	binary.BigEndian.PutUint16(entry[26:], 16)
-	var sizes []byte
+	sizes := make([]byte, 0, 4*n)
 	for range n {
 		sizes = append(sizes, be32(uint32(len(data)))...)
 	}
 	build := func(off uint32) []byte {
-		var offs []byte
+		offs := make([]byte, 0, 4*n)
 		for range n {
 			offs = append(offs, be32(off)...)
 		}

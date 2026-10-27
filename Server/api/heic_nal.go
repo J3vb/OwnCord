@@ -73,11 +73,11 @@ func spsPixels(nal []byte) (int64, error) {
 // parseHvcC reads the decoder configuration of a coded image: the size of the
 // length prefix of its NAL units and the largest picture its parameter sets
 // declare.
-func parseHvcC(body []byte) (lengthSize int, pixels int64, err error) {
+func parseHvcC(body []byte) (lengthSize uint64, pixels int64, err error) {
 	if len(body) < 23 || body[0] != 1 {
 		return 0, 0, refuse("decoder configuration")
 	}
-	lengthSize = int(body[21]&3) + 1
+	lengthSize = uint64(body[21]&3) + 1
 	arrays, rest := int(body[22]), body[23:]
 	for range arrays {
 		if len(rest) < 3 {
@@ -128,50 +128,71 @@ func (m *heicMeta) checkCoded(r io.ReaderAt, id uint32, budget *heicBudget) erro
 	}
 	budget.pixels -= pixels
 	budget.bytes -= total
-	pictures := 0
-	var pos uint64
-	for pos < total {
-		if budget.nals == 0 {
-			return refuse("too many NAL units")
-		}
-		budget.nals--
-		var lenBuf [4]byte
-		if err := extentsAt(r, ext, pos, lenBuf[:lengthSize]); err != nil {
-			return err
-		}
-		var n uint64
-		for _, c := range lenBuf[:lengthSize] {
-			n = n<<8 | uint64(c)
-		}
-		pos += uint64(lengthSize)
-		if n < 3 || n > total-pos {
-			return refuse("NAL unit size")
-		}
-		var hdr [3]byte
-		if err := extentsAt(r, ext, pos, hdr[:]); err != nil {
-			return err
-		}
-		nal, ok := hevc.ParseNAL(hdr[:])
-		if !ok || nal.LayerID != 0 {
-			return refuse("NAL unit header")
-		}
-		switch {
-		case nal.Type.IsVCL():
-			// Slice segments of the base layer only; the reserved types are not slices.
-			if (nal.Type > hevc.NALRaslR && nal.Type < hevc.NALBlaWLP) || nal.Type > hevc.NALCra {
-				return refuse("NAL unit type")
-			}
-			if len(nal.RBSP) > 0 && nal.RBSP[0]&0x80 != 0 {
-				pictures++
-			}
-		case nal.Type == hevc.NALAUD, nal.Type == hevc.NALPrefixSEI, nal.Type == hevc.NALSuffixSEI:
-		default:
-			return refuse("NAL unit type")
-		}
-		pos += n
+	pictures, err := walkNALs(r, ext, lengthSize, budget)
+	if err != nil {
+		return err
 	}
 	if pictures != 1 {
 		return refuse("coded image is not one picture")
 	}
 	return nil
+}
+
+// walkNALs walks the length-prefixed NAL units of an item's data and returns
+// how many pictures start in it. Only slice segments of the base layer, access
+// unit delimiters and SEI may appear.
+func walkNALs(r io.ReaderAt, ext []heicExtent, lengthSize uint64, budget *heicBudget) (pictures int, err error) {
+	total := extentsTotal(ext)
+	var pos uint64
+	for pos < total {
+		if budget.nals == 0 {
+			return 0, refuse("too many NAL units")
+		}
+		budget.nals--
+		var lenBuf [4]byte
+		if err := extentsAt(r, ext, pos, lenBuf[:lengthSize]); err != nil {
+			return 0, err
+		}
+		var n uint64
+		for _, c := range lenBuf[:lengthSize] {
+			n = n<<8 | uint64(c)
+		}
+		pos += lengthSize
+		if n < 3 || n > total-pos {
+			return 0, refuse("NAL unit size")
+		}
+		var hdr [3]byte
+		if err := extentsAt(r, ext, pos, hdr[:]); err != nil {
+			return 0, err
+		}
+		starts, err := startsPicture(hdr[:])
+		if err != nil {
+			return 0, err
+		}
+		if starts {
+			pictures++
+		}
+		pos += n
+	}
+	return pictures, nil
+}
+
+// startsPicture reports whether the NAL unit with this three-byte start is the
+// first slice segment of a picture, and refuses what is not allowed.
+func startsPicture(hdr []byte) (bool, error) {
+	nal, ok := hevc.ParseNAL(hdr)
+	if !ok || nal.LayerID != 0 {
+		return false, refuse("NAL unit header")
+	}
+	switch {
+	case nal.Type.IsVCL():
+		// Slice segments of the base layer only; the reserved types are not slices.
+		if (nal.Type > hevc.NALRaslR && nal.Type < hevc.NALBlaWLP) || nal.Type > hevc.NALCra {
+			return false, refuse("NAL unit type")
+		}
+		return len(nal.RBSP) > 0 && nal.RBSP[0]&0x80 != 0, nil
+	case nal.Type == hevc.NALAUD, nal.Type == hevc.NALPrefixSEI, nal.Type == hevc.NALSuffixSEI:
+		return false, nil
+	}
+	return false, refuse("NAL unit type")
 }

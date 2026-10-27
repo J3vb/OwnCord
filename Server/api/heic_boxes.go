@@ -5,6 +5,7 @@ package api
 // refusal.
 
 import (
+	"math"
 	"slices"
 )
 
@@ -42,6 +43,16 @@ func (r *byteReader) uint(n int) uint64 {
 	}
 	r.b = r.b[n:]
 	return v
+}
+
+// id reads an item id of n (at most 4) bytes.
+func (r *byteReader) id(n int) uint32 {
+	v := r.uint(n)
+	if n > 4 || v > math.MaxUint32 {
+		r.bad = true
+		return 0
+	}
+	return uint32(v)
 }
 
 func (r *byteReader) skip(n int) {
@@ -116,9 +127,9 @@ func (m *heicMeta) parsePitm(body []byte) error {
 	r.skip(3)
 	switch version {
 	case 0:
-		m.primary = uint32(r.uint(2))
+		m.primary = r.id(2)
 	case 1:
-		m.primary = uint32(r.uint(4))
+		m.primary = r.id(4)
 	default:
 		return refuse("pitm version")
 	}
@@ -153,12 +164,12 @@ func (m *heicMeta) parseIinf(body []byte) error {
 		e := byteReader{b: b.body}
 		v := e.uint(1)
 		e.skip(3)
-		var id uint64
+		var id uint32
 		switch v {
 		case 2:
-			id = e.uint(2)
+			id = e.id(2)
 		case 3:
-			id = e.uint(4)
+			id = e.id(4)
 		default:
 			return refuse("infe version")
 		}
@@ -166,80 +177,106 @@ func (m *heicMeta) parseIinf(body []byte) error {
 		if b.typ != "infe" || e.bad || len(e.b) < 4 {
 			return refuse("malformed infe")
 		}
-		if _, dup := m.types[uint32(id)]; dup {
+		if _, dup := m.types[id]; dup {
 			return refuse("repeated item")
 		}
-		m.types[uint32(id)] = string(e.b[:4])
+		m.types[id] = string(e.b[:4])
 	}
 	return nil
 }
 
-func (m *heicMeta) parseIloc(body []byte) error {
-	r := byteReader{b: body}
+// ilocSizes are the field sizes an iloc box declares, in bytes.
+type ilocSizes struct {
+	version                           uint64
+	offset, length, base, index, idSz int
+	// minItem is the least an item takes: id, data reference and extent count.
+	minItem uint64
+}
+
+// readIlocSizes reads the iloc header up to the item count; only the sizes the
+// layout allows are accepted, so no field can be zero-sized where it counts.
+func readIlocSizes(r *byteReader) (ilocSizes, error) {
 	version := r.uint(1)
 	r.skip(3)
 	if version > 2 {
-		return refuse("iloc version")
+		return ilocSizes{}, refuse("iloc version")
 	}
 	sizes := r.uint(1)
-	offsetSize, lengthSize := int(sizes>>4), int(sizes&15)
+	z := ilocSizes{version: version, offset: int(sizes >> 4), length: int(sizes & 15), idSz: 2, minItem: 6}
 	sizes = r.uint(1)
-	baseSize, indexSize := int(sizes>>4), int(sizes&15)
+	z.base, z.index = int(sizes>>4), int(sizes&15)
 	if version == 0 {
-		indexSize = 0
+		z.index = 0
 	}
-	if (offsetSize != 4 && offsetSize != 8) || (lengthSize != 4 && lengthSize != 8) ||
-		(baseSize != 0 && baseSize != 4 && baseSize != 8) ||
-		(indexSize != 0 && indexSize != 4 && indexSize != 8) {
-		return refuse("iloc field sizes")
-	}
-	idSize := 2
 	if version == 2 {
-		idSize = 4
+		z.idSz, z.minItem = 4, 8
 	}
-	count := r.uint(idSize)
+	if (z.offset != 4 && z.offset != 8) || (z.length != 4 && z.length != 8) ||
+		(z.base != 0 && z.base != 4 && z.base != 8) ||
+		(z.index != 0 && z.index != 4 && z.index != 8) {
+		return ilocSizes{}, refuse("iloc field sizes")
+	}
+	return z, nil
+}
+
+func (m *heicMeta) parseIloc(body []byte) error {
+	r := byteReader{b: body}
+	z, err := readIlocSizes(&r)
+	if err != nil {
+		return err
+	}
+	count := r.uint(z.idSz)
 	// Every item is at least id, data reference and extent count.
-	if r.bad || count > heicMaxItems || count*uint64(idSize+4) > uint64(len(r.b)) {
+	if r.bad || count > heicMaxItems || count*z.minItem > uint64(len(r.b)) {
 		return refuse("malformed iloc")
 	}
 	for range count {
-		id := uint32(r.uint(idSize))
-		method := uint64(0)
-		if version >= 1 {
-			method = r.uint(2) & 15
+		if err := m.parseIlocItem(&r, z); err != nil {
+			return err
 		}
-		if method > 1 {
-			return refuse("item data construction method")
-		}
-		if r.uint(2) != 0 {
-			return refuse("item data in another file")
-		}
-		base := r.uint(baseSize)
-		n := r.uint(2)
-		if r.bad || n == 0 || n > heicMaxExtents {
-			return refuse("extent count")
-		}
-		if _, dup := m.extents[id]; dup {
-			return refuse("repeated item")
-		}
-		ext := make([]heicExtent, 0, n)
-		for range n {
-			r.skip(indexSize)
-			off, length := r.uint(offsetSize), r.uint(lengthSize)
-			// Method 0 is an offset in the file; method 1 one in the idat body,
-			// which is checked once that box is known.
-			if r.bad || length == 0 || base+off < base || base+off+length < base+off ||
-				(method == 0 && base+off+length > m.size) {
-				return refuse("extent outside the file")
-			}
-			ext = append(ext, heicExtent{off: base + off, length: length})
-		}
-		m.extents[id] = ext
-		m.inIdat[id] = method == 1
 	}
 	if len(r.b) != 0 {
 		return refuse("malformed iloc")
 	}
+	return nil
+}
+
+// parseIlocItem reads one item's location: the file body (method 0) or the
+// idat box (method 1), one data reference, and its extents.
+func (m *heicMeta) parseIlocItem(r *byteReader, z ilocSizes) error {
+	id := r.id(z.idSz)
+	method := uint64(0)
+	if z.version >= 1 {
+		method = r.uint(2) & 15
+	}
+	if method > 1 {
+		return refuse("item data construction method")
+	}
+	if r.uint(2) != 0 {
+		return refuse("item data in another file")
+	}
+	base := r.uint(z.base)
+	n := r.uint(2)
+	if r.bad || n == 0 || n > heicMaxExtents {
+		return refuse("extent count")
+	}
+	if _, dup := m.extents[id]; dup {
+		return refuse("repeated item")
+	}
+	ext := make([]heicExtent, 0, n)
+	for range n {
+		r.skip(z.index)
+		off, length := r.uint(z.offset), r.uint(z.length)
+		// Method 0 is an offset in the file; method 1 one in the idat body,
+		// which is checked once that box is known.
+		if r.bad || length == 0 || base+off < base || base+off+length < base+off ||
+			(method == 0 && base+off+length > m.size) {
+			return refuse("extent outside the file")
+		}
+		ext = append(ext, heicExtent{off: base + off, length: length})
+	}
+	m.extents[id] = ext
+	m.inIdat[id] = method == 1
 	return nil
 }
 
@@ -257,13 +294,13 @@ func (m *heicMeta) parseIref(body []byte) error {
 	}
 	for _, b := range refs {
 		e := byteReader{b: b.body}
-		from := uint32(e.uint(idSize))
+		from := e.id(idSize)
 		n := e.uint(2)
 		if e.bad || n*uint64(idSize) != uint64(len(e.b)) {
 			return refuse("malformed iref")
 		}
 		if b.typ == "auxl" && n >= 1 {
-			m.auxl = append(m.auxl, [2]uint32{from, uint32(e.uint(idSize))})
+			m.auxl = append(m.auxl, [2]uint32{from, e.id(idSize)})
 		}
 		if b.typ != "dimg" {
 			continue
@@ -273,7 +310,7 @@ func (m *heicMeta) parseIref(body []byte) error {
 		}
 		to := make([]uint32, 0, n)
 		for range n {
-			to = append(to, uint32(e.uint(idSize)))
+			to = append(to, e.id(idSize))
 		}
 		m.dimg[from] = to
 	}
@@ -326,7 +363,7 @@ func (m *heicMeta) parseIpma(body []byte) error {
 		return refuse("malformed ipma")
 	}
 	for range count {
-		id := uint32(r.uint(idSize))
+		id := r.id(idSize)
 		n := r.uint(1)
 		if _, dup := m.assoc[id]; dup || n > heicMaxAssoc {
 			return refuse("repeated item")

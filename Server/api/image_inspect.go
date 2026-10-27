@@ -10,40 +10,47 @@ import (
 // camera RAW is demoted to application/octet-stream (a download, not a
 // picture), and an image gets its upright width and height.
 func inspectStoredImage(store FileStore, fileID, mime string) (outMime string, width, height *int) {
-	// A TIFF-structured camera RAW is a download, not a picture.
-	if mime == mimeTIFF {
-		if f, openErr := store.Open(fileID); openErr == nil {
-			if isCameraRAW(withReadAt(f)) {
-				mime = "application/octet-stream"
-			}
-			f.Close() //nolint:errcheck
-		}
+	if mime == mimeTIFF && storedCameraRAW(store, fileID) {
+		mime = "application/octet-stream"
 	}
-
-	// Extract image dimensions if the file is an image.
-	if strings.HasPrefix(mime, "image/") {
-		f, openErr := store.Open(fileID)
-		if openErr == nil {
-			var cfg image.Config
-			var decErr error
-			if convertedFormat(mime) != "" {
-				cfg, decErr = convertedSize(f, mime)
-			} else {
-				cfg, _, decErr = image.DecodeConfig(f)
-			}
-			if decErr == nil && mime == "image/jpeg" && jpegSidewaysOnDisk(f) {
-				cfg.Width, cfg.Height = cfg.Height, cfg.Width
-			}
-			f.Close() //nolint:errcheck
-			if decErr == nil {
-				w2, h2 := cfg.Width, cfg.Height
-				width = &w2
-				height = &h2
-			} else {
-				slog.Warn("failed to decode image dimensions", "id", fileID, "error", decErr)
-			}
-		}
+	if !strings.HasPrefix(mime, "image/") {
+		return mime, nil, nil
 	}
-
+	width, height = storedImageSize(store, fileID, mime)
 	return mime, width, height
+}
+
+// storedCameraRAW reports whether the stored TIFF-structured file is a camera RAW.
+func storedCameraRAW(store FileStore, fileID string) bool {
+	f, err := store.Open(fileID)
+	if err != nil {
+		return false
+	}
+	defer f.Close() //nolint:errcheck
+	return isCameraRAW(withReadAt(f))
+}
+
+// storedImageSize is the upright size of the stored image, or nil when it
+// cannot be read.
+func storedImageSize(store FileStore, fileID, mime string) (width, height *int) {
+	f, err := store.Open(fileID)
+	if err != nil {
+		return nil, nil
+	}
+	defer f.Close() //nolint:errcheck
+	var cfg image.Config
+	if convertedFormat(mime) != "" {
+		cfg, err = convertedSize(f, mime)
+	} else {
+		cfg, _, err = image.DecodeConfig(f)
+	}
+	if err != nil {
+		slog.Warn("failed to decode image dimensions", "id", fileID, "error", err)
+		return nil, nil
+	}
+	if mime == "image/jpeg" && jpegSidewaysOnDisk(f) {
+		cfg.Width, cfg.Height = cfg.Height, cfg.Width
+	}
+	w, h := cfg.Width, cfg.Height
+	return &w, &h
 }
