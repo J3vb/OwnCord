@@ -111,6 +111,10 @@ Record per run: calls, files opened, wrong turns, whether the answer matches the
 
 Implement R-1 exactly as above (rows 1, 2, 3, 9 and, if the code settles it, 4), in one Sonnet session and one PR into `dev`, with the before/after comparison appended to the baseline. It is cheap, reversible and measurable. Afterwards, decide whether to stop or run a **conditional** code pilot: row 5 (three dialog tests, no production edit) is the better-evidenced candidate; row 6 only if a Go change shows the cost. Neither is authorized by this plan.
 
+## Inputs for later phases
+
+- [#2806](https://github.com/J3vb/OwnCord/pull/2806) is a docs-only design for a measured screen-sharing performance pipeline, tied to issue #2805 (frame-rate drops on Windows). It was not read in detail for this plan. It is **not** part of R-1 and is not ranked above. It is an input to a later performance assignment, which should follow the same measure-then-compare method and keep clear of voice and E2EE code unless that assignment is scoped for it.
+
 ## Honest limits
 
 - Measured in one contaminated session; no variance; no human has tested the contributor path.
