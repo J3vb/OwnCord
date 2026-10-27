@@ -14,9 +14,9 @@ name: Nightly Test Depth
 on:
   schedule:
     # GitHub has started this schedule 5-6 h late every day since 2026-10-18
-    # (03:30 ran at 08:12-09:12 UTC), so it is queued for the evening and lands
-    # overnight.
-    - cron: "0 22 * * *"
+    # (03:30 ran at 08:12-09:12 UTC), so it is queued for the evening, off the
+    # :00/:30 minutes GitHub delays most, and lands overnight.
+    - cron: "17 21 * * *"
   workflow_dispatch:
 
 permissions:
