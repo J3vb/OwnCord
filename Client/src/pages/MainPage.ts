@@ -432,6 +432,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // The right-hand member column's controller (3C-6b). Loaded on demand; the
   // <aside> itself always exists so the header toggle's aria-controls resolves.
   let memberColumn: MemberColumn | null = null;
+  /** The call view is up in this window (callChat's capable state). */
+  let callViewUp = false;
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -1103,7 +1105,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const callChatBtn = chatAreaResult.chatHeaderRefs.callChatBtn;
     callChat = createCallChat({
       videoModeCtrl,
-      onStateChange: (state) => setChatHeaderCallChat(chatAreaResult.chatHeaderRefs, state),
+      onStateChange: (state) => {
+        setChatHeaderCallChat(chatAreaResult.chatHeaderRefs, state);
+        // The call view takes the member column's width while it is up.
+        callViewUp = state.capable;
+        memberColumn?.setCallView(callViewUp);
+      },
     });
     callChatBtn.addEventListener("click", () => callChat?.toggleChat());
 
@@ -1198,6 +1205,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         buildPanel: sidebar.buildMemberPanel,
         fallbackFocus: focusReachable,
       });
+      memberColumn.setCallView(callViewUp);
       memberColumn.sync();
     });
     const layoutOwner = new Disposable();

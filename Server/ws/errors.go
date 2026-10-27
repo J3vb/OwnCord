@@ -26,6 +26,10 @@ const (
 	// that was already ended or whose time ran out. Nothing was written and no
 	// poll_update is sent for the refused command.
 	ErrCodePollEnded = "POLL_ENDED"
+	// ErrCodeStickerNotFound refines NOT_FOUND: a chat_send named a sticker
+	// that does not exist, or was deleted. Nothing was stored, and the client
+	// refreshes its picker from sticker_update.
+	ErrCodeStickerNotFound = "STICKER_NOT_FOUND"
 	// ErrCodeAlreadyDeleted is the WS twin of REST's 409 ALREADY_DELETED: the
 	// same "already in the requested end state" refusal, so a client sees one
 	// code for the state rather than FORBIDDEN over WS and ALREADY_DELETED
@@ -74,4 +78,9 @@ const (
 	// ErrCodeThreadLocked refines FORBIDDEN: the thread is locked and only a
 	// moderator (MANAGE_MESSAGES) may post, react, pin or change it.
 	ErrCodeThreadLocked = "THREAD_LOCKED"
+	// ErrCodeGameActivityDisabled answers an activity_update that sets a game
+	// while an admin has turned game activity off for the server (WP 8.3e-2).
+	// A clear is never refused. The client claims it without a toast and does
+	// not resend until the game changes.
+	ErrCodeGameActivityDisabled = "GAME_ACTIVITY_DISABLED"
 )

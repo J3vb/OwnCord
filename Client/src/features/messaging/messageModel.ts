@@ -8,6 +8,7 @@ import type {
   ForwardInfo,
   PollInfo,
   PollView,
+  MessageStickerInfo,
   ThreadInfo,
   ChatMessagePayload,
   MessageUser,
@@ -77,6 +78,8 @@ export interface Message {
   readonly forward?: ForwardInfo;
   /** Set on a poll message (WP 6.9b): the card's source, kept in version order by pollState.ts. */
   readonly poll?: PollView;
+  /** Set on a sticker message (WP 8.8): the image's source, or just the name once it is deleted. */
+  readonly sticker?: MessageStickerInfo;
   /** Set on a thread's starter message (WP 6.9c); threadsStore holds the live state. */
   readonly thread?: ThreadInfo;
 }
@@ -186,6 +189,7 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     ...(payload.group_event !== undefined && { groupEvent: payload.group_event }),
     ...(payload.forward !== undefined && { forward: payload.forward }),
     ...(payload.poll !== undefined && { poll: toPollView(payload.poll) }),
+    ...(payload.sticker !== undefined && { sticker: payload.sticker }),
     ...(payload.thread !== undefined && { thread: payload.thread }),
   };
 }
@@ -217,6 +221,7 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     ...(response.group_event !== undefined && { groupEvent: response.group_event }),
     ...(response.forward !== undefined && { forward: response.forward }),
     ...(response.poll !== undefined && { poll: toPollView(response.poll) }),
+    ...(response.sticker !== undefined && { sticker: response.sticker }),
     ...(response.thread !== undefined && { thread: response.thread }),
   };
 }

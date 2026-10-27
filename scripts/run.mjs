@@ -3,7 +3,9 @@
 //
 // One entry point for the checks CI runs, so a contributor does not have to
 // know which directory each stack lives in. `node scripts/run.mjs --list`
-// prints every task and the exact commands it runs.
+// prints every task and the exact commands it runs. Add a task name to list
+// only that task, for example: node scripts/run.mjs --list check:rust.
+// Add --json for a read-only command plan with argument arrays and directories.
 //
 // Two rules this file exists to keep:
 //
@@ -21,20 +23,28 @@
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WIN = process.platform === "win32";
 
-// npm and npx are batch shims on Windows; everything else is a real binary.
-const bin = (c) => (WIN && (c === "npm" || c === "npx") ? `${c}.cmd` : c);
-
-// Node refuses to spawn a .cmd/.bat with shell:false (the CVE-2024-27980
-// mitigation): it fails with EINVAL and a null exit status. So the Windows npm
-// shims need a shell, and only they do -- every other command here is a real
-// binary, and a shell would put its quoting rules between us and the arguments.
-const needsShell = (c) => WIN && (c === "npm" || c === "npx");
+// On Windows, bypass npm's .cmd shims and launch its JS entry point with Node.
+// A shell splits tracked paths containing spaces or metacharacters. Keep the
+// argument array intact instead of maintaining a second shell-quoting system.
+function npmCliPath(command) {
+  const entry = `${command}-cli.js`;
+  const candidates = [];
+  const npmExecPath = process.env.npm_execpath;
+  if (npmExecPath && basename(npmExecPath) === "npm-cli.js") {
+    candidates.push(join(dirname(npmExecPath), entry));
+  }
+  for (const dir of (process.env.PATH || "").split(";")) {
+    if (dir) candidates.push(join(dir.replace(/^"|"$/g, ""), "node_modules", "npm", "bin", entry));
+  }
+  candidates.push(join(dirname(process.execPath), "node_modules", "npm", "bin", entry));
+  return candidates.find((candidate) => existsSync(candidate));
+}
 
 /** A step that always runs. `label`, when set, replaces the dumped argv in the
  *  printed banner — used by the chunked prettier steps, whose argument list is
@@ -255,6 +265,8 @@ const PRETTIER_TRACKED = (() => {
 // Lint check, and by .githooks/pre-commit on staged files.
 const CHECK_HYGIENE = [
   ...PRETTIER_TRACKED,
+  step("node", ["--test", "scripts/run.test.mjs"], "."),
+  step("node", ["--test", "scripts/protocol-n1-compat.test.mjs"], "."),
   optional(
     "shellcheck",
     "shellcheck",
@@ -286,6 +298,7 @@ const CHECK_HYGIENE = [
   // OC-0448. Execute the release verification/promotion shell with a fake
   // registry and assert that no release tag moves before verification passes.
   step("node", ["--test", "scripts/check-release-docker.test.mjs"], "."),
+  step("node", ["--test", "tools/mcp-introspect/transport.test.mjs"], "."),
   // Claude Code Bash hook: `cd` in compounds and `.env` reads.
   step("node", ["--test", "scripts/claude-hook.test.mjs"], "."),
   // B7-2 / RL-17. `engine-strict=true` makes `engines` a hard failure but does
@@ -363,10 +376,6 @@ function onPath(cmd) {
 
 function runTask(name) {
   const steps = TASKS[name];
-  if (!steps) {
-    console.error(`unknown task: ${name}\nknown: ${Object.keys(TASKS).join(", ")}`);
-    process.exit(2);
-  }
   const describe = (s) => (s.label ? `${s.cmd} ${s.label}` : `${s.cmd} ${s.args.join(" ")}`);
   const skipped = [];
   for (const s of steps) {
@@ -377,33 +386,36 @@ function runTask(name) {
     }
     const where = s.cwd === "." ? "" : `  [in ${s.cwd}]`;
     console.log(`\n--- ${describe(s)}${where}`);
-    // With shell:true Node deprecates a separate args array (DEP0190), because it
-    // concatenates without escaping. So concatenate deliberately instead: the only
-    // commands that take this branch are the npm shims, and no argument in this
-    // file contains a space.
-    const shell = needsShell(s.cmd);
-    const r = shell
-      ? spawnSync([bin(s.cmd), ...s.args].join(" "), {
-          cwd: join(ROOT, s.cwd),
-          stdio: "inherit",
-          shell: true,
-        })
-      : spawnSync(s.cmd, s.args, {
-          cwd: join(ROOT, s.cwd),
-          stdio: "inherit",
-          shell: false,
-        });
+    const cwd = join(ROOT, s.cwd);
+    const attempt = `${describe(s)}${where || "  [in repository root]"}`;
+    if (!existsSync(cwd)) {
+      console.error(`\nFAILED: ${attempt}: working directory does not exist (${cwd}).`);
+      return 1;
+    }
+    const npmCommand = WIN && (s.cmd === "npm" || s.cmd === "npx");
+    const npmCli = npmCommand ? npmCliPath(s.cmd) : undefined;
+    if (npmCommand && !npmCli) {
+      console.error(
+        `\nFAILED: ${attempt}: cannot locate ${s.cmd}'s JavaScript CLI. Install npm on PATH.`,
+      );
+      return 1;
+    }
+    const r = spawnSync(npmCli ? process.execPath : s.cmd, npmCli ? [npmCli, ...s.args] : s.args, {
+      cwd,
+      stdio: "inherit",
+      shell: false,
+    });
     if (r.error && r.error.code !== "ENOENT") {
-      console.error(`\nFAILED: ${s.cmd} could not be started: ${r.error.code}`);
-      process.exit(1);
+      console.error(`\nFAILED: ${attempt} could not be started: ${r.error.code}`);
+      return 1;
     }
     if (r.error && r.error.code === "ENOENT") {
-      console.error(`\nFAILED: ${s.cmd} is not installed or not on PATH.`);
-      process.exit(1);
+      console.error(`\nFAILED: ${attempt}: executable is not installed or not on PATH.`);
+      return 1;
     }
     if (r.status !== 0) {
       console.error(`\nFAILED: ${describe(s)}${where} exited ${r.status}`);
-      process.exit(r.status ?? 1);
+      return r.status ?? 1;
     }
   }
   if (skipped.length) {
@@ -413,23 +425,63 @@ function runTask(name) {
   } else {
     console.log(`\n${name}: passed`);
   }
+  return 0;
 }
 
-const arg = process.argv[2];
-if (!arg || arg === "--list") {
-  for (const [name, steps] of Object.entries(TASKS)) {
-    console.log(`\n${name}`);
-    for (const s of steps) {
-      const where = s.cwd === "." ? "" : `   (in ${s.cwd})`;
-      const label = s.label ? `${s.cmd} ${s.label}` : `${s.cmd} ${s.args.join(" ")}`;
-      console.log(`  ${s.probe ? "[optional] " : ""}${label}${where}`);
-    }
+// Return an exit code so piped stdout/stderr can drain before Node exits.
+function main(argv) {
+  const arg = argv[0];
+  const usage =
+    "usage: node scripts/run.mjs --list [task] [--json]\n" +
+    "       node scripts/run.mjs <task>\n" +
+    "       node scripts/run.mjs --help";
+  function usageError() {
+    console.error(usage);
+    return 2;
   }
-  console.log("");
-  process.exit(0);
+  function requireTask(name) {
+    if (!Object.hasOwn(TASKS, name)) {
+      console.error(`unknown task: ${name}\nknown: ${Object.keys(TASKS).join(", ")}`);
+      return false;
+    }
+    return true;
+  }
+  if (arg === "--help" || arg === "-h") {
+    if (argv.length !== 1) return usageError();
+    console.log(`${usage}\n\nTasks: ${Object.keys(TASKS).join(", ")}`);
+    return 0;
+  }
+  if (!arg || arg === "--list") {
+    const options = argv.slice(1);
+    const names = options.filter((value) => value !== "--json");
+    if (names.length > 1 || options.filter((value) => value === "--json").length > 1) {
+      return usageError();
+    }
+    const selected = names[0];
+    if (selected !== undefined && !requireTask(selected)) return 2;
+    const entries = selected === undefined ? Object.entries(TASKS) : [[selected, TASKS[selected]]];
+    if (options.includes("--json")) {
+      console.log(JSON.stringify(Object.fromEntries(entries), null, 2));
+      return 0;
+    }
+    for (const [name, steps] of entries) {
+      console.log(`\n${name}`);
+      for (const s of steps) {
+        const where = s.cwd === "." ? "" : `   (in ${s.cwd})`;
+        const label = s.label ? `${s.cmd} ${s.label}` : `${s.cmd} ${s.args.join(" ")}`;
+        console.log(`  ${s.probe ? "[optional] " : ""}${label}${where}`);
+      }
+    }
+    console.log("");
+    return 0;
+  }
+  if (argv.length !== 1 || arg.startsWith("-")) return usageError();
+  if (!requireTask(arg)) return 2;
+  if (!existsSync(join(ROOT, "Server")) || !existsSync(join(ROOT, "Client"))) {
+    console.error("run this from the repository root");
+    return 2;
+  }
+  return runTask(arg);
 }
-if (!existsSync(join(ROOT, "Server")) || !existsSync(join(ROOT, "Client"))) {
-  console.error("run this from the repository root");
-  process.exit(2);
-}
-runTask(arg);
+
+process.exitCode = main(process.argv.slice(2));

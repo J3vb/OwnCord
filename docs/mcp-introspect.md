@@ -12,7 +12,7 @@ It is a **development tool**, not part of the shipped product. It holds no data
 of its own and adds nothing to the server binary. It is a thin wrapper over
 OwnCord's existing REST API.
 
-- **Code:** `tools/mcp-introspect/index.mjs` (one file, about 250 lines).
+- **Code:** `tools/mcp-introspect/index.mjs` (MCP wiring) and `transport.mjs` (HTTP/SSE).
 - **Runtime:** Node 26 (`engines` in its `package.json`), ES modules. Its
   dependencies are `@modelcontextprotocol/sdk` and `zod`.
 - **Registration:** a local `.mcp.json` at the repository root, plus
@@ -34,6 +34,16 @@ Claude Code starts `index.mjs` as a child process
 (`node tools/mcp-introspect/index.mjs`) and talks MCP to it over stdin and
 stdout. When you or the agent call one of its tools, it sends a request to the
 local OwnCord server and returns the result.
+
+### Request deadlines
+
+API and log-ticket requests have a 15-second total deadline, including response
+bodies. Log streams have 15 seconds to receive headers. After headers, a
+backfill closes after 300 ms of quiet or 15 seconds total; live following runs
+for the requested `follow_ms`, capped at 60,000 ms. Completion, errors and
+timeouts close the request and clear its timers. Timeout messages omit tokens
+and log-ticket URLs. Run the offline transport tests from the repository root:
+`node --test tools/mcp-introspect/transport.test.mjs`.
 
 ### Authentication
 
@@ -71,7 +81,7 @@ client's proxy uses.
 ### The two tools
 
 **`api_request`** is one general passthrough that covers the _whole_ REST API.
-It sends one `https.request` to `https://127.0.0.1:<port><path>` with the
+It selects HTTP or HTTPS from the URL and sends one request with the
 bearer token. It returns `{ status, headers, body }`. The body is parsed as
 JSON when possible, otherwise it is raw text. Any HTTP method is allowed,
 including destructive admin routes.

@@ -261,6 +261,8 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
       "Access & registration",
       "Security",
       "Voice: AFK",
+      "Game activity",
+      "Welcome messages",
       "Upload file types",
       "Running configuration",
     ]);
@@ -1106,6 +1108,58 @@ describe("Server/admin/static — voice_owner_movable switch", () => {
     booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: false };
     await render(booted.bridge, dom.window, booted.bridge.renderSettings);
     expect(toggle(dom.window.document)).toBeNull();
+  });
+});
+
+// WP 8.3e-2: the per-server game activity switch. Manage Server's, not the owner's.
+describe("Server/admin/static — game_activity_enabled switch", () => {
+  let dom: JSDOM | undefined;
+
+  afterEach(() => {
+    dom?.window?.close();
+    dom = undefined;
+  });
+
+  const toggle = (document: Document) =>
+    document.getElementById("s-game_activity_enabled") as HTMLButtonElement | null;
+
+  it("is on when the setting is unset, shown to a non-owner, and saves only the flip", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.MANAGE_SERVER, is_owner: false };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+
+    const sw = toggle(document)!;
+    expect(sw.getAttribute("role")).toBe("switch");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(document.getElementById("s-game_activity_enabled-name")?.textContent).toBe(
+      "Show the games members are playing",
+    );
+    const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    sw.click();
+    expect(save.disabled).toBe(false);
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      game_activity_enabled: "false",
+    });
+  });
+
+  it("shows a stored false as off", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /settings": { json: { ...LOADED_SETTINGS, game_activity_enabled: "false" } },
+      }),
+    );
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.MANAGE_SERVER, is_owner: false };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    expect(toggle(dom.window.document)!.getAttribute("aria-checked")).toBe("false");
   });
 });
 

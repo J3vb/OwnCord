@@ -9,6 +9,15 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 }
 
 const noteSeen = vi.hoisted(() => vi.fn());
+vi.mock("@components/message-list/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@components/message-list/attachments")>()),
+  fetchImageAsObjectUrl: vi.fn(async () => "blob:sticker"),
+}));
+// The pending-message queue is not activated in a unit test; a sticker send needs its dedup id.
+vi.mock("@lib/pendingMessages", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/pendingMessages")>()),
+  supportsMessageDeduplication: () => true,
+}));
 vi.mock("@lib/read-state", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@lib/read-state")>()),
   noteMessageSeen: noteSeen,
@@ -29,6 +38,7 @@ import {
 } from "@stores/messages.store";
 import { safetyStore } from "../../src/features/safety/store";
 import { setConnectionStatus } from "@stores/ui.store";
+import { stickersStore, setStickers, clearStickers } from "@stores/stickers.store";
 import {
   applyFollowUpdate,
   getThread,
@@ -219,6 +229,58 @@ describe("ThreadPanel", () => {
         (m) => m.content === "hello thread" && m.status === "pending",
       ),
     ).toBe(true);
+  });
+});
+
+describe("stickers in a thread (WP 8.8)", () => {
+  const SET = [{ id: 7, name: "Wave", emoji: null, url: "/api/v1/stickers/7/image" }];
+
+  async function pickSticker(): Promise<void> {
+    setStickers(SET);
+    stickersStore.flush();
+    mountPanel();
+    await flush();
+    q<HTMLButtonElement>(".sticker-btn").click();
+    await vi.dynamicImportSettled();
+    q<HTMLElement>('.sp-item[data-sticker-id="7"]').click();
+  }
+  const sentSends = (): { payload: Record<string, unknown> }[] =>
+    (
+      ws.getSentMessages() as unknown as { type: string; payload: Record<string, unknown> }[]
+    ).filter((m) => m.type === "chat_send");
+
+  beforeEach(() => {
+    applyReadyCapabilities({ threads: true, stickers: true });
+    setConnectionStatus("connected");
+  });
+  afterEach(() => {
+    clearStickers();
+    stickersStore.flush();
+  });
+
+  it("has a sticker button only on a server with stickers", async () => {
+    applyReadyCapabilities({ threads: true });
+    mountPanel();
+    await flush();
+    expect(container.querySelector(".sticker-btn")).toBeNull();
+  });
+
+  it("sends the picked sticker into the thread as sticker_id, optimistically", async () => {
+    await pickSticker();
+    const sends = sentSends();
+    expect(sends).toHaveLength(1);
+    expect(sends[0]!.payload).toMatchObject({
+      channel_id: THREAD,
+      content: "",
+      sticker_id: 7,
+      reply_to: null,
+    });
+    expect(typeof sends[0]!.payload["client_message_id"]).toBe("string");
+    const row = (messagesStore.getState().messagesByChannel.get(THREAD) ?? []).find(
+      (m) => m.sticker?.id === 7,
+    );
+    expect(row?.status).toBe("pending");
+    expect(row?.content).toBe("[Sticker: Wave]");
   });
 });
 
@@ -413,6 +475,27 @@ describe("ThreadPanelHost", () => {
     expect(slot.children.length).toBe(0);
     expect(host.openThreadId).toBeNull();
     expect(focusFrames()).toHaveLength(1);
+  });
+
+  it("puts a width handle on the open panel; a key step is saved and kept on the next open", async () => {
+    localStorage.removeItem("owncord:settings:threadPanelWidth");
+    const { host, slot } = await makeHost();
+    host.open(getThread(THREAD)!);
+    const handle = slot.querySelector<HTMLElement>('[data-testid="thread-panel-resize"]');
+    expect(handle?.getAttribute("role")).toBe("separator");
+    expect(handle?.getAttribute("aria-label")).toBe("Resize thread panel");
+    expect(slot.style.getPropertyValue("--thread-panel-width")).toBe("380px");
+
+    handle?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    expect(slot.style.getPropertyValue("--thread-panel-width")).toBe("396px");
+    expect(localStorage.getItem("owncord:settings:threadPanelWidth")).toBe("396");
+
+    host.close();
+    expect(slot.querySelector('[data-testid="thread-panel-resize"]')).toBeNull();
+    host.open(getThread(THREAD)!);
+    expect(slot.querySelector('[data-testid="thread-panel-resize"]')).not.toBeNull();
+    expect(slot.style.getPropertyValue("--thread-panel-width")).toBe("396px");
+    host.close();
   });
 
   it("switching to another thread closes the first and focuses the second", async () => {

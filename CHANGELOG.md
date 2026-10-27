@@ -55,6 +55,11 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Messages & files**
+
+- Stickers: a new sticker button in the message box. The GIF, sticker and emoji buttons now open one popup with GIFs, Stickers and Emoji tabs. Click a sticker to send it at once, in channels, threads and DMs, also as a reply. Stickers show big in chat; a sticker an admin removed shows as "Deleted sticker: name". Admins add, rename and remove stickers on the new Stickers page of the admin panel.
+- Text and code files (.txt, .log, .json, .py, .js, .ts, .sql, .go, .md and more) now show a preview in chat: the first lines in a coloured code box, with Expand and Collapse, the language and the line count. Only the first 64 KB is shown; download the file for the rest. Files marked as spoilers stay a plain download.
+
 **Accounts & admin**
 
 - New role permission Move Members: a role with it can move anyone between voice channels, whatever their rank, from the voice menu or by dragging. Only the owner or an Administrator can give it out. No role has it after the upgrade. The person moved sees who moved them. The owner can stop Move Members from moving the owner under Settings → Voice: moving members in the admin panel.
@@ -62,16 +67,30 @@ and only when it changes something a contributor or fork holder must do
 - Roles can start from a preset in the role editor: Super admin, Server manager, Moderator or Voice moderator fill in the matching boxes, which you can still change before saving. Anything you are not allowed to give out stays unticked and is named, and a box you cannot change stays as it was and is named too.
 - Seven more role permissions that start with nobody: Restore Backups, Manage Config, Manage Updates, Manage Tokens and Issue Recovery work like the owner's own powers, so the owner gives each one out by hand and an Administrator cannot, whatever its role holds; View Diagnostics (logs, support bundles and the attention list) and Erase Accounts can be given by the owner or an Administrator. A member with Issue Recovery can only help someone ranked below them, and API tokens a member makes are theirs alone. No role has any of them after the upgrade.
 
+**Messages & files**
+
+- Server support for voice messages: an upload can carry its length (up to 5 minutes) and a small waveform, and both come back on the message's attachment, including in forwarded copies, so a client can draw the player before downloading. The server reports it as the `voice_messages` capability. No voice message exists until a client sends one.
+  **Chat**
+
+- New welcome messages: pick a text channel under Settings → Welcome messages in the admin panel and a line greets each new member there when their account is ready (after sign-up, or once an admin approves it in approval mode). It is off by default. Members can answer with a Wave to say hi! button, and a moderator can delete the line like any message.
+
 **Server (operators)**
 
+- Server stickers: members with Manage Server can upload up to 60 stickers (PNG, GIF or WebP, animation allowed, up to 512 KB and 320x320) under `/api/v1/stickers`, stored with the other uploads.
 - Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.
 
 **Desktop UI**
 
 - The member list, profile and DMs show the game someone is playing ("Playing VALORANT · for 42 min"). The desktop app finds it from your Steam and Epic libraries and a built-in list. To turn it off, use Settings → Advanced → Activity.
 - Under Settings → Advanced → Activity, Your games lets you add any running program as a game, rename a game, or keep one game from showing. These choices stay on your computer.
+- Avatars and profile banners can be animated: upload a GIF, animated WebP or animated PNG. It shows its first frame and plays while you hover the message, member or DM row; the profile card plays it straight away. With reduced motion on it never plays. Avatars may now be up to 2 MB and banners up to 4 MB; group DM icons stay still.
 
 ### Fixed
+
+**Login & connection**
+
+- Rejecting a server's changed certificate while the app was still signing in left the Auto-connecting spinner running forever. The sign-in now stops and the login form says the certificate was not accepted.
+- After picking a server with a remembered password, switching to another server or typing a different address kept the password box filled, and Log in then failed with a raw error. The remembered password now clears when the server changes.
 
 **Accounts & admin**
 
@@ -79,6 +98,7 @@ and only when it changes something a contributor or fork holder must do
 - Account recovery with a recovery kit now spends exactly the kit it checked, so a new kit set up at the same moment stays unspent and usable.
 - A moderator could file an appeal against their own channel purge, which then showed in the moderation queue as an appeal against a sanction. A purge is not a sanction, so it can no longer be appealed.
 - The first-run setup wizard could save a TLS choice the server then could not start with: manual certificates when none were in place, or ACME on port 80. The wizard now refuses those choices, as the admin panel already did.
+- The username box on the register form and in Settings → Account cut a name made of letters outside the Basic Multilingual Plane (some CJK ideographs, mathematical letters) at 16 characters. It now takes the full 32 characters the server allows.
 
 **Chat**
 
@@ -112,6 +132,8 @@ and only when it changes something a contributor or fork holder must do
 - Switching your camera during a call left your own video tile frozen or black until you turned the camera off and on. The tile now follows the new camera straight away.
 - In the Linux app, every voice join, device change and visit to the voice settings left a sound-server connection open, until after a long session no app on the desktop could play or record sound and the call went silent. The app now keeps a few shared connections and reuses them.
 - In the Windows app, a screen share or camera set to H.264 always fell back to VP8, even on a graphics card that can encode H.264. It now stays on H.264 and is encoded on the graphics card (not on Intel graphics, which keep the old behaviour).
+- In the Linux app, your camera could send only about 5 frames a second on some laptop webcams. It now picks a camera mode that keeps 30 fps.
+- In the Linux app, Settings > Voice & Video showed "Camera unavailable" during a call with your camera on. The preview now shows your call camera.
 - In the Linux app, someone else's camera or screen share could show one picture and then freeze for the rest of the call, and a VP9 camera could stay black. Their video now keeps playing. Closing a stream's pop-out window also no longer leaves its tile black.
 - When unmuting failed because the microphone could not be opened, the app switched you back to muted, but everyone else still saw you as unmuted. They now see you muted too.
 - After the call reconnected, a camera or screen share that ended during the drop, or belonged to someone who left meanwhile, stayed in the video grid as a frozen tile. Those tiles are now removed.

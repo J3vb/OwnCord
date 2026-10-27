@@ -210,6 +210,46 @@ describe("MemberColumn", () => {
     expect(document.activeElement).toBe(button);
   });
 
+  describe("call view", () => {
+    it("hides the column while the call view is up and puts the saved choice back after", () => {
+      ctrl = make();
+      ctrl.sync();
+      expect(column.hidden).toBe(false);
+
+      ctrl.setCallView(true);
+      expect(column.hidden).toBe(true);
+      expect(button.hidden).toBe(false);
+      expect(button.getAttribute("aria-pressed")).toBe("false");
+
+      ctrl.setCallView(false);
+      expect(column.hidden).toBe(false);
+      expect(button.getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("toggle opens it for the moment without saving; leaving the call view forgets it", () => {
+      savePref(MEMBER_OPEN_PREF, false);
+      ctrl = make();
+      ctrl.setCallView(true);
+      const before = localStorage.getItem("owncord:settings:memberListOpen");
+
+      ctrl.toggle();
+      expect(column.hidden).toBe(false);
+      expect(localStorage.getItem("owncord:settings:memberListOpen")).toBe(before);
+
+      ctrl.setCallView(false);
+      expect(column.hidden).toBe(true);
+      ctrl.setCallView(true);
+      expect(column.hidden).toBe(true);
+    });
+
+    it("a memberListOpen change during the call view leaves the column hidden", () => {
+      ctrl = make();
+      ctrl.setCallView(true);
+      savePref(MEMBER_OPEN_PREF, true);
+      expect(column.hidden).toBe(true);
+    });
+  });
+
   it("a memberListOpen change from elsewhere re-syncs", () => {
     ctrl = make();
     ctrl.sync();

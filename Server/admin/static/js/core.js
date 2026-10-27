@@ -154,7 +154,7 @@ const ACTION_LABEL={
   channel_create:'created {t}',channel_update:'edited {t}',channel_delete:'deleted {t}',channel_perms_update:'changed role access to {t}',channel_perms_clear:'reset role access to {t}',
   channel_user_perms_update:'changed member access to {t}',channel_user_perms_clear:'reset member access to {t}',category_perms_update:'changed role access on category {t}',category_perms_clear:'reset role access on category {t}',category_user_perms_update:'changed member access on category {t}',category_user_perms_clear:'reset member access on category {t}',channel_perms_sync:'synced category access into {t}',channel_retention_change:'changed message retention for {t}',
   role_create:'created {t}',role_update:'edited {t}',role_delete:'deleted {t}',role_reorder:'reordered the roles',role_change:'changed the role of {t}',role_add:'added a role to {t}',role_remove:'removed a role from {t}',
-  permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',
+  permission_explain:'checked the permissions of {t}',permission_preview:'previewed permissions for {t}',emoji_create:'added an emoji',emoji_delete:'removed an emoji',sticker_create:'added a sticker',sticker_update:'renamed a sticker',sticker_delete:'removed a sticker',
   setting_change:'changed a server setting',settings_change:'changed the server settings',registration_mode_change:'changed who can join',
   retention_policy_change:'changed the message retention policy',config_write:'wrote config.yaml',server_setup:'set up the server',
   config_override_change:'changed a server configuration override',server_restart_requested:'requested a server restart',
@@ -462,6 +462,7 @@ const NAV=[
   {id:'channels',label:'Channels',icon:I.channels,allowed:()=>can(PERM.MANAGE_CHANNELS)},
   {id:'invites',label:'Invites',icon:I.key,allowed:()=>can(PERM.MANAGE_INVITES)},
   {id:'emoji',label:'Emoji',icon:I.smile,allowed:()=>can(PERM.MANAGE_SERVER)},
+  {id:'stickers',label:'Stickers',icon:I.smile,allowed:()=>can(PERM.MANAGE_SERVER)},
   {section:'Moderation'},
   {id:'audit',label:'Audit log',icon:I.audit,allowed:()=>can(PERM.VIEW_AUDIT_LOG)},
   {section:'Server'},
@@ -657,7 +658,7 @@ function dismissButton(id,sig,what){return'<button class="notice-dismiss" aria-l
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,config:renderServerConfig,retention:renderRetention,backups:renderBackups,updates:renderUpdates,whatsnew:renderWhatsNew};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,stickers:renderStickers,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,config:renderServerConfig,retention:renderRetention,backups:renderBackups,updates:renderUpdates,whatsnew:renderWhatsNew};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" data-action="navigateTo" data-args="'+actArgs('dashboard')+'">Back to Dashboard</button>';return}

@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` and `/api/v1/users/me/banner` (2 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), `/api/v1/users/me/avatar` and `/api/v1/dms/{id}/icon` (3 MiB envelope), and `/api/v1/users/me/banner` (5 MiB envelope).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 231 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 236 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -225,6 +225,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/reports/mine`                                               |
 | GET     | `/api/v1/search`                                                     |
 | GET     | `/api/v1/server-info`                                                |
+| GET     | `/api/v1/stickers/`                                                  |
+| POST    | `/api/v1/stickers/`                                                  |
+| DELETE  | `/api/v1/stickers/{id}`                                              |
+| PATCH   | `/api/v1/stickers/{id}`                                              |
+| GET     | `/api/v1/stickers/{id}/image`                                        |
 | POST    | `/api/v1/uploads`                                                    |
 | DELETE  | `/api/v1/uploads/{id}`                                               |
 | PATCH   | `/api/v1/users/me/`                                                  |
@@ -920,16 +925,17 @@ Not registered when the server has no working storage backend.
 
 `multipart/form-data` with a single `file` part.
 
-| Rule       | Value                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
-| Size       | 1 MiB                                                                                                                 |
-| Dimensions | 1024x1024, measured from the sniffed image                                                                            |
+| Rule       | Value                                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg`, `image/webp` or `image/gif`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 2 MiB                                                                                                                              |
+| Dimensions | 1024x1024, measured from the sniffed image                                                                                         |
 
-GIF is refused (an animated avatar renders in every message row), and so is
-SVG — it is markup with script and external-fetch capability, and an avatar is
-rendered inline by definition. The server does not re-encode or crop; the
-client is expected to downscale and square-crop before uploading.
+An animated GIF, WebP or PNG is accepted as-is (WP 8.7): clients show its first
+frame and play it on hover, never under reduced motion. SVG is refused — it is
+markup with script and external-fetch capability, and an avatar is rendered
+inline by definition. The server does not re-encode or crop; the client is
+expected to downscale a still picture before uploading.
 
 #### Response 201 Created
 
@@ -989,14 +995,15 @@ Not registered when the server has no working storage backend.
 
 `multipart/form-data` with a single `file` part.
 
-| Rule       | Value                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
-| Size       | 1 MiB                                                                                                                 |
-| Dimensions | At most 1920x960, measured from the sniffed image                                                                     |
+| Rule       | Value                                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg`, `image/webp` or `image/gif`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 4 MiB                                                                                                                              |
+| Dimensions | At most 1920x960, measured from the sniffed image                                                                                  |
 
-GIF and SVG are refused for the reasons given for avatars. The server does not
-re-encode or crop; the client is expected to crop and scale before uploading.
+Animated pictures are accepted and shown as for avatars; SVG is refused. The
+server does not re-encode or crop; the client crops and scales a still picture
+before uploading and sends an animated one unchanged.
 
 #### Response 201 Created
 
@@ -1294,6 +1301,12 @@ omitted for every other message and for a deleted one: `{"question", "answers":
 when the poll was ended or `expires_at` has passed, even before anything marked it
 ended. The poll's `content` is a readable fallback of the question and answers. A poll
 cannot be edited or forwarded.
+
+A sticker message (`chat_send` with `sticker_id`, see `docs/protocol.md`) carries a
+`sticker` block, omitted for every other message and for a deleted one: `{"id",
+"name", "url"}`. `id` and `url` are `null` when the sticker was deleted, and `name`
+is the label kept from send time. The message's `content` is the fallback `[Sticker:
+name]`, and it cannot be edited or forwarded. Search hits carry the same block.
 
 A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
@@ -2250,10 +2263,10 @@ Set a group DM's icon. Any member may.
 #### Request
 
 `multipart/form-data` with one `file` part, under the same rules as an avatar
-(`POST /api/v1/users/me/avatar`): at most 1 MiB, a PNG, JPEG or WebP image
-(sniffed from the bytes, never from the filename or the client's type), at most
-1024 x 1024 pixels, and it counts against the uploader's storage quota. The
-request body is capped at 2 MiB. Crop to a square client-side.
+(`POST /api/v1/users/me/avatar`) except that it stays still: at most 1 MiB, a
+PNG, JPEG or WebP image (no GIF; sniffed from the bytes, never from the filename
+or the client's type), at most 1024 x 1024 pixels, and it counts against the
+uploader's storage quota. The request body is capped at 3 MiB. Crop to a square client-side.
 
 #### Response 200 OK
 
@@ -2624,6 +2637,17 @@ Files are validated against blocked magic bytes (PE executables, ELF binaries, M
 
 Before any of its bytes are read, the file name is checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and looks only at the final extension, the one Windows opens the file by, so `report.pdf.bat` is refused when `bat` is blocked and `report.bat.pdf` is not; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
 
+#### Voice messages
+
+A voice message is an ordinary attachment that also carries its length and a small waveform, so a client can draw the player before it downloads the file (server capability `voice_messages`, WP 8.9). Send both as query parameters, not form fields:
+
+| Parameter           | Value                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `voice_duration_ms` | Clip length in milliseconds, a decimal integer from 1 to 300000                            |
+| `voice_waveform`    | Amplitude bytes, base64url without padding (`RawURLEncoding`), 1 to 256 bytes once decoded |
+
+Send both or neither; with neither the upload is an ordinary one, exactly as before. One alone, a number out of range or not a plain decimal, a waveform that is not valid unpadded base64url or decodes outside 1 to 256 bytes, or a repeated parameter is refused with `400 BAD_REQUEST` before any quota is reserved or any of the body is read. After the type is sniffed from the file's own bytes, a voice upload whose type is not `audio/*`, `video/webm`, `video/mp4` or `application/ogg` is refused with `400 BAD_REQUEST` and the stored file is deleted. The waveform is stored as the canonical encoding of the decoded bytes. Each upload is its own attachment: sending the same clip again (a retry after a dropped connection) makes a second, independent row. The two values come back on the attachment of the message that carries it, in history, pins, threads and forwarded copies.
+
 #### Response 201 Created
 
 ```json
@@ -2638,7 +2662,7 @@ Before any of its bytes are read, the file name is checked against the server's 
 }
 ```
 
-`width` and `height` are only present for image files.
+`width` and `height` are only present for image files. `duration_ms` (integer) and `waveform` (string, the canonical base64url form) are only present for a voice upload and are omitted otherwise.
 
 ---
 
@@ -2812,6 +2836,153 @@ literal `:shortcode:` text. Broadcasts `emoji_update` on success.
 | 400    | `BAD_REQUEST` | id is not a positive integer |
 | 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER   |
 | 404    | `NOT_FOUND`   | no emoji with that id        |
+
+---
+
+## Custom Stickers
+
+Server-wide custom stickers (WP 8.8a), sent as their own message with
+`chat_send.sticker_id` (see `docs/protocol.md`).
+
+**Permission model.** The same as custom emoji: reading the set is open to any
+authenticated member, and adding, renaming and removing require
+**MANAGE_SERVER**. There is no `MANAGE_STICKERS` bit.
+
+A sticker has a `name` (2 to 30 characters of ASCII letters, digits, space,
+underscore or hyphen; the case typed is kept, trimmed, and uniqueness ignores
+case), an optional related `emoji` the picker searches by (a single emoji or a
+`:shortcode:` of a custom emoji, at most 64 bytes) and an image. A server holds
+at most 60 stickers.
+
+### GET /api/v1/stickers
+
+List every sticker, ordered by name ignoring case.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+[
+  { "id": 3, "name": "Wave", "emoji": "👋", "url": "/api/v1/stickers/3/image" },
+  { "id": 7, "name": "Party Blob", "emoji": null, "url": "/api/v1/stickers/7/image" }
+]
+```
+
+`url` is server-relative and authenticated, see GET /api/v1/stickers/{id}/image.
+
+---
+
+### POST /api/v1/stickers
+
+Upload one sticker as multipart form data.
+
+**Auth:** Required, **MANAGE_SERVER**
+**Rate limit:** 10 requests/minute per user
+**Body size limit:** 1 MiB (the image itself is capped at 512 KiB)
+**Content-Type:** `multipart/form-data`
+
+| Field   | Type   | Notes                                                         |
+| ------- | ------ | ------------------------------------------------------------- |
+| `name`  | string | 2 to 30 characters of `[A-Za-z0-9 _-]` after trimming         |
+| `emoji` | string | Optional. A single emoji or a `:shortcode:`, at most 64 bytes |
+| `file`  | file   | PNG, GIF or WebP; animated GIF and WebP are allowed           |
+
+Validation, in the order it is applied. The permission check runs before the
+multipart body is read, so a member without the bit never causes a spool to disk:
+
+1. MANAGE_SERVER, then the rate limit, then the name and emoji format.
+2. At most **512 KiB** of image bytes.
+3. The MIME type is **sniffed from the file's own bytes**, never taken from the
+   client's part header. Only `image/png`, `image/gif` and `image/webp` are
+   accepted. JPEG and SVG are refused.
+4. Dimensions are re-read from the sniffed image and must be at most
+   **320 x 320**.
+5. Names are unique ignoring case; a collision is `409 CONFLICT`. Two uploads of
+   the same name at once give one `201` and one `409`, and the loser leaves no
+   file behind.
+6. A server holds at most 60 stickers.
+
+On success the full set is broadcast as `sticker_update` (see protocol.md).
+
+#### Response 201 Created
+
+```json
+{ "id": 3, "name": "Wave", "emoji": "👋", "url": "/api/v1/stickers/3/image" }
+```
+
+#### Errors
+
+| Status | Code           | Cause                                                     |
+| ------ | -------------- | --------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | bad name or emoji, wrong format, too large, too big, full |
+| 403    | `FORBIDDEN`    | caller lacks MANAGE_SERVER                                |
+| 409    | `CONFLICT`     | a sticker with that name already exists                   |
+| 429    | `RATE_LIMITED` | upload rate limit exceeded                                |
+
+---
+
+### PATCH /api/v1/stickers/{id}
+
+Rename a sticker and set or clear its related emoji. The image never changes.
+
+**Auth:** Required, **MANAGE_SERVER**
+**Content-Type:** `application/json`
+
+```json
+{ "name": "Hello", "emoji": "" }
+```
+
+Both fields are optional. An absent `name` or `emoji` is kept, and `"emoji": ""`
+clears it. Broadcasts `sticker_update` on success. Messages that used the sticker
+keep the name they were sent with.
+
+#### Response 200 OK
+
+The updated sticker, in the shape of the list entries.
+
+#### Errors
+
+| Status | Code          | Cause                                           |
+| ------ | ------------- | ----------------------------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer, bad name or emoji |
+| 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER                      |
+| 404    | `NOT_FOUND`   | no sticker with that id                         |
+| 409    | `CONFLICT`    | another sticker already has that name           |
+
+---
+
+### GET /api/v1/stickers/{id}/image
+
+Serve one sticker's image bytes.
+
+**Auth:** Required (Bearer token)
+**Caching:** `Cache-Control: private, max-age=86400, immutable`
+
+Authenticated rather than public, for the same reason the emoji image is. A
+sticker is server-wide, so authentication is the whole check. Its bytes never
+change for a given id. Unknown ids answer 404.
+
+---
+
+### DELETE /api/v1/stickers/{id}
+
+Delete one sticker and unlink its stored file.
+
+**Auth:** Required, **MANAGE_SERVER**
+
+Messages that carried the sticker stay, with their name and a `null` `id` and
+`url` in `sticker`. Broadcasts `sticker_update` on success.
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                        |
+| ------ | ------------- | ---------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer |
+| 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER   |
+| 404    | `NOT_FOUND`   | no sticker with that id      |
 
 ---
 
@@ -4854,7 +5025,7 @@ A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
-`voice_owner_movable`.
+`voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -4886,6 +5057,14 @@ can move the owner between voice channels: `true` (the default while no row
 exists) or `false`, also accepted as `1`/`0`. It is stored as `true`/`false`.
 Only the **Owner** role may change it (`403 FORBIDDEN` otherwise).
 
+`game_activity_enabled` (WP 8.3e-2) decides whether members' game activity is
+shown on this server: `true` (the default while no row exists) or `false`, also
+accepted as `1`/`0`, stored as `true`/`false`. Unlike `voice_owner_movable` it
+is not owner-only: `MANAGE_SERVER` may change it. A save hands the value to the
+running hub, which clears every shown game when it is `false` and sends the
+[`game_activity_policy`](protocol.md#game_activity_policy-server---client-broadcast)
+frame to every connected client; an unreadable row at start-up counts as `false`.
+
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change
 is audited as `retention_policy_change` naming the old and new value. The
@@ -4899,6 +5078,13 @@ before the AFK channel may take them: one of `60`, `300`, `900`, `1800` or
 `3600`, anything else is refused with `400`. A server with no row uses `300`.
 Which channel is the AFK channel is not a setting: see
 [`PUT /admin/api/afk-channel`](#put-adminapiafk-channel).
+
+`welcome_channel_id` (WP 8.6) names the text channel that greets each new member
+with a `member_join` row (see `docs/protocol.md`): the id of an existing,
+non-archived `text` channel, or the empty string to turn welcome messages off (the
+default while no row exists). A voice, archived, missing or non-numeric id is refused
+with `400`. It needs only `MANAGE_SERVER`. The pointer can dangle later (the channel
+deleted or archived): registration then writes no row and still succeeds.
 
 `server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
 held to the same limits the first-run setup wizard enforces.

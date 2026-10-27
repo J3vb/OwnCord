@@ -13,6 +13,10 @@
  * narrow-window overlay: below 900 CSS px the column is a fixed panel the
  * toggle opens for the moment (never saved), so the chat keeps its room.
  *
+ * While the call view is up in this window, or a forum is on screen, the
+ * column steps aside so the call or the posts get the width: the toggle opens
+ * it for the moment (never saved), and leaving puts the saved choice back.
+ *
  * This controller is the only writer of the toggle's `hidden` and
  * `aria-pressed`.
  */
@@ -59,6 +63,8 @@ export interface MemberColumn {
   toggle(): void;
   /** Close the narrow overlay (the sidebar drawer opening). No-op otherwise. */
   closeOverlay(): void;
+  /** The call view is up in this window (on) or gone (off). */
+  setCallView(on: boolean): void;
   destroy(): void;
 }
 
@@ -76,6 +82,9 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   // jsdom has no matchMedia; without one the column is never an overlay.
   const narrow = typeof window.matchMedia === "function" ? window.matchMedia(NARROW_QUERY) : null;
   let narrowOpen = false;
+  let callView = false;
+  /** Opened from the toggle while the column steps aside; not saved. */
+  let asideOpen = false;
 
   // --- Width handle ---
   let width = clampMemberWidth(loadPref<number>(MEMBER_WIDTH_PREF, MEMBER_WIDTH_DEFAULT));
@@ -149,13 +158,22 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     body.querySelector<HTMLElement>('[data-testid="member-search"]')?.focus();
   }
 
+  /** The call view or a forum wants the width. */
+  function stepsAside(): boolean {
+    return callView || getActiveChannel()?.type === "forum";
+  }
+
   function sync(): void {
     if (destroyed) return;
     const right = loadMemberLayout() === "right";
     const onScreen = guildChannelOnScreen();
     const overlay = narrow?.matches === true;
     if (!right || !onScreen) narrowOpen = false;
-    const wanted = overlay ? narrowOpen : loadPref<boolean>(MEMBER_OPEN_PREF, true);
+    const wanted = overlay
+      ? narrowOpen
+      : stepsAside()
+        ? asideOpen
+        : loadPref<boolean>(MEMBER_OPEN_PREF, true);
     const shown = right && onScreen && uiStore.getState().activeView === null && wanted;
     button.hidden = !(right && onScreen);
     button.setAttribute("aria-pressed", String(shown));
@@ -185,6 +203,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     (s) => s.activeChannelId,
     () => {
       narrowOpen = false;
+      asideOpen = false;
       sync();
     },
   );
@@ -246,12 +265,24 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
       narrowOpen = false;
       sync();
     },
+    setCallView(on: boolean): void {
+      if (destroyed || callView === on) return;
+      callView = on;
+      asideOpen = false;
+      sync();
+    },
     toggle(): void {
       if (destroyed) return;
       if (narrow?.matches === true) {
         narrowOpen = !narrowOpen;
         sync();
         if (narrowOpen) focusSearch();
+        return;
+      }
+      if (stepsAside()) {
+        asideOpen = !asideOpen;
+        sync();
+        if (asideOpen) focusSearch();
         return;
       }
       savePref(MEMBER_OPEN_PREF, !loadPref<boolean>(MEMBER_OPEN_PREF, true));

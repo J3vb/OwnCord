@@ -30,6 +30,7 @@ mod linux_media;
 #[cfg(target_os = "linux")]
 mod linux_spellcheck;
 mod livekit_proxy;
+mod media_activity;
 // Message notifications that open their message on click (the plugin's desktop
 // backend drops clicks). Desktop-only: the plugin's mobile backend has its own
 // action callback.
@@ -293,6 +294,7 @@ pub fn run() {
             idle::system_idle_ms,
             game_activity::detect_game,
             game_activity::list_running_programs,
+            media_activity::detect_media,
             windows_app_audio::app_audio_available,
             windows_app_audio::start_app_audio,
             windows_app_audio::stop_app_audio,

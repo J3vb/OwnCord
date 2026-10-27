@@ -149,7 +149,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         displayName: identity.displayName,
         avatar: authStore.getState().user?.avatar ?? null,
       },
-      { className: "spc-avatar", background: "var(--accent)" },
+      { className: "spc-avatar", background: "var(--accent)", animate: "always" },
     );
     const names = createElement("div", { class: "spc-names" });
     const nameEl = createElement(

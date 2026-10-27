@@ -34,6 +34,9 @@ type uploadResponse struct {
 	URL      string `json:"url"`
 	Width    *int   `json:"width,omitempty"`
 	Height   *int   `json:"height,omitempty"`
+	// DurationMs and Waveform are set only for a voice upload (WP 8.9).
+	DurationMs int    `json:"duration_ms,omitempty"`
+	Waveform   string `json:"waveform,omitempty"`
 }
 
 // sanitizeUploadFilename cleans an upload filename: strips control and
@@ -230,6 +233,14 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		}
 		defer slots.release(user.ID)
 
+		// WP 8.9: the voice pair is validated before any quota is reserved and
+		// before a byte of the body is read.
+		voice, err := parseVoiceMeta(r.URL.Query())
+		if err != nil {
+			writeVoiceParamError(w, err)
+			return
+		}
+
 		// SRV-05: the server's global 30 s ReadTimeout/WriteTimeout bound the
 		// WHOLE request, so a 25 MB upload on a slow uplink is cut mid-body
 		// (and its 201 never lands, because the write deadline elapsed long
@@ -299,6 +310,9 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		if !ok {
 			return
 		}
+		if !voice.checkStored(w, store, stored) {
+			return
+		}
 
 		// Drain the rest of the body: the tail meets the body cap and the
 		// multipart parser too, so a padded or malformed tail refuses the
@@ -313,15 +327,8 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 
 		// Record the attachment (unlinked — message_id is NULL) and commit
 		// the reservation under the same lock.
-		if err := uploads.Record(r.Context(), service.AttachmentRecord{
-			ID:         stored.id,
-			UploaderID: user.ID,
-			Filename:   safeFilename,
-			MimeType:   stored.mime,
-			Size:       stored.size,
-			Width:      stored.width,
-			Height:     stored.height,
-		}, res); err != nil {
+		rec := voice.record(user.ID, safeFilename, stored)
+		if err := uploads.Record(r.Context(), rec, res); err != nil {
 			// Clean up stored file on DB failure; Settle returns the charge.
 			if delErr := store.Delete(stored.id); delErr != nil {
 				slog.Error("failed to clean up orphaned upload file", "stored_as", stored.id, "error", delErr)
@@ -334,13 +341,15 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		slog.Info("file uploaded", "id", stored.id, "filename", safeFilename, "size", stored.size, "mime", stored.mime)
 
 		writeJSON(w, http.StatusCreated, uploadResponse{
-			ID:       stored.id,
-			Filename: safeFilename,
-			Size:     stored.size,
-			Mime:     stored.mime,
-			URL:      "/api/v1/files/" + stored.id,
-			Width:    stored.width,
-			Height:   stored.height,
+			ID:         stored.id,
+			Filename:   safeFilename,
+			Size:       stored.size,
+			Mime:       stored.mime,
+			URL:        "/api/v1/files/" + stored.id,
+			Width:      stored.width,
+			Height:     stored.height,
+			DurationMs: voice.durationMs,
+			Waveform:   voice.waveform,
 		})
 	}
 }

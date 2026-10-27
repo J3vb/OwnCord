@@ -24,16 +24,18 @@ ORDER BY m.id DESC LIMIT ?;
 -- call_log.sql. A forward (WP 6.9a) is read-only too: its text is a snapshot of
 -- another message, so no row comes back and the wrapper reports "cannot edit".
 -- A poll (WP 6.9b) is read-only too: an edit would change what people voted on.
+-- A sticker message (WP 8.8a) has no text of its own to edit.
 UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0 AND kind = 0
   AND NOT EXISTS (SELECT 1 FROM message_forwards f WHERE f.message_id = messages.id)
   AND NOT EXISTS (SELECT 1 FROM polls p WHERE p.message_id = messages.id)
+  AND NOT EXISTS (SELECT 1 FROM message_stickers s WHERE s.message_id = messages.id)
 RETURNING id, channel_id, user_id, content, reply_to, edited_at, deleted, pinned, timestamp,
           mentions_everyone, pinned_at, kind;
 
 -- name: SoftDeleteMessage :execresult
--- kind IN (0, 7): an ordinary message or a pin row (kind 7) may be deleted. A
+-- kind IN (0, 7, 8): an ordinary message, a pin row (kind 7) or a welcome row (kind 8) may be deleted. A
 -- call log row (kind 1) or a group event row (kinds 2 to 6) never is.
-UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind IN (0, 7);
+UPDATE messages SET deleted = 1 WHERE id = ? AND deleted = 0 AND kind IN (0, 7, 8);
 
 -- name: SetMessagePinned :execresult
 -- pinned_at is the pin timestamp for ordering; the Go layer passes a stamp when
