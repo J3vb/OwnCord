@@ -1857,3 +1857,52 @@ jobs:
             fi
             echo "$d refused Node 24: $(grep -m1 EBADENGINE <<<"$out")"
           done
+
+  # A failed job gets one automatic re-run (@J3vb, 2026-10-27): a test that
+  # fails once and passes on its in-job retry still fails its job
+  # (failOnFlakyTests), and a lane used to lose a cycle re-running it by hand.
+  # A run cannot re-run itself while it is still in progress, so this job only
+  # asks ci-rerun.yml to do it once the run has finished. Only the first
+  # attempt asks, so a job that fails again stays red. Only PRs from this
+  # repository and pushes to dev: a fork's or Dependabot's token cannot
+  # dispatch, and main's runs are release evidence that should show the first
+  # result. `needs` lists every other job in this file; add a new one there.
+  retry-failed:
+    name: Re-run failed jobs once
+    needs:
+      - changes
+      - server-fast-checks
+      - server-build-test
+      - client-check
+      - docs-consistency
+      - hygiene
+      - workflow-lint
+      - supply-chain
+      - client-tests
+      - rust-tests
+      - client-e2e
+      - admin-e2e
+      - client-e2e-parity
+      - server-docker-build
+      - tauri-build
+      - client-fullstack
+      - client-web
+      - client-native
+      - node-policy
+    if: >-
+      ${{ always() && github.run_attempt == 1
+      && contains(needs.*.result, 'failure')
+      && github.actor != 'dependabot[bot]'
+      && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      || (github.event_name == 'push' && github.ref == 'refs/heads/dev')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Ask ci-rerun.yml to re-run this run's failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh workflow run ci-rerun.yml --repo "$REPO" --ref dev -f run_id="$RUN_ID"
