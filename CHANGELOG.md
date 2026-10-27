@@ -65,6 +65,8 @@ and only when it changes something a contributor or fork holder must do
 **Messages & files**
 
 - Stickers: a new sticker button in the message box. The GIF, sticker and emoji buttons now open one popup with GIFs, Stickers and Emoji tabs. Click a sticker to send it at once, in channels, threads and DMs, also as a reply. Stickers show big in chat; a sticker an admin removed shows as "Deleted sticker: name". Admins add, rename and remove stickers on the new Stickers page of the admin panel.
+- Videos now play straight from the chat: the first frame shows before you press play, and the clip streams as it plays instead of downloading in full first. If the server cannot stream a clip, the play button downloads it first and shows a spinner while it does.
+- More video types play inline: .3gp, .m4v, .mkv and .ogv, also when the server could not tell the type. .avi files stay a download.
 - Text and code files (.txt, .log, .json, .py, .js, .ts, .sql, .go, .md and more) now show a preview in chat: the first lines in a coloured code box, with Expand and Collapse, the language and the line count. Only the first 64 KB is shown; download the file for the rest. Files marked as spoilers stay a plain download.
 
 **Accounts & admin**
@@ -83,6 +85,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Server (operators)**
 
+- File links for streaming: `POST /api/v1/files/{id}/link` returns a link to a file the caller may read, good for one hour, that a video player can open without an `Authorization` header. It stops working when the session ends, the account is banned or the channel is no longer readable. A server restart voids every link. Thumbnails do not accept links. A link works like a short-lived password for that one file, so keep reverse-proxy and load-balancer access logs private.
 - Server stickers: members with Manage Server can upload up to 60 stickers (PNG, GIF or WebP, animation allowed, up to 512 KB and 320x320) under `/api/v1/stickers`, stored with the other uploads.
 - Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.
 
