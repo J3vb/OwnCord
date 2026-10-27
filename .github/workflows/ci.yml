@@ -1905,4 +1905,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-        run: gh workflow run ci-rerun.yml --repo "$REPO" --ref dev -f run_id="$RUN_ID"
+        # GitHub only dispatches a workflow file the default branch (main)
+        # carries, so until a release brings ci-rerun.yml to main this is a
+        # notice, not a failure.
+        run: |
+          if out=$(gh workflow run ci-rerun.yml --repo "$REPO" --ref dev -f run_id="$RUN_ID" 2>&1); then
+            echo "$out"
+          elif grep -q "not found on the default branch" <<<"$out"; then
+            echo "::notice::ci-rerun.yml is not on the default branch yet; failed jobs are not re-run automatically"
+          else
+            echo "$out"
+            exit 1
+          fi

@@ -324,9 +324,18 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const syncMarkAllBtn = (): void => {
     const show = unreadChannelIds({ includeDms: false }).length > 0;
     // Hiding the focused button would drop focus to <body>; hand it to the
-    // neighbouring header action (Invite) so the next Tab starts nearby.
+    // next header action still shown (Invite, Audit Log, Moderation are each
+    // permission-gated), else to the channel list's roving row, so the next
+    // Tab starts nearby.
     if (!show && document.activeElement === markAllBtn) {
-      headerActions.querySelector<HTMLElement>('[data-testid="invite-btn"]')?.focus();
+      const next =
+        [...headerActions.querySelectorAll<HTMLElement>(".sidebar-header-action")].find(
+          (btn) => btn !== markAllBtn && btn.style.display !== "none",
+        ) ??
+        headerActions
+          .closest(".unified-sidebar")
+          ?.querySelector<HTMLElement>('[data-channel-id][tabindex="0"]');
+      next?.focus();
     }
     markAllBtn.style.display = show ? "" : "none";
   };
