@@ -15,7 +15,8 @@
 // for standard runners, so for this repository the minutes measure queue
 // pressure on the plan's concurrent-job cap, not money.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -272,22 +273,62 @@ async function fetchRuns(repo, since, until, token) {
   return runs;
 }
 
+function validCachedJobs(jobs) {
+  const timestamp = (value) =>
+    value === null || (typeof value === "string" && Number.isFinite(Date.parse(value)));
+  return (
+    Array.isArray(jobs) &&
+    jobs.every(
+      (job) =>
+        job !== null &&
+        typeof job === "object" &&
+        typeof job.name === "string" &&
+        Array.isArray(job.labels) &&
+        job.labels.every((label) => typeof label === "string") &&
+        timestamp(job.started_at) &&
+        timestamp(job.completed_at) &&
+        (job.conclusion === null || typeof job.conclusion === "string"),
+    )
+  );
+}
+
+function readJobsCache(file) {
+  try {
+    const jobs = JSON.parse(readFileSync(file, "utf8"));
+    return validCachedJobs(jobs) ? jobs : null;
+  } catch (err) {
+    if (err instanceof SyntaxError || err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+function writeJobsCache(file, jobs) {
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, JSON.stringify(jobs), { flag: "wx" });
+    renameSync(temporary, file);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
 // A completed run's jobs never change, so with --cache each run is read once
 // across invocations.
-async function fetchJobs(repo, runs, token, cacheDir) {
+export async function fetchJobs(repo, runs, token, cacheDir, request = get) {
   const jobsByRun = new Map();
   let next = 0;
   async function worker() {
     while (next < runs.length) {
       const run = runs[next++];
       const cached = cacheDir ? join(cacheDir, `jobs-${run.id}-${run.run_attempt ?? 1}.json`) : "";
-      if (cached && existsSync(cached)) {
-        jobsByRun.set(run.id, JSON.parse(readFileSync(cached, "utf8")));
+      const cachedJobs = cached ? readJobsCache(cached) : null;
+      if (cachedJobs !== null) {
+        jobsByRun.set(run.id, cachedJobs);
         continue;
       }
       const jobs = [];
       for (let page = 1; ; page++) {
-        const body = await get(
+        const body = await request(
           `/repos/${repo}/actions/runs/${run.id}/jobs?filter=all&per_page=100&page=${page}`,
           token,
         );
@@ -295,7 +336,7 @@ async function fetchJobs(repo, runs, token, cacheDir) {
         if (body.jobs.length < 100) break;
       }
       jobsByRun.set(run.id, jobs);
-      if (cached) writeFileSync(cached, JSON.stringify(jobs));
+      if (cached) writeJobsCache(cached, jobs);
       if (jobsByRun.size % 200 === 0)
         process.stderr.write(`jobs read for ${jobsByRun.size}/${runs.length} runs\n`);
     }

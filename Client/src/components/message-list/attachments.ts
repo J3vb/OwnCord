@@ -15,6 +15,7 @@ import { ensureHttpProxy } from "@lib/httpProxy";
 import { authStore, getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
 import { desktop } from "../../platform/desktop";
+import { isVoiceAttachment, renderVoicePlayer } from "../../features/voice-messages/player";
 import type {
   ExternalContentResult,
   ExternalImageSource,
@@ -1431,6 +1432,13 @@ export function renderAttachment(att: Attachment, gallery?: LightboxGallery): HT
 function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HTMLDivElement {
   const resolvedUrl = resolveServerUrl(att.url);
   const inlineable = isSafeUrl(resolvedUrl);
+  // A voice message (WP 8.9) is recognised by its metadata, whatever MIME the server sniffed.
+  if (inlineable && isVoiceAttachment(att)) {
+    return renderVoicePlayer(att, resolvedUrl, {
+      fetchMedia: fetchMediaAsObjectUrl,
+      downloadButton: () => buildDownloadButton(att, resolvedUrl),
+    });
+  }
   if (inlineable && isVideoAttachment(att)) {
     return renderVideoAttachment(att, resolvedUrl);
   }
