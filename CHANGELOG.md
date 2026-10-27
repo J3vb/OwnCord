@@ -63,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messages & files**
 
+- iPhone photos (.heic, .heif) and .tiff pictures now show as images in chat and in the full-screen viewer instead of a download card. The server makes a JPEG preview; Download and Save still give you the original file. Files uploaded before this update stay download cards, and a picture the server cannot read shows as unavailable (Download still works).
 - Stickers: a new sticker button in the message box. The GIF, sticker and emoji buttons now open one popup with GIFs, Stickers and Emoji tabs. Click a sticker to send it at once, in channels, threads and DMs, also as a reply. Stickers show big in chat; a sticker an admin removed shows as "Deleted sticker: name". Admins add, rename and remove stickers on the new Stickers page of the admin panel.
 - Text and code files (.txt, .log, .json, .py, .js, .ts, .sql, .go, .md and more) now show a preview in chat: the first lines in a coloured code box, with Expand and Collapse, the language and the line count. Only the first 64 KB is shown; download the file for the rest. Files marked as spoilers stay a plain download.
 

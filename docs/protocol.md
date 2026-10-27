@@ -309,6 +309,9 @@ connections from then on.
 `GET /api/v1/files/{id}/thumb`, an image's bounded preview. A client then shows
 an inline image from that route and loads the full file only when it is
 opened. It is omitted by older servers, and clients then show the full file.
+A `image/heic`, `image/heif` or `image/tiff` attachment has no image a client
+can show except that route's JPEG, so a client without `thumbnails` shows it as
+a file to download.
 
 ### Step 3: Failure -- auth_error
 

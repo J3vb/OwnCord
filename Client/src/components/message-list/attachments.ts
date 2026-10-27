@@ -76,6 +76,9 @@ export interface LightboxGallery {
 export interface LightboxCurrent {
   readonly external: ExternalImageSource | undefined;
   readonly alt: string;
+  /** The server URL shown in full when it is not `external`'s file: a HEIC or
+   *  TIFF is shown through its JPEG preview, while Save keeps the original. */
+  readonly shown?: string | undefined;
 }
 
 /** What the lazy gallery module drives (3A-10c). */
@@ -94,6 +97,7 @@ export interface LightboxHandle {
   /** Passed in so the lazy gallery module imports only types from here. */
   fetchImageAsObjectUrl(url: string): Promise<string | null>;
   thumbnailUrl(fileUrl: string, mime: string): string;
+  shownImageUrl(fileUrl: string, mime: string): string;
   close(): void;
 }
 
@@ -167,7 +171,17 @@ function baseMime(mime: string): string {
  *  a permanently-loading placeholder, so it belongs on the download chip. */
 export function isImageMime(mime: string): boolean {
   const base = baseMime(mime);
+  // A HEIC or TIFF is shown through the server's JPEG preview (WP 8.12); a
+  // server that does not advertise thumbnails has none, so it stays a file.
+  if (isConvertedImageMime(base)) return authStore.getState().uploadPolicy?.thumbnails === true;
   return base.startsWith("image/") && base !== "image/svg+xml";
+}
+
+/** Image types no webview decodes, which the server previews as a JPEG at the
+ *  file's `/thumb` route (WP 8.12). The original is kept; Download gives it. */
+export function isConvertedImageMime(mime: string): boolean {
+  const base = baseMime(mime);
+  return base === "image/heic" || base === "image/heif" || base === "image/tiff";
 }
 
 /** Container MIME types we are willing to hand to a <video> element.
@@ -447,11 +461,12 @@ function isExternalUrl(url: string): boolean {
 
 /** The server's bounded preview of an image file (P4-08), or the file itself
  *  on a server that does not advertise thumbnails or for a type the server
- *  passes through unchanged (only JPEG and PNG are scaled). */
+ *  passes through unchanged (only JPEG and PNG are scaled). A HEIC, HEIF or
+ *  TIFF always takes the preview: the file itself is not an image to a webview. */
 export function thumbnailUrl(fileUrl: string, mime: string): string {
   if (
     authStore.getState().uploadPolicy?.thumbnails !== true ||
-    (mime !== "image/jpeg" && mime !== "image/png") ||
+    (mime !== "image/jpeg" && mime !== "image/png" && !isConvertedImageMime(mime)) ||
     !isServerUrl(fileUrl)
   ) {
     return fileUrl;
@@ -460,6 +475,12 @@ export function thumbnailUrl(fileUrl: string, mime: string): string {
   if (!/^\/api\/v1\/files\/[^/]+$/.test(parsed.pathname)) return fileUrl;
   parsed.pathname += "/thumb";
   return parsed.toString();
+}
+
+/** The URL whose bytes a webview can show in full: the file itself, or for a
+ *  HEIC, HEIF or TIFF its JPEG preview (WP 8.12). */
+export function shownImageUrl(fileUrl: string, mime: string): string {
+  return isConvertedImageMime(mime) ? thumbnailUrl(fileUrl, mime) : fileUrl;
 }
 
 /** Report whether a URL targets the configured OwnCord server host. */
@@ -1484,7 +1505,13 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
         img.click();
       });
       img.addEventListener("click", () => {
-        openImageLightbox(img.src, att.filename, { url: resolvedUrl }, gallery);
+        openImageLightbox(
+          img.src,
+          att.filename,
+          { url: resolvedUrl },
+          gallery,
+          shownImageUrl(resolvedUrl, att.mime),
+        );
       });
     }
 
@@ -1527,8 +1554,9 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
       bindImageMenu({
         img,
         link: null,
-        // The row may show a thumbnail or a frozen GIF frame; copy the file.
-        full: () => fetchImageAsObjectUrl(resolvedUrl),
+        // The row may show a thumbnail or a frozen GIF frame; copy the file
+        // (a HEIC or TIFF has only its JPEG preview to copy).
+        full: () => fetchImageAsObjectUrl(shownImageUrl(resolvedUrl, att.mime)),
         save: () => downloadFile(resolvedUrl, att.filename),
       });
       img.addEventListener(
@@ -1692,6 +1720,9 @@ export function openImageLightbox(
   alt: string,
   external?: ExternalImageSource,
   gallery?: LightboxGallery,
+  /** The server URL to show in full when it is not `external`'s own file (a
+   *  HEIC's JPEG preview); Download and Save still take `external`. */
+  shownUrl?: string,
 ): void {
   // Close any existing lightbox (including its document listeners)
   if (activeLightboxClose !== null) {
@@ -1713,7 +1744,7 @@ export function openImageLightbox(
   const imgWrap = createElement("div", { class: "image-lightbox-wrap" });
   const img = createElement("img", { src, alt });
   // The image on show; a gallery step replaces it (3A-10c).
-  let current: LightboxCurrent = { external, alt };
+  let current: LightboxCurrent = { external, alt, shown: shownUrl };
   const sourceOf = (c: LightboxCurrent): string | null =>
     c.external !== undefined && "url" in c.external ? c.external.url : null;
   // Only a public address opens in the system browser; a server attachment's
@@ -1725,7 +1756,8 @@ export function openImageLightbox(
   if (external !== undefined) {
     recoverEvictedImage(
       img,
-      () => current.external ?? { url: "" },
+      () =>
+        current.shown !== undefined ? { url: current.shown } : (current.external ?? { url: "" }),
       undefined,
       () => current,
     );
@@ -1734,7 +1766,7 @@ export function openImageLightbox(
   // full file. A server image shown in full is a memory-cache hit here.
   if (external !== undefined && "url" in external && isServerUrl(external.url)) {
     const opened = current;
-    void fetchImageAsObjectUrl(external.url).then((full) => {
+    void fetchImageAsObjectUrl(shownUrl ?? external.url).then((full) => {
       // A gallery step since the open owns the picture now.
       if (current !== opened) return;
       if (full !== null && img.isConnected && img.src !== full) img.src = full;
@@ -1909,7 +1941,7 @@ export function openImageLightbox(
       },
       // img may still show the thumbnail or a frozen GIF frame it opened with.
       get full() {
-        const sourceUrl = sourceOf(current);
+        const sourceUrl = current.shown ?? sourceOf(current);
         return sourceUrl === null
           ? undefined
           : isServerUrl(sourceUrl)
@@ -2015,6 +2047,7 @@ export function openImageLightbox(
       isImageMenuOpen: () => document.querySelector(".image-context-menu") !== null,
       fetchImageAsObjectUrl,
       thumbnailUrl,
+      shownImageUrl,
       close,
     };
     import("./lightbox-gallery").then(

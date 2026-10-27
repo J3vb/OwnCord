@@ -2711,8 +2711,19 @@ format, turned upright by its EXIF orientation. Any other image — one that
 already fits, a GIF (kept animated), another format, one too large to decode
 within the server's memory bound (judged from its header, so a 16-bit image
 or a progressive JPEG reaches it at fewer pixels) or one that does not decode —
-is served as the original bytes. A file that is not an image is a `404`. A
-thumbnail is made on the first request, kept beside the original under
+is served as the original bytes. A file that is not an image is a `404`.
+
+A HEIC, HEIF or TIFF file (stored as `image/heic`, `image/heif` or `image/tiff`,
+which the server tells apart by the file's own bytes) is the exception, because
+no webview shows one: the response is always a JPEG with `Content-Type:
+image/jpeg`, scaled to fit the 800×800 box when larger (never enlarged) and
+turned upright by the file's rotation. If it cannot be converted — it does not
+decode, is too large to decode within the memory bound, or the decoder fails —
+the response is a `404`, never the original bytes. The original stays at
+`GET /api/v1/files/{id}`. A file uploaded before the server knew these formats
+was stored as `application/octet-stream` and stays a plain file.
+
+A thumbnail is made on the first request, kept beside the original under
 `upload.storage_dir/thumbs/`, and removed with it; an image that fails to
 decode is remembered there too and not tried again. A server that has this
 route says so with `upload_policy.thumbnails` on `auth_ok`.

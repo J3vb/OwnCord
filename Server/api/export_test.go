@@ -242,3 +242,6 @@ func SetRestRequestDeadlineForTest(t testing.TB, d time.Duration) {
 	restRequestDeadline = d
 	t.Cleanup(func() { restRequestDeadline = old })
 }
+
+// SniffMIMEForTest exposes sniffMIME for external tests.
+var SniffMIMEForTest = sniffMIME

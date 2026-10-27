@@ -107,9 +107,17 @@ func isUnsafeInlineMIME(mimeType string) bool {
 // sniffMIME is http.DetectContentType plus QuickTime, which the WHATWG sniffing
 // table it follows leaves out: a .mov whose ftyp box names the "qt  " brand
 // would otherwise be stored as application/octet-stream and never play inline.
+// It also names HEIC/HEIF and TIFF, which the table does not know and which the
+// thumbnail route previews as JPEG.
 func sniffMIME(header []byte) string {
 	if len(header) >= 12 && string(header[4:12]) == "ftypqt  " {
 		return "video/quicktime"
+	}
+	if m := sniffISOBMFFImage(header); m != "" {
+		return m
+	}
+	if sniffTIFF(header) {
+		return mimeTIFF
 	}
 	return http.DetectContentType(header)
 }
@@ -459,6 +467,9 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 		if openErr == nil {
 			cfg, _, decErr := image.DecodeConfig(f)
 			if decErr == nil && mime == "image/jpeg" && jpegSidewaysOnDisk(f) {
+				cfg.Width, cfg.Height = cfg.Height, cfg.Width
+			}
+			if decErr == nil && convertedFormat(mime) != "" && convertedUprightSwap(f, mime) {
 				cfg.Width, cfg.Height = cfg.Height, cfg.Width
 			}
 			f.Close() //nolint:errcheck
