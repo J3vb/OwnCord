@@ -369,3 +369,111 @@
     min-height: 44px;
   }
 }
+
+/* Voice messages (WP 8.9): the recording bar takes the input row's place. */
+.input-btn[hidden] {
+  display: none;
+}
+.message-input-wrap.voice-active .message-input-box {
+  display: none;
+}
+.voice-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-input);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-control);
+  padding: 4px;
+}
+.voice-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.voice-bar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.voice-bar-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-normal);
+}
+.voice-bar-btn:disabled {
+  cursor: progress;
+  opacity: 0.5;
+}
+.voice-bar-send {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.voice-bar-send:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--on-accent);
+}
+.voice-bar-retry {
+  font-weight: 700;
+}
+.voice-bar-dot {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: var(--radius-circle);
+  background: var(--red);
+}
+.voice-bar:not(.recording) .voice-bar-dot {
+  background: var(--text-muted);
+}
+.voice-bar-time {
+  min-width: 3.2ch;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-normal);
+}
+.voice-bar-wave {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.voice-bar-tick {
+  flex: 1;
+  min-width: 1px;
+  max-width: 4px;
+  height: 10%;
+  border-radius: 2px;
+  background: var(--accent-text);
+}
+.voice-bar-status {
+  padding: 0 8px 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.voice-bar-status.voice-bar-error {
+  color: var(--text-danger);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .voice-bar.recording .voice-bar-dot {
+    animation: voice-dot-pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes voice-dot-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (pointer: coarse) {
+  .voice-bar-btn {
+    min-width: 44px;
+    height: 44px;
+  }
+}

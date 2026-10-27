@@ -11,6 +11,7 @@
 // post-logout series.
 import { describe, expect, it } from "vitest";
 import {
+  describeDomDiff,
   evaluateBars,
   formatBars,
   idleHeapSlope,
@@ -184,6 +185,29 @@ describe("lifecycle soak pass bars", () => {
     const nodes = bar(evaluateBars(leaking), "nodes");
     expect(nodes.pass).toBe(false);
     expect(nodes.bar).toContain("page 0: 2858→2861");
+  });
+
+  it("names the attached region a nodes failure moved in", () => {
+    // The CI flake on #2790: every page-1 sample read 13 nodes over page 0
+    // (phase 5/6/9: 2896→2909) and the bar said nothing about where.
+    const dom = (attached: number, sidebar: number) => ({
+      attached,
+      regions: { "div[channel-sidebar]": sidebar, "div[member-list]": 300 },
+    });
+    const pages = [5, 6, 9, 15, 16, 19].map((cycle) =>
+      cycle < 10
+        ? sample(cycle, { nodes: 2896, dom: dom(2800, 400) })
+        : sample(cycle, { nodes: 2909, dom: dom(2813, 413) }),
+    );
+    const nodes = bar(evaluateBars(pages), "nodes");
+    expect(nodes.pass).toBe(false);
+    expect(nodes.bar).toContain(
+      "phase 5: 2896→2909 [attached 2800→2813, detached 96→96, div[channel-sidebar] 400→413]",
+    );
+  });
+
+  it("describes no DOM diff when a sample has no breakdown", () => {
+    expect(describeDomDiff(sample(5), sample(15))).toBe("");
   });
 
   it("tolerates a 1-2 node wobble in a per-phase pair", () => {
