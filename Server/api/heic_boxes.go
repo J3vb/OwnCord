@@ -193,10 +193,11 @@ func (m *heicMeta) parseIloc(body []byte) error {
 		(indexSize != 0 && indexSize != 4 && indexSize != 8) {
 		return refuse("iloc field sizes")
 	}
-	idSize, count := 2, r.uint(2)
+	idSize := 2
 	if version == 2 {
-		idSize, count = 4, r.uint(4)
+		idSize = 4
 	}
+	count := r.uint(idSize)
 	// Every item is at least id, data reference and extent count.
 	if r.bad || count > heicMaxItems || count*uint64(idSize+4) > uint64(len(r.b)) {
 		return refuse("malformed iloc")

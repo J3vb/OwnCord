@@ -676,6 +676,18 @@ describe("renderAttachment — server thumbnails", () => {
       expect(new Set(fetchedPaths())).toEqual(new Set(["/api/v1/files/abc/thumb"]));
     });
 
+    it("becomes a download card when the server has no preview for it", async () => {
+      authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+      fetchMock.mockResolvedValue({ ok: false, status: 404 });
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      host.appendChild(renderAttachment(converted));
+      await vi.waitFor(() => expect(host.querySelector(".msg-file")).not.toBeNull());
+      expect(host.querySelector(".msg-file-download")).not.toBeNull();
+      expect(host.querySelector(".msg-media-retry")).toBeNull();
+      host.remove();
+    });
+
     it("is a download card on a server without thumbnails", async () => {
       const el = renderAttachment(converted);
       expect(isImageMime(mime)).toBe(false);

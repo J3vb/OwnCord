@@ -1599,6 +1599,13 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
             const img = buildImage(objectUrl);
             current.replaceWith(img);
             current = img;
+          } else if (isConvertedImageMime(att.mime)) {
+            // No preview for this HEIC/TIFF: the file chip keeps the original downloadable.
+            const chip = renderFileChip(att, resolvedUrl);
+            const note = createElement("div", { class: "msg-file-note", role: "status" });
+            setText(note, messageStatusText("file.imageFailed"));
+            chip.querySelector(".msg-file-meta")?.appendChild(note);
+            swapKeepingFocus(wrap, chip);
           } else {
             const failure = renderFailureStatus(
               messageStatusText("file.imageFailed"),

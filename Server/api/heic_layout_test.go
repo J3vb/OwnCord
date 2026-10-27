@@ -110,6 +110,24 @@ func ilocV1(entries ...[4]uint32) func(uint32) []byte {
 	}
 }
 
+// ilocV2 is a version 2 iloc (4-byte item count and ids) with 4-byte offsets
+// and lengths, every item in the file body: {id, offset, length} each.
+func ilocV2(entries ...[3]uint32) func(uint32) []byte {
+	return func(dataOff uint32) []byte {
+		body := append(be32(2<<24), 0x44, 0x00)
+		body = append(body, be32(uint32(len(entries)))...)
+		for _, e := range entries {
+			body = append(body, be32(e[0])...)
+			body = append(body, u16(0)...) // construction method 0
+			body = append(body, u16(0)...) // data reference
+			body = append(body, u16(1)...) // one extent
+			body = append(body, be32(dataOff+e[1])...)
+			body = append(body, be32(e[2])...)
+		}
+		return isoBox("iloc", body)
+	}
+}
+
 func (l hlayout) build() []byte {
 	ftyp := isoBox("ftyp", []byte("heic"), be32(0), []byte("mif1heic"))
 	mdat := isoBox("mdat", l.data)
@@ -252,6 +270,11 @@ func TestHEICLayout_PlainStillAndGridConvert(t *testing.T) {
 		"hand-built grid":   gridLayout(t, 1, 2, 32, 16).build(),
 		"phone layout":      appleLayout(t).build(),
 		"encoder-made grid": testHEICTiled(t, 130, 70),
+		"version 2 iloc": func() []byte {
+			l := plainLayout(t)
+			l.iloc = ilocV2([3]uint32{1, 0, uint32(len(l.data))})
+			return l.build()
+		}(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			database := newUploadTestDB(t)
