@@ -51,15 +51,17 @@ const stickerPickerScreen = createLazyScreen(
 
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
-import { pollsEnabled, stickersEnabled } from "@lib/serverCapabilities";
+import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/serverCapabilities";
 import { currentUserRoleHasPermission } from "@lib/permissions";
-import { Permission } from "@lib/types";
+import { Permission, type VoiceUploadMeta } from "@lib/types";
 import {
   createExpressionPopup,
   type ExpressionPanel,
   type ExpressionPopup,
   type ExpressionTab,
 } from "@components/ExpressionPopup";
+import type { VoiceComposer } from "../features/voice-messages/voiceComposer";
+import { voiceMessagesText } from "../i18n/voiceMessages";
 import { messagingText } from "../i18n/messaging";
 import { stickersText } from "../i18n/stickers";
 import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
@@ -89,6 +91,8 @@ export interface MessageInputOptions {
     file: File,
     signal?: AbortSignal,
     onProgress?: (fraction: number) => void,
+    /** Set for a voice message (WP 8.9): its length and waveform ride the upload. */
+    voice?: VoiceUploadMeta,
   ) => Promise<{ id: string; url: string; filename: string }>;
   /** Withdraw an upload that will never be sent, so its quota is free at
    *  once. Best effort: a rejection is ignored. */
@@ -363,6 +367,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** True once the server has told us GIFs are off, or if no GIF api was wired. */
   let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
+  /** The voice-message recorder bar (WP 8.9), owned by this composer. */
+  let voice: VoiceComposer | null = null;
   let attachmentPreviewBar: HTMLDivElement | null = null;
   /** The composer's single refusal line. It stays until the user edits or
    *  sends rather than vanishing after a few seconds (A11Y-05), so it is one
@@ -927,6 +933,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.placeholder = disabled ? disabledReason! : idlePlaceholder();
     const uploadsOff = uploadsDisabledByServer();
     for (const btn of controlButtons) {
+      // The mic needs what "+" needs (an upload) and a server that keeps the clip's metadata.
+      if (btn.classList.contains("mic-btn")) {
+        btn.hidden = uploadsOff || !voiceMessagesEnabled();
+        if (disabled) btn.setAttribute("disabled", "true");
+        else btn.removeAttribute("disabled");
+        continue;
+      }
       const isAttach = btn.classList.contains("attach-btn");
       if (isAttach) btn.title = uploadsOff ? messagingText("attach.serverDisabled") : "";
       if (disabled || (isAttach && uploadsOff)) {
@@ -1663,11 +1676,25 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "data-testid": "send-btn",
     });
     sendBtn.appendChild(createIcon("send", 20));
+    // The mic (WP 8.9): where the composer can upload at all, unless a text-only composer.
+    const micBtn =
+      options.onUploadFile !== undefined && options.noAttach !== true
+        ? createElement("button", {
+            class: "input-btn mic-btn",
+            type: "button",
+            title: voiceMessagesText("mic.label"),
+            "aria-label": voiceMessagesText("mic.label"),
+            "data-testid": "voice-mic-btn",
+          })
+        : null;
+    micBtn?.appendChild(createIcon("mic", 20));
+    micBtn?.setAttribute("hidden", "");
     // Register interactive controls so the disabled state can toggle them.
     controlButtons.length = 0;
     controlButtons.push(sendBtn, emojiBtn, gifBtn);
     if (stickerBtn !== null) controlButtons.push(stickerBtn);
     if (pollBtn !== null) controlButtons.push(pollBtn);
+    if (micBtn !== null) controlButtons.push(micBtn);
     if (options.onUploadFile !== undefined) {
       controlButtons.push(attachBtn);
       disposable.onStoreChange(
@@ -2008,12 +2035,68 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (stickerBtn !== null) inputBox.appendChild(stickerBtn);
     inputBox.appendChild(gifBtn);
     if (pollBtn !== null) inputBox.appendChild(pollBtn);
+    if (micBtn !== null) inputBox.appendChild(micBtn);
     appendChildren(inputBox, charCounter, sendBtn);
     slowModeNoteEl = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",
     });
     appendChildren(root, replyBar, attachmentPreviewBar, inputBox, slowModeNoteEl);
+    const upload = options.onUploadFile;
+    if (micBtn !== null && upload !== undefined) {
+      const voiceHost = root;
+      // The recorder and its bar load on the first mic click, so they stay out of the app chunk.
+      let voiceLoading = false;
+      const startVoice = async (): Promise<void> => {
+        if (voice === null) {
+          if (voiceLoading) return;
+          voiceLoading = true;
+          let mod: typeof import("../features/voice-messages/voiceComposer");
+          try {
+            mod = await import("../features/voice-messages/voiceComposer");
+          } catch {
+            voiceLoading = false;
+            if (!signal.aborted) showUploadError(voiceMessagesText("error.failed"));
+            return;
+          }
+          voiceLoading = false;
+          // The composer was destroyed while the code loaded.
+          if (signal.aborted) return;
+          voice ??= mod.createVoiceComposer({
+            host: voiceHost,
+            before: inputBox,
+            root: voiceHost,
+            signal,
+            upload: (file, meta, uploadSignal) => upload(file, uploadSignal, undefined, meta),
+            ...(options.onDiscardUpload === undefined
+              ? {}
+              : { discardUpload: options.onDiscardUpload }),
+            send: (attachment) => {
+              // A message of its own: no text, the reply stays (as on Discord).
+              options.onSend(
+                "",
+                state.replyTo?.messageId ?? null,
+                [attachment.id],
+                [attachment],
+                replyPing(),
+              );
+              clearReply();
+            },
+            gate: () =>
+              disabledReason ??
+              sendGateReason ??
+              (uploadsDisabledByServer() ? messagingText("attach.serverDisabled") : null),
+            onError: showUploadError,
+            onClearError: clearUploadError,
+            onActiveChange: (active) => {
+              if (!active) textarea?.focus();
+            },
+          });
+        }
+        voice.start();
+      };
+      micBtn.addEventListener("click", () => void startVoice(), { signal });
+    }
     applySlowModeNote();
     container.appendChild(root);
     releaseComposer?.();
@@ -2051,6 +2134,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       if (!handedOff.has(att.upload)) att.upload.owner.destroy();
     }
     handedOff.clear();
+    // The microphone and a clip not yet sent go with the composer.
+    voice?.destroy();
+    voice = null;
     disposable.destroy();
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.
