@@ -64,6 +64,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messages & files**
 
+- iPhone photos (.heic, .heif) and .tiff pictures now show as images in chat and in the full-screen viewer instead of a download card. The server makes a JPEG preview; Download and Save still give you the original file. Files uploaded before this update stay download cards, camera RAW files (DNG, NEF, CR2, ARW) stay downloads too, and a picture the server cannot read shows as unavailable (Download still works). An older app shows these pictures as unavailable until it is updated; Download still works there.
 - Stickers: a new sticker button in the message box. The GIF, sticker and emoji buttons now open one popup with GIFs, Stickers and Emoji tabs. Click a sticker to send it at once, in channels, threads and DMs, also as a reply. Stickers show big in chat; a sticker an admin removed shows as "Deleted sticker: name". Admins add, rename and remove stickers on the new Stickers page of the admin panel.
 - Videos now play straight from the chat: the first frame shows before you press play, and the clip streams as it plays instead of downloading in full first. If the server cannot stream a clip, the play button downloads it first and shows a spinner while it does.
 - More video types play inline: .3gp, .m4v, .mkv and .ogv, also when the server could not tell the type. .avi files stay a download.

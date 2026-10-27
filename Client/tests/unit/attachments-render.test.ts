@@ -111,6 +111,8 @@ import {
   resolveServerUrl,
   formatFileSize,
   isImageMime,
+  isGalleryImage,
+  thumbnailUrl,
   isSafeUrl,
   isTrustedServerUrl,
   clearAttachmentCaches,
@@ -638,5 +640,61 @@ describe("renderAttachment — server thumbnails", () => {
       expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb", "/api/v1/files/abc"]),
     );
     expect(document.querySelector(".image-lightbox img")).not.toBeNull();
+  });
+
+  // WP 8.12: a HEIC or TIFF is no image to a webview; the server's JPEG
+  // preview at /thumb stands in for it everywhere, and Download keeps the file.
+  describe.each([
+    ["image/heic", "IMG_0001.heic"],
+    ["image/heif", "IMG_0002.heif"],
+    ["image/tiff", "scan.tiff"],
+  ])("%s", (mime, filename) => {
+    const converted = { ...att, filename, mime };
+
+    it("thumbnailUrl points at /thumb", () => {
+      authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+      expect(thumbnailUrl("https://myserver.local:8443/api/v1/files/abc", mime)).toBe(
+        "https://myserver.local:8443/api/v1/files/abc/thumb",
+      );
+    });
+
+    it("renders an <img> from /thumb and never fetches the original", async () => {
+      authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+      const el = renderAttachment(converted);
+      await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+      expect(el.classList.contains("msg-file")).toBe(false);
+      expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb"]);
+    });
+
+    it("opens the lightbox on the preview, not the original", async () => {
+      authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+      const el = renderAttachment(converted);
+      await vi.waitFor(() => expect(el.querySelector("img")).not.toBeNull());
+      (el.querySelector("img") as HTMLImageElement).click();
+      await vi.waitFor(() => expect(document.querySelector(".image-lightbox img")).not.toBeNull());
+      // The preview is a cache hit for the lightbox's full-size load.
+      expect(new Set(fetchedPaths())).toEqual(new Set(["/api/v1/files/abc/thumb"]));
+    });
+
+    it("becomes a download card when the server has no preview for it", async () => {
+      authStore.setState((prev) => ({ ...prev, uploadPolicy: { thumbnails: true } }));
+      fetchMock.mockResolvedValue({ ok: false, status: 404 });
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      host.appendChild(renderAttachment(converted));
+      await vi.waitFor(() => expect(host.querySelector(".msg-file")).not.toBeNull());
+      expect(host.querySelector(".msg-file-download")).not.toBeNull();
+      expect(host.querySelector(".msg-media-retry")).toBeNull();
+      host.remove();
+    });
+
+    it("is a download card on a server without thumbnails", async () => {
+      const el = renderAttachment(converted);
+      expect(isImageMime(mime)).toBe(false);
+      expect(isGalleryImage(converted)).toBe(false);
+      expect(el.querySelector("img")).toBeNull();
+      expect(el.classList.contains("msg-file")).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 });

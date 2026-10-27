@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -107,6 +106,8 @@ func isUnsafeInlineMIME(mimeType string) bool {
 // sniffMIME is http.DetectContentType plus QuickTime and 3GPP, which the WHATWG sniffing
 // table it follows leaves out: a .mov whose ftyp box names the "qt  " brand
 // would otherwise be stored as application/octet-stream and never play inline.
+// It also names HEIC/HEIF and TIFF, which the table does not know and which the
+// thumbnail route previews as JPEG.
 func sniffMIME(header []byte) string {
 	if len(header) >= 12 && string(header[4:12]) == "ftypqt  " {
 		return "video/quicktime"
@@ -116,6 +117,12 @@ func sniffMIME(header []byte) string {
 	if len(header) >= 12 && string(header[4:8]) == "ftyp" &&
 		(string(header[8:11]) == "3gp" || string(header[8:11]) == "3g2") {
 		return "video/3gpp"
+	}
+	if m := sniffISOBMFFImage(header); m != "" {
+		return m
+	}
+	if sniffTIFF(header) {
+		return mimeTIFF
 	}
 	return http.DetectContentType(header)
 }
@@ -463,26 +470,8 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 		return storedUpload{}, false
 	}
 
-	// Extract image dimensions if the file is an image.
-	var width, height *int
-	if strings.HasPrefix(mime, "image/") {
-		f, openErr := store.Open(fileID)
-		if openErr == nil {
-			cfg, _, decErr := image.DecodeConfig(f)
-			if decErr == nil && mime == "image/jpeg" && jpegSidewaysOnDisk(f) {
-				cfg.Width, cfg.Height = cfg.Height, cfg.Width
-			}
-			f.Close() //nolint:errcheck
-			if decErr == nil {
-				w2, h2 := cfg.Width, cfg.Height
-				width = &w2
-				height = &h2
-			} else {
-				slog.Warn("failed to decode image dimensions", "id", fileID, "error", decErr)
-			}
-		}
-	}
-
+	// A TIFF-structured camera RAW is a download; an image gets its upright size.
+	mime, width, height := inspectStoredImage(store, fileID, mime)
 	return storedUpload{id: fileID, mime: mime, size: writtenBytes, width: width, height: height}, true
 }
 

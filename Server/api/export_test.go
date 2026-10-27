@@ -243,6 +243,12 @@ func SetRestRequestDeadlineForTest(t testing.TB, d time.Duration) {
 	t.Cleanup(func() { restRequestDeadline = old })
 }
 
+// ValidateHEICForTest exposes validateHEIC for external tests.
+func ValidateHEICForTest(r io.ReaderAt, size int64) (quarterTurn bool, err error) {
+	info, err := validateHEIC(r, size)
+	return info.quarterTurn, err
+}
+
 // SetFileLinkTTLForTest shortens the minted file-link lifetime and returns the
 // restore func.
 func SetFileLinkTTLForTest(d time.Duration) func() {
