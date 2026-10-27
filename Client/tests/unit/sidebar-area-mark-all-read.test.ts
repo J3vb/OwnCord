@@ -49,13 +49,13 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 }));
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
+import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { membersStore } from "../../src/stores/members.store";
 import { setMarkReadSender } from "@lib/read-state";
-import type { ReadyChannel } from "../../src/lib/types";
+import { Permission, type ReadyChannel } from "../../src/lib/types";
 
 const CHANNELS: ReadyChannel[] = [
   {
@@ -253,6 +253,8 @@ describe("SidebarArea — Mark All as Read", () => {
   });
 
   it("moves focus to Invite before hiding the activated button", async () => {
+    setRoles([{ id: 2, name: "Member", color: null, permissions: Permission.MANAGE_INVITES }]);
+    channelsStore.flush();
     mount(CHANNELS);
     button().focus();
     expect(document.activeElement).toBe(button());
@@ -264,6 +266,23 @@ describe("SidebarArea — Mark All as Read", () => {
     });
     const invite = area.sidebarWrapper.querySelector<HTMLElement>('[data-testid="invite-btn"]');
     expect(document.activeElement).toBe(invite);
+  });
+
+  it("moves focus to the channel list when no other header action is shown", async () => {
+    // A plain member: Invite, Audit Log and Moderation are all hidden.
+    mount(CHANNELS);
+    const invite = area.sidebarWrapper.querySelector<HTMLElement>('[data-testid="invite-btn"]')!;
+    expect(shown(invite)).toBe(false);
+    button().focus();
+
+    button().click();
+
+    await vi.waitFor(() => {
+      expect(shown(button())).toBe(false);
+    });
+    const row = area.sidebarWrapper.querySelector<HTMLElement>('[data-channel-id][tabindex="0"]');
+    expect(row).not.toBeNull();
+    expect(document.activeElement).toBe(row);
   });
 
   it("stops following the stores once the sidebar area is torn down", async () => {
