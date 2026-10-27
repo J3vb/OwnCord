@@ -52,6 +52,7 @@ and only when it changes something a contributor or fork holder must do
 **Voice and video**
 
 - The 120 fps screen share option is hidden for now: the Windows app's screen capture delivers about 60 fps anyway. A saved 120 fps setting shares at 60.
+- The bundled LiveKit voice server moves from 1.13.7 to 1.13.10 (a patch release; no configuration change), in the Docker image and compose file and in the release the server downloads.
 
 ### Added
 
