@@ -533,9 +533,18 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
   await joinBrowserPeer(page, url, joinToken("user-1"), key);
 
   const nativeAudio: Array<{ identity: string; rms: number; at: number }> = [];
+  // Every peer event with its arrival time, so a run with no settled audio
+  // says whether the meter never started, starved, or the peer left early.
+  const timeline: Array<{ type: unknown; identity?: unknown; frames?: unknown; at: number }> = [];
   const peer = runNativePeer(
     ["--url", url, "--token", joinToken("user-2"), "--key", wrongKey, "--secs", "12"],
     ({ event }) => {
+      timeline.push({
+        type: event.type,
+        identity: event.identity,
+        frames: event.frames,
+        at: Date.now(),
+      });
       if (event.type === "audio")
         nativeAudio.push({
           ...(event as unknown as { identity: string; rms: number }),
@@ -561,7 +570,13 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
   // the decoder still encrypted and decode as a burst of noise.
   const fromBrowser = nativeAudio.filter((a) => a.identity === "user-1" && a.at >= settledAt);
   // The native side still plays the browser track out, and it is silence.
-  expect(fromBrowser.length).toBeGreaterThan(0);
+  const seen = timeline
+    .map(
+      (e) =>
+        `${String(e.type)}${e.identity ? `:${String(e.identity)}` : ""}${e.frames === undefined ? "" : `#${String(e.frames)}`}@${e.at - settledAt}ms`,
+    )
+    .join(" ");
+  expect(fromBrowser.length, `native peer events relative to settle: ${seen}`).toBeGreaterThan(0);
   expect(Math.max(...fromBrowser.map((a) => a.rms))).toBeLessThan(1);
 });
 
