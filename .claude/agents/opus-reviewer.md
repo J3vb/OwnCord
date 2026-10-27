@@ -1,6 +1,6 @@
 ---
 name: opus-reviewer
-description: Reviews an OwnCord work-package diff before its PR leaves draft. Use after implementing a work package from the roadmap plans, passing the WP block, design note, diff and tests run. Returns ranked findings; does not edit files.
+description: Reviews an OwnCord diff with logic in server/ws, db, auth or voice before its PR leaves draft. Medium-risk work gets a Sonnet reviewer with this same brief; docs-only, tests-only, config and small no-logic PRs skip review. Pass the WP block, design note, diff and tests run. Returns ranked findings; does not edit files.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---
