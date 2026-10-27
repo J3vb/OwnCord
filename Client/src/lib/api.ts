@@ -31,8 +31,10 @@ import type {
   ForumSettingsBody,
   ChannelCategory,
   EmojiResponse,
+  StickerResponse,
   InviteResponse,
   UploadResponse,
+  VoiceUploadMeta,
   VoiceCredentialsResponse,
   MemberResponse,
   DmChannelsResponse,
@@ -1503,11 +1505,18 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       file: File,
       signal?: AbortSignal,
       onProgress?: (fraction: number) => void,
+      voice?: VoiceUploadMeta,
     ): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
+      // A voice message declares its length and waveform in the query (WP 8.9):
+      // both or neither, which one optional object guarantees.
+      const query =
+        voice === undefined
+          ? ""
+          : `?voice_duration_ms=${Math.round(voice.durationMs)}&voice_waveform=${encodeURIComponent(voice.waveform)}`;
 
-      return request<UploadResponse>("POST", "/uploads", formData, signal, {
+      return request<UploadResponse>("POST", `/uploads${query}`, formData, signal, {
         multipart: true,
         onUploadProgress: onProgress,
       });
@@ -1560,6 +1569,16 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
 
     deleteEmoji(emojiId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("DELETE", `/emoji/${emojiId}`, undefined, signal);
+    },
+
+    // ── Custom stickers (WP 8.8) ──────────────────────────
+    //
+    // Reading is open to any member. Upload, rename and delete are the admin
+    // panel's (Server/admin/static/js/stickers.js), which calls them itself.
+
+    /** The server's whole custom-sticker set. */
+    listStickers(signal?: AbortSignal): Promise<StickerResponse[]> {
+      return request<StickerResponse[]>("GET", "/stickers", undefined, signal);
     },
 
     // ── Direct Messages ─────────────────────────────────────

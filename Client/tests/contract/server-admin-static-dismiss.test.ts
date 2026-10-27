@@ -65,6 +65,9 @@ async function boot(server: Server, userId = 1) {
     },
   });
   await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+  // What core.js showApp does after sign-in: jsdom, like a browser, only
+  // focuses what is displayed.
+  dom.window.document.getElementById("adminShell")!.classList.remove("hidden");
   const bridge = (dom.window as unknown as { __test: Bridge }).__test;
   bridge.state.me = { id: userId, permissions: ADMINISTRATOR, is_owner: true };
   bridge.state.section = "dashboard";

@@ -179,6 +179,7 @@
     { "wire": "member_ban", "go": "MsgTypeMemberBan", "ts": "MEMBER_BAN" },
     { "wire": "roles_update", "go": "MsgTypeRolesUpdate", "ts": "ROLES_UPDATE" },
     { "wire": "emoji_update", "go": "MsgTypeEmojiUpdate", "ts": "EMOJI_UPDATE" },
+    { "wire": "sticker_update", "go": "MsgTypeStickerUpdate", "ts": "STICKER_UPDATE" },
     {
       "wire": "upload_policy",
       "go": "MsgTypeUploadPolicy",
@@ -363,6 +364,12 @@
           "go": "MessageKindPinAdd",
           "ts": "PIN_ADD",
           "note": "a row saying a member pinned a message; reply_to names the pinned message; written only by the server"
+        },
+        {
+          "wire": "member_join",
+          "go": "MessageKindMemberJoin",
+          "ts": "MEMBER_JOIN",
+          "note": "a welcome row: the author just joined the server; written only by the server into the admin-chosen welcome channel"
         }
       ]
     }

@@ -165,8 +165,8 @@ export interface LimitHintOptions {
    * Count characters rather than UTF-16 units. `maxlength` is then set to the
    * worst case (2 units per character) and the limit is enforced by character
    * count on input, so text outside the BMP (the server counts characters)
-   * is not cut short. Leave off for usernames, where `maxlength` is exact
-   * for the characters allowed.
+   * is not cut short. Usernames pass it too: they allow any letter, including
+   * ones outside the BMP.
    */
   readonly countCharacters?: boolean;
   /** The rule text shown while nothing is wrong. */
@@ -185,8 +185,8 @@ let hintSeq = 0;
  * is checked beforehand), and carries a refusal from `showError`.
  *
  * `maxlength` counts UTF-16 units and the server counts characters, so
- * one-line text fields pass `countCharacters` (see the option) and usernames
- * keep an exact unit cap. Callers still check the value with
+ * one-line text fields and usernames pass `countCharacters` (see the option).
+ * Callers still check the value with
  * `runeCount`/`visibleLength` before sending, since a value set by script or
  * restored by autofill is not bound by `maxlength`.
  */

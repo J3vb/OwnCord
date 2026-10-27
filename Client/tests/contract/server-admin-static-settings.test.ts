@@ -262,6 +262,7 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
       "Security",
       "Voice: AFK",
       "Game activity",
+      "Welcome messages",
       "Upload file types",
       "Running configuration",
     ]);

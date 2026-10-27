@@ -32,6 +32,7 @@ import {
   applyReadyActiveChannel,
   applyReadyChannels,
   applyReadyEmoji,
+  applyReadyStickers,
   handleChannelCreate,
   handleChannelDelete,
   handleChannelUpdate,
@@ -43,6 +44,7 @@ import {
   handleChannelActivity,
   resetChannelActivity,
   handleEmojiUpdate,
+  handleStickerUpdate,
   handleMemberBan,
   handleMemberJoin,
   handleMemberUpdate,
@@ -164,6 +166,7 @@ export function wireDispatcher(
         | "updateProfile"
         | "getConfig"
         | "listEmoji"
+        | "listStickers"
         | "getMessages"
         | "getMessagesAround"
         | "listDmRequests"
@@ -201,6 +204,9 @@ export function wireDispatcher(
       // a full flow ("none") refetches them from ready instead.
       if (payload.replay_source === "buffer" || payload.replay_source === "db") {
         applyReadyDmRequests(api);
+        // sticker_update is unsequenced and not replayed, and a resume gets no
+        // ready: refetch the set so a change missed while down is recovered.
+        applyReadyStickers(api);
       }
     }),
   );
@@ -215,7 +221,7 @@ export function wireDispatcher(
       // setVoiceStates overwrites it) -> channels/roles/members -> voice
       // restate + reconcile -> identity publish -> active channel -> message
       // resync (reads the active channel just chosen) -> DMs -> mark read ->
-      // blocks -> Message Requests -> emoji.
+      // blocks -> Message Requests -> emoji -> stickers.
       applyReadyReadPointer(payload);
       activateReadyPendingMessages(api, payload);
       const applyReadyVoice = snapshotReadyVoice();
@@ -233,6 +239,7 @@ export function wireDispatcher(
       applyReadyBlocks(api);
       applyReadyDmRequests(api);
       applyReadyEmoji(api);
+      applyReadyStickers(api);
       applyReadySafety(api, payload);
       applyReadyMemberTimeouts(payload);
       // RT-12: if a planned restart took us out of a voice channel, put us
@@ -351,6 +358,7 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.ROLES_UPDATE, handleRolesUpdate));
 
   unsubs.push(ws.on(S.EMOJI_UPDATE, handleEmojiUpdate));
+  unsubs.push(ws.on(S.STICKER_UPDATE, handleStickerUpdate));
 
   unsubs.push(ws.on(S.UPLOAD_POLICY, handleUploadPolicy));
 

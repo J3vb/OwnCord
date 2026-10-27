@@ -135,18 +135,20 @@ func (q *Queries) InsertMessageForward(ctx context.Context, arg InsertMessageFor
 }
 
 const listAttachmentsForForward = `-- name: ListAttachmentsForForward :many
-SELECT id, filename, stored_as, mime_type, size, width, height
+SELECT id, filename, stored_as, mime_type, size, width, height, duration_ms, waveform
 FROM attachments WHERE message_id = ? ORDER BY rowid
 `
 
 type ListAttachmentsForForwardRow struct {
-	ID       string `json:"id"`
-	Filename string `json:"filename"`
-	StoredAs string `json:"storedAs"`
-	MimeType string `json:"mimeType"`
-	Size     int64  `json:"size"`
-	Width    *int64 `json:"width"`
-	Height   *int64 `json:"height"`
+	ID         string  `json:"id"`
+	Filename   string  `json:"filename"`
+	StoredAs   string  `json:"storedAs"`
+	MimeType   string  `json:"mimeType"`
+	Size       int64   `json:"size"`
+	Width      *int64  `json:"width"`
+	Height     *int64  `json:"height"`
+	DurationMs *int64  `json:"durationMs"`
+	Waveform   *string `json:"waveform"`
 }
 
 // The files a forward clones, in upload order. stored_as names the bytes on
@@ -168,6 +170,8 @@ func (q *Queries) ListAttachmentsForForward(ctx context.Context, messageID *int6
 			&i.Size,
 			&i.Width,
 			&i.Height,
+			&i.DurationMs,
+			&i.Waveform,
 		); err != nil {
 			return nil, err
 		}

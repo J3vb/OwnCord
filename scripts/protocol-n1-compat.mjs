@@ -28,7 +28,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES_REL = path.join("protocol", "fixtures", "epoch-1");
@@ -111,16 +111,56 @@ function defaultTag() {
   return tag;
 }
 
-function run(cmd, args, opts) {
-  const r = spawnSync(cmd, args, { stdio: "inherit", ...opts });
-  return r.status ?? 1;
+// Match the root runner: Windows npm/npx .cmd shims cannot be spawned directly.
+// Launch their JavaScript entry points with Node, retaining argument boundaries.
+function npmCliPath(command) {
+  const entry = `${command}-cli.js`;
+  const candidates = [];
+  const npmExecPath = process.env.npm_execpath;
+  if (npmExecPath && path.basename(npmExecPath) === "npm-cli.js") {
+    candidates.push(path.join(path.dirname(npmExecPath), entry));
+  }
+  for (const dir of (process.env.PATH || "").split(";")) {
+    if (dir)
+      candidates.push(path.join(dir.replace(/^"|"$/g, ""), "node_modules", "npm", "bin", entry));
+  }
+  candidates.push(path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", entry));
+  return candidates.find((candidate) => existsSync(candidate));
 }
 
-function runCaptured(cmd, args, opts) {
-  const r = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...opts });
+function spawnCommand(cmd, args, opts) {
+  const where = `cwd: ${opts?.cwd ?? process.cwd()}`;
+  const npmCommand = process.platform === "win32" && (cmd === "npm" || cmd === "npx");
+  const cli = npmCommand ? npmCliPath(cmd) : undefined;
+  if (npmCommand && !cli) {
+    throw new CompatError(
+      `cannot locate ${cmd}'s JavaScript CLI (${where}); install npm on PATH`,
+      2,
+    );
+  }
+  const r = spawnSync(cli ? process.execPath : cmd, cli ? [cli, ...args] : args, {
+    ...opts,
+    shell: false,
+  });
+  if (r.error || r.status === null) {
+    throw new CompatError(
+      `${cmd} could not run (${where}): ${r.error?.code ?? r.signal ?? "no exit status"}`,
+      2,
+    );
+  }
+  return r;
+}
+
+export function run(cmd, args, opts) {
+  const r = spawnCommand(cmd, args, { stdio: "inherit", ...opts });
+  return r.status;
+}
+
+export function runCaptured(cmd, args, opts) {
+  const r = spawnCommand(cmd, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...opts });
   const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
   process.stdout.write(out);
-  return { status: r.status ?? 1, out };
+  return { status: r.status, out };
 }
 
 function jsonFiles(dir) {
@@ -275,14 +315,16 @@ function compat(tag, tree, work) {
   return 0;
 }
 
-try {
-  process.exitCode = main();
-} catch (err) {
-  if (err instanceof CompatError) {
-    console.error(`\nN-1 compat ${err.code === 1 ? "FAILED" : "could not run"}: ${err.message}`);
-    process.exitCode = err.code;
-  } else {
-    console.error(err);
-    process.exitCode = 2;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    process.exitCode = main();
+  } catch (err) {
+    if (err instanceof CompatError) {
+      console.error(`\nN-1 compat ${err.code === 1 ? "FAILED" : "could not run"}: ${err.message}`);
+      process.exitCode = err.code;
+    } else {
+      console.error(err);
+      process.exitCode = 2;
+    }
   }
 }

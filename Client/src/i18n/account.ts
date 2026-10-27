@@ -38,6 +38,8 @@ export const accountText = defineCatalog("account", {
   "profile.usernameSaveFailed": "Failed to update username.",
 
   "avatar.notImage": "Avatar must be a PNG, JPEG or WebP image.",
+  "avatar.notImageOrGif": "Avatar must be a PNG, JPEG, WebP or GIF image.",
+  "banner.tooLarge": "Banner must be at most {kb} KB.",
   "avatar.tooLarge": "Avatar must be at most {kb} KB.",
   "avatar.unreadable": "That file could not be read as an image.",
   "avatar.tooWide": "Avatar must be at most {width}x{height} pixels.",

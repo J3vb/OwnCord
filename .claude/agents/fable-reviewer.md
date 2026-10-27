@@ -1,6 +1,6 @@
 ---
 name: fable-reviewer
-description: Cross-model review for OwnCord work packages that Opus wrote — "Opus-owned" WPs (concurrency, delivery guarantees, protocol epochs, security) — and for a WP where two opus-reviewer rounds still left blocking findings. Returns ranked findings; does not edit files.
+description: Required review for OwnCord concurrency, race-fix and auth changes, before the PR leaves draft; also one pass on a WP still blocked after two review rounds. Not for anything else, it is the most expensive reviewer. Returns ranked findings; does not edit files.
 tools: Read, Grep, Glob, Bash
 model: fable
 ---

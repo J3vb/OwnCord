@@ -107,6 +107,8 @@ export type WsErrorCode =
   // thread is locked and only a moderator may post in or change it.
   | "THREAD_EXISTS"
   | "THREAD_LOCKED"
+  // WP 8.8: a chat_send named a custom sticker that does not exist (any more).
+  | "STICKER_NOT_FOUND"
   | "GAME_ACTIVITY_DISABLED"
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
@@ -195,6 +197,17 @@ export interface Attachment {
   readonly url: string;
   readonly width?: number;
   readonly height?: number;
+  /** Length of a voice message in ms (WP 8.9). With `waveform`, the attachment is one. */
+  readonly duration_ms?: number;
+  /** A voice message's loudness, base64url (no padding) bytes 0-255, one per bar. */
+  readonly waveform?: string;
+}
+
+/** The length and waveform an upload declares to be a voice message (WP 8.9). */
+export interface VoiceUploadMeta {
+  readonly durationMs: number;
+  /** base64url without padding, 1..256 bytes decoded. */
+  readonly waveform: string;
 }
 
 /** Reaction summary on a REST message response. */
@@ -523,6 +536,12 @@ export interface ReadyPayload {
      */
     readonly polls?: boolean;
     /**
+     * The server has custom stickers (WP 8.8): `sticker_id` on `chat_send`,
+     * `sticker` on `chat_message`, `sticker_update` and `/api/v1/stickers`.
+     * Absent means an older server: no sticker button.
+     */
+    readonly stickers?: boolean;
+    /**
      * The server stores the caller's two direct message privacy settings (WP
      * 6.8b), read and written over `/users/me/privacy`. Absent means an older
      * server.
@@ -565,6 +584,12 @@ export interface ReadyPayload {
      * means an older server: no Follow control, no followed threads.
      */
     readonly thread_follows?: boolean;
+    /**
+     * The server accepts `voice_duration_ms` and `voice_waveform` on an upload
+     * and returns `duration_ms` and `waveform` on the attachment (WP 8.9).
+     * Absent means an older server: no mic button in the composer.
+     */
+    readonly voice_messages?: boolean;
     /**
      * The server understands `activity_update` and carries a member's game as
      * `activity` on `presence` and `presence_batch` and as `ready.activities`
@@ -942,6 +967,8 @@ export interface ChatMessagePayload {
   readonly forward?: ForwardInfo;
   /** Present on a poll message only (WP 6.9b). */
   readonly poll?: PollInfo;
+  /** Present on a sticker message only (WP 8.8). */
+  readonly sticker?: MessageStickerInfo;
   /** Present on a thread's starter message only (WP 6.9c). */
   readonly thread?: ThreadInfo;
 }
@@ -1248,6 +1275,14 @@ export interface EmojiUpdatePayload {
 }
 
 /**
+ * `sticker_update` (WP 8.8) — the server's whole custom-sticker set after an
+ * upload, rename or delete, replaced wholesale like `emoji_update`.
+ */
+export interface StickerUpdatePayload {
+  readonly stickers: readonly StickerResponse[];
+}
+
+/**
  * `upload_policy` — the file-type lists in force after the owner saves them in
  * the admin panel. Both are always present (`[]` when emptied) and replace the
  * lists auth_ok gave; the size cap and thumbnails stay as auth_ok set them.
@@ -1456,6 +1491,8 @@ export interface ChatSendPayload {
   /** With reply_to, whether the reply mentions the parent's author (3A-12). */
   readonly reply_ping?: boolean;
   readonly attachments: readonly string[];
+  /** Sends a custom sticker (WP 8.8): needs `client_message_id`, no text, no attachments. */
+  readonly sticker_id?: number;
 }
 
 /** Create a forum post and its opening message in one step (WP 6.9d). */
@@ -1697,6 +1734,7 @@ export type ServerMessage =
   | (WsEnvelope<MemberTimeoutsPayload> & { readonly type: "member_timeouts" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
+  | (WsEnvelope<StickerUpdatePayload> & { readonly type: "sticker_update" })
   | (WsEnvelope<UploadPolicyPayload> & { readonly type: "upload_policy" })
   | (WsEnvelope<GameActivityPolicyPayload> & { readonly type: "game_activity_policy" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
@@ -1895,6 +1933,8 @@ export interface MessageResponse {
   readonly forward?: ForwardInfo;
   /** Present on a poll message only (WP 6.9b). */
   readonly poll?: PollInfo;
+  /** Present on a sticker message only (WP 8.8). */
+  readonly sticker?: MessageStickerInfo;
   /** Present on a thread's starter message only (WP 6.9c). */
   readonly thread?: ThreadInfo;
 }
@@ -2024,6 +2064,28 @@ export interface EmojiResponse {
   readonly url: string;
 }
 
+/**
+ * One custom sticker from GET/POST/PATCH /api/v1/stickers and `sticker_update`.
+ * `url` is server-relative and behind the session token, like an emoji's.
+ */
+export interface StickerResponse {
+  readonly id: number;
+  readonly name: string;
+  readonly emoji: string | null;
+  readonly url: string;
+}
+
+/**
+ * The `sticker` block of a sticker message, live and in history (WP 8.8).
+ * `name` is the label kept from send time; `id` and `url` are null once the
+ * sticker has been deleted.
+ */
+export interface MessageStickerInfo {
+  readonly id: number | null;
+  readonly name: string;
+  readonly url: string | null;
+}
+
 /** Single invite object from GET/POST /api/invites. */
 export interface InviteResponse {
   readonly id: number;
@@ -2044,6 +2106,8 @@ export interface UploadResponse {
   readonly size: number;
   readonly mime: string;
   readonly url: string;
+  readonly duration_ms?: number;
+  readonly waveform?: string;
 }
 
 /**

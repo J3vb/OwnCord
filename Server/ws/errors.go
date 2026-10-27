@@ -26,6 +26,10 @@ const (
 	// that was already ended or whose time ran out. Nothing was written and no
 	// poll_update is sent for the refused command.
 	ErrCodePollEnded = "POLL_ENDED"
+	// ErrCodeStickerNotFound refines NOT_FOUND: a chat_send named a sticker
+	// that does not exist, or was deleted. Nothing was stored, and the client
+	// refreshes its picker from sticker_update.
+	ErrCodeStickerNotFound = "STICKER_NOT_FOUND"
 	// ErrCodeAlreadyDeleted is the WS twin of REST's 409 ALREADY_DELETED: the
 	// same "already in the requested end state" refusal, so a client sees one
 	// code for the state rather than FORBIDDEN over WS and ALREADY_DELETED

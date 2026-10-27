@@ -60,7 +60,9 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 		Poll string `json:",omitempty"`
 		// And the forum post's title and tags (WP 6.9d).
 		ForumPost string `json:",omitempty"`
-	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing, p.ForwardOf, p.Poll, p.ForumPost})
+		// And the sticker's id (WP 8.8a): zero for every other send.
+		StickerID int64 `json:",omitempty"`
+	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing, p.ForwardOf, p.Poll, p.ForumPost, p.StickerID})
 	if err != nil {
 		return nil, fmt.Errorf("%w: fingerprint message: %w", ErrInternal, err)
 	}
@@ -178,6 +180,8 @@ func messageDeliveryError(err error) error {
 	case errors.Is(err, db.ErrForwardSourceGone):
 		// The message being forwarded was deleted after the gates passed.
 		return fmt.Errorf("%w: message not found", ErrNotFound)
+	case errors.Is(err, db.ErrStickerGone):
+		return errStickerNotFound()
 	case errors.Is(err, db.ErrMessageDeliveryExpired):
 		return fmt.Errorf("%w: client_message_id expired", ErrBadRequest)
 	case errors.Is(err, db.ErrMessageDeliveryBeforeRestore):

@@ -63,9 +63,11 @@
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
+              "stickers": true,
               "thread_follows": true,
               "threads": true,
-              "user_notes": true
+              "user_notes": true,
+              "voice_messages": true
             },
             "channels": [
               {
@@ -365,9 +367,11 @@
               "polls": true,
               "profile_banners": true,
               "read_pointer": true,
+              "stickers": true,
               "thread_follows": true,
               "threads": true,
-              "user_notes": true
+              "user_notes": true,
+              "voice_messages": true
             },
             "channels": [
               {

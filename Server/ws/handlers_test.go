@@ -56,7 +56,9 @@ CREATE TABLE IF NOT EXISTS attachments (
     size        INTEGER NOT NULL,
     uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
     width       INTEGER,
-    height      INTEGER
+    height      INTEGER,
+    duration_ms INTEGER,
+    waveform    TEXT
 );
 `)...)
 

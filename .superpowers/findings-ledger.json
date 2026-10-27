@@ -1,5 +1,5 @@
 {
-  "nextId": 518,
+  "nextId": 520,
   "findings": [
     {
       "id": "OC-0001",
@@ -11952,6 +11952,52 @@
     },
     {
       "id": "OC-0517",
+      "title": "Username inputs cut valid names of letters outside the BMP at 16 characters",
+      "file": "Client/src/lib/nameLimits.ts",
+      "line": 202,
+      "severity": "low",
+      "why": "attachLimitHint set maxlength to the character limit for usernames, and maxlength counts UTF-16 units. The server and checkNewUsername count characters, so a 32-letter name of supplementary-plane letters (2 units each) was truncated to 16 in the register and rename inputs.",
+      "repro": "Register form or Settings > Account > change username: paste 20 x U+1D400. The input keeps 16 and shows the limit, although the server accepts 32 characters.",
+      "evidence": "Vault issue #143; LoginForm and AccountTab called attachLimitHint for usernames without countCharacters, and LoginForm reset maxLength to 32 on switching to Register.",
+      "suggestedFix": "Pass countCharacters for both username inputs and restore the hint's own cap when Register re-bounds the field.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/name-limits.test.ts, Client/tests/unit/settings-overlay.test.ts (32-letter name outside the BMP)",
+        "revertProof": "fail (maxlength 32, name cut)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-18",
+      "hunt": "nightly-bughunt",
+      "lens": "correctness",
+      "finder": "nightly-bughunt",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0518",
+      "title": "A YouTube card mounted without its thumbnail height and grew once the image arrived, moving the chat while scrolling up",
+      "file": "Client/src/styles/app/messages.css",
+      "line": 772,
+      "severity": "low",
+      "why": ".msg-embed-thumb had height:auto and no aspect ratio, so the card drew about 212 px short until the thumbnail bytes landed; each card that mounted while scrolling up was corrected twice.",
+      "repro": "Live Windows log (2026-10-24): scrolling #general up from the newest message, 22 events of -167..-238 px followed ~120 ms later by +212 px on the same row.",
+      "evidence": "message-media.spec.ts: before the image loads the thumbnail box is 0 px tall; with an 8x8 image it is 420 px tall instead of 236.",
+      "suggestedFix": "Give the thumbnail a 16:9 aspect-ratio with object-fit: cover; seed reopened lists with measured row heights.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/e2e/message-media.spec.ts",
+        "revertProof": "fail (both 'YouTube embed box' cases fail without the CSS)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-24",
+      "hunt": "user-report-2026-10-24",
+      "lens": "correctness",
+      "finder": "chat-scroll-thread",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0519",
       "title": "A voice reconnect after a long drop could rejoin the media room on the old token while the server had ended the membership",
       "file": "Client/src/lib/livekitSession.ts",
       "line": 521,

@@ -7,7 +7,11 @@ vi.mock("../../src/components/message-list/attachments", async (importOriginal) 
   return { ...actual, fetchImageAsObjectUrl: vi.fn(() => Promise.resolve(null)) };
 });
 
-import { buildAccountTab, validateAvatarFile } from "@components/settings/AccountTab";
+import {
+  buildAccountTab,
+  prepareBannerFile,
+  validateAvatarFile,
+} from "@components/settings/AccountTab";
 import { authStore } from "@stores/auth.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import { ApiClientError } from "@lib/api";
@@ -60,25 +64,25 @@ function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverl
 describe("validateAvatarFile", () => {
   const ok = { width: 512, height: 512 };
 
-  it("accepts a PNG, JPEG or WebP within the caps", () => {
-    for (const type of ["image/png", "image/jpeg", "image/webp"]) {
+  it("accepts a PNG, JPEG, WebP or GIF within the caps", () => {
+    for (const type of ["image/png", "image/jpeg", "image/webp", "image/gif"]) {
       expect(validateAvatarFile({ size: 1000, type }, ok)).toBeNull();
     }
   });
 
   it("rejects a type the server refuses", () => {
-    // GIF is a real image and still refused — an animated avatar in every
-    // message row is a distraction the renderer cannot opt out of.
-    expect(validateAvatarFile({ size: 1000, type: "image/gif" }, ok)).toMatch(/PNG, JPEG or WebP/);
-    expect(validateAvatarFile({ size: 1000, type: "image/svg+xml" }, ok)).not.toBeNull();
+    expect(validateAvatarFile({ size: 1000, type: "image/svg+xml" }, ok)).toBe(
+      "Avatar must be a PNG, JPEG, WebP or GIF image.",
+    );
+    expect(validateAvatarFile({ size: 1000, type: "text/plain" }, ok)).not.toBeNull();
   });
 
-  it("rejects a file over 1 MB", () => {
-    expect(validateAvatarFile({ size: 1024 * 1024 + 1, type: "image/png" }, ok)).toBe(
-      "Avatar must be at most 1024 KB.",
+  it("rejects a file over 2 MB (WP 8.7)", () => {
+    expect(validateAvatarFile({ size: 2 * 1024 * 1024 + 1, type: "image/gif" }, ok)).toBe(
+      "Avatar must be at most 2048 KB.",
     );
     // Exactly at the cap is fine.
-    expect(validateAvatarFile({ size: 1024 * 1024, type: "image/png" }, ok)).toBeNull();
+    expect(validateAvatarFile({ size: 2 * 1024 * 1024, type: "image/gif" }, ok)).toBeNull();
   });
 
   it("rejects an image bigger than any surface renders", () => {
@@ -112,6 +116,11 @@ describe("Account tab profile fields", () => {
     ac.abort();
     container.remove();
   });
+
+  /** Focus only lands on what is shown, so open the collapsed editor first. */
+  function openProfileEditor(): void {
+    container.querySelector<HTMLButtonElement>('[data-testid="profile-edit-toggle"]')!.click();
+  }
 
   it("pre-fills the display name and about from the signed-in user", () => {
     setUser({ display_name: "Alice A.", about: "writes tests" });
@@ -181,6 +190,7 @@ describe("Account tab profile fields", () => {
     });
     container.appendChild(buildAccountTab(options, ac.signal));
 
+    openProfileEditor();
     const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
     const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
     save.focus();
@@ -202,6 +212,7 @@ describe("Account tab profile fields", () => {
     });
     container.appendChild(buildAccountTab(options, ac.signal));
 
+    openProfileEditor();
     const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
     save.focus();
     save.click();
@@ -230,7 +241,7 @@ describe("Account tab profile fields", () => {
     setUser({});
     container.appendChild(buildAccountTab(makeOptions(), ac.signal));
     const input = container.querySelector<HTMLInputElement>('[data-testid="avatar-file-input"]')!;
-    expect(input.getAttribute("accept")).toBe("image/png,image/jpeg,image/webp");
+    expect(input.getAttribute("accept")).toBe("image/png,image/jpeg,image/webp,image/gif");
     expect(container.querySelector('[data-testid="avatar-upload-btn"]')).not.toBeNull();
   });
 });
@@ -371,5 +382,52 @@ describe("Banner controls (6.11d)", () => {
     q(container, "profile-save-btn").click();
     await vi.waitFor(() => expect(onUpdateProfile).toHaveBeenCalledTimes(3));
     expect(onUpdateProfile.mock.calls[2]![0]).toMatchObject({ banner_color: "" });
+  });
+});
+
+describe("prepareBannerFile (WP 8.7)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const animatedWebp = (): Uint8Array<ArrayBuffer> => {
+    const head = new Uint8Array(30);
+    head.set(
+      [..."RIFF"].map((c) => c.charCodeAt(0)),
+      0,
+    );
+    head.set(
+      [..."WEBP"].map((c) => c.charCodeAt(0)),
+      8,
+    );
+    head.set(
+      [..."VP8X"].map((c) => c.charCodeAt(0)),
+      12,
+    );
+    head[20] = 0x02;
+    return head;
+  };
+
+  it("sends a GIF or an animated WebP uncropped, so it keeps its frames", async () => {
+    const crop = vi.spyOn(imageCrop, "cropImage");
+    const gif = new File(["GIF89a"], "b.gif", { type: "image/gif" });
+    expect(await prepareBannerFile(gif)).toEqual({ ok: true, file: gif });
+    const webp = new File([animatedWebp()], "b.webp", { type: "image/webp" });
+    expect(await prepareBannerFile(webp)).toEqual({ ok: true, file: webp });
+    expect(crop).not.toHaveBeenCalled();
+  });
+
+  it("refuses an animated banner over 4 MB", async () => {
+    const big = new File([new Uint8Array(4 * 1024 * 1024 + 1)], "b.gif", { type: "image/gif" });
+    expect(await prepareBannerFile(big)).toEqual({
+      ok: false,
+      error: "Banner must be at most 4096 KB.",
+    });
+  });
+
+  it("crops a still picture to 5:2 as before", async () => {
+    const cropped = new File(["c"], "banner.png", { type: "image/png" });
+    const crop = vi.spyOn(imageCrop, "cropImage").mockResolvedValue({ ok: true, file: cropped });
+    const still = new File([new Uint8Array(64)], "b.png", { type: "image/png" });
+    expect(await prepareBannerFile(still)).toEqual({ ok: true, file: cropped });
+    expect(crop).toHaveBeenCalledWith(still, { aspect: 2.5, maxWidth: 1200, fileBase: "banner" });
   });
 });

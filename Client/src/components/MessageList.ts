@@ -85,6 +85,7 @@ import {
 } from "./message-list/image-sizes";
 import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
+import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./message-list/row-heights";
 import type { PollOutcome } from "../features/messaging/pollSend";
 import { messagingText } from "../i18n/messaging";
 import {
@@ -170,6 +171,8 @@ export interface MessageListOptions {
    * "Jump to Present" pill, which only appears while the window is detached.
    */
   readonly onJumpToPresent?: () => void;
+  /** Send the 👋 reply to a welcome row (WP 8.6). Absent, the row has no Wave button. */
+  readonly onWave?: (messageId: number) => boolean;
   /** Open the pinned-messages panel ("pinned messages" link of a pin row). It never closes an open panel. */
   readonly onOpenPins?: () => void;
   /** Join the DM call a live call log row stands for (WP 3B-9c). No Join button without it. */
@@ -850,7 +853,23 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function getItemHeight(index: number): number {
     const cached = heightCache.get(itemKey(index));
     if (cached !== undefined) return cached;
-    return estimateItemHeight(virtualItems[index]!, estimateWidth);
+    return estimateRow(index);
+  }
+
+  /** A message row's height key across lists; null for rows that are not a
+   *  confirmed message. */
+  function rememberKey(index: number): string | null {
+    const item = virtualItems[index];
+    if (item === undefined || item.kind !== "message" || item.message.id === 0) return null;
+    return rowHeightKey(item.message.id, item.isGrouped, item.message.editedAt);
+  }
+
+  /** An unmeasured row: the height an earlier list of this channel drew it at,
+   *  else the estimate. */
+  function estimateRow(index: number): number {
+    const key = estimateWidth === undefined ? null : rememberKey(index);
+    const remembered = key === null ? undefined : rememberedRowHeight(key, estimateWidth!);
+    return remembered ?? estimateItemHeight(virtualItems[index]!, estimateWidth);
   }
 
   function totalHeight(): number {
@@ -1246,10 +1265,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }
     }
 
+    // The width these rows were laid out at, read with the heights (layout is
+    // already clean): the observer may not have reported a resize yet.
+    const measuredWidth = root?.clientWidth ?? 0;
+
     // Pass 2 — pure writes: apply all cached heights to heightCache and the
     // Fenwick tree. No DOM reads here, so no additional reflow is triggered.
     for (const { key, idx, h } of measurements) {
       heightCache.set(key, h);
+      const shared = measuredWidth > 0 ? rememberKey(idx) : null;
+      if (shared !== null) rememberRowHeight(shared, measuredWidth, h);
       if (tree !== null) {
         tree.set(idx, h);
       }
@@ -1606,8 +1631,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function reseedUnmeasured(): void {
     if (tree === null) return;
     for (let i = 0; i < virtualItems.length; i++) {
-      if (!heightCache.has(itemKey(i)))
-        tree.set(i, estimateItemHeight(virtualItems[i]!, estimateWidth));
+      if (!heightCache.has(itemKey(i))) tree.set(i, estimateRow(i));
     }
   }
 
@@ -2477,7 +2501,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // The text estimates wrap at the list's width: when it changes, the
       // rows nothing has measured yet are estimated again (below).
       const width = root.clientWidth;
-      const widthChanged = width > 0 && width !== (estimateWidth ?? DEFAULT_LIST_WIDTH);
+      // A list mounted hidden learns its width here, even at the default one,
+      // so the rows an earlier visit measured seed it.
+      const widthChanged = width > 0 && width !== estimateWidth;
       if (widthChanged) estimateWidth = width;
 
       // A viewport that grew (pane enlarged, window maximized) needs more
@@ -2558,6 +2584,9 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     resizeObserver.observe(root);
 
     parentContainer.appendChild(region);
+    // Estimate at the real width from the first render, so rows an earlier
+    // visit measured seed it rather than a reseed after the observer fires.
+    if (root.clientWidth > 0) estimateWidth = root.clientWidth;
 
     openAtDividerPending = unreadOnOpen > 0;
     renderAll();
@@ -3214,6 +3243,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     // A server-written row (call log, group event) is read-only.
     if (isServerRowKind(msg.kind)) return false;
+    // A sticker message has no text to edit (WP 8.8); the server refuses it.
+    if (msg.sticker !== undefined) return false;
     if (edit?.messageId === messageId) {
       if (takeFocus) edit.session?.focusEnd();
       return true;

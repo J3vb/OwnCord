@@ -38,6 +38,7 @@ const {
       id: number;
       content?: string;
       user?: { id: number; username: string; display_name?: string | null };
+      sticker?: { id: number | null; name: string; url: string | null };
       attachments?: Array<{ id: string }>;
       deleted?: boolean;
       status?: string;
@@ -2342,6 +2343,34 @@ describe("createChannelController", () => {
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
 
       expect(mockStartEdit).toHaveBeenCalledExactlyOnceWith(4);
+    });
+
+    it("skips a sticker message and edits the last message with text", () => {
+      mockGetChannelMessages.mockReturnValue([
+        {
+          id: 1,
+          content: "my text",
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "sent",
+        },
+        {
+          id: 2,
+          content: "[Sticker: Wave]",
+          sticker: { id: 3, name: "Wave", url: "/api/v1/stickers/3/image" },
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "sent",
+        },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
+
+      expect(mockStartEdit).toHaveBeenCalledExactlyOnceWith(1);
     });
 
     it("skips deleted messages and finds earlier non-deleted message", () => {

@@ -15,11 +15,13 @@ func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity bool) m
 		"profile_banners":              true,
 		"dm_privacy":                   true,
 		"polls":                        true,
+		"stickers":                     true,         // WP 8.8a: sticker_id on chat_send, chat_message.sticker and sticker_update
 		"threads":                      threads,      // WP 6.9c: thread_* commands and frames
 		"forums":                       forums,       // WP 6.9d: forum_post_create and a forum's posts
 		"multi_role":                   true,         // WP 6.3c: role_ids, hoist, role add/remove
 		"manage_nicknames":             true,         // WP 6.4: PUT /api/v1/moderation/users/{id}/nickname
 		"game_activity":                gameActivity, // WP 8.3a: activity_update, presence.activity and ready.activities; WP 8.3e-2: false while an admin has it off
+		"voice_messages":               true,         // WP 8.9: duration_ms and waveform on an upload and its attachment
 		"thread_follows":               threads,      // WP 6.9c: thread_follow, thread_follow_update and ready.threads
 	}
 }

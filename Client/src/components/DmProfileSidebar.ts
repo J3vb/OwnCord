@@ -18,7 +18,7 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
-import { isRenderableAvatar } from "./message-list/avatar";
+import { isRenderableAvatar, setAvatarSource } from "./message-list/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
@@ -204,14 +204,12 @@ export function createDmProfileSidebar(
     if (isRenderableAvatar(user.avatar)) {
       const resolved = resolveServerUrl(user.avatar);
       const name = resolveDisplayName(user);
-      void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
-        if (objectUrl === null || !wrapper.isConnected || gen !== avatarGen) return;
-        const img = createElement("img", {
-          src: objectUrl,
-          alt: name,
-          class: "dps-avatar-img",
-        });
+      void fetchImageAsObjectUrl(resolved).then(async (objectUrl) => {
+        const current = (): boolean => wrapper.isConnected && gen === avatarGen;
+        if (objectUrl === null || !current()) return;
+        const img = createElement("img", { alt: name, class: "dps-avatar-img" });
         recoverEvictedImage(img, { url: resolved });
+        if (!(await setAvatarSource(img, objectUrl, () => "always", current))) return;
         letter.remove();
         wrapper.style.background = "transparent";
         wrapper.insertBefore(img, wrapper.firstChild);
