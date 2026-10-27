@@ -54,9 +54,69 @@ type voiceGraceState struct {
 	mu      syncutil.Ranked[lockRankLeaf]
 	entries map[int64]*voiceGraceEntry
 	closed  bool // set by close at shutdown: put arms nothing from then on
+	// moved remembers, per device session, a parked call another device took
+	// over (voiceJoinMoveCall): the parking session was never told, so it is
+	// told when it next registers. Entries are consumed by takeMoved, dropped
+	// when stale (movedNoteTTL) and capped (movedNoteCap).
+	moved map[movedKey]movedNote
 	// expiring counts expiry teardowns past takeForExpiry, so close can wait
 	// for one already writing to the database.
 	expiring sync.WaitGroup
+}
+
+// movedKey names the device session a moved-away parked call belonged to.
+type movedKey struct {
+	userID    int64
+	tokenHash string
+}
+
+// movedNote is the channel of the call that was moved away, and when.
+type movedNote struct {
+	chID int64
+	at   time.Time
+}
+
+const (
+	// movedNoteTTL bounds how long a session may be away and still be told its
+	// parked call moved; past it the client has long since given the call up.
+	movedNoteTTL = 10 * time.Minute
+	movedNoteCap = 1024
+)
+
+// markMoved records that tokenHash's parked call in chID was moved to another
+// device.
+func (s *voiceGraceState) markMoved(userID int64, tokenHash string, chID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if s.moved == nil {
+		s.moved = map[movedKey]movedNote{}
+	}
+	for k, n := range s.moved {
+		if now.Sub(n.at) > movedNoteTTL {
+			delete(s.moved, k)
+		}
+	}
+	if len(s.moved) >= movedNoteCap {
+		clear(s.moved)
+	}
+	s.moved[movedKey{userID, tokenHash}] = movedNote{chID: chID, at: now}
+}
+
+// takeMoved returns and clears the moved-call channel for the session, or 0.
+func (s *voiceGraceState) takeMoved(userID int64, tokenHash string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := movedKey{userID, tokenHash}
+	n, ok := s.moved[k]
+	if !ok {
+		return 0
+	}
+	delete(s.moved, k)
+	if time.Since(n.at) > movedNoteTTL {
+		return 0
+	}
+	return n.chID
 }
 
 // isClosed reports whether close has run.
@@ -74,6 +134,7 @@ func (s *voiceGraceState) isClosed() bool {
 func (s *voiceGraceState) close() {
 	s.mu.Lock()
 	s.closed = true
+	clear(s.moved)
 	for uid, e := range s.entries {
 		e.timer.Stop()
 		delete(s.entries, uid)

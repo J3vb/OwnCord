@@ -103,10 +103,16 @@ type Client struct {
 	// stamp. presentableMembers and presence snapshots read it from other
 	// goroutines, hence atomic.
 	presence atomic.Pointer[livePresence]
-	// voiceExitAt is when a voice leave last took a call off this connection
-	// (unix nanos, 0 = never). SendToVoiceDevice uses it to find the device a
+	// voiceExitAt is when a moderator action last took a call off this
+	// connection (unix nanos, 0 = never; ordinary leaves and moves do not stamp). SendToVoiceDevice uses it to find the device a
 	// moderator's voice_moved / voice_disconnected belongs to.
 	voiceExitAt atomic.Int64
+	// displaced is set when registerNow replaced this connection with a newer
+	// one of the same session, which then owns its voice session and presence.
+	// A connection removed any other way (a kick, the stale sweep) is not
+	// displaced even if its session has since reconnected, so its teardown
+	// parks or ends its own call instead of leaving it to the 60 s sweep.
+	displaced atomic.Bool
 }
 
 // wsConn is the subset of github.com/coder/websocket.Conn used by writePump/readPump.

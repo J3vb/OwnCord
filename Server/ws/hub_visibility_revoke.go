@@ -86,12 +86,15 @@ func (h *Hub) revokeConnTopicsNotIn(ctx context.Context, snap *Client, allowed m
 		// the parent's own channel_delete is what tells the client, and a
 		// thread was never a sidebar channel. A deleted thread (ch nil) is
 		// released the same way when it is the slot's thread.
-		if (ch != nil && ch.IsThread()) || (ch == nil && snap.getThreadID() == chID) {
-			live := h.sessionClient(userID, snap.tokenHash)
-			if live == nil {
+		// The deleted-thread test reads the slot from the LIVE connection of
+		// this device, not the snapshot: a reconnect may have replaced the
+		// *Client (and its thread focus) since the snapshot was taken.
+		liveThread := h.sessionClient(userID, snap.tokenHash)
+		if releasesAsThread(ch != nil, ch != nil && ch.IsThread(), liveThread, chID) {
+			if liveThread == nil {
 				return nil, true // that device is gone; nothing left to release on it
 			}
-			h.releaseThreadSocket(live, chID, nil)
+			h.releaseThreadSocket(liveThread, chID, nil)
 			continue
 		}
 		if revokeUnreadableChannelsPreActRaceHook != nil {
@@ -122,4 +125,14 @@ func (h *Hub) revokeConnTopicsNotIn(ctx context.Context, snap *Client, allowed m
 		revoked[chID] = struct{}{}
 	}
 	return revoked, true
+}
+
+// releasesAsThread reports whether chID's topic is a thread slot to release
+// silently: a thread channel, or a deleted channel (exists false) that is the
+// live connection's focused thread.
+func releasesAsThread(exists, isThread bool, live *Client, chID int64) bool {
+	if exists {
+		return isThread
+	}
+	return live != nil && live.getThreadID() == chID
 }

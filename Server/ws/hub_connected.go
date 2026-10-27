@@ -7,8 +7,10 @@ import "slices"
 // kept out of hub.go (at its line ceiling). See livePresences, StoppedUserIDs.
 
 // mergeLivePresence is the user's live presence across all of their
-// connections (oldest first). Status, custom status and the idle stamp are the
-// most recent setter's (livePresence.setAt, ties to the newer connection); a
+// connections (oldest first). The shown status is the highest presenceRank
+// among the connections (any non-idle device wins over idle ones); within a
+// rank, and for the custom status and idle stamp that travel with it, the most
+// recent setter wins (livePresence.setAt, ties to the newer connection). A
 // connection that has stamped nothing yet is skipped. The game activity is the
 // status source's own when it has one, else the newest connection reporting
 // one, so an activity set on one device is the user's, and it ends when that
@@ -22,7 +24,12 @@ func mergeLivePresence(conns []*Client) livePresence {
 		if p == nil || p.status == "" {
 			continue
 		}
-		if src == nil || !p.setAt.Before(src.setAt) {
+		if src == nil {
+			src = p
+			continue
+		}
+		pr, sr := presenceRank(p.status), presenceRank(src.status)
+		if pr > sr || (pr == sr && !p.setAt.Before(src.setAt)) {
 			src = p
 		}
 	}

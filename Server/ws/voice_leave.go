@@ -106,7 +106,6 @@ func (h *Hub) finishVoiceLeaveAnnounce(ctx context.Context, txn *voiceTxn, c *Cl
 	if c.user != nil {
 		username = c.user.Username
 	}
-	c.voiceExitAt.Store(time.Now().UnixNano())
 	slog.Info("voice leave",
 		"user_id", c.userID,
 		"username", username,

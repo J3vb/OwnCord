@@ -229,6 +229,10 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// note in serve_pumps.go's readPump defer — that field is an
 		// auth-time snapshot, never updated, so broadcasting it here can
 		// resurrect a status the user already changed or cleared.
-		h.QueuePresence(c.userID, db.StatusOffline, nil)
+		// Re-check after the DB write: a device that registered meanwhile
+		// queues its own online presence after this point (see readPump).
+		if !h.isConnected(c.userID) {
+			h.QueuePresence(c.userID, db.StatusOffline, nil)
+		}
 	}
 }

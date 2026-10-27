@@ -133,13 +133,14 @@ func (h *Hub) afkCandidates(afkID int64, cutoff time.Time) []afkCandidate {
 		if ch == 0 || ch == afkID {
 			continue
 		}
-		// The user is idle when their merged presence (the most recent setter
-		// across their devices) is, not when the call device's own stale one is.
-		m := mergeLivePresence(h.clients[c.userID])
-		if m.status != db.StatusIdle || m.idleSince.IsZero() || m.idleSince.After(cutoff) {
+		// AFK is judged on the connection that holds the call: it is the
+		// device whose idleness says the person left the call, and another
+		// device's activity or idleness must not move (or keep) it.
+		p := c.presence.Load()
+		if p == nil || p.status != db.StatusIdle || p.idleSince.IsZero() || p.idleSince.After(cutoff) {
 			continue
 		}
-		out = append(out, afkCandidate{c: c, fromCh: ch, idleSince: m.idleSince})
+		out = append(out, afkCandidate{c: c, fromCh: ch, idleSince: p.idleSince})
 	}
 	h.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].idleSince.Before(out[j].idleSince) })
@@ -240,7 +241,7 @@ func (h *Hub) afkEvict(ctx context.Context, c *Client, fromCh int64, idleSince t
 	if !h.isRegistered(c) {
 		return false
 	}
-	if m := mergeLivePresence(h.clientsOf(c.userID)); m.status != db.StatusIdle || !m.idleSince.Equal(idleSince) {
+	if p := c.presence.Load(); p == nil || p.status != db.StatusIdle || !p.idleSince.Equal(idleSince) {
 		return false
 	}
 	unlockMod, ok := h.voiceMod.tryLock(c.userID)

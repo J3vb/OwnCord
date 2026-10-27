@@ -446,3 +446,21 @@ func (h *Hub) deliverPresenceSnapshots() {
 	}
 	slog.Debug("hub: presence snapshots sent", "clients", len(stale))
 }
+
+// presenceRank orders statuses for the merged presence: an idle device never
+// outranks an active one (a background tab or a sleeping phone must not make
+// an active user look idle), and among active ones a chosen restriction wins
+// over plain online: invisible (the user asked not to be seen) over dnd (asked
+// not to be disturbed) over online. An unknown status ranks with online.
+func presenceRank(status string) int {
+	switch status {
+	case db.StatusIdle:
+		return 0
+	case db.StatusDND:
+		return 3
+	case db.StatusInvisible:
+		return 4
+	default:
+		return 2
+	}
+}

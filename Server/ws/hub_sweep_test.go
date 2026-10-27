@@ -95,6 +95,7 @@ func TestUnregisterNow_ReplacedClientIsReportedAsReplaced(t *testing.T) {
 	old := NewTestClient(h, 1, make(chan []byte, 4))
 	live := NewTestClient(h, 1, make(chan []byte, 4))
 	h.clients[1] = []*Client{live} // the reconnect already took the slot
+	old.displaced.Store(true)      // registerNow marks the connection it replaces
 
 	if replaced := h.unregisterNow(old); !replaced {
 		t.Error("unregisterNow(old client) = false, want true (a live client holds the slot)")

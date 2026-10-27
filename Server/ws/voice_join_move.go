@@ -66,6 +66,9 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 	} else if e := txn.takeParked(0); e != nil {
 		slog.Info("voice parked call moved to another device", "user_id", c.userID,
 			"from_channel_id", e.snap.chID, "to_channel_id", channelID)
+		// The parking device's socket is gone, so it cannot be told now: leave
+		// a note it collects when it next registers (registerNow).
+		h.voiceReg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
 		h.finishVoiceLeaveAnnounce(ctx, txn, e.client, e.snap.chID, e.snap.joinToken, voiceLeaveReasonMoved, e.snap.chID != channelID)
 	}
 
@@ -91,8 +94,25 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 // treat its connection as the one a moderator frame belongs to.
 const voiceExitWindow = 30 * time.Second
 
+// noteModeratorExit records that a moderator action just took userID's call off
+// c, so the moderator frame that follows (SendToVoiceDevice) reaches c and no
+// other device. Only moderator paths stamp: a move to another device or an
+// ordinary leave must not make a device the target of a later moderator frame.
+// c == nil is a parked call being torn down: nobody holds it, so every stamp
+// is cleared and the frame goes nowhere (the "reconnecting" answer).
+func (h *Hub) noteModeratorExit(userID int64, c *Client) {
+	for _, o := range h.clientsOf(userID) {
+		if o != c {
+			o.voiceExitAt.Store(0)
+		}
+	}
+	if c != nil {
+		c.voiceExitAt.Store(time.Now().UnixNano())
+	}
+}
+
 // SendToVoiceDevice delivers msg to the connection of userID that holds their
-// call or just lost it (Client.voiceExitAt), and to no other device: a
+// call or just lost it to a moderator (Client.voiceExitAt), and to no other device: a
 // voice_moved frame makes its receiver join the destination, which on the
 // user's other devices would steal the call. It reports false when no
 // connection qualifies (the call was parked, or nothing left it), the signal

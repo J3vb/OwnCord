@@ -99,6 +99,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 		// Name the reason first: writePumpDrainAndClose delivers queued
 		// frames before the close, so the displaced device learns it was
 		// replaced rather than dropped, and does not reconnect to kick back.
+		old.displaced.Store(true)
 		old.sendMsg(buildErrorMsg(ErrCodeSessionReplaced, "signed in on another device"))
 		old.closeSend()
 
@@ -110,7 +111,16 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 		// other sessions) through the same SESSION_REPLACED path. It is a
 		// terminal kick so its call is torn down at once rather than parked
 		// for a resume that cannot come.
+		// The oldest one that does not hold the account's call (at most one
+		// does): the cap must not end a call. All-holders cannot happen with
+		// a cap above 1, but the oldest is the fallback.
 		evicted = list[0]
+		for _, o := range list {
+			if o.voice.channel() == 0 {
+				evicted = o
+				break
+			}
+		}
 		slog.Warn("hub: evicting oldest connection over the per-user cap",
 			"user_id", c.userID, "cap", maxConnectionsPerUser)
 		evicted.markTerminalKick()
@@ -174,6 +184,12 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 	h.mu.Unlock()
 
 	slog.Info("hub: client registered", "user_id", c.userID, "total_clients", total)
+
+	// A call this session parked and another device then moved away: tell it
+	// first, before any other voice frame, so it clears its local call.
+	if ch := h.voiceReg.voiceGrace.takeMoved(c.userID, c.tokenHash); ch != 0 {
+		c.sendMsg(buildVoiceDisconnected(ch, voiceMovedReason))
+	}
 
 	// A fresh connect (lastSeq == 0) drops the replaced connection's voice state
 	// without transferring it, so that channel just lost a participant and the
@@ -331,9 +347,8 @@ func (h *Hub) unregisterNow(c *Client) bool {
 		h.pubsub.UnsubscribeAll(c)
 		return false // not replaced
 	}
-	replaced := h.sessionClientLocked(c.userID, c.tokenHash) != nil
 	h.mu.Unlock()
-	return replaced
+	return c.displaced.Load()
 }
 
 // shouldMarkOffline reports whether a disconnect teardown should run
@@ -385,15 +400,16 @@ type clientEvent struct {
 // postRegisterSessionRecheck's ban check closes that window.
 func (h *Hub) DisconnectUser(userID int64) {
 	conns := h.clientsOf(userID)
-	if len(conns) == 0 {
-		h.leaveParkedVoiceLocked(userID, voiceLeaveReasonDisconnect)
-		return
+	if len(conns) > 0 {
+		slog.Info("hub: disconnecting user", "user_id", userID, "connections", len(conns))
 	}
-	slog.Info("hub: disconnecting user", "user_id", userID, "connections", len(conns))
 	for _, c := range conns {
 		c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
 		h.kickClientTerminal(c)
 	}
+	// A call a dropped device parked in the grace window has no connection to
+	// kick, and survives while another device is connected; it ends with the ban.
+	h.leaveParkedVoiceLocked(userID, voiceLeaveReasonDisconnect)
 }
 
 // DisconnectRevokedUser drops every live connection of a user whose sessions
@@ -409,14 +425,14 @@ func (h *Hub) DisconnectUser(userID int64) {
 // (hub_registry.go) — see its doc for why the pair leaves no gap (OC-0423).
 func (h *Hub) DisconnectRevokedUser(userID int64) {
 	conns := h.clientsOf(userID)
-	if len(conns) == 0 {
-		h.leaveParkedVoiceLocked(userID, voiceLeaveReasonDisconnect)
-		return
+	if len(conns) > 0 {
+		slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID, "connections", len(conns))
 	}
-	slog.Info("hub: disconnecting user after sign-out-everywhere", "user_id", userID, "connections", len(conns))
 	for _, c := range conns {
 		h.kickClientTerminal(c)
 	}
+	// Every session is revoked, so a call parked by a dropped device ends too.
+	h.leaveParkedVoiceLocked(userID, voiceLeaveReasonDisconnect)
 }
 
 // onClientEvent applies a queued Register or Unregister on the dispatch

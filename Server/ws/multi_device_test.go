@@ -653,3 +653,226 @@ func TestMultiDevice_VoiceCommandsFromNonHoldingDeviceAreNoOps(t *testing.T) {
 		t.Fatal("A was told its call ended")
 	}
 }
+
+// ─── review fixes ───────────────────────────────────────────────────────────
+
+// dropSocket is a device's socket closing: unregister, then the voice step of
+// the teardown (which parks a completed call in the grace window).
+func (f *mdFix) dropSocket(d *mdDev) {
+	f.t.Helper()
+	f.hub.unregisterNow(d.c)
+	f.hub.leaveVoiceOnDisconnect(context.Background(), d.c, voiceLeaveReasonDisconnect)
+}
+
+func (f *mdFix) expectCallGone(identity string, ch int64) {
+	f.t.Helper()
+	if f.hub.voiceReg.voiceGrace.get(f.uid) != nil {
+		f.t.Fatal("the parked grace entry survived")
+	}
+	waitFor(f.t, "voice row to be removed", func() bool { return f.row(f.uid) == nil })
+	waitFor(f.t, "LiveKit participant to be removed", func() bool { return !f.sfu.has(RoomName(ch), identity) })
+}
+
+func TestMultiDevice_BanEndsCallParkedByAnotherDevice(t *testing.T) {
+	for name, kick := range map[string]func(*Hub, int64){
+		"ban":                 func(h *Hub, uid int64) { h.DisconnectUser(uid) },
+		"sign-out-everywhere": func(h *Hub, uid int64) { h.DisconnectRevokedUser(uid) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newMDFix(t)
+			a := f.dev("session-a", f.text)
+			token := f.join(a, f.voiceA)
+			f.dropSocket(a)
+			if f.hub.voiceReg.voiceGrace.get(f.uid) == nil {
+				t.Fatal("precondition: A's call should be parked")
+			}
+			b := f.dev("session-b", f.text)
+
+			kick(f.hub, f.uid)
+
+			if !b.c.isSendClosed() {
+				t.Fatal("B survived")
+			}
+			f.expectCallGone(participantIdentity(f.uid, token), f.voiceA)
+		})
+	}
+}
+
+func TestMultiDevice_AFKJudgesTheCallHoldingDevice(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	b := f.dev("session-b", f.text)
+	f.join(a, f.voiceA)
+	long := time.Now().Add(-time.Hour)
+	set := func(d *mdDev, status string, at time.Time) {
+		p := &livePresence{status: status, setAt: at}
+		if status == db.StatusIdle {
+			p.idleSince = long
+		}
+		d.c.presence.Store(p)
+	}
+	cutoff := time.Now().Add(-time.Minute)
+
+	// The call device is active; a background device idled later: not AFK.
+	set(a, db.StatusOnline, long)
+	set(b, db.StatusIdle, time.Now())
+	if got := f.hub.afkCandidates(0, cutoff); len(got) != 0 {
+		t.Fatalf("an idle background device made the active call AFK: %d candidates", len(got))
+	}
+	// The call device is idle although the other device is active: AFK.
+	set(a, db.StatusIdle, long)
+	set(b, db.StatusOnline, time.Now())
+	if got := f.hub.afkCandidates(0, cutoff); len(got) != 1 || got[0].c != a.c {
+		t.Fatalf("an idle call device was not an AFK candidate: %d candidates", len(got))
+	}
+}
+
+func TestMultiDevice_ShownStatusNonIdleDeviceWins(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	b := f.dev("session-b", f.text)
+	now := time.Now()
+	set := func(d *mdDev, status string, at time.Time) {
+		d.c.presence.Store(&livePresence{status: status, setAt: at})
+	}
+	cases := []struct {
+		a, b, want string
+	}{
+		{db.StatusOnline, db.StatusIdle, db.StatusOnline}, // idle set later still loses
+		{db.StatusIdle, db.StatusOnline, db.StatusOnline},
+		{db.StatusIdle, db.StatusIdle, db.StatusIdle},
+		{db.StatusDND, db.StatusOnline, db.StatusDND}, // dnd outranks online
+		{db.StatusOnline, db.StatusDND, db.StatusDND},
+		{db.StatusInvisible, db.StatusDND, db.StatusInvisible},
+	}
+	for i, tc := range cases {
+		set(a, tc.a, now.Add(time.Duration(i)*time.Second))
+		set(b, tc.b, now.Add(time.Duration(i)*time.Second+time.Millisecond)) // b is the later setter
+		if got := f.hub.LiveStatus(f.uid); got != tc.want {
+			t.Fatalf("case %d (%s,%s): shown %q, want %q", i, tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestMultiDevice_ModeratorFramesReachOnlyTheCallDevice(t *testing.T) {
+	t.Run("live call", func(t *testing.T) {
+		f := newMDFix(t)
+		b := f.dev("session-b", f.text)
+		f.join(b, f.voiceA) // B leaves a call recently: A's join moves it
+		a := f.dev("session-a", f.text)
+		f.join(a, f.voiceB)
+		a.pump()
+		b.pump()
+		a.got, b.got = nil, nil
+
+		if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceB, false, false, nil) {
+			t.Fatal("moderator move did not evict")
+		}
+		if !f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceA, "", 99)) {
+			t.Fatal("no device received the moderator frame")
+		}
+		a.await(t, MsgTypeVoiceMoved, nil)
+		b.settle()
+		if b.index(0, MsgTypeVoiceMoved, nil) >= 0 {
+			t.Fatal("the idle device received voice_moved and would steal the call")
+		}
+	})
+	t.Run("parked call", func(t *testing.T) {
+		f := newMDFix(t)
+		a := f.dev("session-a", f.text)
+		b := f.dev("session-b", f.text)
+		f.join(a, f.voiceA)
+		f.dropSocket(a)
+		b.pump()
+		b.got = nil
+
+		if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA, false, false, nil) {
+			t.Fatal("moderator move did not tear down the parked call")
+		}
+		if f.hub.SendToVoiceDevice(f.uid, buildVoiceMoved(f.voiceB, "", 99)) {
+			t.Fatal("a parked call's moderator frame was routed to another device")
+		}
+		b.settle()
+		if b.index(0, MsgTypeVoiceMoved, nil) >= 0 {
+			t.Fatal("device B received voice_moved for A's parked call")
+		}
+	})
+}
+
+func TestMultiDevice_ParkedCallMovedTellsTheOldSession(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	f.join(a, f.voiceA)
+	f.dropSocket(a)
+	b := f.dev("session-b", f.text)
+	f.join(b, f.voiceB)
+	if f.hub.voiceReg.voiceGrace.get(f.uid) != nil {
+		t.Fatal("B's join should have taken the parked call")
+	}
+
+	a2c := f.newConn(f.uid, "session-a", f.text)
+	a2c.lastSeq = 1
+	f.hub.registerNowTest(a2c, map[int64]bool{f.text: true})
+	a2 := &mdDev{c: a2c}
+	a2.pump()
+	i := a2.index(0, MsgTypeVoiceDisconnected, nil)
+	if i < 0 || framePayload(a2.got[i])["reason"] != voiceMovedReason {
+		t.Fatalf("returning session was not told its call moved; got %s", a2.types())
+	}
+	// Told once.
+	again := f.newConn(f.uid, "session-a", f.text)
+	again.lastSeq = 2
+	f.hub.registerNowTest(again, map[int64]bool{f.text: true})
+	d := &mdDev{c: again}
+	d.pump()
+	if d.index(0, MsgTypeVoiceDisconnected, nil) >= 0 {
+		t.Fatal("the moved notice was delivered twice")
+	}
+}
+
+func TestMultiDevice_CapEvictionSparesTheCallHolder(t *testing.T) {
+	f := newMDFix(t)
+	devs := make([]*mdDev, 0, maxConnectionsPerUser)
+	for i := range maxConnectionsPerUser {
+		devs = append(devs, f.dev(fmt.Sprintf("session-%d", i), f.text))
+	}
+	f.join(devs[0], f.voiceA) // the oldest device holds the call
+	f.dev("session-new", f.text)
+
+	if devs[0].c.isSendClosed() || devs[0].c.voice.channel() != f.voiceA {
+		t.Fatal("the cap evicted the device holding the call")
+	}
+	if !devs[1].c.isSendClosed() {
+		t.Fatal("the oldest device without a call was not evicted")
+	}
+	if n := len(f.hub.ClientsOfForTest(f.uid)); n != maxConnectionsPerUser {
+		t.Fatalf("connections = %d, want %d", n, maxConnectionsPerUser)
+	}
+}
+
+// A connection removed by a kick (not displaced by registerNow) tears down its
+// own call even when its session has since reconnected; a displaced one leaves
+// the call to its replacement.
+func TestMultiDevice_KickedConnectionKeepsOwnTeardownEvenAfterSessionReconnects(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	token := f.join(a, f.voiceA)
+	f.hub.kickClient(a.c)
+	f.dev("session-a", f.text) // the session reconnects (fresh)
+	if replaced := f.hub.unregisterNow(a.c); replaced {
+		t.Fatal("a kicked connection was treated as displaced, leaving its call to the 60 s sweep")
+	}
+	f.hub.leaveVoiceOnDisconnect(context.Background(), a.c, voiceLeaveReasonDisconnect)
+	if f.hub.voiceReg.voiceGrace.get(f.uid) == nil {
+		t.Fatal("the kicked connection's call was neither parked nor torn down")
+	}
+	_ = token
+
+	// Displacement still defers to the replacement.
+	g := newMDFix(t)
+	old := g.dev("session-a", g.text)
+	g.dev("session-a", g.text)
+	if replaced := g.hub.unregisterNow(old.c); !replaced {
+		t.Fatal("a displaced connection must report replaced")
+	}
+}

@@ -551,10 +551,12 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 	// no connection holding a call the only membership left may be a parked one.
 	c := h.voiceClient(userID)
 	if c == nil {
+		h.noteModeratorExit(userID, nil)
 		left := h.leaveParkedVoice(ctx, txn, txn.takeParked(0), voiceLeaveReasonModerator)
 		return left || h.isConnected(userID)
 	}
 	h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonModerator)
+	h.noteModeratorExit(userID, c)
 	return true
 }
 
@@ -572,9 +574,14 @@ func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelI
 	defer txn.end()
 	c := h.voiceClient(userID)
 	if c == nil {
+		h.noteModeratorExit(userID, nil)
 		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), reason)
 	}
-	return h.handleVoiceLeaveIfStillIn(ctx, txn, c, channelID, reason)
+	left := h.handleVoiceLeaveIfStillIn(ctx, txn, c, channelID, reason)
+	if left {
+		h.noteModeratorExit(userID, c)
+	}
+	return left
 }
 
 // SetPendingVoiceModFlags stashes a moderator-imposed mute/deafen on
