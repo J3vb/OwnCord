@@ -71,6 +71,34 @@ describe("createModal", () => {
     expect(container.contains(inst.overlay)).toBe(true);
   });
 
+  it("a press that starts inside and ends on the backdrop does not close", () => {
+    const onClose = vi.fn();
+    const content = document.createElement("input");
+    const inst = createModal({ content, onClose }, container);
+
+    // Drag-select past the input edge: the press lands on the input, the
+    // release on the backdrop, so the browser fires the click on the overlay.
+    content.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    inst.overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.contains(inst.overlay)).toBe(true);
+  });
+
+  it("a backdrop press after an inside drag still closes", () => {
+    const onClose = vi.fn();
+    const content = document.createElement("input");
+    const inst = createModal({ content, onClose }, container);
+
+    content.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    inst.overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    inst.overlay.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    inst.overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(container.contains(inst.overlay)).toBe(false);
+  });
+
   it("Escape key closes and calls onClose", () => {
     const onClose = vi.fn();
     const content = document.createElement("div");

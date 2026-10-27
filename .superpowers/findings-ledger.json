@@ -1,5 +1,5 @@
 {
-  "nextId": 520,
+  "nextId": 521,
   "findings": [
     {
       "id": "OC-0001",
@@ -12018,6 +12018,29 @@
       "lens": "concurrency",
       "finder": "ci-keeper",
       "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0520",
+      "title": "Drag-selecting text in a dialog and releasing on the backdrop closed the dialog",
+      "file": "Client/src/lib/modalFactory.ts",
+      "line": 127,
+      "severity": "low",
+      "why": "A mouse press on an input and a release on the backdrop fire the click on their nearest common ancestor, the overlay, so the factory's e.target === overlay check read it as a backdrop click. The Add server box (and every other factory dialog) closed and dropped what was typed.",
+      "repro": "Connect page, Add server, type an address, press inside the address field and drag past the box's edge, release: the box closes.",
+      "evidence": "Owner report, roadmap item 8.13 (2026-10-24).",
+      "suggestedFix": "Remember where the press started; close only when the press also started on the backdrop.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/modal-factory.test.ts (a press that starts inside and ends on the backdrop does not close); Client/tests/unit/server-panel.test.ts (stays open when drag-selecting the address text ends on the backdrop)",
+        "revertProof": "fail (the dialog closed)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-24",
+      "hunt": "owner-report-2026-10-24",
+      "lens": "client-state",
+      "finder": "owner",
+      "fixedDate": "2026-10-27"
     }
   ]
 }

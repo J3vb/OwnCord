@@ -107,12 +107,24 @@ export function createModal(
     }
   }
 
-  // Backdrop click
+  // Backdrop click. A press that starts inside the dialog and is released on
+  // the backdrop (drag-selecting an input's text past its edge) also fires a
+  // click on the overlay; only a press that started on the backdrop closes.
   if (closeOnBackdrop) {
+    let pressStartedInside = false;
+    overlay.addEventListener(
+      "pointerdown",
+      (e) => {
+        pressStartedInside = e.target !== overlay;
+      },
+      { capture: true, signal: disposable.signal },
+    );
     overlay.addEventListener(
       "click",
       (e) => {
-        if (e.target === overlay) {
+        const startedInside = pressStartedInside;
+        pressStartedInside = false;
+        if (e.target === overlay && !startedInside) {
           handleClose();
         }
       },

@@ -1021,6 +1021,23 @@ describe("ServerPanel", () => {
       expect(container.querySelector(".modal-overlay")).toBeNull();
     });
 
+    it("stays open when drag-selecting the address text ends on the backdrop", () => {
+      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
+      addBtn.click();
+
+      const hostInput = container.querySelectorAll(".modal .form-input")[1] as HTMLInputElement;
+      hostInput.value = "chat.example.com:8443";
+      const overlay = container.querySelector(".modal-overlay") as HTMLElement;
+      hostInput.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      expect(container.querySelector(".modal-overlay")).not.toBeNull();
+      expect(hostInput.value).toBe("chat.example.com:8443");
+    });
+
     it("does NOT close modal when clicking inside the modal body", () => {
       const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
       container.appendChild(panel.element);
