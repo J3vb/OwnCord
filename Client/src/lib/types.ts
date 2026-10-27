@@ -197,6 +197,17 @@ export interface Attachment {
   readonly url: string;
   readonly width?: number;
   readonly height?: number;
+  /** Length of a voice message in ms (WP 8.9). With `waveform`, the attachment is one. */
+  readonly duration_ms?: number;
+  /** A voice message's loudness, base64url (no padding) bytes 0-255, one per bar. */
+  readonly waveform?: string;
+}
+
+/** The length and waveform an upload declares to be a voice message (WP 8.9). */
+export interface VoiceUploadMeta {
+  readonly durationMs: number;
+  /** base64url without padding, 1..256 bytes decoded. */
+  readonly waveform: string;
 }
 
 /** Reaction summary on a REST message response. */
@@ -573,6 +584,12 @@ export interface ReadyPayload {
      * means an older server: no Follow control, no followed threads.
      */
     readonly thread_follows?: boolean;
+    /**
+     * The server accepts `voice_duration_ms` and `voice_waveform` on an upload
+     * and returns `duration_ms` and `waveform` on the attachment (WP 8.9).
+     * Absent means an older server: no mic button in the composer.
+     */
+    readonly voice_messages?: boolean;
     /**
      * The server understands `activity_update` and carries a member's game as
      * `activity` on `presence` and `presence_batch` and as `ready.activities`
@@ -2089,6 +2106,8 @@ export interface UploadResponse {
   readonly size: number;
   readonly mime: string;
   readonly url: string;
+  readonly duration_ms?: number;
+  readonly waveform?: string;
 }
 
 /**

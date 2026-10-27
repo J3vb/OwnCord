@@ -34,6 +34,7 @@ import type {
   StickerResponse,
   InviteResponse,
   UploadResponse,
+  VoiceUploadMeta,
   VoiceCredentialsResponse,
   MemberResponse,
   DmChannelsResponse,
@@ -1504,11 +1505,18 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       file: File,
       signal?: AbortSignal,
       onProgress?: (fraction: number) => void,
+      voice?: VoiceUploadMeta,
     ): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
+      // A voice message declares its length and waveform in the query (WP 8.9):
+      // both or neither, which one optional object guarantees.
+      const query =
+        voice === undefined
+          ? ""
+          : `?voice_duration_ms=${Math.round(voice.durationMs)}&voice_waveform=${encodeURIComponent(voice.waveform)}`;
 
-      return request<UploadResponse>("POST", "/uploads", formData, signal, {
+      return request<UploadResponse>("POST", `/uploads${query}`, formData, signal, {
         multipart: true,
         onUploadProgress: onProgress,
       });
