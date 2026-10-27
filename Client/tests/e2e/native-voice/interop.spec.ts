@@ -575,15 +575,24 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
   // receiver FrameCryptor on TrackSubscribed, so the first frames can reach
   // the decoder still encrypted and decode as a burst of noise.
   const fromBrowser = nativeAudio.filter((a) => a.identity === "user-1" && a.at >= settledAt);
-  // The native side still plays the browser track out, and it is silence.
+  // The native side subscribes to the browser track and decodes nothing
+  // audible from it. Its meter reports only while decoded frames arrive: when
+  // the cryptor is attached before the first frame, every frame is dropped and
+  // there is nothing to report, which is silence too.
   const seen = timeline
     .map(
       (e) =>
         `${String(e.type)}${e.identity ? `:${String(e.identity)}` : ""}${e.frames === undefined ? "" : `#${String(e.frames)}`}@${e.at - settledAt}ms`,
     )
     .join(" ");
-  expect(fromBrowser.length, `native peer events relative to settle: ${seen}`).toBeGreaterThan(0);
-  expect(Math.max(...fromBrowser.map((a) => a.rms))).toBeLessThan(1);
+  expect(
+    timeline.some((e) => e.type === "trackSubscribed" && e.identity === "user-1"),
+    `native peer events relative to settle: ${seen}`,
+  ).toBe(true);
+  expect(
+    fromBrowser.filter((a) => a.rms >= 1),
+    `native peer events relative to settle: ${seen}`,
+  ).toEqual([]);
 });
 
 type NativeVideo = { identity: string; frames: number; width: number; height: number; at: number };
