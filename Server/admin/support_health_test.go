@@ -18,7 +18,7 @@ type supportHealthHub struct {
 
 func (h supportHealthHub) LiveKitManaged() bool                          { return h.managed }
 func (h supportHealthHub) LiveKitProcessStatus() ws.LiveKitProcessStatus { return h.status }
-func (h supportHealthHub) ClientCount() int                              { return 3 }
+func (h supportHealthHub) UserCount() int                                { return 3 }
 
 // SRE-M1's in-process latency surface, satisfied so the snapshot's latency
 // branch is exercised.

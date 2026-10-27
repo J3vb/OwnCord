@@ -146,11 +146,16 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 	private := h.channelIsPrivate(ctx, ch.ID, ch.Type)
 	for _, uid := range h.channelReadAudience(ctx, ch.ID) {
 		fireBroadcastChannelCreateRaceHook(uid)
-		live := h.GetClient(uid)
-		if live == nil || !live.sendsChannel(ch.Type) {
-			continue
+		var frame []byte
+		for _, live := range h.clientsOf(uid) {
+			if !live.sendsChannel(ch.Type) {
+				continue
+			}
+			if frame == nil {
+				frame = buildChannelCreateFor(ch, private, h.refreshChannelVisibilityAffordances(ctx, ch, uid))
+			}
+			live.sendMsg(frame)
 		}
-		live.sendMsg(buildChannelCreateFor(ch, private, h.refreshChannelVisibilityAffordances(ctx, ch, uid)))
 	}
 }
 
@@ -291,38 +296,40 @@ func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
 // pattern as refreshChannelVisibilityRaceHook.
 var revokeUnreadableChannelsPreActRaceHook func(userID int64)
 
-// SendToUser delivers msg directly to the client identified by userID.
-// Returns true if the client was found and the message was queued.
+// SendToUser delivers msg directly to every live connection of userID (each
+// of the user's devices). Returns true if at least one connection was found and
+// queued the message.
 func (h *Hub) SendToUser(userID int64, msg []byte) bool {
-	c := h.GetClient(userID)
-	if c == nil {
-		return false
+	queued := false
+	for _, c := range h.clientsOf(userID) {
+		if c.trySendMsg(msg) {
+			queued = true
+		}
 	}
-	return c.trySendMsg(msg)
+	return queued
 }
 
-// SendToUserHigh sends a high-priority message to a specific user.
+// SendToUserHigh sends a high-priority message to every connection of a
+// specific user. Returns false when the user has none.
 func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
-	c := h.GetClient(userID)
-	if c == nil {
-		return false
+	conns := h.clientsOf(userID)
+	for _, c := range conns {
+		c.sendHighMsg(msg)
 	}
-	c.sendHighMsg(msg)
-	return true
+	return len(conns) > 0
 }
 
-// SendToUserLow sends a low-priority message to a specific user. Unlike
-// SendToUserHigh, an overflow is silently dropped rather than disconnecting
-// the client — the targeted-delivery sibling of broadcastExcludeLow, for
-// events (e.g. DM typing indicators) that need direct-to-user routing but
-// are ephemeral and safely droppable (OC-0260).
+// SendToUserLow sends a low-priority message to every connection of a specific
+// user. Unlike SendToUserHigh, an overflow is silently dropped rather than
+// disconnecting the client — the targeted-delivery sibling of
+// broadcastExcludeLow, for events (e.g. DM typing indicators) that need
+// direct-to-user routing but are ephemeral and safely droppable (OC-0260).
 func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
-	c := h.GetClient(userID)
-	if c == nil {
-		return false
+	conns := h.clientsOf(userID)
+	for _, c := range conns {
+		c.sendLowMsg(msg)
 	}
-	c.sendLowMsg(msg)
-	return true
+	return len(conns) > 0
 }
 
 // sendSequencedToUsers stamps msg with a monotonic seq, stores it in the

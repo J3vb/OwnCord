@@ -28,7 +28,7 @@ func TestRegisterNow_ResumeDoesNotTransferIncompleteVoiceJoin(t *testing.T) {
 	h := newEmitTestHub()
 
 	old := NewTestClient(h, 1, make(chan []byte, 8))
-	h.clients[1] = old
+	h.clients[1] = []*Client{old}
 	// Mirrors voiceJoinPersist (voice_join.go:306): the DB row committed and
 	// the client's own voice state was set immediately after (BUG-088), but
 	// voiceJoinComplete — the only place that ever marks a join as having
@@ -53,7 +53,7 @@ func TestRegisterNow_ResumeTransfersCompletedVoiceJoin(t *testing.T) {
 	h := newEmitTestHub()
 
 	old := NewTestClient(h, 1, make(chan []byte, 8))
-	h.clients[1] = old
+	h.clients[1] = []*Client{old}
 	old.voice.setState(7, "join-token-done")
 	if !old.voice.markCompletedIfMatch(7, "join-token-done") {
 		t.Fatal("precondition: markVoiceJoinCompleteIfMatch should succeed for the client's own current state")

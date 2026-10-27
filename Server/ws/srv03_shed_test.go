@@ -150,8 +150,8 @@ func waitDispatchDrained(t *testing.T, h *Hub) {
 func TestTopicShed_MetadataFrameDoesNotForceResync(t *testing.T) {
 	h := newEmitTestHub()
 	send := make(chan []byte, 4096)
-	h.clients[1] = NewTestClient(h, 1, send)
-	h.pubsub.Subscribe(h.clients[1], ChannelTopic(5))
+	h.clients[1] = []*Client{NewTestClient(h, 1, send)}
+	h.pubsub.Subscribe(h.clients[1][0], ChannelTopic(5))
 
 	for range topicRateLimitPerSecond + 5 {
 		h.deliverBroadcast(broadcastMsg{channelID: 5, msg: []byte(`{"type":"chat_deleted"}`)})

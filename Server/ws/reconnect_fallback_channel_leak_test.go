@@ -159,7 +159,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 	var c *Client
 	for {
 		hub.mu.Lock()
-		c = hub.clients[uid]
+		c = hub.newestLocked(uid)
 		hub.mu.Unlock()
 		if c != nil {
 			break
@@ -174,9 +174,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 		t.Errorf("resumed-then-fallback client kept focus on revoked channel %d after registerNow, want 0", got)
 	}
 
-	hub.pubsub.mu.RLock()
-	sub := hub.pubsub.topics[ChannelTopic(chID)][uid]
-	hub.pubsub.mu.RUnlock()
+	sub := hub.pubsub.subscriberForTest(ChannelTopic(chID), uid)
 	if sub != nil {
 		t.Errorf("client is subscribed to ChannelTopic(%d) despite READ_MESSAGES being revoked before registration — "+
 			"every subsequent broadcast to that channel will be delivered to this socket", chID)

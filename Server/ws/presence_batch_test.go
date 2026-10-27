@@ -405,7 +405,7 @@ func TestPresenceDrop_ForcesFullReadyOnResume(t *testing.T) {
 	fillQueue(slow)
 
 	h.QueuePresence(mover.userID, db.StatusIdle, nil)
-	settleUntil(t, h, func() bool { return h.presenceResyncPending(slow.userID) },
+	settleUntil(t, h, func() bool { return h.presenceResyncPending(slow.userID, "") },
 		"the slow client never dropped the presence frame")
 
 	resume := func(u *db.User) bool {

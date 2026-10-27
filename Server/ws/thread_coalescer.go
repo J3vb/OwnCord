@@ -168,7 +168,7 @@ var threadFollowBeforeSendHook func()
 // frame must not follow it. A failed read drops the frames, since ready is
 // authoritative.
 func (h *Hub) sendThreadFollowUpdates(ctx context.Context, t *service.ThreadInfo, e *threadTimer) {
-	audience := h.threadFollowAudience(ctx, t)
+	audience, forumScoped := h.threadFollowAudience(ctx, t)
 	if len(audience) == 0 {
 		return
 	}
@@ -190,8 +190,18 @@ func (h *Hub) sendThreadFollowUpdates(ctx context.Context, t *service.ThreadInfo
 	}
 	payload := buildThreadFollowUpdate(t.ID, true, t)
 	for _, uid := range now {
-		if slices.Contains(audience, uid) {
+		if !slices.Contains(audience, uid) {
+			continue
+		}
+		if !forumScoped {
 			h.SendToUserLow(uid, payload)
+			continue
+		}
+		// A forum's posts go only to a connection that declared forums.
+		for _, c := range h.clientsOf(uid) {
+			if !lacksForums(c) {
+				c.sendLowMsg(payload)
+			}
 		}
 	}
 }
@@ -199,25 +209,27 @@ func (h *Hub) sendThreadFollowUpdates(ctx context.Context, t *service.ThreadInfo
 // threadFollowAudience is the connected followers of t who may read it: the
 // followers intersected with the parent's read audience and, for an NSFW
 // parent, with the users who acknowledged it (one batch read, as
-// resolveChannelActivity does). A failed read yields nobody.
-func (h *Hub) threadFollowAudience(ctx context.Context, t *service.ThreadInfo) []int64 {
+// resolveChannelActivity does). A failed read yields nobody. forumScoped
+// reports a forum's post, whose frames go only to connections that declared
+// forums.
+func (h *Hub) threadFollowAudience(ctx context.Context, t *service.ThreadInfo) ([]int64, bool) {
 	vis := h.readers.Visibility
 	if vis == nil {
-		return nil
+		return nil, false
 	}
 	followers, err := h.threadHub.svc.Followers(ctx, t.ID)
 	if err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("ws: thread follow read failed, dropping follow updates", "thread_id", t.ID, "err", err)
 		}
-		return nil
+		return nil, false
 	}
 	if len(followers) == 0 {
-		return nil
+		return nil, false
 	}
 	ch, err := vis.GetChannel(ctx, t.ID)
 	if err != nil || ch == nil {
-		return nil
+		return nil, false
 	}
 	var acked map[int64]bool
 	if ch.NSFW {
@@ -226,14 +238,11 @@ func (h *Hub) threadFollowAudience(ctx context.Context, t *service.ThreadInfo) [
 	forumScoped := isForumScoped(ctx, vis, ch) // a forum's posts go only to clients that know forums
 	var out []int64
 	for _, uid := range h.channelReadAudienceFor(ctx, t.ID, ch, false) {
-		if forumScoped && lacksForums(h.GetClient(uid)) {
-			continue
-		}
 		if slices.Contains(followers, uid) && (!ch.NSFW || acked[uid]) {
 			out = append(out, uid)
 		}
 	}
-	return out
+	return out, forumScoped
 }
 
 // forgetThread drops a deleted thread's coalescing state, so no timer fires a

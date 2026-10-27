@@ -204,7 +204,7 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 	// ── live delivery: bob focused/subscribed, gets nothing with content ──
 	sendBob := make(chan []byte, 32)
 	cBob := NewTestClientWithUser(f.hub, bobUser, f.labelledID, sendBob)
-	f.hub.clients[f.bobID] = cBob
+	f.hub.clients[f.bobID] = []*Client{cBob}
 	f.hub.pubsub.Subscribe(cBob, ChannelTopic(f.labelledID))
 
 	aliceUser, err := f.db.GetUserByID(ctx, f.aliceID)
@@ -213,7 +213,7 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 	}
 	sendAlice := make(chan []byte, 32)
 	cAlice := NewTestClientWithUser(f.hub, aliceUser, f.labelledID, sendAlice)
-	f.hub.clients[f.aliceID] = cAlice
+	f.hub.clients[f.aliceID] = []*Client{cAlice}
 	f.hub.pubsub.Subscribe(cAlice, ChannelTopic(f.labelledID))
 
 	go f.hub.Run()
@@ -599,7 +599,7 @@ func TestNSFW_ChannelLookupFailureDeniesEverySocketRecipient(t *testing.T) {
 	send := make(chan []byte, 8)
 	c := NewTestClient(hub, subscriberID, send)
 	hub.mu.Lock()
-	hub.clients[subscriberID] = c
+	hub.clients[subscriberID] = []*Client{c}
 	hub.mu.Unlock()
 	hub.pubsub.Subscribe(c, ChannelTopic(chID))
 

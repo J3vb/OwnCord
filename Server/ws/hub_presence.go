@@ -74,7 +74,7 @@ func (h *Hub) publishGlobal(bm broadcastMsg, msg []byte, seq uint64, private map
 	}
 	h.pubsub.publishWithPriority(TopicGlobal, msg, bm.excludeUserID, priority, allow)
 	for uid, own := range private {
-		if c := h.GetClient(uid); c != nil {
+		for _, c := range h.clientsOf(uid) {
 			c.sendPresenceMsg(wrapWithSeq(own, seq))
 		}
 	}
@@ -95,16 +95,14 @@ type presenceRepairState struct {
 	// then takes a full ready listing every member. mu is a leaf lock:
 	// nothing is acquired while holding it.
 	mu    syncutil.Ranked[lockRankLeaf]
-	users map[int64]struct{}
+	users map[resyncKey]struct{} // per device session: a resume of another device cannot clear it
 	joins map[int64]struct{}
 }
 
-// mark sets (or clears) userID in set, one of s's maps, and reports whether
-// it was set.
-func (s *presenceRepairState) mark(set *map[int64]struct{}, userID int64, on bool) bool {
+// mark sets (or clears) userID in set, one of s's maps.
+func (s *presenceRepairState) mark(set *map[int64]struct{}, userID int64, on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, had := (*set)[userID]
 	if on {
 		if *set == nil {
 			*set = make(map[int64]struct{})
@@ -113,7 +111,38 @@ func (s *presenceRepairState) mark(set *map[int64]struct{}, userID int64, on boo
 	} else {
 		delete(*set, userID)
 	}
+}
+
+// resyncKey names one device session: the owed full ready belongs to the
+// session whose frame was dropped, not to the account.
+type resyncKey struct {
+	userID    int64
+	tokenHash string
+}
+
+// markResync sets (or clears) k in the owed-resync set and reports whether it
+// was set.
+func (s *presenceRepairState) markResync(k resyncKey, on bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, had := s.users[k]
+	if on {
+		if s.users == nil {
+			s.users = make(map[resyncKey]struct{})
+		}
+		s.users[k] = struct{}{}
+	} else {
+		delete(s.users, k)
+	}
 	return had
+}
+
+// markedResync reports whether k owes a full ready.
+func (s *presenceRepairState) markedResync(k resyncKey) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.users[k]
+	return ok
 }
 
 // marked reports whether userID is in set, one of s's maps.
@@ -271,6 +300,14 @@ func (h *Hub) flushPresenceQueue() {
 		presenceFlushRaceHook(h)
 	}
 	lost := false
+	// An offline entry queued for a user who has connected since is stale: the
+	// new connection's own online presence follows it, but could be coalesced
+	// away or ordered behind it. Drop it (presenceMu -> Hub.mu (R) is in order).
+	for uid, p := range queued {
+		if p.status == db.StatusOffline && h.isConnected(uid) {
+			delete(queued, uid)
+		}
+	}
 	if len(queued) > 0 {
 		for uid, p := range queued {
 			if p.member != nil {
@@ -285,7 +322,7 @@ func (h *Hub) flushPresenceQueue() {
 	}
 	if lost {
 		h.mu.RLock()
-		for _, c := range h.clients {
+		for _, c := range h.allClientsLocked() {
 			c.presenceStale.Store(true)
 		}
 		h.mu.RUnlock()
@@ -353,15 +390,15 @@ func buildPresenceBatchMsg(updates []presenceBatchEntry, full bool) []byte {
 	return buildJSON(wsMsg{Type: MsgTypePresenceBatch, Payload: presenceBatchPayload{Updates: updates, Full: full}})
 }
 
-// presenceDropped records that userID's connection dropped a presence frame
+// presenceDropped records that the session tokenHash of userID dropped a presence frame
 // (Client.sendPresenceMsg): the next flush sends that client a snapshot, and
 // the user's next resume takes the full ready, because the dropped seq sits
 // below later ones the client may still see and ack. Lock-free apart from the
 // leaf presenceRepairState.mu. Client.sendPresenceMsg releases the client's mu
 // before it calls this, but its callers may hold seqMu, ps.mu or presenceMu.
-func (h *Hub) presenceDropped(userID int64) {
+func (h *Hub) presenceDropped(userID int64, tokenHash string) {
 	h.presenceRepair.drops.Add(1)
-	h.presenceRepair.mark(&h.presenceRepair.users, userID, true)
+	h.presenceRepair.markResync(resyncKey{userID, tokenHash}, true)
 	if h.presenceRepair.staleAny.CompareAndSwap(false, true) {
 		time.AfterFunc(presenceCoalesceWindow, h.flushPresenceQueue)
 	}
@@ -369,14 +406,14 @@ func (h *Hub) presenceDropped(userID int64) {
 
 // presenceResyncPending reports whether userID's connection dropped a
 // presence frame since their last full ready.
-func (h *Hub) presenceResyncPending(userID int64) bool {
-	return h.presenceRepair.marked(&h.presenceRepair.users, userID)
+func (h *Hub) presenceResyncPending(userID int64, tokenHash string) bool {
+	return h.presenceRepair.markedResync(resyncKey{userID, tokenHash})
 }
 
 // setPresenceResync marks (or clears) userID's pending resync and reports
 // whether one was pending.
-func (h *Hub) setPresenceResync(userID int64, pending bool) bool {
-	return h.presenceRepair.mark(&h.presenceRepair.users, userID, pending)
+func (h *Hub) setPresenceResync(userID int64, tokenHash string, pending bool) bool {
+	return h.presenceRepair.markResync(resyncKey{userID, tokenHash}, pending)
 }
 
 // deliverPresenceSnapshots sends every presence-stale client a full
@@ -389,7 +426,7 @@ func (h *Hub) setPresenceResync(userID int64, pending bool) bool {
 func (h *Hub) deliverPresenceSnapshots() {
 	h.mu.RLock()
 	var stale []*Client
-	for _, c := range h.clients {
+	for _, c := range h.allClientsLocked() {
 		if c.presenceStale.Load() {
 			stale = append(stale, c)
 		}
@@ -418,4 +455,43 @@ func (h *Hub) deliverPresenceSnapshots() {
 		c.sendPresenceMsg(msg)
 	}
 	slog.Debug("hub: presence snapshots sent", "clients", len(stale))
+}
+
+// applyPresenceChoice records the presence a presence_update set and returns
+// the events to emit for it. A chosen status (online, dnd, invisible) is the
+// user's, so it is stamped on every connection of the user, the sender last:
+// the newest choice then wins the merge (mergeLivePresence) whatever an older
+// device chose before, and each connection keeps its own idle tracking from
+// there. An idle update is the sender's own auto-idle and stamps only that
+// connection.
+//
+// The outgoing presence follows the MERGED state after the update, not the
+// sender's raw status: an idle device must not show the user idle while
+// another device is active. An auto-idle that leaves the user's shown status
+// and text unchanged emits nothing.
+func (h *Hub) applyPresenceChoice(c *Client, p *livePresence, events []Event) []Event {
+	before := mergeLivePresence(h.clientsOf(c.userID))
+	if !isIdleStatus(p.status) {
+		for _, o := range h.clientsOf(c.userID) {
+			if o != c {
+				o.setLivePresence(p.status, p.customStatus, p.customStatusExpiresAt)
+			}
+		}
+	}
+	c.setLivePresence(p.status, p.customStatus, p.customStatusExpiresAt)
+	merged := mergeLivePresence(h.clientsOf(c.userID))
+	if isIdleStatus(p.status) && merged.status == before.status && sameText(merged.customStatus, before.customStatus) {
+		return nil
+	}
+	if merged.status == p.status && sameText(merged.customStatus, p.customStatus) {
+		return events // the update is what is shown: the handler's events stand
+	}
+	return presenceEvents(c.userID, merged.status, merged.customStatus, merged.activity, merged.listening)
+}
+
+func sameText(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

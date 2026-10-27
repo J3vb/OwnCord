@@ -258,12 +258,10 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 	// without sending a WS voice_leave (e.g. crash, network loss, F5 reload).
 	txn := h.begin(userID)
 	defer txn.end()
-	h.mu.RLock()
-	c, exists := h.clients[userID]
-	h.mu.RUnlock()
+	conns := h.clientsOf(userID)
 
-	if exists {
-		h.webhookLeftCleanupClient(ctx, txn, c, userID, channelID, joinToken)
+	if len(conns) > 0 {
+		h.webhookLeftCleanupClient(ctx, txn, conns, userID, channelID, joinToken)
 	} else if h.voice != nil {
 		// Client already disconnected from WS — use channel-conditional delete
 		// to avoid wiping a newer row if the user reconnected and rejoined.
@@ -277,14 +275,21 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 // handleWebhookParticipantLeft: it compare-and-clears the client's voice
 // fields for this exact join instance, then either finishes the leave or, when
 // the client has already moved on, clears the stale DB row.
-func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, c *Client, userID, channelID int64, joinToken string) {
+func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, conns []*Client, userID, channelID int64, joinToken string) {
 	// Atomic compare-and-clear of this exact join instance (channel AND
 	// token, one slot critical section): a voice_join committed on the
 	// readPump goroutine in between (a channel switch, or a same-channel
 	// rejoin with a fresh token) must not be wiped out from under the new
 	// session, dropping its VoiceTopic subscription along with it. Like every
 	// clear it resets the completed flag and unsubscribes.
-	matched := txn.clearExact(c, channelID, joinToken)
+	// Only the connection that holds the call can match; the user's other
+	// devices have an empty slot and never do.
+	matched := false
+	for _, c := range conns {
+		if txn.clearExact(c, channelID, joinToken) {
+			matched = true
+		}
+	}
 
 	if matched {
 		h.webhookLeftFinishLeave(ctx, txn, userID, channelID, joinToken)

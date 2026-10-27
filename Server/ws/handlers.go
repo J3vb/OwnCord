@@ -91,10 +91,9 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		displayName = c.user.DisplayName
 	}
 	voiceChID, voiceJoinTok := c.voice.state()
-	live := c.livePresence()
 	info := ClientInfo{
-		Activity:       live.activity,
-		Listening:      live.listening,
+		Activity:       h.userActivity(c),
+		Listening:      h.userListening(c),
 		UserID:         c.userID,
 		Username:       username,
 		Avatar:         avatar,
@@ -289,7 +288,7 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID, !result.DeferChannelFocusNoRead)
 	}
 	if result.SetPresence != nil {
-		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus, result.SetPresence.customStatusExpiresAt)
+		result.Events = h.applyPresenceChoice(c, result.SetPresence, result.Events)
 	}
 	if result.SetActivity != nil {
 		h.applyActivity(c, result.SetActivity.next)

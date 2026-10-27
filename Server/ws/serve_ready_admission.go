@@ -72,7 +72,7 @@ func (h *Hub) sendFreshReady(ctx context.Context, conn *websocket.Conn, c *Clien
 	if readyErr != nil {
 		slog.Error("buildReady failed", "user_id", c.userID, "err", readyErr)
 		if owedResync {
-			h.setPresenceResync(c.userID, true)
+			h.setPresenceResync(c.userID, c.tokenHash, true)
 		}
 		_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeInternal, "failed to build ready payload"))
 		h.unregisterFailedHandshake(ctx, c)
@@ -83,7 +83,7 @@ func (h *Hub) sendFreshReady(ctx context.Context, conn *websocket.Conn, c *Clien
 	if err != nil {
 		slog.Warn("ws: failed to send ready payload", "user_id", c.userID, "err", err)
 		if owedResync {
-			h.setPresenceResync(c.userID, true)
+			h.setPresenceResync(c.userID, c.tokenHash, true)
 		}
 		h.unregisterFailedHandshake(ctx, c)
 		_ = conn.Close(websocket.StatusInternalError, "handshake failed")

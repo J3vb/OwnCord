@@ -103,7 +103,7 @@ func (h *Hub) releaseThreadSocket(c *Client, threadID int64, frame []byte) {
 func (h *Hub) releaseThreadSockets(threadID, parentID int64) {
 	h.mu.RLock()
 	holders := make([]*Client, 0, 4)
-	for _, c := range h.clients {
+	for _, c := range h.allClientsLocked() {
 		if c.getThreadID() == threadID {
 			holders = append(holders, c)
 		}
@@ -118,9 +118,13 @@ func (h *Hub) releaseThreadSockets(threadID, parentID int64) {
 	}
 }
 
-// holdsThread reports whether userID's live socket has threadID in its second
-// slot.
+// holdsThread reports whether one of userID's live sockets has threadID in its
+// second slot.
 func (h *Hub) holdsThread(userID, threadID int64) bool {
-	c := h.GetClient(userID)
-	return c != nil && c.getThreadID() == threadID
+	for _, c := range h.clientsOf(userID) {
+		if c.getThreadID() == threadID {
+			return true
+		}
+	}
+	return false
 }

@@ -71,27 +71,25 @@ func (h *Hub) computeReadableChannels(ctx context.Context, database VisibilityRe
 	return readable, nil
 }
 
-// admitHeldThread adds to allowed the thread user's live socket holds in its
-// second slot, when that thread's parent is visible. computeAllowedChannels
+// admitHeldThread adds to allowed the threads user's live sockets hold in their
+// second slots, when that thread's parent is visible. computeAllowedChannels
 // lists parent channels only, so without this a role-change revoke or a
 // reconnect replay would treat the held thread as unreadable (or, for replay,
 // drop its frames). Visibility comes from the parent's entry in allowed, never
 // from the thread row alone: a parent the user cannot see admits nothing.
 func (h *Hub) admitHeldThread(ctx context.Context, database VisibilityReader, userID int64, allowed map[int64]bool) error {
-	live := h.GetClient(userID)
-	if live == nil {
-		return nil
-	}
-	tid := live.getThreadID()
-	if tid == 0 {
-		return nil
-	}
-	ch, err := database.GetChannel(ctx, tid)
-	if err != nil {
-		return fmt.Errorf("admitHeldThread GetChannel: %w", err)
-	}
-	if ch != nil && ch.IsThread() && allowed[ch.Thread.ParentID] {
-		allowed[tid] = true
+	for _, live := range h.clientsOf(userID) {
+		tid := live.getThreadID()
+		if tid == 0 {
+			continue
+		}
+		ch, err := database.GetChannel(ctx, tid)
+		if err != nil {
+			return fmt.Errorf("admitHeldThread GetChannel: %w", err)
+		}
+		if ch != nil && ch.IsThread() && allowed[ch.Thread.ParentID] {
+			allowed[tid] = true
+		}
 	}
 	return nil
 }

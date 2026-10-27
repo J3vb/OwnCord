@@ -191,12 +191,12 @@ export function rejoinVoiceAfterRestart(
     });
     return;
   }
-  // A live membership already in the payload means the rejoin is unnecessary
-  // (or the user re-joined manually while ready was in flight).
+  // Any membership of this user already in the payload means the rejoin is
+  // unnecessary: in this channel, the user re-joined manually while ready was
+  // in flight; in another one, another device holds the user's call and a
+  // voice_join here would move it.
   const currentUserId = authStore.getState().user?.id ?? 0;
-  if (
-    payload.voice_states.some((vs) => vs.user_id === currentUserId && vs.channel_id === channelId)
-  ) {
+  if (payload.voice_states.some((vs) => vs.user_id === currentUserId)) {
     return;
   }
   log.info("Rejoining voice channel after planned restart", { channelId });

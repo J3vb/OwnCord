@@ -140,7 +140,7 @@ test.describe("B9-7 NSFW consent gate (real server)", () => {
     await expect(bob.locator(".search-overlay")).toHaveCount(0);
     // Only an unscoped search may leave; nothing names the gated channel.
     const gatedTraffic = await contentTraffic(bob, general.id);
-    expect(gatedTraffic.filter((l) => !/^GET \/api\/v1\/search\?/.test(l))).toEqual([]);
+    expect(gatedTraffic.filter((l) => !l.startsWith("GET /api/v1/search?"))).toEqual([]);
     expect(gatedTraffic.filter((l) => l.includes(`channel_id=${general.id}`))).toEqual([]);
     await clearTraffic(bob);
 
@@ -200,8 +200,7 @@ test.describe("B9-7 NSFW consent gate (real server)", () => {
     await expect(bob.locator(".search-overlay")).toHaveCount(0);
 
     // 5. A second device inherits the server's consent without a prompt.
-    //    (The server keeps one live socket per account, so device 1 is
-    //    displaced and shows "Signed in elsewhere".)
+    //    (Device 1 stays connected alongside it.)
     const device2 = await secondDevice(browser, server);
     try {
       await channelItem(device2.page, "general").click();
@@ -226,13 +225,12 @@ test.describe("B9-7 NSFW consent gate (real server)", () => {
         server.api(`/api/v1/channels/${general.id}/messages`, undefined, bobLogin.token),
       ).rejects.toThrow(/NSFW_ACKNOWLEDGEMENT_REQUIRED/);
 
-      // 7. Device 1 reconnects ("Use here"): the authoritative ready carries
-      //    the revoke, so the content it showed is unmounted and nothing is
-      //    fetched.
-      await expect(bob.getByRole("button", { name: "Use here" })).toBeVisible();
-      await shot(bob, "07a-device1-displaced-before-reconnect");
+      // 7. Device 1 reconnects (its transport is cut and restored): the
+      //    authoritative state carries the revoke, so the content it showed is
+      //    unmounted and nothing is fetched.
       await clearTraffic(bob);
-      await bob.getByRole("button", { name: "Use here" }).click();
+      await bobTransport.offline();
+      bobTransport.online();
       await expect(gate(bob)).toBeVisible({ timeout: 30_000 });
       await expect(bob.locator(".msg-text", { hasText: secret })).toHaveCount(0);
       await bob.waitForTimeout(3_000);

@@ -44,7 +44,7 @@ func TestVoiceJoin_SupersededDuringTokenGeneration_WithholdsToken(t *testing.T) 
 	c := NewTestClient(h, uid, send)
 	c.user = &db.User{ID: uid, Username: "join-race-victim"}
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 
 	// Simulate a moderator's kick landing between GenerateToken returning and

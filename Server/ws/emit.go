@@ -164,7 +164,7 @@ func (h *Hub) emitPresenceSelf(_ context.Context, _ int64, ev Event) bool {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
 	payload := h.presencePayloadLocked(e.TargetUserID(), e.Payload(), e.bare)
-	if c := h.GetClient(e.TargetUserID()); c != nil {
+	for _, c := range h.clientsOf(e.TargetUserID()) {
 		c.sendPresenceMsg(payload)
 	}
 	return true
@@ -323,7 +323,7 @@ func (h *Hub) presencePayloadLocked(userID int64, payload, bare []byte) []byte {
 	if !h.gameActivity.on.Load() {
 		return bare
 	}
-	if c := h.GetClient(userID); c == nil || c.livePresence().noActivity() {
+	if mergeLivePresence(h.clientsOf(userID)).noActivity() {
 		return bare
 	}
 	return payload

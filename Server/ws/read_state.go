@@ -26,12 +26,9 @@ func buildReadState(channelID int64, rs service.ReadPointer) []byte {
 // service.ReadStateNotifier. It goes through SendToUserLow, the queue
 // mention_count uses, so the two frames cannot reorder, and the service holds
 // mentionEmitMu across the write and this call, so a reader's last frame is
-// the latest committed state. The hub keeps one live connection per user, so
-// only that connection hears it. A reader with no live connection recovers the
+// the latest committed state. Every live connection of the user
+// hears it, so a read on one device clears the badge on the others. A reader with no live connection recovers the
 // pointer from the next ready; nothing is replayed.
 func (h *Hub) NotifyReadState(userID, channelID int64, rs service.ReadPointer) {
-	if h.GetClient(userID) == nil {
-		return
-	}
 	h.SendToUserLow(userID, buildReadState(channelID, rs))
 }

@@ -44,7 +44,7 @@ func sessionReplacedFixture(t *testing.T) (*Hub, int64, string, string) {
 func connectDevice(t *testing.T, ctx context.Context, hub *Hub, uid int64, srvURL, token string) *websocket.Conn {
 	t.Helper()
 	hub.mu.Lock()
-	prev := hub.clients[uid]
+	prev := hub.newestLocked(uid)
 	hub.mu.Unlock()
 	conn := dialAndAuth(t, ctx, srvURL, token, 0, 0)
 	t.Cleanup(func() { _ = conn.Close(websocket.StatusNormalClosure, "") })
@@ -57,7 +57,7 @@ func connectDevice(t *testing.T, ctx context.Context, hub *Hub, uid int64, srvUR
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		hub.mu.Lock()
-		c := hub.clients[uid]
+		c := hub.newestLocked(uid)
 		hub.mu.Unlock()
 		if c != nil && c != prev {
 			return conn
@@ -103,7 +103,7 @@ func readUntilReplaced(t *testing.T, ctx context.Context, conn *websocket.Conn) 
 	}
 }
 
-func TestRegister_SecondDevice_SendsSessionReplacedBeforeClose(t *testing.T) {
+func TestRegister_SameSessionReconnect_SendsSessionReplacedBeforeClose(t *testing.T) {
 	hub, uid, token, srvURL := sessionReplacedFixture(t)
 	ctx := context.Background()
 
@@ -115,9 +115,9 @@ func TestRegister_SecondDevice_SendsSessionReplacedBeforeClose(t *testing.T) {
 	}
 }
 
-// The kick is symmetric: whichever device connects last wins and the other
-// is told why, every round. This is the fight the client stops on.
-func TestRegister_AlternatingDevices_EachDisplacedOneIsTold(t *testing.T) {
+// The replacement is per session: whichever connection of one session connects last wins and the other
+// is told why, every round (the client stops on SESSION_REPLACED).
+func TestRegister_AlternatingSameSessionConnects_EachDisplacedOneIsTold(t *testing.T) {
 	hub, uid, token, srvURL := sessionReplacedFixture(t)
 	ctx := context.Background()
 

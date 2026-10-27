@@ -633,12 +633,12 @@ func TestHub_GetClient(t *testing.T) {
 	defer hub.Stop()
 	waitRegistered(t, hub, client)
 
-	got := hub.GetClient(42)
+	got := hub.ClientForTest(42)
 	if got == nil {
 		t.Fatal("GetClient(42) returned nil")
 	}
 
-	got2 := hub.GetClient(999)
+	got2 := hub.ClientForTest(999)
 	if got2 != nil {
 		t.Fatal("GetClient(999) should return nil")
 	}
@@ -895,10 +895,10 @@ func TestHub_SweepStaleClients_RemovesInactiveClients(t *testing.T) {
 	if hub.ClientCount() != 1 {
 		t.Errorf("ClientCount = %d after sweep, want 1", hub.ClientCount())
 	}
-	if hub.GetClient(u1) != nil {
+	if hub.ClientForTest(u1) != nil {
 		t.Error("stale client should have been removed")
 	}
-	if hub.GetClient(u2) == nil {
+	if hub.ClientForTest(u2) == nil {
 		t.Error("fresh client should still be present")
 	}
 }
@@ -981,10 +981,10 @@ func TestHub_SweepRevokedSessions_KicksRevokedClient(t *testing.T) {
 	hub.SweepRevokedSessionsForTest()
 
 	// Alice should be kicked, Bob should remain.
-	if hub.GetClient(uid1) != nil {
+	if hub.ClientForTest(uid1) != nil {
 		t.Error("revoked client alice should have been kicked")
 	}
-	if hub.GetClient(uid2) == nil {
+	if hub.ClientForTest(uid2) == nil {
 		t.Error("valid client bob should still be connected")
 	}
 	if hub.ClientCount() != 1 {
@@ -1022,7 +1022,7 @@ func TestHub_SweepRevokedSessions_KicksBannedClient(t *testing.T) {
 
 	hub.SweepRevokedSessionsForTest()
 
-	if hub.GetClient(uid) != nil {
+	if hub.ClientForTest(uid) != nil {
 		t.Error("banned client should have been kicked by the session sweep")
 	}
 }
@@ -1626,7 +1626,7 @@ func TestBroadcastMemberUpdate_RevokesUnreadableSubscriptions(t *testing.T) {
 	if got := hub.ClientCount(); got != 1 {
 		t.Fatalf("ClientCount = %d, want 1 (socket must stay up)", got)
 	}
-	topics := hub.PubSubForTest().TopicsForClient(user.ID)
+	topics := hub.PubSubForTest().TopicsForUser(user.ID)
 	if slices.Contains(topics, ws.ChannelTopic(chID)) {
 		t.Error("still subscribed to the revoked channel topic")
 	}
@@ -1677,7 +1677,7 @@ func TestBroadcastMemberUpdate_ClosesSocketWhenVisibilityUnresolved(t *testing.T
 	if got := hub.ClientCount(); got != 0 {
 		t.Errorf("ClientCount = %d, want 0 (socket must close when visibility is unresolved)", got)
 	}
-	if topics := hub.PubSubForTest().TopicsForClient(uid); len(topics) != 0 {
+	if topics := hub.PubSubForTest().TopicsForUser(uid); len(topics) != 0 {
 		t.Errorf("TopicsForClient = %v, want none", topics)
 	}
 }

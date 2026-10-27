@@ -243,7 +243,7 @@ func TestCseqSocket_ReplayGateFailureSkipsOne(t *testing.T) {
 	if gaps != 1 || got[0] != 1 {
 		t.Fatalf("cseq on the wire = %v, want a run from 1 with exactly one skip", got)
 	}
-	if !f.hub.presenceResyncPending(f.userID) {
+	if !f.hub.presenceResyncPending(f.userID, auth.HashToken(f.token)) {
 		t.Fatal("the withheld frame did not mark the user's next resume for the full ready")
 	}
 }

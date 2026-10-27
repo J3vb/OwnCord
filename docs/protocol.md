@@ -149,14 +149,14 @@ After the WebSocket connection is established, the client sends the first messag
 }
 ```
 
-| Field               | Type     | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `token`             | string   | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `last_seq`          | uint64   | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `active_channel_id` | int64    | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                                                                                                                                                                                           |
-| `wake`              | bool     | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). The server refuses it with `ANOTHER_DEVICE_ACTIVE` (an `error` frame) when a different session of the same account holds the live connection or a call it parked in the voice grace window, so a woken device cannot silently displace another. Kept on every later dial (including a user's Retry) until one authenticates; only an explicit takeover ("Use here") omits it. |
-| `epoch`             | int      | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                                                                                                                                                                                           |
-| `features`          | string[] | No       | Optional capabilities this client can render, declared once per connection (see [Client features](#client-features)). Absent means none. Only `"forums"` is defined; unknown names are ignored. The list is untrusted input and only ever narrows what the socket is sent.                                                                                                                                                                                                                 |
+| Field               | Type     | Required | Description                                                                                                                                                                                                                                                                                                               |
+| ------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token`             | string   | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                                                                                                                                     |
+| `last_seq`          | uint64   | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                                                                                                                                 |
+| `active_channel_id` | int64    | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                          |
+| `wake`              | bool     | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). Servers that keep one connection per device session accept it like any other dial; the flag is ignored. Older servers refused it with `ANOTHER_DEVICE_ACTIVE` while a different session held the connection. |
+| `epoch`             | int      | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                          |
+| `features`          | string[] | No       | Optional capabilities this client can render, declared once per connection (see [Client features](#client-features)). Absent means none. Only `"forums"` is defined; unknown names are ignored. The list is untrusted input and only ever narrows what the socket is sent.                                                |
 
 `active_channel_id` closes a resume-only gap. The hub restores a reconnecting
 client's channel subscription by copying it from the previous connection entry,
@@ -177,19 +177,42 @@ the same frames.
 Clients should still send `channel_focus` after `auth_ok` — it remains the
 fallback for servers that predate this field, and it is idempotent.
 
-`wake` carries no privilege and grants nothing: it only asks the server not to
-displace a **different** session's live connection or a call it parked in the
-voice grace window. The server holds one live socket per account (last connect
-wins), so a device dialling on its own after a suspend could otherwise end the
-call on the machine the user is actually at. When a different session is live,
-or has a call parked in the grace window, the server answers an `error` frame
-with code `ANOTHER_DEVICE_ACTIVE` (not `auth_error` — the token is still valid)
-and closes without touching that session; the client stays signed in and offers
-"Use here", which reconnects **without** `wake` and takes the connection back.
-With no other session — or when the live connection or parked call is this same
-session's own — the wake connects normally. Only an explicit takeover ("Use
-here") omits `wake`; every other dial after a suspend, including a user's Retry,
-keeps it until one authenticates.
+`wake` carries no privilege and grants nothing. The server keeps one live
+connection per **device session** (the session token the socket authenticated
+with), not one per account, so a device dialling on its own after a suspend no
+longer displaces another device and is never refused: it connects alongside the
+others. The flag is accepted and ignored. `ANOTHER_DEVICE_ACTIVE` is no longer
+sent; the code stays in the protocol for clients that still talk to an older
+server, which refused a wake dial while a different session held the live
+connection or a call parked in the voice grace window.
+
+#### Connection model
+
+- One connection per device session. A user may be connected from several
+  devices at once, each on its own session token; everything addressed to "the
+  user" (direct messages, read state, mention counts, permission and role
+  changes, timeouts, settings) reaches every connection.
+- A new connection replaces an older one only when it is the **same session**
+  (a reload, a network reconnect, a wake on the same device). The older socket
+  receives `SESSION_REPLACED` and is closed; the new one carries on.
+- At most 10 connections per user. The 11th evicts the oldest connection of a
+  different session with `SESSION_REPLACED`.
+- Presence is online while any connection exists; the user goes offline, once,
+  when the last one drops.
+- A ban, sign-out-everywhere or an admin disconnect closes every connection. A
+  single revoked session closes only the connection that rode it.
+- Voice: one call per account. A `voice_join` from a second device **moves**
+  the call: the device that held it receives `voice_disconnected` with reason
+  `Call moved to another device` before anything produced by the new join, and
+  the new device joins normally. A move to a different channel broadcasts
+  `voice_leave` for the old one; a move within the same channel does not, since
+  the new device's join produces the `voice_state`. Voice commands
+  (`voice_leave`, `voice_mute`, `voice_deafen`, `voice_camera`,
+  `voice_screenshare`, watching and E2EE announces, token refresh) from a
+  connection that does not hold the call do nothing to the call another
+  connection holds. While a call is on another device, `ready` and
+  `voice_state` still list the user as in voice, so a client must not send
+  `voice_leave` on `ready` for a call it does not hold locally.
 
 ### Step 2: Success -- auth_ok
 
@@ -457,8 +480,8 @@ one already due sooner). A socket that died during the suspend is redialled
 within about 15 seconds instead of staying Connected for up to a minute.
 A gap longer than 90 seconds since the client last saw its clock running — at
 a heartbeat tick, an inbound frame or when a reconnect is about to dial — also
-marks its next dials `wake: true` ([Step 1](#step-1-client-sends-auth)), so
-the server refuses one that would displace another device
+marks its next dials `wake: true` ([Step 1](#step-1-client-sends-auth)); the
+flag is informational now that devices coexist
 ([connection-and-auth.md](architecture/ux/connection-and-auth.md) §4).
 
 ### Desktop Transport Liveness
@@ -1910,7 +1933,7 @@ including the one on screen. Sent after every accepted `mark_read` and
 `mark_unread`, even a no-op, and never after `channel_focus`. A rejected command
 sends no frame.
 
-Targeted to the caller's one live connection, unsequenced and never replayed;
+Sent to every live connection of the caller, unsequenced and never replayed;
 it shares the queue of `mention_count`, and each is written and sent under one
 lock, so a reader's last frame carries the latest committed state. A client that
 resumes keeps its own pointer, and the next full `ready` is the truth. A frame
@@ -3645,40 +3668,40 @@ warm resume served by replay never waits for a permit.
 
 ### Error Codes
 
-| Code                       | Description                                                                                                                                                                                                                                                                      |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BAD_REQUEST`              | Invalid payload format or field values                                                                                                                                                                                                                                           |
-| `BAD_PAYLOAD`              | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)                                                                                                                                                            |
-| `INTERNAL`                 | Server-side error                                                                                                                                                                                                                                                                |
-| `NOT_FOUND`                | Channel or message not found                                                                                                                                                                                                                                                     |
-| `FORBIDDEN`                | Missing required permission                                                                                                                                                                                                                                                      |
-| `NOT_KEY_HOLDER`           | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                                                                                                                                                     |
-| `STICKER_NOT_FOUND`        | A `chat_send` named a sticker that does not exist or was deleted. Nothing was stored. Refines `NOT_FOUND`.                                                                                                                                                                       |
-| `THREAD_EXISTS`            | The message already has a thread; the error carries `thread_id`                                                                                                                                                                                                                  |
-| `THREAD_LOCKED`            | The thread is locked; only a moderator may post in it or change it                                                                                                                                                                                                               |
-| `GAME_ACTIVITY_DISABLED`   | `activity_update` or `listening_update` set a game or a song while an admin has member activity switched off for the server; a clear is never refused (WP 8.3e-2, 8.10a)                                                                                                         |
-| `RATE_LIMITED`             | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                                                        |
-| `ALREADY_JOINED`           | Already in this voice channel                                                                                                                                                                                                                                                    |
-| `CHANNEL_FULL`             | Voice channel at capacity                                                                                                                                                                                                                                                        |
-| `VOICE_ERROR`              | Voice-specific error                                                                                                                                                                                                                                                             |
-| `VIDEO_LIMIT`              | Maximum video streams reached                                                                                                                                                                                                                                                    |
-| `BANNED`                   | User is banned                                                                                                                                                                                                                                                                   |
-| `INVALID_JSON`             | Message is not valid JSON                                                                                                                                                                                                                                                        |
-| `UNKNOWN_TYPE`             | Unrecognized message type                                                                                                                                                                                                                                                        |
-| `SLOW_MODE`                | Channel has slow mode enabled                                                                                                                                                                                                                                                    |
-| `TIMED_OUT`                | A send, edit, reaction, voice join, call ring or custom status refused by an active moderator timeout (B5-9)                                                                                                                                                                     |
-| `CALL_REQUIRES_ACCEPTANCE` | A 1:1 `call_ring` whose recipient has not accepted the caller's message request; the ring is never delivered                                                                                                                                                                     |
-| `CONFLICT`                 | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
-| `ALREADY_DELETED`          | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                                                                  |
-| `REACTION_LIMIT`           | A `reaction_add` with a new emoji on a message that already has 20 different ones. No `reaction_update` is sent. Refines `BAD_REQUEST`.                                                                                                                                          |
-| `POLL_ENDED`               | A `poll_vote` on a poll that was ended or whose time ran out, or a `poll_end` on one already ended. Nothing was written and no `poll_update` is sent. Refines `BAD_REQUEST`.                                                                                                     |
-| `ATTACHMENTS_UNAVAILABLE`  | A `chat_send` with no text whose every attachment was skipped (swept, foreign, already attached, a live avatar or group icon, or missing). No message is delivered and no ids are returned; the client holds the list. Refines `BAD_REQUEST`.                                    |
-| `SERVER_MUTED`             | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
-| `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
-| `SESSION_REPLACED`         | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |
-| `SERVER_BUSY`              | A fresh connect waited too long for a ready-build permit; carries `retry_after_ms`, and the socket closes 1013 (see Fresh-connect admission)                                                                                                                                     |
-| `REQUEST_TIMEOUT`          | A command's database work ran past the per-frame deadline and was not applied; the `error` carries the command's `id` (see Command deadlines). Unlike `SERVER_BUSY` it does not end the connection                                                                               |
-| `ANOTHER_DEVICE_ACTIVE`    | Sent to a wake reconnect (auth `wake: true`) refused because a different session of the same account holds the live connection or a call it parked in the voice grace window; that session is not displaced, and the client does not reconnect until the user chooses "Use here" |
+| Code                       | Description                                                                                                                                                                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BAD_REQUEST`              | Invalid payload format or field values                                                                                                                                                                                                        |
+| `BAD_PAYLOAD`              | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)                                                                                                                         |
+| `INTERNAL`                 | Server-side error                                                                                                                                                                                                                             |
+| `NOT_FOUND`                | Channel or message not found                                                                                                                                                                                                                  |
+| `FORBIDDEN`                | Missing required permission                                                                                                                                                                                                                   |
+| `NOT_KEY_HOLDER`           | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                                                                                                                  |
+| `STICKER_NOT_FOUND`        | A `chat_send` named a sticker that does not exist or was deleted. Nothing was stored. Refines `NOT_FOUND`.                                                                                                                                    |
+| `THREAD_EXISTS`            | The message already has a thread; the error carries `thread_id`                                                                                                                                                                               |
+| `THREAD_LOCKED`            | The thread is locked; only a moderator may post in it or change it                                                                                                                                                                            |
+| `GAME_ACTIVITY_DISABLED`   | `activity_update` or `listening_update` set a game or a song while an admin has member activity switched off for the server; a clear is never refused (WP 8.3e-2, 8.10a)                                                                      |
+| `RATE_LIMITED`             | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                     |
+| `ALREADY_JOINED`           | Already in this voice channel                                                                                                                                                                                                                 |
+| `CHANNEL_FULL`             | Voice channel at capacity                                                                                                                                                                                                                     |
+| `VOICE_ERROR`              | Voice-specific error                                                                                                                                                                                                                          |
+| `VIDEO_LIMIT`              | Maximum video streams reached                                                                                                                                                                                                                 |
+| `BANNED`                   | User is banned                                                                                                                                                                                                                                |
+| `INVALID_JSON`             | Message is not valid JSON                                                                                                                                                                                                                     |
+| `UNKNOWN_TYPE`             | Unrecognized message type                                                                                                                                                                                                                     |
+| `SLOW_MODE`                | Channel has slow mode enabled                                                                                                                                                                                                                 |
+| `TIMED_OUT`                | A send, edit, reaction, voice join, call ring or custom status refused by an active moderator timeout (B5-9)                                                                                                                                  |
+| `CALL_REQUIRES_ACCEPTANCE` | A 1:1 `call_ring` whose recipient has not accepted the caller's message request; the ring is never delivered                                                                                                                                  |
+| `CONFLICT`                 | Duplicate reaction or constraint violation                                                                                                                                                                                                    |
+| `ALREADY_DELETED`          | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                               |
+| `REACTION_LIMIT`           | A `reaction_add` with a new emoji on a message that already has 20 different ones. No `reaction_update` is sent. Refines `BAD_REQUEST`.                                                                                                       |
+| `POLL_ENDED`               | A `poll_vote` on a poll that was ended or whose time ran out, or a `poll_end` on one already ended. Nothing was written and no `poll_update` is sent. Refines `BAD_REQUEST`.                                                                  |
+| `ATTACHMENTS_UNAVAILABLE`  | A `chat_send` with no text whose every attachment was skipped (swept, foreign, already attached, a live avatar or group icon, or missing). No message is delivered and no ids are returned; the client holds the list. Refines `BAD_REQUEST`. |
+| `SERVER_MUTED`             | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                             |
+| `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                         |
+| `SESSION_REPLACED`         | Sent before the close to a connection displaced because the same device session reconnected, or because the account is over its 10-connection cap; the client does not reconnect on its own                                                   |
+| `SERVER_BUSY`              | A fresh connect waited too long for a ready-build permit; carries `retry_after_ms`, and the socket closes 1013 (see Fresh-connect admission)                                                                                                  |
+| `REQUEST_TIMEOUT`          | A command's database work ran past the per-frame deadline and was not applied; the `error` carries the command's `id` (see Command deadlines). Unlike `SERVER_BUSY` it does not end the connection                                            |
+| `ANOTHER_DEVICE_ACTIVE`    | No longer sent; kept for clients that still talk to an older server, which refused a wake reconnect while a different session held the connection                                                                                             |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
 

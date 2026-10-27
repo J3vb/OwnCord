@@ -24,7 +24,7 @@ func TestRegisterNow_ReconnectTransfersPendingModFlags(t *testing.T) {
 	h := newEmitTestHub()
 
 	old := NewTestClient(h, 1, make(chan []byte, 8))
-	h.clients[1] = old
+	h.clients[1] = []*Client{old}
 	// Mirrors voice_moderation.go:443 (handleVoiceModMoveV2 stashing the
 	// target's server_muted/server_deafened state onto their live *Client
 	// right before DisconnectFromVoiceInChannel deletes the voice_states row

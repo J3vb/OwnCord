@@ -188,6 +188,17 @@ func (t *voiceTxn) takeParked(chID int64) *voiceGraceEntry {
 	return t.h.voiceReg.voiceGrace.takeJoin(t.userID, chID, "")
 }
 
+// takeParkedOfSession is takeParked limited to an entry that tokenHash's session
+// parked: a device reloading discards its own parked call, never another
+// device's.
+func (t *voiceTxn) takeParkedOfSession(tokenHash string) *voiceGraceEntry {
+	g := &t.h.voiceReg.voiceGrace
+	if e := g.get(t.userID); e == nil || e.client.tokenHash != tokenHash {
+		return nil
+	}
+	return g.take(t.userID)
+}
+
 // dropParked drops userID's grace entry for chID whatever its join token, for
 // a channel being torn down under every member.
 func (t *voiceTxn) dropParked(chID int64) {

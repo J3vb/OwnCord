@@ -213,12 +213,11 @@ export const MOCK_MESSAGES_RICH = {
 };
 
 // Remote users only — the ready payload must never claim the LOCAL user
-// (id 1) is in a voice channel: the dispatcher treats "self in
-// ready.voice_states while voiceStatus is idle" as stale state from a
-// reload and immediately sends voice_leave + clears the local store
-// (dispatcher.ts stale-voice cleanup), which would hide the widget again.
-// Tests that need the widget visible must join via the real click path
-// (see joinVoiceChannelByName).
+// (id 1) is in a voice channel. A device whose voice status is idle reads its
+// own user's row (in ready.voice_states or a voice_state frame) as ANOTHER
+// device's call: the roster shows it, but this device holds no call, so the
+// widget stays hidden. Tests that need the widget visible must join via the
+// real click path (see joinVoiceChannelByName).
 export const MOCK_VOICE_STATE = [
   { user_id: 2, channel_id: 10, muted: true, deafened: false },
   { user_id: 3, channel_id: 10, muted: false, deafened: false },
@@ -1302,8 +1301,9 @@ export async function navigateToMainPageReady(page: Page): Promise<void> {
 /**
  * Join a voice channel through the real click path and wait for the voice
  * widget to become visible. This is the only supported way for tests to get
- * the local user into voice: pre-seeding the ready payload with user 1 no
- * longer works (the dispatcher's stale-voice cleanup immediately leaves).
+ * the local user into voice: a self row in ready or a self voice_state on an
+ * idle device is treated as another device's call (roster only), so it never
+ * shows the widget.
  */
 export async function joinVoiceChannelByName(
   page: Page,

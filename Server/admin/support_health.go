@@ -44,7 +44,7 @@ func supportHealth(hub HubBroadcaster, at time.Time) map[string]any {
 	runtime.ReadMemStats(&mem)
 	out := map[string]any{"captured_at": at, "scope": "database, process and local hub counters; LiveKit is reported from the supervisor's own state, never probed", "database_readable": true, "goroutines": runtime.NumGoroutine(), "heap_alloc_bytes": mem.HeapAlloc, "gc_cycles": mem.NumGC}
 	if hub != nil {
-		out["connected_users"] = hub.ClientCount()
+		out["connected_users"] = hub.UserCount()
 	}
 	if h, ok := hub.(supportHubMetrics); ok {
 		out["voice_sessions"] = h.VoiceSessionCount()
