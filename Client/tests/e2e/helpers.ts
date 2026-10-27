@@ -275,12 +275,14 @@ function buildReadyPayload(overrides?: {
   notices?: unknown[];
   categories?: unknown[];
   capabilities?: Record<string, boolean>;
+  listening?: unknown[];
 }): unknown {
   return {
     type: "ready",
     payload: {
       ...(overrides?.capabilities === undefined ? {} : { capabilities: overrides.capabilities }),
       ...(overrides?.categories === undefined ? {} : { categories: overrides.categories }),
+      ...(overrides?.listening === undefined ? {} : { listening: overrides.listening }),
       channels: overrides?.channels ?? MOCK_CHANNELS,
       members: overrides?.members ?? MOCK_READY_PAYLOAD.payload.members,
       voice_states: overrides?.voice_states ?? [],
@@ -538,7 +540,12 @@ export function buildTauriMockScript(opts: {
     categories?: unknown[];
     /** The server capability flags of `ready` (for example `{ forums: true }`); omitted = absent. */
     capabilities?: Record<string, boolean>;
+    /** `ready.listening` (WP 8.10): the songs members are listening to; omitted = absent. */
+    listening?: unknown[];
   };
+  /** What `detect_media` answers (WP 8.10), for a spec that needs a song playing on
+   *  this device. Omitted = `{ state: "none" }`, which every other spec relies on. */
+  detectMedia?: unknown;
   /** Functions run after the mock installs `__TAURI_INTERNALS__`, inside the
    *  same init script, because Playwright does not order separate
    *  `addInitScript` registrations. Each is serialised with `toString()`, so it
@@ -900,6 +907,8 @@ export function buildTauriMockScript(opts: {
         if (cmd === "system_idle_ms") return null;
         // The game scan (WP 8.3): no game is running in the mocked app.
         if (cmd === "detect_game") return null;
+        // The song read (WP 8.10): nothing is playing in the mocked app.
+        if (cmd === "detect_media") return ${JSON.stringify(opts.detectMedia ?? { state: "none" })};
         // The "Add a game" picker's program list: nothing is running here.
         if (cmd === "list_running_programs") return [];
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.

@@ -1093,6 +1093,86 @@ describe("MemberList profile fields", () => {
     expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
   });
 
+  describe("Listening to <player> (WP 8.10)", () => {
+    const song = {
+      title: "Blue in Green",
+      artist: "Miles Davis",
+      player: "Spotify",
+      startedAt: 1,
+      durationMs: 337_000,
+    };
+
+    it("shows Listening to <player> as the second line, with the music note", () => {
+      setTestMembers([
+        makeMember({ id: 1, username: "alice", listening: song }),
+        makeMember({ id: 2, username: "bob" }),
+      ]);
+      list = createMemberList(opts);
+      list.mount(container);
+
+      const line = container.querySelector('[data-testid="member-activity-1"]');
+      expect(line?.textContent).toBe("Listening to Spotify");
+      expect(line?.querySelector("svg")).not.toBeNull();
+      expect(line?.querySelector("svg path")?.getAttribute("d")).toBe("M9 18V5l12-2v13");
+      expect(container.querySelector('[data-testid="member-activity-2"]')).toBeNull();
+      const row = container.querySelector('[data-testid="member-1"]');
+      expect(row?.getAttribute("aria-describedby")).toContain("mi-activity-1");
+    });
+
+    it("priority: a custom status beats a game, and a game beats music", () => {
+      const activity = { name: "VALORANT", startedAt: Date.now() };
+      setTestMembers([
+        makeMember({ id: 1, username: "alice", customStatus: "busy", activity, listening: song }),
+        makeMember({ id: 2, username: "bob", activity, listening: song }),
+        makeMember({ id: 3, username: "cy", listening: song }),
+      ]);
+      list = createMemberList(opts);
+      list.mount(container);
+
+      expect(container.querySelector('[data-testid="member-custom-status-1"]')?.textContent).toBe(
+        "busy",
+      );
+      expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
+      expect(container.querySelector('[data-testid="member-activity-2"]')?.textContent).toBe(
+        "Playing VALORANT",
+      );
+      expect(container.querySelector('[data-testid="member-activity-3"]')?.textContent).toBe(
+        "Listening to Spotify",
+      );
+    });
+
+    it("follows a song starting, the game taking over, and the music stopping in place", () => {
+      setTestMembers([makeMember({ id: 1, username: "alice" })]);
+      list = createMemberList(opts);
+      list.mount(container);
+      expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
+
+      setTestMembers([makeMember({ id: 1, username: "alice", listening: song })]);
+      membersStore.flush();
+      expect(container.querySelector('[data-testid="member-activity-1"]')?.textContent).toBe(
+        "Listening to Spotify",
+      );
+
+      setTestMembers([
+        makeMember({
+          id: 1,
+          username: "alice",
+          listening: song,
+          activity: { name: "Factorio", startedAt: 1 },
+        }),
+      ]);
+      membersStore.flush();
+      const game = container.querySelector('[data-testid="member-activity-1"]');
+      expect(game?.textContent).toBe("Playing Factorio");
+      // The icon changed with the line: the controller, not the note.
+      expect(game?.querySelector("svg path")?.getAttribute("d")).not.toBe("M9 18V5l12-2v13");
+
+      setTestMembers([makeMember({ id: 1, username: "alice", listening: null, activity: null })]);
+      membersStore.flush();
+      expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
+    });
+  });
+
   it("opens the profile from the keyboard, where Report names the user (B9-10)", async () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice", displayName: "Alice A." }),

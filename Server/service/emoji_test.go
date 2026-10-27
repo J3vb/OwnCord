@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -352,5 +353,40 @@ func TestEmojiCreate_WritesAudit(t *testing.T) {
 		if !seen[action] {
 			t.Errorf("no %s audit entry (saw %v)", action, seen)
 		}
+	}
+}
+
+// listOnlyEmojiStore implements EmojiStore without embedding *db.DB: the six
+// methods are the whole of what the service can call, so a fake needs nothing
+// else (Store would need 318).
+type listOnlyEmojiStore struct{ rows []*db.Emoji }
+
+func (f *listOnlyEmojiStore) ListEmoji(context.Context) ([]*db.Emoji, error) { return f.rows, nil }
+func (f *listOnlyEmojiStore) GetEmoji(context.Context, int64) (*db.Emoji, error) {
+	return nil, nil
+}
+func (f *listOnlyEmojiStore) GetEmojiByShortcode(context.Context, string) (*db.Emoji, error) {
+	return nil, nil
+}
+func (f *listOnlyEmojiStore) CreateEmoji(context.Context, string, string, string, int64) (*db.Emoji, error) {
+	return nil, nil
+}
+func (f *listOnlyEmojiStore) DeleteEmoji(context.Context, int64) (bool, error) { return false, nil }
+func (f *listOnlyEmojiStore) LogAudit(context.Context, int64, string, string, int64, string) error {
+	return nil
+}
+
+func TestEmojiService_RunsOnASixMethodFake(t *testing.T) {
+	if n := reflect.TypeFor[EmojiStore]().NumMethod(); n != 6 {
+		t.Fatalf("EmojiStore has %d methods, want 6", n)
+	}
+	want := []*db.Emoji{{ID: 7, Shortcode: "wave"}}
+	svc := NewEmojiService(&listOnlyEmojiStore{rows: want}, nil)
+	got, err := svc.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != 7 {
+		t.Fatalf("List = %+v, want the fake's row", got)
 	}
 }

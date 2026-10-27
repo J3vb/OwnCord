@@ -11,6 +11,19 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
+// EmojiStore is the data access the emoji service needs: the emoji table plus
+// the audit write. *db.DB satisfies it; Store embeds it, so the signatures live
+// here once. LogAudit is also written in Store, where every audited service
+// reaches it.
+type EmojiStore interface {
+	ListEmoji(ctx context.Context) ([]*db.Emoji, error)
+	GetEmoji(ctx context.Context, id int64) (*db.Emoji, error)
+	GetEmojiByShortcode(ctx context.Context, shortcode string) (*db.Emoji, error)
+	CreateEmoji(ctx context.Context, shortcode, storedAs, mimeType string, uploadedBy int64) (*db.Emoji, error)
+	DeleteEmoji(ctx context.Context, id int64) (bool, error)
+	LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error
+}
+
 // EmojiService owns the server-wide custom emoji set: who may change it, what
 // a shortcode is allowed to look like, and the uniqueness rule.
 //
@@ -21,12 +34,12 @@ import (
 // emoji nobody can render is not an emoji, and the set is server-wide with no
 // per-channel scope to leak.
 type EmojiService struct {
-	st    Store
+	st    EmojiStore
 	perms *PermissionService
 }
 
 // NewEmojiService creates an EmojiService.
-func NewEmojiService(st Store, perms *PermissionService) *EmojiService {
+func NewEmojiService(st EmojiStore, perms *PermissionService) *EmojiService {
 	return &EmojiService{st: st, perms: perms}
 }
 

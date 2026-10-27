@@ -164,6 +164,22 @@ Wrong turns went from 1 to 0 on task C. The file counts are the author's walkthr
 
 No task got a longer path or a worse answer, no gate was weakened, and no CI selection changed. Task B stays partly answered and is the one open gap. The change is kept.
 
+## R-2 emoji seam (2026-10-27)
+
+Measured on a branch from `origin/dev`. Evidence level: **executed**. The change is a type narrowing: `EmojiService` and `NewEmojiService` take `EmojiStore` instead of `Store`. `service.go` passes the same `Store` value, so no wiring changed. Behaviour is unchanged: `db.WriteAudit` still receives the same `*db.DB` and its `AsyncEntryAuditor` check still sees the dynamic type.
+
+| Measure                                                    | Before                                                    | After                                                                 |
+| ---------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------- |
+| Methods a fake that does not embed `*db.DB` must implement | 318 (`reflect` count of `Store`, 309 source + 9 promoted) | 6 (`EmojiStore`: the five emoji methods plus `LogAudit`)              |
+| Methods a fake that embeds `*db.DB` must override          | 1 (`raceEmojiStore`)                                      | 1 (unchanged; embedding already hid the width)                        |
+| Emoji tests passing (`go test -run Emoji ./service/`)      | 18                                                        | 19 (18 plus `TestEmojiService_RunsOnASixMethodFake`, a 6-method fake) |
+| `storeMethodBaseline` (distinct methods in `Store`)        | 309                                                       | 309 (the slice is embedded, so `Store` is unchanged; 287 direct)      |
+| Lines in `Store` body                                      | five emoji lines                                          | one embed line                                                        |
+
+### Verdict
+
+Kept. The seam is smaller (318 to 6 for a standalone fake) with the same tests passing. The benefit is only real for a fake that does not embed `*db.DB`; every existing fake embeds it, so no current test got shorter. The gain is for the next emoji change, not for today's tests. No savings in time or tokens are claimed.
+
 ## R-3 after (2026-10-27)
 
 Row 5 of the execution plan, run as a code pilot with the owner's go. Based on `origin/dev` `deb491fd`. Evidence level: **simulated walkthrough plus a deliberate-break check**. The author wrote both the breaks and the tests, so the check is not blind.

@@ -24,6 +24,7 @@ import type {
   CredentialStore,
   DevTools,
   GameDetector,
+  MediaDetector,
   GlobalShortcuts,
   HttpClient,
   IdentityStore,
@@ -233,6 +234,11 @@ const gameDetector: GameDetector = {
   listRunningPrograms: async () => [],
 };
 
+const mediaDetector: MediaDetector = {
+  available: false,
+  detect: async () => ({ state: "none" }),
+};
+
 const systemIdle: SystemIdle = {
   idleMs: async () => null,
 };
@@ -284,6 +290,7 @@ export const browser: Platform = {
   externalContent,
   fileSaver,
   gameDetector,
+  mediaDetector,
   logFiles,
   nativeVoice,
   pushToTalk,
