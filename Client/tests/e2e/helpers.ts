@@ -275,6 +275,7 @@ function buildReadyPayload(overrides?: {
   notices?: unknown[];
   categories?: unknown[];
   capabilities?: Record<string, boolean>;
+  listening?: unknown[];
 }): unknown {
   return {
     type: "ready",
