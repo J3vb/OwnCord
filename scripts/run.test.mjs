@@ -268,6 +268,49 @@ test("a failing check preserves its exit code and stops later steps", () => {
   }
 });
 
+test("a skipped optional tool is named and the task still passes", () => {
+  const fixture = mkdtempSync(join(tmpdir(), "owncord-runner-"));
+  try {
+    mkdirSync(join(fixture, "scripts"));
+    mkdirSync(join(fixture, "Server"));
+    mkdirSync(join(fixture, "Client"));
+    const source = readFileSync(runner, "utf8");
+    const task = '"check:docs": CHECK_DOCS,';
+    assert.ok(source.includes(task), "run.mjs registers check:docs");
+    writeFileSync(
+      join(fixture, "scripts", "run.mjs"),
+      source.replace(
+        task,
+        `"check:docs": [
+          step("node", ["-e", ""], "."),
+          optional("owncord-absent-tool", "owncord-absent-tool", ["--check"], ".", "owncord-absent-tool not on PATH"),
+        ],`,
+      ),
+    );
+    const result = spawnSync(
+      process.execPath,
+      [join(fixture, "scripts", "run.mjs"), "check:docs"],
+      {
+        env: { ...env, PATH: dirname(process.execPath) },
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(
+      result.stdout,
+      /--- SKIP\s+owncord-absent-tool --check\s+\(owncord-absent-tool not on PATH\)/,
+    );
+    assert.match(
+      result.stdout,
+      /check:docs: passed, with owncord-absent-tool skipped \(not installed\)\. CI runs them\./,
+    );
+    assert.equal(result.stderr, "");
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
 test("Windows npm and npx launch without a shell and preserve argument boundaries", () => {
   const fixture = mkdtempSync(join(tmpdir(), "owncord runner spaces "));
   try {

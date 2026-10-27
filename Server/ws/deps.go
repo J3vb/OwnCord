@@ -33,6 +33,10 @@ type ClientInfo struct {
 	// (no-op and clear checks) and presence_update (the frame it emits
 	// carries the game).
 	Activity *gameActivity
+	// Listening is the connection's live song when the frame was read (WP
+	// 8.10a), nil when none: listening_update's no-op and clear checks, and
+	// the frame presence_update emits.
+	Listening *listeningActivity
 }
 
 // ── Per-domain dependency structs ───────────────────────────────────────────

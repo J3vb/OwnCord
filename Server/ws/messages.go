@@ -39,6 +39,10 @@ type presencePayload struct {
 	// null when none, like CustomStatus: every presence frame carries the
 	// current value. Blanked for everyone but the owner while invisible.
 	Activity *gameActivity `json:"activity"`
+	// Listening is the song the user is listening to (WP 8.10a). Same rules
+	// as Activity: always present, null when none, blanked for everyone but
+	// the owner while invisible.
+	Listening *listeningActivity `json:"listening"`
 }
 
 type memberUserPayload struct {
@@ -434,10 +438,10 @@ func buildProtocolEpochError(clientEpoch int) []byte {
 // pass db.BroadcastStatus(status) for everyone but the owner. Keeping the
 // mapping out of the builder is deliberate — a builder that always collapsed
 // invisible could never produce the owner's own true-state message.
-func buildPresenceMsg(userID int64, status string, customStatus *string, activity *gameActivity) []byte {
+func buildPresenceMsg(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypePresence,
-		Payload: presencePayload{UserID: userID, Status: status, CustomStatus: customStatus, Activity: activity},
+		Payload: presencePayload{UserID: userID, Status: status, CustomStatus: customStatus, Activity: activity, Listening: listening},
 	})
 }
 

@@ -1,5 +1,5 @@
 {
-  "nextId": 519,
+  "nextId": 520,
   "findings": [
     {
       "id": "OC-0001",
@@ -11994,6 +11994,29 @@
       "hunt": "user-report-2026-10-24",
       "lens": "correctness",
       "finder": "chat-scroll-thread",
+      "fixedDate": "2026-10-24"
+    },
+    {
+      "id": "OC-0519",
+      "title": "A voice reconnect after a long drop could rejoin the media room on the old token while the server had ended the membership",
+      "file": "Client/src/lib/livekitSession.ts",
+      "line": 521,
+      "severity": "medium",
+      "why": "The chat socket reads \"connected\" from its auth_ok, before its ready or resume replay restates the voice roster. An auto-reconnect attempt landing in that gap still saw the user in the roster from before the drop, read the membership as held, and connected to LiveKit with the old token. The server no longer had the user in voice, so the restored camera's voice_camera was refused and rolled back, and the user sat in a call nobody else listed.",
+      "repro": "In voice with the camera on, cut the chat transport for longer than the 15 s grace window, then restore it. Occasionally the call comes back as Voice Connected with the camera off (fullstack media.spec.ts:431, flaky on #2781).",
+      "evidence": "CI job 120796001513: aria-pressed stayed false for 15 s after Voice Connected and decoded media; ws.ts sets state connected on auth_ok before dispatching it, and the ready or replay frames follow as separate frames.",
+      "suggestedFix": "Before reading the roster, ping the socket: the server writes the ready or replay in the handshake, before it answers a ping, so a pong means the roster is current.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/livekit-session.test.ts (attemptAutoReconnect slow phase: reads the roster only after the returned socket's replay, not from its auth_ok)",
+        "revertProof": "fail (the loop connected on the old token)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-24",
+      "hunt": "ci-flake-2026-10-24",
+      "lens": "concurrency",
+      "finder": "ci-keeper",
       "fixedDate": "2026-10-24"
     }
   ]

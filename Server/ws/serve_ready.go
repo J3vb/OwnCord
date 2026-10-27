@@ -444,13 +444,15 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		retryFloorMS = h.readers.Ready.MessageDeliveryFloorMS()
 	}
 	threads := h.readyThreads(ctx, userID, visibleChannels, ackMap)
+	live := h.livePresences()
 	return &readyFields{
 		head: readyHead{
-			Activities:   h.readyActivities(userID),
+			Activities:   readyActivities(live, userID),
 			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil, h.gameActivity.on.Load()),
 			Categories:   categories,
 			Channels:     channelPayloads,
 			DMChannels:   dmChannels,
+			Listening:    readyListening(live, userID),
 
 			MemberTimeouts: timeouts.entries,
 		},

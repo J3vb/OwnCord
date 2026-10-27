@@ -67,6 +67,9 @@ async function boot(calls: string[], respond: Responder, sent: Sent[] = []) {
   const settle = (ms = 0) => new Promise((resolve) => dom!.window.setTimeout(resolve, ms));
   await settle();
   calls.length = 0;
+  // What core.js showApp does after sign-in: jsdom, like a browser, only
+  // focuses what is displayed.
+  dom.window.document.getElementById("adminShell")!.classList.remove("hidden");
   const bridge = (dom.window as unknown as { __test: Bridge }).__test;
   const doc = dom.window.document;
   const show = async (me: Record<string, unknown>) => {

@@ -25,7 +25,7 @@ func TestEmitEvents_DirectPresenceDropsQueuedEntry(t *testing.T) {
 	}
 
 	// The user immediately sets a status via presence_update (visible path).
-	h.EmitEvents(context.Background(), presenceEvents(7, "dnd", nil, nil))
+	h.EmitEvents(context.Background(), presenceEvents(7, "dnd", nil, nil, nil))
 
 	h.presenceMu.Lock()
 	_, stillQueued := h.presenceQueue[7]
@@ -36,7 +36,7 @@ func TestEmitEvents_DirectPresenceDropsQueuedEntry(t *testing.T) {
 
 	// The invisible path must drop it too (public half rides PresenceOthersEvent).
 	h.QueuePresence(7, "online", nil)
-	h.EmitEvents(context.Background(), presenceEvents(7, "invisible", nil, nil))
+	h.EmitEvents(context.Background(), presenceEvents(7, "invisible", nil, nil, nil))
 	h.presenceMu.Lock()
 	_, stillQueued = h.presenceQueue[7]
 	h.presenceMu.Unlock()
@@ -46,7 +46,7 @@ func TestEmitEvents_DirectPresenceDropsQueuedEntry(t *testing.T) {
 
 	// Other users' queued entries are untouched.
 	h.QueuePresence(8, "online", nil)
-	h.EmitEvents(context.Background(), presenceEvents(7, "idle", nil, nil))
+	h.EmitEvents(context.Background(), presenceEvents(7, "idle", nil, nil, nil))
 	h.presenceMu.Lock()
 	_, otherKept := h.presenceQueue[8]
 	h.presenceMu.Unlock()

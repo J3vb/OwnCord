@@ -108,6 +108,72 @@
   white-space: nowrap;
 }
 
+/* WP 8.10: the song being listened to, under the game. */
+.upp-listening {
+  min-width: 0;
+  margin: 4px 0;
+}
+.upp-listening:empty {
+  display: none;
+}
+.upp-listening-head {
+  display: flex;
+  align-items: center;
+
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.upp-listening-icon {
+  flex: none;
+}
+.upp-listening-label,
+.upp-listening-title,
+.upp-listening-artist {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.upp-listening-title {
+  margin-top: 2px;
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+.upp-listening-artist {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+.upp-listening-bar {
+  height: 4px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border-control);
+}
+.upp-listening-fill {
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 1s linear;
+}
+.upp-listening-time {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.reduced-motion .upp-listening-fill {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .upp-listening-fill {
+    transition: none;
+  }
+}
+
 /* Status picker: the custom-status input sits below the four options. */
 .status-picker-divider {
   height: 1px;

@@ -393,7 +393,11 @@ describe("LiveKitSession", () => {
       channels: new Map([1, 5, 7, 9, 11].map((id) => [id, { id, type: "voice" } as any])),
     }));
     session = new LiveKitSession();
-    session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
+    session.setWsClient({
+      send: vi.fn(),
+      getState: () => "connected",
+      ping: async () => {},
+    } as any);
     // Reset mockRoom state
     mockRoom.state = "connected";
     mockRoom.remoteParticipants = new Map();
@@ -827,7 +831,7 @@ describe("LiveKitSession", () => {
       ws.send.mock.calls.filter(([m]) => m.type === "voice_watch").map(([m]) => m.payload.user_ids);
 
     it("sends the watched screen-share set when it changes, in a channel", () => {
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       (session as any)._remoteTracks.watch(9, "screenshare", true);
       (session as any)._remoteTracks.watch(4, "screenshare", true);
@@ -836,7 +840,7 @@ describe("LiveKitSession", () => {
     });
 
     it("sends nothing for a camera, or when the socket is down or no channel is joined", () => {
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       (session as any)._remoteTracks.watch(9, "camera", true);
       expect(watchFrames(ws)).toEqual([]);
@@ -851,7 +855,7 @@ describe("LiveKitSession", () => {
     });
 
     it("sends nothing when leaving clears the set (the server clears on leave)", () => {
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       (session as any)._remoteTracks.watch(9, "screenshare", true);
       ws.send.mockClear();
@@ -861,7 +865,7 @@ describe("LiveKitSession", () => {
     });
 
     it("re-sends the current set on a resume, an empty one included", () => {
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       // The server keeps the old set across a resume, so empty must be said.
       session.resendWatching();
@@ -874,7 +878,7 @@ describe("LiveKitSession", () => {
 
     it("retries once after a second when rate limited, and leaving cancels it", () => {
       vi.useFakeTimers();
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       session.retryWatching();
       session.retryWatching();
@@ -888,7 +892,11 @@ describe("LiveKitSession", () => {
     });
 
     it("an error reply to a voice_watch is recognised and dropped", () => {
-      const ws = { send: vi.fn(() => "env-1"), getState: () => "connected" } as any;
+      const ws = {
+        send: vi.fn(() => "env-1"),
+        getState: () => "connected",
+        ping: async () => {},
+      } as any;
       session.setWsClient(ws);
       (session as any)._remoteTracks.watch(9, "screenshare", true);
       expect(takeWatchRefusal("env-1")).toBe(true);
@@ -2330,7 +2338,7 @@ describe("LiveKitSession", () => {
 
     async function dropWhile(media: { camera: boolean; screenshare: boolean }): Promise<void> {
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn(), getState: () => wsState } as any);
+      session.setWsClient({ send: vi.fn(), getState: () => wsState, ping: async () => {} } as any);
       let disconnectedHandler: ((reason?: number) => void) | undefined;
       mockRoom.on.mockImplementation((event: string, handler: any) => {
         if (event === "disconnected") disconnectedHandler = handler;
@@ -2507,7 +2515,11 @@ describe("LiveKitSession", () => {
     async function drop(): Promise<void> {
       mockVoiceState.currentChannelId = 100;
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
+      session.setWsClient({
+        send: vi.fn(),
+        getState: () => "connected",
+        ping: async () => {},
+      } as any);
       let handler: ((reason?: number) => void) | undefined;
       mockRoom.on.mockImplementation((event: string, h: any) => {
         if (event === "disconnected") handler = h;
@@ -2912,7 +2924,11 @@ describe("LiveKitSession", () => {
   describe("setMuted (with active room)", () => {
     beforeEach(async () => {
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
+      session.setWsClient({
+        send: vi.fn(),
+        getState: () => "connected",
+        ping: async () => {},
+      } as any);
       await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
       vi.clearAllMocks();
     });
@@ -3012,7 +3028,7 @@ describe("LiveKitSession", () => {
     // The toggle sent voice_mute{muted:false} before the re-enable failed, so
     // the fallback has to restate the mute or peers keep seeing it unmuted.
     it("a failed unmute tells the server the member is muted again", async () => {
-      const ws = { send: vi.fn(), getState: () => "connected" };
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} };
       session.setWsClient(ws as any);
       mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(
         new DOMException("Permission denied", "NotAllowedError"),
@@ -3236,7 +3252,11 @@ describe("LiveKitSession", () => {
   describe("restoreLocalVoiceState", () => {
     beforeEach(async () => {
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
+      session.setWsClient({
+        send: vi.fn(),
+        getState: () => "connected",
+        ping: async () => {},
+      } as any);
     });
 
     it("enables the microphone on the first unmute after a muted join", async () => {
@@ -4594,7 +4614,7 @@ describe("LiveKitSession", () => {
       errorCb = vi.fn<(message: string) => void>();
       ac = new AbortController();
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: sendSpy, getState: () => wsState } as any);
+      session.setWsClient({ send: sendSpy, getState: () => wsState, ping: async () => {} } as any);
       session.setOnError(errorCb);
       channelsStore.setState((prev) => ({
         ...prev,
@@ -4768,6 +4788,49 @@ describe("LiveKitSession", () => {
       expect(errorCb).not.toHaveBeenCalled();
     });
 
+    it("reads the roster only after the returned socket's replay, not from its auth_ok", async () => {
+      sendSpy.mockImplementation((msg) => (msg.type === "voice_join" ? "rejoin-1" : undefined));
+      mockRoom.connect.mockResolvedValue(undefined);
+      // auth_ok has flipped the socket to "connected", but the roster still
+      // lists us from before the drop. The server writes the replayed self
+      // voice_leave before it answers a ping.
+      mockVoiceState.voiceUsers = new Map([[5, new Set([0])]]);
+      const ping = vi.fn(async () => {
+        mockVoiceState.voiceUsers = new Map();
+      });
+      session.setWsClient({ send: sendSpy, getState: () => wsState, ping } as any);
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(90_000);
+      wsState = "connected";
+      await vi.advanceTimersByTimeAsync(15_000);
+      await loop;
+
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect(sendSpy).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 5 } });
+      expect(ping).toHaveBeenCalled();
+    });
+
+    it("waits for the next attempt when the returned socket does not answer the ping", async () => {
+      mockRoom.connect.mockResolvedValue(undefined);
+      mockVoiceState.voiceUsers = new Map([[5, new Set([0])]]);
+      const ping = vi.fn(async () => {
+        throw new Error("No heartbeat response arrived.");
+      });
+      session.setWsClient({ send: sendSpy, getState: () => wsState, ping } as any);
+
+      void startLoop();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect(ping).toHaveBeenCalled();
+      expect(sendSpy.mock.calls.some(([m]) => m.type === "voice_join")).toBe(false);
+      ac.abort();
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+
     it("turns the camera back on once a rejoin after a long drop connects", async () => {
       const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
       mockVoiceState.localCamera = false;
@@ -4901,7 +4964,11 @@ describe("LiveKitSession", () => {
       };
       session.setServerHost("localhost:7880");
       const sendSpy = vi.fn();
-      session.setWsClient({ send: sendSpy, getState: () => "connected" } as any);
+      session.setWsClient({
+        send: sendSpy,
+        getState: () => "connected",
+        ping: async () => {},
+      } as any);
 
       let resolveMic!: () => void;
       mockRoom.localParticipant.setMicrophoneEnabled.mockImplementationOnce(

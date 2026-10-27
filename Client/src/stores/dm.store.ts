@@ -20,6 +20,15 @@ export interface DmUser {
   /** The game this person is playing (WP 8.3), copied from presence like
    *  `status`. Null or undefined = none. */
   readonly activity?: { readonly name: string; readonly startedAt: number } | null;
+  /** The song this person is listening to (WP 8.10), copied from presence like
+   *  `activity`. Null or undefined = none. */
+  readonly listening?: {
+    readonly title: string;
+    readonly artist: string;
+    readonly player: string;
+    readonly startedAt: number;
+    readonly durationMs: number;
+  } | null;
 }
 
 export interface DmChannel {
@@ -83,16 +92,39 @@ export function setDmActivityLookup(lookup: (userId: number) => DmUser["activity
   knownActivity = lookup;
 }
 
+/** The same for the song (WP 8.10). */
+let knownListening: (userId: number) => DmUser["listening"] = () => undefined;
+
+export function setDmListeningLookup(lookup: (userId: number) => DmUser["listening"]): void {
+  knownListening = lookup;
+}
+
 /**
- * A DM summary carries no game (WP 8.3), so a person the payload left without
- * one keeps the game this DM already showed, else the one presence gave them.
- * A DM opened after `ready` then shows a partner who is already playing.
+ * A DM summary carries no game (WP 8.3) or song (WP 8.10), so a person the
+ * payload left without one keeps the one this DM already showed, else the one
+ * presence gave them. A DM opened after `ready` then shows a partner who is
+ * already playing or listening.
  */
 function withKnownActivity(user: DmUser, prior: DmChannel | undefined): DmUser {
-  if (user.activity !== undefined) return user;
-  const shown = prior?.participants.find((p) => p.id === user.id)?.activity;
-  const known = shown !== undefined ? shown : knownActivity(user.id);
-  return known === undefined ? user : { ...user, activity: known };
+  const before = prior?.participants.find((p) => p.id === user.id);
+  // Only undefined means "not stated": null is a stated "nothing" and stays.
+  const activity =
+    user.activity !== undefined
+      ? user.activity
+      : before?.activity !== undefined
+        ? before.activity
+        : knownActivity(user.id);
+  const listening =
+    user.listening !== undefined
+      ? user.listening
+      : before?.listening !== undefined
+        ? before.listening
+        : knownListening(user.id);
+  return {
+    ...user,
+    ...(activity === undefined ? {} : { activity }),
+    ...(listening === undefined ? {} : { listening }),
+  };
 }
 
 /**

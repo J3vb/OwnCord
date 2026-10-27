@@ -267,7 +267,7 @@ func liveKitVersionRule(v any) (any, error) {
 		return nil, err
 	}
 	if s != "" && !liveKitVersionRe.MatchString(s) {
-		return nil, fmt.Errorf("must be empty or a version like 1.13.7")
+		return nil, fmt.Errorf("must be empty or a version like 1.13.10")
 	}
 	return s, nil
 }

@@ -34,6 +34,7 @@ const (
 	MsgTypeMarkUnread        = "mark_unread"
 	MsgTypePresenceUpdate    = "presence_update"
 	MsgTypeActivityUpdate    = "activity_update"
+	MsgTypeListeningUpdate   = "listening_update"
 	MsgTypeVoiceJoin         = "voice_join"
 	MsgTypeVoiceLeave        = "voice_leave"
 	MsgTypeVoiceMute         = "voice_mute"

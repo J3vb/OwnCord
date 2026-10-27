@@ -26,13 +26,13 @@ import (
 const (
 	// storeMethodBaseline is the number of distinct methods in Store, counting
 	// transitively through embedded interfaces declared in this package
-	// (CallLogStore, GroupDMStore). Methods promoted from the cross-package
+	// (CallLogStore, GroupDMStore, EmojiStore). Methods promoted from the cross-package
 	// embeds in storeCrossPackageEmbeds are not counted here.
 	//
 	// The pin was 306 when this test was written. WP 4.1a (#2582) landed first
 	// and replaced EraseAccount with the embedded ErasureStageStore slice, a net
 	// three more methods; it is accepted as the starting point.
-	storeMethodBaseline = 309 // 292 written in Store itself plus 17 from the three same-package embeds (CallLogStore, GroupDMStore, ErasureStageStore)
+	storeMethodBaseline = 309 // 287 written in Store itself plus 22 more from the four same-package embeds (CallLogStore, GroupDMStore, ErasureStageStore, EmojiStore; EmojiStore's LogAudit is also written in Store)
 
 	// modelsJSONTagBaseline is the number of struct fields in db/models.go
 	// whose tag carries a json: key, json:"-" included.

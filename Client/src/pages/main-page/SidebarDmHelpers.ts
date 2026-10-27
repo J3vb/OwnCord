@@ -22,7 +22,7 @@ import { voiceStore } from "@stores/voice.store";
 import { getChannelMute, isChannelMuted } from "@lib/channel-mutes";
 import { markdownToPlainText } from "@lib/markdown";
 import { connectText } from "../../i18n/connect";
-import { playingLine } from "../../features/members/gameActivityLine";
+import { rowActivity } from "../../features/members/listeningLine";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -186,6 +186,12 @@ function timedMute(channelId: number): { mutedUntil?: number } {
   return until === null ? {} : { mutedUntil: until };
 }
 
+/** A 1:1 partner's second line: their game, else their music (WP 8.3, 8.10). */
+function dmActivityFields(dm: DmChannel): Pick<DmConversation, "activity" | "activityIcon"> {
+  const shown = dm.isGroup ? null : rowActivity(dm.recipient.activity, dm.recipient.listening);
+  return shown === null ? {} : { activity: shown.text, activityIcon: shown.icon };
+}
+
 export function buildDmConversations(activeChannelId: number | null): readonly DmConversation[] {
   const dmChannels = dmStore.getState().channels;
   return dmChannels.map((dm) => ({
@@ -194,9 +200,7 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
     username: dmDisplayName(dm),
     avatar: dm.recipient.avatar || null,
     status: (dm.recipient.status as DmConversation["status"]) ?? "offline",
-    ...(!dm.isGroup && dm.recipient.activity != null
-      ? { activity: playingLine(dm.recipient.activity) }
-      : {}),
+    ...dmActivityFields(dm),
     isGroup: dm.isGroup,
     ...(dm.ownerId !== undefined && { hasOwner: true }),
     ...(dm.icon !== undefined && dm.icon !== "" && { icon: dm.icon }),

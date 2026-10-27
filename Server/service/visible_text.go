@@ -43,3 +43,23 @@ func CleanActivityName(raw string) (string, error) {
 	}
 	return cleanVisibleBounded(trimmed, MaxActivityNameLen, "activity name")
 }
+
+// Listening activity text caps (WP 8.10a): title and artist share the game
+// name's cap, the player (the app's name) is shorter.
+const (
+	MaxListeningTitleLen  = MaxActivityNameLen
+	MaxListeningArtistLen = MaxActivityNameLen
+	MaxListeningPlayerLen = 64
+)
+
+// CleanListeningText is CleanActivityName with the cap and the field name of a
+// listening_update text (title, artist or player): trimmed, then the custom
+// status text rules. Empty after the trim returns "" with no error; the caller
+// decides whether that means "clear", "no artist" or BAD_REQUEST.
+func CleanListeningText(raw string, maxRunes int, fieldName string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", nil
+	}
+	return cleanVisibleBounded(trimmed, maxRunes, fieldName)
+}

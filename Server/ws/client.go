@@ -186,19 +186,27 @@ type livePresence struct {
 	// starts without one. The value is immutable; a change swaps in a new
 	// livePresence, so every writer of livePresence must carry it over.
 	activity *gameActivity
+	// listening is the song this connection reports (WP 8.10a), nil when none.
+	// Same rules as activity: memory only, owned by the connection, immutable,
+	// and carried over by every writer of livePresence.
+	listening *listeningActivity
 }
+
+// noActivity reports whether the connection shows neither a game nor a song.
+func (p livePresence) noActivity() bool { return p.activity == nil && p.listening == nil }
 
 // afkNow is the clock the idle stamp and the AFK sweep read. A var so tests
 // can move time without sleeping.
 var afkNow = time.Now
 
 // nextLivePresence is the presence that follows prev when the connection takes
-// status: it keeps prev.activity, and prev.idleSince while the status stays idle and stamps now on
+// status: it keeps prev.activity and prev.listening, and prev.idleSince while the status stays idle and stamps now on
 // entry to idle, and leaves it zero for every other status.
 func nextLivePresence(prev *livePresence, status string, customStatus *string, expiresAt string, now time.Time) *livePresence {
 	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt}
 	if prev != nil {
 		next.activity = prev.activity
+		next.listening = prev.listening
 	}
 	if !isIdleStatus(status) {
 		return next

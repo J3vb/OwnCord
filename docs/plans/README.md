@@ -66,6 +66,8 @@ block in the same roadmap.) Superseded: the betas shipped without a B10 phase; s
 | Plan                                                                                                                   | State                                                                                                                                                                                                                                                                                                        |
 | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [developer-experience-layout-refactor-2026-08-29](../archive/plans/developer-experience-layout-refactor-2026-08-29.md) | Draft, never started as one plan; its workstreams were folded into B3, B7 and B9, so it is archived. Implementation supplement bound into the roadmap 2026-08-29: B3 workstream 17 (Phases 1–3, auth slice → HP-3), B7 workstream 16 (Phases 4–6), B9 workstream 11 (CSS split). Nothing starts before HP-2. |
+| [screen-sharing-pipeline-2026-10-25](screen-sharing-pipeline-2026-10-25.md)                                            | Design only, 2026-10-25. Issue #2805 investigation, per-layer diagnostics, measured motion/codec/layer policy, qualification gates and rollback. No runtime changes or validated performance results.                                                                                                        |
+| [developer-maintainability-execution-2026-10-24](developer-maintainability-execution-2026-10-24.md)                    | Planning, 2026-10-27 at `dev` `cab72959`. Ranked opportunities and an exact R-1 plan (check-name docs, one runner test). **R-1 implemented 2026-10-27**; its before/after result is in the baseline. #2803 and #2804 already delivered the task map and `run.mjs --list`.                                    |
 | [slash-commands](slash-commands.md)                                                                                    | Design only. No implementation; not in beta scope.                                                                                                                                                                                                                                                           |
 
 ## Shipped — kept for history, do not use as current status
@@ -147,16 +149,17 @@ plans and PRDs that drive work. The files below are dated evidence, baselines,
 scorecards or drafts rather than plans with a status to track, so they are
 listed here for discoverability and keep their own dated status lines:
 
-| Document                                                                                     | Kind                                   |
-| -------------------------------------------------------------------------------------------- | -------------------------------------- |
-| [ci-cost-2026-09-20](../archive/plans/ci-cost-2026-09-20.md)                                 | Dated CI-cost measurement              |
-| [b7-8-mutation-baseline-2026-09-20](../archive/plans/b7-8-mutation-baseline-2026-09-20.md)   | Dated mutation baseline                |
-| [b9-shared-a11y-evidence-2026-09-23](../archive/plans/b9-shared-a11y-evidence-2026-09-23.md) | B9-2 accessibility evidence            |
-| [b9-text-inventory-2026-09-23](../archive/plans/b9-text-inventory-2026-09-23.md)             | B9-3 text-inventory evidence           |
-| [hp-5-scorecard-2026-09-05](../archive/plans/hp-5-scorecard-2026-09-05.md)                   | Signed HP-5 scorecard                  |
-| [auto-loop-2026-09-04](../archive/plans/auto-loop-2026-09-04.md)                             | Design note (not in beta scope)        |
-| [hp-4-drafts/](../archive/plans/hp-4-drafts/), [hp-5-drafts/](../archive/plans/hp-5-drafts/) | Owner draft folders, not indexed plans |
-| [b7-0-client-baseline-2026-09-19](../archive/plans/b7-0-client-baseline-2026-09-19.md)       | B7 startup/memory baseline             |
+| Document                                                                                          | Kind                                   |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| [ci-cost-2026-09-20](../archive/plans/ci-cost-2026-09-20.md)                                      | Dated CI-cost measurement              |
+| [b7-8-mutation-baseline-2026-09-20](../archive/plans/b7-8-mutation-baseline-2026-09-20.md)        | Dated mutation baseline                |
+| [b9-shared-a11y-evidence-2026-09-23](../archive/plans/b9-shared-a11y-evidence-2026-09-23.md)      | B9-2 accessibility evidence            |
+| [b9-text-inventory-2026-09-23](../archive/plans/b9-text-inventory-2026-09-23.md)                  | B9-3 text-inventory evidence           |
+| [hp-5-scorecard-2026-09-05](../archive/plans/hp-5-scorecard-2026-09-05.md)                        | Signed HP-5 scorecard                  |
+| [auto-loop-2026-09-04](../archive/plans/auto-loop-2026-09-04.md)                                  | Design note (not in beta scope)        |
+| [hp-4-drafts/](../archive/plans/hp-4-drafts/), [hp-5-drafts/](../archive/plans/hp-5-drafts/)      | Owner draft folders, not indexed plans |
+| [b7-0-client-baseline-2026-09-19](../archive/plans/b7-0-client-baseline-2026-09-19.md)            | B7 startup/memory baseline             |
+| [developer-maintainability-baseline-2026-10-24](developer-maintainability-baseline-2026-10-24.md) | Dated discovery baseline (2026-10-27)  |
 
 ## Archive
 

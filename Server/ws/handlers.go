@@ -91,8 +91,10 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		displayName = c.user.DisplayName
 	}
 	voiceChID, voiceJoinTok := c.voice.state()
+	live := c.livePresence()
 	info := ClientInfo{
-		Activity:       c.livePresence().activity,
+		Activity:       live.activity,
+		Listening:      live.listening,
 		UserID:         c.userID,
 		Username:       username,
 		Avatar:         avatar,
@@ -291,6 +293,9 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 	}
 	if result.SetActivity != nil {
 		h.applyActivity(c, result.SetActivity.next)
+	}
+	if result.SetListening != nil {
+		h.applyListening(c, result.SetListening.next)
 	}
 	if result.SetE2EEAnnounce != nil {
 		c.setE2EEAnnounce(*result.SetE2EEAnnounce)

@@ -1,0 +1,60 @@
+name: CI re-run
+
+# Re-runs the failed jobs of one CI run, once. ci.yml's retry-failed job
+# dispatches this when a first attempt fails; a run cannot re-run itself while
+# it is still in progress, so this waits for it to finish first. Dispatched on
+# dev, so it is dev's copy of this file that runs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: The CI run whose failed jobs to re-run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-rerun-${{ inputs.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    name: Re-run failed jobs once
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: write
+    steps:
+      - name: Wait for the run, then re-run its failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::run_id must be a number, got '$RUN_ID'"
+            exit 1
+          fi
+          # Only CI's own runs, on their first attempt, that ended in failure.
+          # A cancelled run was superseded; a later attempt was already re-run.
+          for _ in $(seq 1 80); do
+            read -r path status conclusion attempt < <(gh api "repos/$REPO/actions/runs/$RUN_ID" \
+              --jq '[.path, .status, (.conclusion // "none"), .run_attempt] | @tsv')
+            [ "$status" = completed ] && break
+            sleep 10
+          done
+          echo "run $RUN_ID: $path $status $conclusion attempt $attempt"
+          if [ "$path" != .github/workflows/ci.yml ]; then
+            echo "::error::run $RUN_ID is not a CI run"
+            exit 1
+          fi
+          if [ "$status" != completed ] || [ "$conclusion" != failure ] || [ "$attempt" != 1 ]; then
+            echo "Nothing to re-run."
+            exit 0
+          fi
+          gh api -X POST "repos/$REPO/actions/runs/$RUN_ID/rerun-failed-jobs"
+          echo "Re-running the failed jobs of run $RUN_ID: https://github.com/$REPO/actions/runs/$RUN_ID"

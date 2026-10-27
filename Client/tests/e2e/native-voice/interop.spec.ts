@@ -59,7 +59,9 @@ const livekitDist = resolve("node_modules/livekit-client/dist");
 
 const KEY_ID = "e2e-key";
 const API_SECRET = "e2e-secret-at-least-32-characters-long";
-const ROOM = "native-interop";
+/** One room per test: tests reuse the same identities against one server, and
+ *  a previous test's peers can still be in the room when the next one joins. */
+let room = "native-interop";
 /** 440 Hz sine, amplitude 8000 of 32768: RMS = 8000/32768/sqrt(2). */
 const EXPECTED_SINE_RMS = 8000 / 32768 / Math.SQRT2;
 /** The per-user volume the native peer plays the browser peer at. */
@@ -86,7 +88,7 @@ function joinToken(identity: string): string {
       sub: identity,
       nbf: now - 10,
       exp: now + 600,
-      video: { room: ROOM, roomJoin: true, canPublish: true, canSubscribe: true },
+      video: { room, roomJoin: true, canPublish: true, canSubscribe: true },
     }),
   );
   const signature = b64url(
@@ -146,6 +148,10 @@ test.beforeAll(async () => {
   );
   livekit = startProcess(resolve(livekitBinary!), ["--config", config], dataDir);
   await waitForHttp(`http://127.0.0.1:${livekitPort}`, livekit);
+});
+
+test.beforeEach(({}, testInfo) => {
+  room = `native-interop-${testInfo.testId}-${testInfo.retry}`;
 });
 
 test.afterAll(async () => {
@@ -533,9 +539,18 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
   await joinBrowserPeer(page, url, joinToken("user-1"), key);
 
   const nativeAudio: Array<{ identity: string; rms: number; at: number }> = [];
+  // Every peer event with its arrival time, so a run with no settled audio
+  // says whether the meter never started, starved, or the peer left early.
+  const timeline: Array<{ type: unknown; identity?: unknown; frames?: unknown; at: number }> = [];
   const peer = runNativePeer(
     ["--url", url, "--token", joinToken("user-2"), "--key", wrongKey, "--secs", "12"],
     ({ event }) => {
+      timeline.push({
+        type: event.type,
+        identity: event.identity,
+        frames: event.frames,
+        at: Date.now(),
+      });
       if (event.type === "audio")
         nativeAudio.push({
           ...(event as unknown as { identity: string; rms: number }),
@@ -560,9 +575,24 @@ test("a native peer with the wrong key hears silence and is heard as silence", a
   // receiver FrameCryptor on TrackSubscribed, so the first frames can reach
   // the decoder still encrypted and decode as a burst of noise.
   const fromBrowser = nativeAudio.filter((a) => a.identity === "user-1" && a.at >= settledAt);
-  // The native side still plays the browser track out, and it is silence.
-  expect(fromBrowser.length).toBeGreaterThan(0);
-  expect(Math.max(...fromBrowser.map((a) => a.rms))).toBeLessThan(1);
+  // The native side subscribes to the browser track and decodes nothing
+  // audible from it. Its meter reports only while decoded frames arrive: when
+  // the cryptor is attached before the first frame, every frame is dropped and
+  // there is nothing to report, which is silence too.
+  const seen = timeline
+    .map(
+      (e) =>
+        `${String(e.type)}${e.identity ? `:${String(e.identity)}` : ""}${e.frames === undefined ? "" : `#${String(e.frames)}`}@${e.at - settledAt}ms`,
+    )
+    .join(" ");
+  expect(
+    timeline.some((e) => e.type === "trackSubscribed" && e.identity === "user-1"),
+    `native peer events relative to settle: ${seen}`,
+  ).toBe(true);
+  expect(
+    fromBrowser.filter((a) => a.rms >= 1),
+    `native peer events relative to settle: ${seen}`,
+  ).toEqual([]);
 });
 
 type NativeVideo = { identity: string; frames: number; width: number; height: number; at: number };

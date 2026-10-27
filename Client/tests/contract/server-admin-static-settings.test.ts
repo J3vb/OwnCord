@@ -261,7 +261,7 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
       "Access & registration",
       "Security",
       "Voice: AFK",
-      "Game activity",
+      "Member activity (games and music)",
       "Welcome messages",
       "Upload file types",
       "Running configuration",
@@ -1135,7 +1135,7 @@ describe("Server/admin/static — game_activity_enabled switch", () => {
     expect(sw.getAttribute("role")).toBe("switch");
     expect(sw.getAttribute("aria-checked")).toBe("true");
     expect(document.getElementById("s-game_activity_enabled-name")?.textContent).toBe(
-      "Show the games members are playing",
+      "Show what members are playing and listening to",
     );
     const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
     expect(save.disabled).toBe(true);

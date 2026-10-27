@@ -4,6 +4,7 @@ import {
   setMembers,
   addMember,
   applyReadyActivities,
+  applyReadyListening,
   removeMember,
   updateMemberRole,
   updateMemberProfile,
@@ -13,7 +14,7 @@ import {
   getOnlineMembers,
   getTypingUsers,
 } from "../../src/stores/members.store";
-import type { ReadyMember, MemberJoinPayload, UserStatus } from "../../src/lib/types";
+import type { ReadyMember, MemberJoinPayload } from "../../src/lib/types";
 
 const MEMBER_ALICE: ReadyMember = {
   id: 1,
@@ -138,6 +139,28 @@ describe("members store", () => {
       });
     });
 
+    it("keeps a rejoining member's song, and adds no listening key for a new one (WP 8.10)", () => {
+      addMember({
+        user: { id: 13, username: "dj", avatar: null, role: "member" },
+        status: "online",
+      });
+      expect("listening" in (membersStore.getState().members.get(13) ?? {})).toBe(false);
+      applyReadyListening([
+        { user_id: 13, title: "T", artist: "", player: "VLC", started_at: 5, duration_ms: 9 },
+      ]);
+      addMember({
+        user: { id: 13, username: "dj", avatar: null, role: "member" },
+        status: "online",
+      });
+      expect(membersStore.getState().members.get(13)?.listening).toEqual({
+        title: "T",
+        artist: "",
+        player: "VLC",
+        startedAt: 5,
+        durationMs: 9,
+      });
+    });
+
     it("renders an invisible join as offline", () => {
       // The server collapses an invisible connector's status to "offline"
       // before broadcasting member_join; the store must pass that through
@@ -180,7 +203,6 @@ describe("members store", () => {
 
     it("is a no-op for non-existent userId", () => {
       setMembers([MEMBER_ALICE]);
-      const before = membersStore.getState();
       removeMember(999);
       // Map was still rebuilt, but size unchanged
       expect(membersStore.getState().members.size).toBe(1);

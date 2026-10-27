@@ -52,6 +52,7 @@ and only when it changes something a contributor or fork holder must do
 **Voice and video**
 
 - The 120 fps screen share option is hidden for now: the Windows app's screen capture delivers about 60 fps anyway. A saved 120 fps setting shares at 60.
+- The bundled LiveKit voice server moves from 1.13.7 to 1.13.10 (a patch release; no configuration change), in the Docker image and compose file and in the release the server downloads.
 
 ### Added
 
@@ -84,6 +85,7 @@ and only when it changes something a contributor or fork holder must do
 - The member list, profile and DMs show the game someone is playing ("Playing VALORANT · for 42 min"). The desktop app finds it from your Steam and Epic libraries and a built-in list. To turn it off, use Settings → Advanced → Activity.
 - Under Settings → Advanced → Activity, Your games lets you add any running program as a game, rename a game, or keep one game from showing. These choices stay on your computer.
 - Avatars and profile banners can be animated: upload a GIF, animated WebP or animated PNG. It shows its first frame and plays while you hover the message, member or DM row; the profile card plays it straight away. With reduced motion on it never plays. Avatars may now be up to 2 MB and banners up to 4 MB; group DM icons stay still.
+- The member list, profile and DMs show the music someone is listening to ("Listening to Spotify", with the song, the artist and a progress bar in the profile). The desktop app reads it from the song your media player reports to Windows or Linux; web browsers never count. To turn it off, or to hide one player, use Settings → Advanced → Activity (Share the music you're listening to, Your players). These choices stay on your computer.
 
 ### Fixed
 
@@ -137,6 +139,7 @@ and only when it changes something a contributor or fork holder must do
 - In the Linux app, someone else's camera or screen share could show one picture and then freeze for the rest of the call, and a VP9 camera could stay black. Their video now keeps playing. Closing a stream's pop-out window also no longer leaves its tile black.
 - When unmuting failed because the microphone could not be opened, the app switched you back to muted, but everyone else still saw you as unmuted. They now see you muted too.
 - After the call reconnected, a camera or screen share that ended during the drop, or belonged to someone who left meanwhile, stayed in the video grid as a frozen tile. Those tiles are now removed.
+- After a network drop longer than about 15 seconds, the call could come back as "Voice Connected" with your camera off, and nobody else listed you in the channel. The app now waits until it knows whether the server still has you in the call, and rejoins properly when it does not, so the camera comes back on.
 
 ## v2.4.0-beta.1
 

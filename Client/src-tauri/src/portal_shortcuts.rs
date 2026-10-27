@@ -2310,12 +2310,15 @@ mod tests {
             old: ":1.1".into(),
             new: ":1.2".into(),
         }));
-        wait_until("a second registration", || {
-            lock(&script.calls)
-                .iter()
-                .filter(|c| c.starts_with("register"))
-                .count()
-                == 2
+        // Wait for the call after the second registration too: the portal
+        // thread records `register` before it sends the next call.
+        wait_until("a second registration and the call after it", || {
+            let calls = lock(&script.calls);
+            calls.iter().filter(|c| c.starts_with("register")).count() == 2
+                && calls
+                    .iter()
+                    .rposition(|c| c == "register")
+                    .is_some_and(|i| i + 1 < calls.len())
         });
         let calls = lock(&script.calls).clone();
         let second = calls.iter().rposition(|c| c == "register").unwrap();

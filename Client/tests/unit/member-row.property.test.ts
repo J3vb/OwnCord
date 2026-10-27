@@ -57,6 +57,7 @@ const rowModel: fc.Arbitrary<MemberRowModel> = fc
     avatarColor: fc.constantFrom("#5865f2", "#3ba55c", "#faa61a"),
     customStatus: fc.option(text, { nil: null }),
     activity: fc.option(text, { nil: null }),
+    activityIcon: fc.constantFrom("gamepad-2" as const, "music" as const),
     colorVar: fc.constantFrom("var(--green)", "#ff0000", "#3366cc", "var(--text-micro)"),
     status: fc.constantFrom(...STATUSES),
     away: fc.boolean(),
@@ -90,6 +91,14 @@ function mutateRow(model: MemberRowModel, field: string): MemberRowModel {
         ...model,
         customStatus: null,
         activity: model.activity === null ? "Playing x" : null,
+      };
+    case "activityIcon":
+      // The icon only draws beside a line, and the line needs no custom status.
+      return {
+        ...model,
+        customStatus: null,
+        activity: model.activity ?? "Listening to x",
+        activityIcon: model.activityIcon === "music" ? "gamepad-2" : "music",
       };
     case "colorVar":
       return { ...model, colorVar: model.colorVar === "#ff0000" ? "#00ff00" : "#ff0000" };

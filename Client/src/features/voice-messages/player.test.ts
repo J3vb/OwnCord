@@ -34,7 +34,9 @@ function setup(att = voiceAtt(), fetched: string | null = "blob:voice-1"): Harne
   Object.defineProperty(audio, "duration", { get: () => 20, configurable: true });
   Object.defineProperty(audio, "currentTime", {
     get: () => audio.currentTimeValue,
-    set: (v: number) => (audio.currentTimeValue = v),
+    set: (v: number) => {
+      audio.currentTimeValue = v;
+    },
   });
   audio.play = vi.fn(async () => {
     audio.dispatchEvent(new Event("play"));

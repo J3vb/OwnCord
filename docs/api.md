@@ -5057,11 +5057,12 @@ can move the owner between voice channels: `true` (the default while no row
 exists) or `false`, also accepted as `1`/`0`. It is stored as `true`/`false`.
 Only the **Owner** role may change it (`403 FORBIDDEN` otherwise).
 
-`game_activity_enabled` (WP 8.3e-2) decides whether members' game activity is
-shown on this server: `true` (the default while no row exists) or `false`, also
+`game_activity_enabled` (WP 8.3e-2) decides whether members' game activity and,
+since WP 8.10a, the song they are listening to are shown on this server (the
+admin panel calls it "Member activity (games and music)"): `true` (the default while no row exists) or `false`, also
 accepted as `1`/`0`, stored as `true`/`false`. Unlike `voice_owner_movable` it
 is not owner-only: `MANAGE_SERVER` may change it. A save hands the value to the
-running hub, which clears every shown game when it is `false` and sends the
+running hub, which clears every shown game and song when it is `false` and sends the
 [`game_activity_policy`](protocol.md#game_activity_policy-server---client-broadcast)
 frame to every connected client; an unreadable row at start-up counts as `false`.
 

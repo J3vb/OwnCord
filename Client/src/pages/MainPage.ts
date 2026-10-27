@@ -42,6 +42,7 @@ import { loadPref, savePref } from "@lib/preferences";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import type { GameActivityLoop } from "@lib/gameActivity";
+import type { MusicActivityLoop } from "@lib/musicActivity";
 import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -161,6 +162,11 @@ function personName(userId: number): string | undefined {
   return (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
 }
 
+/** What the DM profile panel repaints from a member's song. */
+function listeningKey(l: DmProfileData["listening"] | undefined): string {
+  return l == null ? "" : `${l.title}|${l.artist}|${l.player}|${l.startedAt}|${l.durationMs}`;
+}
+
 /** Saved preference: the 1:1 DM profile panel opens with the conversation. */
 const DM_PROFILE_PREF = "dmProfileOpen";
 
@@ -202,6 +208,7 @@ function buildDmProfileUser(channelId: number): DmProfileData | null {
     // The live copy first, as for the status; the DM list's own copy covers a
     // partner who is not a member of this server.
     activity: member === undefined ? (recipient.activity ?? null) : (member.activity ?? null),
+    listening: member === undefined ? (recipient.listening ?? null) : (member.listening ?? null),
     about: null,
     joinDate: null,
     banner: member?.banner ?? null,
@@ -342,6 +349,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Reports the game running on this machine (WP 8.3). Desktop only, and
    *  loaded on first use so the web build and the startup path never carry it. */
   let gameActivity: GameActivityLoop | null = null;
+  let musicActivity: MusicActivityLoop | null = null;
   let speakingActivityTimer: ReturnType<typeof setInterval> | null = null;
   let statusTimerWatcher: StatusTimerWatcher | null = null;
 
@@ -552,7 +560,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     };
     const unsubMembers = membersStore.subscribeSelector(
       (s) =>
-        `${s.members.get(recipientId)?.status ?? ""}|${s.members.get(recipientId)?.activity?.name ?? ""}`,
+        `${s.members.get(recipientId)?.status ?? ""}|${s.members.get(recipientId)?.activity?.name ?? ""}|${listeningKey(s.members.get(recipientId)?.listening)}`,
       refresh,
     );
     // A banner change shows without reopening the panel.
@@ -968,6 +976,20 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           });
         },
         (err: unknown) => log.warn("Game activity failed to load", { error: String(err) }),
+      );
+    }
+    // The song being listened to, for the "Listening to <player>" line. Same
+    // rules as the game loop, with its own capability (listening_activity).
+    if (desktop.mediaDetector.available) {
+      void import("@lib/musicActivity").then(
+        ({ startMusicActivity }) => {
+          if (tornDown) return;
+          musicActivity = startMusicActivity({
+            ws,
+            detect: (prefs) => desktop.mediaDetector.detect(prefs),
+          });
+        },
+        (err: unknown) => log.warn("Music activity failed to load", { error: String(err) }),
       );
     }
     // Talking in a call is being here even with hands off the keyboard and
@@ -2265,6 +2287,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       step("autoIdle", () => {
         autoIdle?.destroy();
         autoIdle = null;
+      });
+      step("musicActivity", () => {
+        musicActivity?.destroy();
+        musicActivity = null;
       });
       step("gameActivity", () => {
         gameActivity?.destroy();

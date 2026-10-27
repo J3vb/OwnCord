@@ -177,6 +177,12 @@ async function boot(
   return { dom, bridge };
 }
 
+/** What core.js showApp does after sign-in. jsdom, like a browser, only
+ * focuses what is displayed, and boot() leaves the shell hidden. */
+function showShell(dom: JSDOM): void {
+  dom.window.document.getElementById("adminShell")!.classList.remove("hidden");
+}
+
 // Sign-in is a real <form>: submit it the way Enter or the button does, then
 // let the handler's fetch chain (mocked, so microtasks only) run out.
 async function submitForm(doc: Document, id: string): Promise<void> {
@@ -846,6 +852,7 @@ describe("Server/admin/static — panel behaviour", () => {
     dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
+    showShell(booted.dom);
     booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     booted.bridge.state.auditPage = 2;
@@ -1207,6 +1214,7 @@ describe("Server/admin/static — panel behaviour", () => {
     dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
+    showShell(booted.dom);
 
     const content = doc.getElementById("content") as HTMLElement;
     content.innerHTML = '<input class="filter-search">';
@@ -1578,6 +1586,11 @@ describe("Server/admin/static — panel behaviour", () => {
     // Drawer: focus moves in, Escape closes it and restores focus.
     const toggle = doc.getElementById("navToggle") as HTMLButtonElement;
     const shell = doc.getElementById("adminShell")!;
+    // The menu button only shows below 900px, and jsdom does not evaluate
+    // @media: apply the narrow rule so the button can take focus.
+    const narrow = doc.createElement("style");
+    narrow.textContent = ".topbar-menu{display:inline-flex}";
+    doc.head.append(narrow);
     toggle.focus();
     toggle.click();
     expect(shell.classList.contains("nav-open")).toBe(true);

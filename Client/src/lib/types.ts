@@ -507,6 +507,24 @@ export interface ReadyActivity extends GameActivity {
   readonly user_id: number;
 }
 
+/** The song a member is listening to, as it rides `presence` and `listening_update` (WP 8.10). */
+export interface ListeningActivity {
+  readonly title: string;
+  /** May be empty. */
+  readonly artist: string;
+  /** The app that plays it ("Spotify"). */
+  readonly player: string;
+  /** Unix milliseconds the song would have started at (now minus the position). */
+  readonly started_at: number;
+  /** The song's length in milliseconds; 0 = unknown. */
+  readonly duration_ms: number;
+}
+
+/** One entry of `ready.listening`. */
+export interface ReadyListening extends ListeningActivity {
+  readonly user_id: number;
+}
+
 export interface ReadyPayload {
   readonly capabilities?: {
     readonly message_deduplication?: boolean;
@@ -596,7 +614,19 @@ export interface ReadyPayload {
      * (WP 8.3). Absent means an older server: nothing is sent, no game shown.
      */
     readonly game_activity?: boolean;
+    /**
+     * The server understands `listening_update` and carries a member's song as
+     * `listening` on `presence` and `presence_batch` and as `ready.listening`
+     * (WP 8.10). Absent means an older server: nothing is sent, no song shown.
+     */
+    readonly listening_activity?: boolean;
   };
+  /**
+   * The songs connected members are listening to (WP 8.10), sorted by user id.
+   * Absent from a server without `listening_activity`; later changes arrive as
+   * `presence`.
+   */
+  readonly listening?: readonly ReadyListening[];
   /**
    * The games connected members are playing (WP 8.3), sorted by user id. Absent
    * from a server without `game_activity`; authoritative for the moment of the
@@ -1049,6 +1079,9 @@ export interface PresencePayload {
    *  `game_activity` (null = none); absent from an older one, where the store
    *  leaves the shown game alone. */
   readonly activity?: GameActivity | null;
+  /** The song the user is listening to (WP 8.10). Always present on a server
+   *  with `listening_activity` (null = none); absent from an older one. */
+  readonly listening?: ListeningActivity | null;
 }
 
 export interface ChannelCreatePayload {
@@ -1235,6 +1268,8 @@ export interface PresenceBatchEntry {
   readonly custom_status: string | null;
   /** Always present on a server with `game_activity` (null = none). */
   readonly activity?: GameActivity | null;
+  /** Always present on a server with `listening_activity` (null = none). */
+  readonly listening?: ListeningActivity | null;
 }
 
 /** Many users' presence in one frame: a coalescing window's changes, or with
@@ -1629,6 +1664,11 @@ export interface ActivityUpdatePayload {
   readonly activity: GameActivity | null;
 }
 
+/** Client→Server: the song being listened to, or null once it stops (WP 8.10). */
+export interface ListeningUpdatePayload {
+  readonly listening: ListeningActivity | null;
+}
+
 export interface VoiceJoinPayload {
   readonly channel_id: number;
   /** Set on the user's own join; automatic rejoins (reconnect, voice_moved) omit it. */
@@ -1774,6 +1814,7 @@ export type ClientMessage =
   | (WsEnvelope<MarkUnreadPayload> & { readonly type: "mark_unread" })
   | (WsEnvelope<PresenceUpdatePayload> & { readonly type: "presence_update" })
   | (WsEnvelope<ActivityUpdatePayload> & { readonly type: "activity_update" })
+  | (WsEnvelope<ListeningUpdatePayload> & { readonly type: "listening_update" })
   | (WsEnvelope<VoiceJoinPayload> & { readonly type: "voice_join" })
   | (WsEnvelope<VoiceLeaveClientPayload> & { readonly type: "voice_leave" })
   | (WsEnvelope<VoiceMutePayload> & { readonly type: "voice_mute" })
