@@ -109,6 +109,12 @@ export const shards = {
     "src/lib/voiceTokenManager.ts",
     "src/features/channels/voiceRow.view.ts",
     "src/features/channels/voiceRowModel.ts",
+    "src/features/voice-messages/waveform.ts",
+    "src/features/voice-messages/wav.ts",
+    "src/features/voice-messages/mime.ts",
+    "src/features/voice-messages/recorder.ts",
+    "src/features/voice-messages/voiceComposer.ts",
+    "src/features/voice-messages/player.ts",
   ],
   "transport-auth-1": ["src/lib/api.ts", "src/lib/permissions.ts", "src/lib/hostValidation.ts"],
   "transport-auth-2": [
