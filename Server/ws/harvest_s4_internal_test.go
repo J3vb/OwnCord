@@ -32,7 +32,7 @@ func TestKickClient_SubscribeRaceCannotLeaveDeadSubscriber(t *testing.T) {
 	for range 300 {
 		h := newEmitTestHub()
 		c := NewTestClient(h, 1, make(chan []byte, 8))
-		h.clients[1] = c
+		h.clients[1] = []*Client{c}
 		h.pubsub.Subscribe(c, ChannelTopic(3))
 
 		done := make(chan struct{})
@@ -43,9 +43,7 @@ func TestKickClient_SubscribeRaceCannotLeaveDeadSubscriber(t *testing.T) {
 		h.kickClient(c)
 		<-done
 
-		h.pubsub.mu.RLock()
-		sub := h.pubsub.topics[ChannelTopic(3)][1]
-		h.pubsub.mu.RUnlock()
+		sub := h.pubsub.subscriberForTest(ChannelTopic(3), 1)
 		if sub != nil {
 			t.Fatal("a Subscribe racing kickClient left a dead client holding the topic — its user silently loses the channel stream")
 		}
@@ -60,7 +58,7 @@ func TestDeliverBroadcast_ShedFrameLeavesNoSeqGap(t *testing.T) {
 	h := newEmitTestHub()
 	send := make(chan []byte, 4096)
 	c := NewTestClient(h, 1, send)
-	h.clients[1] = c
+	h.clients[1] = []*Client{c}
 	h.pubsub.Subscribe(c, ChannelTopic(5))
 
 	total := topicRateLimitPerSecond + 20
@@ -221,7 +219,7 @@ func TestFailedHandshake_MarksUserOfflineWhenNoReplacementRemains(t *testing.T) 
 	// A's readPump defer runs while B holds the slot → teardown skipped.
 	oldClient := NewTestClient(h, userID, make(chan []byte, 8))
 	oldClient.user = &db.User{ID: userID, Status: "online"}
-	h.clients[userID] = oldClient
+	h.clients[userID] = []*Client{oldClient}
 
 	newClient := NewTestClient(h, userID, make(chan []byte, 8))
 	newClient.user = &db.User{ID: userID, Status: "online"}

@@ -138,7 +138,8 @@ drain:
 	deadline2 := time.Now().Add(2 * time.Second)
 	for {
 		hub.mu.RLock()
-		c, stillRegistered := hub.clients[uid]
+		c := hub.newestLocked(uid)
+		stillRegistered := c != nil
 		hub.mu.RUnlock()
 		if !stillRegistered {
 			return // fixed: never stayed registered past the revocation
@@ -279,7 +280,8 @@ drain:
 	deadline2 := time.Now().Add(2 * time.Second)
 	for {
 		hub.mu.RLock()
-		c, stillRegistered := hub.clients[uid]
+		c := hub.newestLocked(uid)
+		stillRegistered := c != nil
 		hub.mu.RUnlock()
 		if !stillRegistered {
 			return

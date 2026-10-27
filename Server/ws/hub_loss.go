@@ -32,9 +32,7 @@ func (h *Hub) markLoss(r lossRoute) {
 	switch {
 	case r.recipients != nil:
 		for _, uid := range r.recipients {
-			if c := h.GetClient(uid); c != nil {
-				clients = append(clients, c)
-			}
+			clients = append(clients, h.clientsOf(uid)...)
 		}
 	case r.channelID != 0:
 		clients = h.pubsub.subscribers(ChannelTopic(r.channelID), 0)
@@ -42,7 +40,7 @@ func (h *Hub) markLoss(r lossRoute) {
 		clients = h.pubsub.subscribers(TopicGlobal, r.excludeUserID)
 	}
 	for _, c := range clients {
-		h.setPresenceResync(c.userID, true)
+		h.setPresenceResync(c.userID, c.tokenHash, true)
 		c.cseq.lossPending.Store(true)
 	}
 	h.queueDrops.lossMarks.Add(uint64(len(clients)))
@@ -93,7 +91,7 @@ func (h *Hub) markDroppedRoutes() {
 // loss marked before it. Reports whether a resync was owed, so a ready that
 // never reaches the client can restore it.
 func (h *Hub) takeOwedResync(c *Client) bool {
-	owed := h.setPresenceResync(c.userID, false)
+	owed := h.setPresenceResync(c.userID, c.tokenHash, false)
 	c.cseq.lossPending.Store(false)
 	return owed
 }
@@ -109,7 +107,7 @@ func (h *Hub) LossMarkCount() uint64 { return h.queueDrops.lossMarks.Load() }
 func (h *Hub) replayFrameAllowed(ctx context.Context, c *Client, channelID int64) bool {
 	readable, confirmed := h.frameReadableNow(ctx, c.user.ID, channelID)
 	if !confirmed {
-		h.setPresenceResync(c.userID, true)
+		h.setPresenceResync(c.userID, c.tokenHash, true)
 		c.cseq.lossPending.Store(true)
 		h.queueDrops.lossMarks.Add(1)
 	}

@@ -31,7 +31,7 @@ func TestHandleMessageSessionRecheck_TransientDBErrorDoesNotKick(t *testing.T) {
 	// Put the client one message away from the periodic recheck boundary, so
 	// the very next call to handleMessageSessionRecheck triggers the DB read.
 	c.msgCount = SessionCheckInterval - 1
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 
 	// Force GetSessionWithBanStatus to fail with a genuine DB error (not
 	// sql.ErrNoRows, which the production code already treats as "session

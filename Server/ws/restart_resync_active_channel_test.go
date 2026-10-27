@@ -142,7 +142,7 @@ func TestFullResyncAfterRestartHonorsActiveChannelID(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		hub.mu.Lock()
-		c := hub.clients[userID]
+		c := hub.newestLocked(userID)
 		hub.mu.Unlock()
 		if c != nil && c.getChannelID() == chID {
 			break
@@ -265,7 +265,7 @@ func TestFullResyncAfterRestartActiveChannelIsReadGated(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	hub.mu.Lock()
-	c := hub.clients[userID]
+	c := hub.newestLocked(userID)
 	hub.mu.Unlock()
 	if c == nil {
 		t.Fatal("client was not registered")
@@ -274,9 +274,7 @@ func TestFullResyncAfterRestartActiveChannelIsReadGated(t *testing.T) {
 		t.Fatalf("post-restart full-resync client was focused on unreadable channel %d from an "+
 			"attacker-supplied auth frame", got)
 	}
-	hub.pubsub.mu.RLock()
-	sub := hub.pubsub.topics[ChannelTopic(secretID)][userID]
-	hub.pubsub.mu.RUnlock()
+	sub := hub.pubsub.subscriberForTest(ChannelTopic(secretID), userID)
 	if sub != nil {
 		t.Fatalf("post-restart full-resync client is subscribed to ChannelTopic(%d) despite "+
 			"READ_MESSAGES being denied", secretID)
@@ -348,7 +346,7 @@ func TestFreshConnectIgnoresActiveChannelID(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	hub.mu.Lock()
-	c := hub.clients[userID]
+	c := hub.newestLocked(userID)
 	hub.mu.Unlock()
 	if c == nil {
 		t.Fatal("client was not registered")
@@ -357,9 +355,7 @@ func TestFreshConnectIgnoresActiveChannelID(t *testing.T) {
 		t.Fatalf("fresh-connect client channelID = %d, want 0 — active_channel_id must be "+
 			"ignored when last_seq is 0", got)
 	}
-	hub.pubsub.mu.RLock()
-	sub := hub.pubsub.topics[ChannelTopic(chID)][userID]
-	hub.pubsub.mu.RUnlock()
+	sub := hub.pubsub.subscriberForTest(ChannelTopic(chID), userID)
 	if sub != nil {
 		t.Fatalf("fresh-connect client is subscribed to ChannelTopic(%d) via the auth-frame hint", chID)
 	}

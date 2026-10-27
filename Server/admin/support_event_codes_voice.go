@@ -21,5 +21,8 @@ func init() {
 		"ws voiceModTarget owner movable setting":                                  "ws_voicemodtarget_owner_movable_setting",
 		"voice afk: sweep read failed":                                             "voice_afk_sweep_read_failed",
 		"voice removed watch: removing participant failed, retrying next tick":     "voice_removed_watch_remove_participant_failed",
+		"hub: evicting oldest connection over the per-user cap":                    "hub_evicting_oldest_connection_over_cap",
+		"handleVoiceJoin: could not verify voice state cleared after move":         "handlevoicejoin_could_not_verify_voice_state_after_move",
+		"handleVoiceJoin: stale voice state persists after move, aborting join":    "handlevoicejoin_stale_voice_state_persists_after_move",
 	})
 }

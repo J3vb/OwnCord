@@ -36,7 +36,7 @@ func newRosterFixture(t *testing.T) *rosterFixture {
 	for uid, send := range map[int64]chan []byte{f.alice: f.aliceSend, f.bob: f.bobSend} {
 		c := NewTestClient(f.h, uid, send)
 		f.h.mu.Lock()
-		f.h.clients[uid] = c
+		f.h.clients[uid] = []*Client{c}
 		f.h.mu.Unlock()
 	}
 	return f

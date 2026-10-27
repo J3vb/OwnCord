@@ -168,7 +168,7 @@ func assertGateFailureForcesResync(t *testing.T, labelled bool, wrap func(Visibi
 
 	c := NewTestClient(hub, subscriberID, make(chan []byte, 8))
 	hub.mu.Lock()
-	hub.clients[subscriberID] = c
+	hub.clients[subscriberID] = []*Client{c}
 	hub.mu.Unlock()
 	hub.pubsub.Subscribe(c, ChannelTopic(chID))
 

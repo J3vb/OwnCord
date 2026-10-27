@@ -10,7 +10,7 @@ import (
 // configured cap, upgrade requests are refused with 503 before the WebSocket
 // handshake, and the rejection is counted.
 func TestServeWS_ConnectionCap(t *testing.T) {
-	h := &Hub{clients: map[int64]*Client{1: {}, 2: {}}}
+	h := &Hub{clients: map[int64][]*Client{1: {{}}, 2: {{}}}}
 	handler := ServeWS(h, nil, 2)
 
 	rec := httptest.NewRecorder()
@@ -28,7 +28,7 @@ func TestServeWS_ConnectionCap(t *testing.T) {
 
 	// Below the cap the request proceeds to the upgrade (which fails without
 	// WebSocket headers — but NOT with the capacity 503).
-	h2 := &Hub{clients: map[int64]*Client{1: {}}}
+	h2 := &Hub{clients: map[int64][]*Client{1: {{}}}}
 	rec2 := httptest.NewRecorder()
 	ServeWS(h2, nil, 2)(rec2, httptest.NewRequest(http.MethodGet, "/api/v1/ws", nil))
 	if rec2.Code == http.StatusServiceUnavailable {

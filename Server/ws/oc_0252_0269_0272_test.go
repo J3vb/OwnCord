@@ -56,7 +56,7 @@ func TestFreshConnectCleanStaleVoice_ClearsOldClientVoiceState(t *testing.T) {
 	old := NewTestClient(h, uid, make(chan []byte, 32))
 	old.voice.setState(chID, vs.JoinedAt)
 	h.mu.Lock()
-	h.clients[uid] = old
+	h.clients[uid] = []*Client{old}
 	h.mu.Unlock()
 	h.updateKeyHolder(chID)
 	if !h.IsVoiceKeyHolder(chID, uid) {

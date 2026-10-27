@@ -35,7 +35,7 @@ func TestTimeout_InVoiceMemberSurvivesSweepAndTokenRefresh(t *testing.T) {
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
 	c.voice.setState(100, state.JoinedAt)
-	h.clients[1] = c
+	h.clients[1] = []*Client{c}
 
 	if _, _, err := database.TimeoutUser(ctx, 1, modID(t, database), nil, "cool off", time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("TimeoutUser: %v", err)

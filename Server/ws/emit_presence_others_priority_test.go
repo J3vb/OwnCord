@@ -54,8 +54,8 @@ func TestEmitEvents_PresenceOthersEvent_UsesNormalPriorityQueue(t *testing.T) {
 		sendHigh: make(chan []byte, 8),
 		sendLow:  make(chan []byte, 8),
 	}
-	h.clients[1] = observer
-	h.clients[2] = owner
+	h.clients[1] = []*Client{observer}
+	h.clients[2] = []*Client{owner}
 	h.pubsub.Subscribe(observer, TopicGlobal)
 	h.pubsub.Subscribe(owner, TopicGlobal)
 

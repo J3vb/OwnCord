@@ -202,9 +202,5 @@ func (h *Hub) clearAllGameActivity() {
 func (h *Hub) clientSnapshot() []*Client {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	clients := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
-		clients = append(clients, c)
-	}
-	return clients
+	return h.allClientsLocked()
 }

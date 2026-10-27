@@ -109,7 +109,7 @@ func voiceWatchClient(h *Hub, uid, chID int64) (*Client, chan []byte) {
 	c.sendLow = send
 	c.voice.voiceChID = chID
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 	h.pubsub.Subscribe(c, VoiceTopic(chID))
 	return c, send
@@ -223,7 +223,7 @@ func TestVoiceJoin_SendsPeerWatching(t *testing.T) {
 	c := NewTestClient(h, uid, send)
 	c.user = &db.User{ID: uid, Username: "join-watch"}
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 
 	payload, _ := json.Marshal(map[string]any{"channel_id": chID})
@@ -245,7 +245,7 @@ func TestResume_KeepsWatchingAndResendsPeers(t *testing.T) {
 	peer.voice.voiceChID = chanID
 	peer.voice.watching = []int64{2, 9}
 	hub.mu.Lock()
-	hub.clients[1] = peer
+	hub.clients[1] = []*Client{peer}
 	hub.mu.Unlock()
 	hub.pubsub.Subscribe(peer, VoiceTopic(chanID))
 
@@ -256,7 +256,7 @@ func TestResume_KeepsWatchingAndResendsPeers(t *testing.T) {
 	old.voice.voiceJoinCompleted = true
 	old.voice.watching = []int64{1}
 	hub.mu.Lock()
-	hub.clients[2] = old
+	hub.clients[2] = []*Client{old}
 	hub.mu.Unlock()
 
 	newSend := make(chan []byte, 8)

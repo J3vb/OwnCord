@@ -41,7 +41,7 @@ func (h *Hub) ReconcileChannelVoicePermissions(channelID int64) {
 	}
 	h.mu.RLock()
 	members := make([]*Client, 0, 8)
-	for _, c := range h.clients {
+	for _, c := range h.allClientsLocked() {
 		if c.voice.channel() == channelID {
 			members = append(members, c)
 		}

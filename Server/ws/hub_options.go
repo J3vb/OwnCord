@@ -193,7 +193,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	h := &Hub{
-		clients:             make(map[int64]*Client),
+		clients:             make(map[int64][]*Client),
 		db:                  database,
 		limiter:             limiter,
 		settings:            opts.Settings,

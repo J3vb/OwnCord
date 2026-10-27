@@ -85,7 +85,7 @@ func TestPubSub_UnsubscribeAll(t *testing.T) {
 	if n := ps.SubscriberCount(TopicGlobal); n != 0 {
 		t.Fatalf("global still has %d subscribers", n)
 	}
-	if topics := ps.TopicsForClient(1); len(topics) != 0 {
+	if topics := ps.TopicsForUser(1); len(topics) != 0 {
 		t.Fatalf("client still has topics: %v", topics)
 	}
 }
@@ -128,7 +128,7 @@ func TestPubSub_UnsubscribeAllKeepsReplacementClientSubscribed(t *testing.T) {
 	if n := ps.SubscriberCount("channel:5"); n != 0 {
 		t.Errorf("channel:5 SubscriberCount = %d, want 0 (stale client's own topic)", n)
 	}
-	if topics := ps.TopicsForClient(1); len(topics) != 2 {
+	if topics := ps.TopicsForUser(1); len(topics) != 2 {
 		t.Errorf("TopicsForClient = %v, want the live client's 2 topics", topics)
 	}
 }
@@ -248,7 +248,7 @@ func TestPubSub_PublishLow(t *testing.T) {
 
 // ─── TopicsForClient ─────────────────────────────────────────────────────────
 
-func TestPubSub_TopicsForClient(t *testing.T) {
+func TestPubSub_TopicsForUser(t *testing.T) {
 	ps := newTestPubSub()
 	c := makeTestClient(1)
 
@@ -256,7 +256,7 @@ func TestPubSub_TopicsForClient(t *testing.T) {
 	ps.Subscribe(c, "channel:10")
 	ps.Subscribe(c, UserTopic(1))
 
-	topics := ps.TopicsForClient(1)
+	topics := ps.TopicsForUser(1)
 	slices.Sort(topics)
 
 	expected := []Topic{"channel:10", TopicGlobal, UserTopic(1)}

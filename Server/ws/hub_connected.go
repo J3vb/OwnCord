@@ -1,32 +1,77 @@
 package ws
 
+import "slices"
+
 // hub_connected.go — live-connection status snapshots, split out of
 // serve_ready.go (at its line ceiling), and the graceful-stop user snapshot
 // kept out of hub.go (at its line ceiling). See livePresences, StoppedUserIDs.
 
-// livePresences snapshots each connected user's live presence
-// (Client.livePresence), status "" for a connection that has not stamped one
-// yet.
-func (h *Hub) livePresences() map[int64]livePresence {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	out := make(map[int64]livePresence, len(h.clients))
-	for uid, c := range h.clients {
-		out[uid] = c.livePresence()
+// mergeLivePresence is the user's live presence across all of their
+// connections (oldest first). Status, custom status and the idle stamp are the
+// most recent setter's (livePresence.setAt, ties to the newer connection); a
+// connection that has stamped nothing yet is skipped. The game activity is the
+// status source's own when it has one, else the newest connection reporting
+// one, so an activity set on one device is the user's, and it ends when that
+// device's connection goes (or the user clears it there) rather than when an
+// unrelated device sets a status.
+func mergeLivePresence(conns []*Client) livePresence {
+	var out livePresence
+	var src *livePresence
+	for _, c := range conns {
+		p := c.presence.Load()
+		if p == nil || p.status == "" {
+			continue
+		}
+		if src == nil || !p.setAt.Before(src.setAt) {
+			src = p
+		}
+	}
+	if src != nil {
+		out = *src
+	}
+	if out.activity == nil {
+		for _, c := range slices.Backward(conns) {
+			if p := c.presence.Load(); p != nil && p.activity != nil {
+				out.activity = p.activity
+				break
+			}
+		}
 	}
 	return out
 }
 
-// LiveStatus returns userID's live status, "" when the user has no
-// connection or it has not stamped one yet. Safe to call from any goroutine.
-func (h *Hub) LiveStatus(userID int64) string {
+// livePresences snapshots each connected user's live presence
+// (mergeLivePresence), status "" for a user none of whose connections has
+// stamped one yet.
+func (h *Hub) livePresences() map[int64]livePresence {
 	h.mu.RLock()
-	c := h.clients[userID]
-	h.mu.RUnlock()
-	if c == nil {
-		return ""
+	defer h.mu.RUnlock()
+	out := make(map[int64]livePresence, len(h.clients))
+	for uid, conns := range h.clients {
+		out[uid] = mergeLivePresence(conns)
 	}
-	return c.livePresence().status
+	return out
+}
+
+// userActivity is the game c's user reports across all of their connections:
+// c's own when it has one, else another connection's (mergeLivePresence). The
+// presence frames a connection emits carry it, so a status change on one device
+// does not blank the game another device reports.
+func (h *Hub) userActivity(c *Client) *gameActivity {
+	if own := c.livePresence().activity; own != nil {
+		return own
+	}
+	conns := h.clientsOf(c.userID)
+	if len(conns) < 2 {
+		return nil
+	}
+	return mergeLivePresence(conns).activity
+}
+
+// LiveStatus returns userID's live status, "" when the user has no
+// connection or none has stamped one yet. Safe to call from any goroutine.
+func (h *Hub) LiveStatus(userID int64) string {
+	return mergeLivePresence(h.clientsOf(userID)).status
 }
 
 // StoppedUserIDs returns every user the hub held when GracefulStopContext
@@ -55,8 +100,10 @@ func (h *Hub) recordStopUsers() {
 func (h *Hub) closeClientsForStop() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for uid, c := range h.clients {
+	for uid, conns := range h.clients {
 		h.stopUsers = append(h.stopUsers, uid)
-		c.closeSend()
+		for _, c := range conns {
+			c.closeSend()
+		}
 	}
 }

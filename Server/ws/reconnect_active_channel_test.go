@@ -127,7 +127,7 @@ func TestReconnect_AuthFrameActiveChannelRestoresSubscription(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		hub.mu.Lock()
-		c := hub.clients[userID]
+		c := hub.newestLocked(userID)
 		hub.mu.Unlock()
 		if c != nil && c.getChannelID() == chID {
 			break
@@ -233,7 +233,7 @@ func TestReconnect_AuthFrameActiveChannelIsReadGated(t *testing.T) {
 	// Give registration a moment, then assert the claim was refused.
 	time.Sleep(200 * time.Millisecond)
 	hub.mu.Lock()
-	c := hub.clients[userID]
+	c := hub.newestLocked(userID)
 	hub.mu.Unlock()
 	if c == nil {
 		t.Fatal("client was not registered")

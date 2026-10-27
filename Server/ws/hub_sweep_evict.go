@@ -23,7 +23,7 @@ func (h *Hub) sweepStaleVoiceEvictRevoked(ctx context.Context) {
 	// of clients actually in voice.
 	h.mu.RLock()
 	inVoice := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
+	for _, c := range h.allClientsLocked() {
 		if c.voice.channel() != 0 {
 			inVoice = append(inVoice, c)
 		}

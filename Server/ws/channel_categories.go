@@ -90,10 +90,7 @@ func (h *Hub) BroadcastChannelCategories(cats []db.ChannelCategory) {
 	frame := buildChannelCategories(cats)
 
 	h.mu.RLock()
-	ids := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
-		ids = append(ids, uid)
-	}
+	ids := h.connectedUserIDsLocked()
 	h.mu.RUnlock()
 
 	for _, uid := range ids {
@@ -105,7 +102,7 @@ func (h *Hub) BroadcastChannelCategories(cats []db.ChannelCategory) {
 		if permissions.CanManageChannels(sub) != nil {
 			continue
 		}
-		if live := h.GetClient(uid); live != nil {
+		for _, live := range h.clientsOf(uid) {
 			live.sendMsg(frame)
 		}
 	}

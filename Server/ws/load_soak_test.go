@@ -322,7 +322,7 @@ func TestTheLoadTest(t *testing.T) {
 	for {
 		stillRegistered = stillRegistered[:0]
 		for _, u := range churnUsers {
-			if hub.GetClient(u.ID) != nil {
+			if hub.ClientForTest(u.ID) != nil {
 				stillRegistered = append(stillRegistered, u.ID)
 			}
 		}

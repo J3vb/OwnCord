@@ -208,7 +208,7 @@ func routeHub() (*Hub, map[int64]*routeObserver) {
 		if voiceChID > 0 {
 			SetClientVoiceChID(c, voiceChID)
 		}
-		h.clients[userID] = c
+		h.clients[userID] = []*Client{c}
 		h.pubsub.Subscribe(c, TopicGlobal)
 		h.pubsub.Subscribe(c, UserTopic(userID))
 		if channelID > 0 {

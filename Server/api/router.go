@@ -197,7 +197,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// WebSocket hub — built, wired and started by internal/app; WS does its
 	// own in-band auth, so no AuthMiddleware here.
 	hub := rt.Hub
-	getOnlineUsers = func() int { return hub.ClientCount() }
+	getOnlineUsers = func() int { return hub.UserCount() }
 	hubAlive = func() bool { return hub.DispatchAlive() }
 
 	// Auth routes. StartRuntime built the service over the hub (its
@@ -500,7 +500,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	// admin_allowed_cidrs) so a central scraper can be admitted without widening
 	// /admin. The shape is documented in docs/deployment.md — keep the two in sync.
 	src := MetricsSources{
-		ConnectedUsers:      hub.ClientCount,
+		ConnectedUsers:      hub.UserCount,
 		VoiceSessions:       hub.VoiceSessionCount,
 		BroadcastDrops:      hub.BroadcastDropCount,
 		TopicSheds:          hub.TopicShedCount,

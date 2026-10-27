@@ -12,7 +12,7 @@ func TestRegisterNow_ResumeTransfersFocusedChannel(t *testing.T) {
 	h := newEmitTestHub()
 
 	old := NewTestClientWithChannel(h, 1, 7, make(chan []byte, 8))
-	h.clients[1] = old
+	h.clients[1] = []*Client{old}
 	h.pubsub.Subscribe(old, ChannelTopic(7)) // as the channel_focus applier does
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
@@ -22,9 +22,7 @@ func TestRegisterNow_ResumeTransfersFocusedChannel(t *testing.T) {
 	if got := replacement.getChannelID(); got != 7 {
 		t.Errorf("focused channel not transferred on resume: got %d, want 7", got)
 	}
-	h.pubsub.mu.RLock()
-	sub := h.pubsub.topics[ChannelTopic(7)][1]
-	h.pubsub.mu.RUnlock()
+	sub := h.pubsub.subscriberForTest(ChannelTopic(7), 1)
 	if sub != replacement {
 		t.Error("resumed connection is not subscribed to its focused channel's topic")
 	}
@@ -37,7 +35,7 @@ func TestRegisterNow_ResumeFocusedChannelStaysReadGated(t *testing.T) {
 	h := newEmitTestHub()
 
 	old := NewTestClientWithChannel(h, 1, 7, make(chan []byte, 8))
-	h.clients[1] = old
+	h.clients[1] = []*Client{old}
 	h.pubsub.Subscribe(old, ChannelTopic(7))
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
@@ -47,9 +45,7 @@ func TestRegisterNow_ResumeFocusedChannelStaysReadGated(t *testing.T) {
 	if got := replacement.getChannelID(); got != 0 {
 		t.Errorf("focused channel transferred without READ_MESSAGES: got %d, want 0", got)
 	}
-	h.pubsub.mu.RLock()
-	sub := h.pubsub.topics[ChannelTopic(7)][1]
-	h.pubsub.mu.RUnlock()
+	sub := h.pubsub.subscriberForTest(ChannelTopic(7), 1)
 	if sub != nil {
 		t.Error("channel topic subscription survived a resume without READ_MESSAGES")
 	}
@@ -65,7 +61,7 @@ func TestSubscribe_RefusesReplacedClientWithClosedSend(t *testing.T) {
 	h := newEmitTestHub()
 
 	old := NewTestClient(h, 1, make(chan []byte, 8))
-	h.clients[1] = old
+	h.clients[1] = []*Client{old}
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
 	replacement.lastSeq = 1
@@ -74,9 +70,7 @@ func TestSubscribe_RefusesReplacedClientWithClosedSend(t *testing.T) {
 	// The old connection's handler completes its Subscribe late.
 	h.pubsub.Subscribe(old, ChannelTopic(7))
 
-	h.pubsub.mu.RLock()
-	sub := h.pubsub.topics[ChannelTopic(7)][1]
-	h.pubsub.mu.RUnlock()
+	sub := h.pubsub.subscriberForTest(ChannelTopic(7), 1)
 	if sub == old {
 		t.Error("closed connection stole the topic subscription from its replacement")
 	}
@@ -89,7 +83,7 @@ func TestRegisterNow_FreshConnectDoesNotInheritFocusedChannel(t *testing.T) {
 	h := newEmitTestHub()
 
 	old := NewTestClientWithChannel(h, 1, 7, make(chan []byte, 8))
-	h.clients[1] = old
+	h.clients[1] = []*Client{old}
 	h.pubsub.Subscribe(old, ChannelTopic(7))
 
 	replacement := NewTestClient(h, 1, make(chan []byte, 8))
@@ -100,58 +94,59 @@ func TestRegisterNow_FreshConnectDoesNotInheritFocusedChannel(t *testing.T) {
 	}
 }
 
-// U4: registerNow is the atomic authority for the wake refusal. A wake
-// reconnect (wakeReconnect) whose token hash differs from the live client's is
-// another SESSION — another device — and must be refused without touching the
-// live connection. Verified under h.mu, which is where the race with a
-// concurrent connect is closed.
-func TestRegisterNow_WakeReconnectAnotherSession_RefusedNotRegistered(t *testing.T) {
+// Several devices stay signed in at once: a connection of another SESSION is
+// added beside the live one, whatever the wake flag the client sent (the auth
+// frame's `wake` is accepted and ignored). The live connection is untouched.
+func TestRegisterNow_AnotherSession_CoexistsAndKeepsLive(t *testing.T) {
 	h := newEmitTestHub()
 
 	live := NewTestClient(h, 1, make(chan []byte, 8))
 	live.tokenHash = "session-a"
-	h.clients[1] = live
+	h.clients[1] = []*Client{live}
 
-	wake := NewTestClient(h, 1, make(chan []byte, 8))
-	wake.tokenHash = "session-b"
-	wake.wakeReconnect = true
+	other := NewTestClient(h, 1, make(chan []byte, 8))
+	other.tokenHash = "session-b"
 
-	if refused := h.registerNowTest(wake, nil); !refused {
-		t.Fatal("wake reconnect from another session was not refused")
-	}
-	if h.clients[1] != live {
-		t.Fatal("wake refusal displaced the live session")
+	h.registerNowTest(other, nil)
+	if got := h.clientsOf(1); len(got) != 2 || got[0] != live || got[1] != other {
+		t.Fatalf("connections = %v, want [live other]", got)
 	}
 	if live.isSendClosed() {
-		t.Fatal("wake refusal closed the live session's send channel")
+		t.Fatal("another device's connect closed the live session's send channel")
 	}
 }
 
-// U4: a wake reconnect for the SAME session (this device's own stale socket)
-// is not another device — it must replace the dead connection normally.
-func TestRegisterNow_WakeReconnectSameSession_Replaces(t *testing.T) {
+// A reconnect of the SAME session (this device's own stale socket) replaces the
+// dead connection, and only that one.
+func TestRegisterNow_SameSession_ReplacesOnlyItself(t *testing.T) {
 	h := newEmitTestHub()
 
-	live := NewTestClient(h, 1, make(chan []byte, 8))
-	live.tokenHash = "session-a"
-	h.clients[1] = live
+	a := NewTestClient(h, 1, make(chan []byte, 8))
+	a.tokenHash = "session-a"
+	b := NewTestClient(h, 1, make(chan []byte, 8))
+	b.tokenHash = "session-b"
+	h.clients[1] = []*Client{a, b}
 
-	wake := NewTestClient(h, 1, make(chan []byte, 8))
-	wake.tokenHash = "session-a"
-	wake.wakeReconnect = true
+	again := NewTestClient(h, 1, make(chan []byte, 8))
+	again.tokenHash = "session-a"
+	h.registerNowTest(again, nil)
 
-	if refused := h.registerNowTest(wake, nil); refused {
-		t.Fatal("wake reconnect for the same session was refused")
+	got := h.clientsOf(1)
+	if len(got) != 2 || got[0] != b || got[1] != again {
+		t.Fatalf("connections = %v, want [b again]", got)
 	}
-	if h.clients[1] != wake {
-		t.Fatal("same-session wake reconnect did not take the connection")
+	if !a.isSendClosed() {
+		t.Fatal("the replaced same-session connection was not closed")
+	}
+	if b.isSendClosed() {
+		t.Fatal("a same-session replacement closed the other device")
 	}
 }
 
-// U4: a DIFFERENT session's call parked in the RT-8 grace window is held by
-// another device too. A wake reconnect must not inherit (resume) or discard
-// (fresh connect) it — registerNow refuses and leaves the parked entry alone.
-func TestRegisterNow_WakeReconnectAnotherSessionGraced_Refused(t *testing.T) {
+// Another session's call parked in the RT-8 grace window does not block a
+// connect: the new device registers and the parked call stays parked for its
+// own device. A resume cannot inherit it.
+func TestRegisterNow_AnotherSessionGraced_StaysParked(t *testing.T) {
 	h := newEmitTestHub()
 
 	parked := NewTestClient(h, 1, make(chan []byte, 8))
@@ -160,40 +155,55 @@ func TestRegisterNow_WakeReconnectAnotherSessionGraced_Refused(t *testing.T) {
 	h.voiceReg.voiceGrace.put(1, entry, func() {})
 	t.Cleanup(func() { h.voiceReg.voiceGrace.take(1) })
 
-	wake := NewTestClient(h, 1, make(chan []byte, 8))
-	wake.tokenHash = "session-b"
-	wake.wakeReconnect = true
-	wake.lastSeq = 5
+	other := NewTestClient(h, 1, make(chan []byte, 8))
+	other.tokenHash = "session-b"
+	other.lastSeq = 5
 
-	if refused := h.registerNowTest(wake, nil); !refused {
-		t.Fatal("wake reconnect was not refused while another session's call was parked")
-	}
-	if _, ok := h.clients[1]; ok {
-		t.Fatal("refused wake was registered")
+	h.registerNowTest(other, nil)
+	if !h.isRegistered(other) {
+		t.Fatal("the new device was not registered")
 	}
 	if h.voiceReg.voiceGrace.get(1) != entry {
-		t.Fatal("refused wake took the other session's parked call")
+		t.Fatal("the new device took the other session's parked call")
+	}
+	if got := other.voice.channel(); got != 0 {
+		t.Fatalf("another session's resume inherited the parked call: voice channel %d", got)
 	}
 }
 
-// U4: the same session's own parked call is not another device — a wake
-// resume inherits it as an ordinary RT-8 resume does.
-func TestRegisterNow_WakeReconnectSameSessionGraced_Inherits(t *testing.T) {
+// A fresh connect of another session leaves the parked call parked too
+// (voiceTxn.inherit's discard is the same session's only).
+func TestRegisterNow_FreshConnectAnotherSession_KeepsParkedEntry(t *testing.T) {
+	h := newEmitTestHub()
+
+	parked := NewTestClient(h, 1, make(chan []byte, 8))
+	parked.tokenHash = "session-a"
+	entry := &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}
+	h.voiceReg.voiceGrace.put(1, entry, func() {})
+	t.Cleanup(func() { h.voiceReg.voiceGrace.take(1) })
+
+	other := NewTestClient(h, 1, make(chan []byte, 8))
+	other.tokenHash = "session-b"
+	h.registerNowTest(other, nil)
+	if h.voiceReg.voiceGrace.get(1) != entry {
+		t.Fatal("a fresh connect on another device discarded the parked call")
+	}
+}
+
+// The same session's own parked call is inherited by its resume, as ever.
+func TestRegisterNow_SameSessionGraced_Inherits(t *testing.T) {
 	h := newEmitTestHub()
 
 	parked := NewTestClient(h, 1, make(chan []byte, 8))
 	parked.tokenHash = "session-a"
 	h.voiceReg.voiceGrace.put(1, &voiceGraceEntry{client: parked, snap: slotSnap{chID: 7, joinToken: "jt", completed: true}}, func() {})
 
-	wake := NewTestClient(h, 1, make(chan []byte, 8))
-	wake.tokenHash = "session-a"
-	wake.wakeReconnect = true
-	wake.lastSeq = 5
+	resume := NewTestClient(h, 1, make(chan []byte, 8))
+	resume.tokenHash = "session-a"
+	resume.lastSeq = 5
 
-	if refused := h.registerNowTest(wake, nil); refused {
-		t.Fatal("same-session wake with its own parked call was refused")
-	}
-	if got := wake.voice.channel(); got != 7 {
-		t.Fatalf("same-session wake did not inherit its parked call: voice channel %d", got)
+	h.registerNowTest(resume, nil)
+	if got := resume.voice.channel(); got != 7 {
+		t.Fatalf("same-session resume did not inherit its parked call: voice channel %d", got)
 	}
 }

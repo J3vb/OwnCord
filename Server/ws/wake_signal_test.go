@@ -1,14 +1,10 @@
 package ws
 
-// wake_signal_test.go — U4 follow-up: a woken device must never silently
-// displace a session that another device is actively holding.
-//
-// The client-side suspend gate could only guess from a wall-clock gap. Now the
-// client marks a wake reconnect on the auth frame (`wake: true`) and the server
-// arbitrates: when a *different session* (different device, hence a different
-// token) is live, the wake is refused with ANOTHER_DEVICE_ACTIVE and the live
-// session is left untouched. With no other device — or when the live client is
-// this same session's own stale socket — the reconnect proceeds as before.
+// wake_signal_test.go — the auth frame's `wake: true` flag (a reconnect after
+// the process was suspended). It used to make the server refuse a wake while
+// another device held the account (U4, ANOTHER_DEVICE_ACTIVE). Several devices
+// now stay signed in at once, so a wake is an ordinary connect: another
+// device's connection is never displaced and nothing is refused.
 
 import (
 	"context"
@@ -73,30 +69,9 @@ func dialAndAuthWake(t *testing.T, ctx context.Context, srvURL, token string, la
 	return conn
 }
 
-// readErrorCode reads the next frame, requires it to be an `error` frame, and
-// returns its payload code. The wake refusal is a plain error frame (the token
-// is still valid), not auth_error, so a granted wake (auth_ok) surfaces as a
-// failure.
-func readErrorCode(t *testing.T, ctx context.Context, conn *websocket.Conn) string {
-	t.Helper()
-	typ, raw := readFrameType(t, ctx, conn)
-	if typ != MsgTypeError {
-		t.Fatalf("expected error, got %q (raw=%s)", typ, raw)
-	}
-	var frame struct {
-		Payload struct {
-			Code string `json:"code"`
-		} `json:"payload"`
-	}
-	if err := json.Unmarshal(raw, &frame); err != nil {
-		t.Fatalf("unmarshal error frame %s: %v", raw, err)
-	}
-	return frame.Payload.Code
-}
-
-// A wake reconnect while another device holds the session is refused and the
-// live session is not displaced.
-func TestWakeReconnect_AnotherDeviceActive_RefusedWithoutDisplacing(t *testing.T) {
+// A wake reconnect while another device is connected is accepted and the
+// other device's connection is not displaced: both stay registered.
+func TestWakeReconnect_AnotherDeviceActive_CoexistsWithoutDisplacing(t *testing.T) {
 	hub, uid, srvURL, tokenA, tokenB := wakeFixture(t)
 	ctx := context.Background()
 
@@ -109,21 +84,16 @@ func TestWakeReconnect_AnotherDeviceActive_RefusedWithoutDisplacing(t *testing.T
 	}
 
 	connB := dialAndAuthWake(t, ctx, srvURL, tokenB, 0, true)
-	if code := readErrorCode(t, ctx, connB); code != ErrCodeAnotherDeviceActive {
-		t.Fatalf("wake error code = %q, want %q", code, ErrCodeAnotherDeviceActive)
+	if typ, _ := readFrameType(t, ctx, connB); typ != MsgTypeAuthOK {
+		t.Fatalf("device B: expected auth_ok for a wake beside another device, got %v", typ)
 	}
 
-	// The live session must be untouched: still A, still its own token, and
-	// no SESSION_REPLACED frame was queued to A.
-	live := hub.GetClient(uid)
-	if live == nil {
-		t.Fatal("device A was displaced by the refused wake")
+	conns := hub.ClientsOfForTest(uid)
+	if len(conns) != 2 {
+		t.Fatalf("connections = %d, want both devices registered", len(conns))
 	}
-	if live.tokenHash != auth.HashToken(tokenA) {
-		t.Fatalf("live session is not device A after the refused wake")
-	}
-	if live.isSendClosed() {
-		t.Fatal("device A's connection was closed by the refused wake")
+	if conns[0].tokenHash != auth.HashToken(tokenA) || conns[0].isSendClosed() {
+		t.Fatal("device A was displaced or closed by device B's wake")
 	}
 }
 
@@ -158,15 +128,15 @@ func TestWakeReconnect_SameSessionStaleSocket_Connects(t *testing.T) {
 	if typ, _ := readFrameType(t, ctx, connA2); typ != MsgTypeAuthOK {
 		t.Fatalf("expected auth_ok for same-session wake reconnect, got %v", typ)
 	}
-	if live := hub.GetClient(uid); live == nil || live.tokenHash != auth.HashToken(tokenA) {
+	if live := hub.ClientForTest(uid); live == nil || live.tokenHash != auth.HashToken(tokenA) {
 		t.Fatal("same-session wake did not take the connection back")
 	}
 }
 
-// Without the wake marker the server keeps its last-connect-wins behaviour:
-// a second device deliberately taking over still displaces the first.
-func TestNormalConnect_AnotherDevice_StillDisplaces(t *testing.T) {
-	_, _, srvURL, tokenA, tokenB := wakeFixture(t)
+// Without the wake marker a second device connecting no longer displaces the
+// first either: no SESSION_REPLACED reaches device A.
+func TestNormalConnect_AnotherDevice_Coexists(t *testing.T) {
+	hub, uid, srvURL, tokenA, tokenB := wakeFixture(t)
 	ctx := context.Background()
 
 	connA := dialAndAuthWake(t, ctx, srvURL, tokenA, 0, false)
@@ -181,15 +151,33 @@ func TestNormalConnect_AnotherDevice_StillDisplaces(t *testing.T) {
 	if typ, _ := readFrameType(t, ctx, connB); typ != MsgTypeAuthOK {
 		t.Fatalf("device B: expected auth_ok, got %v", typ)
 	}
-	if !readUntilReplaced(t, ctx, connA) {
-		t.Fatal("deliberate second-device connect did not displace the first")
+	if typ, _ := readFrameType(t, ctx, connB); typ != MsgTypeReady {
+		t.Fatalf("device B: expected ready, got %v", typ)
+	}
+	if got := len(hub.ClientsOfForTest(uid)); got != 2 {
+		t.Fatalf("connections = %d, want 2", got)
+	}
+	// A is still served: a broadcast reaches it, and it is not told it was replaced.
+	hub.BroadcastToAll([]byte(`{"type":"server_notice","payload":{}}`))
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for {
+		_, raw, err := connA.Read(readCtx)
+		if err != nil {
+			t.Fatalf("device A read: %v", err)
+		}
+		if strings.Contains(string(raw), ErrCodeSessionReplaced) {
+			t.Fatalf("device A was told it was replaced: %s", raw)
+		}
+		if strings.Contains(string(raw), "server_notice") {
+			return
+		}
 	}
 }
 
-// A resuming wake (last_seq > 0) is refused by registerNow on the replay path
-// itself — answered ANOTHER_DEVICE_ACTIVE, never auth_ok or a fall-through to
-// a full ready — and the live session is untouched.
-func TestWakeReconnect_Resume_AnotherDeviceActive_Refused(t *testing.T) {
+// A resuming wake (last_seq > 0) from another device is also an ordinary
+// resume: it gets auth_ok and the live session is untouched.
+func TestWakeReconnect_Resume_AnotherDeviceActive_Resumes(t *testing.T) {
 	hub, uid, srvURL, tokenA, tokenB := wakeFixture(t)
 	ctx := context.Background()
 
@@ -212,10 +200,11 @@ func TestWakeReconnect_Resume_AnotherDeviceActive_Refused(t *testing.T) {
 	}
 
 	connB := dialAndAuthWake(t, ctx, srvURL, tokenB, seq, true)
-	if code := readErrorCode(t, ctx, connB); code != ErrCodeAnotherDeviceActive {
-		t.Fatalf("resume wake error code = %q, want %q", code, ErrCodeAnotherDeviceActive)
+	if typ, _ := readFrameType(t, ctx, connB); typ != MsgTypeAuthOK {
+		t.Fatalf("device B: expected auth_ok for a resume beside another device, got %v", typ)
 	}
-	if live := hub.GetClient(uid); live == nil || live.tokenHash != auth.HashToken(tokenA) || live.isSendClosed() {
-		t.Fatal("refused resume wake displaced device A")
+	conns := hub.ClientsOfForTest(uid)
+	if len(conns) != 2 || conns[0].tokenHash != auth.HashToken(tokenA) || conns[0].isSendClosed() {
+		t.Fatal("a resuming wake from device B displaced device A")
 	}
 }

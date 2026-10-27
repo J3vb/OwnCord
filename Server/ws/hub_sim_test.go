@@ -355,7 +355,7 @@ func (s *sim) attach(c *simClient, conn *ws.Client, preface [][]byte, owed []uin
 	// snapshot those frames fell, the one thing the scheduler rather than
 	// the seed decides.
 	c.wire.Pull()
-	if got := s.hub.GetClient(c.user.ID); got != conn {
+	if got := s.hub.ClientForTest(c.user.ID); got != conn {
 		s.failf("c%d: hub holds %p for the user after registration, want %p", c.idx, got, conn)
 	}
 }
@@ -520,7 +520,7 @@ func (s *sim) disconnect(c *simClient) {
 		s.note("disconnect c%d: already gone", c.idx)
 		return
 	}
-	if s.hub.UnregisterNowForTest(c.conn) || s.hub.GetClient(c.user.ID) != nil {
+	if s.hub.UnregisterNowForTest(c.conn) || s.hub.ClientForTest(c.user.ID) != nil {
 		s.failf("I6: c%d: tearing down the live connection reported replaced or left a client registered", c.idx)
 	}
 	ws.CloseSendForTest(c.conn)

@@ -40,7 +40,7 @@ func TestEmitEvents_PresenceEvent_UsesNormalPriorityQueue(t *testing.T) {
 		sendHigh: make(chan []byte, 8),
 		sendLow:  make(chan []byte, 8),
 	}
-	h.clients[1] = c
+	h.clients[1] = []*Client{c}
 	h.pubsub.Subscribe(c, TopicGlobal)
 
 	// BroadcastToAll (normal priority) goes through the async hub.broadcast

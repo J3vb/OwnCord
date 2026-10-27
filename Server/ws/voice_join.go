@@ -258,6 +258,14 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 		return false, false, nil, false
 	}
 
+	// The call may be on another of this user's devices: this join takes it
+	// over (rule: one call per account, and it moves).
+	if currentChID == 0 {
+		if moved, mMuted, mDeafened, mMutedBy, mOK := h.voiceJoinMoveCall(fctx, ctx, txn, c, channelID, reqID); moved {
+			return mMuted, mDeafened, mMutedBy, mOK
+		}
+	}
+
 	// A moderator-imposed mute/deafen must survive a channel switch.
 	// voice.sql's ON CONFLICT branch preserves server_muted/server_deafened
 	// across a plain re-join, but the switch below deletes the row via

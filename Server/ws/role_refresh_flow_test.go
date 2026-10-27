@@ -144,7 +144,7 @@ func TestRoleRefresh_SlowClientIsKickedNotBanned(t *testing.T) {
 	send := make(chan []byte, 128)
 	c := NewTestClientWithUser(f.hub, f.clients[u].user, 0, send)
 	f.hub.mu.Lock()
-	f.hub.clients[u] = c
+	f.hub.clients[u] = []*Client{c}
 	f.hub.mu.Unlock()
 	for range 70 { // above a quarter of sendBufSize: it never drains
 		send <- []byte(`{"type":"filler"}`)
@@ -156,7 +156,7 @@ func TestRoleRefresh_SlowClientIsKickedNotBanned(t *testing.T) {
 	f.hub.EnqueueRoleRefresh(RoleRefresh{Visibility: []int64{u}})
 	f.hub.flushRoleRefresh(context.Background())
 
-	if f.hub.GetClient(u) != nil {
+	if f.hub.ClientForTest(u) != nil {
 		t.Error("the slow client is still registered, want it kicked")
 	}
 	for fr := range send {
@@ -184,10 +184,10 @@ func TestRoleRefresh_UnresolvedSubjectKicks(t *testing.T) {
 	f.hub.EnqueueRoleRefresh(RoleRefresh{Visibility: []int64{u}})
 	f.hub.flushRoleRefresh(context.Background())
 
-	if f.hub.GetClient(u) != nil {
+	if f.hub.ClientForTest(u) != nil {
 		t.Error("a user whose permissions could not be resolved was not kicked")
 	}
-	if f.hub.GetClient(bystander) == nil {
+	if f.hub.ClientForTest(bystander) == nil {
 		t.Error("an unaffected user was kicked")
 	}
 	for fr := range f.sends[u] {
@@ -362,7 +362,7 @@ func TestRoleRefresh_ListFailureRetriesThenCloses(t *testing.T) {
 		if d := f.hub.flushRoleRefresh(ctx); d <= 0 {
 			t.Fatalf("attempt %d: no retry requested", i)
 		}
-		if f.hub.GetClient(u) == nil {
+		if f.hub.ClientForTest(u) == nil {
 			t.Fatalf("attempt %d: user closed before the attempts ran out", i)
 		}
 		if !f.hub.roleRefresh.covers(u) {
@@ -372,7 +372,7 @@ func TestRoleRefresh_ListFailureRetriesThenCloses(t *testing.T) {
 	if d := f.hub.flushRoleRefresh(ctx); d != 0 {
 		t.Errorf("final attempt requested another retry (%v)", d)
 	}
-	if f.hub.GetClient(u) != nil {
+	if f.hub.ClientForTest(u) != nil {
 		t.Error("the user was not closed after the last failed attempt")
 	}
 	if f.hub.roleRefresh.covers(u) {
@@ -395,7 +395,7 @@ func TestRoleRefresh_ListFailureRecovers(t *testing.T) {
 	if d := f.hub.flushRoleRefresh(ctx); d != 0 {
 		t.Fatalf("second attempt asked to retry again (%v)", d)
 	}
-	if f.hub.GetClient(u) == nil {
+	if f.hub.ClientForTest(u) == nil {
 		t.Error("user closed although the second attempt succeeded")
 	}
 	if len(channelFrames(f.drainFrames(u))) == 0 {
@@ -430,7 +430,7 @@ func TestRoleRefresh_RevocationNeverWaitsBehindAnotherUsersSend(t *testing.T) {
 		t.Fatal("the send pass never started")
 	}
 	for _, uid := range []int64{u1, u2} {
-		if slices.Contains(f.hub.pubsub.TopicsForClient(uid), ChannelTopic(f.chA)) {
+		if slices.Contains(f.hub.pubsub.TopicsForUser(uid), ChannelTopic(f.chA)) {
 			t.Errorf("user %d still holds the channel topic while the first send is held", uid)
 		}
 	}
@@ -453,7 +453,7 @@ func TestRevokeTopicsNotIn_SkipsTopicsOutsideSnapshot(t *testing.T) {
 	if !ok || len(revoked) != 0 {
 		t.Errorf("revoked=%v, want the late topic left alone", revoked)
 	}
-	if !slices.Contains(f.hub.pubsub.TopicsForClient(u), ChannelTopic(f.chB)) {
+	if !slices.Contains(f.hub.pubsub.TopicsForUser(u), ChannelTopic(f.chB)) {
 		t.Error("the late topic was unsubscribed")
 	}
 }
@@ -514,7 +514,7 @@ func TestRoleRefresh_RegisterCheckReadsCoverageBeforeWatermark(t *testing.T) {
 	}
 	t.Cleanup(func() { mustFullResyncMidReadRaceHook = nil })
 
-	if !f.hub.mustFullResyncAtRegister(100, uid) {
+	if !f.hub.mustFullResyncAtRegister(100, uid, "") {
 		t.Error("a reconnect that raced the settle of its own refresh resumed by replay")
 	}
 	if !fired {
@@ -536,7 +536,7 @@ func TestRoleRefresh_FirstChunkLeavesRoomForConcurrentDispatch(t *testing.T) {
 	send := make(chan []byte, sendBufSize)
 	c := NewTestClientWithUser(f.hub, f.clients[u].user, 0, send)
 	f.hub.mu.Lock()
-	f.hub.clients[u] = c
+	f.hub.clients[u] = []*Client{c}
 	f.hub.mu.Unlock()
 	f.hub.pubsub.Subscribe(c, TopicGlobal)
 	f.hub.pubsub.Subscribe(c, UserTopic(u))
@@ -569,7 +569,7 @@ func TestRoleRefresh_FirstChunkLeavesRoomForConcurrentDispatch(t *testing.T) {
 		t.Fatal("the pump never finished")
 	}
 	rrWaitFor(t, "the round to settle", func() bool { return !f.hub.roleRefresh.covers(u) })
-	if f.hub.GetClient(u) != c {
+	if f.hub.ClientForTest(u) != c {
 		t.Error("the client was closed while the worker and dispatch both pushed")
 	}
 	if n := f.hub.bpQueueDisconnects.Load(); n != 0 {

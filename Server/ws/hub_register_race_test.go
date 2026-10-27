@@ -37,7 +37,7 @@ func TestRegisterNow_ReplacementNeverLosesAConcurrentGlobalBroadcast(t *testing.
 
 	old := NewTestClient(h, userID, make(chan []byte, 8))
 	h.mu.Lock()
-	h.clients[userID] = old
+	h.clients[userID] = []*Client{old}
 	h.mu.Unlock()
 	h.pubsub.Subscribe(old, TopicGlobal)
 

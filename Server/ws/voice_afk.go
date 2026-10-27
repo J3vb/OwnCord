@@ -128,16 +128,18 @@ func (h *Hub) afkTimeout(ctx context.Context) (time.Duration, bool) {
 func (h *Hub) afkCandidates(afkID int64, cutoff time.Time) []afkCandidate {
 	h.mu.RLock()
 	var out []afkCandidate
-	for _, c := range h.clients {
+	for _, c := range h.allClientsLocked() {
 		ch := c.voice.channel()
 		if ch == 0 || ch == afkID {
 			continue
 		}
-		p := c.presence.Load()
-		if p == nil || p.status != db.StatusIdle || p.idleSince.IsZero() || p.idleSince.After(cutoff) {
+		// The user is idle when their merged presence (the most recent setter
+		// across their devices) is, not when the call device's own stale one is.
+		m := mergeLivePresence(h.clients[c.userID])
+		if m.status != db.StatusIdle || m.idleSince.IsZero() || m.idleSince.After(cutoff) {
 			continue
 		}
-		out = append(out, afkCandidate{c: c, fromCh: ch, idleSince: p.idleSince})
+		out = append(out, afkCandidate{c: c, fromCh: ch, idleSince: m.idleSince})
 	}
 	h.mu.RUnlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].idleSince.Before(out[j].idleSince) })
@@ -204,7 +206,7 @@ func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandi
 // reconnecting) clears the stash and leaves the member out of voice.
 //
 // Lock order: voiceMember, then only the leaves the moderator move already
-// takes (Hub.mu (R) in GetClient, PubSub.mu, voiceSlot.voiceMu) and the DB
+// takes (Hub.mu (R) in clientsOf, PubSub.mu, voiceSlot.voiceMu) and the DB
 // read, plus a TRY-lock of voiceMod, which follows voiceMember in the
 // documented order. voiceMod is never waited for: a blocking take under
 // voiceMember would sit behind a LiveKit RPC (user_locks.go). Held across the
@@ -221,7 +223,7 @@ func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idle
 	if afkAfterEvictHook != nil {
 		afkAfterEvictHook()
 	}
-	if !h.SendToUser(c.userID, buildVoiceMoved(afkID, voiceMovedReasonAFK, 0)) {
+	if !c.trySendMsg(buildVoiceMoved(afkID, voiceMovedReasonAFK, 0)) {
 		clearPendingModFlags(h, c.userID)
 		slog.Info("voice afk move: member was reconnecting, removed from voice instead of moved",
 			"user_id", c.userID, "from_channel_id", fromCh)
@@ -235,10 +237,10 @@ func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idle
 func (h *Hub) afkEvict(ctx context.Context, c *Client, fromCh int64, idleSince time.Time) bool {
 	txn := h.begin(c.userID)
 	defer txn.end()
-	if h.GetClient(c.userID) != c {
+	if !h.isRegistered(c) {
 		return false
 	}
-	if p := c.presence.Load(); p == nil || p.status != db.StatusIdle || !p.idleSince.Equal(idleSince) {
+	if m := mergeLivePresence(h.clientsOf(c.userID)); m.status != db.StatusIdle || !m.idleSince.Equal(idleSince) {
 		return false
 	}
 	unlockMod, ok := h.voiceMod.tryLock(c.userID)

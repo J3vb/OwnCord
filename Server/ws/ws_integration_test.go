@@ -675,7 +675,7 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	var originalClient *ws.Client
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		originalClient = hub.GetClient(userID)
+		originalClient = hub.ClientForTest(userID)
 		if originalClient != nil {
 			break
 		}
@@ -710,7 +710,7 @@ func TestServeWS_Reconnect_PreservesVoiceState(t *testing.T) {
 	var replacementClient *ws.Client
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		replacementClient = hub.GetClient(userID)
+		replacementClient = hub.ClientForTest(userID)
 		if replacementClient != nil && ws.GetClientVoiceChIDForTest(replacementClient) == chID {
 			break
 		}
@@ -833,7 +833,7 @@ func TestServeWS_ReplayFallback_PreservesVoiceState(t *testing.T) {
 	var originalClient *ws.Client
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		originalClient = hub.GetClient(userID)
+		originalClient = hub.ClientForTest(userID)
 		if originalClient != nil {
 			break
 		}
@@ -864,7 +864,7 @@ func TestServeWS_ReplayFallback_PreservesVoiceState(t *testing.T) {
 	var replacementClient *ws.Client
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		replacementClient = hub.GetClient(userID)
+		replacementClient = hub.ClientForTest(userID)
 		if replacementClient != nil && replacementClient != originalClient {
 			break
 		}
@@ -965,7 +965,7 @@ func TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream(t *testing.T)
 	var originalClient *ws.Client
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		originalClient = hub.GetClient(userID)
+		originalClient = hub.ClientForTest(userID)
 		if originalClient != nil {
 			break
 		}
@@ -994,7 +994,7 @@ func TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream(t *testing.T)
 	var replacementClient *ws.Client
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		replacementClient = hub.GetClient(userID)
+		replacementClient = hub.ClientForTest(userID)
 		if replacementClient != nil && ws.GetClientVoiceChIDForTest(replacementClient) == chID {
 			break
 		}
@@ -1005,7 +1005,7 @@ func TestServeWS_Reconnect_AuthorizedVoiceClientKeepsChannelStream(t *testing.T)
 	}
 	// The topic subscription lands just after the client enters the hub map.
 	waitFor(t, waitTimeout, func() bool {
-		return slices.Contains(hub.PubSubForTest().TopicsForClient(userID), ws.ChannelTopic(chID))
+		return slices.Contains(hub.PubSubForTest().TopicsForUser(userID), ws.ChannelTopic(chID))
 	}, "reconnected client to be resubscribed to the voice channel topic")
 
 	hub.BroadcastToChannel(chID, []byte(`{"type":"chat_message","payload":{"content":"still-visible"}}`))
@@ -1159,7 +1159,7 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	var originalClient *ws.Client
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		originalClient = hub.GetClient(userID)
+		originalClient = hub.ClientForTest(userID)
 		if originalClient != nil {
 			break
 		}
@@ -1197,12 +1197,12 @@ func TestServeWS_FreshReconnect_CleansStaleVoiceState(t *testing.T) {
 	// the hub's client map to show the swap. Broadcast propagation is covered
 	// by the observer read loop's own timeout below.
 	waitFor(t, waitTimeout, func() bool {
-		c := hub.GetClient(userID)
+		c := hub.ClientForTest(userID)
 		return c != nil && c != originalClient
 	}, "replacement client to take over in the hub")
 
 	// Assert 1: replacement client voiceChID == 0
-	replacementClient := hub.GetClient(userID)
+	replacementClient := hub.ClientForTest(userID)
 	if replacementClient == nil {
 		t.Fatal("expected replacement client to be registered")
 	}
@@ -1452,7 +1452,7 @@ func TestIntegration_MessageRoundTrip(t *testing.T) {
 		t.Fatalf("clientB write channel_focus: %v", err)
 	}
 	waitFor(t, waitTimeout, func() bool {
-		return slices.Contains(hub.PubSubForTest().TopicsForClient(userIDB), ws.ChannelTopic(chID))
+		return slices.Contains(hub.PubSubForTest().TopicsForUser(userIDB), ws.ChannelTopic(chID))
 	}, "clientB channel_focus subscription to land")
 
 	// Client A sends a chat message.

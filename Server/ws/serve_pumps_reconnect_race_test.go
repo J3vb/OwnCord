@@ -60,7 +60,7 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	c.user = &db.User{ID: uid, Status: "online"}
 	c.voice.setState(chID, "tok-race")
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 
 	// Real server-side *websocket.Conn, closed immediately so readPump's
 	// first Read fails and its defer runs — mirrors
@@ -129,7 +129,7 @@ func TestReadPump_ReconnectDuringVoiceCleanup_DoesNotMarkUserOffline(t *testing.
 		t.Fatal("readPump did not return after the voice_states delete completed")
 	}
 
-	if got := h.GetClient(uid); got != newClient {
+	if got := h.ClientForTest(uid); got != newClient {
 		t.Fatalf("hub client for user %d = %p after old connection's teardown, want the reconnected client %p", uid, got, newClient)
 	}
 

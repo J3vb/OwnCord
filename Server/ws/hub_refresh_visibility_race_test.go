@@ -107,7 +107,7 @@ func TestRefreshChannelVisibility_ReconnectDuringFanOutActsOnLiveClient(t *testi
 	// Look up the live client via the hub rather than the hook's closure
 	// variable, so the assertion reflects what RefreshChannelVisibility
 	// actually left behind.
-	live := h.GetClient(uid)
+	live := h.ClientForTest(uid)
 	if live == nil {
 		t.Fatal("no client registered for user after RefreshChannelVisibility")
 	}

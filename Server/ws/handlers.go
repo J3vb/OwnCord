@@ -92,7 +92,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	}
 	voiceChID, voiceJoinTok := c.voice.state()
 	info := ClientInfo{
-		Activity:       c.livePresence().activity,
+		Activity:       h.userActivity(c),
 		UserID:         c.userID,
 		Username:       username,
 		Avatar:         avatar,

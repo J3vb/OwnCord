@@ -214,7 +214,7 @@ func (h *Hub) applyQueueContentDrops() {
 // reconnectPrecheck looked, and a role refresh pending or running for this user
 // (role_refresh.go) -- scoped to the affected users, so every other reconnect
 // still resumes by replay.
-func (h *Hub) mustFullResyncAtRegister(lastSeq uint64, userID int64) bool {
+func (h *Hub) mustFullResyncAtRegister(lastSeq uint64, userID int64, tokenHash string) bool {
 	if h.queueDrops.dropped.Load() != h.queueDrops.applied {
 		h.bumpVisibilityWatermark()
 	}
@@ -227,7 +227,7 @@ func (h *Hub) mustFullResyncAtRegister(lastSeq uint64, userID int64) bool {
 		mustFullResyncMidReadRaceHook()
 	}
 	return covered || h.targetedFanouts > 0 || h.mustFullResync(lastSeq) ||
-		h.presenceResyncPending(userID)
+		h.presenceResyncPending(userID, tokenHash)
 }
 
 // mustFullResyncMidReadRaceHook, when non-nil, runs between the coverage read
@@ -324,49 +324,22 @@ func (h *Hub) WindowSources() ([]metrics.NamedHistogram, []metrics.NamedMaxGauge
 	return hists, gauges, counters
 }
 
-// IsUserConnected returns true if a client with the given userID is already
+// IsUserConnected returns true if the user has at least one live connection
 // registered in the hub. Safe to call from any goroutine.
 func (h *Hub) IsUserConnected(userID int64) bool {
-	h.mu.RLock()
-	_, ok := h.clients[userID]
-	h.mu.RUnlock()
-	return ok
+	return h.isConnected(userID)
 }
 
-// GetClient returns the client for userID, or nil if not connected.
-// Safe to call from any goroutine.
-func (h *Hub) GetClient(userID int64) *Client {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.clients[userID]
-}
-
-// wakeBlocked is wakeBlockedLocked for a caller that does not hold h.mu.
-func (h *Hub) wakeBlocked(c *Client) bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.wakeBlockedLocked(c)
-}
-
-// wakeBlockedLocked reports whether c is a wake reconnect (U4) while another
-// device — a DIFFERENT session (token hash) of the same account — holds the
-// session: its live connection, or the call it parked in the RT-8 grace
-// window. A same-session match is this device's own stale socket or parked
-// call, not another device. Caller holds h.mu (h.mu -> voiceGrace.mu is the
-// order registerNow's voiceTxn.inherit already takes).
-func (h *Hub) wakeBlockedLocked(c *Client) bool {
-	if !c.wakeReconnect {
-		return false
-	}
-	if old, ok := h.clients[c.userID]; ok && old.tokenHash != c.tokenHash {
-		return true
-	}
-	e := h.voiceReg.voiceGrace.get(c.userID)
-	return e != nil && e.client.tokenHash != c.tokenHash
-}
-
-// ClientCount returns the number of currently registered clients (test helper).
+// ClientCount returns the number of live connections (test helper and the
+// admin connection count): an account on two devices counts twice.
 func (h *Hub) ClientCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.connectionCountLocked()
+}
+
+// UserCount returns the number of distinct connected users.
+func (h *Hub) UserCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients)

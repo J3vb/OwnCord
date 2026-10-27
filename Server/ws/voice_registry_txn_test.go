@@ -31,7 +31,7 @@ func newTxnFixture(t *testing.T, opts func(*HubOptions)) *txnFixture {
 	h := newTestHubWith(t, o)
 	c := NewTestClient(h, uid, make(chan []byte, 64))
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 	return &txnFixture{h: h, c: c, uid: uid, chID: chID}
 }

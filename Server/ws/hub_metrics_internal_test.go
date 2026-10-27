@@ -13,8 +13,8 @@ import (
 func TestTopicSheds_CountedAboveTheTopicRateLimit(t *testing.T) {
 	h := newEmitTestHub()
 	send := make(chan []byte, 4096)
-	h.clients[1] = NewTestClient(h, 1, send)
-	h.pubsub.Subscribe(h.clients[1], ChannelTopic(5))
+	h.clients[1] = []*Client{NewTestClient(h, 1, send)}
+	h.pubsub.Subscribe(h.clients[1][0], ChannelTopic(5))
 
 	total := topicRateLimitPerSecond + 20
 	for range total {

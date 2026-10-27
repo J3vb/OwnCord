@@ -63,7 +63,7 @@ func TestHandleMessage_MarkReadTimesOutBehindStalledMentionWorker(t *testing.T) 
 	send := make(chan []byte, 16)
 	c := NewTestClient(f.hub, reader.ID, send)
 	c.user = reader
-	f.hub.clients[reader.ID] = c
+	f.hub.clients[reader.ID] = []*Client{c}
 
 	for _, typ := range []string{"mark_read", "mark_unread"} {
 		payload := map[string]any{"channel_id": f.textID}
@@ -246,7 +246,7 @@ func TestHandleMessage_ChannelFocusTimesOutOnStalledRead(t *testing.T) {
 
 	c := NewTestClient(f.hub, reader.ID, make(chan []byte, 16))
 	c.user = reader
-	f.hub.clients[reader.ID] = c
+	f.hub.clients[reader.ID] = []*Client{c}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

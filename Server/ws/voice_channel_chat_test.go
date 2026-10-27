@@ -22,7 +22,7 @@ func (f *activityFixture) voiceChatClient(u *db.User, focus int64) chan []byte {
 	send := make(chan []byte, 64)
 	c := NewTestClientWithUser(f.hub, u, focus, send)
 	f.hub.mu.Lock()
-	f.hub.clients[u.ID] = c
+	f.hub.clients[u.ID] = []*Client{c}
 	f.hub.mu.Unlock()
 	f.hub.pubsub.Subscribe(c, TopicGlobal)
 	f.hub.pubsub.Subscribe(c, UserTopic(u.ID))

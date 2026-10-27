@@ -160,17 +160,15 @@ func (h *Hub) enforceRemovedVoiceIdentities(ctx context.Context) {
 	}
 }
 
-// holdsVoiceJoin reports whether userID's connection is in the join that
+// holdsVoiceJoin reports whether one of userID's connections is in the join that
 // token names. Every eviction clears the connection's voice state before it
 // removes the SFU identity, so a stored voice_states row that outlived its
 // teardown does not count.
 func (h *Hub) holdsVoiceJoin(userID, channelID int64, token string) bool {
-	h.mu.RLock()
-	c := h.clients[userID]
-	h.mu.RUnlock()
-	if c == nil {
-		return false
+	for _, c := range h.clientsOf(userID) {
+		if chID, joinToken := c.voice.state(); chID == channelID && joinToken == token {
+			return true
+		}
 	}
-	chID, joinToken := c.voice.state()
-	return chID == channelID && joinToken == token
+	return false
 }

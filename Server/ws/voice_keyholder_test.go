@@ -16,8 +16,8 @@ func setupVoiceRoom(t *testing.T) (*Hub, *Client, *Client) {
 
 	c1 := NewTestClient(h, 1, make(chan []byte, 8))
 	c2 := NewTestClient(h, 2, make(chan []byte, 8))
-	h.clients[1] = c1
-	h.clients[2] = c2
+	h.clients[1] = []*Client{c1}
+	h.clients[2] = []*Client{c2}
 	c1.voice.setState(5, "join-token-1")
 	c2.voice.setState(5, "join-token-2")
 	// Both represent settled, already-completed voice sessions (not a join
@@ -96,9 +96,7 @@ func TestWebhookParticipantLeft_UnsubscribesVoiceTopic(t *testing.T) {
 
 	h.HandleWebhookParticipantLeftForTest(1, 5, "join-token-1")
 
-	h.pubsub.mu.RLock()
-	sub := h.pubsub.topics[VoiceTopic(5)][1]
-	h.pubsub.mu.RUnlock()
+	sub := h.pubsub.subscriberForTest(VoiceTopic(5), 1)
 	if sub != nil {
 		t.Error("client is still subscribed to the voice topic after webhook participant_left")
 	}
@@ -117,9 +115,7 @@ func TestRegisterNow_ResumeRestoresVoiceTopicAndE2EEKey(t *testing.T) {
 	replacement.lastSeq = 1 // network reconnect — voice state is preserved
 	h.registerNowTest(replacement, map[int64]bool{5: true})
 
-	h.pubsub.mu.RLock()
-	sub := h.pubsub.topics[VoiceTopic(5)][1]
-	h.pubsub.mu.RUnlock()
+	sub := h.pubsub.subscriberForTest(VoiceTopic(5), 1)
 	if sub != replacement {
 		t.Error("resumed connection is not subscribed to its voice channel's topic")
 	}
@@ -140,10 +136,8 @@ func TestRegisterNow_ResumeVoiceTopicIgnoresReadGate(t *testing.T) {
 	replacement.lastSeq = 1
 	h.registerNowTest(replacement, nil) // no READ_MESSAGES anywhere
 
-	h.pubsub.mu.RLock()
-	voiceSub := h.pubsub.topics[VoiceTopic(5)][1]
-	chanSub := h.pubsub.topics[ChannelTopic(5)][1]
-	h.pubsub.mu.RUnlock()
+	voiceSub := h.pubsub.subscriberForTest(VoiceTopic(5), 1)
+	chanSub := h.pubsub.subscriberForTest(ChannelTopic(5), 1)
 	if voiceSub != replacement {
 		t.Error("voice topic subscription must not be gated on READ_MESSAGES")
 	}

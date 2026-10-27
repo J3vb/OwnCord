@@ -44,7 +44,7 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 	peer.voice.voiceChID = chanID
 	peer.voice.e2ee.key = "peer-pub-key-b64"
 	hub.mu.Lock()
-	hub.clients[peerID] = peer
+	hub.clients[peerID] = []*Client{peer}
 	hub.mu.Unlock()
 
 	// userID's PREVIOUS connection, still registered, with a completed voice
@@ -56,7 +56,7 @@ func TestRegisterNow_ResyncsPeerE2EEKeyOnResume(t *testing.T) {
 	old.voice.voiceJoinToken = "join-token"
 	old.voice.voiceJoinCompleted = true
 	hub.mu.Lock()
-	hub.clients[userID] = old
+	hub.clients[userID] = []*Client{old}
 	hub.mu.Unlock()
 
 	// The resuming connection: lastSeq > 0 marks this as a network reconnect

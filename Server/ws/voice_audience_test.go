@@ -23,15 +23,15 @@ func TestBroadcastVoiceEvent_VoiceParticipantsAlwaysInAudience(t *testing.T) {
 	h := newEmitTestHub()
 
 	participant := NewTestClient(h, 1, make(chan []byte, 8))
-	h.clients[1] = participant
+	h.clients[1] = []*Client{participant}
 	participant.voice.setState(5, "join-token-1")
 
 	otherRoom := NewTestClient(h, 2, make(chan []byte, 8))
-	h.clients[2] = otherRoom
+	h.clients[2] = []*Client{otherRoom}
 	otherRoom.voice.setState(6, "join-token-2")
 
 	outsider := NewTestClient(h, 3, make(chan []byte, 8))
-	h.clients[3] = outsider
+	h.clients[3] = []*Client{outsider}
 
 	h.broadcastVoiceEvent(context.Background(), 5, 1, buildVoiceLeave(5, 1))
 
@@ -67,23 +67,23 @@ func TestFinishVoiceLeave_EvictedUserAlwaysInAudience(t *testing.T) {
 	h := newEmitTestHub()
 
 	evicted := NewTestClient(h, 1, make(chan []byte, 8))
-	h.clients[1] = evicted
+	h.clients[1] = []*Client{evicted}
 	// The real callers (handleVoiceLeave, handleVoiceLeaveIfStillIn) clear the
 	// client's voice state before calling finishVoiceLeave; evicted's
 	// getVoiceChID() is already 0 here, exactly like at the real call site.
 
 	outsider := NewTestClient(h, 2, make(chan []byte, 8))
-	h.clients[2] = outsider
+	h.clients[2] = []*Client{outsider}
 
 	// Still in the room the leaver is being removed from, and (bare hub)
 	// without READ: they must still be told, or their client keeps a stale
 	// E2EE key holder for the channel.
 	staying := NewTestClient(h, 3, make(chan []byte, 8))
-	h.clients[3] = staying
+	h.clients[3] = []*Client{staying}
 	staying.voice.setState(5, "join-token-3")
 
 	otherRoom := NewTestClient(h, 4, make(chan []byte, 8))
-	h.clients[4] = otherRoom
+	h.clients[4] = []*Client{otherRoom}
 	otherRoom.voice.setState(6, "join-token-4")
 
 	// Empty join token skips the DB delete (leaveVoiceChannelWithRetry treats
@@ -124,7 +124,7 @@ func TestChannelReadAudience_GetChannelErrorDeniesEveryone(t *testing.T) {
 	chID := mustCreateVoiceChannel(t, database, "audience-room")
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
-	h.clients[uid] = NewTestClient(h, uid, make(chan []byte, 8))
+	h.clients[uid] = []*Client{NewTestClient(h, uid, make(chan []byte, 8))}
 
 	// Precondition: the role scan really does grant this user READ on this
 	// channel, so an empty audience after the fault can only be the deny.
@@ -159,7 +159,7 @@ func TestChannelReadAudience_DMParticipantsErrorDeniesEveryone(t *testing.T) {
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	for _, uid := range []int64{alice, bob, mallory} {
-		h.clients[uid] = NewTestClient(h, uid, make(chan []byte, 8))
+		h.clients[uid] = []*Client{NewTestClient(h, uid, make(chan []byte, 8))}
 	}
 
 	// Precondition: the DM resolves to its participants only — mallory is

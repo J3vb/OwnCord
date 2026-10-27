@@ -111,11 +111,7 @@ func (h *Hub) runRoleRound(ctx context.Context, b roleBatch) time.Duration {
 func (h *Hub) connectedUserIDs() []int64 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	ids := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
-		ids = append(ids, uid)
-	}
-	return ids
+	return h.connectedUserIDsLocked()
 }
 
 // beginVisibilityRefresh marks the start of a visibility refresh: it bumps
@@ -149,7 +145,7 @@ func (h *Hub) refreshVisibilityUsers(ctx context.Context, ids []int64, done func
 // ready built from committed state.
 func (h *Hub) closeUsers(ids []int64, done func(int64)) {
 	for _, uid := range ids {
-		if c := h.GetClient(uid); c != nil {
+		for _, c := range h.clientsOf(uid) {
 			h.kickClient(c)
 		}
 		h.bumpVisibilityWatermark()
@@ -240,14 +236,16 @@ func (h *Hub) listRoleChannels(ctx context.Context) (*roleChannels, bool) {
 // permissions could not be resolved (never sent BANNED; they reconnect onto a
 // full ready), or went away during the step.
 func (h *Hub) prepareUserVisibility(ctx context.Context, uid int64, rc *roleChannels) ([]roleFrame, bool) {
-	if c := h.GetClient(uid); c == nil || c.user == nil {
+	if conns := h.clientsOf(uid); len(conns) == 0 || conns[0].user == nil {
 		return nil, false
 	}
 	frames, allowed, ok := h.roleRefreshVerdicts(ctx, uid, rc)
 	if !ok {
-		if c := h.GetClient(uid); c != nil && ctx.Err() == nil {
+		if conns := h.clientsOf(uid); len(conns) > 0 && ctx.Err() == nil {
 			slog.Warn("hub: role refresh could not resolve permissions, closing socket", "user_id", uid)
-			h.kickClient(c)
+			for _, c := range conns {
+				h.kickClient(c)
+			}
 		}
 		return nil, false
 	}
@@ -273,7 +271,7 @@ func (h *Hub) prepareUserVisibility(ctx context.Context, uid int64, rc *roleChan
 // subscriptions rather than every DM on the server.
 func (h *Hub) heldDMs(uid int64, rc *roleChannels) map[int64]bool {
 	allowed := make(map[int64]bool, len(rc.servers))
-	for _, topic := range h.pubsub.TopicsForClient(uid) {
+	for _, topic := range h.topicsOfUser(uid) {
 		if id := channelTopicID(topic); id != 0 {
 			if _, dm := rc.dms[id]; dm {
 				allowed[id] = true
@@ -308,7 +306,7 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 	}
 	// A channel created after the snapshot and held by this user is resolved
 	// now, so it is kept and sent when the user may view it.
-	for _, topic := range h.pubsub.TopicsForClient(uid) {
+	for _, topic := range h.topicsOfUser(uid) {
 		chID := channelTopicID(topic)
 		if _, in := rc.known[chID]; chID == 0 || in {
 			continue
@@ -350,12 +348,22 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 	return frames, allowed, true
 }
 
-// sendRoleRefreshFrames queues frames in chunks to uid's live client, waiting
-// between chunks for its queue to drain. A client that does not drain in time
-// is kicked, never sent BANNED, and converges on a full ready.
+// sendRoleRefreshFrames queues frames in chunks to each of uid's live
+// connections, waiting between chunks for its queue to drain. A client that
+// does not drain in time is kicked, never sent BANNED, and converges on a full
+// ready; the user's other devices are unaffected.
 func (h *Hub) sendRoleRefreshFrames(ctx context.Context, uid int64, frames []roleFrame) {
+	for _, snap := range h.clientsOf(uid) {
+		h.sendRoleRefreshFramesTo(ctx, snap, frames)
+	}
+}
+
+// sendRoleRefreshFramesTo is sendRoleRefreshFrames for one device, identified
+// by the session of snap; a same-session reconnect during the round is followed
+// to its replacement.
+func (h *Hub) sendRoleRefreshFramesTo(ctx context.Context, snap *Client, frames []roleFrame) {
 	for start := 0; start < len(frames); start += roleRefreshChunk {
-		live := h.GetClient(uid)
+		live := h.sessionClient(snap.userID, snap.tokenHash)
 		if live == nil {
 			return
 		}

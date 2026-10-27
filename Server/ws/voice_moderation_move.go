@@ -51,7 +51,7 @@ func evictForMove(ctx context.Context, mod VoiceModerator, targetID, channelID i
 func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
 	txn := h.begin(userID)
 	defer txn.end()
-	c := h.GetClient(userID)
+	c := h.voiceClient(userID)
 	if c == nil {
 		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), voiceLeaveReasonModerator)
 	}

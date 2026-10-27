@@ -59,23 +59,25 @@ func UserTopic(userID int64) Topic {
 
 // PubSub provides topic-based publish/subscribe routing for WebSocket clients.
 // Broadcasting to a topic costs O(subscribers) instead of O(all connections).
+// Subscribers are connections (*Client), not users: one account may hold
+// several (one per device session), and each is subscribed on its own.
 //
 // Thread-safe: all methods may be called from any goroutine.
 type PubSub struct {
 	mu syncutil.RankedRW[lockRankPubSub]
 
-	// Forward index: topic → (userID → *Client)
-	topics map[Topic]map[int64]*Client
+	// Forward index: topic → set of subscribed connections
+	topics map[Topic]map[*Client]struct{}
 
-	// Reverse index: userID → set of topics (for efficient UnsubscribeAll)
-	clients map[int64]map[Topic]struct{}
+	// Reverse index: connection → set of topics (for efficient UnsubscribeAll)
+	clients map[*Client]map[Topic]struct{}
 }
 
 // NewPubSub creates an empty PubSub ready for use.
 func NewPubSub() *PubSub {
 	return &PubSub{
-		topics:  make(map[Topic]map[int64]*Client),
-		clients: make(map[int64]map[Topic]struct{}),
+		topics:  make(map[Topic]map[*Client]struct{}),
+		clients: make(map[*Client]map[Topic]struct{}),
 	}
 }
 
@@ -85,12 +87,12 @@ func (ps *PubSub) Subscribe(client *Client, topic Topic) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	// A dying connection must not (re-)take a topic: its replacement's own
-	// unsubscribes would skip the entry (unsubscribeLocked's identity guard)
-	// and publishes would go to the closed connection. registerNow closes the
+	// A dying connection must not (re-)take a topic: registerNow closes the
 	// old client's send BEFORE stripping it under this same lock, so a late
 	// Subscribe either sees sendClosed here and is refused, or slipped in
-	// earlier and is removed by the subsequent UnsubscribeAll.
+	// earlier and is removed by the subsequent UnsubscribeAll. Without the
+	// refusal the dead connection would keep a subscription (and its entry in
+	// both indexes) for good.
 	if client.isSendClosed() {
 		return
 	}
@@ -98,16 +100,16 @@ func (ps *PubSub) Subscribe(client *Client, topic Topic) {
 	// Forward index
 	subs, ok := ps.topics[topic]
 	if !ok {
-		subs = make(map[int64]*Client)
+		subs = make(map[*Client]struct{})
 		ps.topics[topic] = subs
 	}
-	subs[client.userID] = client
+	subs[client] = struct{}{}
 
 	// Reverse index
-	ts, ok := ps.clients[client.userID]
+	ts, ok := ps.clients[client]
 	if !ok {
 		ts = make(map[Topic]struct{})
-		ps.clients[client.userID] = ts
+		ps.clients[client] = ts
 	}
 	ts[topic] = struct{}{}
 }
@@ -122,43 +124,36 @@ func (ps *PubSub) Unsubscribe(client *Client, topic Topic) {
 
 // unsubscribeLocked removes client from topic. Caller must hold ps.mu (write).
 //
-// Both indexes are keyed by userID, but a reconnect registers a *new* *Client
-// under that same userID. Unsubscribing a client that has already been replaced
-// must be a no-op: the replacement stays in h.clients and keeps answering
-// ping/pong, so if its subscriptions were stripped it would never reconnect —
-// it would just silently stop receiving every broadcast.
+// Subscribers are keyed by connection, so a client that has already been
+// replaced (same session, newer socket) or is a different device of the same
+// user can only ever strip its own entries; the other connections of the user
+// keep theirs.
 func (ps *PubSub) unsubscribeLocked(client *Client, topic Topic) {
 	// Forward index
 	if subs, ok := ps.topics[topic]; ok {
-		if cur, ok := subs[client.userID]; ok && cur != client {
-			return // replaced by a newer connection; leave it alone
-		}
-		delete(subs, client.userID)
+		delete(subs, client)
 		if len(subs) == 0 {
 			delete(ps.topics, topic)
 		}
 	}
 
 	// Reverse index
-	if ts, ok := ps.clients[client.userID]; ok {
+	if ts, ok := ps.clients[client]; ok {
 		delete(ts, topic)
 		if len(ts) == 0 {
-			delete(ps.clients, client.userID)
+			delete(ps.clients, client)
 		}
 	}
 }
 
 // UnsubscribeAll removes client from every topic it is subscribed to.
-// Called when a client disconnects.
-//
-// Topics already taken over by a newer connection for the same user are left
-// in place — see unsubscribeLocked. Deleting a key during range is defined, and
+// Called when a client disconnects. Deleting a key during range is defined, and
 // unsubscribeLocked drops the reverse-index entry once the last topic goes.
 func (ps *PubSub) UnsubscribeAll(client *Client) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	for topic := range ps.clients[client.userID] {
+	for topic := range ps.clients[client] {
 		ps.unsubscribeLocked(client, topic)
 	}
 }
@@ -209,11 +204,11 @@ func (ps *PubSub) publishWithPriority(topic Topic, msg []byte, excludeUserID int
 	// Snapshot the subscriber slice under read lock to avoid holding the lock
 	// while calling sendMsg (which acquires the client's own mutex).
 	clients := make([]*Client, 0, len(subs))
-	for uid, c := range subs {
-		if uid == excludeUserID {
+	for c := range subs {
+		if c.userID == excludeUserID {
 			continue
 		}
-		if allow != nil && !allow(uid) {
+		if allow != nil && !allow(c.userID) {
 			continue
 		}
 		clients = append(clients, c)
@@ -242,27 +237,49 @@ func (ps *PubSub) subscribers(topic Topic, excludeUserID int64) []*Client {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	clients := make([]*Client, 0, len(ps.topics[topic]))
-	for uid, c := range ps.topics[topic] {
-		if uid != excludeUserID {
+	for c := range ps.topics[topic] {
+		if c.userID != excludeUserID {
 			clients = append(clients, c)
 		}
 	}
 	return clients
 }
 
-// SubscriberCount returns the number of subscribers for a topic.
+// SubscriberCount returns the number of subscribed connections for a topic.
 func (ps *PubSub) SubscriberCount(topic Topic) int {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 	return len(ps.topics[topic])
 }
 
-// TopicsForClient returns the set of topics a client is subscribed to.
-// Intended for debugging and tests.
-func (ps *PubSub) TopicsForClient(userID int64) []Topic {
+// TopicsForUser returns the union of the topics every connection of userID is
+// subscribed to, each once. A scan over all subscriptions: for tests and
+// debugging, not a hot path.
+func (ps *PubSub) TopicsForUser(userID int64) []Topic {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	ts := ps.clients[userID]
+	seen := map[Topic]struct{}{}
+	for c, ts := range ps.clients {
+		if c.userID != userID {
+			continue
+		}
+		for t := range ts {
+			seen[t] = struct{}{}
+		}
+	}
+	result := make([]Topic, 0, len(seen))
+	for t := range seen {
+		result = append(result, t)
+	}
+	return result
+}
+
+// TopicsForClient returns the set of topics a client is subscribed to.
+// Intended for debugging and tests.
+func (ps *PubSub) TopicsForClient(client *Client) []Topic {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	ts := ps.clients[client]
 	result := make([]Topic, 0, len(ts))
 	for t := range ts {
 		result = append(result, t)

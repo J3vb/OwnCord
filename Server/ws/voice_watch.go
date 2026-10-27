@@ -66,10 +66,8 @@ func handleVoiceWatchV2(_ context.Context, cmd Command, info ClientInfo, deps an
 // happen outside it.
 func (h *Hub) sendVoicePeerWatching(c *Client, channelID int64) {
 	for _, uid := range h.voiceChannelPeerUserIDs(channelID, c.userID) {
-		h.mu.RLock()
-		peer, ok := h.clients[uid]
-		h.mu.RUnlock()
-		if !ok {
+		peer := h.voiceClient(uid)
+		if peer == nil {
 			continue
 		}
 		if ids := peer.voice.watchingIfChannel(channelID); len(ids) > 0 {

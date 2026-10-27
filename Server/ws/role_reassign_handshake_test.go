@@ -104,7 +104,7 @@ func waitForRegisteredClient(t *testing.T, hub *Hub, uid int64) *Client {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		hub.mu.Lock()
-		c := hub.clients[uid]
+		c := hub.newestLocked(uid)
 		hub.mu.Unlock()
 		if c != nil {
 			return c
@@ -119,16 +119,14 @@ func waitForRegisteredClient(t *testing.T, hub *Hub, uid int64) *Client {
 func assertNotSubscribed(t *testing.T, hub *Hub, uid, chID int64, when string) {
 	t.Helper()
 	hub.mu.Lock()
-	c := hub.clients[uid]
+	c := hub.newestLocked(uid)
 	hub.mu.Unlock()
 	if c != nil && c.getChannelID() == chID {
 		t.Errorf("%s: client kept focus on channel %d resolved from the stale role", when, chID)
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		hub.pubsub.mu.RLock()
-		sub := hub.pubsub.topics[ChannelTopic(chID)][uid]
-		hub.pubsub.mu.RUnlock()
+		sub := hub.pubsub.subscriberForTest(ChannelTopic(chID), uid)
 		if sub == nil {
 			return
 		}
@@ -356,7 +354,7 @@ func TestRevokeUnreadableChannels_ActsOnReplacementClient(t *testing.T) {
 	c2 := newClient(hub, nil, user, "", 0, ctx)
 
 	hub.mu.Lock()
-	hub.clients[uid] = c1
+	hub.clients[uid] = []*Client{c1}
 	hub.mu.Unlock()
 	hub.pubsub.Subscribe(c1, ChannelTopic(chID))
 
@@ -368,17 +366,16 @@ func TestRevokeUnreadableChannels_ActsOnReplacementClient(t *testing.T) {
 	// visible to it).
 	revokeUnreadableChannelsPreActRaceHook = func(int64) {
 		hub.mu.Lock()
-		hub.clients[uid] = c2
+		hub.clients[uid] = []*Client{c2}
 		hub.mu.Unlock()
+		hub.pubsub.UnsubscribeAll(c1) // what registerNow does to the replaced connection
 		hub.pubsub.Subscribe(c2, ChannelTopic(chID))
 	}
 	defer func() { revokeUnreadableChannelsPreActRaceHook = nil }()
 
 	hub.revokeUnreadableChannels(uid)
 
-	hub.pubsub.mu.RLock()
-	sub := hub.pubsub.topics[ChannelTopic(chID)][uid]
-	hub.pubsub.mu.RUnlock()
+	sub := hub.pubsub.subscriberForTest(ChannelTopic(chID), uid)
 	if sub != nil {
 		t.Errorf("replacement client is still subscribed to ChannelTopic(%d): "+
 			"the revocation acted on the stale snapshot and no-opped on the identity guard", chID)

@@ -162,6 +162,14 @@ connection keeps its own slot in `Client.voice` (channel, join token, completed
 flag, E2EE announce and any moderator mute stash). The durable half is the
 `voice_states` row.
 
+The hub holds one connection per device session, not per account:
+`Hub.clients` maps a user id to all of that user's live connections
+(`hub_conns.go`), and `PubSub` keys subscribers by `*Client`. A new connection
+replaces only one with the same `tokenHash`; the cap is `maxConnectionsPerUser`
+(10). A per-user lookup is one of `clientsOf` (fan-out to every device),
+`isConnected` (presence) or `voiceClient` (the one connection holding the
+account's call). A second device's `voice_join` moves the call.
+
 Writes go only through the `voiceTxn` handle, with two exceptions: the lock-free `onClientEvent` handle (the test-only registration path) and the `setE2EE` key store. A path takes it once with
 `h.begin(uid)`, which locks that user's voice membership, and releases it with
 `txn.end()`. Helpers it calls take the handle as a parameter and never lock
@@ -172,7 +180,8 @@ again. The handle's operations are:
 - `clear`, `clearIfChannel`, `clearExact`: empty the slot and unsubscribe.
 - `deleteRow`: remove the `voice_states` row for one join instance.
 - `transfer`: move the whole slot from a replaced connection to its successor.
-- `park`, `inherit`, `takeParked`: hold, claim or drop the grace entry.
+- `park`, `inherit`, `takeParked`, `takeParkedOfSession`: hold, claim or drop the
+  grace entry. Only the parking connection's own session may inherit it.
 - `stashModFlags`, `setJoinToken`: keep a moderator mute across a move, and
   set the join token.
 

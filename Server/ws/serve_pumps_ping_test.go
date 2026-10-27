@@ -24,7 +24,7 @@ func scalePingTimings(t *testing.T) {
 func registeredClient(hub *Hub, uid int64) *Client {
 	hub.mu.RLock()
 	defer hub.mu.RUnlock()
-	return hub.clients[uid]
+	return hub.newestLocked(uid)
 }
 
 func TestServeWS_PongOnlyPeerOutlivesStaleSweep(t *testing.T) {

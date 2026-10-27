@@ -23,14 +23,14 @@ func midPassResyncForced(h *Hub) bool {
 	lastSeq := atomic.AddUint64(&h.seq, 1)
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
-	return h.mustFullResyncAtRegister(lastSeq, 0)
+	return h.mustFullResyncAtRegister(lastSeq, 0, "")
 }
 
 func assertResyncForcedAfterPass(t *testing.T, h *Hub) {
 	t.Helper()
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
-	if !h.mustFullResyncAtRegister(atomic.LoadUint64(&h.seq), 0) {
+	if !h.mustFullResyncAtRegister(atomic.LoadUint64(&h.seq), 0, "") {
 		t.Error("after the pass, a resume from the mid-pass seq was allowed to replay")
 	}
 }
@@ -87,7 +87,7 @@ func TestRevokeUnreadableChannels_ReconnectDuringPassForcesFullResync(t *testing
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := newClient(h, nil, user, "", 0, ctx)
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 	h.pubsub.Subscribe(c, ChannelTopic(chID))
 

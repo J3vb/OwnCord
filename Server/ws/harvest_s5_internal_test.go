@@ -83,7 +83,7 @@ func TestSweepStaleVoiceStates_EvictionIsScopedToCheckedChannel(t *testing.T) {
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 2048))
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 
 	for i := range 300 {
 		c.voice.setState(chA, "tok-a")
@@ -146,7 +146,7 @@ func TestHandleVoiceJoin_AbortedSwitchDoesNotResurrectVoiceTopicSubscription(t *
 	}
 	c := NewTestClient(h, uid, make(chan []byte, 64))
 	c.user = user
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	c.voice.setState(chA, vs.JoinedAt)
 	h.pubsub.Subscribe(c, VoiceTopic(chA))
 	h.updateKeyHolder(chA)

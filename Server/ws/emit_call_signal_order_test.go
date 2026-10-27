@@ -31,7 +31,7 @@ func TestEmitEvents_CallSignalEvent_UsesNormalQueue(t *testing.T) {
 		sendHigh: make(chan []byte, 8),
 		sendLow:  make(chan []byte, 8),
 	}
-	h.clients[2] = target
+	h.clients[2] = []*Client{target}
 
 	h.EmitEvents(context.Background(), []Event{
 		CallSignalEvent{eventType: MsgTypeCallIncoming, targetUserID: 2, payload: []byte(`{"type":"call_incoming"}`)},

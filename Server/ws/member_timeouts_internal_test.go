@@ -351,7 +351,7 @@ func TestRoleChange_GrantModerateSendsFullView(t *testing.T) {
 	if len(fr) != 1 || !reflect.DeepEqual(entryIDs(fr[0]), []int64{f.targetID}) {
 		t.Fatalf("new moderator frames = %v, want the full list", fr)
 	}
-	if !f.hub.GetClient(f.byID).timeouts.full.Load() {
+	if !f.hub.ClientForTest(f.byID).timeouts.full.Load() {
 		t.Error("timeouts.full not set after the grant")
 	}
 	// A client that never was a moderator is left alone.
@@ -363,7 +363,7 @@ func TestRoleChange_GrantModerateSendsFullView(t *testing.T) {
 func TestRoleChange_RevokeSendsOwnOnly(t *testing.T) {
 	f := roleChangeFixture(t)
 	ctx := context.Background()
-	f.hub.GetClient(f.modID).timeouts.full.Store(true) // as its ready set it
+	f.hub.ClientForTest(f.modID).timeouts.full.Store(true) // as its ready set it
 	if err := f.database.UpdateUserRole(ctx, f.modID, 4); err != nil {
 		t.Fatalf("UpdateUserRole: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestRoleChange_RevokeSendsOwnOnly(t *testing.T) {
 	if len(fr) != 1 || len(fr[0]) != 0 {
 		t.Fatalf("ex-moderator frames = %v, want one own-only (empty) list", fr)
 	}
-	if f.hub.GetClient(f.modID).timeouts.full.Load() {
+	if f.hub.ClientForTest(f.modID).timeouts.full.Load() {
 		t.Error("timeouts.full still set after the revoke")
 	}
 	// Second refresh: the flag is down, so nothing more is sent.

@@ -4,7 +4,7 @@ package ws
 // OC-0428.
 //
 // handleReconnect's own-voice-room replay supplement only fires when
-// h.GetClient(c.userID) still returns the OLD, still-registered *Client — but
+// h.ClientForTest(c.userID) still returns the OLD, still-registered *Client — but
 // by the time an ORDINARY reconnect reaches here, readPump's own
 // disconnect-teardown defer has almost always already run: unregisterNow
 // deleted the old entry from h.clients, and handleVoiceLeave tore down the
@@ -88,8 +88,8 @@ func TestReconnect_ReplaysOwnVoiceLeaveAfterTeardownWithNoOldClient(t *testing.T
 	// disconnect-teardown defer (unregisterNow + handleVoiceLeave) has
 	// already run by the time this reconnect arrives, exactly like an
 	// ordinary reconnect after the server observed the previous socket
-	// close. h.GetClient(userID) must return nil.
-	if hub.GetClient(userID) != nil {
+	// close. h.ClientForTest(userID) must return nil.
+	if hub.ClientForTest(userID) != nil {
 		t.Fatalf("precondition: no old client must be registered for user %d", userID)
 	}
 

@@ -81,10 +81,7 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 // the bare test hub with no database: the role scan runs without a channel ref.
 func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *db.Channel, ignoreArchived bool) []int64 {
 	h.mu.RLock()
-	userIDs := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
-		userIDs = append(userIDs, uid)
-	}
+	userIDs := h.connectedUserIDsLocked()
 	h.mu.RUnlock()
 
 	// A DM channel carries no channel_overrides rows, so every connected
@@ -243,10 +240,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	defer h.endTargetedFanout()
 
 	h.mu.RLock()
-	clients := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
-		clients = append(clients, c)
-	}
+	clients := h.allClientsLocked()
 	h.mu.RUnlock()
 
 	// Called via the admin HubBroadcaster interface, which carries no context;
@@ -297,9 +291,10 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		// leaves a topic alone when the current holder differs from the client
 		// passed in — stranding the replacement with a subscription (or a
 		// missing one) exactly inverted from what this fan-out just decided.
-		// A nil result means the user disconnected entirely since the
-		// snapshot; nothing to act on.
-		live := h.GetClient(c.user.ID)
+		// A nil result means that device disconnected entirely since the
+		// snapshot; nothing to act on. The user's other devices are separate
+		// entries of the snapshot, each judged here on its own.
+		live := h.sessionClient(c.user.ID, c.tokenHash)
 		if live == nil {
 			continue
 		}
@@ -379,8 +374,7 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 	if h.db == nil {
 		return
 	}
-	c := h.GetClient(userID)
-	if c == nil || c.user == nil {
+	if conns := h.clientsOf(userID); len(conns) == 0 || conns[0].user == nil {
 		return
 	}
 
@@ -409,7 +403,7 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 		// Re-resolve before kicking: the lookups above are DB round trips a
 		// reconnect can overlap, and kicking the stale snapshot would close a
 		// dead socket while the replacement keeps its subscriptions.
-		if live := h.GetClient(userID); live != nil {
+		for _, live := range h.clientsOf(userID) {
 			h.kickClient(live)
 		}
 		return

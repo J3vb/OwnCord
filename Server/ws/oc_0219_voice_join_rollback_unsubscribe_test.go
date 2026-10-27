@@ -46,7 +46,7 @@ func TestVoiceJoin_GetChannelVoiceStatesError_UnsubscribesVoiceTopic(t *testing.
 	c := NewTestClient(h, uid, send)
 	c.user = &db.User{ID: uid, Username: "join-0219-victim"}
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 
 	// Fault-inject the GetChannelVoiceStates call inside voiceJoinComplete —
@@ -82,7 +82,7 @@ func TestVoiceJoin_GetChannelVoiceStatesError_UnsubscribesVoiceTopic(t *testing.
 	// that voiceJoinComplete already established. Left in place, this socket
 	// keeps receiving voice_e2ee_announce relays for chID indefinitely.
 	topic := VoiceTopic(chID)
-	for _, tp := range h.pubsub.TopicsForClient(uid) {
+	for _, tp := range h.pubsub.TopicsForUser(uid) {
 		if tp == topic {
 			t.Fatalf("client is still subscribed to %q after rollbackVoiceJoin — E2EE relays for this channel will keep reaching a socket that never finished joining it", topic)
 		}

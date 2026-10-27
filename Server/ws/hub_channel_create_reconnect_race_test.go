@@ -45,7 +45,7 @@ func TestBroadcastChannelCreate_ReconnectDuringFanoutForcesFullResync(t *testing
 		// acked it, so its last_seq sits above the leading watermark bump.
 		lastSeq := atomic.AddUint64(&h.seq, 1)
 		h.seqMu.Lock()
-		forced = h.mustFullResyncAtRegister(lastSeq, 0)
+		forced = h.mustFullResyncAtRegister(lastSeq, 0, "")
 		h.seqMu.Unlock()
 	}
 	defer func() { broadcastChannelCreateRaceHook = nil }()
@@ -62,7 +62,7 @@ func TestBroadcastChannelCreate_ReconnectDuringFanoutForcesFullResync(t *testing
 	// forced to a full ready by the trailing bump.
 	h.seqMu.Lock()
 	defer h.seqMu.Unlock()
-	if !h.mustFullResyncAtRegister(atomic.LoadUint64(&h.seq), 0) {
+	if !h.mustFullResyncAtRegister(atomic.LoadUint64(&h.seq), 0, "") {
 		t.Error("after the fan-out, a resume from the mid-fan-out seq was allowed to replay")
 	}
 }

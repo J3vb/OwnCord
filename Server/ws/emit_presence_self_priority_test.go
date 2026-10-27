@@ -42,7 +42,7 @@ func TestEmitEvents_PresenceSelfEvent_UsesNormalPriorityQueue(t *testing.T) {
 		sendHigh: make(chan []byte, 8),
 		sendLow:  make(chan []byte, 8),
 	}
-	h.clients[1] = owner
+	h.clients[1] = []*Client{owner}
 
 	payload := []byte(`{"type":"presence","user_id":1,"status":"invisible"}`)
 	h.EmitEvents(context.Background(), []Event{

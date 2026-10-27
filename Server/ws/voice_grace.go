@@ -282,19 +282,28 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 // gone, so inheriting and tearing down can never both run. It returns the
 // inherited channel id, or 0.
 //
+// Only the same session (token hash) inherits or discards a parked entry.
+//
 // Skipped when the old-client transfer already supplied a session (c is in a
 // voice channel) — a reconnect that beat the drop teardown. A fresh connect
 // (lastSeq == 0) is a deliberate reload rather than a blip, so it discards any
 // parked entry instead.
 func (t *voiceTxn) inherit(c *Client) int64 {
+	// Only the session that parked the call may take it back. Another device's
+	// parked call stays parked for its own device (and expires on its own):
+	// this connection just joins alongside it.
+	e := t.h.voiceReg.voiceGrace.get(c.userID)
+	if e == nil || e.client.tokenHash != c.tokenHash {
+		return 0
+	}
 	if c.lastSeq == 0 {
-		t.takeParked(0)
+		t.takeParked(0) // the entry is this session's (checked above)
 		return 0
 	}
 	if c.voice.channel() != 0 {
 		return 0
 	}
-	e := t.takeParked(0)
+	e = t.takeParked(0)
 	if e == nil || !t.adoptParked(c, e.snap) {
 		return 0
 	}

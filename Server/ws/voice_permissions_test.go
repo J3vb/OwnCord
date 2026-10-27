@@ -73,7 +73,7 @@ func TestVoicePermissions_SweepReconcilesCurrentRole(t *testing.T) {
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
 	c.voice.setState(100, state.JoinedAt)
-	h.clients[1] = c
+	h.clients[1] = []*Client{c}
 	for _, tc := range []struct {
 		role int64
 		want []livekit.TrackSource
@@ -162,7 +162,7 @@ func TestVoicePermissions_SweepSkipsConcurrentModeration(t *testing.T) {
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
 	c.voice.setState(100, state.JoinedAt)
-	h.clients[1] = c
+	h.clients[1] = []*Client{c}
 	unlock := h.voiceMod.lock(1)
 	finished := make(chan struct{})
 	go func() {
@@ -208,7 +208,7 @@ func TestVoicePermissions_ModerationFailureRetainsDesiredStateForRetry(t *testin
 			send := make(chan []byte, 8)
 			c := NewTestClient(h, 1, send)
 			c.voice.setState(100, initial.JoinedAt)
-			h.clients[1] = c
+			h.clients[1] = []*Client{c}
 			go h.Run()
 			t.Cleanup(h.Stop)
 			deps.Mod = h

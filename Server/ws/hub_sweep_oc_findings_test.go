@@ -48,7 +48,7 @@ func TestSweepStaleVoiceStates_JoinCatchesUpDuringDeleteWindow(t *testing.T) {
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	// c.voice.voiceChID is still 0 here — exactly like the joiner's client at the
 	// instant between JoinVoiceChannelIfCapacity's commit and setVoiceState.
 
@@ -111,9 +111,9 @@ func TestCleanupVoiceForChannel_NotifiesReadAudienceOfArchivedChannel(t *testing
 	// bystander has READ_MESSAGES on the channel (harvestVoiceRoleID grants it
 	// directly, no override) but is not a voice participant.
 	cBystander := NewTestClient(h, bystander, make(chan []byte, 8))
-	h.clients[userA] = cA
-	h.clients[userB] = cB
-	h.clients[bystander] = cBystander
+	h.clients[userA] = []*Client{cA}
+	h.clients[userB] = []*Client{cB}
+	h.clients[bystander] = []*Client{cBystander}
 	cA.voice.setState(chID, "tok-a")
 	cB.voice.setState(chID, "tok-b")
 

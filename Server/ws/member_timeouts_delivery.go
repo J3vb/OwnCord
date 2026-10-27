@@ -89,7 +89,7 @@ func (h *Hub) resolveTimeoutVerdicts(ctx context.Context, only map[int64]struct{
 	defer cancel()
 	h.mu.RLock()
 	ids := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
+	for _, uid := range h.connectedUserIDsLocked() {
 		if _, ok := only[uid]; only == nil || ok {
 			ids = append(ids, uid)
 		}
@@ -159,7 +159,7 @@ func (h *Hub) reloadTimeoutMirror(ctx context.Context) bool {
 
 // sendTimeoutViewsLocked is deliverTimeoutViews' send step. The caller holds
 // timeoutView.mu. Only users present in verdicts are considered, each through
-// its client as registered now, so a connection that replaced the evaluated
+// its clients (every device) as registered now, so a connection that replaced the evaluated
 // one gets the frame instead of the closed socket.
 func (h *Hub) sendTimeoutViewsLocked(verdicts map[int64]bool, wants func(c *Client, isMod bool) bool) bool {
 	snap, ok := h.perms.TimeoutSnapshot()
@@ -169,9 +169,7 @@ func (h *Hub) sendTimeoutViewsLocked(verdicts map[int64]bool, wants func(c *Clie
 	h.mu.RLock()
 	live := make([]*Client, 0, len(verdicts))
 	for uid := range verdicts {
-		if c := h.clients[uid]; c != nil {
-			live = append(live, c)
-		}
+		live = append(live, h.clients[uid]...)
 	}
 	h.mu.RUnlock()
 	now := time.Now()

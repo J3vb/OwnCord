@@ -54,7 +54,9 @@ type HubBroadcaster interface {
 	// channel row is deleted: the voice_states FK cascade wipes the rows the
 	// cleanup reads.
 	CleanupVoiceForChannel(channelID int64)
-	ClientCount() int
+	// UserCount is the number of distinct connected users (an account on two
+	// devices counts once).
+	UserCount() int
 }
 
 // ─── PermissionInvalidator ───────────────────────────────────────────────────

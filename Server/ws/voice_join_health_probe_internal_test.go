@@ -40,7 +40,7 @@ func TestHandleVoiceJoin_ExternalLiveKitUnreachable_RefusedNoToken(t *testing.T)
 
 	c := NewTestClient(h, uid, make(chan []byte, 32))
 	c.user = user
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 
 	h.handleVoiceJoin(ctx, c, json.RawMessage(fmt.Sprintf(`{"channel_id": %d}`, chID)), "")
 

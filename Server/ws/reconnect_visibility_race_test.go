@@ -145,7 +145,7 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 	if startPumps {
 		t.Errorf("handleReconnect: startPumps=true after a visibility change landed mid-handshake, want false")
 	}
-	if live := h.GetClient(uid); live != nil {
+	if live := h.ClientForTest(uid); live != nil {
 		t.Errorf("handleReconnect registered the client with permissions computed before the mid-handshake visibility change")
 	}
 
