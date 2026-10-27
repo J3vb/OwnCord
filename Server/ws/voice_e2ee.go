@@ -3,10 +3,13 @@ package ws
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // Voice E2EE rate limits. Both the announce and offer relays fan out to every
@@ -140,7 +143,15 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 
 	// video_decode (WP M-4) is optional and never fatal: a malformed list is
 	// dropped and the announce (the key) is still accepted.
-	announce := e2eeAnnounce{key: pubKey, sig: sig, videoDecode: sanitizeVideoDecode(announceCmd.VideoDecode), identityKey: info.IdentityKey}
+	// The device key the announce itself names wins: unlike the auth frame it
+	// can be sent on the first connection of an app start, when the user id that
+	// scopes the key was not yet known. Without one (older client, or an invalid
+	// value the parser dropped) the connection's auth-frame key is used.
+	identityKey := announceCmd.IdentityKey
+	if identityKey == "" {
+		identityKey = info.IdentityKey
+	}
+	announce := e2eeAnnounce{key: pubKey, sig: sig, videoDecode: sanitizeVideoDecode(announceCmd.VideoDecode), identityKey: identityKey}
 	msg := buildVoiceE2EEAnnounce(userID, announce)
 	return Result{
 		SetE2EEAnnounce: &announce,
@@ -150,6 +161,27 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 			payload:        msg,
 		}},
 	}
+}
+
+// announceIdentityKey returns the device identity key a voice_e2ee_announce
+// payload carried, or "" when it carried none or an invalid one. An invalid key
+// is logged and ignored, never an error: it must not cost the announce (the
+// ephemeral key), and the connection's auth-frame key is used instead.
+func announceIdentityKey(userID int64, raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var key string
+	if err := json.Unmarshal(raw, &key); err != nil {
+		slog.Info("ws voice_e2ee_announce: identity_public_key ignored, not a string", "user_id", userID)
+		return ""
+	}
+	key = strings.TrimSpace(key)
+	if err := service.ValidateIdentityKey(key); err != nil {
+		slog.Info("ws voice_e2ee_announce: identity_public_key ignored, invalid", "user_id", userID, "err", err)
+		return ""
+	}
+	return key
 }
 
 const (

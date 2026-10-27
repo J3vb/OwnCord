@@ -274,3 +274,107 @@ func TestDeviceKey_AuthFrameStoresKeyOnConnectionAndSession(t *testing.T) {
 		})
 	}
 }
+
+// announceWithKey makes d announce pub through a real voice_e2ee_announce
+// frame whose payload also carries identity_public_key = key.
+func (f *mdFix) announceWithKey(d *mdDev, pub string, key any) {
+	f.t.Helper()
+	f.hub.handleMessage(d.c, voiceFrame(f.t, "voice_e2ee_announce", "annk-"+pub,
+		map[string]any{"public_key": pub, "identity_public_key": key}))
+}
+
+func TestDeviceKey_AnnounceKeyWinsOverAuthKey(t *testing.T) {
+	f := newMDFix(t)
+	obs := f.observer(f.text)
+	a := f.dev("session-a", f.text)
+	a.c.identityKey = devKeyA // the auth frame's key
+
+	f.join(obs, f.voiceA)
+	f.join(a, f.voiceA)
+	f.announceWithKey(a, "cHViLXc=", devKeyB) // the announce names another key
+	i := obs.await(t, MsgTypeVoiceE2EEAnnounceBC, announceFrom(f.uid, "cHViLXc="))
+	if k, ok := keyOf(obs, i); !ok || k != devKeyB {
+		t.Fatalf("live announce carries key %q (present=%v), want the announce's %q", k, ok, devKeyB)
+	}
+	if a.c.identityKey != devKeyA {
+		t.Fatalf("Client.identityKey mutated to %q, must stay the auth key %q", a.c.identityKey, devKeyA)
+	}
+
+	// Replay to a later joiner follows the stored announce.
+	f.leave(obs)
+	obs.pump()
+	obs.got = nil
+	f.join(obs, f.voiceA)
+	i = obs.await(t, MsgTypeVoiceE2EEAnnounceBC, announceFrom(f.uid, "cHViLXc="))
+	if k, ok := keyOf(obs, i); !ok || k != devKeyB {
+		t.Fatalf("replayed announce carries key %q (present=%v), want %q", k, ok, devKeyB)
+	}
+}
+
+func TestDeviceKey_InvalidAnnounceKeyFallsBackToAuthKey(t *testing.T) {
+	for name, bad := range map[string]any{
+		"not base64": "not base64 !!",
+		"too long":   strings.Repeat("A", 200),
+		"not string": 42,
+		"empty":      "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newMDFix(t)
+			obs := f.observer(f.text)
+			a := f.dev("session-a", f.text)
+			a.c.identityKey = devKeyA
+			f.join(obs, f.voiceA)
+			f.join(a, f.voiceA)
+			f.announceWithKey(a, "cHViLWY=", bad)
+			i := obs.await(t, MsgTypeVoiceE2EEAnnounceBC, announceFrom(f.uid, "cHViLWY="))
+			if k, ok := keyOf(obs, i); !ok || k != devKeyA {
+				t.Fatalf("announce with an invalid key carries %q (present=%v), want auth key %q", k, ok, devKeyA)
+			}
+		})
+	}
+}
+
+func TestDeviceKey_AnnounceKeyWithoutAuthKey_BroadcastAndReplay(t *testing.T) {
+	f := newMDFix(t)
+	obs := f.observer(f.text)
+	a := f.dev("session-a", f.text) // first connection of an app start: no auth key
+
+	f.join(obs, f.voiceA)
+	f.join(a, f.voiceA)
+	f.announceWithKey(a, "cHViLWc=", devKeyA)
+	i := obs.await(t, MsgTypeVoiceE2EEAnnounceBC, announceFrom(f.uid, "cHViLWc="))
+	if k, ok := keyOf(obs, i); !ok || k != devKeyA {
+		t.Fatalf("broadcast carries key %q (present=%v), want %q", k, ok, devKeyA)
+	}
+
+	f.leave(obs)
+	obs.pump()
+	obs.got = nil
+	f.join(obs, f.voiceA)
+	i = obs.await(t, MsgTypeVoiceE2EEAnnounceBC, announceFrom(f.uid, "cHViLWc="))
+	if k, ok := keyOf(obs, i); !ok || k != devKeyA {
+		t.Fatalf("replay carries key %q (present=%v), want %q", k, ok, devKeyA)
+	}
+}
+
+func TestAnnounceIdentityKey(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"absent", ``, ""},
+		{"null", `null`, ""},
+		{"valid", `"` + devKeyA + `"`, devKeyA},
+		{"trimmed", `"  ` + devKeyA + ` "`, devKeyA},
+		{"not a string", `42`, ""},
+		{"invalid", `"!!"`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := announceIdentityKey(1, json.RawMessage(tc.raw)); got != tc.want {
+				t.Fatalf("announceIdentityKey(%s) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}

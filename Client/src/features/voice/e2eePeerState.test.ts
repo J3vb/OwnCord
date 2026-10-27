@@ -374,6 +374,15 @@ describe("verifyPeerAnnounce with a key per device", () => {
     expect(peers.announcedIdentityKey(PEER)).toBe("published-id");
   });
 
+  it("drops the previous announce's key when the latest announce carries none", async () => {
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "device-id");
+    expect(peers.announcedIdentityKey(PEER)).toBe("device-id");
+    // Next announce: no key of its own and no published key to fall back to.
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(peers.announcedIdentityKey(PEER)).toBeNull();
+  });
+
   it("rejects a signature made by a different device than the announce names", async () => {
     members.set(PEER, { identityPublicKey: "published-id", username: "alice" });
     vi.mocked(verifyEphemeralKeySignature).mockImplementation(

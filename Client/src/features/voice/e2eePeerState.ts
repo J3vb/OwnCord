@@ -221,8 +221,13 @@ export class E2EEPeerState {
       announcedIdentityKey ??
       membersStore.getState().members.get(userId)?.identityPublicKey ??
       null;
-    if (isCurrent() && publishedIdentity)
-      this._announcedIdentityKeys.set(userId, publishedIdentity);
+    if (isCurrent()) {
+      // The entry always mirrors the LATEST announce: one that carries no key
+      // (and no published fallback) must not leave a previous announce's key
+      // behind for the verify panel to show.
+      if (publishedIdentity) this._announcedIdentityKeys.set(userId, publishedIdentity);
+      else this._announcedIdentityKeys.delete(userId);
+    }
     const host = this.deps.getServerHost();
     const sessionGeneration = this._sessionGeneration;
 

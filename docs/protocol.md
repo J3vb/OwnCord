@@ -3195,10 +3195,22 @@ published identity key but the signature is missing/invalid → reject).
   "payload": {
     "public_key": "base64-ecdh-pubkey",
     "signature": "base64-ecdsa-signature",
+    "identity_public_key": "base64-device-identity-public-key",
     "video_decode": ["vp8", "h264", "vp9"]
   }
 }
 ```
+
+`identity_public_key` is optional: the public half of the device identity key
+that made `signature`. A client sends it because the `auth` frame often cannot
+carry the key on the first connection of an app start (the user id that scopes
+the key only arrives in `auth_ok`). It uses the same rules as the `auth`
+frame's field (base64, at most 128 characters). The server stores the
+announce's key with the announce and relays it; when the announce has none, it
+uses the connection's `auth`-frame key, and when neither exists the relayed
+announce carries none. An invalid or wrongly typed value is ignored (the
+announce is still accepted and the `auth`-frame key is used) and logged. The
+connection's own key is never changed by an announce.
 
 The server validates `signature` like `public_key` (standard-alphabet base64,
 max 128 chars) and stores it alongside the key, but never verifies it — only
@@ -3219,10 +3231,11 @@ Relayed to the other participants with the sender's user ID attached. Also
 replayed to late joiners (and to a resumed socket) from the stored
 key+signature+list+identity key. `signature` and `video_decode` are omitted
 when the announcing client did not send them (or sent an invalid
-`video_decode`). `identity_public_key` is the announcing connection's device
-key from its `auth` frame, stored with the announce, so a live relay and every
+`video_decode`). `identity_public_key` is the announcing device's key: the
+one in the announce itself when it sent a valid one, otherwise its connection's
+`auth`-frame key. It is stored with the announce, so a live relay and every
 replay carry the key of the device that made that announce. It is omitted when
-that connection sent none (an older client):
+the client sent neither (an older client):
 
 ```json
 {

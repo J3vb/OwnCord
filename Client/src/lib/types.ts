@@ -1837,7 +1837,13 @@ export type ClientMessage =
   | (WsEnvelope<VoiceModMovePayload> & { readonly type: "voice_mod_move" })
   | (WsEnvelope<VoiceModKickPayload> & { readonly type: "voice_mod_kick" })
   | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" })
-  | (WsEnvelope<{ public_key: string; signature?: string; video_decode?: readonly string[] }> & {
+  | (WsEnvelope<{
+      public_key: string;
+      signature?: string;
+      /** This device's identity public key (the one that signed `signature`). */
+      identity_public_key?: string;
+      video_decode?: readonly string[];
+    }> & {
       readonly type: "voice_e2ee_announce";
     })
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {

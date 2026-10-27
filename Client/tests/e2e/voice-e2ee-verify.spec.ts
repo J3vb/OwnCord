@@ -258,10 +258,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     const pins = await invokesOf(page, "store_identity_pin");
     expect(pins).toHaveLength(1);
     expect(pins[0]).toMatchObject({ userId: "2" });
-    expect(JSON.parse(String((pins[0] as { pin: string }).pin))).toEqual([
-      oldPin,
-      peer.identityPublicKeyB64,
-    ]);
+    expect((pins[0] as { pin: string }).pin).toBe(`${oldPin}_${peer.identityPublicKeyB64}`);
 
     // The notice names the peer and is sticky: only a sticky toast carries a
     // close button (toast.test.ts pins that it outlives the auto-dismiss).

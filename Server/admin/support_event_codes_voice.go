@@ -27,5 +27,7 @@ func init() {
 		"ws auth: identity_public_key ignored, not a string":                       "ws_auth_identity_key_ignored_not_string",
 		"ws auth: identity_public_key ignored, invalid":                            "ws_auth_identity_key_ignored_invalid",
 		"ws auth: recording the session identity key failed":                       "ws_auth_record_session_identity_key_failed",
+		"ws voice_e2ee_announce: identity_public_key ignored, not a string":        "ws_voice_e2ee_announce_identity_key_ignored_not_string",
+		"ws voice_e2ee_announce: identity_public_key ignored, invalid":             "ws_voice_e2ee_announce_identity_key_ignored_invalid",
 	})
 }

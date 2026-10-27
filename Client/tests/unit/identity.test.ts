@@ -665,7 +665,12 @@ function pinStoreDouble(seed: Record<string, string> = {}): Map<string, string> 
     const slot = `${args?.host as string}:${args?.userId as string}`;
     if (cmd === "get_identity_pin") return Promise.resolve(slots.get(slot) ?? null);
     if (cmd === "store_identity_pin") {
-      slots.set(slot, args!.pin as string);
+      const pin = args!.pin as string;
+      // Same validation as store_identity_pin in src-tauri/src/commands.rs.
+      if (pin.length < 1 || pin.length > 512 || !/^[A-Za-z0-9+/=_-]+$/.test(pin)) {
+        return Promise.reject(new Error("pin rejected"));
+      }
+      slots.set(slot, pin);
       return Promise.resolve(undefined);
     }
     return Promise.resolve(undefined);
@@ -675,60 +680,77 @@ function pinStoreDouble(seed: Record<string, string> = {}): Map<string, string> 
 
 describe("identity pins as a set per device", () => {
   it("reads a single legacy pin as a set of one, unchanged on disk", async () => {
-    const slots = pinStoreDouble({ "chat.example:42": "legacy-key" });
+    const slots = pinStoreDouble({ "chat.example:42": "legacyKey" });
     expect(await getIdentityPin("chat.example", "42")).toEqual({
       status: "pinned",
-      pin: "legacy-key",
+      pin: "legacyKey",
     });
-    expect(slots.get("chat.example:42")).toBe("legacy-key");
+    expect(slots.get("chat.example:42")).toBe("legacyKey");
   });
 
   it("migrates a legacy pin to a two-key set when a second device is added", async () => {
-    const slots = pinStoreDouble({ "chat.example:42": "key-a" });
-    expect(await storeIdentityPin("chat.example", "42", "key-b")).toBe("stored");
-    expect(JSON.parse(slots.get("chat.example:42")!)).toEqual(["key-a", "key-b"]);
+    const slots = pinStoreDouble({ "chat.example:42": "keyA" });
+    expect(await storeIdentityPin("chat.example", "42", "keyB")).toBe("stored");
+    expect(slots.get("chat.example:42")).toBe("keyA_keyB");
     expect(await getIdentityPin("chat.example", "42")).toEqual({
       status: "pinned",
-      pin: "key-b",
-      pins: ["key-a", "key-b"],
+      pin: "keyB",
+      pins: ["keyA", "keyB"],
     });
   });
 
   it("stores the first key bare and ignores a key that is already pinned", async () => {
     const slots = pinStoreDouble();
-    await storeIdentityPin("chat.example", "42", "key-a");
-    expect(slots.get("chat.example:42")).toBe("key-a");
+    await storeIdentityPin("chat.example", "42", "keyA");
+    expect(slots.get("chat.example:42")).toBe("keyA");
     invokeMock.mockClear();
-    expect(await storeIdentityPin("chat.example", "42", "key-a")).toBe("stored");
+    expect(await storeIdentityPin("chat.example", "42", "keyA")).toBe("stored");
     expect(invokeMock.mock.calls.some((c) => c[0] === "store_identity_pin")).toBe(false);
   });
 
-  it("keeps at most ten keys per peer, dropping the oldest", async () => {
+  it("keeps at most five keys per peer, dropping the oldest", async () => {
     const slots = pinStoreDouble();
-    for (let i = 1; i <= 11; i++) {
+    for (let i = 1; i <= 6; i++) {
       // oxlint-disable-next-line no-await-in-loop -- each add reads the previous one's write
-      await storeIdentityPin("chat.example", "42", `key-${i}`);
+      await storeIdentityPin("chat.example", "42", `key${i}`);
     }
-    const kept = JSON.parse(slots.get("chat.example:42")!) as string[];
-    expect(kept).toHaveLength(10);
-    expect(kept[0]).toBe("key-2");
-    expect(kept[9]).toBe("key-11");
-    expect(kept).not.toContain("key-1");
+    expect(slots.get("chat.example:42")).toBe("key2_key3_key4_key5_key6");
+  });
+
+  it("writes only slots the desktop store accepts, at real key length", async () => {
+    const slots = pinStoreDouble();
+    const realKeys: string[] = [];
+    for (let i = 0; i < 7; i++) {
+      // oxlint-disable-next-line no-await-in-loop -- each key is generated and added in turn
+      const pair = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+        "deriveBits",
+      ]);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      realKeys.push(await exportPublicKey(pair.publicKey));
+      // oxlint-disable-next-line no-await-in-loop -- each add reads the previous one's write
+      expect(await storeIdentityPin("chat.example", "42", realKeys[i]!)).toBe("stored");
+      const slot = slots.get("chat.example:42")!;
+      // Mirror of store_identity_pin: 1-512 chars of [A-Za-z0-9+/=_-].
+      expect(slot.length).toBeGreaterThanOrEqual(1);
+      expect(slot.length).toBeLessThanOrEqual(512);
+      expect(slot).toMatch(/^[A-Za-z0-9+/=_-]+$/);
+    }
+    expect(slots.get("chat.example:42")).toBe(realKeys.slice(-5).join("_"));
   });
 
   it("does not lose a key when two adds race on the same peer", async () => {
-    const slots = pinStoreDouble({ "chat.example:42": "key-a" });
+    const slots = pinStoreDouble({ "chat.example:42": "keyA" });
     await Promise.all([
-      storeIdentityPin("chat.example", "42", "key-b"),
-      storeIdentityPin("chat.example", "42", "key-c"),
+      storeIdentityPin("chat.example", "42", "keyB"),
+      storeIdentityPin("chat.example", "42", "keyC"),
     ]);
-    expect(JSON.parse(slots.get("chat.example:42")!)).toEqual(["key-a", "key-b", "key-c"]);
+    expect(slots.get("chat.example:42")).toBe("keyA_keyB_keyC");
   });
 
   it("reports an unreadable pin slot as unavailable and never overwrites it", async () => {
     const slots = pinStoreDouble({ "chat.example:42": "[not json" });
     expect(await getIdentityPin("chat.example", "42")).toEqual({ status: "unavailable" });
-    expect(await storeIdentityPin("chat.example", "42", "key-b")).toBe("failed");
+    expect(await storeIdentityPin("chat.example", "42", "keyB")).toBe("failed");
     expect(slots.get("chat.example:42")).toBe("[not json");
   });
 });

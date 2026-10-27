@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -125,6 +126,22 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 	}, nil
 }
 
+// sessionIdentityKeyTimeout bounds the session-row write of the device key, so
+// a busy database writer cannot stall the handshake behind it.
+const sessionIdentityKeyTimeout = 2 * time.Second
+
+// recordSessionIdentityKey stores the device key on the session row. The
+// context is the hub's lifecycle, not the hijacked request's, with its own
+// deadline. Failure is log-only: the key is also held on the Client, and the
+// row is only kept for a resumed connection and future device lists.
+func (h *Hub) recordSessionIdentityKey(userID int64, tokenHash, key string) {
+	ctx, cancel := context.WithTimeout(h.life, sessionIdentityKeyTimeout)
+	defer cancel()
+	if err := h.authn.RecordSessionIdentityKey(ctx, tokenHash, key); err != nil {
+		slog.Warn("ws auth: recording the session identity key failed", "user_id", userID, "err", err)
+	}
+}
+
 // authIdentityKey returns the device identity key an auth frame carried, or ""
 // when it carried none or an invalid one. An invalid key is logged and
 // ignored, never an auth failure: a bad key must not lock a device out of its
@@ -206,9 +223,7 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	// reachable, and never written again, so reading it needs no lock.
 	c.identityKey = hint.IdentityKey
 	if hint.IdentityKey != "" {
-		if err := h.authn.RecordSessionIdentityKey(r.Context(), tokenHash, hint.IdentityKey); err != nil {
-			slog.Warn("ws auth: recording the session identity key failed", "user_id", user.ID, "err", err)
-		}
+		h.recordSessionIdentityKey(user.ID, tokenHash, hint.IdentityKey)
 	}
 
 	// Look up role name for protocol-compliant payloads and cache on client.
