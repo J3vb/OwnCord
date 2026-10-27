@@ -519,15 +519,16 @@ type Role struct {
 }
 
 type Session struct {
-	ID        int64   `json:"id"`
-	UserID    int64   `json:"userId"`
-	Token     string  `json:"token"`
-	Device    *string `json:"device"`
-	IpAddress *string `json:"ipAddress"`
-	CreatedAt string  `json:"createdAt"`
-	LastUsed  string  `json:"lastUsed"`
-	ExpiresAt string  `json:"expiresAt"`
-	Unseen    int64   `json:"unseen"`
+	ID                int64   `json:"id"`
+	UserID            int64   `json:"userId"`
+	Token             string  `json:"token"`
+	Device            *string `json:"device"`
+	IpAddress         *string `json:"ipAddress"`
+	CreatedAt         string  `json:"createdAt"`
+	LastUsed          string  `json:"lastUsed"`
+	ExpiresAt         string  `json:"expiresAt"`
+	Unseen            int64   `json:"unseen"`
+	IdentityPublicKey *string `json:"identityPublicKey"`
 }
 
 type Setting struct {

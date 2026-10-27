@@ -298,6 +298,11 @@ type voiceE2EEAnnounceBroadcast struct {
 	// VideoDecode is the sender's sanitized decodable video codec list
 	// (WP M-4), omitted when absent so legacy announces serialize unchanged.
 	VideoDecode []string `json:"video_decode,omitempty"`
+	// IdentityPublicKey is the announcing connection's device identity key
+	// (key per device), omitted when that connection sent none so an announce
+	// from an older client serializes unchanged. Peers verify Signature
+	// against it when present, else against the member's published key.
+	IdentityPublicKey string `json:"identity_public_key,omitempty"`
 }
 
 // voiceE2EEOfferRelay is the server→client relay with from_user_id.
@@ -710,10 +715,11 @@ func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceE2EEAnnounceBC,
 		Payload: voiceE2EEAnnounceBroadcast{
-			UserID:      userID,
-			PublicKey:   a.key,
-			Signature:   a.sig,
-			VideoDecode: a.videoDecode,
+			UserID:            userID,
+			PublicKey:         a.key,
+			Signature:         a.sig,
+			VideoDecode:       a.videoDecode,
+			IdentityPublicKey: a.identityKey,
 		},
 	})
 }

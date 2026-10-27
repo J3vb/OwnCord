@@ -502,7 +502,7 @@ func (d *DB) GetSessionByTokenHash(ctx context.Context, tokenHash string) (*Sess
 	if err != nil {
 		return nil, fmt.Errorf("GetSessionByTokenHash: %w", err)
 	}
-	sess := sessionFromGen(s)
+	sess := sessionFromColumns(s.ID, s.UserID, s.Token, s.Device, s.IpAddress, s.CreatedAt, s.LastUsed, s.ExpiresAt, s.Unseen)
 	return &sess, nil
 }
 

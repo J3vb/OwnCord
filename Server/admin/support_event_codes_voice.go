@@ -24,5 +24,8 @@ func init() {
 		"hub: evicting oldest connection over the per-user cap":                    "hub_evicting_oldest_connection_over_cap",
 		"handleVoiceJoin: could not verify voice state cleared after move":         "handlevoicejoin_could_not_verify_voice_state_after_move",
 		"handleVoiceJoin: stale voice state persists after move, aborting join":    "handlevoicejoin_stale_voice_state_persists_after_move",
+		"ws auth: identity_public_key ignored, not a string":                       "ws_auth_identity_key_ignored_not_string",
+		"ws auth: identity_public_key ignored, invalid":                            "ws_auth_identity_key_ignored_invalid",
+		"ws auth: recording the session identity key failed":                       "ws_auth_record_session_identity_key_failed",
 	})
 }

@@ -140,7 +140,7 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 
 	// video_decode (WP M-4) is optional and never fatal: a malformed list is
 	// dropped and the announce (the key) is still accepted.
-	announce := e2eeAnnounce{key: pubKey, sig: sig, videoDecode: sanitizeVideoDecode(announceCmd.VideoDecode)}
+	announce := e2eeAnnounce{key: pubKey, sig: sig, videoDecode: sanitizeVideoDecode(announceCmd.VideoDecode), identityKey: info.IdentityKey}
 	msg := buildVoiceE2EEAnnounce(userID, announce)
 	return Result{
 		SetE2EEAnnounce: &announce,

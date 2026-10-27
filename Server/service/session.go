@@ -22,6 +22,10 @@ import (
 // depending on it would close a construction cycle.
 type SessionService struct {
 	st Store
+	// keys stores a session's device identity key. It is a slice interface
+	// rather than a Store method so the Store surface does not grow
+	// (datastore_ratchet_test.go); nil when st does not provide it.
+	keys SessionKeyStore
 	// batch, when set, takes TouchSession's write off the writer's hot path
 	// (P5-S07). nil writes each touch at once, which is what tests and the
 	// admin panel's own instance get.
@@ -30,7 +34,29 @@ type SessionService struct {
 
 // NewSessionService creates a SessionService.
 func NewSessionService(st Store) *SessionService {
-	return &SessionService{st: st}
+	keys, _ := st.(SessionKeyStore)
+	return &SessionService{st: st, keys: keys}
+}
+
+// SessionKeyStore is the one write RecordSessionIdentityKey needs.
+type SessionKeyStore interface {
+	SetSessionIdentityKey(ctx context.Context, tokenHash, key string) error
+}
+
+// RecordSessionIdentityKey stores the device identity public key a WebSocket
+// auth frame carried on the session it authenticated (voice E2EE, key per
+// device). The caller has already validated key with ValidateIdentityKey. A
+// failure is returned wrapped in ErrInternal; the hub logs it and carries on,
+// because the key also rides on the live connection and a missed write never
+// blocks sign-in.
+func (s *SessionService) RecordSessionIdentityKey(ctx context.Context, tokenHash, key string) error {
+	if s.keys == nil {
+		return fmt.Errorf("%w: store cannot record session identity keys", ErrInternal)
+	}
+	if err := s.keys.SetSessionIdentityKey(ctx, tokenHash, key); err != nil {
+		return fmt.Errorf("%w: failed to record session identity key: %w", ErrInternal, err)
+	}
+	return nil
 }
 
 // ─── Bearer-token resolution (B3-8 auth family, session sub-family) ─────────

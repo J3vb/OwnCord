@@ -172,7 +172,7 @@ func (d *DB) ListUserSessions(ctx context.Context, userID int64) ([]Session, err
 	}
 	sessions := make([]Session, 0, len(rows))
 	for _, s := range rows {
-		sessions = append(sessions, sessionFromGen(s))
+		sessions = append(sessions, sessionFromColumns(s.ID, s.UserID, s.Token, s.Device, s.IpAddress, s.CreatedAt, s.LastUsed, s.ExpiresAt, s.Unseen))
 	}
 	return sessions, nil
 }
@@ -241,4 +241,18 @@ func (d *DB) SignOutEverywhere(ctx context.Context, userID int64) (sessions, tok
 		return 0, 0, fmt.Errorf("SignOutEverywhere commit: %w", err)
 	}
 	return sessions, tokens, nil
+}
+
+// SetSessionIdentityKey stores the device identity public key a WebSocket
+// auth frame carried on the session that authenticated it. A token hash that
+// matches no row changes nothing and is not an error: the session may have
+// been revoked between the handshake read and this write.
+func (d *DB) SetSessionIdentityKey(ctx context.Context, tokenHash, key string) error {
+	if _, err := d.q.SetSessionIdentityKey(ctx, dbgen.SetSessionIdentityKeyParams{
+		IdentityPublicKey: &key,
+		Token:             tokenHash,
+	}); err != nil {
+		return fmt.Errorf("SetSessionIdentityKey: %w", err)
+	}
+	return nil
 }
