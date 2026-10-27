@@ -35,8 +35,9 @@ import {
   type DmUser,
 } from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
+import { setStickers, stickersStore } from "../../stores/stickers.store";
 import { uiStore } from "../../stores/ui.store";
-import { getChannelMessages } from "../../stores/messages.store";
+import { getChannelMessages, markStickersDeleted } from "../../stores/messages.store";
 import { isTextLikeChannel, type ChannelActivityEntry, type ReadyActivity } from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import {
@@ -55,6 +56,7 @@ import {
   gameActivityPolicyIsOff,
   hasReceivedReady,
   readPointerEnabled,
+  stickersEnabled,
 } from "../../lib/serverCapabilities";
 import { showToast } from "../../lib/toast";
 import {
@@ -293,6 +295,25 @@ export function applyReadyEmoji(api: DispatchApi | undefined): void {
       .then((list) => setCustomEmoji(list, emojiRevAtFetch))
       .catch((err) => log.warn("Failed to load custom emoji", { error: String(err) }));
   }
+}
+
+/**
+ * The custom-sticker slice of `ready` (WP 8.8). Like emoji, the set is not in
+ * the ready payload: load it once here, only on a server that advertises the
+ * `stickers` capability (applyReadyCapabilities has already run), and let
+ * `sticker_update` keep it fresh. A failure is non-fatal: the picker shows its
+ * empty state until the next broadcast.
+ *
+ * The revision snapshot mirrors the emoji one: a `sticker_update` that lands
+ * while this GET is in flight bumps it, and the stale reply is then dropped.
+ */
+export function applyReadyStickers(api: DispatchApi | undefined): void {
+  if (!stickersEnabled() || api?.listStickers === undefined) return;
+  const revAtFetch = stickersStore.getState().rev;
+  api
+    .listStickers()
+    .then((list) => setStickers(list, revAtFetch))
+    .catch((err) => log.warn("Failed to load custom stickers", { error: String(err) }));
 }
 
 /**
@@ -703,6 +724,18 @@ export function handleRolesUpdate(payload: Payload<"roles_update">): void {
 export function handleEmojiUpdate(payload: Payload<"emoji_update">): void {
   log.info("Custom emoji updated", { count: payload.emoji?.length ?? 0 });
   setCustomEmoji(payload.emoji ?? []);
+}
+
+// Custom stickers changed server-side (uploaded, renamed or deleted). Whole
+// set, like emoji_update: a sticker deleted while a picker is open drops out of
+// its grid, and a stale id can no longer be sent from the next open.
+export function handleStickerUpdate(payload: Payload<"sticker_update">): void {
+  log.info("Custom stickers updated", { count: payload.stickers?.length ?? 0 });
+  const stickers = payload.stickers ?? [];
+  setStickers(stickers);
+  // Messages already on screen still name the removed sticker: turn them into
+  // "Deleted sticker" rows (never fetching the image again).
+  markStickersDeleted(new Set(stickers.map((s) => s.id)));
 }
 
 export function handleUserUpdate(payload: Payload<"user_update">): void {

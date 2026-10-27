@@ -26,6 +26,7 @@ type readyCapabilitiesPayload struct {
 	ThreadFollows             bool  `json:"thread_follows"` // WP 6.9c: thread_follow, thread_follow_update and ready.threads
 	Threads                   bool  `json:"threads"`        // WP 6.9c: thread_* commands and frames
 	UserNotes                 bool  `json:"user_notes"`
+	VoiceMessages             bool  `json:"voice_messages"` // WP 8.9: duration_ms and waveform on an upload and its attachment
 }
 
 func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity bool) readyCapabilitiesPayload {
@@ -46,5 +47,6 @@ func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity bool) r
 		ThreadFollows:             threads,
 		Threads:                   threads,
 		UserNotes:                 true,
+		VoiceMessages:             true,
 	}
 }

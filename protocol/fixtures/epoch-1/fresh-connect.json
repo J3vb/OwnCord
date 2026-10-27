@@ -67,7 +67,8 @@
               "stickers": true,
               "thread_follows": true,
               "threads": true,
-              "user_notes": true
+              "user_notes": true,
+              "voice_messages": true
             },
             "channels": [
               {
@@ -374,7 +375,8 @@
               "stickers": true,
               "thread_follows": true,
               "threads": true,
-              "user_notes": true
+              "user_notes": true,
+              "voice_messages": true
             },
             "channels": [
               {

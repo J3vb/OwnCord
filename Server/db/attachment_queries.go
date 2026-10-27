@@ -38,6 +38,13 @@ type AttachmentAccess struct {
 // uploaderID records who uploaded the file for ownership checks on unlinked files.
 // width and height are optional image dimensions (pass nil for non-image files).
 func (d *DB) CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error {
+	return d.CreateAttachmentVoice(ctx, id, uploaderID, filename, storedAs, mimeType, size, width, height, nil, nil)
+}
+
+// CreateAttachmentVoice is CreateAttachment plus the voice message fields
+// (WP 8.9): durationMs is the clip length and waveform its canonical
+// base64url (unpadded) amplitude bytes. Both are nil for any other file.
+func (d *DB) CreateAttachmentVoice(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height, durationMs *int, waveform *string) error {
 	if err := d.q.CreateAttachment(ctx, dbgen.CreateAttachmentParams{
 		ID:         id,
 		UploaderID: &uploaderID,
@@ -47,6 +54,8 @@ func (d *DB) CreateAttachment(ctx context.Context, id string, uploaderID int64, 
 		Size:       size,
 		Width:      ptrItoI64(width),
 		Height:     ptrItoI64(height),
+		DurationMs: ptrItoI64(durationMs),
+		Waveform:   waveform,
 	}); err != nil {
 		return fmt.Errorf("CreateAttachment: %w", err)
 	}
@@ -210,7 +219,7 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 	}
 
 	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-		`SELECT id, message_id, filename, size, mime_type, width, height
+		`SELECT id, message_id, filename, size, mime_type, width, height, duration_ms, waveform
 		 FROM attachments WHERE message_id IN (%s)`,
 		strings.Join(placeholders, ","),
 	)
@@ -225,7 +234,7 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 		var id string
 		var msgID int64
 		var ai AttachmentInfo
-		if scanErr := rows.Scan(&id, &msgID, &ai.Filename, &ai.Size, &ai.Mime, &ai.Width, &ai.Height); scanErr != nil {
+		if scanErr := rows.Scan(&id, &msgID, &ai.Filename, &ai.Size, &ai.Mime, &ai.Width, &ai.Height, &ai.DurationMs, &ai.Waveform); scanErr != nil {
 			return nil, fmt.Errorf("GetAttachmentsByMessageIDs scan: %w", scanErr)
 		}
 		ai.ID = id

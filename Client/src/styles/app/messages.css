@@ -1760,6 +1760,95 @@ ul.md-list-nested {
   display: none;
 }
 
+/* Voice message (WP 8.9): round play button, waveform that fills as it plays,
+   time left and speed. The fill is a class per bar, so reduced motion changes
+   nothing: no bar animates either way. */
+.msg-voice {
+  max-width: 400px;
+}
+.msg-voice .msg-file-inner {
+  align-items: center;
+  gap: 10px;
+}
+.msg-voice-audio[hidden] {
+  display: none;
+}
+.msg-voice-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  flex-shrink: 0;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.msg-voice-play:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.msg-voice-play:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.msg-voice-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.msg-voice-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  cursor: pointer;
+  touch-action: none;
+  border-radius: var(--radius-sm);
+}
+.msg-voice-wave:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.msg-voice-bar {
+  flex: 1;
+  min-width: 1px;
+  max-width: 5px;
+  border-radius: 2px;
+  background: var(--text-muted);
+  opacity: 0.55;
+}
+.msg-voice-bar.played {
+  background: var(--accent-text);
+  opacity: 1;
+}
+.msg-voice-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-voice-time {
+  font-variant-numeric: tabular-nums;
+}
+.msg-voice-speed {
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-normal);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+.msg-voice-error {
+  font-size: var(--font-size-xs);
+  color: var(--text-danger);
+}
+
 /* Stands in for a video/audio player until the clip is wanted: nothing is
    downloaded before it is pressed. */
 .msg-media-play {
@@ -2280,4 +2369,26 @@ ul.md-list-nested {
     min-width: 44px;
     min-height: 44px;
   }
+}
+
+/* ── Sticker messages (WP 8.8) ── */
+.msg-sticker {
+  width: 160px;
+  height: 160px;
+  margin-top: 2px;
+}
+.msg-sticker-img {
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+}
+.msg-sticker-deleted {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-style: italic;
 }

@@ -17,12 +17,14 @@ export interface ReadyCapabilityFlags {
   readonly profile_banners?: boolean;
   readonly dm_privacy?: boolean;
   readonly polls?: boolean;
+  readonly stickers?: boolean;
   readonly threads?: boolean;
   readonly forums?: boolean;
   readonly multi_role?: boolean;
   readonly manage_nicknames?: boolean;
   readonly id_mentions?: boolean;
   readonly thread_follows?: boolean;
+  readonly voice_messages?: boolean;
   readonly game_activity?: boolean;
 }
 
@@ -105,6 +107,15 @@ export function pollsEnabled(): boolean {
 }
 
 /**
+ * Whether the server has custom stickers (WP 8.8): `sticker_id` on `chat_send`,
+ * `sticker` on messages, `sticker_update` and `/api/v1/stickers`. False hides
+ * the composer's sticker button and the Stickers tab; nothing is fetched.
+ */
+export function stickersEnabled(): boolean {
+  return caps?.stickers === true;
+}
+
+/**
  * Whether the server supports threads (WP 6.9c): the `thread_*` frames and `GET
  * /channels/{id}/threads`. False hides Create Thread, the header's Threads
  * button and the chip.
@@ -156,6 +167,14 @@ export function idMentionsEnabled(): boolean {
  */
 export function threadFollowsEnabled(): boolean {
   return caps?.thread_follows === true && caps.threads === true;
+}
+
+/**
+ * Whether the server keeps a voice message's length and waveform on the upload
+ * and its attachment (WP 8.9). False hides the composer's mic button.
+ */
+export function voiceMessagesEnabled(): boolean {
+  return caps?.voice_messages === true;
 }
 
 /**

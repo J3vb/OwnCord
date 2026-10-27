@@ -378,3 +378,146 @@
 .msg-gif-fav[hidden] {
   display: none;
 }
+
+/* ── Expression popup (WP 8.8): GIFs | Stickers | Emoji ── */
+.expression-popup {
+  position: absolute;
+  z-index: 90;
+  bottom: 100%;
+  right: 0;
+  width: 320px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  margin-bottom: 4px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.xp-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 8px 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.xp-tab {
+  flex: 1;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.xp-tab:hover {
+  color: var(--text-normal);
+}
+.xp-tab.active {
+  color: var(--text-normal);
+  border-bottom-color: var(--accent);
+}
+.xp-tab:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.xp-panel {
+  height: 400px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* The pickers drop their own popup shell inside the panel. */
+.xp-panel > .emoji-picker,
+.xp-panel > .gif-picker,
+.xp-panel > .sticker-picker {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: auto;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+  overflow: hidden;
+}
+
+/* ── Sticker picker ── */
+.sticker-picker {
+  background: var(--bg-primary);
+}
+.sp-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sp-search {
+  width: 100%;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+}
+.sp-search::placeholder {
+  color: var(--text-muted);
+}
+.sp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px 8px;
+}
+.sp-label {
+  padding: 8px 4px 4px;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.sp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.sp-item {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.1s;
+}
+.sp-item:hover {
+  background: var(--bg-hover);
+}
+.sp-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.sp-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.sp-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: var(--font-size-sm);
+}
+.sp-empty-hint {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}

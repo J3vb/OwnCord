@@ -2637,6 +2637,17 @@ Files are validated against blocked magic bytes (PE executables, ELF binaries, M
 
 Before any of its bytes are read, the file name is checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and looks only at the final extension, the one Windows opens the file by, so `report.pdf.bat` is refused when `bat` is blocked and `report.bat.pdf` is not; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
 
+#### Voice messages
+
+A voice message is an ordinary attachment that also carries its length and a small waveform, so a client can draw the player before it downloads the file (server capability `voice_messages`, WP 8.9). Send both as query parameters, not form fields:
+
+| Parameter           | Value                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `voice_duration_ms` | Clip length in milliseconds, a decimal integer from 1 to 300000                            |
+| `voice_waveform`    | Amplitude bytes, base64url without padding (`RawURLEncoding`), 1 to 256 bytes once decoded |
+
+Send both or neither; with neither the upload is an ordinary one, exactly as before. One alone, a number out of range or not a plain decimal, a waveform that is not valid unpadded base64url or decodes outside 1 to 256 bytes, or a repeated parameter is refused with `400 BAD_REQUEST` before any quota is reserved or any of the body is read. After the type is sniffed from the file's own bytes, a voice upload whose type is not `audio/*`, `video/webm`, `video/mp4` or `application/ogg` is refused with `400 BAD_REQUEST` and the stored file is deleted. The waveform is stored as the canonical encoding of the decoded bytes. Each upload is its own attachment: sending the same clip again (a retry after a dropped connection) makes a second, independent row. The two values come back on the attachment of the message that carries it, in history, pins, threads and forwarded copies.
+
 #### Response 201 Created
 
 ```json
@@ -2651,7 +2662,7 @@ Before any of its bytes are read, the file name is checked against the server's 
 }
 ```
 
-`width` and `height` are only present for image files.
+`width` and `height` are only present for image files. `duration_ms` (integer) and `waveform` (string, the canonical base64url form) are only present for a voice upload and are omitted otherwise.
 
 ---
 

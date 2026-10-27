@@ -227,7 +227,9 @@ CREATE TABLE IF NOT EXISTS attachments (
     uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
     width       INTEGER,
     height      INTEGER,
-    uploader_id INTEGER REFERENCES users(id)
+    uploader_id INTEGER REFERENCES users(id),
+    duration_ms INTEGER,
+    waveform    TEXT
 );
 -- B5-2: the upload byte counter UploadService.Reserve charges before every
 -- store write, so no upload succeeds without it. Keep in step with

@@ -29,6 +29,7 @@ vi.mock("@lib/httpProxy", () => ({
 import { listSessionResets, registerSessionReset } from "../../src/lib/sessionRegistry";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
+import { stickersStore, setStickers } from "../../src/stores/stickers.store";
 import {
   externalPartition,
   fetchMediaAsObjectUrl,
@@ -131,6 +132,7 @@ let snapshotRevBefore = 0;
 const COLLAPSED_KEY = "owncord:collapsed:a.example";
 
 let emojiRevBefore = 0;
+let stickerRevBefore = 0;
 let partitionBefore = "";
 const FILE_URL = "https://chat.example/api/v1/files/1";
 const LINK_URL = "https://news.example/story";
@@ -292,6 +294,19 @@ const PROBES: readonly Probe[] = [
     },
     isInitial: () =>
       emojiStore.getState().emoji.length === 0 && (emojiStore.getState().rev ?? 0) > emojiRevBefore,
+  },
+  {
+    // Bumped, not reset (like emoji): a late GET /stickers from the old server
+    // must not match the next session's snapshot.
+    name: "stickers:store",
+    mutate: () => {
+      stickerRevBefore = stickersStore.getState().rev;
+      setStickers([{ id: 1, name: "Wave", emoji: null, url: "/api/v1/stickers/1/image" }]);
+    },
+    isInitial: () =>
+      stickersStore.getState().stickers.length === 0 &&
+      !stickersStore.getState().loaded &&
+      stickersStore.getState().rev > stickerRevBefore,
   },
   {
     name: "attachments:caches",
@@ -593,6 +608,9 @@ const EXEMPT: readonly string[] = [
   // Its reset is not observable: a kept DM needs the live voice session on that
   // channel, and the voice reset that follows prunes the set anyway.
   "dm:kept-calls",
+  // Playing <audio> elements, not store state; features/voice-messages/player.test.ts
+  // ("pauses every playing clip when the session ends") runs the reset.
+  "voice-messages:player",
   // Per-subscriber names built from a counter in auth.store (onAuthCleared);
   // page-scoped callers only, each removes its own entry with its disposer.
   "auth-cleared#${authClearedSeq}",

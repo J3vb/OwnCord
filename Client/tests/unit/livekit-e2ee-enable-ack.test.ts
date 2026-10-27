@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ExternalE2EEKeyProvider, Room, RoomEvent } from "livekit-client";
 
-// The installed livekit-client, patched in patches/livekit-client+2.22.3.patch.
+// The installed livekit-client, patched in patches/livekit-client+2.23.0.patch.
 // The E2EE worker acknowledges every `enable` it is sent; the manager then looks
 // the participant up by identity. A peer who left between the post and the ack
 // (a quick leave, or the room's own reconnect re-posting for every peer) is no
