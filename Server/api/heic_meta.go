@@ -7,6 +7,7 @@ package api
 // bounded size, found where the boxes say it is.
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -183,15 +184,15 @@ func validateHEIC(r io.ReaderAt, size int64) (heicInfo, error) {
 		return heicInfo{}, refuse("primary item is not a coded still")
 	}
 	budget := heicBudget{pixels: 2 * heicMaxPixels, nals: heicMaxNALs, bytes: uint64(size)}
+	decoded := m.decodedItems()
 	coded := 0
-	for id, t := range m.types {
-		switch t {
-		case "hvc2":
+	for _, id := range decoded {
+		t := m.types[id]
+		if t != "hvc1" && t != "grid" {
 			return heicInfo{}, refuse("unsupported item type")
-		case "hvc1", "grid":
-			if err := m.checkItemProps(id); err != nil {
-				return heicInfo{}, err
-			}
+		}
+		if err := m.checkItemProps(id); err != nil {
+			return heicInfo{}, err
 		}
 		if t == "hvc1" {
 			coded++
@@ -203,22 +204,10 @@ func validateHEIC(r io.ReaderAt, size int64) (heicInfo, error) {
 	if coded == 0 {
 		return heicInfo{}, refuse("no coded image")
 	}
-	for id, t := range m.types {
-		if t == "grid" {
-			if err := m.checkGrid(r, id, &budget); err != nil {
-				return heicInfo{}, err
-			}
+	if m.types[m.primary] == "grid" {
+		if err := m.checkGrid(r, m.primary, &budget); err != nil {
+			return heicInfo{}, err
 		}
-	}
-	if len(m.dimg) > 0 {
-		for from := range m.dimg {
-			if m.types[from] != "grid" {
-				return heicInfo{}, refuse("tiles of a non-grid item")
-			}
-		}
-	}
-	if t := m.types[m.primary]; t == "grid" && len(m.dimg[m.primary]) == 0 {
-		return heicInfo{}, refuse("grid without tiles")
 	}
 	body, found := m.property(m.primary, "irot")
 	return heicInfo{quarterTurn: found && len(body) >= 1 && body[0]&1 == 1}, nil
@@ -238,6 +227,49 @@ func (m *heicMeta) checkItemProps(id uint32) error {
 	return nil
 }
 
+// decodedItems lists the items the decoder reads for the primary image: the
+// primary item, a grid's tiles, and the alpha channel items that are
+// auxiliary to them (an auxC of an alpha type, whatever the item's own type).
+// Every other item (Exif, XMP, a tone map, thumbnails, depth or gain maps) is
+// never decoded, and the layout check does not look at it.
+func (m *heicMeta) decodedItems() []uint32 {
+	list := []uint32{m.primary}
+	if m.types[m.primary] == "grid" {
+		list = append(list, m.dimg[m.primary]...)
+	}
+	seen := make(map[uint32]bool, len(list))
+	var out []uint32
+	for _, id := range list {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+		for _, a := range m.auxl {
+			if a[1] != id || seen[a[0]] || !m.isAlpha(a[0]) {
+				continue
+			}
+			seen[a[0]] = true
+			out = append(out, a[0])
+		}
+	}
+	return out
+}
+
+// isAlpha reports an auxC property of one of the alpha auxiliary types.
+func (m *heicMeta) isAlpha(id uint32) bool {
+	body, ok := m.property(id, "auxC")
+	if !ok || len(body) < 5 {
+		return false
+	}
+	urn, _, _ := bytes.Cut(body[4:], []byte{0})
+	switch string(urn) {
+	case "urn:mpeg:mpegB:cicp:systems:auxiliary:alpha", "urn:mpeg:hevc:2015:auxid:1":
+		return true
+	}
+	return false
+}
+
 // checkGrid reads a grid's descriptor and holds its tiles to it.
 func (m *heicMeta) checkGrid(r io.ReaderAt, id uint32, budget *heicBudget) error {
 	ext, located := m.extents[id]
@@ -246,7 +278,14 @@ func (m *heicMeta) checkGrid(r io.ReaderAt, id uint32, budget *heicBudget) error
 		return refuse("grid descriptor")
 	}
 	var desc [12]byte
-	if err := extentsAt(r, ext, 0, desc[:total]); err != nil {
+	if m.inIdat[id] {
+		// Phones keep the descriptor in the idat box: its extents are
+		// offsets into that box's body, as the decoder reads them.
+		d := desc[:0]
+		for _, e := range ext {
+			d = append(d, m.idat[e.off:e.off+e.length]...)
+		}
+	} else if err := extentsAt(r, ext, 0, desc[:total]); err != nil {
 		return err
 	}
 	rows, cols := uint64(desc[2])+1, uint64(desc[3])+1

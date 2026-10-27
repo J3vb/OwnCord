@@ -115,7 +115,7 @@ func parseHvcC(body []byte) (lengthSize int, pixels int64, err error) {
 func (m *heicMeta) checkCoded(r io.ReaderAt, id uint32, budget *heicBudget) error {
 	cfg, found := m.property(id, "hvcC")
 	ext, located := m.extents[id]
-	if !found || !located {
+	if !found || !located || m.inIdat[id] {
 		return refuse("coded image not locatable")
 	}
 	lengthSize, pixels, err := parseHvcC(cfg)

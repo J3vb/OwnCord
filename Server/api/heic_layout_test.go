@@ -29,8 +29,10 @@ type hlayout struct {
 	props   [][]byte                    // whole property boxes, in ipco order
 	ipma    []byte                      // the whole ipma box
 	iref    []byte                      // the whole iref box, or nil
+	idat    []byte                      // the body of an idat box, or nil
 	primary uint16
 	extra   [][]byte // further top-level boxes, after meta
+	inMeta  [][]byte // further boxes inside meta
 }
 
 func u16(v int) []byte { return binary.BigEndian.AppendUint16(nil, uint16(v)) }
@@ -82,6 +84,32 @@ func plainLayout(t *testing.T) hlayout {
 	}
 }
 
+func auxC(urn string) []byte {
+	return isoBox("auxC", be32(0), append([]byte(urn), 0))
+}
+
+// ilocV1 is a version 1 iloc with 4-byte offsets and lengths: {id, method,
+// offset, length} each. An offset is in the file (method 0) or in the idat body (1).
+func ilocV1(entries ...[4]uint32) func(uint32) []byte {
+	return func(dataOff uint32) []byte {
+		body := append(be32(1<<24), 0x44, 0x00)
+		body = append(body, u16(len(entries))...)
+		for _, e := range entries {
+			body = append(body, u16(int(e[0]))...)
+			body = append(body, u16(int(e[1]))...)
+			body = append(body, u16(0)...)
+			body = append(body, u16(1)...)
+			off := e[2]
+			if e[1] == 0 {
+				off += dataOff
+			}
+			body = append(body, be32(off)...)
+			body = append(body, be32(e[3])...)
+		}
+		return isoBox("iloc", body)
+	}
+}
+
 func (l hlayout) build() []byte {
 	ftyp := isoBox("ftyp", []byte("heic"), be32(0), []byte("mif1heic"))
 	mdat := isoBox("mdat", l.data)
@@ -95,6 +123,10 @@ func (l hlayout) build() []byte {
 	if l.iref != nil {
 		parts = append(parts, l.iref)
 	}
+	if l.idat != nil {
+		parts = append(parts, isoBox("idat", l.idat))
+	}
+	parts = append(parts, l.inMeta...)
 	out := append(bytes.Clone(ftyp), mdat...)
 	out = append(out, isoBox("meta", parts...)...)
 	for _, x := range l.extra {
@@ -143,6 +175,44 @@ func gridLayout(t *testing.T, rows, cols int, canvasW, canvasH int) hlayout {
 	return l
 }
 
+// appleLayout is the layout a phone writes: a grid primary whose descriptor
+// is in the idat box (construction method 1), hvc1 tiles, and items that are
+// never decoded: Exif, a tone map, a thumbnail (thmb) and an auxiliary image
+// that is not alpha (a gain map), the last two with properties outside the
+// allowed set.
+func appleLayout(t *testing.T) hlayout {
+	t.Helper()
+	l := gridLayout(t, 1, 2, 32, 16)
+	tile := l.data[:len(l.data)-8]
+	oneTile := len(tile) / 2
+	desc := bytes.Clone(l.data[len(l.data)-8:])
+	l.idat = desc
+	// iloc: tiles 1, 2 and the extra images in the file body; the grid (3) in idat.
+	entries := [][4]uint32{{1, 0, 0, uint32(oneTile)}, {2, 0, uint32(oneTile), uint32(oneTile)}, {3, 1, 0, 8}}
+	l.data = bytes.Clone(tile)
+	add := func(id uint32, data []byte) {
+		entries = append(entries, [4]uint32{id, 0, uint32(len(l.data)), uint32(len(data))})
+		l.data = append(l.data, data...)
+	}
+	add(20, []byte("Exif\x00\x00MM\x00*\x00\x00\x00\x08\x00\x00"))
+	add(21, tile[:oneTile]) // a thumbnail
+	add(23, tile[:oneTile]) // a gain map
+	l.iloc = ilocV1(entries...)
+	l.items = append(l.items, hitem{20, "Exif"}, hitem{21, "hvc1"}, hitem{22, "tmap"}, hitem{23, "hvc1"})
+	l.props = append(l.props,
+		isoBox("clli", be32(0)),                         // 4: not an allowed property
+		isoBox("mdcv", make([]byte, 24)),                // 5
+		auxC("urn:com:apple:photo:2020:aux:hdrgainmap")) // 6
+	// Items 21 and 23 are small images; their ispe must not matter: they are not decoded.
+	l.ipma = ipmaV0([]int{1, 1, 2}, []int{2, 1, 2}, []int{3, 3}, []int{21, 1, 2, 4, 5}, []int{22, 4}, []int{23, 1, 2, 6, 4})
+	l.iref = isoBox("iref", be32(0),
+		isoBox("dimg", u16(3), u16(2), append(u16(1), u16(2)...)),
+		isoBox("thmb", u16(21), u16(1), u16(3)),
+		isoBox("auxl", u16(23), u16(1), u16(3)),
+		isoBox("cdsc", u16(20), u16(1), u16(3)))
+	return l
+}
+
 // heicRefused uploads content and asserts that it is stored without
 // dimensions, that its preview is a 404 once with the empty marker kept, and
 // that nothing of the original is served in its place.
@@ -180,6 +250,7 @@ func TestHEICLayout_PlainStillAndGridConvert(t *testing.T) {
 	for name, content := range map[string][]byte{
 		"hand-built still":  plainLayout(t).build(),
 		"hand-built grid":   gridLayout(t, 1, 2, 32, 16).build(),
+		"phone layout":      appleLayout(t).build(),
 		"encoder-made grid": testHEICTiled(t, 130, 70),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -242,9 +313,28 @@ func TestHEICLayout_Refusals(t *testing.T) {
 			l.items = []hitem{{1, "iovl"}}
 			return l.build()
 		},
-		"an item type the decoder reads but the layout does not allow": func() []byte {
+		"an alpha item of a type the layout does not allow": func() []byte {
 			l := plain()
 			l.items = append(l.items, hitem{2, "hvc2"})
+			l.props = append(l.props, auxC("urn:mpeg:mpegB:cicp:systems:auxiliary:alpha"))
+			l.ipma = ipmaV0([]int{1, 1, 2}, []int{2, 3})
+			l.iref = isoBox("iref", be32(0), isoBox("auxl", u16(2), u16(1), u16(1)))
+			return l.build()
+		},
+		"a coded image whose data is in the idat box": func() []byte {
+			l := plain()
+			l.idat = l.data
+			l.iloc = ilocV1([4]uint32{1, 1, 0, uint32(len(l.data))})
+			return l.build()
+		},
+		"a grid descriptor that runs past the idat box": func() []byte {
+			l := appleLayout(t)
+			l.idat = l.idat[:5]
+			return l.build()
+		},
+		"a second idat box": func() []byte {
+			l := appleLayout(t)
+			l.inMeta = [][]byte{isoBox("idat", l.idat)}
 			return l.build()
 		},
 		"an essential association to a property that does not exist": func() []byte {
@@ -299,11 +389,10 @@ func TestHEICLayout_Refusals(t *testing.T) {
 			return l.build()
 		},
 		"more extents than the layout allows": func() []byte { l := plain(); l.iloc = extents(65); return l.build() },
-		"item data in the idat box": func() []byte {
+		"item data in a construction method the layout does not allow": func() []byte {
 			l := plain()
 			l.iloc = func(uint32) []byte {
-				body := []byte{1, 0, 0, 0, 0x44, 0x00, 0, 1, 0, 1, 0, 1, 0, 0}
-				body = append(body, 0, 1)
+				body := []byte{1, 0, 0, 0, 0x44, 0x00, 0, 1, 0, 1, 0, 2, 0, 0, 0, 1}
 				body = append(body, be32(0)...)
 				body = append(body, be32(8)...)
 				return isoBox("iloc", body)
@@ -385,6 +474,7 @@ func FuzzValidateHEIC(f *testing.F) {
 	t := &testing.T{}
 	f.Add(plainLayout(t).build())
 	f.Add(gridLayout(t, 1, 2, 32, 16).build())
+	f.Add(appleLayout(t).build())
 	f.Add(testHEIC(t, 16, 16))
 	f.Add(sequenceOnlyHEIC(t, 2))
 	f.Add([]byte("\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"))

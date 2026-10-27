@@ -19,6 +19,9 @@ type heicMeta struct {
 	assoc       map[uint32][]int // item to 1-based property indices
 	extents     map[uint32][]heicExtent
 	dimg        map[uint32][]uint32 // grid item to its tile items
+	auxl        [][2]uint32         // auxiliary item, the item it is auxiliary to
+	idat        []byte              // the body of the one idat box
+	inIdat      map[uint32]bool     // items whose extents lie in idat (method 1)
 	size        uint64              // the file's size
 }
 
@@ -61,12 +64,13 @@ func parseHEICMeta(meta []byte, size uint64) (*heicMeta, error) {
 	}
 	m := &heicMeta{
 		types: map[uint32]string{}, assoc: map[uint32][]int{},
-		extents: map[uint32][]heicExtent{}, dimg: map[uint32][]uint32{}, size: size,
+		extents: map[uint32][]heicExtent{}, dimg: map[uint32][]uint32{},
+		inIdat: map[uint32]bool{}, size: size,
 	}
 	seen := map[string]bool{}
 	for _, b := range boxes {
 		switch b.typ {
-		case "pitm", "iinf", "iloc", "iprp", "iref":
+		case "pitm", "iinf", "iloc", "iprp", "iref", "idat":
 			if seen[b.typ] {
 				return nil, refuse("repeated %s box", b.typ)
 			}
@@ -81,6 +85,8 @@ func parseHEICMeta(meta []byte, size uint64) (*heicMeta, error) {
 			err = m.parseIloc(b.body)
 		case "iref":
 			err = m.parseIref(b.body)
+		case "idat":
+			m.idat = b.body
 		case "iprp":
 			err = m.parseIprp(b.body)
 		}
@@ -90,6 +96,16 @@ func parseHEICMeta(meta []byte, size uint64) (*heicMeta, error) {
 	}
 	if !m.havePrimary {
 		return nil, refuse("no primary item")
+	}
+	for id, in := range m.inIdat {
+		if !in {
+			continue
+		}
+		for _, e := range m.extents[id] {
+			if e.off > uint64(len(m.idat)) || e.length > uint64(len(m.idat))-e.off {
+				return nil, refuse("extent outside the idat box")
+			}
+		}
 	}
 	return m, nil
 }
@@ -187,8 +203,12 @@ func (m *heicMeta) parseIloc(body []byte) error {
 	}
 	for range count {
 		id := uint32(r.uint(idSize))
-		if version >= 1 && r.uint(2)&15 != 0 {
-			return refuse("item data outside the file body")
+		method := uint64(0)
+		if version >= 1 {
+			method = r.uint(2) & 15
+		}
+		if method > 1 {
+			return refuse("item data construction method")
 		}
 		if r.uint(2) != 0 {
 			return refuse("item data in another file")
@@ -205,13 +225,16 @@ func (m *heicMeta) parseIloc(body []byte) error {
 		for range n {
 			r.skip(indexSize)
 			off, length := r.uint(offsetSize), r.uint(lengthSize)
+			// Method 0 is an offset in the file; method 1 one in the idat body,
+			// which is checked once that box is known.
 			if r.bad || length == 0 || base+off < base || base+off+length < base+off ||
-				base+off+length > m.size {
+				(method == 0 && base+off+length > m.size) {
 				return refuse("extent outside the file")
 			}
 			ext = append(ext, heicExtent{off: base + off, length: length})
 		}
 		m.extents[id] = ext
+		m.inIdat[id] = method == 1
 	}
 	if len(r.b) != 0 {
 		return refuse("malformed iloc")
@@ -237,6 +260,9 @@ func (m *heicMeta) parseIref(body []byte) error {
 		n := e.uint(2)
 		if e.bad || n*uint64(idSize) != uint64(len(e.b)) {
 			return refuse("malformed iref")
+		}
+		if b.typ == "auxl" && n >= 1 {
+			m.auxl = append(m.auxl, [2]uint32{from, uint32(e.uint(idSize))})
 		}
 		if b.typ != "dimg" {
 			continue

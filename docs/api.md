@@ -2717,13 +2717,18 @@ A HEIC, HEIF or TIFF file (stored as `image/heic`, `image/heif` or `image/tiff`,
 which the server tells apart by the file's own bytes) is the exception, because
 no webview shows one: the response is always a JPEG with `Content-Type:
 image/jpeg`, scaled to fit the 800×800 box when larger (never enlarged) and
-turned upright by the file's rotation. Only a HEIC with the plain still-image layout is converted: a file with
-only ftyp, meta, mdat, free and skip boxes (no movie or fragment boxes), whose
-primary item is a coded image or a grid of them; whose coded images each hold
-one picture on the base layer, with parameter sets only in the decoder
-configuration; whose items, locations and property associations are listed
-once each, with the properties the converter reads (ispe, hvcC, pixi, auxC,
-irot, imir, clap, colr); and whose grid, if any, lists each tile once. A HEIC
+turned upright by the file's rotation. Only a HEIC with the plain still-image layout is converted. The file has only
+ftyp, meta, mdat, free and skip boxes (no movie or fragment boxes), and its
+items, locations and property associations are listed once each. Its primary
+item is a coded image or a grid of them. A grid's descriptor may sit in the
+file or in the meta box's idat (as phones write it), and it lists each tile
+once. The images the decoder reads (the primary item, a grid's tiles and any
+alpha auxiliary image) are held to the layout: item data in the file body,
+one base-layer picture each, parameter sets only in the decoder configuration,
+and the properties the converter reads (ispe, hvcC, pixi, auxC, irot, imir,
+clap, colr). Items the decoder never reads — Exif and XMP, a tone map (tmap),
+thumbnails and other auxiliary images such as a depth or gain map — may carry
+anything. An overlay (iovl) or other derived primary item is not converted. A HEIC
 larger than about 22 megapixels (half as many at 10 bits), or a TIFF whose
 decode would take more than the 96 MiB bound (judged from its header), is not
 converted. If it cannot be converted — it is outside that layout, does not
