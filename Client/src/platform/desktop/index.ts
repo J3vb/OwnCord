@@ -28,6 +28,7 @@ import { settings } from "./settings";
 import { socket } from "./socket";
 import { systemIdle } from "./systemIdle";
 import { gameDetector } from "./gameDetector";
+import { mediaDetector } from "./mediaDetector";
 import { trayStatus } from "./trayStatus";
 import { updater } from "./updater";
 import { urlOpener } from "./urlOpener";
@@ -46,6 +47,7 @@ export const desktop: Platform = {
   externalContent,
   fileSaver,
   gameDetector,
+  mediaDetector,
   http,
   identity,
   logFiles,

@@ -248,6 +248,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
         // The taskbar/tray unread badge (DP-27): nothing to draw here.
         case "set_unread_badge":
           return null;
+        // The song read (WP 8.10): nothing is playing here.
+        case "detect_media":
+          return { state: "none" };
         // The "Add a game" picker's program list: nothing is running here.
         case "list_running_programs":
           return [];

@@ -27,6 +27,8 @@ import { bannerImages } from "./bannerImages";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
 import { playingForLine } from "../features/members/gameActivityLine";
+import { mountListeningCard } from "../features/members/listeningCard";
+import type { ListeningSong } from "../features/members/listeningLine";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +48,9 @@ export interface UserProfileData {
   readonly customStatus?: string | null;
   /** The game being played (WP 8.3), shown as "Playing <game> · for N min". */
   readonly activity?: { readonly name: string; readonly startedAt: number } | null;
+  /** The song being listened to (WP 8.10): a card under the game with a
+   *  progress bar that ticks while the popup is open. */
+  readonly listening?: ListeningSong | null;
   readonly joinDate?: string | null;
   /** Banner image path and colour (WP 6.11); absent or null = the gradient. */
   readonly banner?: string | null;
@@ -329,6 +334,16 @@ export function createUserProfilePopup(
       const text = createElement("span", { class: "upp-activity-text" });
       setText(text, playingForLine(user.activity, Date.now()));
       appendChildren(activityEl, icon, text);
+    }
+
+    // The song being listened to, under the game (WP 8.10). Its clock stops
+    // with the popup.
+    const listeningEl = createElement("div", {
+      class: "upp-listening",
+      "data-testid": "upp-listening",
+    });
+    if (user.listening != null && user.isDeleted !== true) {
+      disposable.addCleanup(mountListeningCard(listeningEl, user.listening, { prefix: "upp" }));
     }
 
     // Role badge, or the role picker for a viewer who may change it.
@@ -871,6 +886,7 @@ export function createUserProfilePopup(
       handleEl,
       customStatusEl,
       activityEl,
+      listeningEl,
       roleHolder,
       statusLine,
       aboutSection,

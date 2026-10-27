@@ -10,6 +10,7 @@ import {
   clearDmUnread,
   updateDmParticipant,
   setDmActivityLookup,
+  setDmListeningLookup,
 } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { channelsStore } from "../../src/stores/channels.store";
@@ -92,6 +93,23 @@ describe("dmStore", () => {
       expect(dm.recipient.activity).toEqual({ name: "Factorio", startedAt: 1_000 });
       expect(dm.participants[0]?.activity).toEqual({ name: "Factorio", startedAt: 1_000 });
       setDmActivityLookup(() => undefined);
+    });
+
+    it("seeds a new DM's partner with the song presence already gave them (WP 8.10)", () => {
+      const song = { title: "T", artist: "A", player: "Spotify", startedAt: 1, durationMs: 0 };
+      setDmListeningLookup((id) => (id === 1 ? song : undefined));
+      addDmChannel(makeDm());
+      const dm = dmStore.getState().channels[0]!;
+      expect(dm.recipient.listening).toEqual(song);
+      expect(dm.participants[0]?.listening).toEqual(song);
+      setDmListeningLookup(() => undefined);
+    });
+
+    it("keeps the song a re-sent DM already showed (WP 8.10)", () => {
+      const quiet = { id: 1, username: "alice", avatar: "", status: "online", listening: null };
+      addDmChannel(makeDm({ recipient: quiet, participants: [quiet] }));
+      addDmChannel(makeDm());
+      expect(dmStore.getState().channels[0]?.recipient.listening).toBeNull();
     });
 
     it("keeps the game a re-sent DM already showed", () => {

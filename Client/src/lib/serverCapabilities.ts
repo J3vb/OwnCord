@@ -26,6 +26,7 @@ export interface ReadyCapabilityFlags {
   readonly thread_follows?: boolean;
   readonly voice_messages?: boolean;
   readonly game_activity?: boolean;
+  readonly listening_activity?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -187,6 +188,17 @@ export function voiceMessagesEnabled(): boolean {
 export function serverSupportsGameActivity(): boolean {
   if (caps === null) return false;
   return (gameActivityPolicy ?? caps.game_activity) === true;
+}
+
+/**
+ * Whether the server carries a member's song (WP 8.10): `listening_update`, and
+ * `listening` on `presence`, `presence_batch` and `ready.listening`. The one
+ * admin switch covers games and music, so the stated policy decides while it
+ * is known; a server that never listed the flag (older) never supports it.
+ */
+export function serverSupportsListeningActivity(): boolean {
+  if (caps === null || caps.listening_activity === undefined) return false;
+  return (gameActivityPolicy ?? caps.listening_activity) === true;
 }
 
 /** Whether the server has stated that game activity is off (WP 8.3e-2). */
