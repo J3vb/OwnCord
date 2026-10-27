@@ -319,6 +319,7 @@ var deadlineBound = []string{
 	"POST /api/v1/dms/",
 	"POST /api/v1/dms/group",
 	"POST /api/v1/dms/{channelId}/members",
+	"POST /api/v1/files/{id}/link",
 	"POST /api/v1/invites/",
 	"POST /api/v1/livekit/webhook",
 	"POST /api/v1/moderation/appeals/{id}/assign",

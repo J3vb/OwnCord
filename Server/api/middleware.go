@@ -103,6 +103,86 @@ func requireUser(w http.ResponseWriter, r *http.Request) (*db.User, bool) {
 // API-token touch), so a wedged DB cannot hold a request forever. A var so tests can shorten it.
 var backgroundWriteTimeout = 5 * time.Second
 
+// authFailure is why a credential hash did not resolve to a usable principal,
+// in the form both perimeters answer with.
+type authFailure struct {
+	status  int
+	code    string
+	message string
+}
+
+// resolvePrincipal resolves a bearer credential hash to the request context
+// AuthMiddleware hands its handler (UserKey, SessionKey, RoleKey), applying the
+// expired-session cleanup, the ban check and the last-used touch. A non-nil
+// failure carries the status the bearer perimeter answers; AuthMiddleware
+// writes it as is, and the file-link perimeter (file_link.go) maps it to its
+// own uniform refusal. Both call this, so a link can never outlive what a
+// bearer request would be refused for.
+func resolvePrincipal(r *http.Request, sessions *service.SessionService, touches *touchThrottle, hash string) (context.Context, *authFailure) {
+	// Resolve the bearer token to a principal. A login session is matched
+	// first (existing behavior unchanged); an API token is the fallback.
+	user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
+	switch {
+	case errors.Is(err, auth.ErrTokenExpired):
+		// Clean up the expired login session. With the server's batch
+		// installed this only queues the delete for the connection-writes
+		// flush, so no goroutine is spawned (ARCH-034); without one
+		// (tests, the token CLI) it deletes inline, bounded. The ctx is
+		// detached: the delete must not die with the finished request.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
+		defer cancel()
+		if err := sessions.DiscardSession(cleanupCtx, hash); err != nil {
+			slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
+		}
+		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "session has expired"}
+	case errors.Is(err, auth.ErrUserNotFound):
+		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "user not found"}
+	case errors.Is(err, auth.ErrRoleNotFound):
+		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "role not found"}
+	case errors.Is(err, auth.ErrTokenNotFound):
+		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session"}
+	case err != nil:
+		// A wrapped DB error, not one of the sentinels above. A DB outage
+		// is not a bad token: answering 401 here would make the client
+		// treat a live, valid session as expired — it clears auth,
+		// disconnects the WS, and deletes the stored credential. Log it
+		// and report the failure as a server-side fault instead.
+		slog.ErrorContext(r.Context(), "auth: token resolution failed", "error", err)
+		return nil, &authFailure{http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authentication service temporarily unavailable"}
+	}
+
+	// Reject effectively-banned users before any further processing.
+	if auth.IsEffectivelyBanned(user) {
+		return nil, &authFailure{http.StatusForbidden, "FORBIDDEN", "your account has been suspended"}
+	}
+
+	// Touch last-used — non-fatal. A login session is touched inline but
+	// throttled to once per sessionTouchInterval per session, so hot API
+	// traffic doesn't queue a write per request; an API-token principal
+	// (sess == nil) is touched off the hot path so it never adds latency
+	// to bot/CI traffic: with the server's batch installed the touch is
+	// only queued (one write per token per minute, no goroutine);
+	// without one it is written inline under backgroundWriteTimeout.
+	if sess != nil {
+		if touches.shouldTouch(hash, middlewareNow()) {
+			if err := sessions.TouchSession(r.Context(), hash); err != nil {
+				slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
+			}
+		}
+	} else {
+		touchCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
+		if err := sessions.TouchAPIToken(touchCtx, hash); err != nil {
+			slog.WarnContext(touchCtx, "failed to touch api token", "error", err)
+		}
+		cancel()
+	}
+
+	ctx := context.WithValue(r.Context(), UserKey, user)
+	ctx = context.WithValue(ctx, SessionKey, sess) // nil for API-token principals; consumers guard nil
+	ctx = context.WithValue(ctx, RoleKey, role)
+	return ctx, nil
+}
+
 // AuthMiddleware reads the "Authorization: Bearer <token>" header, validates
 // the session, and injects the user and session into the request context.
 // Returns 401 if the token is missing, invalid, or the session is expired.
@@ -115,75 +195,11 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid authorization header")
 				return
 			}
-
-			hash := auth.HashToken(token)
-			// Resolve the bearer token to a principal. A login session is matched
-			// first (existing behavior unchanged); an API token is the fallback.
-			user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
-			switch {
-			case errors.Is(err, auth.ErrTokenExpired):
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "session has expired")
-				// Clean up the expired login session. With the server's batch
-				// installed this only queues the delete for the connection-writes
-				// flush, so no goroutine is spawned (ARCH-034); without one
-				// (tests, the token CLI) it deletes inline, bounded. The ctx is
-				// detached: the delete must not die with the finished request.
-				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
-				defer cancel()
-				if err := sessions.DiscardSession(cleanupCtx, hash); err != nil {
-					slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
-				}
-				return
-			case errors.Is(err, auth.ErrUserNotFound):
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
-				return
-			case errors.Is(err, auth.ErrRoleNotFound):
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "role not found")
-				return
-			case errors.Is(err, auth.ErrTokenNotFound):
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
-				return
-			case err != nil:
-				// A wrapped DB error, not one of the sentinels above. A DB outage
-				// is not a bad token: answering 401 here would make the client
-				// treat a live, valid session as expired — it clears auth,
-				// disconnects the WS, and deletes the stored credential. Log it
-				// and report the failure as a server-side fault instead.
-				slog.ErrorContext(r.Context(), "auth: token resolution failed", "error", err)
-				writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authentication service temporarily unavailable")
+			ctx, fail := resolvePrincipal(r, sessions, touches, auth.HashToken(token))
+			if fail != nil {
+				writeErr(w, fail.status, fail.code, fail.message)
 				return
 			}
-
-			// Reject effectively-banned users before any further processing.
-			if auth.IsEffectivelyBanned(user) {
-				writeErr(w, http.StatusForbidden, "FORBIDDEN", "your account has been suspended")
-				return
-			}
-
-			// Touch last-used — non-fatal. A login session is touched inline but
-			// throttled to once per sessionTouchInterval per session, so hot API
-			// traffic doesn't queue a write per request; an API-token principal
-			// (sess == nil) is touched off the hot path so it never adds latency
-			// to bot/CI traffic: with the server's batch installed the touch is
-			// only queued (one write per token per minute, no goroutine);
-			// without one it is written inline under backgroundWriteTimeout.
-			if sess != nil {
-				if touches.shouldTouch(hash, middlewareNow()) {
-					if err := sessions.TouchSession(r.Context(), hash); err != nil {
-						slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
-					}
-				}
-			} else {
-				touchCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
-				if err := sessions.TouchAPIToken(touchCtx, hash); err != nil {
-					slog.WarnContext(touchCtx, "failed to touch api token", "error", err)
-				}
-				cancel()
-			}
-
-			ctx := context.WithValue(r.Context(), UserKey, user)
-			ctx = context.WithValue(ctx, SessionKey, sess) // nil for API-token principals; consumers guard nil
-			ctx = context.WithValue(ctx, RoleKey, role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
