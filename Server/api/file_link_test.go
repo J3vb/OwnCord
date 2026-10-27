@@ -130,7 +130,7 @@ func TestFileLink_RedeemServesFileAndRange(t *testing.T) {
 		t.Fatalf("link GET = %d (%d bytes), want 200 with the file", rr.Code, rr.Body.Len())
 	}
 	// A player makes many Range requests: the link must keep working.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		rr = f.get(path, map[string]string{"Range": "bytes=10-19"})
 		if rr.Code != http.StatusPartialContent {
 			t.Fatalf("range %d = %d, want 206", i, rr.Code)
@@ -167,7 +167,8 @@ func TestFileLink_WrongFileIDIsRefused(t *testing.T) {
 		t.Fatal("second upload returned no id")
 	}
 	_, path := f.mint(t, f.fileID, f.viewer)
-	token := path[strings.Index(path, "link="):]
+	_, query, _ := strings.Cut(path, "?")
+	token := query
 	// The viewer owns the other (unlinked) file, so only the binding stops this.
 	if rr := f.get("/api/v1/files/"+otherID+"?"+token, nil); rr.Code != http.StatusForbidden {
 		t.Errorf("link replayed on another file = %d, want 403", rr.Code)
@@ -269,7 +270,8 @@ func TestFileLink_AuthorizationHeaderTakesPrecedence(t *testing.T) {
 func TestFileLink_ThumbRouteDoesNotAcceptLinks(t *testing.T) {
 	f := newLinkFixture(t)
 	_, path := f.mint(t, f.fileID, f.viewer)
-	token := path[strings.Index(path, "link="):]
+	_, query, _ := strings.Cut(path, "?")
+	token := query
 	if rr := f.get("/api/v1/files/"+f.fileID+"/thumb?"+token, nil); rr.Code != http.StatusUnauthorized {
 		t.Errorf("thumb with a link = %d, want 401", rr.Code)
 	}
@@ -300,7 +302,7 @@ func TestFileLink_TokenIsNeverLogged(t *testing.T) {
 
 	f := newLinkFixture(t)
 	_, path := f.mint(t, f.fileID, f.viewer)
-	token := strings.TrimPrefix(path[strings.Index(path, "link="):], "link=")
+	_, token, _ := strings.Cut(path, "link=")
 	f.get(path, nil)
 	if _, err := f.database.ExecContext(context.Background(), `DELETE FROM sessions`); err != nil {
 		t.Fatal(err)
@@ -426,7 +428,7 @@ func TestFileLink_IssueIsRateLimitedPerUser(t *testing.T) {
 	if code := post(); code != http.StatusOK {
 		t.Fatalf("first mint = %d, want 200", code)
 	}
-	for i := 0; i < api.FileLinkRateLimitPerMinuteForTest; i++ {
+	for range api.FileLinkRateLimitPerMinuteForTest {
 		limiter.Allow(auth.Key("file_link", uid), api.FileLinkRateLimitPerMinuteForTest, time.Minute)
 	}
 	if code := post(); code != http.StatusTooManyRequests {

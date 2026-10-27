@@ -121,10 +121,10 @@ type authFailure struct {
 // writes it as is, and the file-link perimeter (file_link.go) maps it to its
 // own uniform refusal. Both call this, so a link can never outlive what a
 // bearer request would be refused for.
-func resolvePrincipal(r *http.Request, sessions *service.SessionService, touches *touchThrottle, hash string) (context.Context, *authFailure) {
+func resolvePrincipal(ctx context.Context, sessions *service.SessionService, touches *touchThrottle, hash string) (context.Context, *authFailure) {
 	// Resolve the bearer token to a principal. A login session is matched
 	// first (existing behavior unchanged); an API token is the fallback.
-	user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
+	user, role, sess, err := sessions.ResolveBearer(ctx, hash)
 	switch {
 	case errors.Is(err, auth.ErrTokenExpired):
 		// Clean up the expired login session once the response is written.
@@ -133,7 +133,7 @@ func resolvePrincipal(r *http.Request, sessions *service.SessionService, touches
 		// without one (tests, the token CLI) it deletes inline, bounded. The
 		// ctx is detached: the delete must not die with the finished request.
 		cleanup := func() {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundWriteTimeout)
 			defer cancel()
 			if err := sessions.DiscardSession(cleanupCtx, hash); err != nil {
 				slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
@@ -152,7 +152,7 @@ func resolvePrincipal(r *http.Request, sessions *service.SessionService, touches
 		// treat a live, valid session as expired — it clears auth,
 		// disconnects the WS, and deletes the stored credential. Log it
 		// and report the failure as a server-side fault instead.
-		slog.ErrorContext(r.Context(), "auth: token resolution failed", "error", err)
+		slog.ErrorContext(ctx, "auth: token resolution failed", "error", err)
 		return nil, &authFailure{http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authentication service temporarily unavailable", nil}
 	}
 
@@ -170,19 +170,19 @@ func resolvePrincipal(r *http.Request, sessions *service.SessionService, touches
 	// without one it is written inline under backgroundWriteTimeout.
 	if sess != nil {
 		if touches.shouldTouch(hash, middlewareNow()) {
-			if err := sessions.TouchSession(r.Context(), hash); err != nil {
+			if err := sessions.TouchSession(ctx, hash); err != nil {
 				slog.Warn("failed to touch session", "error", err, "user_id", user.ID)
 			}
 		}
 	} else {
-		touchCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
+		touchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), backgroundWriteTimeout)
 		if err := sessions.TouchAPIToken(touchCtx, hash); err != nil {
 			slog.WarnContext(touchCtx, "failed to touch api token", "error", err)
 		}
 		cancel()
 	}
 
-	ctx := context.WithValue(r.Context(), UserKey, user)
+	ctx = context.WithValue(ctx, UserKey, user)
 	ctx = context.WithValue(ctx, SessionKey, sess) // nil for API-token principals; consumers guard nil
 	ctx = context.WithValue(ctx, RoleKey, role)
 	return ctx, nil
@@ -200,7 +200,7 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid authorization header")
 				return
 			}
-			ctx, fail := resolvePrincipal(r, sessions, touches, auth.HashToken(token))
+			ctx, fail := resolvePrincipal(r.Context(), sessions, touches, auth.HashToken(token))
 			if fail != nil {
 				writeErr(w, fail.status, fail.code, fail.message)
 				if fail.after != nil {

@@ -245,7 +245,7 @@ func fileLinkAuth(sessions *service.SessionService, links *fileLinks) func(http.
 				writeFileLinkRefused(w)
 				return
 			}
-			ctx, fail := resolvePrincipal(r, sessions, touches, hash)
+			ctx, fail := resolvePrincipal(r.Context(), sessions, touches, hash)
 			if fail != nil {
 				if fail.status == http.StatusServiceUnavailable {
 					writeErr(w, fail.status, fail.code, fail.message)
