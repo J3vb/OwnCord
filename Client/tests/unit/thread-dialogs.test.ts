@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { openCreateThreadDialog } from "@components/CreateThreadDialog";
+import { createErrorText, openCreateThreadDialog } from "@components/CreateThreadDialog";
+import { isForwardRequest } from "../../src/features/messaging/forwardRequests";
 import { openThreadListPopover } from "@components/ThreadListPopover";
 import { resetMessagesStore } from "@stores/messages.store";
 import { resetThreadsStore, threadsStore } from "@stores/threads.store";
@@ -23,6 +24,7 @@ afterEach(() => {
   ac.abort();
   document.body.replaceChildren();
   resetThreadsStore();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -110,6 +112,67 @@ describe("CreateThreadDialog", () => {
     name.value = "Plan";
     submit();
     expect(sentOf(ws)).toHaveLength(0);
+  });
+
+  const errorEl = (): HTMLElement =>
+    document.querySelector<HTMLElement>('[data-testid="create-thread-error"]')!;
+  const submitBtn = (): HTMLButtonElement =>
+    document.querySelector<HTMLButtonElement>('[data-testid="create-thread-submit"]')!;
+  const dialog = (): Element | null =>
+    document.querySelector('[data-testid="create-thread-dialog"]');
+
+  it("says the reply is unconfirmed after 20 s, frees Send and ignores a late reply", async () => {
+    vi.useFakeTimers();
+    const { ws, onCreated, name, submit } = open();
+    name.value = "Plan";
+    submit();
+    const id = sentOf(ws)[0]!.id;
+    vi.advanceTimersByTime(19_999);
+    expect(errorEl().hidden).toBe(true);
+    expect(submitBtn().disabled).toBe(true);
+
+    vi.advanceTimersByTime(1);
+    expect(errorEl().hidden).toBe(false);
+    expect(errorEl().textContent).toBe(createErrorText("UNCONFIRMED"));
+    expect(submitBtn().disabled).toBe(false);
+    await Promise.resolve();
+    expect(isForwardRequest(id)).toBe(false);
+
+    ws.simulateMessage("thread_create_ok", { thread: makeThread({ id: 7 }) }, id);
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(dialog()).not.toBeNull();
+  });
+
+  it("shows the offline line when the send fails, and can retry", () => {
+    const { ws, name, submit } = open();
+    name.value = "Plan";
+    submit();
+    ws.simulateSendFailure(sentOf(ws)[0]!.id, "CHANNEL_CLOSED");
+    expect(errorEl().hidden).toBe(false);
+    expect(errorEl().textContent).toBe(createErrorText("OFFLINE"));
+    expect(submitBtn().disabled).toBe(false);
+    submit();
+    expect(sentOf(ws)).toHaveLength(2);
+  });
+
+  it("closing while waiting releases the request, so a late reply does nothing", async () => {
+    vi.useFakeTimers();
+    const { ws, onCreated, onExists, name, submit } = open();
+    name.value = "Plan";
+    submit();
+    const id = sentOf(ws)[0]!.id;
+    expect(isForwardRequest(id)).toBe(true);
+    document.querySelector<HTMLButtonElement>('[data-testid="create-thread-cancel"]')!.click();
+    expect(dialog()).toBeNull();
+    await Promise.resolve();
+    expect(isForwardRequest(id)).toBe(false);
+
+    ws.simulateMessage("thread_create_ok", { thread: makeThread({ id: 7 }) }, id);
+    ws.simulateMessage("error", { code: "THREAD_EXISTS", message: "exists", thread_id: 42 }, id);
+    vi.advanceTimersByTime(20_000);
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(onExists).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
