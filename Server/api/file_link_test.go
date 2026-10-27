@@ -350,3 +350,86 @@ func TestFileLinks_CapAndSweep(t *testing.T) {
 		t.Errorf("size after the sweep = %d, want 1", got)
 	}
 }
+
+// A replaced link is left to expire: a player holding the old one keeps working.
+func TestFileLinks_ReissueKeepsTheOldTokenRedeemable(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	l := api.NewFileLinksForTest(func() time.Time { return now })
+	old, _, err := l.Issue("f", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(55 * time.Minute) // under the reuse margin
+	fresh, _, err := l.Issue("f", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh == old {
+		t.Fatal("a link near expiry was handed out again")
+	}
+	if _, ok := l.Lookup(old, "f"); !ok {
+		t.Errorf("the replaced link stopped working before it expired")
+	}
+	if _, ok := l.Lookup(fresh, "f"); !ok {
+		t.Errorf("the new link does not redeem")
+	}
+	now = now.Add(10 * time.Minute)
+	if _, ok := l.Lookup(old, "f"); ok {
+		t.Errorf("the replaced link outlived its expiry")
+	}
+}
+
+func TestFileLinks_PerCredentialCapEvictsItsOwnSoonest(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	l := api.NewFileLinksForTest(func() time.Time { return now })
+	other, _, _ := l.Issue("o", "other")
+	first, _, _ := l.Issue("f0", "h")
+	for i := 1; i <= api.FileLinkMaxPerCredentialForTest; i++ {
+		now = now.Add(time.Second)
+		if _, _, err := l.Issue(fmt.Sprintf("f%d", i), "h"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := l.Size(), api.FileLinkMaxPerCredentialForTest+1; got != want {
+		t.Errorf("size = %d, want %d (cap for h plus the other credential)", got, want)
+	}
+	if _, ok := l.Lookup(first, "f0"); ok {
+		t.Errorf("the credential's soonest link survived the cap")
+	}
+	if _, ok := l.Lookup(other, "o"); !ok {
+		t.Errorf("another credential's link was evicted")
+	}
+}
+
+func TestFileLink_IssueIsRateLimitedPerUser(t *testing.T) {
+	database := newUploadTestDB(t)
+	limiter := auth.NewRateLimiter()
+	perms := service.NewPermissionService(database, permissions.NewChecker(database))
+	r := chi.NewRouter()
+	api.MountUploadRoutes(r, service.NewSessionService(database), newUploadTestStorage(t), limiter, nil, service.NewUploadService(database, perms))
+	owner := uploadCreateToken(t, database, "ratelinkowner", 4)
+	rr := doUpload(t, r, owner, "file", "a.txt", []byte("abc"))
+	var resp map[string]any
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	fileID, _ := resp["id"].(string)
+	var uid int64
+	if err := database.QueryRowContext(context.Background(), `SELECT id FROM users WHERE username = 'ratelinkowner'`).Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	post := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/files/"+fileID+"/link", nil)
+		req.Header.Set("Authorization", "Bearer "+owner)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+	if code := post(); code != http.StatusOK {
+		t.Fatalf("first mint = %d, want 200", code)
+	}
+	for i := 0; i < api.FileLinkRateLimitPerMinuteForTest; i++ {
+		limiter.Allow(auth.Key("file_link", uid), api.FileLinkRateLimitPerMinuteForTest, time.Minute)
+	}
+	if code := post(); code != http.StatusTooManyRequests {
+		t.Errorf("mint past the limit = %d, want 429", code)
+	}
+}

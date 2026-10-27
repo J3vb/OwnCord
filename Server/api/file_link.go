@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -30,6 +31,13 @@ var fileLinkTTL = time.Hour
 // fileLinkMaxEntries bounds the link map. Past it the soonest-expiring link is
 // dropped to make room, so a flood of mints cannot grow memory without limit.
 const fileLinkMaxEntries = 10000
+
+// fileLinkMaxPerCredential bounds the links one credential holds.
+const fileLinkMaxPerCredential = 64
+
+// fileLinkRateLimitPerMinute is the per-user cap on link requests: a page of
+// videos mints one each, so it is generous.
+const fileLinkRateLimitPerMinute = 600
 
 // fileLinkReuseMargin is how much life a kept link must have left for a
 // second mint by the same credential for the same file to hand it out again.
@@ -87,15 +95,13 @@ func (s *fileLinks) issue(fileID, tokenHash string) (string, time.Time, error) {
 			s.dropLocked(tok)
 		}
 	}
+	// One credential holds at most fileLinkMaxPerCredential links; past it
+	// that credential's own soonest-expiring link goes first.
+	for s.countLocked(tokenHash) >= fileLinkMaxPerCredential {
+		s.dropLocked(s.soonestLocked(tokenHash))
+	}
 	for len(s.tokens) >= fileLinkMaxEntries {
-		var oldest string
-		var oldestExp time.Time
-		for tok, l := range s.tokens {
-			if oldest == "" || l.expires.Before(oldestExp) {
-				oldest, oldestExp = tok, l.expires
-			}
-		}
-		s.dropLocked(oldest)
+		s.dropLocked(s.soonestLocked(""))
 	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -103,12 +109,38 @@ func (s *fileLinks) issue(fileID, tokenHash string) (string, time.Time, error) {
 	}
 	tok := hex.EncodeToString(b)
 	expires := now.Add(fileLinkTTL)
-	if old, ok := s.byKey[key]; ok {
-		delete(s.tokens, old)
-	}
+	// A replaced link is left to expire (the sweep bounds it): a player that
+	// was handed it a moment ago keeps working.
 	s.tokens[tok] = fileLink{key: key, expires: expires}
 	s.byKey[key] = tok
 	return tok, expires, nil
+}
+
+// countLocked is how many links tokenHash holds. s.mu must be held.
+func (s *fileLinks) countLocked(tokenHash string) int {
+	n := 0
+	for _, l := range s.tokens {
+		if l.key.tokenHash == tokenHash {
+			n++
+		}
+	}
+	return n
+}
+
+// soonestLocked is the soonest-expiring token of tokenHash, or of everyone
+// when tokenHash is empty. s.mu must be held.
+func (s *fileLinks) soonestLocked(tokenHash string) string {
+	var soonest string
+	var soonestExp time.Time
+	for tok, l := range s.tokens {
+		if tokenHash != "" && l.key.tokenHash != tokenHash {
+			continue
+		}
+		if soonest == "" || l.expires.Before(soonestExp) {
+			soonest, soonestExp = tok, l.expires
+		}
+	}
+	return soonest
 }
 
 // dropLocked removes a token and its reverse index entry. s.mu must be held.
@@ -158,8 +190,16 @@ type fileLinkResponse struct {
 // handleIssueFileLink answers POST /api/v1/files/{id}/link: a link to the file
 // for the caller, under exactly the access rule the download applies. It runs
 // behind AuthMiddleware, so the link is bound to the bearer credential used.
-func handleIssueFileLink(uploads *service.UploadService, links *fileLinks) http.HandlerFunc {
+func handleIssueFileLink(uploads *service.UploadService, links *fileLinks, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		if !limiter.Allow(auth.Key("file_link", user.ID), fileLinkRateLimitPerMinute, time.Minute) {
+			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many file link requests, try again shortly")
+			return
+		}
 		if _, ok := authorizeFileRead(w, r, uploads); !ok {
 			return
 		}
@@ -171,6 +211,7 @@ func handleIssueFileLink(uploads *service.UploadService, links *fileLinks) http.
 		fileID := chi.URLParam(r, "id")
 		tok, expires, err := links.issue(fileID, auth.HashToken(token))
 		if err != nil {
+			slog.ErrorContext(r.Context(), "file link token generation failed", "error", err)
 			writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "could not create a file link")
 			return
 		}
@@ -208,9 +249,12 @@ func fileLinkAuth(sessions *service.SessionService, links *fileLinks) func(http.
 			if fail != nil {
 				if fail.status == http.StatusServiceUnavailable {
 					writeErr(w, fail.status, fail.code, fail.message)
-					return
+				} else {
+					writeFileLinkRefused(w)
 				}
-				writeFileLinkRefused(w)
+				if fail.after != nil {
+					fail.after()
+				}
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(ctx))

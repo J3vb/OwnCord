@@ -286,6 +286,79 @@ describe("a link that stops working", () => {
   });
 });
 
+describe("link recovery details", () => {
+  it("resets the element when it falls back to the play button", async () => {
+    const load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+    serve([linkResponse("tok1"), { ok: false, status: 401 }]);
+    const { el, video } = mount();
+    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    load.mockClear();
+
+    failVideo(video, 4);
+    await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
+
+    expect(load).toHaveBeenCalled();
+    load.mockRestore();
+  });
+
+  it("asks for its own fresh link rather than joining a request already in flight", async () => {
+    let resolveSecond!: (v: unknown) => void;
+    let n = 0;
+    fetchMock.mockImplementation((_url: string, init?: { method?: string }) => {
+      if (init?.method !== "POST") return Promise.resolve(fileBytes);
+      n += 1;
+      if (n === 1) return Promise.resolve(linkResponse("tok1"));
+      if (n === 2) return new Promise((resolve) => (resolveSecond = resolve));
+      return Promise.resolve(linkResponse("tok3"));
+    });
+    const a = mount();
+    const b = mount();
+    await vi.waitFor(() => expect(a.video.src).toContain("link=tok1"));
+    await vi.waitFor(() => expect(b.video.src).toContain("link=tok1"));
+
+    failVideo(a.video, 4);
+    await vi.waitFor(() => expect(posts()).toHaveLength(2));
+    failVideo(b.video, 4);
+
+    await vi.waitFor(() => expect(b.video.src).toContain("link=tok3"));
+    expect(posts()).toHaveLength(3);
+    resolveSecond(linkResponse("tok2"));
+  });
+
+  it("gives a picture-less clip's audio row the same recovery", async () => {
+    serve([linkResponse("tok1"), linkResponse("tok2")]);
+    const { video } = mount();
+    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+
+    video.dispatchEvent(new Event("loadedmetadata")); // no picture: audio row
+    const row = document.querySelector(".msg-audio") as HTMLElement;
+    const audio = row.querySelector("audio") as HTMLAudioElement;
+    expect(audio.src).toContain("link=tok1");
+
+    audio.dispatchEvent(new Event("error"));
+    await vi.waitFor(() => expect(audio.src).toContain("link=tok2"));
+    expect(posts()).toHaveLength(2);
+
+    audio.dispatchEvent(new Event("error"));
+    expect(audio.hidden).toBe(true);
+    expect(row.querySelector(".msg-media-play")).not.toBeNull();
+    expect(posts()).toHaveLength(2);
+  });
+
+  it("falls back to the play button when the audio row cannot get a fresh link", async () => {
+    serve([linkResponse("tok1"), { ok: false, status: 401 }]);
+    const { video } = mount();
+    await vi.waitFor(() => expect(video.src).toContain("link=tok1"));
+    video.dispatchEvent(new Event("loadedmetadata"));
+    const row = document.querySelector(".msg-audio") as HTMLElement;
+
+    (row.querySelector("audio") as HTMLAudioElement).dispatchEvent(new Event("error"));
+
+    await vi.waitFor(() => expect(row.querySelector(".msg-media-play")).not.toBeNull());
+    expect((row.querySelector("audio") as HTMLAudioElement).hidden).toBe(true);
+  });
+});
+
 describe("a server without file links", () => {
   it.each([404, 405])("answering %i falls back to the play button", async (status) => {
     serve([{ ok: false, status }]);

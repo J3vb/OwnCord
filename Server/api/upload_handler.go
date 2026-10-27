@@ -192,7 +192,7 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	links := newFileLinks()
 	r.With(fileLinkAuth(sessions, links)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
 	// Mints the link for the caller, under the same access rule as the download.
-	r.With(AuthMiddleware(sessions)).Post("/api/v1/files/{id}/link", handleIssueFileLink(uploads, links))
+	r.With(AuthMiddleware(sessions)).Post("/api/v1/files/{id}/link", handleIssueFileLink(uploads, links, limiter))
 	// A bounded preview of an image file, under the same access rule (P4-08).
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}/thumb", handleServeThumb(uploads, store, allowedOrigins))
 }

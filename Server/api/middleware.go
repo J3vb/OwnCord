@@ -109,6 +109,9 @@ type authFailure struct {
 	status  int
 	code    string
 	message string
+	// after, when set, is work the caller runs once the response is written
+	// (the expired-session cleanup).
+	after func()
 }
 
 // resolvePrincipal resolves a bearer credential hash to the request context
@@ -124,23 +127,25 @@ func resolvePrincipal(r *http.Request, sessions *service.SessionService, touches
 	user, role, sess, err := sessions.ResolveBearer(r.Context(), hash)
 	switch {
 	case errors.Is(err, auth.ErrTokenExpired):
-		// Clean up the expired login session. With the server's batch
-		// installed this only queues the delete for the connection-writes
-		// flush, so no goroutine is spawned (ARCH-034); without one
-		// (tests, the token CLI) it deletes inline, bounded. The ctx is
-		// detached: the delete must not die with the finished request.
-		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
-		defer cancel()
-		if err := sessions.DiscardSession(cleanupCtx, hash); err != nil {
-			slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
+		// Clean up the expired login session once the response is written.
+		// With the server's batch installed this only queues the delete for
+		// the connection-writes flush, so no goroutine is spawned (ARCH-034);
+		// without one (tests, the token CLI) it deletes inline, bounded. The
+		// ctx is detached: the delete must not die with the finished request.
+		cleanup := func() {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), backgroundWriteTimeout)
+			defer cancel()
+			if err := sessions.DiscardSession(cleanupCtx, hash); err != nil {
+				slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
+			}
 		}
-		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "session has expired"}
+		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "session has expired", cleanup}
 	case errors.Is(err, auth.ErrUserNotFound):
-		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "user not found"}
+		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "user not found", nil}
 	case errors.Is(err, auth.ErrRoleNotFound):
-		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "role not found"}
+		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "role not found", nil}
 	case errors.Is(err, auth.ErrTokenNotFound):
-		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session"}
+		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session", nil}
 	case err != nil:
 		// A wrapped DB error, not one of the sentinels above. A DB outage
 		// is not a bad token: answering 401 here would make the client
@@ -148,12 +153,12 @@ func resolvePrincipal(r *http.Request, sessions *service.SessionService, touches
 		// disconnects the WS, and deletes the stored credential. Log it
 		// and report the failure as a server-side fault instead.
 		slog.ErrorContext(r.Context(), "auth: token resolution failed", "error", err)
-		return nil, &authFailure{http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authentication service temporarily unavailable"}
+		return nil, &authFailure{http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authentication service temporarily unavailable", nil}
 	}
 
 	// Reject effectively-banned users before any further processing.
 	if auth.IsEffectivelyBanned(user) {
-		return nil, &authFailure{http.StatusForbidden, "FORBIDDEN", "your account has been suspended"}
+		return nil, &authFailure{http.StatusForbidden, "FORBIDDEN", "your account has been suspended", nil}
 	}
 
 	// Touch last-used — non-fatal. A login session is touched inline but
@@ -198,6 +203,9 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 			ctx, fail := resolvePrincipal(r, sessions, touches, auth.HashToken(token))
 			if fail != nil {
 				writeErr(w, fail.status, fail.code, fail.message)
+				if fail.after != nil {
+					fail.after()
+				}
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(ctx))

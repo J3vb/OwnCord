@@ -1025,7 +1025,9 @@ function getFileLink(url: string, fresh = false): Promise<FileLink | null> {
   if (held !== undefined && held.expiresAtMs - Date.now() > FILE_LINK_REFRESH_MARGIN_MS) {
     return Promise.resolve(held);
   }
-  const existing = fileLinkInFlight.get(url);
+  // A fresh link is wanted because the one in flight (or just held) may be
+  // the one that failed, so it does not join an earlier request.
+  const existing = fresh ? undefined : fileLinkInFlight.get(url);
   if (existing !== undefined) return existing;
   const promise = requestFileLink(url);
   fileLinkInFlight.set(url, promise);
@@ -1380,6 +1382,53 @@ function sizeVideo(video: HTMLVideoElement, w: number, h: number): void {
   video.style.aspectRatio = fits ? `${w} / ${h}` : `${width} / ${VIDEO_MAX_H}`;
 }
 
+/** The audio row a picture-less clip becomes keeps streaming from the link,
+ *  so it gets the same recovery as the player: one fresh link, then the play
+ *  button's download path. */
+function watchAudioLink(
+  att: Attachment,
+  resolvedUrl: string,
+  row: HTMLElement,
+  audio: HTMLAudioElement,
+): void {
+  const downloadPath = (): void => {
+    audio.removeAttribute("src");
+    audio.load();
+    audio.hidden = true;
+    audio.controls = false;
+    row.querySelector(".msg-file-meta")?.appendChild(buildPlayButton(att, resolvedUrl, row, audio));
+  };
+  audio.addEventListener(
+    "error",
+    () => {
+      const at = audio.currentTime;
+      const wasPlaying = !audio.paused;
+      void getFileLink(resolvedUrl, true).then((link) => {
+        if (link === null) {
+          downloadPath();
+          return;
+        }
+        // A second failure is the download path's to settle.
+        audio.addEventListener("error", downloadPath, { once: true });
+        audio.addEventListener(
+          "loadedmetadata",
+          () => {
+            audio.currentTime = at;
+            if (wasPlaying && row.isConnected) {
+              void audio.play().catch((err: unknown) => {
+                log.debug("Media playback refused", { error: String(err) });
+              });
+            }
+          },
+          { once: true },
+        );
+        audio.src = link.src;
+      });
+    },
+    { once: true },
+  );
+}
+
 /** MediaError.code for "the stream arrived and could not be decoded". Every
  *  other code, a refused request included, is ambiguous, so it earns the
  *  fresh-link retry before the clip is called unplayable. */
@@ -1426,6 +1475,7 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
   const useBlobPath = (): void => {
     source = "blob";
     video.removeAttribute("src");
+    video.load();
     video.controls = false;
     if (playButton === null) {
       playButton = buildPlayButton(att, resolvedUrl, wrap, video);
@@ -1496,6 +1546,7 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
     audio.hidden = false;
     audio.controls = true;
     audio.src = src;
+    if (source === "link") watchAudioLink(att, resolvedUrl, row, audio);
     const note = createElement("div", { class: "msg-file-note", role: "status" });
     setText(note, messageStatusText("file.noPicture"));
     row.querySelector(".msg-file-meta")?.appendChild(note);

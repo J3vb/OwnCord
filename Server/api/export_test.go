@@ -276,3 +276,9 @@ func (f *FileLinksForTest) Size() int { return f.l.size() }
 
 // SniffMIMEForTest exposes the upload content sniffer.
 func SniffMIMEForTest(header []byte) string { return sniffMIME(header) }
+
+// Link-store limits the tests drive.
+const (
+	FileLinkMaxPerCredentialForTest   = fileLinkMaxPerCredential
+	FileLinkRateLimitPerMinuteForTest = fileLinkRateLimitPerMinute
+)

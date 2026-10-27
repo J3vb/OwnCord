@@ -79,7 +79,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Server (operators)**
 
-- File links for streaming: `POST /api/v1/files/{id}/link` returns a link to a file the caller may read, good for one hour, that a video player can open without an `Authorization` header. It stops working when the session ends, the account is banned or the channel is no longer readable. A server restart voids every link. Thumbnails do not accept links.
+- File links for streaming: `POST /api/v1/files/{id}/link` returns a link to a file the caller may read, good for one hour, that a video player can open without an `Authorization` header. It stops working when the session ends, the account is banned or the channel is no longer readable. A server restart voids every link. Thumbnails do not accept links. A link works like a short-lived password for that one file, so keep reverse-proxy and load-balancer access logs private.
 - Server stickers: members with Manage Server can upload up to 60 stickers (PNG, GIF or WebP, animation allowed, up to 512 KB and 320x320) under `/api/v1/stickers`, stored with the other uploads.
 - Release server binaries and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`; then the server's own address opens it in a browser.
 
