@@ -193,6 +193,8 @@ describe("Account tab — devices", () => {
 
   it("hands focus back to the trigger when the confirmation is cancelled", async () => {
     const tab = await render(makeOptions());
+    // Focus only lands on what is shown, so open the devices panel first.
+    tab.querySelector<HTMLButtonElement>('[data-testid="sessions-manage"]')!.click();
     const trigger = tab.querySelector<HTMLButtonElement>('[data-testid="sessions-revoke-all"]')!;
     const confirmArea = tab.querySelector<HTMLElement>(
       '[data-testid="sessions-revoke-all-confirm-area"]',
