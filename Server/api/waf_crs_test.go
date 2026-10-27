@@ -383,3 +383,41 @@ func TestWAFMiddleware_UploadBodyNotBufferedOrEmptied(t *testing.T) {
 		})
 	}
 }
+
+// A file-link token travels in the query string. Neither the per-rule nor the
+// aggregated CRS line may carry it, in detect or block mode, whichever rule
+// matches (an XSS probe in the same query, and a numeric Host header).
+func TestWAFMiddleware_CRSLogsOmitTheQuery(t *testing.T) {
+	const token = "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffee1234"
+	for _, mode := range []string{CRSModeDetect, CRSModeBlock} {
+		for _, host := range []string{"10.0.0.1", "127.0.0.1"} {
+			t.Run(mode+"/"+host, func(t *testing.T) {
+				handler := NewWAFMiddlewareCRS(2, mode)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				}))
+				req := httptest.NewRequest(http.MethodGet, "/api/v1/files/abc?link="+token+"&q=<script>alert(1)</script>", nil)
+				req.Host = host
+				req.RemoteAddr = "127.0.0.1:9999"
+				out := captureSlog(t, func() { handler.ServeHTTP(httptest.NewRecorder(), req) })
+				if !strings.Contains(out, "waf: CRS") {
+					t.Fatalf("no CRS match was logged, so the test proves nothing:\n%s", out)
+				}
+				if strings.Contains(out, token) {
+					t.Errorf("the token appears in the WAF log output:\n%s", out)
+				}
+			})
+		}
+	}
+}
+
+func TestLogURIPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/api/v1/files/a?link=zz": "/api/v1/files/a",
+		"/plain":                  "/plain",
+		"%zz?link=zz":             "%zz",
+	} {
+		if got := logURIPath(in); got != want {
+			t.Errorf("logURIPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

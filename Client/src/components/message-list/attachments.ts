@@ -187,12 +187,21 @@ export function isConvertedImageMime(mime: string): boolean {
 /** Container MIME types we are willing to hand to a <video> element.
  *  An allowlist, not a `video/` prefix test: an unknown container gets the
  *  download chip rather than a player that silently fails to decode. */
-const INLINE_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/ogg", "video/quicktime"]);
+const INLINE_VIDEO_MIMES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/ogg",
+  "video/quicktime",
+  "video/3gpp",
+  "video/x-m4v",
+  "video/x-matroska",
+]);
 
 /** Video extensions trusted only when the server could not type the file
- *  (a .mov stored before it learned QuickTime). A player that cannot decode
- *  one falls back to the download chip. */
-const VIDEO_EXTENSIONS = new Set(["mov"]);
+ *  (a .mov stored before it learned QuickTime, a .3gp it still stores as
+ *  generic). A player that cannot decode one falls back to the download chip.
+ *  .avi is deliberately absent: the engines do not read it. */
+const VIDEO_EXTENSIONS = new Set(["mov", "mp4", "m4v", "webm", "mkv", "3gp", "ogv"]);
 
 /** Container MIME types we are willing to hand to an <audio> element.
  *  Includes the common aliases servers emit for MP3 and WAV. */
@@ -403,6 +412,9 @@ export function clearAttachmentCaches(): void {
   mediaCache.clear();
   mediaInFlight.clear();
   videoDims.clear();
+  fileLinks.clear();
+  fileLinkInFlight.clear();
+  fileLinkRefused.clear();
   clearStillCache();
   clearAnimatedStills();
   clearTextPreviewCache();
@@ -423,7 +435,11 @@ const SAFE_MIME_TYPES = new Set([
   "image/bmp",
   "video/mp4",
   "video/webm",
+  "video/ogg",
   "video/quicktime",
+  "video/3gpp",
+  "video/x-m4v",
+  "video/x-matroska",
   "audio/mpeg",
   "audio/ogg",
   "audio/wav",
@@ -952,6 +968,97 @@ export function fetchMediaAsObjectUrl(url: string): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
+// File links (WP 8.11): a <video> streams from a server-minted link
+// ---------------------------------------------------------------------------
+
+/** A source a media element can load with no Authorization header. */
+interface FileLink {
+  /** Origin (the loopback proxy on desktop, the page's own in a browser) plus
+   *  the server's link path. It carries a credential: never log it. */
+  readonly src: string;
+  readonly expiresAtMs: number;
+}
+
+/** A link is replaced this long before the server expires it. */
+const FILE_LINK_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+
+/** Minted links by attachment URL; re-rendered rows reuse one. */
+const fileLinks = new Map<string, FileLink>();
+/** In-flight mints, so rows showing the same clip share one request. */
+const fileLinkInFlight = new Map<string, Promise<FileLink | null>>();
+/** Attachment URLs the server answered 404 or 405 for: a server without the
+ *  route (or without the file). They go straight to the blob path. */
+const fileLinkRefused = new Set<string>();
+
+/** The attachment path a link can be minted for (not /thumb). */
+const FILE_LINK_PATH = /^\/api\/v1\/files\/[^/]+$/;
+
+async function requestFileLink(url: string): Promise<FileLink | null> {
+  const generation = attachmentCacheGeneration;
+  try {
+    if (!isServerUrl(url)) return null;
+    const parsed = new URL(url);
+    if (!FILE_LINK_PATH.test(parsed.pathname)) return null;
+    const token = getToken();
+    if (token === null) return null;
+    const origin = await ensureHttpProxy(parsed.host);
+    const res = await desktop.http.fetch(`${origin}${parsed.pathname}/link`, {
+      method: "POST",
+      // i18n-exempt: HTTP wire header value, never rendered
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 404 || res.status === 405) {
+      if (generation === attachmentCacheGeneration) fileLinkRefused.add(url);
+      return null;
+    }
+    if (!res.ok) return null;
+    const body: unknown = await res.json();
+    if (typeof body !== "object" || body === null) return null;
+    const { path, expires_at: expiresAt } = body as { path?: unknown; expires_at?: unknown };
+    const expiresAtMs = typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
+    if (
+      typeof path !== "string" ||
+      !path.startsWith("/api/v1/files/") ||
+      Number.isNaN(expiresAtMs)
+    ) {
+      return null;
+    }
+    // A cache clear (logout, server switch) during the request: the link
+    // belongs to a session that is gone.
+    if (generation !== attachmentCacheGeneration) return null;
+    const link: FileLink = { src: `${origin}${path}`, expiresAtMs };
+    fileLinks.set(url, link);
+    return link;
+  } catch (err) {
+    // The error text is logged, never the URL: a link is a credential.
+    log.warn("File link request failed", { error: String(err) });
+    return null;
+  }
+}
+
+/** A usable streaming source for a server attachment, or null when there is
+ *  none (an older server, a refused or failed request) and the caller should
+ *  use the blob path. `fresh` discards the held link first. */
+function getFileLink(url: string, fresh = false): Promise<FileLink | null> {
+  if (fresh) fileLinks.delete(url);
+  if (fileLinkRefused.has(url)) return Promise.resolve(null);
+  const held = fileLinks.get(url);
+  if (held !== undefined && held.expiresAtMs - Date.now() > FILE_LINK_REFRESH_MARGIN_MS) {
+    return Promise.resolve(held);
+  }
+  // A fresh link is wanted because the one in flight (or just held) may be
+  // the one that failed, so it does not join an earlier request.
+  const existing = fresh ? undefined : fileLinkInFlight.get(url);
+  if (existing !== undefined) return existing;
+  const promise = requestFileLink(url);
+  fileLinkInFlight.set(url, promise);
+  void promise.finally(() => {
+    if (fileLinkInFlight.get(url) === promise) fileLinkInFlight.delete(url);
+  });
+  return promise;
+}
+
+// ---------------------------------------------------------------------------
 // External images (B7-16): the broker's bytes as blob: URLs
 // ---------------------------------------------------------------------------
 
@@ -1223,16 +1330,36 @@ function buildPlayButton(
     type: "button",
     "aria-label": messageStatusText("file.playNamed", { filename: att.filename }),
   });
+  const playLabel = btn.getAttribute("aria-label") ?? "";
   btn.appendChild(createIcon("play", 20));
+  const setLoading = (loading: boolean): void => {
+    btn.disabled = loading;
+    btn.replaceChildren(createIcon(loading ? "loader" : "play", 20));
+    if (loading) {
+      btn.setAttribute("aria-busy", "true");
+      btn.setAttribute(
+        "aria-label",
+        messageStatusText("file.loadingNamed", { filename: att.filename }),
+      );
+      wrap.setAttribute("aria-busy", "true");
+    } else {
+      btn.removeAttribute("aria-busy");
+      btn.setAttribute("aria-label", playLabel);
+      wrap.removeAttribute("aria-busy");
+    }
+  };
   btn.addEventListener("click", () => {
-    btn.disabled = true;
+    // The whole clip downloads first on this path, so say so: a big file
+    // would otherwise look like a dead button.
+    setLoading(true);
     void fetchMediaAsObjectUrl(resolvedUrl).then((objectUrl) => {
       if (objectUrl === null) {
         // The download chip stays; the player is dimmed, never shown as loading.
         wrap.classList.add("msg-media-failed");
-        btn.disabled = false;
+        setLoading(false);
         return;
       }
+      wrap.removeAttribute("aria-busy");
       wrap.classList.remove("msg-media-failed");
       btn.remove();
       player.hidden = false;
@@ -1276,11 +1403,69 @@ function sizeVideo(video: HTMLVideoElement, w: number, h: number): void {
   video.style.aspectRatio = fits ? `${w} / ${h}` : `${width} / ${VIDEO_MAX_H}`;
 }
 
+/** The audio row a picture-less clip becomes keeps streaming from the link,
+ *  so it gets the same recovery as the player: one fresh link, then the play
+ *  button's download path. */
+function watchAudioLink(
+  att: Attachment,
+  resolvedUrl: string,
+  row: HTMLElement,
+  audio: HTMLAudioElement,
+): void {
+  const downloadPath = (): void => {
+    audio.removeAttribute("src");
+    audio.load();
+    audio.hidden = true;
+    audio.controls = false;
+    row.querySelector(".msg-file-meta")?.appendChild(buildPlayButton(att, resolvedUrl, row, audio));
+  };
+  audio.addEventListener(
+    "error",
+    () => {
+      const at = audio.currentTime;
+      const wasPlaying = !audio.paused;
+      void getFileLink(resolvedUrl, true).then((link) => {
+        if (link === null) {
+          downloadPath();
+          return;
+        }
+        // A second failure is the download path's to settle.
+        audio.addEventListener("error", downloadPath, { once: true });
+        audio.addEventListener(
+          "loadedmetadata",
+          () => {
+            audio.currentTime = at;
+            if (wasPlaying && row.isConnected) {
+              void audio.play().catch((err: unknown) => {
+                log.debug("Media playback refused", { error: String(err) });
+              });
+            }
+          },
+          { once: true },
+        );
+        audio.src = link.src;
+      });
+    },
+    { once: true },
+  );
+}
+
+/** MediaError.code for "the stream arrived and could not be decoded". Every
+ *  other code, a refused request included, is ambiguous, so it earns the
+ *  fresh-link retry before the clip is called unplayable. */
+const MEDIA_ERR_DECODE = 3;
+/** A link that fails again within this long of its replacement is not
+ *  replaced a second time: the clip goes to the blob path. */
+const VIDEO_RELINK_COOLDOWN_MS = 60_000;
+
 /** Inline <video> player, capped to the same box as an image and sized to the
  *  clip's real shape once it is known (server dimensions, an earlier play, or
- *  the metadata on play); until then a 16:9 placeholder. The source arrives on
- *  play because it needs the session token attached. A clip the engine cannot
- *  decode becomes the download chip, never a broken player. */
+ *  the metadata). The source is a server-minted link, so the engine streams
+ *  with Range requests and shows the first frame before play. When a link
+ *  cannot be had (an older server, a failed request), or keeps failing, the
+ *  play button downloads the clip through the authenticated fetch instead.
+ *  A clip the engine cannot decode becomes the download chip, never a broken
+ *  player. */
 function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivElement {
   const wrap = createElement("div", { class: "msg-image msg-video" });
 
@@ -1298,7 +1483,59 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
     chip.querySelector(".msg-file-meta")?.appendChild(note);
     swapKeepingFocus(wrap, chip);
   };
-  video.addEventListener("error", unplayable, { once: true });
+
+  // "link": streaming from a minted link. "blob": the play button's download
+  // path (also the state before any link has arrived).
+  let source: "link" | "blob" = "blob";
+  let playButton: HTMLButtonElement | null = null;
+  let relinking = false;
+  let lastRelinkAt = Number.NEGATIVE_INFINITY;
+  let resumeAt = 0;
+  let resumePlaying = false;
+
+  const useBlobPath = (): void => {
+    source = "blob";
+    video.removeAttribute("src");
+    video.load();
+    video.controls = false;
+    if (playButton === null) {
+      playButton = buildPlayButton(att, resolvedUrl, wrap, video);
+      video.after(playButton);
+    }
+  };
+  const useLink = (link: FileLink): void => {
+    source = "link";
+    video.controls = true;
+    video.src = link.src;
+  };
+  const recoverLink = (): void => {
+    // A decode failure on a link that delivered bytes is the clip, not the link.
+    if (video.error?.code === MEDIA_ERR_DECODE) {
+      unplayable();
+      return;
+    }
+    if (relinking) return;
+    // A 403 (expired or voided link) and an undecodable clip both surface as
+    // an unsupported-source error. Replace the link once before concluding;
+    // after that the blob path decides, which can tell the two apart.
+    if (Date.now() - lastRelinkAt < VIDEO_RELINK_COOLDOWN_MS) {
+      useBlobPath();
+      return;
+    }
+    lastRelinkAt = Date.now();
+    relinking = true;
+    resumeAt = video.currentTime;
+    resumePlaying = !video.paused;
+    void getFileLink(resolvedUrl, true).then((link) => {
+      relinking = false;
+      if (link === null) useBlobPath();
+      else useLink(link);
+    });
+  };
+  video.addEventListener("error", () => {
+    if (source === "link") recoverLink();
+    else unplayable();
+  });
   video.addEventListener("loadedmetadata", () => {
     if (video.videoWidth > 0 && video.videoHeight > 0) {
       sizeVideo(video, video.videoWidth, video.videoHeight);
@@ -1307,6 +1544,15 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
         if (oldest !== undefined) videoDims.delete(oldest);
       }
       videoDims.set(att.id, [video.videoWidth, video.videoHeight]);
+      if (resumeAt > 0) {
+        video.currentTime = resumeAt;
+        if (resumePlaying && wrap.isConnected) {
+          void video.play().catch((err: unknown) => {
+            log.debug("Media playback refused", { error: String(err) });
+          });
+        }
+        resumeAt = 0;
+      }
       return;
     }
     // No picture (audio-only, or a codec the engine lacks): keep playing as audio.
@@ -1321,6 +1567,7 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
     audio.hidden = false;
     audio.controls = true;
     audio.src = src;
+    if (source === "link") watchAudioLink(att, resolvedUrl, row, audio);
     const note = createElement("div", { class: "msg-file-note", role: "status" });
     setText(note, messageStatusText("file.noPicture"));
     row.querySelector(".msg-file-meta")?.appendChild(note);
@@ -1331,11 +1578,18 @@ function renderVideoAttachment(att: Attachment, resolvedUrl: string): HTMLDivEle
       });
     }
   });
-  appendChildren(wrap, video, buildPlayButton(att, resolvedUrl, wrap, video));
+  wrap.appendChild(video);
 
   const overlay = createElement("div", { class: "msg-media-overlay" });
   overlay.appendChild(buildDownloadButton(att, resolvedUrl));
   wrap.appendChild(overlay);
+
+  // Mint on render, not on play: the link is what lets the engine fetch the
+  // first frame. The play button appears only if there is no link to stream.
+  void getFileLink(resolvedUrl).then((link) => {
+    if (link === null) useBlobPath();
+    else useLink(link);
+  });
 
   return wrap;
 }

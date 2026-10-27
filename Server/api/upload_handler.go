@@ -103,7 +103,7 @@ func isUnsafeInlineMIME(mimeType string) bool {
 	return false
 }
 
-// sniffMIME is http.DetectContentType plus QuickTime, which the WHATWG sniffing
+// sniffMIME is http.DetectContentType plus QuickTime and 3GPP, which the WHATWG sniffing
 // table it follows leaves out: a .mov whose ftyp box names the "qt  " brand
 // would otherwise be stored as application/octet-stream and never play inline.
 // It also names HEIC/HEIF and TIFF, which the table does not know and which the
@@ -111,6 +111,12 @@ func isUnsafeInlineMIME(mimeType string) bool {
 func sniffMIME(header []byte) string {
 	if len(header) >= 12 && string(header[4:12]) == "ftypqt  " {
 		return "video/quicktime"
+	}
+	// 3GPP and 3GPP2 clips carry a "3gp*" / "3g2*" major brand, which the
+	// WHATWG table does not know either.
+	if len(header) >= 12 && string(header[4:8]) == "ftyp" &&
+		(string(header[8:11]) == "3gp" || string(header[8:11]) == "3g2") {
+		return "video/3gpp"
 	}
 	if m := sniffISOBMFFImage(header); m != "" {
 		return m
@@ -188,7 +194,12 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	// The uploader withdraws a file it staged and never sent.
 	r.With(AuthMiddleware(sessions)).Delete("/api/v1/uploads/{id}", handleDiscardUpload(uploads, store))
 	// File serving requires authentication for channel-level access control.
-	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
+	// A <video> element cannot send a header, so this one route also accepts a
+	// short-lived file link minted below (file_link.go); a thumbnail does not.
+	links := newFileLinks()
+	r.With(fileLinkAuth(sessions, links)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
+	// Mints the link for the caller, under the same access rule as the download.
+	r.With(AuthMiddleware(sessions)).Post("/api/v1/files/{id}/link", handleIssueFileLink(uploads, links, limiter))
 	// A bounded preview of an image file, under the same access rule (P4-08).
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}/thumb", handleServeThumb(uploads, store, allowedOrigins))
 }

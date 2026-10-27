@@ -1871,6 +1871,11 @@ ul.md-list-nested {
   cursor: progress;
   opacity: 0.6;
 }
+/* The blob path downloads the whole clip before it plays: the button shows a
+   spinner at full strength instead of the dimmed disabled look. */
+.msg-media-play[aria-busy="true"] {
+  opacity: 1;
+}
 .msg-video .msg-media-play {
   position: absolute;
   top: 50%;
