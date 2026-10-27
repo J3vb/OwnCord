@@ -13,6 +13,7 @@ import {
   computeRawKeyFingerprint,
 } from "../../lib/e2eeCrypto";
 import { getIdentityPin, storeIdentityPin } from "../../lib/identity";
+import { trustedPins } from "../../lib/identityPins";
 import { memberDisplayName, membersStore } from "../../stores/members.store";
 import { setPeerVerification } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
@@ -28,6 +29,8 @@ export interface PendingAnnounce {
   userId: number;
   publicKeyBase64: string;
   signatureBase64?: string;
+  /** Identity key of the announcing device, when the server sent one. */
+  identityKeyBase64?: string;
 }
 
 export interface E2EEPeerStateDeps {
@@ -63,8 +66,16 @@ export class E2EEPeerState {
    *  else would re-run verification against the freshly-stored pin. At most
    *  one entry per peer; a later mismatch (or a later legitimate announce)
    *  simply overwrites the previous one. Cleared in clearState(). */
-  private _blockedAnnounces: Map<number, { publicKeyBase64: string; signatureBase64?: string }> =
-    new Map();
+  private _blockedAnnounces: Map<
+    number,
+    { publicKeyBase64: string; signatureBase64?: string; identityKeyBase64?: string }
+  > = new Map();
+  /** The identity key each peer's CURRENT announce was verified (or blocked)
+   *  against: the announce's own key when the server sent one, else the
+   *  member's published key. Read by the verify panel so the safety number
+   *  shown is the one of the device actually in the call. Cleared in
+   *  clearState() and when the peer leaves. */
+  private _announcedIdentityKeys: Map<number, string> = new Map();
   /** Peers whose identity key changed and was accepted automatically this
    *  session, mapped to the latest key a notice was shown for, so their badge
    *  keeps showing the change after later announces verify cleanly against the
@@ -126,8 +137,19 @@ export class E2EEPeerState {
     this._stagedAnnounces = [];
     this._stagedChannelId = null;
   }
-  get blockedAnnounces(): Map<number, { publicKeyBase64: string; signatureBase64?: string }> {
+  get blockedAnnounces(): Map<
+    number,
+    { publicKeyBase64: string; signatureBase64?: string; identityKeyBase64?: string }
+  > {
     return this._blockedAnnounces;
+  }
+  get announcedIdentityKeys(): Map<number, string> {
+    return this._announcedIdentityKeys;
+  }
+  /** The identity key from the peer's current announce, or null when none has
+   *  been seen this call. */
+  announcedIdentityKey(userId: number): string | null {
+    return this._announcedIdentityKeys.get(userId) ?? null;
   }
   get keyChangedPeers(): Map<number, string> {
     return this._keyChangedPeers;
@@ -167,11 +189,17 @@ export class E2EEPeerState {
 
   /**
    * F3 TOFU: resolve a peer's identity key and verify their ephemeral-announce
-   * signature. Pins the identity key on first sight. A later change is accepted
-   * automatically once the announce verifies against the new key: the pin is
-   * overwritten, the peer shows as "changed" for the rest of the session and
-   * the user gets a notice naming them. A pinned peer whose key the server
-   * stopped delivering is still blocked ("mismatch") until the user re-pins.
+   * signature. The key is the announce's own `identity_public_key` (the
+   * announcing device's key) when the server sent one, else the member's
+   * published key (older server or older peer). A peer can have several
+   * devices, each with its own key, so the pin store keeps every key seen for
+   * them and any pinned key is trusted. A key not seen before for a peer who
+   * already has pins is accepted once the announce verifies against it: it is
+   * added to the pins (nothing is overwritten, so switching back is silent),
+   * the peer shows as "changed" while that key is in the call, and the user
+   * gets one "new device" notice naming them. A pinned peer whose key the
+   * server stopped delivering is still blocked ("mismatch") until the user
+   * re-pins.
    * Returns true when the announce may be accepted (verified, or a legacy peer
    * with no identity key), false to reject/block. The store write is the
    * surfaced verification state the voice panel reads.
@@ -187,9 +215,14 @@ export class E2EEPeerState {
     publicKeyBase64: string,
     signatureBase64: string | undefined,
     isCurrent: () => boolean,
+    announcedIdentityKey?: string,
   ): Promise<boolean> {
     const publishedIdentity =
-      membersStore.getState().members.get(userId)?.identityPublicKey ?? null;
+      announcedIdentityKey ??
+      membersStore.getState().members.get(userId)?.identityPublicKey ??
+      null;
+    if (isCurrent() && publishedIdentity)
+      this._announcedIdentityKeys.set(userId, publishedIdentity);
     const host = this.deps.getServerHost();
     const sessionGeneration = this._sessionGeneration;
 
@@ -219,6 +252,7 @@ export class E2EEPeerState {
       return false;
     }
 
+    const trusted = lookup.status === "pinned" ? trustedPins(lookup) : [];
     const pin = lookup.status === "pinned" ? lookup.pin : null;
 
     // Pinned peer whose delivered key the server stopped sending. There is no
@@ -228,7 +262,11 @@ export class E2EEPeerState {
       // replay it: a mid-call peer never re-announces on its own, so without
       // this, re-pinning writes a new pin that nothing ever verifies the
       // peer's key against, leaving them un-keyed for the rest of the call.
-      this._blockedAnnounces.set(userId, { publicKeyBase64, signatureBase64 });
+      this._blockedAnnounces.set(userId, {
+        publicKeyBase64,
+        signatureBase64,
+        identityKeyBase64: announcedIdentityKey,
+      });
       this.setPeerVerificationIfCurrent(isCurrent, {
         userId,
         status: "mismatch",
@@ -240,10 +278,11 @@ export class E2EEPeerState {
       });
       return false;
     }
-    // Pinned peer whose delivered key differs from the pin (reinstall, new
-    // device, or a swapped key). Accepted below only if the announce verifies
-    // against the NEW key; the pin is then overwritten and the user notified.
-    const keyChanged = pin !== null && publishedIdentity !== pin;
+    // Pinned peer announcing a key none of the pins match (a new device, a
+    // reinstall, or a swapped key). Accepted below only if the announce
+    // verifies against the NEW key; the key is then added to the pins and the
+    // user notified once.
+    const keyChanged = pin !== null && !!publishedIdentity && !trusted.includes(publishedIdentity);
 
     // Fingerprint of the ephemeral key this announce carries (OC-0003). Every
     // accepted peer gets one — for an unverified peer it is the only value
@@ -276,7 +315,12 @@ export class E2EEPeerState {
       // Fail closed: peer has an identity key but no valid signature (MITM).
       // Buffered like the missing-key block so a re-pin replays and
       // re-verifies it rather than clearing the badge (OC-0212).
-      if (isCurrent()) this._blockedAnnounces.set(userId, { publicKeyBase64, signatureBase64 });
+      if (isCurrent())
+        this._blockedAnnounces.set(userId, {
+          publicKeyBase64,
+          signatureBase64,
+          identityKeyBase64: announcedIdentityKey,
+        });
       this.setPeerVerificationIfCurrent(isCurrent, {
         userId,
         status: "mismatch",
@@ -287,7 +331,7 @@ export class E2EEPeerState {
       return false;
     }
 
-    // First sight (or a changed key) with a valid signature — pin the
+    // First sight (or a new device's key) with a valid signature — pin the
     // identity key now. A failed write (disk full, unwritable pins file) must
     // not display "verified" with no pin ever persisted: the pin is what arms
     // mismatch detection on a LATER announce, so a peer we call verified but
@@ -304,7 +348,7 @@ export class E2EEPeerState {
           userId,
         });
       } else if (keyChanged) {
-        log.warn("E2EE: peer identity key changed — accepted and re-pinned (identity-tofu)", {
+        log.warn("E2EE: peer is using a new device key — accepted and pinned (identity-tofu)", {
           userId,
         });
       } else {
@@ -321,7 +365,7 @@ export class E2EEPeerState {
       }
       const member = membersStore.getState().members.get(userId);
       showToast(
-        voiceText("identity.keyChanged", {
+        voiceText("identity.newDevice", {
           name: member ? memberDisplayName(member) : String(userId),
         }),
         "warning",
@@ -338,7 +382,10 @@ export class E2EEPeerState {
       return true; // still accept the announce — the write failure alone shouldn't block the call
     }
     const safetyNumber = await computeKeyFingerprint(identityKey);
-    if (this._keyChangedPeers.has(userId)) {
+    // "changed" only while the newly seen key is the one in the call: the
+    // peer switching back to a device whose key was already trusted is plain
+    // "verified", with no notice.
+    if (this._keyChangedPeers.get(userId) === publishedIdentity) {
       this.setPeerVerificationIfCurrent(isCurrent, {
         userId,
         status: "changed",

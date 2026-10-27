@@ -14,10 +14,8 @@
 
 import { createLogger } from "./logger";
 import { desktop } from "../platform/desktop";
-import type {
-  IdentityPinLookup,
-  StoreIdentityPinResult,
-} from "../platform/contracts/identityStore";
+import type { StoreIdentityPinResult } from "../platform/contracts/identityStore";
+import { decodePinSlot, encodePinSlot, withPin } from "./identityPins";
 import {
   exportIdentityKeyPair,
   exportPublicKey,
@@ -31,7 +29,19 @@ const log = createLogger("identity");
 // The five primitives below are the `IdentityStore` contract, implemented in
 // `platform/desktop/identity.ts` (B7-4). Their names and signatures stay here
 // because their callers import them from this module.
-export type { IdentityPinLookup, StoreIdentityPinResult };
+export type { StoreIdentityPinResult };
+
+/**
+ * A peer's pin lookup. The pin store holds one slot per `{host}:{userId}`;
+ * `identityPins.ts` defines how a set of device keys is kept in it. A single
+ * pin (including every pin written before keys became per device) reads as
+ * `{ pin }`; a peer with several devices adds `pins`, every trusted key oldest
+ * first, with `pin` the newest.
+ */
+export type IdentityPinLookup =
+  | { readonly status: "pinned"; readonly pin: string; readonly pins?: readonly string[] }
+  | { readonly status: "unpinned" }
+  | { readonly status: "unavailable" };
 
 // ── Identity private key (OS keyring) ──────────────────────────────────────
 
@@ -64,28 +74,103 @@ export async function deleteIdentityKey(host: string): Promise<boolean> {
 
 // ── Peer identity pins (identity_pins.json, TOFU) ──────────────────────────
 
-/** Pin a peer's identity public key (base64) under `{host}:{userId}`. */
+// Read-modify-write on one slot must not interleave with another on the same
+// slot, or two keys added at once would overwrite each other. Keyed per slot.
+const pinWrites = new Map<string, Promise<unknown>>();
+
+function serialized<T>(slot: string, task: () => Promise<T>): Promise<T> {
+  const run = (pinWrites.get(slot) ?? Promise.resolve()).then(task, task);
+  const tail = run.catch(() => undefined);
+  pinWrites.set(slot, tail);
+  void tail.then(() => {
+    if (pinWrites.get(slot) === tail) pinWrites.delete(slot);
+  });
+  return run;
+}
+
+/**
+ * Trust a peer's identity public key (base64) under `{host}:{userId}`. The key
+ * joins the keys already pinned for that peer (one per device, at most
+ * MAX_PINS_PER_USER, oldest dropped); nothing is overwritten, so a peer who
+ * switches back to an earlier device is still recognised. Adding a key that is
+ * already pinned is a no-op that reports "stored".
+ *
+ * An unreadable existing slot reports "failed" without writing: replacing it
+ * could drop keys the user already trusts.
+ */
 export async function storeIdentityPin(
   host: string,
   userId: string,
   pin: string,
 ): Promise<StoreIdentityPinResult> {
-  return desktop.identity.storePin(host, userId, pin);
+  return serialized(`${host}:${userId}`, async () => {
+    const existing = await desktop.identity.getPin(host, userId);
+    if (existing.status === "unavailable") {
+      log.error("Failed to store identity pin", { host, userId });
+      return "failed";
+    }
+    let keys: readonly string[] = [];
+    if (existing.status === "pinned") {
+      const decoded = decodePinSlot(existing.pin);
+      if (decoded === null) {
+        log.error("Failed to store identity pin", { host, userId });
+        return "failed";
+      }
+      keys = decoded;
+    }
+    const next = withPin(keys, pin);
+    if (existing.status === "pinned" && next === keys) return "stored";
+    return desktop.identity.storePin(host, userId, encodePinSlot(next));
+  });
 }
 
 /**
- * Look up a peer's pinned identity public key.
+ * Look up the keys pinned for a peer (see `IdentityPinLookup`).
  *
  * A store read error is returned as "unavailable", NOT "unpinned" (DC-08,
  * F3 follow-up 3): collapsing the two let a transient keyring error send a
  * pinned peer down the first-sight path — silently verifying against, and
  * then re-pinning, whatever key the server delivered. Callers must fail
- * closed on "unavailable". In non-Tauri environments (tests, browser) there
+ * closed on "unavailable". A stored value this code cannot interpret is also
+ * "unavailable". In non-Tauri environments (tests, browser) there
  * is no pin store by design, so the result is "unpinned" — consistent with
  * every other wrapper in this module no-oping there.
  */
 export async function getIdentityPin(host: string, userId: string): Promise<IdentityPinLookup> {
-  return desktop.identity.getPin(host, userId);
+  const raw = await desktop.identity.getPin(host, userId);
+  if (raw.status !== "pinned") return raw;
+  const keys = decodePinSlot(raw.pin);
+  if (keys === null) {
+    log.error("Identity pin is unreadable — treating as unavailable, not unpinned", {
+      host,
+      userId,
+    });
+    return { status: "unavailable" };
+  }
+  const [only] = keys;
+  const newest = keys[keys.length - 1];
+  if (newest === undefined) return { status: "unpinned" };
+  return keys.length === 1 && only !== undefined
+    ? { status: "pinned", pin: only }
+    : { status: "pinned", pin: newest, pins: keys };
+}
+
+/** This device's identity public key (base64) for `host`, for the `auth`
+ *  frame. Null when there is no signed-in user id yet or the keyring fails:
+ *  the frame then goes without it and connecting is never blocked. */
+export async function getDeviceIdentityPublicKey(host: string): Promise<string | null> {
+  try {
+    const userId = authStore.getState().user?.id;
+    if (userId === undefined) return null;
+    const keyPair = await getOrCreateIdentityKeyPair(host, userId);
+    return await exportPublicKey(keyPair.publicKey);
+  } catch (err) {
+    log.warn("Device identity key unavailable — authenticating without it", {
+      host,
+      error: String(err),
+    });
+    return null;
+  }
 }
 
 // ── High-level lifecycle ───────────────────────────────────────────────────

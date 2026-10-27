@@ -235,7 +235,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     expect(await invokesOf(page, "store_identity_pin")).toHaveLength(0);
   });
 
-  test("a pinned peer whose delivered key changed is accepted automatically, re-pinned, with a persistent notice", async ({
+  test("a pinned peer announcing a new device key is accepted automatically, pinned alongside the old key, with a persistent notice", async ({
     page,
   }) => {
     const peer = await makePeerCrypto(2);
@@ -253,16 +253,20 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     const badge = peerBadge(page);
     await expect(badge).toBeVisible({ timeout: 10_000 });
     await expect(badge).toHaveClass(/changed/);
-    await expect(badge).toHaveAttribute("title", /^Security key changed · Safety number: /);
-    // The new key replaced the pin.
+    await expect(badge).toHaveAttribute("title", /^New device · Safety number: /);
+    // The new key joined the pin set; the old one stays trusted.
     const pins = await invokesOf(page, "store_identity_pin");
     expect(pins).toHaveLength(1);
-    expect(pins[0]).toMatchObject({ userId: "2", pin: peer.identityPublicKeyB64 });
+    expect(pins[0]).toMatchObject({ userId: "2" });
+    expect(JSON.parse(String((pins[0] as { pin: string }).pin))).toEqual([
+      oldPin,
+      peer.identityPublicKeyB64,
+    ]);
 
     // The notice names the peer and is sticky: only a sticky toast carries a
     // close button (toast.test.ts pins that it outlives the auto-dismiss).
     const notice = page.locator(".toast-warning", { hasText: "moderator1" });
-    await expect(notice).toContainText("security key changed");
+    await expect(notice).toContainText("is using a new device");
     await notice.locator(".toast-close").click();
     await expect(notice).toBeHidden();
   });

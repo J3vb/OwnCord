@@ -1242,6 +1242,10 @@ export interface VoiceE2EEAnnouncePayload {
   /** Sender's identity-key signature over the ephemeral key (F3 TOFU).
    *  Omitted for legacy clients that have not published an identity key. */
   readonly signature?: string;
+  /** Identity public key (base64) of the announcing device. Peers verify
+   *  `signature` against it. Absent from an older server or older peer: the
+   *  receiver falls back to the member's published key. */
+  readonly identity_public_key?: string;
   /** Video codecs the sender decodes (lowercase MIME subtypes). Absent from an
    *  old client or server: the receiver assumes VP8 and H.264. */
   readonly video_decode?: readonly string[];
@@ -1516,6 +1520,13 @@ export interface AuthPayload {
    * server withholds anything not declared, so an older client never sees it.
    */
   readonly features?: readonly string[];
+  /**
+   * This device's identity public key (base64, the format PATCH /users/me
+   * takes). The server attaches it to the voice E2EE announces this connection
+   * sends, so peers verify against the announcing device's own key. Omitted
+   * when the key is unavailable or for an older client.
+   */
+  readonly identity_public_key?: string;
 }
 
 export interface ChatSendPayload {

@@ -32,6 +32,7 @@ import {
   resetIdentityKeyPairCache,
   publishIdentityKey,
   ensureIdentityKeyPublished,
+  getDeviceIdentityPublicKey,
 } from "@lib/identity";
 import { generateIdentityKeyPair, exportPublicKey, exportIdentityKeyPair } from "@lib/e2eeCrypto";
 import { authStore } from "@stores/auth.store";
@@ -651,5 +652,116 @@ describe("legacy identity key migration (pre-B3-3 host-only account)", () => {
       expect.stringMatching(/Failed to migrate legacy identity key.*next launch can retry/),
       { host: "chat.example" },
     );
+  });
+});
+
+/**
+ * Pin-store double: one slot per `{host}:{userId}`, holding exactly the string
+ * the app writes, as `identity_pins.json` does.
+ */
+function pinStoreDouble(seed: Record<string, string> = {}): Map<string, string> {
+  const slots = new Map<string, string>(Object.entries(seed));
+  invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+    const slot = `${args?.host as string}:${args?.userId as string}`;
+    if (cmd === "get_identity_pin") return Promise.resolve(slots.get(slot) ?? null);
+    if (cmd === "store_identity_pin") {
+      slots.set(slot, args!.pin as string);
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(undefined);
+  });
+  return slots;
+}
+
+describe("identity pins as a set per device", () => {
+  it("reads a single legacy pin as a set of one, unchanged on disk", async () => {
+    const slots = pinStoreDouble({ "chat.example:42": "legacy-key" });
+    expect(await getIdentityPin("chat.example", "42")).toEqual({
+      status: "pinned",
+      pin: "legacy-key",
+    });
+    expect(slots.get("chat.example:42")).toBe("legacy-key");
+  });
+
+  it("migrates a legacy pin to a two-key set when a second device is added", async () => {
+    const slots = pinStoreDouble({ "chat.example:42": "key-a" });
+    expect(await storeIdentityPin("chat.example", "42", "key-b")).toBe("stored");
+    expect(JSON.parse(slots.get("chat.example:42")!)).toEqual(["key-a", "key-b"]);
+    expect(await getIdentityPin("chat.example", "42")).toEqual({
+      status: "pinned",
+      pin: "key-b",
+      pins: ["key-a", "key-b"],
+    });
+  });
+
+  it("stores the first key bare and ignores a key that is already pinned", async () => {
+    const slots = pinStoreDouble();
+    await storeIdentityPin("chat.example", "42", "key-a");
+    expect(slots.get("chat.example:42")).toBe("key-a");
+    invokeMock.mockClear();
+    expect(await storeIdentityPin("chat.example", "42", "key-a")).toBe("stored");
+    expect(invokeMock.mock.calls.some((c) => c[0] === "store_identity_pin")).toBe(false);
+  });
+
+  it("keeps at most ten keys per peer, dropping the oldest", async () => {
+    const slots = pinStoreDouble();
+    for (let i = 1; i <= 11; i++) {
+      // oxlint-disable-next-line no-await-in-loop -- each add reads the previous one's write
+      await storeIdentityPin("chat.example", "42", `key-${i}`);
+    }
+    const kept = JSON.parse(slots.get("chat.example:42")!) as string[];
+    expect(kept).toHaveLength(10);
+    expect(kept[0]).toBe("key-2");
+    expect(kept[9]).toBe("key-11");
+    expect(kept).not.toContain("key-1");
+  });
+
+  it("does not lose a key when two adds race on the same peer", async () => {
+    const slots = pinStoreDouble({ "chat.example:42": "key-a" });
+    await Promise.all([
+      storeIdentityPin("chat.example", "42", "key-b"),
+      storeIdentityPin("chat.example", "42", "key-c"),
+    ]);
+    expect(JSON.parse(slots.get("chat.example:42")!)).toEqual(["key-a", "key-b", "key-c"]);
+  });
+
+  it("reports an unreadable pin slot as unavailable and never overwrites it", async () => {
+    const slots = pinStoreDouble({ "chat.example:42": "[not json" });
+    expect(await getIdentityPin("chat.example", "42")).toEqual({ status: "unavailable" });
+    expect(await storeIdentityPin("chat.example", "42", "key-b")).toBe("failed");
+    expect(slots.get("chat.example:42")).toBe("[not json");
+  });
+});
+
+describe("getDeviceIdentityPublicKey (auth frame key)", () => {
+  afterEach(() => {
+    authStore.setState((prev) => ({ ...prev, user: null }));
+  });
+
+  it("returns this device's public key, the one the ready hook publishes", async () => {
+    keyringDouble();
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+    }));
+    const key = await getDeviceIdentityPublicKey("chat.example");
+    const pair = await getOrCreateIdentityKeyPair("chat.example", 1);
+    expect(key).toBe(await exportPublicKey(pair.publicKey));
+  });
+
+  it("returns null without touching the keyring when nobody is signed in yet", async () => {
+    keyringDouble();
+    authStore.setState((prev) => ({ ...prev, user: null }));
+    expect(await getDeviceIdentityPublicKey("chat.example")).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("returns null, not a rejection, when the keyring cannot be read", async () => {
+    invokeMock.mockRejectedValue(new Error("keyring locked"));
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 1, username: "alex", avatar: null, role: "member" },
+    }));
+    await expect(getDeviceIdentityPublicKey("chat.example")).resolves.toBeNull();
   });
 });
