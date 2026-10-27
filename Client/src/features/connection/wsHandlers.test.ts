@@ -220,31 +220,19 @@ describe("rejoinVoiceAfterRestart", () => {
 
   it("rejoins when ready has no row for this user", () => {
     const ws = socketStub();
-    rejoinVoiceAfterRestart(
-      armedClock(),
-      ws as never,
-      readyPayload([{ user_id: 2, channel_id: 5 }]),
-    );
+    rejoinVoiceAfterRestart(armedClock(), ws, readyPayload([{ user_id: 2, channel_id: 5 }]));
     expect(ws.send).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 5 } });
   });
 
   it("does not rejoin when this user already has a row in the channel", () => {
     const ws = socketStub();
-    rejoinVoiceAfterRestart(
-      armedClock(),
-      ws as never,
-      readyPayload([{ user_id: 9, channel_id: 5 }]),
-    );
+    rejoinVoiceAfterRestart(armedClock(), ws, readyPayload([{ user_id: 9, channel_id: 5 }]));
     expect(ws.send).not.toHaveBeenCalled();
   });
 
   it("does not rejoin when another device holds the user's call in another channel", () => {
     const ws = socketStub();
-    rejoinVoiceAfterRestart(
-      armedClock(),
-      ws as never,
-      readyPayload([{ user_id: 9, channel_id: 7 }]),
-    );
+    rejoinVoiceAfterRestart(armedClock(), ws, readyPayload([{ user_id: 9, channel_id: 7 }]));
     expect(ws.send).not.toHaveBeenCalled();
   });
 });
