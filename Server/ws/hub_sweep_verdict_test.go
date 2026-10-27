@@ -29,6 +29,9 @@ func (a partialSweepAuthn) SweepSessions(context.Context, []string) (map[string]
 func (a partialSweepAuthn) RecordSocketConnect(context.Context, int64, string) {}
 
 func (a partialSweepAuthn) TouchSession(context.Context, string) error { return nil }
+func (a partialSweepAuthn) RecordSessionIdentityKey(context.Context, string, string) error {
+	return nil
+}
 
 // TestSweepRevokedSessions_MissingVerdictFailsClosed pins the sweep's posture
 // for a session the authenticator did not answer for: kick, exactly as the

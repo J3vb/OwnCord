@@ -178,15 +178,27 @@ FROM sessions WHERE user_id = ?
 ORDER BY created_at DESC
 `
 
-func (q *Queries) GetUserSessions(ctx context.Context, userID int64) ([]Session, error) {
+type GetUserSessionsRow struct {
+	ID        int64   `json:"id"`
+	UserID    int64   `json:"userId"`
+	Token     string  `json:"token"`
+	Device    *string `json:"device"`
+	IpAddress *string `json:"ipAddress"`
+	CreatedAt string  `json:"createdAt"`
+	LastUsed  string  `json:"lastUsed"`
+	ExpiresAt string  `json:"expiresAt"`
+	Unseen    int64   `json:"unseen"`
+}
+
+func (q *Queries) GetUserSessions(ctx context.Context, userID int64) ([]GetUserSessionsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getUserSessions, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Session{}
+	items := []GetUserSessionsRow{}
 	for rows.Next() {
-		var i Session
+		var i GetUserSessionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,

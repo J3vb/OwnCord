@@ -118,6 +118,24 @@ and, if it later changes, accept the new key once the announce verifies
 against it, replacing the pin and showing a persistent notice (see
 [ux/voice-and-e2ee.md](ux/voice-and-e2ee.md)).
 
+Each device has its own identity keypair, so the key a peer verifies against
+travels with the connection, not the account. The `auth` frame carries the
+device's `identity_public_key`; `Server/ws` keeps it on the `Client`
+(immutable after the handshake) and on the session row
+(`sessions.identity_public_key`, migration 085), and `buildVoiceE2EEAnnounce`
+attaches it to each `voice_e2ee_announce`. The first connection of an app
+start cannot put the key in its `auth` frame (the user id that scopes it only
+arrives in `auth_ok`), so the client also puts the key in its own
+`voice_e2ee_announce`, and the server stores that key in preference to the
+`auth`-frame one. The key is stored inside the stored
+announce (`e2eeAnnounce.identityKey`), so the replay to a late joiner, a
+resumed socket and the key holder's re-relay all carry the key of the
+connection that made the announce. When a call moves to another device, that
+device's own announce replaces the stored one, so later replays carry the new
+device's key. A new client verifies an announce against its
+`identity_public_key` when present and against the member's published key
+otherwise. An older client sends no key and its announces carry none.
+
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
 `Client/src/lib/livekitSession.ts`, `Client/src/features/voice/`,
 `Client/src/lib/livekitE2EE.ts`, `Client/src/lib/e2eeCrypto.ts`,

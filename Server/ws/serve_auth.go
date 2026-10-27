@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -31,6 +32,12 @@ type resumeHint struct {
 	// the rest of the hint it is UNTRUSTED, and it only narrows what the
 	// socket is sent.
 	Features clientFeatures
+	// IdentityKey is the device identity public key from the auth frame
+	// (voice E2EE, key per device), trimmed and validated; "" when the frame
+	// carried none or an invalid one. Unlike the rest of the hint it is not
+	// narrowed by anything: it is relayed to peers in this connection's voice
+	// announces, which verify it against the announce's own signature.
+	IdentityKey string
 }
 
 func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*db.User, string, resumeHint, error) {
@@ -70,6 +77,10 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		// Features declares optional client capabilities (client_features.go).
 		// Absent means none: clients before WP 6.9d predate the field.
 		Features []string `json:"features"`
+		// IdentityPublicKey is this device's E2EE identity public key (base64).
+		// Optional and never fatal: kept raw so a wrongly typed value cannot
+		// make the whole frame fail to parse, and validated below.
+		IdentityPublicKey json.RawMessage `json:"identity_public_key"`
 	}
 	if err := json.Unmarshal(env.Payload, &p); err != nil || p.Token == "" {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("missing token"))
@@ -107,7 +118,50 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		return nil, "", resumeHint{}, fmt.Errorf("auth: principal resolution failed: %w", err)
 	}
 
-	return user, hash, resumeHint{LastSeq: p.LastSeq, ChannelID: p.ActiveChannelID, Features: parseClientFeatures(p.Features)}, nil
+	return user, hash, resumeHint{
+		LastSeq:     p.LastSeq,
+		ChannelID:   p.ActiveChannelID,
+		Features:    parseClientFeatures(p.Features),
+		IdentityKey: authIdentityKey(user.ID, p.IdentityPublicKey),
+	}, nil
+}
+
+// sessionIdentityKeyTimeout bounds the session-row write of the device key, so
+// a busy database writer cannot stall the handshake behind it.
+const sessionIdentityKeyTimeout = 2 * time.Second
+
+// recordSessionIdentityKey stores the device key on the session row, bounded
+// by its own deadline: after the hijack the request context no longer ends on
+// a client disconnect, so the timeout is what keeps a busy writer from
+// stalling the handshake. Failure is log-only: the key is also held on the Client, and the
+// row is only kept for a resumed connection and future device lists.
+func (h *Hub) recordSessionIdentityKey(ctx context.Context, userID int64, tokenHash, key string) {
+	ctx, cancel := context.WithTimeout(ctx, sessionIdentityKeyTimeout)
+	defer cancel()
+	if err := h.authn.RecordSessionIdentityKey(ctx, tokenHash, key); err != nil {
+		slog.Warn("ws auth: recording the session identity key failed", "user_id", userID, "err", err)
+	}
+}
+
+// authIdentityKey returns the device identity key an auth frame carried, or ""
+// when it carried none or an invalid one. An invalid key is logged and
+// ignored, never an auth failure: a bad key must not lock a device out of its
+// account, and the announce simply goes out without a per-device key.
+func authIdentityKey(userID int64, raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var key string
+	if err := json.Unmarshal(raw, &key); err != nil {
+		slog.Info("ws auth: identity_public_key ignored, not a string", "user_id", userID)
+		return ""
+	}
+	key = strings.TrimSpace(key)
+	if err := service.ValidateIdentityKey(key); err != nil {
+		slog.Info("ws auth: identity_public_key ignored, invalid", "user_id", userID, "err", err)
+		return ""
+	}
+	return key
 }
 
 // handshakeWrite writes one handshake-phase message (auth_ok, ready, or a
@@ -166,6 +220,12 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	c.authChannelID = hint.ChannelID
 	// 6.9d: what the client says it can render; forums are withheld without it.
 	c.features = hint.Features
+	// Voice E2EE key per device: set once, before registerNow makes c
+	// reachable, and never written again, so reading it needs no lock.
+	c.identityKey = hint.IdentityKey
+	if hint.IdentityKey != "" {
+		h.recordSessionIdentityKey(r.Context(), user.ID, tokenHash, hint.IdentityKey)
+	}
 
 	// Look up role name for protocol-compliant payloads and cache on client.
 	// Fail closed like the sibling lookup in handleFreshConnect (BUG-094):

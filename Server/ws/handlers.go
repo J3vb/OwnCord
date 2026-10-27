@@ -99,6 +99,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		Avatar:         avatar,
 		DisplayName:    displayName,
 		RoleName:       c.roleName,
+		IdentityKey:    c.identityKey,
 		ReqID:          env.ID,
 		VoiceChannelID: voiceChID,
 		VoiceJoinToken: voiceJoinTok,

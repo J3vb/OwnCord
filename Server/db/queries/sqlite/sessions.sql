@@ -74,3 +74,8 @@ ORDER BY created_at DESC;
 -- device acknowledges every other session's login. The caller's own row is
 -- left alone so a device never acknowledges itself.
 UPDATE sessions SET unseen = 0 WHERE user_id = ? AND id != ? AND unseen = 1;
+
+-- name: SetSessionIdentityKey :execresult
+-- The device identity public key a WebSocket auth frame carried, stored on the
+-- session it authenticated. Written on every connect, last write wins.
+UPDATE sessions SET identity_public_key = sqlc.arg(identity_public_key) WHERE token = sqlc.arg(token);

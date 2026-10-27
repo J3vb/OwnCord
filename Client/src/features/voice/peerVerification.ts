@@ -8,7 +8,7 @@
 import type { IconName } from "../../lib/icons";
 import type { MountableComponent } from "../../lib/safe-render";
 import type { PeerVerification } from "../../stores/voice.store";
-import { rePinPeerIdentity } from "../../lib/livekitSession";
+import { rePinPeerIdentity, peerAnnouncedIdentityKey } from "../../lib/livekitSession";
 import { showToast } from "../../lib/toast";
 import { createLogger } from "../../lib/logger";
 import { membersStore } from "../../stores/members.store";
@@ -20,8 +20,8 @@ const log = createLogger("peer-verification");
 /** Icon, color, and tooltip for a peer's E2EE identity verification badge
  *  (F3 TOFU). The states mirror the voice store's PeerVerification:
  *  a green shield-check when the announce signature verified against the pinned
- *  key, an amber shield-alert when it verified against a changed key that was
- *  accepted automatically, a muted shield when the peer published no key
+ *  key, an amber shield-alert when it verified against a key not seen before
+ *  for this peer (a new device) that was accepted automatically, a muted shield when the peer published no key
  *  (legacy), a red shield-alert when the peer is blocked (pinned key no longer
  *  delivered, or a bad signature), and an amber shield-question when the local
  *  pin store could not be read (DC-08). */
@@ -34,7 +34,7 @@ export function verifyPresentation(v: PeerVerification): {
     return {
       icon: "shield-alert",
       color: "var(--yellow, #f0b232)",
-      title: shellText("identity.keyChanged", { safetyNumber: v.safetyNumber ?? "" }),
+      title: shellText("identity.newDevice", { safetyNumber: v.safetyNumber ?? "" }),
     };
   }
   if (v.status === "verified") {
@@ -116,7 +116,14 @@ export async function openIdentityMismatchModal(
   // runs on the verified path). Without it the modal's "verify out-of-band"
   // instruction is unfollowable and "Trust New Key" is a blind accept.
   let fingerprint: string | null = null;
-  const publishedKey = membersStore.getState().members.get(userId)?.identityPublicKey ?? null;
+  // The key of the device actually in the call: the one its current announce
+  // was checked against. A peer with several devices has several keys, so the
+  // member's single published key may belong to another device. Falls back to
+  // the published key when no announce has been seen (older server or peer).
+  const publishedKey =
+    peerAnnouncedIdentityKey(userId) ??
+    membersStore.getState().members.get(userId)?.identityPublicKey ??
+    null;
   if (publishedKey !== null) {
     try {
       fingerprint = await computeKeyFingerprint(await importIdentityPublicKey(publishedKey));

@@ -22,8 +22,11 @@ type ClientInfo struct {
 	// DisplayName is the connection's nickname, nil when unset. Carried
 	// alongside Username rather than replacing it: renderers fall back to the
 	// username, and mentions still resolve against it.
-	DisplayName    *string
-	RoleName       string
+	DisplayName *string
+	RoleName    string
+	// IdentityKey is the connection's device identity public key from its auth
+	// frame, "" when none (client.identityKey).
+	IdentityKey    string
 	ReqID          string
 	VoiceChannelID int64  // 0 if not in a voice channel
 	VoiceJoinToken string // opaque join-instance token for the current voice session

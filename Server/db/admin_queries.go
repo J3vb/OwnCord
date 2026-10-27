@@ -175,7 +175,7 @@ func (d *DB) GetUserSessions(ctx context.Context, userID int64) ([]Session, erro
 	}
 	sessions := make([]Session, 0, len(rows))
 	for _, s := range rows {
-		sessions = append(sessions, sessionFromGen(s))
+		sessions = append(sessions, sessionFromColumns(s.ID, s.UserID, s.Token, s.Device, s.IpAddress, s.CreatedAt, s.LastUsed, s.ExpiresAt, s.Unseen))
 	}
 	return sessions, nil
 }

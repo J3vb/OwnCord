@@ -465,7 +465,17 @@ export function handleVoiceE2eeAnnounce(payload: Payload<"voice_e2ee_announce">)
     log.warn("voice_e2ee_announce: could not record video_decode", err);
   }
   void livekitSession().then(({ handleE2EEAnnounce }) =>
-    handleE2EEAnnounce(payload.user_id, payload.public_key, payload.signature),
+    // The announcing device's own key rides along only when the server sent one
+    // (older servers do not); the wire is untrusted, so anything but a string
+    // reads as absent.
+    typeof payload.identity_public_key === "string" && payload.identity_public_key !== ""
+      ? handleE2EEAnnounce(
+          payload.user_id,
+          payload.public_key,
+          payload.signature,
+          payload.identity_public_key,
+        )
+      : handleE2EEAnnounce(payload.user_id, payload.public_key, payload.signature),
   );
 }
 

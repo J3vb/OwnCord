@@ -188,6 +188,12 @@
       "reason": "Keyed by host and user, so a second server never reads the first's pair"
     },
     {
+      "file": "lib/identity.ts",
+      "binding": "pinWrites",
+      "category": "host-keyed",
+      "reason": "In-flight pin writes keyed by host and user; each entry removes itself when its write settles"
+    },
+    {
       "file": "lib/legacyKeyMigration.ts",
       "binding": "unsettled",
       "category": "host-keyed",

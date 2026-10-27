@@ -90,9 +90,21 @@ SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
 FROM sessions WHERE token = ?
 `
 
-func (q *Queries) GetSessionByTokenHash(ctx context.Context, token string) (Session, error) {
+type GetSessionByTokenHashRow struct {
+	ID        int64   `json:"id"`
+	UserID    int64   `json:"userId"`
+	Token     string  `json:"token"`
+	Device    *string `json:"device"`
+	IpAddress *string `json:"ipAddress"`
+	CreatedAt string  `json:"createdAt"`
+	LastUsed  string  `json:"lastUsed"`
+	ExpiresAt string  `json:"expiresAt"`
+	Unseen    int64   `json:"unseen"`
+}
+
+func (q *Queries) GetSessionByTokenHash(ctx context.Context, token string) (GetSessionByTokenHashRow, error) {
 	row := q.db.QueryRowContext(ctx, getSessionByTokenHash, token)
-	var i Session
+	var i GetSessionByTokenHashRow
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
@@ -189,15 +201,27 @@ WHERE user_id = ?
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListUserSessions(ctx context.Context, userID int64) ([]Session, error) {
+type ListUserSessionsRow struct {
+	ID        int64   `json:"id"`
+	UserID    int64   `json:"userId"`
+	Token     string  `json:"token"`
+	Device    *string `json:"device"`
+	IpAddress *string `json:"ipAddress"`
+	CreatedAt string  `json:"createdAt"`
+	LastUsed  string  `json:"lastUsed"`
+	ExpiresAt string  `json:"expiresAt"`
+	Unseen    int64   `json:"unseen"`
+}
+
+func (q *Queries) ListUserSessions(ctx context.Context, userID int64) ([]ListUserSessionsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listUserSessions, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Session{}
+	items := []ListUserSessionsRow{}
 	for rows.Next() {
-		var i Session
+		var i ListUserSessionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
@@ -236,6 +260,21 @@ type MarkSessionsSeenParams struct {
 // left alone so a device never acknowledges itself.
 func (q *Queries) MarkSessionsSeen(ctx context.Context, arg MarkSessionsSeenParams) (sql.Result, error) {
 	return q.db.ExecContext(ctx, markSessionsSeen, arg.UserID, arg.ID)
+}
+
+const setSessionIdentityKey = `-- name: SetSessionIdentityKey :execresult
+UPDATE sessions SET identity_public_key = ?1 WHERE token = ?2
+`
+
+type SetSessionIdentityKeyParams struct {
+	IdentityPublicKey *string `json:"identityPublicKey"`
+	Token             string  `json:"token"`
+}
+
+// The device identity public key a WebSocket auth frame carried, stored on the
+// session it authenticated. Written on every connect, last write wins.
+func (q *Queries) SetSessionIdentityKey(ctx context.Context, arg SetSessionIdentityKeyParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setSessionIdentityKey, arg.IdentityPublicKey, arg.Token)
 }
 
 const touchSessions = `-- name: TouchSessions :exec

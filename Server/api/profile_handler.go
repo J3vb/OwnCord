@@ -3,9 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -200,25 +198,6 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// validateIdentityKey checks that key is non-empty, at most 128 characters and
-// valid standard-alphabet base64 (padded or unpadded) — the same posture as
-// the WS voice_e2ee_announce public_key validation.
-func validateIdentityKey(key string) error {
-	if key == "" {
-		return fmt.Errorf("identity_public_key must not be empty")
-	}
-	if len(key) > 128 {
-		return fmt.Errorf("identity_public_key too large (max 128 characters)")
-	}
-	if _, err := base64.StdEncoding.DecodeString(key); err == nil {
-		return nil
-	}
-	if _, err := base64.RawStdEncoding.DecodeString(key); err != nil {
-		return fmt.Errorf("identity_public_key is not valid base64")
-	}
-	return nil
-}
-
 // allowedAvatarMIME is the set of still image types an avatar, banner or group
 // icon may be, matched against the type sniffed from the file's own bytes.
 // GIF is added per surface (imageLimits.AllowGIF, WP 8.7) where the client
@@ -347,7 +326,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	// all-or-nothing.
 	if req.IdentityPublicKey != nil {
 		trimmed := strings.TrimSpace(*req.IdentityPublicKey)
-		if err := validateIdentityKey(trimmed); err != nil {
+		if err := service.ValidateIdentityKey(trimmed); err != nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}

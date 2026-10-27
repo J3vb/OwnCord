@@ -235,7 +235,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     expect(await invokesOf(page, "store_identity_pin")).toHaveLength(0);
   });
 
-  test("a pinned peer whose delivered key changed is accepted automatically, re-pinned, with a persistent notice", async ({
+  test("a pinned peer announcing a new device key is accepted automatically, pinned alongside the old key, with a persistent notice", async ({
     page,
   }) => {
     const peer = await makePeerCrypto(2);
@@ -253,16 +253,17 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     const badge = peerBadge(page);
     await expect(badge).toBeVisible({ timeout: 10_000 });
     await expect(badge).toHaveClass(/changed/);
-    await expect(badge).toHaveAttribute("title", /^Security key changed · Safety number: /);
-    // The new key replaced the pin.
+    await expect(badge).toHaveAttribute("title", /^New device · Safety number: /);
+    // The new key joined the pin set; the old one stays trusted.
     const pins = await invokesOf(page, "store_identity_pin");
     expect(pins).toHaveLength(1);
-    expect(pins[0]).toMatchObject({ userId: "2", pin: peer.identityPublicKeyB64 });
+    expect(pins[0]).toMatchObject({ userId: "2" });
+    expect((pins[0] as { pin: string }).pin).toBe(`${oldPin}_${peer.identityPublicKeyB64}`);
 
     // The notice names the peer and is sticky: only a sticky toast carries a
     // close button (toast.test.ts pins that it outlives the auto-dismiss).
     const notice = page.locator(".toast-warning", { hasText: "moderator1" });
-    await expect(notice).toContainText("security key changed");
+    await expect(notice).toContainText("is using a new device");
     await notice.locator(".toast-close").click();
     await expect(notice).toBeHidden();
   });
@@ -338,7 +339,8 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     await page.locator(".modal-footer button", { hasText: "Trust New Key" }).click();
 
     await expect(page.locator("h3", { hasText: "Identity Warning" })).toBeHidden();
-    // The EXACT displayed key was pinned (TOCTOU-safe re-pin), and the
+    // The EXACT displayed key joined the pin set as the newest entry
+    // (TOCTOU-safe re-pin; the earlier key stays trusted), and the
     // mismatch block cleared. Re-pinning replays the announce that was
     // blocked as a mismatch (OC-0212), which re-verifies against the pin just
     // stored — so the peer lands in the verified state rather than losing its
@@ -350,7 +352,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     await expect(badge).toHaveAttribute("title", /^Same key as before · Safety number: /);
     const pins = await invokesOf(page, "store_identity_pin");
     expect(pins).toHaveLength(1);
-    expect(pins[0]).toMatchObject({ userId: "2", pin: peer.identityPublicKeyB64 });
+    expect(pins[0]).toMatchObject({ userId: "2", pin: `${oldPin}_${peer.identityPublicKeyB64}` });
   });
 
   test("an unreadable pin store fails closed: distinct 'could not check' badge, nothing pinned (DC-08)", async ({

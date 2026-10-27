@@ -125,10 +125,10 @@ export function describeIdentityStoreSuite(
 
     describe("getPin", () => {
       check('resolves { status: "pinned" } when a pin is stored', async () => {
-        ctx.native.succeedWith("pin-value");
+        ctx.native.succeedWith("pinValue");
         await expect(ctx.subject.getPin("host", "1")).resolves.toEqual({
           status: "pinned",
-          pin: "pin-value",
+          pin: "pinValue",
         });
       });
 

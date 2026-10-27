@@ -5,7 +5,11 @@ vi.mock("../../stores/auth.store", () => ({
   authStore: { getState: () => auth },
 }));
 vi.mock("../../lib/identity", () => ({ getOrCreateIdentityKeyPair: vi.fn() }));
-vi.mock("../../lib/e2eeCrypto", () => ({ signEphemeralKey: vi.fn() }));
+vi.mock("../../lib/e2eeCrypto", () => ({
+  signEphemeralKey: vi.fn(),
+  exportPublicKey: vi.fn(),
+  computeKeyFingerprint: vi.fn(),
+}));
 const decode = vi.hoisted(() => ({ list: vi.fn() }));
 vi.mock("./decodeCaps", () => ({ localVideoDecode: () => decode.list() }));
 vi.mock("../../lib/logger", () => ({
@@ -13,7 +17,7 @@ vi.mock("../../lib/logger", () => ({
 }));
 
 import { getOrCreateIdentityKeyPair } from "../../lib/identity";
-import { signEphemeralKey } from "../../lib/e2eeCrypto";
+import { exportPublicKey, signEphemeralKey } from "../../lib/e2eeCrypto";
 import { E2EEIdentity, rawFromBase64 } from "./e2eeIdentity";
 
 const PAIR = { privateKey: "priv", publicKey: "pub" } as unknown as CryptoKeyPair;
@@ -46,6 +50,7 @@ beforeEach(() => {
   auth.user = { id: 7 };
   vi.mocked(getOrCreateIdentityKeyPair).mockResolvedValue(PAIR);
   vi.mocked(signEphemeralKey).mockResolvedValue("sig");
+  vi.mocked(exportPublicKey).mockResolvedValue("device-pub");
   decode.list.mockResolvedValue(["vp8", "h264"]);
 });
 
@@ -78,8 +83,10 @@ describe("E2EEIdentity", () => {
     await expect(identity.buildAnnouncePayload(EPHEMERAL)).resolves.toEqual({
       public_key: EPHEMERAL,
       signature: "sig",
+      identity_public_key: "device-pub",
       video_decode: ["vp8", "h264"],
     });
+    expect(exportPublicKey).toHaveBeenCalledWith("pub");
     expect(getOrCreateIdentityKeyPair).toHaveBeenCalledWith("chat.example", 7);
     expect(signEphemeralKey).toHaveBeenCalledWith("priv", 7, new Uint8Array([1, 2, 3]));
   });
@@ -160,6 +167,31 @@ describe("E2EEIdentity", () => {
       expect(signEphemeralKey).not.toHaveBeenCalled();
     },
   );
+
+  it("carries the device key even when no user id existed at auth time", async () => {
+    // Fresh app start: the auth frame was built with no user id (so it went
+    // without a key). auth_ok then delivers the id, and the announce, built
+    // afterwards, still ends up keyed.
+    auth.user = null;
+    const { identity } = setup();
+    const atAuth = await identity.buildAnnouncePayload(EPHEMERAL);
+    expect(atAuth).not.toHaveProperty("identity_public_key");
+    auth.user = { id: 7 };
+    await expect(identity.buildAnnouncePayload(EPHEMERAL)).resolves.toEqual({
+      public_key: EPHEMERAL,
+      signature: "sig",
+      identity_public_key: "device-pub",
+      video_decode: ["vp8", "h264"],
+    });
+  });
+
+  it("sends no key when the announce goes out unsigned", async () => {
+    vi.mocked(exportPublicKey).mockRejectedValueOnce(new Error("export"));
+    const { identity } = setup();
+    const payload = await identity.buildAnnouncePayload(EPHEMERAL);
+    expect(payload).not.toHaveProperty("identity_public_key");
+    expect(payload).not.toHaveProperty("signature");
+  });
 
   it("degrades to an unsigned announce when signing fails", async () => {
     vi.mocked(signEphemeralKey).mockRejectedValueOnce(new Error("keyring"));

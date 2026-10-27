@@ -12,6 +12,7 @@ vi.mock("@lib/livekitSession", () => ({
   getUserVolume: vi.fn(() => 1),
   getUserLocalMute: (userId: number) => mockGetUserLocalMute(userId),
   rePinPeerIdentity: mockRePinPeerIdentity,
+  peerAnnouncedIdentityKey: vi.fn(() => null),
 }));
 
 const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }));
@@ -3138,7 +3139,7 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(own!.getAttribute("title")).toContain("0123 4567 89AB CDEF");
   });
 
-  it("shows a key-changed badge, not a plain verified one, after a changed key was accepted", () => {
+  it("shows a new-device badge, not a plain verified one, after a new device key was accepted", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     setPeerVerif(10, "changed", "AB12 CD34");
     sidebar.mount(container);
@@ -3146,7 +3147,7 @@ describe("ChannelSidebar voice identity badge", () => {
     const badge = badgeFor(10);
     expect(badge).not.toBeNull();
     expect(badge!.classList.contains("changed")).toBe(true);
-    expect(badge!.getAttribute("title")).toContain("Security key changed");
+    expect(badge!.getAttribute("title")).toContain("New device");
     expect(badge!.getAttribute("title")).toContain("AB12 CD34");
     expect(badge!.getAttribute("title")).not.toContain("Same key as before");
   });

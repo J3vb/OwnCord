@@ -42,7 +42,11 @@ type Client struct {
 	held      *db.MemberRoles // the one held-role read of this handshake (refreshUserSnapshot)
 	roleIDs   []int64         // held role ids, top first; set by refreshUserSnapshot before registration
 	tokenHash string          // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq   uint64          // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	// identityKey is this device's E2EE identity public key from its auth
+	// frame ("" when none was sent). Immutable: set once in upgradeAndAuth
+	// before registerNow publishes the client, so it needs no lock.
+	identityKey string
+	lastSeq     uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
 	// authChannelID is the channel the client says it had open when it
 	// disconnected, sent alongside last_seq in the auth frame (0 = none).
 	//

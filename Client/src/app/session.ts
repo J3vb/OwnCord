@@ -21,6 +21,7 @@ import {
   type WsClient,
 } from "@lib/ws";
 import { wireDispatcher } from "@lib/dispatcher";
+import { setIdentityKeyProvider } from "@lib/ws";
 import { setLastChannelHost } from "@lib/last-channel";
 import { authStore } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
@@ -156,6 +157,15 @@ export function startSession(
   // It has to be here, not MainPage: the first ready arrives before MainPage
   // mounts, and it is what restores the last channel.
   setLastChannelHost(host);
+  // The auth frame carries this device's identity public key, so peers verify
+  // its voice announces against the device that signed them. Registered before
+  // the dial; a keyring failure resolves null and the frame goes without it.
+  // Lazy: the identity module pulls in the E2EE crypto layer, which the
+  // session shell must not load just to dial.
+  setIdentityKeyProvider(async (identityHost) =>
+    (await import("@lib/identity")).getDeviceIdentityPublicKey(identityHost),
+  );
+  owner.addCleanup(() => setIdentityKeyProvider(null));
   ws.connect({ host, token });
   dispatcherCleanup = wireDispatcher(ws, api);
   owner.addCleanup(dispatcherCleanup);
