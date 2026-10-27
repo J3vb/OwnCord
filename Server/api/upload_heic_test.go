@@ -251,6 +251,8 @@ func TestServeThumb_UnconvertibleImageIs404OnceAndNeverRetried(t *testing.T) {
 		{"truncated HEIC", "bad.heic", good[:len(good)/2]},
 		{"HEIC header with garbage", "junk.heic", append(ftypHeader("heic", "mif1"), bytes.Repeat([]byte{0xAB}, 300)...)},
 		{"oversized HEIC", "huge.heic", patchedISPE(t, good, 12000, 12000)},
+		{"sequence-only HEIC", "seq.heic", sequenceOnlyHEIC(t, 3)},
+		{"HEIC primary item with several pictures", "multi.heic", multiPictureHEIC(t, 3)},
 		{"truncated TIFF", "bad.tif", tiffGood[:len(tiffGood)/2]},
 		{"TIFF header with garbage", "junk.tif", append([]byte("II*\x00\x08\x00\x00\x00"), bytes.Repeat([]byte{0xFF}, 100)...)},
 	}
@@ -303,6 +305,156 @@ func TestServeThumb_UnconvertibleImageIs404OnceAndNeverRetried(t *testing.T) {
 			rr = doServeThumb(t, router, id, token)
 			if rr.Code != http.StatusNotFound {
 				t.Errorf("second request: %d, want 404 from the kept marker", rr.Code)
+			}
+		})
+	}
+}
+
+func isoBox(typ string, parts ...[]byte) []byte {
+	n := 8
+	for _, p := range parts {
+		n += len(p)
+	}
+	out := binary.BigEndian.AppendUint32(nil, uint32(n))
+	out = append(out, typ...)
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out
+}
+
+func be32(v uint32) []byte { return binary.BigEndian.AppendUint32(nil, v) }
+
+// boxOf returns the whole first box of the given type found in b.
+func boxOf(t *testing.T, b []byte, typ string) []byte {
+	t.Helper()
+	i := bytes.Index(b, []byte(typ))
+	if i < 4 {
+		t.Fatalf("no %s box", typ)
+	}
+	return b[i-4 : i-4+int(binary.BigEndian.Uint32(b[i-4:]))]
+}
+
+// sequenceOnlyHEIC is a file with the msf1 and hevc brands that holds an image
+// sequence track of n frames and no primary item.
+func sequenceOnlyHEIC(t *testing.T, n int) []byte {
+	t.Helper()
+	still := testHEIC(t, 16, 16)
+	hvcC := boxOf(t, still, "hvcC")
+	data := boxOf(t, still, "mdat")[8:]
+	ftyp := isoBox("ftyp", []byte("msf1"), be32(0), []byte("msf1hevciso8"))
+	entry := make([]byte, 78)
+	binary.BigEndian.PutUint16(entry[6:], 1)
+	binary.BigEndian.PutUint16(entry[24:], 16)
+	binary.BigEndian.PutUint16(entry[26:], 16)
+	var sizes []byte
+	for range n {
+		sizes = append(sizes, be32(uint32(len(data)))...)
+	}
+	build := func(off uint32) []byte {
+		var offs []byte
+		for range n {
+			offs = append(offs, be32(off)...)
+		}
+		stbl := isoBox("stbl",
+			isoBox("stsd", be32(0), be32(1), isoBox("hvc1", entry, hvcC)),
+			isoBox("stts", be32(0), be32(1), be32(uint32(n)), be32(1)),
+			isoBox("stsz", be32(0), be32(0), be32(uint32(n)), sizes),
+			isoBox("stsc", be32(0), be32(1), be32(1), be32(1), be32(1)),
+			isoBox("stco", be32(0), be32(uint32(n)), offs))
+		hdlr := isoBox("hdlr", be32(0), be32(0), []byte("pict"), make([]byte, 13))
+		mdhd := isoBox("mdhd", be32(0), be32(0), be32(0), be32(1000), be32(0), be32(0))
+		tkhd := isoBox("tkhd", be32(0), be32(0), be32(0), be32(1), be32(0), be32(0), make([]byte, 60))
+		trak := isoBox("trak", tkhd, isoBox("mdia", mdhd, hdlr, isoBox("minf", stbl)))
+		return append(bytes.Clone(ftyp), isoBox("moov", trak)...)
+	}
+	head := build(0)
+	return append(build(uint32(len(head)+8)), isoBox("mdat", data)...)
+}
+
+// multiPictureHEIC is a still whose primary item's data holds n coded pictures
+// in a row, with its iloc extent length widened to match.
+func multiPictureHEIC(t *testing.T, n int) []byte {
+	t.Helper()
+	still := testHEIC(t, 16, 16)
+	mdat := boxOf(t, still, "mdat")
+	start := bytes.Index(still, mdat)
+	rep := bytes.Repeat(mdat[8:], n)
+	out := append(bytes.Clone(still[:start]), isoBox("mdat", rep)...)
+	// The single extent's length is the last four bytes of the iloc entry.
+	iloc := boxOf(t, out, "iloc")
+	at := bytes.Index(out, iloc) + len(iloc) - 4
+	if got := binary.BigEndian.Uint32(out[at:]); int(got) != len(mdat)-8 {
+		t.Fatalf("iloc layout differs: extent length %d, want %d", got, len(mdat)-8)
+	}
+	binary.BigEndian.PutUint32(out[at:], uint32(len(rep)))
+	return out
+}
+
+func TestServeThumb_ThePlainStillStillConverts(t *testing.T) {
+	// The fixtures above are variations of this file: it must pass the check.
+	database := newUploadTestDB(t)
+	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+	token := uploadCreateToken(t, database, "thumbplain", 4)
+	id := uploadForThumb(t, router, token, "ok.heic", testHEIC(t, 16, 16))
+	rr := doServeThumb(t, router, id, token)
+	assertPreviewJPEG(t, rr, 16, 16)
+}
+
+// A HEIC whose major brand is not an HEVC one but lists one as compatible is
+// still a HEIC: it gets its dimensions and its preview.
+func TestUpload_HEICWithAHEVCCompatibleBrand(t *testing.T) {
+	data := testHEIC(t, 64, 32)
+	copy(data[8:12], "miaf") // major brand; the compatible brands keep heic
+	database := newUploadTestDB(t)
+	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+	token := uploadCreateToken(t, database, "heicmiaf", 4)
+	mime, w, h := uploadMeta(t, router, token, "m.heic", data)
+	if mime != "image/heic" || w != 64 || h != 32 {
+		t.Fatalf("%s %dx%d, want image/heic 64x32", mime, w, h)
+	}
+	id := uploadForThumb(t, router, token, "m2.heic", data)
+	rr := doServeThumb(t, router, id, token)
+	assertPreviewJPEG(t, rr, 64, 32)
+}
+
+// tiffWithTags is a tiny little-endian TIFF header and first directory with
+// the given SHORT tag values, and no image data.
+func tiffWithTags(first8 []byte, tags [][2]uint16) []byte {
+	b := append([]byte("II*\x00"), 8, 0, 0, 0)
+	if first8 != nil {
+		b = append(b[:0], first8...)
+	}
+	b = binary.LittleEndian.AppendUint16(b, uint16(len(tags)))
+	for _, tg := range tags {
+		b = binary.LittleEndian.AppendUint16(b, tg[0])
+		b = binary.LittleEndian.AppendUint16(b, 3) // SHORT
+		b = binary.LittleEndian.AppendUint32(b, 1)
+		b = binary.LittleEndian.AppendUint16(b, tg[1])
+		b = append(b, 0, 0)
+	}
+	return append(b, make([]byte, 4)...)
+}
+
+func TestUpload_CameraRAWStaysAFile(t *testing.T) {
+	cr2 := append([]byte("II*\x00\x10\x00\x00\x00CR\x02\x00"), 0, 0, 0, 0)
+	cases := []struct {
+		name, file string
+		content    []byte
+		want       string
+	}{
+		{"DNG version tag", "a.dng", tiffWithTags(nil, [][2]uint16{{0x0100, 8}, {0x0101, 8}, {0xC612, 1}}), "application/octet-stream"},
+		{"Canon CR2 marker", "a.cr2", tiffWithTags(cr2, [][2]uint16{{0x0100, 8}}), "application/octet-stream"},
+		{"old-style JPEG compression", "a.nef", tiffWithTags(nil, [][2]uint16{{0x0103, 7}}), "application/octet-stream"},
+		{"plain TIFF directory", "a.tif", tiffWithTags(nil, [][2]uint16{{0x0100, 8}, {0x0101, 8}, {0x0103, 1}}), "image/tiff"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			database := newUploadTestDB(t)
+			router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+			token := uploadCreateToken(t, database, "rawfile", 4)
+			if mime, _, _ := uploadMeta(t, router, token, tc.file, tc.content); mime != tc.want {
+				t.Errorf("mime = %q, want %q", mime, tc.want)
 			}
 		})
 	}

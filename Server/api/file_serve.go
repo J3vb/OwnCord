@@ -144,7 +144,11 @@ func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.Attach
 	t, found = keptThumb(store, aa.StoredAs)
 	var preview []byte
 	if t == nil && !found {
-		preview, _ = makeConvertedPreview(f, format)
+		var convErr error
+		preview, convErr = makeConvertedPreview(f, format)
+		if convErr != nil {
+			slog.Warn("could not convert an image preview", "stored_as", aa.StoredAs, "error", convErr)
+		}
 		keepThumbnail(r.Context(), uploads, store, aa.StoredAs, preview)
 	}
 	<-slots

@@ -73,6 +73,7 @@ import {
 import {
   isAudioMime,
   isGalleryImage,
+  isImageMime,
   isVideoAttachment,
   resolveServerUrl,
   thumbnailUrl,
@@ -337,7 +338,7 @@ export function estimateItemHeight(
       height += 220;
     } else if (isAudioMime(att.mime)) {
       height += 96;
-    } else if (att.mime.startsWith("image/")) {
+    } else if (isImageMime(att.mime)) {
       const known = knownAttachmentHeight(att);
       height += known === undefined ? 220 : known + MEDIA_MARGIN;
     }

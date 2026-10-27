@@ -2717,9 +2717,16 @@ A HEIC, HEIF or TIFF file (stored as `image/heic`, `image/heif` or `image/tiff`,
 which the server tells apart by the file's own bytes) is the exception, because
 no webview shows one: the response is always a JPEG with `Content-Type:
 image/jpeg`, scaled to fit the 800×800 box when larger (never enlarged) and
-turned upright by the file's rotation. If it cannot be converted — it does not
-decode, is too large to decode within the memory bound, or the decoder fails —
-the response is a `404`, never the original bytes. The original stays at
+turned upright by the file's rotation. Only a HEIC that is one still picture
+is converted (its primary item is a coded image or a grid of them, each holding
+a single picture); a file that carries an image sequence is not. A HEIC larger
+than about 22 megapixels, or a TIFF whose decode would take more than the
+96 MiB bound (judged from its header), is not converted. If it cannot be
+converted — it does not decode, is not a single still, is too large, or the
+decoder fails — the response is a `404`, never the original bytes. The failure
+is remembered and not tried again. A camera RAW (DNG, NEF, CR2, ARW and the
+like) is TIFF-structured but is stored as `application/octet-stream` and stays
+a plain file. The original stays at
 `GET /api/v1/files/{id}`. A file uploaded before the server knew these formats
 was stored as `application/octet-stream` and stays a plain file.
 

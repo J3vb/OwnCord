@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -460,29 +459,8 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 		return storedUpload{}, false
 	}
 
-	// Extract image dimensions if the file is an image.
-	var width, height *int
-	if strings.HasPrefix(mime, "image/") {
-		f, openErr := store.Open(fileID)
-		if openErr == nil {
-			cfg, _, decErr := image.DecodeConfig(f)
-			if decErr == nil && mime == "image/jpeg" && jpegSidewaysOnDisk(f) {
-				cfg.Width, cfg.Height = cfg.Height, cfg.Width
-			}
-			if decErr == nil && convertedFormat(mime) != "" && convertedUprightSwap(f, mime) {
-				cfg.Width, cfg.Height = cfg.Height, cfg.Width
-			}
-			f.Close() //nolint:errcheck
-			if decErr == nil {
-				w2, h2 := cfg.Width, cfg.Height
-				width = &w2
-				height = &h2
-			} else {
-				slog.Warn("failed to decode image dimensions", "id", fileID, "error", decErr)
-			}
-		}
-	}
-
+	// A TIFF-structured camera RAW is a download; an image gets its upright size.
+	mime, width, height := inspectStoredImage(store, fileID, mime)
 	return storedUpload{id: fileID, mime: mime, size: writtenBytes, width: width, height: height}, true
 }
 
