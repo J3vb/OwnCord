@@ -117,6 +117,11 @@ describe("Account tab profile fields", () => {
     container.remove();
   });
 
+  /** Focus only lands on what is shown, so open the collapsed editor first. */
+  function openProfileEditor(): void {
+    container.querySelector<HTMLButtonElement>('[data-testid="profile-edit-toggle"]')!.click();
+  }
+
   it("pre-fills the display name and about from the signed-in user", () => {
     setUser({ display_name: "Alice A.", about: "writes tests" });
     container.appendChild(buildAccountTab(makeOptions(), ac.signal));
@@ -185,6 +190,7 @@ describe("Account tab profile fields", () => {
     });
     container.appendChild(buildAccountTab(options, ac.signal));
 
+    openProfileEditor();
     const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
     const about = container.querySelector<HTMLTextAreaElement>('[data-testid="about-input"]')!;
     save.focus();
@@ -206,6 +212,7 @@ describe("Account tab profile fields", () => {
     });
     container.appendChild(buildAccountTab(options, ac.signal));
 
+    openProfileEditor();
     const save = container.querySelector<HTMLButtonElement>('[data-testid="profile-save-btn"]')!;
     save.focus();
     save.click();
