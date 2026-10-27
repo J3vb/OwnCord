@@ -130,12 +130,13 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 // a busy database writer cannot stall the handshake behind it.
 const sessionIdentityKeyTimeout = 2 * time.Second
 
-// recordSessionIdentityKey stores the device key on the session row. The
-// context is the hub's lifecycle, not the hijacked request's, with its own
-// deadline. Failure is log-only: the key is also held on the Client, and the
+// recordSessionIdentityKey stores the device key on the session row, bounded
+// by its own deadline: after the hijack the request context no longer ends on
+// a client disconnect, so the timeout is what keeps a busy writer from
+// stalling the handshake. Failure is log-only: the key is also held on the Client, and the
 // row is only kept for a resumed connection and future device lists.
-func (h *Hub) recordSessionIdentityKey(userID int64, tokenHash, key string) {
-	ctx, cancel := context.WithTimeout(h.life, sessionIdentityKeyTimeout)
+func (h *Hub) recordSessionIdentityKey(ctx context.Context, userID int64, tokenHash, key string) {
+	ctx, cancel := context.WithTimeout(ctx, sessionIdentityKeyTimeout)
 	defer cancel()
 	if err := h.authn.RecordSessionIdentityKey(ctx, tokenHash, key); err != nil {
 		slog.Warn("ws auth: recording the session identity key failed", "user_id", userID, "err", err)
@@ -223,7 +224,7 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	// reachable, and never written again, so reading it needs no lock.
 	c.identityKey = hint.IdentityKey
 	if hint.IdentityKey != "" {
-		h.recordSessionIdentityKey(user.ID, tokenHash, hint.IdentityKey)
+		h.recordSessionIdentityKey(r.Context(), user.ID, tokenHash, hint.IdentityKey)
 	}
 
 	// Look up role name for protocol-compliant payloads and cache on client.
