@@ -2717,14 +2717,19 @@ A HEIC, HEIF or TIFF file (stored as `image/heic`, `image/heif` or `image/tiff`,
 which the server tells apart by the file's own bytes) is the exception, because
 no webview shows one: the response is always a JPEG with `Content-Type:
 image/jpeg`, scaled to fit the 800×800 box when larger (never enlarged) and
-turned upright by the file's rotation. Only a HEIC that is one still picture
-is converted (its primary item is a coded image or a grid of them, each holding
-a single picture); a file that carries an image sequence is not. A HEIC larger
-than about 22 megapixels, or a TIFF whose decode would take more than the
-96 MiB bound (judged from its header), is not converted. If it cannot be
-converted — it does not decode, is not a single still, is too large, or the
-decoder fails — the response is a `404`, never the original bytes. The failure
-is remembered and not tried again. A camera RAW (DNG, NEF, CR2, ARW and the
+turned upright by the file's rotation. Only a HEIC with the plain still-image layout is converted: a file with
+only ftyp, meta, mdat, free and skip boxes (no movie or fragment boxes), whose
+primary item is a coded image or a grid of them; whose coded images each hold
+one picture on the base layer, with parameter sets only in the decoder
+configuration; whose items, locations and property associations are listed
+once each, with the properties the converter reads (ispe, hvcC, pixi, auxC,
+irot, imir, clap, colr); and whose grid, if any, lists each tile once. A HEIC
+larger than about 22 megapixels (half as many at 10 bits), or a TIFF whose
+decode would take more than the 96 MiB bound (judged from its header), is not
+converted. If it cannot be converted — it is outside that layout, does not
+decode, is too large, or the decoder fails — the response is a `404`, never
+the original bytes. The failure is remembered and not tried again, and the
+file is stored without dimensions. A camera RAW (DNG, NEF, CR2, ARW and the
 like) is TIFF-structured but is stored as `application/octet-stream` and stays
 a plain file. The original stays at
 `GET /api/v1/files/{id}`. A file uploaded before the server knew these formats

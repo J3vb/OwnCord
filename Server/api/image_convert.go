@@ -26,15 +26,13 @@ const (
 	// convertedPreviewMIME is what the thumbnail route answers for them.
 	convertedPreviewMIME = "image/jpeg"
 
-	// heicMetaMaxBytes caps the meta box read to find its items and properties.
-	heicMetaMaxBytes = 4 << 20
-	// heicMaxItems and heicMaxNALs bound what the item check walks.
-	heicMaxItems = 4096
-	heicMaxNALs  = 1 << 16
+	// heicMaxNALs bounds the NAL units the HEIC check walks in a file.
+	heicMaxNALs = 1 << 14
 	// convertedHEICPeakBytes is the memory a HEIC conversion may take at its
 	// peak, which is about heicPeakBytesPerPixel for each pixel: the decoded
 	// picture, its RGBA copy and the rotated copy. It sets the largest HEIC
-	// converted (about 22 megapixels, which covers a phone's 12 MP photo).
+	// converted (about 22 megapixels of 8-bit colour, which covers a phone's
+	// 12 MP photo; a 10-bit image gets half as many pixels).
 	convertedHEICPeakBytes = 256 << 20
 	heicPeakBytesPerPixel  = 12
 	heicMaxPixels          = convertedHEICPeakBytes / heicPeakBytesPerPixel
@@ -97,53 +95,6 @@ func sniffTIFF(header []byte) bool {
 	return bytes.HasPrefix(header, []byte("II*\x00")) || bytes.HasPrefix(header, []byte("MM\x00*"))
 }
 
-// convertedUprightSwap reports whether the image in r, stored as mimeType, is
-// shown a quarter turn from how it is stored, so its upright width and height
-// swap: a HEIC's irot of 90 or 270 degrees (iPhone portrait shots are stored
-// landscape), or a TIFF's orientation 5-8, as the preview is made.
-func convertedUprightSwap(r io.ReadSeeker, mimeType string) bool {
-	if _, err := r.Seek(0, io.SeekStart); err != nil {
-		return false
-	}
-	switch convertedFormat(mimeType) {
-	case "heic":
-		return heicQuarterTurn(r)
-	case "tiff":
-		o := tiffOrientation(withReadAt(r))
-		return o >= 5 && o <= 8
-	}
-	return false
-}
-
-// isoBox is one box of an ISO base media file.
-type isoBox struct {
-	typ  string
-	body []byte
-}
-
-// isoBoxes splits b into its boxes; a box that overruns b ends the list.
-func isoBoxes(b []byte) []isoBox {
-	var out []isoBox
-	for len(b) >= 8 {
-		size := uint64(binary.BigEndian.Uint32(b))
-		hdr := uint64(8)
-		if size == 1 {
-			if len(b) < 16 {
-				break
-			}
-			size, hdr = binary.BigEndian.Uint64(b[8:]), 16
-		} else if size == 0 {
-			size = uint64(len(b))
-		}
-		if size < hdr || size > uint64(len(b)) {
-			break
-		}
-		out = append(out, isoBox{typ: string(b[4:8]), body: b[hdr:size]})
-		b = b[size:]
-	}
-	return out
-}
-
 // readerAt is what the decoders want: a seekable reader that also reads at an
 // offset, so a decode of a large file does not buffer all of it.
 type readerAt interface {
@@ -172,95 +123,49 @@ func withReadAt(r io.ReadSeeker) readerAt {
 	return seekReadAt{r}
 }
 
-// convertedConfig is the stored size of the HEIC or TIFF in r, read by its
-// own decoder: image.DecodeConfig would choose it by the major brand alone and
-// buffer a TIFF whole.
-func convertedConfig(r io.ReadSeeker, mimeType string) (image.Config, error) {
-	if _, err := r.Seek(0, io.SeekStart); err != nil {
+// convertedSize is the upright size and the color model of the HEIC or TIFF
+// in r, read by its own decoder: image.DecodeConfig would choose it by the
+// major brand alone and buffer a TIFF whole. A HEIC is validated first, so
+// nothing but a plain still reaches the HEIC decoder.
+func convertedSize(r io.ReadSeeker, mimeType string) (cfg image.Config, err error) {
+	src := withReadAt(r)
+	if convertedFormat(mimeType) == "heic" {
+		size, err := src.Seek(0, io.SeekEnd)
+		if err != nil {
+			return image.Config{}, fmt.Errorf("seeking: %w", err)
+		}
+		info, err := validateHEIC(src, size)
+		if err != nil {
+			return image.Config{}, err
+		}
+		if _, err := src.Seek(0, io.SeekStart); err != nil {
+			return image.Config{}, fmt.Errorf("seeking: %w", err)
+		}
+		if cfg, err = heic.DecodeConfig(src); err != nil {
+			return image.Config{}, fmt.Errorf("reading image size: %w", err)
+		}
+		if info.quarterTurn {
+			cfg.Width, cfg.Height = cfg.Height, cfg.Width
+		}
+		return cfg, nil
+	}
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
 		return image.Config{}, fmt.Errorf("seeking: %w", err)
 	}
-	var cfg image.Config
-	var err error
-	if convertedFormat(mimeType) == "heic" {
-		cfg, err = heic.DecodeConfig(withReadAt(r))
-	} else {
-		cfg, err = tiff.DecodeConfig(withReadAt(r))
-	}
-	if err != nil {
+	if cfg, err = tiff.DecodeConfig(src); err != nil {
 		return image.Config{}, fmt.Errorf("reading image size: %w", err)
 	}
+	if o := tiffOrientation(src); o >= 5 && o <= 8 {
+		cfg.Width, cfg.Height = cfg.Height, cfg.Width
+	}
 	return cfg, nil
-}
-
-// tiffIFD0 reads the first IFD of the TIFF in r as tag to the first value
-// field's low 16 bits, and whether the header and directory parsed.
-func tiffIFD0(r io.ReaderAt) (tags map[uint16]uint16, ok bool) {
-	var head [8]byte
-	if _, err := r.ReadAt(head[:], 0); err != nil {
-		return nil, false
-	}
-	var bo binary.ByteOrder
-	switch string(head[:2]) {
-	case "II":
-		bo = binary.LittleEndian
-	case "MM":
-		bo = binary.BigEndian
-	default:
-		return nil, false
-	}
-	ifd := int64(bo.Uint32(head[4:]))
-	var cnt [2]byte
-	if _, err := r.ReadAt(cnt[:], ifd); err != nil {
-		return nil, false
-	}
-	n := min(int(bo.Uint16(cnt[:])), tiffMaxIFDEntries)
-	buf := make([]byte, n*12)
-	if _, err := r.ReadAt(buf, ifd+2); err != nil {
-		return nil, false
-	}
-	tags = make(map[uint16]uint16, n)
-	for i := range n {
-		e := buf[i*12:]
-		tags[bo.Uint16(e)] = bo.Uint16(e[8:])
-	}
-	return tags, true
-}
-
-// tiffOrientation reads the Orientation tag (1-8, or 1 when absent or
-// unreadable) from the first IFD of the TIFF in r.
-func tiffOrientation(r io.ReaderAt) int {
-	tags, ok := tiffIFD0(r)
-	if o := int(tags[0x0112]); ok && o >= 1 && o <= 8 {
-		return o
-	}
-	return 1
-}
-
-// isCameraRAW reports whether the TIFF-structured file in r is a camera RAW
-// (DNG, NEF, CR2, ARW and the like) rather than a plain TIFF: those are not
-// pictures a preview can be made of, so they stay a download. It looks for
-// the DNGVersion tag, the Canon CR2 marker, and old-style JPEG compression
-// in the first IFD, which the TIFF decoder does not read either.
-func isCameraRAW(r io.ReaderAt) bool {
-	var mark [2]byte
-	if _, err := r.ReadAt(mark[:], 8); err == nil && string(mark[:]) == "CR" {
-		return true
-	}
-	tags, ok := tiffIFD0(r)
-	if !ok {
-		return false
-	}
-	if _, dng := tags[0xC612]; dng {
-		return true
-	}
-	c := tags[0x0103]
-	return c == 6 || c == 7
 }
 
 // makeConvertedPreview decodes the HEIC or TIFF in r (format as image.Decode
 // names it) into an upright JPEG that fits thumbBox, never enlarged. The
 // decode is bounded from the header: a TIFF by thumbMaxDecodeBytes, a HEIC by
-// heicMaxPixels, and a HEIC is decoded only when it is one still picture. A
+// heicMaxPixels (less for a deeper color model), and a HEIC is decoded only
+// when validateHEIC accepts its layout. A
 // panic in a decoder fed hostile input is a failed conversion, not a crashed
 // request.
 func makeConvertedPreview(r io.ReadSeeker, format string) (jpg []byte, err error) {
@@ -273,21 +178,23 @@ func makeConvertedPreview(r io.ReadSeeker, format string) (jpg []byte, err error
 	mimeType := mimeTIFF
 	if format == "heic" {
 		mimeType = mimeHEIC
-		if err := checkHEICStill(src); err != nil {
-			return nil, err
-		}
 	}
-	cfg, err := convertedConfig(src, mimeType)
-	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
-		return nil, fmt.Errorf("%w: header does not parse", errConvertRefused)
+	cfg, err := convertedSize(src, mimeType)
+	if err != nil {
+		return nil, err
 	}
-	pixels := int64(cfg.Width) * int64(cfg.Height)
-	limit := int64(heicMaxPixels)
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil, refuse("header does not parse")
+	}
+	// The pixel bound follows the color model: 4 bytes a pixel is the base, and
+	// a 16-bit model gets half the pixels (the TIFF bound is thumbMaxDecodeBytes).
+	perPixel := decodedBytesPerPixel(cfg.ColorModel)
+	limit := int64(heicMaxPixels) * 4 / perPixel
 	if format != "heic" {
-		limit = thumbMaxDecodeBytes / decodedBytesPerPixel(cfg.ColorModel)
+		limit = thumbMaxDecodeBytes / perPixel
 	}
-	if pixels > limit {
-		return nil, fmt.Errorf("%w: too large to decode", errConvertRefused)
+	if int64(cfg.Width)*int64(cfg.Height) > limit {
+		return nil, refuse("too large to decode")
 	}
 	if _, err := src.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("%w: %w", errConvertRefused, err)
@@ -295,7 +202,7 @@ func makeConvertedPreview(r io.ReadSeeker, format string) (jpg []byte, err error
 	var img image.Image
 	orientation := 1
 	if format == "heic" {
-		img, err = heic.Decode(src, heic.Options{AutoRotate: true, FrameSizeLimit: heicMaxPixels, Threads: 1})
+		img, err = heic.Decode(src, heic.Options{AutoRotate: true, FrameSizeLimit: int(limit), Threads: 1})
 	} else {
 		orientation = tiffOrientation(src)
 		img, err = tiff.Decode(src)

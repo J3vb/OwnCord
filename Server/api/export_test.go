@@ -245,3 +245,9 @@ func SetRestRequestDeadlineForTest(t testing.TB, d time.Duration) {
 
 // SniffMIMEForTest exposes sniffMIME for external tests.
 var SniffMIMEForTest = sniffMIME
+
+// ValidateHEICForTest exposes validateHEIC for external tests.
+func ValidateHEICForTest(r io.ReaderAt, size int64) (quarterTurn bool, err error) {
+	info, err := validateHEIC(r, size)
+	return info.quarterTurn, err
+}

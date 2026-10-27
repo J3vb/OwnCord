@@ -1,250 +1,136 @@
 package api
 
-// heic_meta.go reads the parts of a HEIC's ISO base media boxes that decide
-// whether it is converted: its primary item, how its pictures are stored, and
-// its rotation.
+// heic_meta.go decides whether a HEIC has the plain still-image layout that
+// is converted: an allowlist of the file shape, checked before any HEIC
+// decoder runs. Everything outside it is refused, so what the decoder is then
+// handed is one primary picture (or one grid of single-picture tiles) of a
+// bounded size, found where the boxes say it is.
 
 import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"math"
-
-	"github.com/gen2brain/h265/hevc"
 )
 
-// byteReader reads big-endian fields from a box body; a short read sets bad.
-type byteReader struct {
-	b   []byte
-	bad bool
+const (
+	// heicMetaMaxBytes caps the meta box read to find its items and properties.
+	heicMetaMaxBytes = 4 << 20
+	// heicMaxItems, heicMaxTopBoxes, heicMaxProps and heicMaxExtents bound the
+	// counts the file may declare.
+	heicMaxItems    = 4096
+	heicMaxTopBoxes = 64
+	heicMaxProps    = 1024
+	heicMaxExtents  = 64
+	heicMaxTiles    = 1024
+	// heicMaxAssoc bounds the property associations of one item.
+	heicMaxAssoc = 64
+)
+
+// refuse is a HEIC the converter does not take, for the reason given.
+func refuse(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", errConvertRefused, fmt.Sprintf(format, args...))
 }
 
-func (r *byteReader) uint(n int) uint64 {
-	if n < 0 || n > 8 || len(r.b) < n {
-		r.bad = true
-		return 0
-	}
-	var v uint64
-	for _, c := range r.b[:n] {
-		v = v<<8 | uint64(c)
-	}
-	r.b = r.b[n:]
-	return v
+// heicInfo is what validateHEIC learns about an accepted file.
+type heicInfo struct {
+	// quarterTurn is whether the primary image is shown a quarter turn from
+	// how it is stored (irot of 90 or 270 degrees).
+	quarterTurn bool
 }
 
-func (r *byteReader) skip(n int) {
-	if n < 0 || len(r.b) < n {
-		r.bad = true
-		return
-	}
-	r.b = r.b[n:]
+type isoBox struct {
+	typ  string
+	body []byte
 }
 
-type heicExtent struct{ off, length uint64 }
-
-// heicMeta is what the checks need from a HEIC's meta box.
-type heicMeta struct {
-	primary     uint32
-	havePrimary bool
-	types       map[uint32]string
-	props       []isoBox
-	assoc       map[uint32][]int
-	extents     map[uint32][]heicExtent // construction method 0 only
-}
-
-// readHEICMeta finds and parses the meta box of the file in r, which it reads
-// from the current position; ok is false when there is none or it is not
-// followable.
-func readHEICMeta(r io.Reader) (m *heicMeta, ok bool) {
-	var hdr [8]byte
-	for range 64 {
-		if _, err := io.ReadFull(r, hdr[:]); err != nil {
-			return nil, false
+// splitBoxes splits b into its boxes, strictly: every byte belongs to a box
+// whose declared size fits, and there are at most limit of them.
+func splitBoxes(b []byte, limit int) ([]isoBox, error) {
+	var out []isoBox
+	for len(b) > 0 {
+		if len(b) < 8 || len(out) >= limit {
+			return nil, refuse("malformed boxes")
 		}
-		size := uint64(binary.BigEndian.Uint32(hdr[:4]))
-		skip := uint64(8)
+		size, hdr := uint64(binary.BigEndian.Uint32(b)), uint64(8)
 		if size == 1 {
-			var large [8]byte
-			if _, err := io.ReadFull(r, large[:]); err != nil {
-				return nil, false
+			if len(b) < 16 {
+				return nil, refuse("malformed boxes")
 			}
-			size, skip = binary.BigEndian.Uint64(large[:]), 16
+			size, hdr = binary.BigEndian.Uint64(b[8:]), 16
+		} else if size == 0 {
+			size = uint64(len(b))
 		}
-		if size < skip {
-			return nil, false
+		if size < hdr || size > uint64(len(b)) {
+			return nil, refuse("malformed boxes")
 		}
-		payload := size - skip
-		if string(hdr[4:]) != "meta" {
-			if _, err := io.CopyN(io.Discard, r, int64(min(payload, math.MaxInt64))); err != nil {
-				return nil, false
-			}
-			continue
-		}
-		if payload > heicMetaMaxBytes {
-			return nil, false
-		}
-		meta := make([]byte, payload)
-		if _, err := io.ReadFull(r, meta); err != nil {
-			return nil, false
-		}
-		return parseHEICMeta(meta)
+		out = append(out, isoBox{typ: string(b[4:8]), body: b[hdr:size]})
+		b = b[size:]
 	}
-	return nil, false
+	return out, nil
 }
 
-func parseHEICMeta(meta []byte) (m *heicMeta, ok bool) {
-	if len(meta) < 4 {
-		return nil, false
-	}
-	m = &heicMeta{types: map[uint32]string{}, assoc: map[uint32][]int{}, extents: map[uint32][]heicExtent{}}
-	var ipma, iloc []byte
-	for _, b := range isoBoxes(meta[4:]) { // meta is a full box: version and flags first
-		switch b.typ {
-		case "pitm":
-			r := byteReader{b: b.body}
-			version := r.uint(1)
-			r.skip(3)
-			if version == 0 {
-				m.primary = uint32(r.uint(2))
-			} else {
-				m.primary = uint32(r.uint(4))
+// heicTopLevel walks the top-level boxes of the size-byte file in r and
+// returns the payload of its meta box. Only ftyp (first), meta, mdat, free and
+// skip may appear: a movie, fragment or any other box is refused.
+func heicTopLevel(r io.ReaderAt, size int64) (meta []byte, err error) {
+	var pos uint64
+	total := uint64(size)
+	for n := 0; pos < total; n++ {
+		if n >= heicMaxTopBoxes {
+			return nil, refuse("too many boxes")
+		}
+		var hdr [16]byte
+		got := min(uint64(len(hdr)), total-pos)
+		if got < 8 {
+			return nil, refuse("malformed boxes")
+		}
+		if _, err := r.ReadAt(hdr[:got], int64(pos)); err != nil { //nolint:gosec // pos <= size
+			return nil, refuse("unreadable header")
+		}
+		boxSize, hdrLen := uint64(binary.BigEndian.Uint32(hdr[:])), uint64(8)
+		if boxSize == 1 {
+			if got < 16 {
+				return nil, refuse("malformed boxes")
 			}
-			m.havePrimary = !r.bad
-		case "iinf":
-			parseIinf(b.body, m)
-		case "iloc":
-			iloc = b.body
-		case "iprp":
-			for _, c := range isoBoxes(b.body) {
-				switch c.typ {
-				case "ipco":
-					m.props = isoBoxes(c.body)
-				case "ipma":
-					ipma = c.body
+			boxSize, hdrLen = binary.BigEndian.Uint64(hdr[8:]), 16
+		} else if boxSize == 0 {
+			boxSize = total - pos
+		}
+		if boxSize < hdrLen || boxSize > total-pos {
+			return nil, refuse("malformed boxes")
+		}
+		typ := string(hdr[4:8])
+		if (n == 0) != (typ == "ftyp") {
+			return nil, refuse("ftyp must be the first box")
+		}
+		switch typ {
+		case "ftyp", "mdat", "free", "skip":
+		case "meta":
+			if meta != nil {
+				return nil, refuse("several meta boxes")
+			}
+			payload := boxSize - hdrLen
+			if payload > heicMetaMaxBytes {
+				return nil, refuse("meta too large")
+			}
+			meta = make([]byte, payload)
+			if payload > 0 {
+				if _, err := r.ReadAt(meta, int64(pos+hdrLen)); err != nil { //nolint:gosec // bounded by size
+					return nil, refuse("unreadable meta")
 				}
 			}
-		}
-	}
-	parseIpma(ipma, m)
-	parseIloc(iloc, m)
-	return m, true
-}
-
-func parseIinf(body []byte, m *heicMeta) {
-	r := byteReader{b: body}
-	version := r.uint(1)
-	r.skip(3)
-	if version == 0 {
-		r.skip(2) // entry count; the infe boxes that follow are what is read
-	} else {
-		r.skip(4)
-	}
-	if r.bad {
-		return
-	}
-	for _, b := range isoBoxes(r.b) {
-		if b.typ != "infe" || len(m.types) >= heicMaxItems {
-			continue
-		}
-		e := byteReader{b: b.body}
-		v := e.uint(1)
-		e.skip(3)
-		var id uint64
-		switch v {
-		case 2:
-			id = e.uint(2)
-		case 3:
-			id = e.uint(4)
 		default:
-			continue
+			return nil, refuse("box %q is not part of a still image", typ)
 		}
-		e.skip(2) // protection index
-		if t := e.b; !e.bad && len(t) >= 4 {
-			m.types[uint32(id)] = string(t[:4])
-		}
+		pos += boxSize
 	}
+	if meta == nil {
+		return nil, refuse("no meta box")
+	}
+	return meta, nil
 }
 
-func parseIpma(body []byte, m *heicMeta) {
-	r := byteReader{b: body}
-	version := r.uint(1)
-	flags := r.uint(3)
-	count := r.uint(4)
-	for range min(count, heicMaxItems) {
-		idSize := 2
-		if version >= 1 {
-			idSize = 4
-		}
-		id := uint32(r.uint(idSize))
-		n := int(r.uint(1))
-		for range n {
-			var idx int
-			if flags&1 == 1 {
-				idx = int(r.uint(2) & 0x7fff)
-			} else {
-				idx = int(r.uint(1) & 0x7f)
-			}
-			if r.bad {
-				return
-			}
-			m.assoc[id] = append(m.assoc[id], idx)
-		}
-		if r.bad {
-			return
-		}
-	}
-}
-
-func parseIloc(body []byte, m *heicMeta) {
-	r := byteReader{b: body}
-	version := r.uint(1)
-	r.skip(3)
-	sizes := r.uint(1)
-	offsetSize, lengthSize := int(sizes>>4), int(sizes&15)
-	sizes = r.uint(1)
-	baseSize, indexSize := int(sizes>>4), int(sizes&15)
-	if version == 0 {
-		indexSize = 0
-	}
-	var count uint64
-	if version < 2 {
-		count = r.uint(2)
-	} else {
-		count = r.uint(4)
-	}
-	for range min(count, heicMaxItems) {
-		var id uint32
-		if version < 2 {
-			id = uint32(r.uint(2))
-		} else {
-			id = uint32(r.uint(4))
-		}
-		method := uint64(0)
-		if version >= 1 {
-			method = r.uint(2) & 15
-		}
-		r.skip(2) // data reference index
-		base := r.uint(baseSize)
-		n := r.uint(2)
-		var ext []heicExtent
-		for range n {
-			r.skip(indexSize)
-			off, length := r.uint(offsetSize), r.uint(lengthSize)
-			if r.bad {
-				return
-			}
-			ext = append(ext, heicExtent{off: base + off, length: length})
-		}
-		if r.bad {
-			return
-		}
-		if method == 0 {
-			m.extents[id] = ext
-		}
-	}
-}
-
-// property is the first property of item id with the box type typ.
+// property is the first property of item id of box type typ.
 func (m *heicMeta) property(id uint32, typ string) (body []byte, ok bool) {
 	for _, idx := range m.assoc[id] {
 		if idx >= 1 && idx <= len(m.props) && m.props[idx-1].typ == typ {
@@ -254,21 +140,144 @@ func (m *heicMeta) property(id uint32, typ string) (body []byte, ok bool) {
 	return nil, false
 }
 
-// heicQuarterTurn reports whether the primary image of the HEIC in r carries
-// an irot property of 90 or 270 degrees. heic.DecodeConfig returns the stored
-// size, before the rotation, and the package exposes nothing cheaper than a
-// full decode, so the one property is read here. Anything it cannot follow
-// counts as no rotation.
-func heicQuarterTurn(r io.Reader) bool {
-	m, ok := readHEICMeta(r)
-	if !ok || !m.havePrimary {
-		return false
-	}
-	body, found := m.property(m.primary, "irot")
-	return found && len(body) >= 1 && body[0]&1 == 1
+// heicAllowedProps are the properties a coded image or grid may carry.
+var heicAllowedProps = map[string]bool{
+	"ispe": true, "hvcC": true, "pixi": true, "auxC": true,
+	"irot": true, "imir": true, "clap": true, "colr": true,
 }
 
-// extentsAt reads len(buf) bytes at pos of the data the extents make up in turn.
+// ispe is the displayed size an item declares.
+func (m *heicMeta) ispe(id uint32) (w, h uint64, ok bool) {
+	body, found := m.property(id, "ispe")
+	r := byteReader{b: body}
+	r.skip(4)
+	w, h = r.uint(4), r.uint(4)
+	return w, h, found && !r.bad && w > 0 && h > 0
+}
+
+func extentsTotal(ext []heicExtent) uint64 {
+	var total uint64
+	for _, e := range ext {
+		total += e.length
+	}
+	return total
+}
+
+// validateHEIC accepts only the plain still-image layout (see the file
+// comment). It is the one check ahead of every HEIC decoder call, at upload
+// and for the preview, and reads the headers and each NAL's first bytes but
+// none of the picture data.
+func validateHEIC(r io.ReaderAt, size int64) (heicInfo, error) {
+	if size < 16 {
+		return heicInfo{}, refuse("too short")
+	}
+	meta, err := heicTopLevel(r, size)
+	if err != nil {
+		return heicInfo{}, err
+	}
+	m, err := parseHEICMeta(meta, uint64(size))
+	if err != nil {
+		return heicInfo{}, err
+	}
+	if t := m.types[m.primary]; t != "hvc1" && t != "grid" {
+		return heicInfo{}, refuse("primary item is not a coded still")
+	}
+	budget := heicBudget{pixels: 2 * heicMaxPixels, nals: heicMaxNALs, bytes: uint64(size)}
+	coded := 0
+	for id, t := range m.types {
+		switch t {
+		case "hvc2":
+			return heicInfo{}, refuse("unsupported item type")
+		case "hvc1", "grid":
+			if err := m.checkItemProps(id); err != nil {
+				return heicInfo{}, err
+			}
+		}
+		if t == "hvc1" {
+			coded++
+			if err := m.checkCoded(r, id, &budget); err != nil {
+				return heicInfo{}, err
+			}
+		}
+	}
+	if coded == 0 {
+		return heicInfo{}, refuse("no coded image")
+	}
+	for id, t := range m.types {
+		if t == "grid" {
+			if err := m.checkGrid(r, id, &budget); err != nil {
+				return heicInfo{}, err
+			}
+		}
+	}
+	if len(m.dimg) > 0 {
+		for from := range m.dimg {
+			if m.types[from] != "grid" {
+				return heicInfo{}, refuse("tiles of a non-grid item")
+			}
+		}
+	}
+	if t := m.types[m.primary]; t == "grid" && len(m.dimg[m.primary]) == 0 {
+		return heicInfo{}, refuse("grid without tiles")
+	}
+	body, found := m.property(m.primary, "irot")
+	return heicInfo{quarterTurn: found && len(body) >= 1 && body[0]&1 == 1}, nil
+}
+
+// checkItemProps refuses an association of a coded image or grid to a
+// property that does not exist or is not one of heicAllowedProps.
+func (m *heicMeta) checkItemProps(id uint32) error {
+	for _, idx := range m.assoc[id] {
+		if idx == 0 {
+			continue
+		}
+		if idx > len(m.props) || !heicAllowedProps[m.props[idx-1].typ] {
+			return refuse("property outside the still-image set")
+		}
+	}
+	return nil
+}
+
+// checkGrid reads a grid's descriptor and holds its tiles to it.
+func (m *heicMeta) checkGrid(r io.ReaderAt, id uint32, budget *heicBudget) error {
+	ext, located := m.extents[id]
+	total := extentsTotal(ext)
+	if !located || (total != 8 && total != 12) {
+		return refuse("grid descriptor")
+	}
+	var desc [12]byte
+	if err := extentsAt(r, ext, 0, desc[:total]); err != nil {
+		return err
+	}
+	rows, cols := uint64(desc[2])+1, uint64(desc[3])+1
+	var gw, gh uint64
+	switch {
+	case desc[0] != 0 || desc[1]&^1 != 0 || (desc[1]&1 == 1) != (total == 12):
+		return refuse("grid descriptor")
+	case total == 12:
+		gw, gh = uint64(binary.BigEndian.Uint32(desc[4:])), uint64(binary.BigEndian.Uint32(desc[8:]))
+	default:
+		gw, gh = uint64(binary.BigEndian.Uint16(desc[4:])), uint64(binary.BigEndian.Uint16(desc[6:]))
+	}
+	tiles := m.dimg[id]
+	if gw == 0 || gh == 0 || gw > 1<<16 || gh > 1<<16 || gw*gh > heicMaxPixels ||
+		uint64(len(tiles)) != rows*cols || len(tiles) > heicMaxTiles {
+		return refuse("grid size")
+	}
+	seen := make(map[uint32]bool, len(tiles))
+	needW, needH := (gw+cols-1)/cols, (gh+rows-1)/rows
+	for _, t := range tiles {
+		w, h, ok := m.ispe(t)
+		if seen[t] || m.types[t] != "hvc1" || !ok || w < needW || h < needH {
+			return refuse("grid tiles")
+		}
+		seen[t] = true
+	}
+	return nil
+}
+
+// extentsAt reads len(buf) bytes at pos of the data the extents make up in
+// turn; the bytes must lie in one extent.
 func extentsAt(r io.ReaderAt, ext []heicExtent, pos uint64, buf []byte) error {
 	for _, e := range ext {
 		if pos >= e.length {
@@ -276,93 +285,12 @@ func extentsAt(r io.ReaderAt, ext []heicExtent, pos uint64, buf []byte) error {
 			continue
 		}
 		if uint64(len(buf)) > e.length-pos {
-			return errConvertRefused // a read across extents is never needed: NAL headers are read whole
+			return refuse("item data layout")
 		}
-		if _, err := r.ReadAt(buf, int64(e.off+pos)); err != nil { //nolint:gosec // bounded by the file size in ReadAt
-			return fmt.Errorf("reading item data: %w", err)
+		if _, err := r.ReadAt(buf, int64(e.off+pos)); err != nil { //nolint:gosec // extents were checked against the file size
+			return refuse("unreadable item data")
 		}
 		return nil
 	}
-	return errConvertRefused
-}
-
-// heicPictures counts the coded pictures in an item's data: the slice segment
-// NAL units that start one. It reads only each NAL's length and first bytes.
-func heicPictures(r io.ReaderAt, ext []heicExtent, lengthSize int) (int, error) {
-	var total uint64
-	for _, e := range ext {
-		total += e.length
-	}
-	pictures := 0
-	var pos uint64
-	for range heicMaxNALs {
-		if pos >= total {
-			return pictures, nil
-		}
-		var lenBuf [4]byte
-		if err := extentsAt(r, ext, pos, lenBuf[:lengthSize]); err != nil {
-			return 0, err
-		}
-		var n uint64
-		for _, c := range lenBuf[:lengthSize] {
-			n = n<<8 | uint64(c)
-		}
-		pos += uint64(lengthSize)
-		if n < 3 || n > total-pos {
-			return 0, errConvertRefused
-		}
-		var hdr [3]byte
-		if err := extentsAt(r, ext, pos, hdr[:]); err != nil {
-			return 0, err
-		}
-		nal, ok := hevc.ParseNAL(hdr[:])
-		if !ok {
-			return 0, errConvertRefused
-		}
-		if nal.Type.IsVCL() && nal.LayerID == 0 && len(nal.RBSP) > 0 && nal.RBSP[0]&0x80 != 0 {
-			pictures++
-			if pictures > 1 {
-				return pictures, nil
-			}
-		}
-		pos += n
-	}
-	return 0, errConvertRefused
-}
-
-// checkHEICStill refuses a HEIC that is not one still picture the decoder
-// would take whole: its primary item must be a coded image (hvc1) or a grid of
-// them, and every coded image holds exactly one picture. A file that only
-// carries an image sequence track has no primary item and is refused.
-func checkHEICStill(r readerAt) error {
-	if _, err := r.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("%w: %w", errConvertRefused, err)
-	}
-	m, ok := readHEICMeta(r)
-	if !ok || !m.havePrimary {
-		return fmt.Errorf("%w: no primary image", errConvertRefused)
-	}
-	if t := m.types[m.primary]; t != "hvc1" && t != "grid" {
-		return fmt.Errorf("%w: primary item is not a coded still", errConvertRefused)
-	}
-	coded := 0
-	for id, t := range m.types {
-		if t != "hvc1" {
-			continue
-		}
-		coded++
-		cfg, found := m.property(id, "hvcC")
-		ext, located := m.extents[id]
-		if !found || len(cfg) < 22 || !located {
-			return fmt.Errorf("%w: coded image not locatable", errConvertRefused)
-		}
-		n, err := heicPictures(r, ext, int(cfg[21]&3)+1)
-		if err != nil || n != 1 {
-			return fmt.Errorf("%w: coded image is not one picture", errConvertRefused)
-		}
-	}
-	if coded == 0 {
-		return fmt.Errorf("%w: no coded image", errConvertRefused)
-	}
-	return nil
+	return refuse("item data layout")
 }

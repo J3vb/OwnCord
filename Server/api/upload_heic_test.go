@@ -83,7 +83,7 @@ func withIrot(t *testing.T, heicBytes []byte) []byte {
 		t.Fatalf("the encoder's pixi box is not the expected 16 bytes")
 	}
 	copy(out[i:], "irot")
-	copy(out[i+4:], make([]byte, 12))
+	copy(out[i+4:], make([]byte, 8))
 	out[i+4] = 1 // 90 degrees anticlockwise
 	return out
 }
@@ -99,11 +99,18 @@ func testTIFF(t *testing.T, w, h int) []byte {
 
 func uploadMeta(t *testing.T, router http.Handler, token, name string, content []byte) (mime string, w, h int) {
 	t.Helper()
+	_, mime, w, h = uploadFull(t, router, token, name, content)
+	return mime, w, h
+}
+
+func uploadFull(t *testing.T, router http.Handler, token, name string, content []byte) (id, mime string, w, h int) {
+	t.Helper()
 	rr := doUpload(t, router, token, "file", name, content)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("upload %s: %d; body: %s", name, rr.Code, rr.Body.String())
 	}
 	var resp struct {
+		ID     string `json:"id"`
 		Mime   string `json:"mime"`
 		Width  int    `json:"width"`
 		Height int    `json:"height"`
@@ -111,7 +118,7 @@ func uploadMeta(t *testing.T, router http.Handler, token, name string, content [
 	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	return resp.Mime, resp.Width, resp.Height
+	return resp.ID, resp.Mime, resp.Width, resp.Height
 }
 
 func TestUpload_HEICStoresMimeAndUprightDimensions(t *testing.T) {
@@ -445,7 +452,10 @@ func TestUpload_CameraRAWStaysAFile(t *testing.T) {
 	}{
 		{"DNG version tag", "a.dng", tiffWithTags(nil, [][2]uint16{{0x0100, 8}, {0x0101, 8}, {0xC612, 1}}), "application/octet-stream"},
 		{"Canon CR2 marker", "a.cr2", tiffWithTags(cr2, [][2]uint16{{0x0100, 8}}), "application/octet-stream"},
-		{"old-style JPEG compression", "a.nef", tiffWithTags(nil, [][2]uint16{{0x0103, 7}}), "application/octet-stream"},
+		{"NEF-style SubIFDs", "a.nef", tiffWithTags(nil, [][2]uint16{{0x0100, 8}, {0x0103, 1}, {0x014A, 1}}), "application/octet-stream"},
+		{"reduced-resolution first image", "a.tif", tiffWithTags(nil, [][2]uint16{{0x00FE, 1}, {0x0103, 1}}), "application/octet-stream"},
+		{"old-style JPEG compression", "a.arw", tiffWithTags(nil, [][2]uint16{{0x0103, 7}}), "application/octet-stream"},
+		{"scanner page (NewSubfileType page bit only)", "a.tif", tiffWithTags(nil, [][2]uint16{{0x00FE, 2}, {0x0100, 8}, {0x0101, 8}, {0x0103, 1}}), "image/tiff"},
 		{"plain TIFF directory", "a.tif", tiffWithTags(nil, [][2]uint16{{0x0100, 8}, {0x0101, 8}, {0x0103, 1}}), "image/tiff"},
 	}
 	for _, tc := range cases {

@@ -27,14 +27,11 @@ func inspectStoredImage(store FileStore, fileID, mime string) (outMime string, w
 			var cfg image.Config
 			var decErr error
 			if convertedFormat(mime) != "" {
-				cfg, decErr = convertedConfig(f, mime)
+				cfg, decErr = convertedSize(f, mime)
 			} else {
 				cfg, _, decErr = image.DecodeConfig(f)
 			}
 			if decErr == nil && mime == "image/jpeg" && jpegSidewaysOnDisk(f) {
-				cfg.Width, cfg.Height = cfg.Height, cfg.Width
-			}
-			if decErr == nil && convertedFormat(mime) != "" && convertedUprightSwap(f, mime) {
 				cfg.Width, cfg.Height = cfg.Height, cfg.Width
 			}
 			f.Close() //nolint:errcheck
