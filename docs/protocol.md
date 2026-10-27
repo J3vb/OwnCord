@@ -520,7 +520,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "game_activity": true, "thread_follows": true, "voice_messages": true }`. `voice_messages` (WP 8.9) means `POST /api/v1/uploads` accepts the `voice_duration_ms` and `voice_waveform` query parameters and an attachment of a voice message carries `duration_ms` and `waveform` (see `docs/api.md`, File Upload and Serving); a client that does not see it offers no voice message recorder. `game_activity` means the server understands `activity_update`, carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`, and has game activity switched on right now (WP 8.3e-2: an admin can turn it off, and the flag is then `false`, like `threads` tracking whether threads are available); a client that does not see it sends no `activity_update` and shows no game. The runtime switch is [`game_activity_policy`](#game_activity_policy-server---client-broadcast). `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "game_activity": true, "listening_activity": true, "thread_follows": true, "voice_messages": true }`. `voice_messages` (WP 8.9) means `POST /api/v1/uploads` accepts the `voice_duration_ms` and `voice_waveform` query parameters and an attachment of a voice message carries `duration_ms` and `waveform` (see `docs/api.md`, File Upload and Serving); a client that does not see it offers no voice message recorder. `listening_activity` (WP 8.10a) means the server understands `listening_update`, carries a member's song as `listening` on `presence` and `presence_batch` and as `ready.listening`, and has member activity switched on right now; it follows the same admin switch as `game_activity` and is `false` while it is off. A client that does not see it sends no `listening_update` and shows no song. `game_activity` means the server understands `activity_update`, carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`, and has game activity switched on right now (WP 8.3e-2: an admin can turn it off, and the flag is then `false`, like `threads` tracking whether threads are available); a client that does not see it sends no `activity_update` and shows no game. The runtime switch is [`game_activity_policy`](#game_activity_policy-server---client-broadcast). `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -679,6 +679,8 @@ to reconstruct them:
    yet is `"offline"` too; their `presence` broadcast follows once it does.
 2. An `"invisible"` member is `"offline"` to everyone but themselves. The
    viewer's own entry carries their true status.
+
+**listening[]:** The songs connected members are listening to (WP 8.10a), as `{user_id, title, artist, player, started_at, duration_ms}` (`started_at` in unix milliseconds, `duration_ms` `0` when unknown), sorted by `user_id`; always an array, `[]` when nobody is. Same visibility as `activities[]`: every connected member who reports a song and is not offline to this viewer, the viewer included, so an invisible member appears only in their own `ready`. It is a separate array, not a field of `members[]`, and sorts between `dm_channels` and `member_timeouts`. It is `[]` while an admin has member activity switched off, and absent on a server without the `listening_activity` capability. Later changes arrive as `presence`.
 
 **threads[]:** The viewer's followed, open threads (WP 6.9c), newest activity first, at most 200; the key is present whenever the server advertises `thread_follows` and is `[]` when the viewer follows none. Each entry is `{ "thread": ThreadInfo, "last_message_id", "last_read_message_id", "unread_count", "mention_count" }`: the thread, the newest live message in it (`0` when empty), the viewer's read pointer for it (`0` for none), the number of messages after the pointer (counted up to 100, as in `channels[]`) and the viewer's `read_states.mention_count` for it. An archived thread is left out (it is still in the thread list), and so is a thread whose parent channel the viewer cannot read (a deny override, a lost role, an archived parent): the follow is kept and the thread returns when read access does. A thread of an NSFW-labelled parent the viewer has not acknowledged is left out too, and `thread_follow_update` frames for it are not sent, because a thread's name discloses its starter message. A follow row for a user who cannot read the parent (or has not acknowledged it) is kept and ignored; it surfaces again if they later regain `READ_MESSAGES` or acknowledge. An older client ignores the key. `ready` is authoritative for the set; `thread_follow_update` only keeps it current.
 
@@ -1653,6 +1655,74 @@ of another JSON type or a non-integer `started_at` is refused with
 
 The capability is `game_activity`.
 
+### listening_update (Client -> Server)
+
+Reports the song the user is listening to, or that it stopped (WP 8.10a). Same
+shape of rules as `activity_update`, with its own frame and its own budget so a
+song change never eats the game's or `presence_update`'s. It writes nothing to
+the database.
+
+```json
+{
+  "type": "listening_update",
+  "payload": {
+    "listening": {
+      "title": "Song",
+      "artist": "Band",
+      "player": "Spotify",
+      "started_at": 1761206400000,
+      "duration_ms": 215000
+    }
+  }
+}
+```
+
+```json
+{ "type": "listening_update", "payload": { "listening": null } }
+```
+
+`listening` is required: an object with string `title`, `artist` and `player`
+and integer `started_at` and `duration_ms`, or `null` to clear. A missing
+field, a field of another JSON type or a non-integer number is refused with
+`BAD_REQUEST`.
+
+- `title`, `artist` and `player` are trimmed, then follow the `custom_status`
+  text rules (single line, no control or invisible characters, runs of spaces
+  collapse). `title` is 1 to 128 characters and `artist` 0 to 128 (it may be
+  empty); `player` (the app that plays it) is 1 to 64, and an empty `player` is
+  `BAD_REQUEST`. A `title` that is empty after trimming clears the listening,
+  like `null`.
+- `started_at` is the unix milliseconds the song would have started at (now
+  minus the position) and is clamped like a game's: never later than now,
+  never earlier than now minus 24 h.
+- `duration_ms` is the song's length: `0` means unknown, a negative value is
+  `BAD_REQUEST`, and anything over 24 h is capped at 24 h.
+- While the user is timed out a set is refused with `TIMED_OUT`; a clear still
+  applies.
+- The per-server switch covers music too: while an admin has member activity
+  switched off a set is refused with `GAME_ACTIVITY_DISABLED`, before the rate
+  limit, and a clear still applies. Turning the switch off clears every shown
+  song together with every shown game, in the same `presence` frame per user
+  (see `activity_update` for who receives it).
+- Setting a song is limited to 1 per 10 seconds per user, on its own budget;
+  over it the frame is refused with `RATE_LIMITED`, and the client keeps its
+  latest song and sends it on its next poll. A clear is never limited.
+- Naming the song the connection already shows (same `title`, `artist` and
+  `player`, whatever its `started_at` or `duration_ms`), or clearing when
+  nothing is set, does nothing: no frame, no budget, no reply. The shown
+  `started_at` is kept, so a seek does not rebroadcast.
+- A change is broadcast as a `presence` frame with the user's live status,
+  custom status and game plus the new `listening`; a game change likewise
+  keeps the song. While the user is invisible only their own connection gets
+  that frame.
+- The song belongs to the connection and has no table of its own. A device
+  that connects again replaces the previous connection and starts with no song
+  until it sends one; a late `listening_update` from the replaced connection
+  is ignored, and its disconnect does not clear the new connection's.
+  Disconnecting, or a server restart, clears it.
+
+The capability is `listening_activity`.
+
 ### presence (Server -> Client, broadcast)
 
 ```json
@@ -1663,10 +1733,18 @@ The capability is `game_activity`.
     "user_id": 1,
     "status": "online",
     "custom_status": "shipping phase 6",
-    "activity": { "name": "Factorio", "started_at": 1761206400000 }
+    "activity": { "name": "Factorio", "started_at": 1761206400000 },
+    "listening": null
   }
 }
 ```
+
+`listening` (WP 8.10a) is the song the user is listening to (see
+`listening_update`): `{title, artist, player, started_at, duration_ms}`, always
+present (`null` when none), with the same rules as `activity`: every presence
+frame carries the current value, invisible users show `null` to everyone else
+and the truth to themselves, and it is `null` while member activity is switched
+off. A server without the `listening_activity` capability omits the key.
 
 `activity` is the game the user is playing (see `activity_update`), always
 present (`null` when none), like `custom_status`. Every presence frame carries
@@ -1713,17 +1791,24 @@ of N users costs each client a handful of frames instead of N.
         "user_id": 1,
         "status": "online",
         "custom_status": "shipping phase 6",
-        "activity": { "name": "Factorio", "started_at": 1761206400000 }
+        "activity": { "name": "Factorio", "started_at": 1761206400000 },
+        "listening": null
       },
-      { "user_id": 4, "status": "offline", "custom_status": null, "activity": null }
+      {
+        "user_id": 4,
+        "status": "offline",
+        "custom_status": null,
+        "activity": null,
+        "listening": null
+      }
     ]
   }
 }
 ```
 
-Each entry means what a `presence` with the same fields means: `custom_status`
-and `activity` are always present (`null` when unset), and an invisible user is
-`"offline"` with `custom_status: null` and `activity: null` for everyone but themselves — the invisible user's
+Each entry means what a `presence` with the same fields means: `custom_status`,
+`activity` and `listening` (WP 8.10a) are always present (`null` when unset), and an invisible user is
+`"offline"` with `custom_status: null`, `activity: null` and `listening: null` for everyone but themselves — the invisible user's
 own copy of the same frame (same `seq`) carries their true status. An entry
 for a user the client does not know is ignored: a member the recipient's list
 may not have yet arrives first as a `member_join` (see `member_join`).
@@ -1733,7 +1818,7 @@ arrived has that frame dropped (not the connection) and receives, within the
 next window, an unsequenced `presence_batch` with `"full": true`. It lists
 every connected user who is not offline to that client (its own true status
 and custom text included, even when invisible), each with their current
-`custom_status` and `activity` (always present, `null` when unset); every member it leaves
+`custom_status`, `activity` and `listening` (always present, `null` when unset); every member it leaves
 out is offline, so an invisible member is simply absent. Clear an offline
 member's custom text, which is what `ready` shows.
 
@@ -2459,8 +2544,10 @@ Sent to every connected client after an admin with `MANAGE_SERVER` saves the
 }
 ```
 
-`enabled` is whether game activity is shown on this server. Turning it off
-clears the server's state first (every connection's shown game, see
+`enabled` is whether member activity is shown on this server: games
+(`activity_update`) and, since WP 8.10a, music (`listening_update`); the admin
+panel calls the setting "Member activity (games and music)". Turning it off
+clears the server's state first (every connection's shown game and song, see
 `activity_update`) and then sends this frame; turning it on sends only the
 frame, and the games return as clients send them again. The clearing `presence`
 frames ride the sequenced broadcast queue and this frame is sent directly, so
@@ -3569,7 +3656,7 @@ warm resume served by replay never waits for a permit.
 | `STICKER_NOT_FOUND`        | A `chat_send` named a sticker that does not exist or was deleted. Nothing was stored. Refines `NOT_FOUND`.                                                                                                                                                                       |
 | `THREAD_EXISTS`            | The message already has a thread; the error carries `thread_id`                                                                                                                                                                                                                  |
 | `THREAD_LOCKED`            | The thread is locked; only a moderator may post in it or change it                                                                                                                                                                                                               |
-| `GAME_ACTIVITY_DISABLED`   | `activity_update` set a game while an admin has game activity switched off for the server; a clear is never refused (WP 8.3e-2)                                                                                                                                                  |
+| `GAME_ACTIVITY_DISABLED`   | `activity_update` or `listening_update` set a game or a song while an admin has member activity switched off for the server; a clear is never refused (WP 8.3e-2, 8.10a)                                                                                                         |
 | `RATE_LIMITED`             | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                                                        |
 | `ALREADY_JOINED`           | Already in this voice channel                                                                                                                                                                                                                                                    |
 | `CHANNEL_FULL`             | Voice channel at capacity                                                                                                                                                                                                                                                        |
@@ -3711,6 +3798,7 @@ tables below add per-type behavioral notes.
 | `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)                          | Moves the read pointer back; answers `read_state`               |
 | `presence_update`     | 1/10sec                                                     |                                                                 |
 | `activity_update`     | 1/10sec, own budget (`RATE_LIMITED`)                        | A set only; a clear and a repeat of the current one are free    |
+| `listening_update`    | 1/10sec, own budget (`RATE_LIMITED`)                        | A set only; a clear and a repeat of the current song are free   |
 | `voice_join`          | 5/sec                                                       |                                                                 |
 | `voice_leave`         | 5/sec                                                       | Empty payload                                                   |
 | `voice_mute`          | 2/sec                                                       | Refused with `SERVER_MUTED` while server muted                  |
