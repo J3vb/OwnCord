@@ -875,6 +875,9 @@ jobs:
       - name: Self-test the findings-ledger merge driver
         run: node --test scripts/merge-ledger.test.mjs
 
+      - name: Self-test the PR advisory diff
+        run: node --test scripts/osv-pr-diff.test.mjs
+
       - name: Self-test the CI cost report
         run: node --test scripts/ci-cost-report.test.mjs
 
@@ -1053,9 +1056,13 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       # Every lockfile in the repository, named rather than globbed: a new
-      # component's lockfile must be added here and to scripts/ci-select.mjs's
-      # DEPS_FILES, so it cannot be silently unscanned.
+      # component's lockfile must be added here, to scripts/ci-select.mjs's
+      # DEPS_FILES and to scripts/osv-pr-diff.mjs's LOCKFILES, so it cannot be
+      # silently unscanned. On a PR this step only warns and the next one
+      # decides; on a push it is the verdict.
       - name: Scan the dependency manifests (osv-scanner)
+        id: osv
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: |
           osv-scanner scan source --config osv-scanner.toml \
             -L Server/go.mod \
@@ -1063,6 +1070,17 @@ jobs:
             -L Client/src-tauri/Cargo.lock \
             -L tools/mcp-introspect/package-lock.json \
             -L package-lock.json
+
+      # A PR fails only on advisories its own lockfile changes bring in: one
+      # already on the base commit is dev's to fix (daily dev scan, dev's push
+      # run), not every PR's that happens to touch a lockfile.
+      - name: Fail a PR only on advisories it introduces
+        if: ${{ github.event_name == 'pull_request' && steps.osv.outcome == 'failure' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          node scripts/osv-pr-diff.mjs "$BASE_SHA"
 
       # cargo-deny reads the resolved graph through `cargo metadata`, so cargo
       # has to be on PATH. Pinned the same way rust-tests pins it.

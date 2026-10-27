@@ -12,7 +12,7 @@ import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import { ApiClientError, type ApiClient } from "@lib/api";
-import type { ChannelType } from "@lib/types";
+import type { ChannelType, VoiceUploadMeta } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
 import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
@@ -887,11 +887,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       file: File,
       uploadSignal?: AbortSignal,
       onProgress?: (fraction: number) => void,
+      voice?: VoiceUploadMeta,
     ): Promise<{ id: string; url: string; filename: string }> => {
       // The first upload loads the queue module, so a send queued while it runs finds it ready.
       preloadSendQueue();
       try {
-        const result = await api.uploadFile(file, uploadSignal, onProgress);
+        const result = await api.uploadFile(file, uploadSignal, onProgress, voice);
         return { id: result.id, url: result.url, filename: result.filename };
       } catch (err) {
         // A user-cancelled upload is not a failure — the composer already
