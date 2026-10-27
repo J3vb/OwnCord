@@ -87,7 +87,7 @@ import { createWsClient, type WsClient } from "../../src/lib/ws";
 import { wireDispatcher, type DispatcherCleanup } from "../../src/lib/dispatcher";
 import { clearAuth } from "../../src/stores/auth.store";
 import { getChannelMessages } from "../../src/stores/messages.store";
-import { voiceStore, setPeerVerification } from "../../src/stores/voice.store";
+import { voiceStore, setPeerVerification, joinVoiceChannel } from "../../src/stores/voice.store";
 import type {
   AuthOkPayload,
   ChatMessagePayload,
@@ -426,6 +426,9 @@ function supersedeCmd(next: number, stale: boolean): Cmd {
     `Supersede(channel=${channel},${stale ? "stale" : "live"})`,
     (m) => m.connected,
     async (m, r) => {
+      // The user's own join (VoiceCallbacks.onVoiceJoin) takes the call on this
+      // device before the server's answering voice_state can arrive.
+      joinVoiceChannel(channel);
       emit("voice_state", voiceState(channel, SELF_ID));
       for (const uid of PEER_IDS) emit("voice_state", voiceState(channel, uid));
       await settle();

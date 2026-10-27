@@ -212,6 +212,7 @@ describe("voice store", () => {
         // A full-ready reconnect (mustFullResync / replay miss) that
         // preserves a live voice session reports the moderator flags on the
         // signed-in user's own row.
+        voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
         setVoiceStates([
           { ...VOICE_STATE_1, server_muted: true, server_deafened: true },
           VOICE_STATE_2,
@@ -221,11 +222,26 @@ describe("voice store", () => {
         expect(state.localServerDeafened).toBe(true);
       });
 
+      it("leaves the local moderator flags false for a self row while this device is idle", () => {
+        authStore.setState((prev) => ({
+          ...prev,
+          user: { id: 1, username: "me", avatar: null, role: "member" },
+        }));
+        // The row is another device's call: roster only.
+        setVoiceStates([{ ...VOICE_STATE_1, server_muted: true, server_deafened: true }]);
+        const state = voiceStore.getState();
+        expect(state.localServerMuted).toBe(false);
+        expect(state.localServerDeafened).toBe(false);
+        expect(state.currentChannelId).toBeNull();
+        expect(state.voiceUsers.get(10)?.get(1)?.serverMuted).toBe(true);
+      });
+
       it("resets the local moderator flags to false when the signed-in user's row omits them", () => {
         authStore.setState((prev) => ({
           ...prev,
           user: { id: 1, username: "me", avatar: null, role: "member" },
         }));
+        voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
         // Simulate a stale localServerMuted from before the resync.
         voiceStore.setState((prev) => ({ ...prev, localServerMuted: true }));
         setVoiceStates([VOICE_STATE_1]); // no server_muted/server_deafened on this row
@@ -303,6 +319,7 @@ describe("voice store", () => {
         ...prev,
         user: { id: 5, username: "dave", avatar: null, role: "member" },
       }));
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
       updateVoiceState({
         ...FULL_VOICE_PAYLOAD,
         muted: true,
@@ -313,6 +330,18 @@ describe("voice store", () => {
       const state = voiceStore.getState();
       expect(state.localServerMuted).toBe(true);
       expect(state.localServerDeafened).toBe(true);
+      expect(state.voiceUsers.get(10)?.get(5)?.serverMuted).toBe(true);
+    });
+
+    it("keeps the local flags off for the signed-in user's row while this device is idle", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "dave", avatar: null, role: "member" },
+      }));
+      updateVoiceState({ ...FULL_VOICE_PAYLOAD, server_muted: true, server_deafened: true });
+      const state = voiceStore.getState();
+      expect(state.localServerMuted).not.toBe(true);
+      expect(state.localServerDeafened).not.toBe(true);
       expect(state.voiceUsers.get(10)?.get(5)?.serverMuted).toBe(true);
     });
 
@@ -917,7 +946,7 @@ describe("voice store", () => {
   });
 
   describe("setVoiceStates — auto-join for current user", () => {
-    it("auto-joins current user's channel from ready payload", () => {
+    it("keeps the roster row but no channel for a self row while this device is idle", () => {
       authStore.setState(() => ({
         token: "t",
         user: { id: 1, username: "me", avatar: "", role: "member" },
@@ -925,6 +954,30 @@ describe("voice store", () => {
         motd: "",
         isAuthenticated: true,
       }));
+
+      setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
+
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceUsers.get(10)?.has(1)).toBe(true);
+
+      authStore.setState(() => ({
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
+      }));
+    });
+
+    it("auto-joins current user's channel from ready payload when this device holds the call", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 1, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
 
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
 

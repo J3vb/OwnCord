@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  handleVoiceDisconnected,
   handleVoiceE2eeAnnounce,
   handleVoiceError,
   handleVoiceJoinRollback,
@@ -30,7 +31,6 @@ import { clearAfkMove } from "./moveHint";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
 import type { Payload, ReconnectClock } from "../connection/dispatchContext";
-import { expectConsole } from "../../../tests/helpers/console";
 
 vi.mock("../../lib/livekitSession", () => ({
   setMuted: vi.fn(),
@@ -49,6 +49,7 @@ vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
 import {
   setMuted,
   setDeafened,
+  leaveVoice,
   handleParticipantLeft,
   handleE2EEAnnounce,
   resendWatching,
@@ -68,6 +69,7 @@ function voiceState(overrides: Partial<Payload<"voice_state">>): Payload<"voice_
   } as Payload<"voice_state">;
 }
 
+const clockStub = (): ReconnectClock => ({ voiceRejoinChannelId: null }) as ReconnectClock;
 const socketStub = () => ({ send: vi.fn(), disconnect: vi.fn() });
 const readyWith = (voiceStates: Payload<"voice_state">[]) =>
   ({ voice_states: voiceStates }) as unknown as Payload<"ready">;
@@ -82,15 +84,25 @@ beforeEach(() => {
 });
 
 describe("snapshotReadyVoice", () => {
-  it("sends voice_leave for a stale self voice state with no live session", () => {
+  it("leaves another device's call alone: no voice_leave, the roster keeps the user", () => {
     const socket = socketStub();
     const apply = snapshotReadyVoice();
 
     apply(socket, readyWith([voiceState({})]));
-    expectConsole("warn", /\[dispatcher\] Stale voice state detected in ready payload/);
 
-    expect(socket.send).toHaveBeenCalledWith({ type: "voice_leave", payload: {} });
+    expect(socket.send).not.toHaveBeenCalled();
     expect(voiceStore.getState().currentChannelId).toBeNull();
+    expect(voiceStore.getState().voiceStatus).toBe("idle");
+    expect(voiceStore.getState().voiceUsers.get(4)?.has(9)).toBe(true);
+    expect(resendWatching).not.toHaveBeenCalled();
+  });
+
+  it("does not apply a moderator mute from another device's self row", async () => {
+    snapshotReadyVoice()(socketStub(), readyWith([voiceState({ server_muted: true })]));
+    await Promise.resolve();
+
+    expect(setMuted).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localServerMuted).toBe(false);
   });
 
   it("reconciles only the peers who left the snapshotted channel during the outage", async () => {
@@ -174,6 +186,11 @@ describe("snapshotReadyVoice", () => {
 });
 
 describe("handleVoiceState moderator enforcement", () => {
+  // These run on the device that holds the call; an idle device is covered below.
+  beforeEach(() => {
+    setVoiceStatus("joining");
+  });
+
   it("applies a moderator mute and deafen to this client", async () => {
     handleVoiceState(socketStub(), voiceState({ server_muted: true, server_deafened: true }));
 
@@ -245,6 +262,65 @@ describe("handleVoiceState moderator enforcement", () => {
     handleVoiceState(socketStub(), voiceState({ user_id: 10, server_muted: true }));
     await Promise.resolve();
     expect(setMuted).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleVoiceState on a device without the call", () => {
+  it("only updates the roster: no channel, no LiveKit call, no moderator enforcement", async () => {
+    const socket = socketStub();
+
+    handleVoiceState(socket, voiceState({ server_muted: true, server_deafened: true }));
+    await Promise.resolve();
+
+    const state = voiceStore.getState();
+    expect(state.voiceUsers.get(4)?.has(9)).toBe(true);
+    expect(state.currentChannelId).toBeNull();
+    expect(state.voiceStatus).toBe("idle");
+    expect(state.localServerMuted).toBe(false);
+    expect(setMuted).not.toHaveBeenCalled();
+    expect(setDeafened).not.toHaveBeenCalled();
+    expect(socket.send).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("behaves as before for a device whose own join is in flight", () => {
+    joinVoiceChannel(4);
+    expect(voiceStore.getState().voiceStatus).toBe("joining");
+
+    handleVoiceState(socketStub(), voiceState({ server_muted: true }));
+
+    const state = voiceStore.getState();
+    expect(state.currentChannelId).toBe(4);
+    expect(state.voiceStatus).toBe("joining");
+    expect(state.localServerMuted).toBe(true);
+  });
+});
+
+describe("handleVoiceLeave on a device without the call", () => {
+  it("removes the roster row and tears nothing down", async () => {
+    handleVoiceState(socketStub(), voiceState({}));
+    expect(voiceStore.getState().voiceUsers.get(4)?.has(9)).toBe(true);
+
+    handleVoiceLeave({ channel_id: 4, user_id: 9 }, clockStub());
+    await Promise.resolve();
+
+    expect(voiceStore.getState().voiceUsers.get(4)?.has(9) ?? false).toBe(false);
+    expect(voiceStore.getState().voiceStatus).toBe("idle");
+    expect(leaveVoice).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleVoiceDisconnected for a moved call", () => {
+  it("tears the call down and shows the reason", async () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+
+    handleVoiceDisconnected({ channel_id: 4, reason: "Call moved to another device" }, clockStub());
+
+    await vi.waitFor(() => expect(leaveVoice).toHaveBeenCalledWith(false));
+    expect(voiceStore.getState().voiceStatus).toBe("idle");
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+    expect(showToast).toHaveBeenCalledWith("Call moved to another device", "error");
   });
 });
 

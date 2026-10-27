@@ -309,7 +309,10 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
   const currentUserId = authStore.getState().user?.id ?? 0;
   let autoJoinChannel: number | null = null;
   let selfState: ReadyVoiceState | undefined;
-  if (currentUserId !== 0) {
+  // Only a device that holds the call adopts its self row: while idle, that row
+  // is another device's call and stays a roster entry (the sidebar still shows
+  // the user in the channel) without becoming this device's channel.
+  if (currentUserId !== 0 && voiceStore.getState().voiceStatus !== "idle") {
     for (const vs of states) {
       if (vs.user_id === currentUserId) {
         autoJoinChannel = vs.channel_id;
@@ -366,7 +369,8 @@ export function updateVoiceState(payload: VoiceStatePayload): void {
     });
 
     nextChannels.set(payload.channel_id, nextUsers);
-    if (payload.user_id !== currentUserId) {
+    // An idle device's own row is another device's call: roster only.
+    if (payload.user_id !== currentUserId || prev.voiceStatus === "idle") {
       return { ...prev, voiceUsers: nextChannels };
     }
     return {
