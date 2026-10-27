@@ -287,7 +287,7 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID, !result.DeferChannelFocusNoRead)
 	}
 	if result.SetPresence != nil {
-		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus, result.SetPresence.customStatusExpiresAt)
+		h.applyPresenceChoice(c, result.SetPresence)
 	}
 	if result.SetActivity != nil {
 		h.applyActivity(c, result.SetActivity.next)

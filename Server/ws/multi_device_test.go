@@ -731,26 +731,98 @@ func TestMultiDevice_ShownStatusNonIdleDeviceWins(t *testing.T) {
 	f := newMDFix(t)
 	a := f.dev("session-a", f.text)
 	b := f.dev("session-b", f.text)
-	now := time.Now()
-	set := func(d *mdDev, status string, at time.Time) {
-		d.c.presence.Store(&livePresence{status: status, setAt: at})
+	choose := func(d *mdDev, status string) {
+		f.hub.applyPresenceChoice(d.c, &livePresence{status: status})
 	}
-	cases := []struct {
-		a, b, want string
-	}{
-		{db.StatusOnline, db.StatusIdle, db.StatusOnline}, // idle set later still loses
-		{db.StatusIdle, db.StatusOnline, db.StatusOnline},
-		{db.StatusIdle, db.StatusIdle, db.StatusIdle},
-		{db.StatusDND, db.StatusOnline, db.StatusDND}, // dnd outranks online
-		{db.StatusOnline, db.StatusDND, db.StatusDND},
-		{db.StatusInvisible, db.StatusDND, db.StatusInvisible},
-	}
-	for i, tc := range cases {
-		set(a, tc.a, now.Add(time.Duration(i)*time.Second))
-		set(b, tc.b, now.Add(time.Duration(i)*time.Second+time.Millisecond)) // b is the later setter
-		if got := f.hub.LiveStatus(f.uid); got != tc.want {
-			t.Fatalf("case %d (%s,%s): shown %q, want %q", i, tc.a, tc.b, got, tc.want)
+	want := func(step, status string) {
+		t.Helper()
+		if got := f.hub.LiveStatus(f.uid); got != status {
+			t.Fatalf("%s: shown %q, want %q", step, got, status)
 		}
+	}
+	choose(a, db.StatusDND)
+	want("A dnd", db.StatusDND)
+	choose(b, db.StatusOnline) // the newest choice wins over A's older dnd
+	want("A dnd, then B online", db.StatusOnline)
+	choose(a, db.StatusOnline)
+	choose(b, db.StatusIdle) // B's auto-idle stamps only B
+	want("A online, B auto-idle", db.StatusOnline)
+	if st := a.c.livePresence().status; st != db.StatusOnline {
+		t.Fatalf("B's auto-idle changed A to %q", st)
+	}
+	choose(a, db.StatusIdle)
+	want("both idle", db.StatusIdle)
+	choose(a, db.StatusInvisible)
+	want("A invisible after idle", db.StatusInvisible)
+	if st := b.c.livePresence().status; st != db.StatusInvisible {
+		t.Fatalf("a chosen status was not stamped on B: %q", st)
+	}
+}
+
+func TestMultiDevice_SameSessionRejoinOfParkedCallIsNotAMove(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	f.join(a, f.voiceA)
+	f.dropSocket(a)
+	// The same session joins the same channel while its call is parked.
+	again := &mdDev{c: f.newConn(f.uid, "session-a", f.text)}
+	f.join(again, f.voiceA)
+
+	resumed := f.newConn(f.uid, "session-a", f.text)
+	resumed.lastSeq = 1
+	f.hub.registerNowTest(resumed, map[int64]bool{f.text: true})
+	d := &mdDev{c: resumed}
+	d.pump()
+	if d.index(0, MsgTypeVoiceDisconnected, nil) >= 0 {
+		t.Fatalf("a session re-joining its own parked call was told it moved; got %s", d.types())
+	}
+}
+
+func TestMultiDevice_MovedNoteDroppedOnFreshConnect(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	f.join(a, f.voiceA)
+	f.dropSocket(a)
+	b := f.dev("session-b", f.text)
+	f.join(b, f.voiceB)
+
+	fresh := f.newConn(f.uid, "session-a", f.text) // lastSeq 0: a reload
+	f.hub.registerNowTest(fresh, map[int64]bool{f.text: true})
+	d := &mdDev{c: fresh}
+	d.pump()
+	if d.index(0, MsgTypeVoiceDisconnected, nil) >= 0 {
+		t.Fatal("a fresh connect was sent the moved notice")
+	}
+	if f.hub.voiceReg.voiceGrace.takeMoved(f.uid, auth.HashToken("session-a")) != 0 {
+		t.Fatal("the note should have been consumed by the fresh connect")
+	}
+}
+
+func TestMultiDevice_FlushDropsQueuedOfflineForConnectedUser(t *testing.T) {
+	f := newMDFix(t)
+	f.dev("session-a", f.text)
+	obs := f.observer(f.text)
+	const gone = int64(99999)
+	f.hub.presenceMu.Lock()
+	f.hub.presenceQueue = map[int64]pendingPresence{
+		f.uid: {status: db.StatusOffline}, // connected: stale, dropped
+		gone:  {status: db.StatusOffline}, // not connected: broadcast
+	}
+	f.hub.presenceMu.Unlock()
+	f.hub.flushPresenceQueue()
+
+	i := obs.await(t, "presence_batch", nil)
+	updates, _ := framePayload(obs.got[i])["updates"].([]any)
+	seen := map[int64]bool{}
+	for _, u := range updates {
+		m, _ := u.(map[string]any)
+		seen[int64Of(m["user_id"])] = true
+	}
+	if seen[f.uid] {
+		t.Fatalf("the offline entry for a connected user was broadcast: %v", updates)
+	}
+	if !seen[gone] {
+		t.Fatalf("the offline entry for an unconnected user was dropped: %v", updates)
 	}
 }
 

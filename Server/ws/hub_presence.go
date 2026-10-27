@@ -298,6 +298,14 @@ func (h *Hub) flushPresenceQueue() {
 		presenceFlushRaceHook(h)
 	}
 	lost := false
+	// An offline entry queued for a user who has connected since is stale: the
+	// new connection's own online presence follows it, but could be coalesced
+	// away or ordered behind it. Drop it (presenceMu -> Hub.mu (R) is in order).
+	for uid, p := range queued {
+		if p.status == db.StatusOffline && h.isConnected(uid) {
+			delete(queued, uid)
+		}
+	}
 	if len(queued) > 0 {
 		for uid, p := range queued {
 			if p.member != nil {
@@ -447,20 +455,19 @@ func (h *Hub) deliverPresenceSnapshots() {
 	slog.Debug("hub: presence snapshots sent", "clients", len(stale))
 }
 
-// presenceRank orders statuses for the merged presence: an idle device never
-// outranks an active one (a background tab or a sleeping phone must not make
-// an active user look idle), and among active ones a chosen restriction wins
-// over plain online: invisible (the user asked not to be seen) over dnd (asked
-// not to be disturbed) over online. An unknown status ranks with online.
-func presenceRank(status string) int {
-	switch status {
-	case db.StatusIdle:
-		return 0
-	case db.StatusDND:
-		return 3
-	case db.StatusInvisible:
-		return 4
-	default:
-		return 2
+// applyPresenceChoice records the presence a presence_update set. A chosen
+// status (online, dnd, invisible) is the user's, so it is stamped on every
+// connection of the user, the sender last: the newest choice then wins the
+// merge (mergeLivePresence) whatever an older device chose before, and each
+// connection keeps its own idle tracking from there. An idle update is the
+// sender's own auto-idle and stamps only that connection.
+func (h *Hub) applyPresenceChoice(c *Client, p *livePresence) {
+	if !isIdleStatus(p.status) {
+		for _, o := range h.clientsOf(c.userID) {
+			if o != c {
+				o.setLivePresence(p.status, p.customStatus, p.customStatusExpiresAt)
+			}
+		}
 	}
+	c.setLivePresence(p.status, p.customStatus, p.customStatusExpiresAt)
 }

@@ -68,7 +68,11 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 			"from_channel_id", e.snap.chID, "to_channel_id", channelID)
 		// The parking device's socket is gone, so it cannot be told now: leave
 		// a note it collects when it next registers (registerNow).
-		h.voiceReg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
+		// Never for the joining connection's own session: re-joining its own
+		// parked call is not a move.
+		if e.client.tokenHash != c.tokenHash {
+			h.voiceReg.voiceGrace.markMoved(c.userID, e.client.tokenHash, e.snap.chID)
+		}
 		h.finishVoiceLeaveAnnounce(ctx, txn, e.client, e.snap.chID, e.snap.joinToken, voiceLeaveReasonMoved, e.snap.chID != channelID)
 	}
 
@@ -94,8 +98,10 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 // treat its connection as the one a moderator frame belongs to.
 const voiceExitWindow = 30 * time.Second
 
-// noteModeratorExit records that a moderator action just took userID's call off
-// c, so the moderator frame that follows (SendToVoiceDevice) reaches c and no
+// noteModeratorExit records that a leave through DisconnectFromVoice,
+// DisconnectFromVoiceInChannel or EvictForModeratorMove just took userID's call
+// off c (these also serve the DM leave, block and group-removal paths, which
+// send no moderator frame, so a stamp there is never read), so the moderator frame that follows (SendToVoiceDevice) reaches c and no
 // other device. Only moderator paths stamp: a move to another device or an
 // ordinary leave must not make a device the target of a later moderator frame.
 // c == nil is a parked call being torn down: nobody holds it, so every stamp

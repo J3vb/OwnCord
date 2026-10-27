@@ -596,7 +596,7 @@ test.describe("B9-26 first-contact journey (real server)", () => {
   });
 });
 
-test.describe("B9-26 session-switching journey (real server)", () => {
+test.describe("B9-26 several-devices journey (real server)", () => {
   test("a sign-in on a second device leaves the first connected and receiving", async ({
     browser,
     bob,

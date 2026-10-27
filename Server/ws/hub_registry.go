@@ -187,7 +187,9 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 
 	// A call this session parked and another device then moved away: tell it
 	// first, before any other voice frame, so it clears its local call.
-	if ch := h.voiceReg.voiceGrace.takeMoved(c.userID, c.tokenHash); ch != 0 {
+	// Only a resume (lastSeq > 0) can hold the call locally; a fresh connect just
+	// drops the note.
+	if ch := h.voiceReg.voiceGrace.takeMoved(c.userID, c.tokenHash); ch != 0 && c.lastSeq > 0 {
 		c.sendMsg(buildVoiceDisconnected(ch, voiceMovedReason))
 	}
 
@@ -348,6 +350,11 @@ func (h *Hub) unregisterNow(c *Client) bool {
 		return false // not replaced
 	}
 	h.mu.Unlock()
+	// Residual: a non-terminal kick removes c, a same-session resume then
+	// registers before c's read loop reaches this teardown. The resume finds no
+	// parked entry yet (so it inherits nothing) and c, not being displaced, is
+	// torn down here: its call parks in the grace window and, since nobody
+	// inherits it, ends when the 15 s window expires.
 	return c.displaced.Load()
 }
 

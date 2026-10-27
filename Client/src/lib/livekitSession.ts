@@ -519,6 +519,11 @@ export class LiveKitSession {
           dmStore.getState().channels.some((dm) => dm.channelId === channelId) ||
           isDmKeptForCall(channelId)),
       serverMembership: () => {
+        // The roster read below relies on the server sending voice_disconnected
+        // before ready when this call was moved to another device while this
+        // socket was away (registerNow): the roster keeps the other device's
+        // self row, so without that frame "held" would be read for a call that
+        // is no longer ours.
         if (this.ws?.getState() !== "connected") return "unknown";
         const self = authStore.getState().user?.id ?? 0;
         return voiceStore.getState().voiceUsers.get(channelId)?.has(self) === true
