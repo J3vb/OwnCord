@@ -295,7 +295,9 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 			wasServerMutedBy = prevState.ServerMutedBy
 		}
 	} else {
-		wasServerMuted, wasServerDeafened, wasServerMutedBy = c.voice.takeModFlags()
+		// The stash may sit on another of this user's devices: a moderator move
+		// evicted the call from it and the user changed device before rejoining.
+		wasServerMuted, wasServerDeafened, wasServerMutedBy = h.takeUserModFlags(c)
 	}
 
 	// If user is already in a different voice channel, leave it first.

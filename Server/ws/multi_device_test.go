@@ -732,7 +732,7 @@ func TestMultiDevice_ShownStatusNonIdleDeviceWins(t *testing.T) {
 	a := f.dev("session-a", f.text)
 	b := f.dev("session-b", f.text)
 	choose := func(d *mdDev, status string) {
-		f.hub.applyPresenceChoice(d.c, &livePresence{status: status})
+		f.hub.applyPresenceChoice(d.c, &livePresence{status: status}, nil)
 	}
 	want := func(step, status string) {
 		t.Helper()
@@ -980,5 +980,87 @@ func TestMultiDevice_GameAndSongBelongToTheConnectionThatSetThem(t *testing.T) {
 	}
 	if !f.hub.IsUserConnected(f.uid) {
 		t.Fatal("B should still be connected")
+	}
+}
+
+// presenceOf returns the statuses the observer has been sent for uid, from
+// both presence frames and presence_batch updates, in order.
+func presenceOf(d *mdDev, uid int64) []string {
+	d.pump()
+	var out []string
+	for _, fr := range d.got {
+		p := framePayload(fr)
+		switch frameType(fr) {
+		case "presence":
+			if int64Of(p["user_id"]) == uid {
+				out = append(out, fmt.Sprint(p["status"]))
+			}
+		case "presence_batch":
+			ups, _ := p["updates"].([]any)
+			for _, u := range ups {
+				m, _ := u.(map[string]any)
+				if int64Of(m["user_id"]) == uid {
+					out = append(out, fmt.Sprint(m["status"]))
+				}
+			}
+		}
+	}
+	return out
+}
+
+// An auto-idle from one device must not show the user idle to others while
+// another device is active: the frame follows the merged status.
+func TestMultiDevice_AutoIdleFromOneDeviceDoesNotShowUserIdle(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	b := f.dev("session-b", f.text)
+	obs := f.observer(f.text)
+	apply := func(d *mdDev, status string) {
+		env := envelope{Type: MsgTypePresenceUpdate}
+		res := Result{Events: presenceEvents(f.uid, status, nil, nil, nil), SetPresence: &livePresence{status: status}}
+		f.hub.handleMessageApply(context.Background(), context.Background(), d.c, env, "", res, time.Now())
+	}
+
+	apply(a, db.StatusOnline)
+	waitFor(t, "A's online to be delivered", func() bool { return len(presenceOf(obs, f.uid)) >= 1 })
+	obs.got = nil
+	apply(b, db.StatusIdle) // B auto-idles while A stays online
+	obs.settle()
+	if got := presenceOf(obs, f.uid); len(got) != 0 {
+		t.Fatalf("B's auto-idle was broadcast although the user is still online on A: %v", got)
+	}
+	if st := f.hub.LiveStatus(f.uid); st != db.StatusOnline {
+		t.Fatalf("shown status = %q, want online", st)
+	}
+
+	apply(a, db.StatusIdle) // now every device is idle: idle is shown
+	waitFor(t, "idle to be delivered", func() bool {
+		g := presenceOf(obs, f.uid)
+		return len(g) > 0 && g[len(g)-1] == db.StatusIdle
+	})
+}
+
+// A moderator move leaves the mute on the device it evicted; the user joining
+// from another device keeps it.
+func TestMultiDevice_ModeratorFlagsFollowADeviceChange(t *testing.T) {
+	f := newMDFix(t)
+	a := f.dev("session-a", f.text)
+	b := f.dev("session-b", f.text)
+	f.join(a, f.voiceA)
+
+	if !f.hub.EvictForModeratorMove(context.Background(), f.uid, f.voiceA, true, false, nil) {
+		t.Fatal("moderator move did not evict")
+	}
+	if a.c.voice.channel() != 0 {
+		t.Fatal("A should be out of the call")
+	}
+	f.join(b, f.voiceB) // the user changes device before rejoining
+
+	row := f.row(f.uid)
+	if row == nil || !row.ServerMuted {
+		t.Fatalf("the moderator mute was lost on the device change: %+v", row)
+	}
+	if sm, _ := a.c.peekPendingModFlagsForHarness(); sm {
+		t.Fatal("A still holds a stash that would be applied a second time")
 	}
 }

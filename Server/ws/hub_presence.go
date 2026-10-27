@@ -457,13 +457,20 @@ func (h *Hub) deliverPresenceSnapshots() {
 	slog.Debug("hub: presence snapshots sent", "clients", len(stale))
 }
 
-// applyPresenceChoice records the presence a presence_update set. A chosen
-// status (online, dnd, invisible) is the user's, so it is stamped on every
-// connection of the user, the sender last: the newest choice then wins the
-// merge (mergeLivePresence) whatever an older device chose before, and each
-// connection keeps its own idle tracking from there. An idle update is the
-// sender's own auto-idle and stamps only that connection.
-func (h *Hub) applyPresenceChoice(c *Client, p *livePresence) {
+// applyPresenceChoice records the presence a presence_update set and returns
+// the events to emit for it. A chosen status (online, dnd, invisible) is the
+// user's, so it is stamped on every connection of the user, the sender last:
+// the newest choice then wins the merge (mergeLivePresence) whatever an older
+// device chose before, and each connection keeps its own idle tracking from
+// there. An idle update is the sender's own auto-idle and stamps only that
+// connection.
+//
+// The outgoing presence follows the MERGED state after the update, not the
+// sender's raw status: an idle device must not show the user idle while
+// another device is active. An auto-idle that leaves the user's shown status
+// and text unchanged emits nothing.
+func (h *Hub) applyPresenceChoice(c *Client, p *livePresence, events []Event) []Event {
+	before := mergeLivePresence(h.clientsOf(c.userID))
 	if !isIdleStatus(p.status) {
 		for _, o := range h.clientsOf(c.userID) {
 			if o != c {
@@ -472,4 +479,19 @@ func (h *Hub) applyPresenceChoice(c *Client, p *livePresence) {
 		}
 	}
 	c.setLivePresence(p.status, p.customStatus, p.customStatusExpiresAt)
+	merged := mergeLivePresence(h.clientsOf(c.userID))
+	if isIdleStatus(p.status) && merged.status == before.status && sameText(merged.customStatus, before.customStatus) {
+		return nil
+	}
+	if merged.status == p.status && sameText(merged.customStatus, p.customStatus) {
+		return events // the update is what is shown: the handler's events stand
+	}
+	return presenceEvents(c.userID, merged.status, merged.customStatus, merged.activity, merged.listening)
+}
+
+func sameText(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }

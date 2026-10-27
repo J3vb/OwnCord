@@ -53,7 +53,7 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 		wasServerMuted, wasServerDeafened, wasServerMutedBy = prev.ServerMuted, prev.ServerDeafened, prev.ServerMutedBy
 	}
 	if from != nil {
-		if sm, sd, sby := from.voice.takeModFlags(); (sm || sd) && !wasServerMuted && !wasServerDeafened {
+		if sm, sd, sby := h.takeUserModFlags(from); (sm || sd) && !wasServerMuted && !wasServerDeafened {
 			wasServerMuted, wasServerDeafened, wasServerMutedBy = sm, sd, sby
 		}
 		snap := txn.clear(from)
@@ -92,6 +92,26 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 		return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, false
 	}
 	return true, wasServerMuted, wasServerDeafened, wasServerMutedBy, true
+}
+
+// takeUserModFlags takes and clears the pending moderator mute/deafen stash of
+// every connection of c's user and returns the one c carries, else the first
+// other connection's that holds one. The caller holds the user's membership
+// lock, so no stash is set or consumed meanwhile: a moderator move that evicted
+// the call from device A leaves its flags on A, and they must follow the user
+// to whichever device joins next.
+func (h *Hub) takeUserModFlags(c *Client) (serverMuted, serverDeafened bool, serverMutedBy *int64) {
+	serverMuted, serverDeafened, serverMutedBy = c.voice.takeModFlags()
+	for _, o := range h.clientsOf(c.userID) {
+		if o == c {
+			continue
+		}
+		sm, sd, sby := o.voice.takeModFlags()
+		if !serverMuted && !serverDeafened && (sm || sd) {
+			serverMuted, serverDeafened, serverMutedBy = sm, sd, sby
+		}
+	}
+	return serverMuted, serverDeafened, serverMutedBy
 }
 
 // voiceExitWindow is how recent a voice leave must be for SendToVoiceDevice to
