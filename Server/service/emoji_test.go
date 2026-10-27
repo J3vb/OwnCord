@@ -377,7 +377,7 @@ func (f *listOnlyEmojiStore) LogAudit(context.Context, int64, string, string, in
 }
 
 func TestEmojiService_RunsOnASixMethodFake(t *testing.T) {
-	if n := reflect.TypeOf((*EmojiStore)(nil)).Elem().NumMethod(); n != 6 {
+	if n := reflect.TypeFor[EmojiStore]().NumMethod(); n != 6 {
 		t.Fatalf("EmojiStore has %d methods, want 6", n)
 	}
 	want := []*db.Emoji{{ID: 7, Shortcode: "wave"}}
