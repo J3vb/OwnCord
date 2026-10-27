@@ -129,6 +129,7 @@ export const shards = {
   ],
   "transport-auth-3": [
     "src/lib/identity.ts",
+    "src/lib/identityPins.ts",
     "src/lib/credentials.ts",
     "src/lib/httpProxy.ts",
     "src/lib/cert-reconnect.ts",

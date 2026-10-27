@@ -880,6 +880,14 @@ export function buildTauriMockScript(opts: {
         // so the replay would re-fail and the mock would report a permanent
         // mismatch the real keyring never produces.
         if (cmd === "store_identity_pin") {
+          // Same validation as store_identity_pin in src-tauri/src/commands.rs
+          // (1-512 chars of [A-Za-z0-9+/=_-]), so an encoding the real store
+          // refuses cannot pass here.
+          const pin = args?.pin;
+          if (typeof pin !== "string" || pin.length < 1 || pin.length > 512 ||
+              !/^[A-Za-z0-9+/=_-]+$/.test(pin)) {
+            throw "pin must be 1-512 characters of [A-Za-z0-9+/=_-]";
+          }
           window.__mockIdentityPins ??= ${JSON.stringify(opts.identityPins ?? {})};
           window.__mockIdentityPins[String(args?.userId)] = args?.pin ?? null;
           return null;

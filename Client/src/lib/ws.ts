@@ -120,6 +120,27 @@ export function setActiveChannelProvider(fn: (() => number | null) | null): void
   activeChannelProvider = fn;
 }
 
+/**
+ * Supplies this device's identity public key (base64) for the host being
+ * dialled, so the auth frame can tell the server which key this connection
+ * signs its voice announces with (encryption key per device). Resolves null
+ * when the key is unavailable (keyring failure, no signed-in user yet): the
+ * frame then goes out without it. Registered rather than imported, like
+ * `setActiveChannelProvider`, to keep this module free of store and keyring
+ * imports.
+ */
+let identityKeyProvider: ((host: string) => Promise<string | null>) | null = null;
+
+export function setIdentityKeyProvider(
+  fn: ((host: string) => Promise<string | null>) | null,
+): void {
+  identityKeyProvider = fn;
+}
+
+/** Longest the auth frame waits for the identity key. A slow keyring must
+ *  never hold up connecting; the frame goes without the key past this. */
+const IDENTITY_KEY_WAIT_MS = 1_500;
+
 const DEFAULT_MAX_RECONNECT_DELAY = 30_000;
 const DEFAULT_MAX_MESSAGE_SIZE = 1_048_576; // 1MB
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -813,6 +834,24 @@ export function createWsClient({
     }
   }
 
+  // This device's identity public key for the auth frame, or null. Never
+  // rejects and never waits longer than IDENTITY_KEY_WAIT_MS.
+  async function resolveIdentityKey(host: string): Promise<string | null> {
+    const provider = identityKeyProvider;
+    if (provider === null) return null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeout = new Promise<null>((resolve) => {
+      timer = clock.setTimeout(() => resolve(null), IDENTITY_KEY_WAIT_MS);
+    });
+    try {
+      return await Promise.race([provider(host).catch(() => null), timeout]);
+    } catch {
+      return null;
+    } finally {
+      if (timer !== null) clock.clearTimeout(timer);
+    }
+  }
+
   // The transport's proxy lifecycle, turned into the app's reaction: an open
   // proxy is still unauthenticated until `auth_ok` arrives, and a closed one
   // starts the reconnect policy unless the close was intentional.
@@ -840,16 +879,32 @@ export function createWsClient({
       // accepts it otherwise — so a lone device wakes silently while a woken
       // laptop cannot displace the desktop's call. Omitted unless set, so an
       // ordinary auth frame is byte-identical to before.
-      send({
-        type: "auth",
-        payload: {
-          token: config.token,
-          last_seq: lastSeq,
-          epoch: PROTOCOL_EPOCH,
-          ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
-          ...(pendingWake ? { wake: true } : {}),
-          features: CLIENT_FEATURES,
-        },
+      const frame = {
+        token: config.token,
+        last_seq: lastSeq,
+        epoch: PROTOCOL_EPOCH,
+        ...(activeChannelId !== null ? { active_channel_id: activeChannelId } : {}),
+        ...(pendingWake ? { wake: true } : {}),
+        features: CLIENT_FEATURES,
+      };
+      if (identityKeyProvider === null) {
+        send({ type: "auth", payload: frame });
+        return;
+      }
+      // The key is looked up asynchronously, so this attempt must still own
+      // the socket when the lookup settles: a newer socket, a disconnect() or
+      // a newer connect() makes this frame stale and it is dropped.
+      const attemptSocketId = socketId;
+      const attemptGen = wsGeneration;
+      void resolveIdentityKey(config.host).then((identityKey) => {
+        if (socketId !== attemptSocketId || wsGeneration !== attemptGen || !proxyOpen) return;
+        send({
+          type: "auth",
+          payload: {
+            ...frame,
+            ...(identityKey !== null ? { identity_public_key: identityKey } : {}),
+          },
+        });
       });
     } else if (next === "disconnected") {
       proxyOpen = false;

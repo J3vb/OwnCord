@@ -723,3 +723,20 @@ describe("handleVoiceWatching (6.6b)", () => {
     });
   });
 });
+
+describe("handleVoiceE2eeAnnounce identity key", () => {
+  it("hands the announcing device's identity key to E2EE when the server sent one", async () => {
+    handleVoiceE2eeAnnounce({ ...raw(undefined), identity_public_key: "device-id" });
+    await vi.waitFor(() =>
+      expect(handleE2EEAnnounce).toHaveBeenCalledWith(5, "k", undefined, "device-id"),
+    );
+  });
+
+  it.each([null, 7, "", {}])("ignores a malformed identity key %j", async (bad) => {
+    handleVoiceE2eeAnnounce({
+      ...raw(undefined),
+      identity_public_key: bad as unknown as string,
+    });
+    await vi.waitFor(() => expect(handleE2EEAnnounce).toHaveBeenCalledWith(5, "k", undefined));
+  });
+});

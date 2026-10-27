@@ -55,6 +55,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice and video**
 
+- Voice encryption now works when you are signed in on several devices: each device keeps its own encryption key and others in the call check your voice against the key of the device you are calling from. Update the app on every device; an older app keeps working but may show a "changed key" warning when you switch devices.
 - Joining voice on another device moves your call there. The device you left shows "Call moved to another device"; you are in one call at a time.
 - The 120 fps screen share option is hidden for now: the Windows app's screen capture delivers about 60 fps anyway. A saved 120 fps setting shares at 60.
 - The bundled LiveKit voice server moves from 1.13.7 to 1.13.10 (a patch release; no configuration change), in the Docker image and compose file and in the release the server downloads.

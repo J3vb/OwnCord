@@ -234,6 +234,9 @@ type SocketAuthenticator interface {
 	SweepSessions(ctx context.Context, tokenHashes []string) (map[string]service.SessionVerdict, error)
 	RecordSocketConnect(ctx context.Context, userID int64, remoteAddr string)
 	TouchSession(ctx context.Context, tokenHash string) error
+	// RecordSessionIdentityKey stores the device identity public key the auth
+	// frame carried on its session. The caller has validated the key.
+	RecordSessionIdentityKey(ctx context.Context, tokenHash, key string) error
 }
 
 // ChannelPrivacy is the channel-level private flag (3D-6) the hub's channel

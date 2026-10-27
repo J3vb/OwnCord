@@ -149,14 +149,28 @@ After the WebSocket connection is established, the client sends the first messag
 }
 ```
 
-| Field               | Type     | Required | Description                                                                                                                                                                                                                                                                                                               |
-| ------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `token`             | string   | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                                                                                                                                     |
-| `last_seq`          | uint64   | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                                                                                                                                 |
-| `active_channel_id` | int64    | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                          |
-| `wake`              | bool     | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). Servers that keep one connection per device session accept it like any other dial; the flag is ignored. Older servers refused it with `ANOTHER_DEVICE_ACTIVE` while a different session held the connection. |
-| `epoch`             | int      | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                          |
-| `features`          | string[] | No       | Optional capabilities this client can render, declared once per connection (see [Client features](#client-features)). Absent means none. Only `"forums"` is defined; unknown names are ignored. The list is untrusted input and only ever narrows what the socket is sent.                                                |
+| Field                 | Type     | Required | Description                                                                                                                                                                                                                                                                                                               |
+| --------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token`               | string   | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                                                                                                                                     |
+| `last_seq`            | uint64   | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                                                                                                                                 |
+| `active_channel_id`   | int64    | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                          |
+| `wake`                | bool     | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). Servers that keep one connection per device session accept it like any other dial; the flag is ignored. Older servers refused it with `ANOTHER_DEVICE_ACTIVE` while a different session held the connection. |
+| `epoch`               | int      | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                          |
+| `features`            | string[] | No       | Optional capabilities this client can render, declared once per connection (see [Client features](#client-features)). Absent means none. Only `"forums"` is defined; unknown names are ignored. The list is untrusted input and only ever narrows what the socket is sent.                                                |
+| `identity_public_key` | string   | No       | This device's voice E2EE identity public key (base64, at most 128 characters, same rules as `identity_public_key` on `PATCH /users/me`). See [Identity key per device](#identity-key-per-device). An invalid or wrongly typed value is ignored and logged; it never fails the handshake.                                  |
+
+#### Identity key per device
+
+Each device keeps its own identity keypair, and several devices of one account
+can be connected at once, so the account's single published key
+(`users.identity_public_key`) cannot say which key signed a given voice
+announce. The key therefore travels with the connection: the server keeps the
+`identity_public_key` from a connection's `auth` frame on that connection and
+on its session row (`sessions.identity_public_key`, rewritten on every connect),
+and attaches it to every `voice_e2ee_announce` that connection makes (see
+[voice_e2ee_announce (Server -> Client)](#voice_e2ee_announce-server---client-broadcast-to-voice-channel)).
+The field is optional: an older client sends none, and its announces carry
+none. `users.identity_public_key` and `PATCH /users/me` are unchanged.
 
 `active_channel_id` closes a resume-only gap. The hub restores a reconnecting
 client's channel subscription by copying it from the previous connection entry,
@@ -3184,10 +3198,22 @@ published identity key but the signature is missing/invalid → reject).
   "payload": {
     "public_key": "base64-ecdh-pubkey",
     "signature": "base64-ecdsa-signature",
+    "identity_public_key": "base64-device-identity-public-key",
     "video_decode": ["vp8", "h264", "vp9"]
   }
 }
 ```
+
+`identity_public_key` is optional: the public half of the device identity key
+that made `signature`. A client sends it because the `auth` frame often cannot
+carry the key on the first connection of an app start (the user id that scopes
+the key only arrives in `auth_ok`). It uses the same rules as the `auth`
+frame's field (base64, at most 128 characters). The server stores the
+announce's key with the announce and relays it; when the announce has none, it
+uses the connection's `auth`-frame key, and when neither exists the relayed
+announce carries none. An invalid or wrongly typed value is ignored (the
+announce is still accepted and the `auth`-frame key is used) and logged. The
+connection's own key is never changed by an announce.
 
 The server validates `signature` like `public_key` (standard-alphabet base64,
 max 128 chars) and stores it alongside the key, but never verifies it — only
@@ -3206,8 +3232,13 @@ treat an absent or empty list as `["vp8", "h264"]`.
 
 Relayed to the other participants with the sender's user ID attached. Also
 replayed to late joiners (and to a resumed socket) from the stored
-key+signature+list. `signature` and `video_decode` are omitted when the
-announcing client did not send them (or sent an invalid `video_decode`):
+key+signature+list+identity key. `signature` and `video_decode` are omitted
+when the announcing client did not send them (or sent an invalid
+`video_decode`). `identity_public_key` is the announcing device's key: the
+one in the announce itself when it sent a valid one, otherwise its connection's
+`auth`-frame key. It is stored with the announce, so a live relay and every
+replay carry the key of the device that made that announce. It is omitted when
+the client sent neither (an older client):
 
 ```json
 {
@@ -3216,10 +3247,17 @@ announcing client did not send them (or sent an invalid `video_decode`):
     "user_id": 1,
     "public_key": "base64-ecdh-pubkey",
     "signature": "base64-ecdsa-signature",
-    "video_decode": ["vp8", "h264", "vp9"]
+    "video_decode": ["vp8", "h264", "vp9"],
+    "identity_public_key": "base64-device-identity-public-key"
   }
 }
 ```
+
+**Verify rule.** A receiving client verifies `signature` against the
+announce's `identity_public_key` when it is present, and otherwise against the
+member's published key (`identity_public_key` on the member object), which is
+what an older server or client provides. The server relays the key and never
+verifies the signature itself.
 
 ### voice_watch (Client -> Server)
 

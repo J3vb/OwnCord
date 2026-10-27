@@ -9,6 +9,12 @@ type e2eeAnnounce struct {
 	key         string
 	sig         string
 	videoDecode []string
+	// identityKey is the identity public key of the device that made this
+	// announce: the announce payload's own identity_public_key when it sent a
+	// valid one, else its connection's auth-frame key; "" when it sent neither.
+	// It is stored with the announce, so every replay carries the key of the
+	// device that announced, not whichever device the user signed in on last.
+	identityKey string
 }
 
 // clone returns a copy that shares no slice storage with the receiver.

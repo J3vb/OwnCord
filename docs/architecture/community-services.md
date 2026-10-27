@@ -102,7 +102,11 @@ owner-type bits by clearing them on every role but the Owner (WP 8.4d). Neither 
 a table or column or a data class. **Amended 2026-10-24 (voice messages):**
 `084_attachment_voice.sql` adds two nullable columns to `attachments`, `duration_ms` and
 `waveform` (WP 8.9). They are part of the S3-c attachment row and share its ownership,
-retention, erasure and backup behaviour; no new data class. Other historical
+retention, erasure and backup behaviour; no new data class. **Amended 2026-10-27 (device
+identity key):** `085_session_identity_key.sql` adds one nullable column to `sessions`,
+`identity_public_key`: the voice E2EE public key a device sent in its WebSocket auth frame.
+It is part of the session row and shares its ownership, retention, erasure (deleted with the
+session) and backup behaviour; no new data class. Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a

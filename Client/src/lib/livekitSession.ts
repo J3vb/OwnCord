@@ -173,6 +173,7 @@ export class LiveKitSession {
     userId: number;
     publicKeyBase64: string;
     signatureBase64?: string;
+    identityKeyBase64?: string;
   }> {
     return this._e2ee.pendingAnnounces;
   }
@@ -897,8 +898,16 @@ export class LiveKitSession {
     userId: number,
     publicKeyBase64: string,
     signatureBase64?: string,
+    identityKeyBase64?: string,
   ): Promise<void> {
-    return this._e2ee.handleAnnounce(userId, publicKeyBase64, signatureBase64);
+    return this._e2ee.handleAnnounce(userId, publicKeyBase64, signatureBase64, identityKeyBase64);
+  }
+
+  /** The identity key from the peer's current announce, or null when they have
+   *  announced none this call (the verify panel then falls back to the
+   *  published key). See E2EEPeerState.announcedIdentityKey. */
+  peerAnnouncedIdentityKey(userId: number): string | null {
+    return this._e2ee.peerAnnouncedIdentityKey(userId);
   }
 
   /**
@@ -1236,6 +1245,7 @@ export const handleVoiceToken = session.handleVoiceToken.bind(session);
 export const handleE2EEAnnounce = session.handleE2EEAnnounce.bind(session);
 export const handleE2EEOffer = session.handleE2EEOffer.bind(session);
 export const rePinPeerIdentity = session.rePinPeerIdentity.bind(session);
+export const peerAnnouncedIdentityKey = session.peerAnnouncedIdentityKey.bind(session);
 export const handleParticipantLeft = session.handleParticipantLeft.bind(session);
 export const leaveVoice = session.leaveVoice.bind(session);
 export const failPendingRejoin = session.failPendingRejoin.bind(session);

@@ -228,6 +228,10 @@ type VoiceE2EEAnnounceCmd struct {
 	userID    int64
 	PublicKey string
 	Signature string
+	// IdentityKey is the announcing device's identity public key from the
+	// announce payload, already validated and trimmed by the parser; "" when the
+	// client sent none or an invalid one (the connection's auth key is used then).
+	IdentityKey string
 	// VideoDecode is the sender's raw video_decode list (WP M-4). Unvalidated
 	// here; handleVoiceE2EEAnnounceV2 runs it through sanitizeVideoDecode.
 	VideoDecode []string
@@ -583,6 +587,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		var p struct {
 			PublicKey   string          `json:"public_key"`
 			Signature   string          `json:"signature"`
+			IdentityKey json.RawMessage `json:"identity_public_key"`
 			VideoDecode json.RawMessage `json:"video_decode"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -593,7 +598,13 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if len(p.VideoDecode) > 0 && json.Unmarshal(p.VideoDecode, &videoDecode) != nil {
 			videoDecode = nil
 		}
-		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature, VideoDecode: videoDecode}, nil
+		return VoiceE2EEAnnounceCmd{
+			userID:      userID,
+			PublicKey:   p.PublicKey,
+			Signature:   p.Signature,
+			IdentityKey: announceIdentityKey(userID, p.IdentityKey),
+			VideoDecode: videoDecode,
+		}, nil
 	},
 
 	MsgTypeVoiceWatch: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
