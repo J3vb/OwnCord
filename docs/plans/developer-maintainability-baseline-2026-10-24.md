@@ -179,3 +179,41 @@ Measured on a branch from `origin/dev`. Evidence level: **executed**. The change
 ### Verdict
 
 Kept. The seam is smaller (318 to 6 for a standalone fake) with the same tests passing. The benefit is only real for a fake that does not embed `*db.DB`; every existing fake embeds it, so no current test got shorter. The gain is for the next emoji change, not for today's tests. No savings in time or tokens are claimed.
+
+## R-3 after (2026-10-27)
+
+Row 5 of the execution plan, run as a code pilot with the owner's go. Based on `origin/dev` `deb491fd`. Evidence level: **simulated walkthrough plus a deliberate-break check**. The author wrote both the breaks and the tests, so the check is not blind.
+
+### What changed
+
+- `Client/tests/unit/thread-dialogs.test.ts`: three tests for `CreateThreadDialog`. One for the 20 s `UNCONFIRMED` timeout, which also checks that Send is enabled again, the forward claim is released and a late `thread_create_ok` is ignored. One for `ws.onSendFailure`, which checks the `OFFLINE` line and a retry. One for closing while a request is pending, which checks the claim is released, late `thread_create_ok` and `THREAD_EXISTS` replies are ignored, and no timer is left.
+- No production file changed.
+
+### Deliberate-break check
+
+Each break was a one-line edit to `Client/src/components/CreateThreadDialog.ts`, run against the dialog test file, then reverted.
+
+| Break                                                    | Before: 8 tests | After: 11 tests             |
+| -------------------------------------------------------- | --------------- | --------------------------- |
+| B1. The 20 s timer does nothing                          | all pass        | 1 fails (timeout)           |
+| B2. A send failure is ignored                            | all pass        | 1 fails (send fail)         |
+| B3. The teardown cleanup (`owner.addCleanup`) is removed | all pass        | 1 fails (close)             |
+| B4. `settle()` leaves the Send button disabled           | all pass        | 2 fail (timeout, send fail) |
+
+Caught: 0 of 4 before, 4 of 4 after. The new tests found no defect in the dialog: all three paths behave as the code comments describe.
+
+### Commands run
+
+| Command (in `Client/`)                             | Status   | Result                                                |
+| -------------------------------------------------- | -------- | ----------------------------------------------------- |
+| `npx vitest run tests/unit/thread-dialogs.test.ts` | executed | 11 of 11 pass, five runs in a row, 1.8 to 2.5 s each. |
+| `npx eslint tests/unit/thread-dialogs.test.ts`     | executed | clean.                                                |
+| `npx tsc --noEmit -p tsconfig.json`                | executed | clean.                                                |
+
+### Comparison with discovery exercise 2
+
+Before, the answer to "are the late-reply and teardown paths pinned?" was "no", found in 3 calls. After, the same 3 calls (the dialog, the test file, a search for `UNCONFIRMED`) give "yes": each path has one named test. The file count did not change. The gain is the guard, not a shorter search.
+
+### Verdict against the stop rules
+
+No production code changed, no gate was weakened, and every break that survived before now fails a test. The change is kept.
