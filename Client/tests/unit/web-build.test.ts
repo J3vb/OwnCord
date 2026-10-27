@@ -13,6 +13,7 @@ const PUBLIC_FILES = [
   "rnnoise-worklet.js",
   "vad-worklet.js",
   "app-audio-worklet.js",
+  "pcm-capture-worklet.js",
 ];
 
 let outDir = "";
