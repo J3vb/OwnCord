@@ -439,7 +439,7 @@ export class AudioPipeline {
     const processor = createMicProcessor();
     processor.setInputGain(this.currentInputGain);
     processor.setGate("ptt", this.pttGated);
-    track.setAudioContext(processor.context);
+    await track.setAudioContext(processor.context);
     await track.setProcessor(processor);
     if (gen !== this.generation) {
       // Torn down while attaching: the track keeps a processor it will

@@ -142,7 +142,9 @@ export function createMicProcessor(): MicProcessor {
     },
 
     async init(opts: AudioProcessorOptions): Promise<void> {
-      void ctx.resume(); // WebView2 autoplay policy can leave it suspended
+      // WebView2 autoplay policy can leave it suspended. A destroy() before the
+      // resume settles closes the context and rejects it.
+      ctx.resume().catch((err: unknown) => log.debug("AudioContext resume did not complete", err));
       entry = ctx.createGain();
       entry.gain.setValueAtTime(inputGain, ctx.currentTime);
       analyser = ctx.createAnalyser();
