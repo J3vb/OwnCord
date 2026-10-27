@@ -61,6 +61,7 @@
           "payload": {
             "activity": null,
             "custom_status": "fixture custom status",
+            "listening": null,
             "status": "idle",
             "user_id": "<id:number>"
           },
@@ -133,6 +134,7 @@
           "payload": {
             "activity": null,
             "custom_status": "fixture custom status",
+            "listening": null,
             "status": "idle",
             "user_id": "<id:number>"
           },

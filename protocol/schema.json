@@ -65,6 +65,7 @@
     { "wire": "mark_unread", "go": "MsgTypeMarkUnread", "ts": "MARK_UNREAD" },
     { "wire": "presence_update", "go": "MsgTypePresenceUpdate", "ts": "PRESENCE_UPDATE" },
     { "wire": "activity_update", "go": "MsgTypeActivityUpdate", "ts": "ACTIVITY_UPDATE" },
+    { "wire": "listening_update", "go": "MsgTypeListeningUpdate", "ts": "LISTENING_UPDATE" },
     { "wire": "voice_join", "go": "MsgTypeVoiceJoin", "ts": "VOICE_JOIN" },
     { "wire": "voice_leave", "go": "MsgTypeVoiceLeave", "ts": "VOICE_LEAVE" },
     { "wire": "voice_mute", "go": "MsgTypeVoiceMute", "ts": "VOICE_MUTE" },

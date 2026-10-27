@@ -311,10 +311,11 @@ func (h *Hub) emitBroadcastAll(_ context.Context, _ int64, ev Event) bool {
 }
 
 // presencePayloadLocked picks the frame for a presence event that may carry a
-// game the handler snapshotted earlier (WP 8.3e-2). bare, the same frame with
-// a null game, is sent while game activity is off, and also when the user's
-// live activity is already nil: a sweep cleared it after the snapshot, even if
-// the switch has been turned back on since. The caller holds presenceMu.
+// game or song the handler snapshotted earlier (WP 8.3e-2, 8.10a). bare, the
+// same frame with a null game and song, is sent while member activity is off,
+// and also when the user's live game and song are both already nil: a sweep
+// cleared them after the snapshot, even if the switch has been turned back on
+// since. The caller holds presenceMu.
 func (h *Hub) presencePayloadLocked(userID int64, payload, bare []byte) []byte {
 	if bare == nil {
 		return payload
@@ -322,7 +323,7 @@ func (h *Hub) presencePayloadLocked(userID int64, payload, bare []byte) []byte {
 	if !h.gameActivity.on.Load() {
 		return bare
 	}
-	if mergeLivePresence(h.clientsOf(userID)).activity == nil {
+	if mergeLivePresence(h.clientsOf(userID)).noActivity() {
 		return bare
 	}
 	return payload

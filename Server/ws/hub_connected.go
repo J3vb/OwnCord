@@ -40,11 +40,19 @@ func mergeLivePresence(conns []*Client) livePresence {
 	if src != nil {
 		out = *src
 	}
-	if out.activity == nil {
+	// The song follows the same rule as the game: the status source's own,
+	// else the newest connection reporting one.
+	if out.activity == nil || out.listening == nil {
 		for _, c := range slices.Backward(conns) {
-			if p := c.presence.Load(); p != nil && p.activity != nil {
+			p := c.presence.Load()
+			if p == nil {
+				continue
+			}
+			if out.activity == nil && p.activity != nil {
 				out.activity = p.activity
-				break
+			}
+			if out.listening == nil && p.listening != nil {
+				out.listening = p.listening
 			}
 		}
 	}
@@ -77,6 +85,20 @@ func (h *Hub) userActivity(c *Client) *gameActivity {
 		return nil
 	}
 	return mergeLivePresence(conns).activity
+}
+
+// userListening is userActivity for the song (WP 8.10a): c's own when it has
+// one, else another connection's, so a status change on one device does not
+// blank the song another device reports.
+func (h *Hub) userListening(c *Client) *listeningActivity {
+	if own := c.livePresence().listening; own != nil {
+		return own
+	}
+	conns := h.clientsOf(c.userID)
+	if len(conns) < 2 {
+		return nil
+	}
+	return mergeLivePresence(conns).listening
 }
 
 // LiveStatus returns userID's live status, "" when the user has no

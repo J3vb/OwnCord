@@ -948,3 +948,37 @@ func TestMultiDevice_KickedConnectionKeepsOwnTeardownEvenAfterSessionReconnects(
 		t.Fatal("a displaced connection must report replaced")
 	}
 }
+
+// A game and a song belong to the connection that set them: another device
+// connecting does not blank them, the user's shown activity merges across
+// devices, and they end when that device's connection goes while the other
+// stays.
+func TestMultiDevice_GameAndSongBelongToTheConnectionThatSetThem(t *testing.T) {
+	f := newMDFix(t)
+	f.hub.gameActivity.on.Store(true)
+	a := f.dev("session-a", f.text)
+	a.c.setLivePresence(db.StatusOnline, nil, "")
+	game := &gameActivity{Name: "Chess", StartedAt: 1}
+	song := &listeningActivity{Title: "T", Artist: "A", Player: "P", StartedAt: 2}
+	f.hub.applyActivity(a.c, game)
+	f.hub.applyListening(a.c, song)
+
+	b := f.dev("session-b", f.text)
+	b.c.setLivePresence(db.StatusOnline, nil, "") // B connects later and is the newest setter
+	merged := mergeLivePresence(f.hub.clientsOf(f.uid))
+	if merged.activity == nil || merged.listening == nil {
+		t.Fatalf("B connecting blanked A's game/song: %+v", merged)
+	}
+	if got := f.hub.userListening(b.c); got == nil || got.Title != "T" {
+		t.Fatalf("B's frames do not carry the user's song: %+v", got)
+	}
+
+	f.hub.unregisterNow(a.c)
+	merged = mergeLivePresence(f.hub.clientsOf(f.uid))
+	if merged.activity != nil || merged.listening != nil {
+		t.Fatalf("A's game/song outlived A's connection: %+v", merged)
+	}
+	if !f.hub.IsUserConnected(f.uid) {
+		t.Fatal("B should still be connected")
+	}
+}
