@@ -124,3 +124,42 @@ Judged by reading, not by a person doing it. **Documentation/setup verified for 
 - Timings include model thinking and tool latency.
 - Cold Go cache and warm Node cache differ, so the command timings are not comparable with each other.
 - No savings are claimed.
+
+## R-1 after (2026-10-27)
+
+Measured on the R-1 branch, based on `origin/dev` `cab72959`. Evidence level: **documentation/setup verified, plus a simulated walkthrough**. Nobody outside the author ran the three tasks, and the author had read the plan and the code, so every run is contaminated (not blind). Each task was walked once, not twice, so there is no spread to report. The agent-instruction files were loaded in both cases.
+
+### What changed
+
+- `docs/contributing.md`: one table mapping each selector name to the CI jobs it gates, a local command and whether `npm run check` covers it; one sentence on the path file format; a Node note on the admin row. Job names were read from `ci.yml` job `name:` and `if:` lines, and local commands from `node scripts/run.mjs --list` and `Client/package.json`.
+- `scripts/run.test.mjs`: one test pinning the skipped-optional-tool summary. `scripts/run.mjs` is unchanged.
+- `docs/architecture/server.md`: the "remaining work" paragraph now matches the code and the inventory.
+
+### Commands run
+
+| Command                                                                          | Status                 | Result                                                                                                                                                            |
+| -------------------------------------------------------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node scripts/run.mjs --list`                                                    | executed               | Every `npm run` task named in the table exists.                                                                                                                   |
+| `node --test scripts/run.test.mjs`                                               | executed               | 17 of 17 pass (16 before). Changing the final line to end in `!` fails it.                                                                                        |
+| `node scripts/ci-select.mjs` on `M Server/service/emoji.go`                      | executed               | `server`, `integration`, `native`.                                                                                                                                |
+| the same path without the `M` status, an empty file, an unknown path             | executed               | Bare path reads as 0 paths; empty and unknown select all eleven.                                                                                                  |
+| `M Client/src-tauri/src/unread_badge.rs`, `M Server/admin/static/js/stickers.js` | executed               | `client`, `rust`, `native`; and `server`, `client`, `integration`, `native`.                                                                                      |
+| `go test -count=1 ./cmd/dbinventory/` (in `Server/`)                             | executed               | ok; 83 rows, 55 `adapter`, 28 `boundary`, 0 `move`.                                                                                                               |
+| `check-doc-counts`, `check-doc-citations`                                        | executed               | pass.                                                                                                                                                             |
+| Every local command in the new table                                             | reviewed, not executed | Each names an existing script or tool; the Playwright, Tauri, `zizmor`, `osv-scanner` and Stryker runs need browsers, a Windows host or tools not installed here. |
+
+### Comparison
+
+"Before" is the `dev` documentation read as a newcomer would, with the extra files that reading needed.
+
+| Task | Before: files opened for the answer                                                                        | After: files opened                        | Answer matches the known one?                                                                                                                                   |
+| ---- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A    | 3: `contributing.md`, then `ci-select.mjs` comments for the names, then `package.json` or `run.mjs --list` | 1: `contributing.md` plus one selector run | Yes both times: `server`, `integration`, `native`, now with job names and local commands in the table.                                                          |
+| B    | 3, and "covered by `npm run check`" had to be inferred                                                     | 1                                          | Partly after. The table says `rust` is covered on your OS only and `native` has no local equivalent off Windows. The live Linux D-Bus send is not in the guide. |
+| C    | 1 plus one wrong turn (searching `Server/admin/*_test.go`, as in exercise 3)                               | 1, no wrong turn from the guide            | Yes: the admin row now says the tests are in `Client/` and need Node 26. It does not name `server-admin-static-stickers.test.ts`.                               |
+
+Wrong turns went from 1 to 0 on task C. The file counts are the author's walkthrough, not recorded session tool calls, and no token usage was recorded. Under the plan's rule they support "one fewer file to open on A and B and one avoided dead end on C", not a time or cost saving.
+
+### Verdict against the stop rules
+
+No task got a longer path or a worse answer, no gate was weakened, and no CI selection changed. Task B stays partly answered and is the one open gap. The change is kept.

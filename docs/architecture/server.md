@@ -77,7 +77,7 @@ flowchart TB
     WS --> PLUGIN
 
     %% Residual layering seam (dashed): raw *db.DB used above the service layer
-    API -.->|"handlers take *db.DB directly"| DB
+    API -.->|"router wiring takes *db.DB"| DB
     ADMIN -.->|"raw *db.DB"| DB
 ```
 
@@ -88,15 +88,20 @@ interfaces (`ws.EventStore`, `plugin.PluginStore`) in the same way. The `db`
 package's query methods call the sqlc-generated `db/dbgen` code, so sqlc is the
 type-checked query layer.
 
-The two dashed edges mark where code still skips the service layer:
+The two dashed edges mark where code above the service layer still holds the
+raw `*db.DB` (this paragraph checked against `origin/dev` at `cab72959`,
+2026-10-27):
 
-- Many REST handlers still receive a raw `*db.DB` alongside `svc`.
-- Sixteen `admin` files import `db`. Most only name its types or pass the
-  handle on. A few make raw calls because they need the handle itself, mainly
-  the backup, archive, update and audit files.
+- In `api`, no non-test file but `router.go` names `*db.DB` in a signature, and
+  there it is router wiring (`NewRouter` and the health and metrics routes).
+- Seventeen `admin` files import `db`. Most only name its types. The ones that
+  need the handle itself are the backup, archive, update, log-level,
+  log-stream and config-override files, which
+  [server-boundaries.md](server-boundaries.md) classes as `boundary`.
 
-Moving those behind the service layer is the remaining work (audit
-A-2026-07-06, backlog item 12). The per-file table is in
+That table classes all 83 files above the domain layer as `adapter` (55) or
+`boundary` (28), and none as `move`. No service-layer move is listed as open
+work there. The per-file table is in
 [server-boundaries.md](server-boundaries.md). See also
 [data-model.md](data-model.md).
 
