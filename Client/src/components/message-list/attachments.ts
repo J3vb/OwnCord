@@ -4,6 +4,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
@@ -2248,9 +2249,7 @@ export function openImageLightbox(
     close();
   });
 
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
-  });
+  closeOnBackdropClick(overlay, close, disposable.signal);
 
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape") close();

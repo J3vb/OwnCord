@@ -116,6 +116,18 @@ describe("lightbox gallery", () => {
     expect(document.activeElement).toBe(btn("image-lightbox-close"));
   });
 
+  it("stays open when a pan that starts on the image ends on the backdrop", async () => {
+    open(0, {}, [items[0]!]);
+    await flush();
+    const overlay = document.querySelector<HTMLElement>(".image-lightbox")!;
+    overlay.querySelector("img")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(document.querySelector(".image-lightbox")).not.toBeNull();
+    overlay.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(document.querySelector(".image-lightbox")).toBeNull();
+  });
+
   it("ArrowRight/ArrowLeft step and wrap, and the counter and aria-label follow", async () => {
     open(0);
     await ready();
