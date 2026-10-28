@@ -2,7 +2,6 @@ package ws
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 )
 
@@ -49,20 +48,6 @@ type MarkUnreadCmd struct {
 func (c MarkUnreadCmd) Type() string  { return MsgTypeMarkUnread }
 func (c MarkUnreadCmd) UserID() int64 { return c.userID }
 
-// parseReadPointerMessageID parses a message_id read-state field. json.Number
-// keeps a fractional or out-of-range value from being truncated silently.
-// A present id must be a positive integer.
-func parseReadPointerMessageID(n json.Number) (int64, error) {
-	id, err := n.Int64()
-	if err != nil {
-		return 0, fmt.Errorf("message_id must be integer: %w", err)
-	}
-	if id <= 0 {
-		return 0, errors.New("message_id must be positive")
-	}
-	return id, nil
-}
-
 func parseChannelFocus(userID int64, _ string, raw json.RawMessage) (Command, error) {
 	chID, err := parseCallChannelID(MsgTypeChannelFocus, raw)
 	if err != nil {
@@ -90,7 +75,7 @@ func parseMarkRead(userID int64, _ string, raw json.RawMessage) (Command, error)
 	}
 	var msgID int64
 	if p.MessageID != nil {
-		if msgID, err = parseReadPointerMessageID(*p.MessageID); err != nil {
+		if msgID, err = positiveID(*p.MessageID, "message_id"); err != nil {
 			return nil, err
 		}
 	}
@@ -108,7 +93,7 @@ func parseMarkUnread(userID int64, _ string, raw json.RawMessage) (Command, erro
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid mark_unread payload: %w", err)
 	}
-	msgID, err := parseReadPointerMessageID(p.MessageID)
+	msgID, err := positiveID(p.MessageID, "message_id")
 	if err != nil {
 		return nil, err
 	}

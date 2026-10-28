@@ -3746,6 +3746,16 @@ warm resume served by replay never waits for a permit.
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
 
+A command's `channel_id`, `message_id`, `thread_id`, `user_id` and
+`to_channel_id` must be positive integers. A missing, fractional, zero or
+negative one is refused with `BAD_REQUEST` and an `invalid payload` message
+before the command runs. Two exceptions: `chat_command`'s `channel_id` may be
+0 ("no channel"), and ids sent as plain integers or lists (`reply_to`,
+`target_user_id`, `user_ids`, `tag_ids`, `answer_ids`) are checked by the
+command itself. An id that a
+command documents as optional (`mark_read`'s `message_id`, `thread_focus`'s
+`thread_id`) may be left out or `null`, but is checked when present.
+
 ### Command deadlines
 
 Each inbound frame's database work (the periodic session recheck, the

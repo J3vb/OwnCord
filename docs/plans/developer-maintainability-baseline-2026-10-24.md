@@ -619,3 +619,38 @@ The scout counted 7 names; it missed `searchTSLayout` and the service copy of `C
 ### Verdict
 
 Kept. 24 hand-typed layouts and 9 names became 2 names and one parser, and the invariant stops a new copy. Test files still spell the layouts out on purpose: they check the stored text independently of the names. No savings in time or tokens are claimed.
+
+## MX-12 WebSocket payload ids (2026-10-28)
+
+Scout candidate D4 in the execution plan; the WebSocket twin of MX-10. Based on `origin/dev` `3eacc98a`. Evidence level: **executed** (unit tests and a deliberate-break check; no client was run against it).
+
+### Baseline count
+
+Counted with `grep -rn "\.Int64()" Server/ws --include=*.go` over non-test files, and with the new `ws-payload-ids` invariant.
+
+| Measure (non-test files in `Server/ws`)                                                                                      | Before                                                                                                         | After                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Raw `json.Number.Int64()` calls                                                                                              | 16                                                                                                             | 2: `positiveID` and `duration_hours`                                                   |
+| Raw `Int64()` calls that read an id                                                                                          | 15                                                                                                             | 1 (`positiveID`), held by the invariant                                                |
+| Private id parsers (`parseModTarget`, `parseCallChannelID`, `parsePollMessageID`, `parseReadPointerMessageID`, `positiveID`) | 5, with 3 different error texts ("must be integer", "must be positive", "must be a positive integer")          | 1 helper, 1 text; `parseCallChannelID` and `parseModTarget` stay as thin callers of it |
+| Ids that accepted 0 and negatives at parse time (the service refused them later)                                             | 5 (`channel_id` in `chat_send`; `message_id` in `chat_edit`, `chat_delete`, `reaction_add`, `reaction_remove`) | 0                                                                                      |
+
+### What changed
+
+- `Server/ws/ids.go`: `positiveID(n, field)`, moved from `command_thread.go`. Every id read in `command.go`, `command_chat_send.go`, `command_forward.go`, `command_poll.go` and `command_read.go` calls it. `parseModTarget` takes the channel field name, so a bad `to_channel_id` is named as such.
+- A parse error of any of these commands reaches the client as one frame: `BAD_REQUEST` with the message `invalid payload` (`handleMessage`); the specific text is logged only. The code and frame are unchanged. For the five newly checked ids only the message changed: the service already refused them with `BAD_REQUEST` and its own text, now they get `invalid payload` before the service (and before its rate limiter). The client matches none of the old texts.
+- `Server/invariants/ws_payload_ids.go`: rule `ws-payload-ids` fails a zero-argument `.Int64()` in `ws` outside `positiveID`, with `duration_hours` in `command_poll.go` allowed by field name.
+- `docs/protocol.md` and `docs/code-style.md` describe the rule. `CHANGELOG.md` has one line.
+
+Left as they were: an optional id (`mark_read` `message_id`, `thread_focus` `thread_id`) is still absent-or-`null` allowed and checked when present; `reply_to` and `sticker_id` in `chat_send` are decoded as `*int64` (the `sticker_id` is checked, `reply_to` is validated by the service) and do not use `Int64()`.
+
+### Checks
+
+| Check                                                                                                                | Before                                                                                | After    |
+| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------- |
+| `TestPayloadIDs_RequiredIDsRefuseBadValues` (every required id of 25 commands x zero, negative, 1.5, missing, `"x"`) | the five ids above fail on 0 and -1 (10 cases), checked by putting the old reads back | all pass |
+| `ws-payload-ids` invariant (5 snippet tests and the real tree)                                                       | did not exist                                                                         | pass     |
+
+### Verdict
+
+Kept. One id parser and one error text, five ids no longer reach a handler as 0 or a negative number, and a rule stops a new hand-written read. No saving in time or tokens is claimed.
