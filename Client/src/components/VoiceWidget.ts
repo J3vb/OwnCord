@@ -27,7 +27,7 @@ import {
   reapplyEnhancedNoiseSuppression,
   retryMicPermission,
 } from "@lib/livekitSession";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, onPrefChange, savePref } from "@lib/preferences";
 import { voiceText as t } from "../i18n/voice";
 import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";
 import { shareBlockReason } from "../features/voice/shareGate";
@@ -546,14 +546,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       { signal: disposable.signal },
     );
     // savePref announces every change, so a toggle in Settings shows here too.
-    window.addEventListener(
-      "owncord:pref-change",
-      (e) => {
-        if ((e as CustomEvent<{ key: string }>).detail.key === "enhancedNoiseSuppression")
-          renderNs();
-      },
-      { signal: disposable.signal },
-    );
+    onPrefChange(["enhancedNoiseSuppression"], renderNs, disposable.signal);
     renderNs();
 
     const headerSub = createElement("div", { class: "vw-header-sub" });

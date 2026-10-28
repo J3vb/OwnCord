@@ -18,7 +18,14 @@
  * and `notificationSounds` live in localStorage next to it.
  */
 
-import { loadPref, readStored, removeStored, savePref, STORAGE_PREFIX } from "./preferences";
+import {
+  loadPref,
+  onPrefChange,
+  readStored,
+  removeStored,
+  savePref,
+  STORAGE_PREFIX,
+} from "./preferences";
 import { registerSessionReset } from "./sessionRegistry";
 
 /**
@@ -207,9 +214,8 @@ export function invalidateMuteCache(): void {
 }
 
 if (typeof window !== "undefined") {
-  window.addEventListener("owncord:pref-change", (e) => {
-    const detail = (e as CustomEvent<{ key?: string }>).detail;
-    if (detail?.key === mutedKey()) invalidateMuteCache();
+  onPrefChange("any", (key) => {
+    if (key === mutedKey()) invalidateMuteCache();
   });
   // Cross-tab: the native storage event fires only in the *other* tab.
   window.addEventListener("storage", () => invalidateMuteCache());
