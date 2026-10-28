@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { joinRetryInMs, noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import {
+  joinBackoffFromSwitch,
+  joinRetryInMs,
+  noteJoinFailed,
+  noteJoinSucceeded,
+} from "./joinBackoff";
 import { joinBackoffText } from "./joinBackoffText";
 
 beforeEach(() => noteJoinSucceeded());
@@ -32,6 +37,13 @@ describe("joinBackoff", () => {
     expect(joinRetryInMs(0)).toBe(2_000);
   });
 
+  it("stops attributing the wait to a channel switch once a join succeeds", () => {
+    noteJoinFailed(0, true);
+    expect(joinBackoffFromSwitch()).toBe(true);
+    noteJoinSucceeded();
+    expect(joinBackoffFromSwitch()).toBe(false);
+  });
+
   it("words the refusal by what armed the wait", () => {
     expect(joinBackoffText(0)).toBeNull();
     noteJoinFailed(0);
@@ -41,5 +53,14 @@ describe("joinBackoff", () => {
     noteJoinFailed(0);
     expect(joinBackoffText(0)).toBe("Voice join failed — try again in 8 s");
     expect(joinBackoffText(8_000)).toBeNull();
+  });
+});
+
+describe("joinBackoff on a fresh start", () => {
+  it("has no wait armed by a channel switch before any join has failed", async () => {
+    vi.resetModules();
+    const fresh = await import("./joinBackoff");
+    expect(fresh.joinBackoffFromSwitch()).toBe(false);
+    expect(fresh.joinRetryInMs(0)).toBe(0);
   });
 });
