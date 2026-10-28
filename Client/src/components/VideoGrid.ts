@@ -1705,6 +1705,7 @@ export function createVideoGrid(): VideoGridComponent {
       renderDetail(sample?.sentFps ?? null);
       const text = infoModule?.senderText(sample) ?? "";
       senderLine.textContent = text;
+      senderLine.title = infoModule?.layersText(sample) ?? "";
       senderLine.hidden = text === "";
       setOwnedTimeout(signal, () => void pollSender(), STATS_POLL_MS);
     };
