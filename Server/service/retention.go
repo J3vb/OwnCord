@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -390,7 +391,7 @@ func (s *RetentionService) recordMessagesMarker(ctx context.Context, channelID i
 	if err != nil {
 		return fmt.Errorf("retention marker sequence for channel %d: %w", channelID, err)
 	}
-	if err := s.markers.RecordMessagesSweep(ctx, channelID, cutoff.Format("2006-01-02 15:04:05"), seq); err != nil {
+	if err := s.markers.RecordMessagesSweep(ctx, channelID, cutoff.Format(dbtime.SQLiteLayout), seq); err != nil {
 		return fmt.Errorf("retention marker for channel %d: %w", channelID, err)
 	}
 	return nil
@@ -493,7 +494,7 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("resume retention runs before marker replay: %w", err)
 	}
 	return s.markers.ReplayMessages(ctx, func(ctx context.Context, channelID int64, cutoff string) (int, error) {
-		t, err := time.Parse("2006-01-02 15:04:05", cutoff)
+		t, err := time.Parse(dbtime.SQLiteLayout, cutoff)
 		if err != nil {
 			return 0, fmt.Errorf("marker cutoff %q: %w", cutoff, err)
 		}

@@ -10,6 +10,8 @@ import (
 	// Embed the IANA zone database so a tz name resolves on hosts that ship
 	// none (a Windows server without a Go install).
 	_ "time/tzdata"
+
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // Limits on filter tokens in one search query (design D12).
@@ -19,8 +21,6 @@ const (
 	maxSearchTZLen        = 64
 
 	searchDateLayout = "2006-01-02"
-	// searchTSLayout is the stored messages.timestamp format, in UTC.
-	searchTSLayout = "2006-01-02 15:04:05"
 )
 
 // ParsedSearch is a search query split into free text and typed filters.
@@ -276,10 +276,10 @@ func (w *searchWindow) intersect(lo, hi time.Time) {
 // window is empty.
 func (w *searchWindow) stored() (after, before string, empty bool) {
 	if !w.lo.IsZero() {
-		after = w.lo.UTC().Format(searchTSLayout)
+		after = w.lo.UTC().Format(dbtime.SQLiteLayout)
 	}
 	if !w.hi.IsZero() {
-		before = w.hi.UTC().Format(searchTSLayout)
+		before = w.hi.UTC().Format(dbtime.SQLiteLayout)
 	}
 	return after, before, !w.lo.IsZero() && !w.hi.IsZero() && !w.lo.Before(w.hi)
 }

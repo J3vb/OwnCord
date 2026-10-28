@@ -562,3 +562,41 @@ Not a defect fix, but two behaviours are new: a copy on a page with no clipboard
 ### Verdict against the stop rules
 
 No gate was weakened and no existing assertion changed. The count went from 9 to 1 with a test that holds it. The change is kept.
+
+## MX-13 one name per stored time layout (2026-10-28)
+
+Scout round 2 candidate D3, on `dev` `4a5e0b2b`. Evidence level: **executed** (counted by the new invariant, tests run, two deliberate breaks). No app run.
+
+### Counts
+
+Counted with the new `db-time-layouts` invariant (`Server/invariants/db_time_layouts.go`) against `dev` before any site moved, over non-test files. It matched the scout's 24.
+
+| Measure (non-test files)                                       | Before                                                                                                                                                                                                                               | After                                        |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| `"2006-01-02 15:04:05"` / `"2006-01-02T15:04:05Z"` spelled out | 24 in 17 files (13 space, 11 `T…Z`)                                                                                                                                                                                                  | 0 outside `dbtime/`, held by the invariant   |
+| Names for the two layouts                                      | 9: `sqliteTimeLayout`, `sqliteDatetimeFormat`, `sessionTimeLayout`, `ThreadActivityLayout`, `CustomStatusExpiryLayout`, `MemberCreatedAtLayout` (db); `sqliteDateTimeLayout`, `searchTSLayout`, `CustomStatusExpiryLayout` (service) | 2: `dbtime.SQLiteLayout`, `dbtime.ISOLayout` |
+| "Try both layouts" parsers                                     | 3 (`auth.parseTS`, `admin.parseBanExpiry`, half of `db.FormatMemberCreatedAt`)                                                                                                                                                       | 1: `dbtime.Parse`                            |
+
+The scout counted 7 names; it missed `searchTSLayout` and the service copy of `CustomStatusExpiryLayout`, which existed so `ws` and `api` could reach the layout without importing `db`.
+
+### What changed
+
+- `Server/dbtime/`: a leaf package with the two layouts and `Parse` (either layout, `ok=false` otherwise). A leaf package rather than `db/timefmt.go`, because `admin`, `auth` and `ws` read the layouts and `db-import-boundary` keeps new `db` imports out of them.
+- 34 existing production files and 10 test files switched to the shared names (not counting the new `dbtime` and invariant files or the regenerated `dbgen` comment). Every writer formats exactly the text it did before; no stored value, column or SQL query changes. The SQL already reads `ban_expires` in both forms (`replace(…, ' ', 'T')`), so no live defect was found.
+- `TimeoutUser` keeps a two-line comment saying why it writes `SQLiteLayout`, the one write whose layout the old `sqliteDatetimeFormat` comment guarded.
+- `docs/code-style.md`: the invariant table gains `db-time-layouts`.
+
+### Checks
+
+| Check                                                                                                        | Result                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `db-time-layouts` on the tree                                                                                | 24 violations before, 0 after                                                                                                                                         |
+| Invariant fixtures (call, constant, raw string, `time.DateTime`, aliased and dot imports, build-tagged file) | 8 of 8 flagged; other layouts, `dbtime/` itself and `row.DateTime` are clean                                                                                          |
+| `dbtime` tests (exact stored text, both layouts parse to one instant, junk and offsets refused)              | pass                                                                                                                                                                  |
+| Break: a layout literal put back in `service/retention.go`                                                   | `TestDBTimeLayouts_RealTreeIsClean` fails and names the line                                                                                                          |
+| Break: `TimeoutUser` writes `ISOLayout` instead of `SQLiteLayout` (the bug class)                            | 3 existing tests fail (`TestListActiveTimeoutExpiries_OnlyActive`, `TestTimeout_ExpiryLiftsAutomatically`, `TestUpdateProfile_DisplayNameAllowedAfterTimeoutExpired`) |
+| `go test -race` over `dbtime`, `invariants`, `auth`, `db`, `service`, `admin`, `api`, `cmd`, `internal`      | pass                                                                                                                                                                  |
+
+### Verdict
+
+Kept. 24 hand-typed layouts and 9 names became 2 names and one parser, and the invariant stops a new copy. Test files still spell the layouts out on purpose: they check the stored text independently of the names. No savings in time or tokens are claimed.

@@ -256,7 +256,7 @@ func pollTally(ctx context.Context, q *dbgen.Queries, messageID int64, answerIDs
 }
 
 // NextPollExpiry returns the soonest expiry among polls that are not ended, in
-// CustomStatusExpiryLayout text, or ok=false when none is pending.
+// dbtime.ISOLayout text, or ok=false when none is pending.
 func (d *DB) NextPollExpiry(ctx context.Context) (next string, ok bool, err error) {
 	v, err := d.q.NextPollExpiry(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -269,7 +269,7 @@ func (d *DB) NextPollExpiry(ctx context.Context) (next string, ok bool, err erro
 }
 
 // ListDuePolls returns up to limit polls that are not ended and whose expiry is
-// at or before now (CustomStatusExpiryLayout text), oldest first.
+// at or before now (dbtime.ISOLayout text), oldest first.
 func (d *DB) ListDuePolls(ctx context.Context, now string, limit int) ([]DuePoll, error) {
 	rows, err := d.q.ListDuePolls(ctx, dbgen.ListDuePollsParams{Now: now, MaxRows: int64(limit)})
 	if err != nil {

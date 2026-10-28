@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // ─── API Token Operations ───────────────────────────────────────────────────
@@ -24,7 +25,7 @@ import (
 func (d *DB) CreateAPIToken(ctx context.Context, userID int64, tokenHash, label string, expiresAt *time.Time) (int64, error) {
 	var expiresStr *string
 	if expiresAt != nil {
-		s := expiresAt.UTC().Format("2006-01-02T15:04:05Z")
+		s := expiresAt.UTC().Format(dbtime.ISOLayout)
 		expiresStr = &s
 	}
 	res, err := d.q.CreateAPIToken(ctx, dbgen.CreateAPITokenParams{

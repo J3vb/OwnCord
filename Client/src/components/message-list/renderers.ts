@@ -69,7 +69,7 @@ import { renderMentions, renderMessageContent } from "./content-parser";
 import { markdownToPlainText } from "@lib/markdown";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
-import { renderUrlEmbeds } from "./media";
+import { isLoneImageEmbed, renderUrlEmbeds } from "./media";
 import {
   isGalleryImage,
   renderAttachment,
@@ -747,6 +747,12 @@ export function renderMessage(
       // A queued row's Cancel describes itself by this text (3A-9).
       const wrap = createElement("div", { id: `msg-body-${msg.correlationId}` });
       wrap.style.display = "contents";
+      wrap.appendChild(body);
+      box.appendChild(wrap);
+    } else if (isLoneImageEmbed(msg.content)) {
+      // The image stands in for its link; the text comes back if the embed goes.
+      const wrap = createElement("div", { "data-lone-image-text": "" });
+      wrap.hidden = true;
       wrap.appendChild(body);
       box.appendChild(wrap);
     } else if (!isVoiceOnly(msg)) box.appendChild(body);

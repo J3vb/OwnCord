@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -727,7 +728,7 @@ func alphaInsertInvites(tx *sql.Tx, rng *rand.Rand, windowStart time.Time) error
 // ─── Small helpers ──────────────────────────────────────────────────────────
 
 // ts renders a time the way the schema's datetime('now') defaults do.
-func ts(t time.Time) string { return t.UTC().Format("2006-01-02 15:04:05") }
+func ts(t time.Time) string { return t.UTC().Format(dbtime.SQLiteLayout) }
 
 // sentence builds 3–14 lexicon words; median chat-message length.
 func sentence(rng *rand.Rand) string {

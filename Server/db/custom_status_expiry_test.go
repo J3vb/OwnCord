@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // A status set in the same instant the old one expires carries a different
@@ -93,7 +94,7 @@ func TestDenyPendingUser_ClearsCustomStatusExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.UpdateUserPresence(ctx, pid, db.StatusOnline, new("hi"), new(time.Now().UTC().Add(time.Hour).Format(db.CustomStatusExpiryLayout))); err != nil {
+	if err := database.UpdateUserPresence(ctx, pid, db.StatusOnline, new("hi"), new(time.Now().UTC().Add(time.Hour).Format(dbtime.ISOLayout))); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.DenyPendingUser(ctx, pid); err != nil {

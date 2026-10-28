@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // The connection writes: the batched session touch and status stamps the
@@ -45,9 +46,9 @@ func (d *DB) TouchSessions(ctx context.Context, tokenHashes []string) error {
 	return d.inWriteTx(ctx, "TouchSessions", func(q *dbgen.Queries) error {
 		for tokens := range slices.Chunk(tokenHashes, maxBatchIDs) {
 			if err := q.TouchSessions(ctx, dbgen.TouchSessionsParams{
-				ExpiresAt: now.Add(sessionTTL).Format(sessionTimeLayout),
+				ExpiresAt: now.Add(sessionTTL).Format(dbtime.ISOLayout),
 				Tokens:    tokens,
-				Now:       now.Format(sessionTimeLayout),
+				Now:       now.Format(dbtime.ISOLayout),
 			}); err != nil {
 				return err
 			}
