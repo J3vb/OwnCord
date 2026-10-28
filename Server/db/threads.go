@@ -9,10 +9,8 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
-
-// ThreadActivityLayout is how channels.thread_last_activity_at is written.
-const ThreadActivityLayout = "2006-01-02T15:04:05Z"
 
 // ThreadAutoArchiveMinutes are the auto-archive periods a thread may have,
 // matching the CHECK on channels.thread_auto_archive_minutes (migration 074).
@@ -131,7 +129,7 @@ func (d *DB) CreateThread(ctx context.Context, n NewThread) (info *ThreadInfo, c
 	} else if !errors.Is(werr, sql.ErrNoRows) {
 		return nil, false, fmt.Errorf("CreateThread winner lookup: %w", werr)
 	}
-	now := time.Now().UTC().Format(ThreadActivityLayout)
+	now := time.Now().UTC().Format(dbtime.ISOLayout)
 	res, err := q.InsertThread(ctx, dbgen.InsertThreadParams{
 		Name: n.Name, ParentID: &n.ParentID, StarterMessageID: &n.StarterMessageID, OwnerID: &n.OwnerID,
 		AutoArchiveMinutes: int64(n.AutoArchiveMinutes), LastActivityAt: &now,
@@ -284,7 +282,7 @@ func (d *DB) UpdateThread(ctx context.Context, id int64, patch ThreadPatch, byMo
 	}
 	// Unarchiving restarts the idle clock, or the next sweep would archive it again.
 	if patch.Archived != nil && !*patch.Archived {
-		now := time.Now().UTC().Format(ThreadActivityLayout)
+		now := time.Now().UTC().Format(dbtime.ISOLayout)
 		if err := q.TouchThreadOnPost(ctx, dbgen.TouchThreadOnPostParams{ID: id, At: &now}); err != nil {
 			return nil, fmt.Errorf("UpdateThread touch: %w", err)
 		}
@@ -326,7 +324,7 @@ func touchIfThread(ctx context.Context, q *dbgen.Queries, channelID int64) (isTh
 	} else if is == 0 {
 		return false, nil
 	}
-	now := time.Now().UTC().Format(ThreadActivityLayout)
+	now := time.Now().UTC().Format(dbtime.ISOLayout)
 	if err := q.TouchThreadOnPost(ctx, dbgen.TouchThreadOnPostParams{ID: channelID, At: &now}); err != nil {
 		return false, fmt.Errorf("touch thread: %w", err)
 	}

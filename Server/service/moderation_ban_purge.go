@@ -9,6 +9,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -102,7 +103,7 @@ func (s *ModerationService) PurgeAfterBan(ctx context.Context, actorID, targetID
 	}
 	// The window is measured from the request, not from when the wait below
 	// ends.
-	since := time.Now().UTC().Add(-window).Format(searchTSLayout)
+	since := time.Now().UTC().Add(-window).Format(dbtime.SQLiteLayout)
 	if s.messages == nil {
 		return BanPurgeResult{Err: fmt.Errorf("%w: message purge unavailable", ErrInternal)}
 	}

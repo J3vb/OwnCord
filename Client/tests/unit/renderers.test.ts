@@ -27,6 +27,7 @@ import {
   clearReactionUsersCache,
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
+import { savePref } from "../../src/lib/preferences";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
 import { expectConsole } from "../helpers/console";
 import {
@@ -35,15 +36,16 @@ import {
 } from "../../src/components/message-list/attachments";
 
 // B7-16: every external image and oEmbed title comes from the native broker.
-const { previewMock, imageMock } = vi.hoisted(() => ({
+const { previewMock, imageMock, consent } = vi.hoisted(() => ({
   previewMock: vi.fn(),
   imageMock: vi.fn(),
+  consent: { allowed: true },
 }));
 // B9-8: this suite exercises content the viewer has already consented to;
 // the consent gate itself is proven in src/features/content-consent/external.test.ts.
 vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
+  externalAllowed: () => consent.allowed,
 }));
 
 vi.mock("../../src/platform/desktop/externalContent", () => ({
@@ -1022,6 +1024,62 @@ describe("renderers", () => {
   // ---------------------------------------------------------------------------
   // renderInlineImage (via renderMessage)
   // ---------------------------------------------------------------------------
+
+  describe("a message that is only an image link", () => {
+    function render(content: string): HTMLElement {
+      const msg = makeMessage({ content });
+      const el = renderMessage(msg, false, [msg], makeOpts(), new AbortController().signal);
+      container.appendChild(el);
+      return el;
+    }
+
+    it("shows the GIF and hides the link text, like a GIF picker pick", () => {
+      const url = "https://static.klipy.com/ii/abc/cat.gif";
+      const el = render(`  ${url}\n`);
+      expect(el.querySelector(".msg-image")).not.toBeNull();
+      const text = el.querySelector<HTMLElement>("[data-lone-image-text]");
+      expect(text?.hidden).toBe(true);
+      expect(text?.querySelector(`a[href="${url}"]`)).not.toBeNull();
+    });
+
+    it("brings the link text back when turning inline media off removes the GIF", async () => {
+      const url = "https://static.klipy.com/ii/abc/cat.gif";
+      const el = render(url);
+      await brokerImages(1);
+      try {
+        // Turning inline media off also withdraws consent, which re-renders the embed.
+        consent.allowed = false;
+        savePref("inlineMedia", false);
+        expect(el.querySelector(".msg-image")).toBeNull();
+        const text = el.querySelector<HTMLElement>("[data-lone-image-text]");
+        expect(text?.hidden).toBe(false);
+        expect(text?.style.display).toBe("contents");
+      } finally {
+        consent.allowed = true;
+        savePref("inlineMedia", true);
+      }
+    });
+
+    it("keeps the link text when the image link comes with other words", () => {
+      const url = "https://example.com/cat.gif";
+      const el = render(`look ${url}`);
+      expect(el.querySelector(".msg-image")).not.toBeNull();
+      expect(el.querySelector(`a.msg-link[href="${url}"]`)).not.toBeNull();
+    });
+
+    it("keeps the text of two image links, an embed-suppressed one and a non-image one", () => {
+      for (const content of [
+        "https://example.com/a.gif https://example.com/b.gif",
+        "<https://example.com/a.gif>",
+        "||https://example.com/a.gif||",
+        "https://example.com/page.html",
+      ]) {
+        const el = render(content);
+        expect(el.querySelector(".msg-text"), content).not.toBeNull();
+        el.remove();
+      }
+    });
+  });
 
   describe("renderInlineImage — img element and lightbox behaviour", () => {
     it("creates an img element with the correct src attribute", async () => {

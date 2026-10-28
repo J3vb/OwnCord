@@ -11,6 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
@@ -55,7 +56,7 @@ func toUserResponse(u *db.User) *userResponse {
 	}
 	customStatus, expiresAt := u.CustomStatus, u.CustomStatusExpiresAt
 	if expiresAt != nil {
-		if at, err := time.Parse(service.CustomStatusExpiryLayout, *expiresAt); err == nil && !time.Now().Before(at) {
+		if at, err := time.Parse(dbtime.ISOLayout, *expiresAt); err == nil && !time.Now().Before(at) {
 			customStatus = nil // expired, not yet cleared by the expirer
 		}
 	}

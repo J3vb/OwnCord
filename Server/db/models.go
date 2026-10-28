@@ -35,7 +35,7 @@ type User struct {
 	// Nil = unset. Set over the WebSocket presence path and cleared on logout.
 	CustomStatus *string
 	// CustomStatusExpiresAt is the instant CustomStatus clears itself, as
-	// CustomStatusExpiryLayout text. Nil = no expiry. Only ever set with a
+	// dbtime.ISOLayout text. Nil = no expiry. Only ever set with a
 	// non-nil CustomStatus.
 	CustomStatusExpiresAt *string
 	// BannerID is the attachment id of the profile banner image (migration
@@ -432,12 +432,6 @@ type Emoji struct {
 // expires_at at created_at + 365 days, the absolute lifetime from sign-in,
 // in its query (sessions.sql).
 const sessionTTL = 30 * 24 * time.Hour
-
-// sessionTimeLayout is the storage format for sessions.expires_at (and the
-// other RFC3339-UTC expiry columns). DeleteExpiredSessions compares these as
-// plain text against an index, so every writer and the sweep's cutoff must
-// use exactly this layout.
-const sessionTimeLayout = "2006-01-02T15:04:05Z"
 
 // Registration statuses of a users row (B4-1).
 const (

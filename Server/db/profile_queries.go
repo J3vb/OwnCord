@@ -37,11 +37,6 @@ func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username strin
 	return nil
 }
 
-// CustomStatusExpiryLayout is how users.custom_status_expires_at is written:
-// UTC, second precision, the same shape SQLite's strftime renders, so the
-// stored text compares correctly as a string.
-const CustomStatusExpiryLayout = "2006-01-02T15:04:05Z"
-
 // UpdateUserCustomStatus sets (or clears, with nil) the user's custom status
 // line with no expiry, clearing any expiry the old text carried. Kept separate
 // from UpdateUserProfile because it arrives on the presence path and must not
@@ -95,7 +90,7 @@ func (d *DB) NextCustomStatusExpiry(ctx context.Context) (next string, ok bool, 
 }
 
 // ListExpiredCustomStatuses returns up to limit statuses whose expiry is at or
-// before now (CustomStatusExpiryLayout text), oldest first.
+// before now (dbtime.ISOLayout text), oldest first.
 func (d *DB) ListExpiredCustomStatuses(ctx context.Context, now string, limit int) ([]ExpiredCustomStatus, error) {
 	rows, err := d.q.ListExpiredCustomStatuses(ctx, dbgen.ListExpiredCustomStatusesParams{
 		CustomStatusExpiresAt: &now,

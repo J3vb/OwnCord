@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // visibleCustomStatus is the publish guard for a custom status line that may
 // predate its own clear: it returns text while expiresAt (a
-// db.CustomStatusExpiryLayout instant, "" for none) is still ahead of now, and
+// dbtime.ISOLayout instant, "" for none) is still ahead of now, and
 // nil from the expiry on. An unparseable expiry keeps the text, since nothing
 // can then say it ended. The expirer clears the row and tells the hub about a
 // second after the instant, so every place a status leaves the server from a
@@ -21,7 +22,7 @@ func visibleCustomStatus(text *string, expiresAt string, now time.Time) *string 
 	if text == nil || expiresAt == "" {
 		return text
 	}
-	at, err := time.Parse(service.CustomStatusExpiryLayout, expiresAt)
+	at, err := time.Parse(dbtime.ISOLayout, expiresAt)
 	if err != nil {
 		return text
 	}
