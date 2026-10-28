@@ -408,6 +408,12 @@
       "binding": "shown",
       "category": "dom-owned",
       "reason": "WeakMap keyed by a <video> element; the entry goes with the element"
+    },
+    {
+      "file": "features/voice/shareSenderStats.ts",
+      "binding": "lastCounters",
+      "category": "pure-cache",
+      "reason": "WeakMap keyed by the share's RTCRtpSender; a new share is a new sender and a closed one is collected with its entry, so nothing outlives the session that published it"
     }
   ]
 }

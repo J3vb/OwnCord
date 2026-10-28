@@ -1102,27 +1102,54 @@ describe("LiveKitSession", () => {
       expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
 
       const sample = { sentFps: 61, limitation: "cpu", encoder: "libvpx" };
+      const sharePublication = {
+        track: {
+          mediaStreamTrack: {},
+          getSenderStats: async () => [
+            {
+              framesPerSecond: 61,
+              qualityLimitationReason: "cpu",
+              encoderImplementation: "libvpx",
+            },
+          ],
+        },
+      };
       mockRoom.localParticipant.getTrackPublication.mockImplementation((source: string) =>
-        source === "screenShare"
-          ? {
-              track: {
-                mediaStreamTrack: {},
-                getSenderStats: async () => [
-                  {
-                    framesPerSecond: 61,
-                    qualityLimitationReason: "cpu",
-                    encoderImplementation: "libvpx",
-                  },
-                ],
-              },
-            }
-          : undefined,
+        source === "screenShare" ? sharePublication : undefined,
       );
       // The share's tile polls; the bundle reports what the last poll read.
       await session.getLocalScreenshareStats();
       expect(session.getSessionDebugInfo().screenShareSender).toMatchObject(sample);
 
       mockRoom.localParticipant.getTrackPublication.mockReturnValue(undefined);
+      expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
+    });
+
+    it("drops a sender stats read that outlived its share", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      let resolveStats: (layers: unknown[]) => void = () => {};
+      const oldShare = {
+        track: {
+          mediaStreamTrack: {},
+          getSenderStats: () =>
+            new Promise<unknown[]>((resolve) => {
+              resolveStats = resolve;
+            }),
+        },
+      };
+      const newShare = { track: { mediaStreamTrack: {}, getSenderStats: async () => [] } };
+      let current = oldShare;
+      mockRoom.localParticipant.getTrackPublication.mockImplementation((source: string) =>
+        source === "screenShare" ? current : undefined,
+      );
+      const pending = session.getLocalScreenshareStats();
+      // The share stops and a new one starts while the old read is in flight.
+      current = newShare;
+      resolveStats([{ framesPerSecond: 5, frameWidth: 1920, active: true }]);
+      await expect(pending).resolves.toBeNull();
       expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
     });
   });

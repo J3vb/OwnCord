@@ -124,6 +124,8 @@ export const voiceText = defineCatalog("voice", {
   "tile.withAudio": "With audio",
   "tile.noAudio": "No audio",
   "tile.senderCapture": "Capture {fps} fps",
+  "tile.senderCaptureSet": "Capture set to {fps} fps",
+  "tile.senderLayerPaused": "{height}p paused",
   "tile.senderNotLimited": "Not limited",
   "tile.senderLimitedCpu": "Limited by CPU",
   "tile.senderLimitedBandwidth": "Limited by bandwidth",
