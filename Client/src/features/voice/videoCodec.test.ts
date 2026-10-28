@@ -753,3 +753,47 @@ describe("resolveVideoCodec with channel peers", () => {
     await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe("vp8");
   });
 });
+
+describe("codec choice details", () => {
+  it("releases the WebGL context it opened to read the renderer name", () => {
+    const loseContext = vi.fn();
+    const getExtension = vi.fn((name: string) =>
+      name === "WEBGL_debug_renderer_info"
+        ? { UNMASKED_RENDERER_WEBGL: 0x9246 }
+        : name === "WEBGL_lose_context"
+          ? { loseContext }
+          : null,
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      getExtension,
+      getParameter: () => NVIDIA,
+    } as unknown as WebGLRenderingContext);
+
+    expect(gpuRenderer()).toBe(NVIDIA);
+
+    expect(getExtension).toHaveBeenCalledWith("WEBGL_lose_context");
+    expect(loseContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let the Windows GPU-profile shortcut override a saved VP8 or VP9", async () => {
+    isWindowsDesktop.mockReturnValue(true);
+    encodingInfo.mockResolvedValue(HARDWARE);
+
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+
+    savePref("vp9");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp9");
+    expect(encodingInfo).not.toHaveBeenCalled();
+  });
+
+  it("does not open a WebGL context for Auto when the encoder probe has no answer", async () => {
+    savePref("auto");
+    encodingInfo.mockRejectedValue(new TypeError("unsupported config"));
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext");
+    getContext.mockClear();
+
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+
+    expect(getContext).not.toHaveBeenCalled();
+  });
+});
