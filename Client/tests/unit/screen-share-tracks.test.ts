@@ -1472,14 +1472,30 @@ describe("stream getters", () => {
       mediaStreamTrack: { getSettings: () => ({ frameRate: 120 }) },
       sender: { getStats: async () => report },
     });
+    const layer = {
+      rid: undefined,
+      active: true,
+      width: 1920,
+      height: 1080,
+      sentFps: 61,
+      encodedFps: undefined,
+      bitrateBps: undefined,
+      encodeMsPerFrame: undefined,
+      limitation: "cpu",
+      encoder: "libvpx",
+      codec: "video/VP8",
+      powerEfficient: undefined,
+    };
     await expect(getLocalScreenshareStats(room)).resolves.toEqual({
       captureFps: 120,
+      captureFpsSource: "configured",
       sentFps: 61,
       width: 1920,
       height: 1080,
       limitation: "cpu",
       encoder: "libvpx",
       codec: "video/VP8",
+      layers: [layer],
     });
   });
 
