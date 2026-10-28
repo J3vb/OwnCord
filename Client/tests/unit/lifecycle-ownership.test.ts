@@ -187,18 +187,6 @@ const R3_ALLOWLIST: readonly R3Entry[] = [
     fn: "removeToast",
     reason: "self-bounded: fallback removal after transitionend; touches only the node it removes",
   },
-  {
-    file: "components/message-list/content-parser.ts",
-    fn: "renderParsedCodeBlock",
-    reason:
-      "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
-  },
-  {
-    file: "components/message-list/content-parser.ts",
-    fn: "renderParsedCodeBlock",
-    reason:
-      "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
-  },
 ];
 // R4: every `new AbortController` outside the two primitives.
 const R4_ALLOWLIST: readonly R4Entry[] = [
