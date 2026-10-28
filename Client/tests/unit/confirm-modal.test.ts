@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { createConfirmModal, type ConfirmModalOptions } from "../../src/lib/confirmModal";
+import {
+  createConfirmModal,
+  type ConfirmModalOptions,
+} from "../../src/features/dialogs/confirmModal";
 
 const flush = async (): Promise<void> => {
   await Promise.resolve();

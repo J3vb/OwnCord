@@ -6,7 +6,7 @@
 
 import { clearChildren, createElement, setText } from "@lib/dom";
 import { isServerRowKind } from "@lib/messageKind";
-import { createConfirmModal } from "@lib/confirmModal";
+import { createConfirmModal } from "../../features/dialogs/confirmModal";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
@@ -1396,7 +1396,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     }
 
     /** P4-12: the destructive delete confirm, on the shared confirm preset
-     *  (lib/confirmModal.ts): Cancel first and focused, Escape and the backdrop
+     *  (features/dialogs/confirmModal.ts): Cancel first and focused, Escape and the backdrop
      *  cancel, focus returns to the opener. Tied to the mounted channel's
      *  signal, so a switch or destroy closes it. */
     /** `onConfirm` runs just before the delete is sent. */

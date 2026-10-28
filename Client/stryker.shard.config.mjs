@@ -215,7 +215,7 @@ export const shards = {
     "src/lib/hostNormalize.ts",
     "src/lib/invite-navigation.ts",
     "src/lib/message-navigation.ts",
-    "src/lib/confirmModal.ts",
+    "src/features/dialogs/confirmModal.ts",
     "src/lib/modalFactory.ts",
     "src/lib/notificationSound.ts",
     "src/lib/serverCapabilities.ts",

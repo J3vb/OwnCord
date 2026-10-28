@@ -3,9 +3,10 @@
  * prompt that serves Create and Rename, and the Delete confirmation. They
  * follow DeleteChannelModal's shape: the caller owns the request and the toast,
  * the dialog only re-arms its button and shows the inline error when the
- * caller's promise rejects. The Delete confirmation is the shared confirm preset
- * (lib/confirmModal.ts); the name prompt keeps its own form shell. They load on first use (SidebarArea), so neither
- * is in the main-page chunk.
+ * caller's promise rejects. The Delete confirmation is the shared confirm
+ * preset (features/dialogs/confirmModal.ts); the name prompt keeps its own form
+ * shell. They load on first use (SidebarArea), so neither is in the main-page
+ * chunk.
  */
 
 import { Disposable } from "@lib/disposable";
@@ -13,7 +14,7 @@ import { isImeCommit } from "@lib/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
-import { createConfirmModal, type ConfirmModalInstance } from "@lib/confirmModal";
+import { createConfirmModal, type ConfirmModalInstance } from "../features/dialogs/confirmModal";
 import type { MountableComponent } from "@lib/safe-render";
 import { shellText } from "../i18n/shell";
 import { categoryErrorText } from "../features/channels/categoryActions";

@@ -18,7 +18,7 @@ import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { showContextMenu, openMenuOnKeyboard } from "@lib/context-menu";
-import { createConfirmModal } from "@lib/confirmModal";
+import { createConfirmModal } from "../features/dialogs/confirmModal";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";

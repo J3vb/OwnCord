@@ -11,7 +11,7 @@
  */
 
 import { errorText, type ApiClient } from "@lib/api";
-import { createConfirmModal } from "@lib/confirmModal";
+import { createConfirmModal } from "../dialogs/confirmModal";
 import { setUserBlockedByMe } from "@stores/blocks.store";
 import type { ToastType } from "@components/Toast";
 import { messageRequestsText as t } from "../../i18n/messageRequests";

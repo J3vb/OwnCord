@@ -2,14 +2,14 @@
  * "Are you sure you want to log out?" — the confirmation Log Out in the
  * settings overlay asks before it does anything.
  *
- * Built on the shared confirm preset (lib/confirmModal.ts) like the other
+ * Built on the shared confirm preset (features/dialogs/confirmModal.ts) like the other
  * confirm prompts (DM leave, masked link): Cancel is focused first so a stray Enter cancels, Escape and the
  * backdrop cancel, and focus returns to the opener. The prompt is tied to the
  * `signal` it is given (the overlay's lifetime): when that aborts the prompt
  * is removed and its listeners go with it, and nothing is logged out.
  */
 
-import { createConfirmModal } from "../../lib/confirmModal";
+import { createConfirmModal } from "../dialogs/confirmModal";
 import type { ModalInstance } from "../../lib/modalFactory";
 import { settingsText as t } from "../../i18n/settings";
 

@@ -20,7 +20,7 @@ import { isImeCommit } from "@lib/ime";
 import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
-import { createConfirmModal } from "@lib/confirmModal";
+import { createConfirmModal } from "../features/dialogs/confirmModal";
 import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { readableRoleColor } from "@lib/themes";

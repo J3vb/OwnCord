@@ -1,5 +1,5 @@
 // Every yes/no confirm dialog is built by createConfirmModal in
-// lib/confirmModal.ts, which owns the behaviour they share: Cancel focused on
+// features/dialogs/confirmModal.ts, which owns the behaviour they share: Cancel focused on
 // open, Escape and the backdrop cancel, the action runs at most once, and its
 // listeners die with the dialog. A source file that writes both a
 // "btn-modal-cancel" and a "btn-danger" class literal is a hand-built confirm,
@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 
 const srcDir = path.resolve(__dirname, "..");
 
-const HELPER = "lib/confirmModal.ts";
+const HELPER = "features/dialogs/confirmModal.ts";
 
 const ALLOWLIST: Readonly<Record<string, string>> = {
   "features/moderation/BanDialog.ts":
@@ -46,7 +46,7 @@ describe("the confirm dialog door", () => {
 
   it("no file outside the allowlist hand-builds a confirm", () => {
     const offenders = matching.filter((file) => file !== HELPER && !(file in ALLOWLIST));
-    expect(offenders, "use createConfirmModal from lib/confirmModal.ts").toEqual([]);
+    expect(offenders, "use createConfirmModal from features/dialogs/confirmModal.ts").toEqual([]);
   });
 
   it("every allowlist entry still matches (the list only shrinks)", () => {

@@ -21,7 +21,7 @@
  * confirmation, so an offer made before a demotion is not sent.
  */
 
-import { createConfirmModal } from "@lib/confirmModal";
+import { createConfirmModal } from "../dialogs/confirmModal";
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";

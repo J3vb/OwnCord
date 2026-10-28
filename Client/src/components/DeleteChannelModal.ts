@@ -1,13 +1,13 @@
 /**
  * DeleteChannelModal — confirmation dialog for deleting a channel.
  * Shows channel name and requires explicit confirmation. A thin
- * MountableComponent over the shared confirm preset (lib/confirmModal.ts):
+ * MountableComponent over the shared confirm preset (features/dialogs/confirmModal.ts):
  * Cancel focused, Escape and the backdrop cancel, and a rejected `onConfirm`
  * shows the inline error and re-arms the button.
  */
 
 import { createElement, appendChildren } from "@lib/dom";
-import { createConfirmModal, type ConfirmModalInstance } from "@lib/confirmModal";
+import { createConfirmModal, type ConfirmModalInstance } from "../features/dialogs/confirmModal";
 import { errorText } from "@lib/api";
 import type { MountableComponent } from "@lib/safe-render";
 import { shellText } from "../i18n/shell";

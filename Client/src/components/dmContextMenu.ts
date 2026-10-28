@@ -4,7 +4,7 @@
  * Also owns the destructive group-leave confirm both menus open.
  */
 
-import { createConfirmModal } from "@lib/confirmModal";
+import { createConfirmModal } from "../features/dialogs/confirmModal";
 import type { ModalInstance } from "@lib/modalFactory";
 import { showContextMenu, type ContextMenuItem } from "@lib/context-menu";
 import { requestsText } from "../i18n/requests";

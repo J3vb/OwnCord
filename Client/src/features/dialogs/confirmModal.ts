@@ -15,11 +15,11 @@
  * Kept out of modalFactory.ts on purpose: that module is on the startup path.
  */
 
-import { Disposable } from "./disposable";
-import { createElement, setText } from "./dom";
-import { createIcon } from "./icons";
-import { createModal, type ModalInstance } from "./modalFactory";
-import { connectText } from "../i18n/connect";
+import { Disposable } from "../../lib/disposable";
+import { createElement, setText } from "../../lib/dom";
+import { createIcon } from "../../lib/icons";
+import { createModal, type ModalInstance } from "../../lib/modalFactory";
+import { connectText } from "../../i18n/connect";
 
 export interface ConfirmModalOptions {
   readonly title: string;
