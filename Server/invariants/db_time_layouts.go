@@ -33,7 +33,8 @@ var dbTimeLayouts = Rule{
 		if dbTimeLayoutHomes[path.Dir(rel)] {
 			return nil
 		}
-		timeNames, _ := importNames(f, "time")
+		timeNames, timeDots := importNames(f, "time")
+		selectors := make(map[*ast.Ident]bool)
 		var out []Violation
 		report := func(pos token.Pos) {
 			out = append(out, Violation{
@@ -53,10 +54,17 @@ var dbTimeLayouts = Rule{
 				if s, err := strconv.Unquote(n.Value); err == nil && dbTimeLayoutValues[s] {
 					report(n.Pos())
 				}
+			case *ast.Ident:
+				// import . "time" lets DateTime be spelled bare.
+				if len(timeDots) > 0 && n.Name == "DateTime" && !selectors[n] {
+					report(n.Pos())
+				}
 			case *ast.SelectorExpr:
 				if pkg, ok := n.X.(*ast.Ident); ok && timeNames[pkg.Name] && n.Sel.Name == "DateTime" {
 					report(n.Pos())
 				}
+				// Sel is an Ident too: row.DateTime is not the layout.
+				selectors[n.Sel] = true
 			}
 			return true
 		})

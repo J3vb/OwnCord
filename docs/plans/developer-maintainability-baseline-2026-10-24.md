@@ -472,20 +472,20 @@ The scout counted 7 names; it missed `searchTSLayout` and the service copy of `C
 ### What changed
 
 - `Server/dbtime/`: a leaf package with the two layouts and `Parse` (either layout, `ok=false` otherwise). A leaf package rather than `db/timefmt.go`, because `admin`, `auth` and `ws` read the layouts and `db-import-boundary` keeps new `db` imports out of them.
-- 34 production files and 10 test files switched to the shared names. Every writer formats exactly the text it did before; no stored value, column or SQL query changes. The SQL already reads `ban_expires` in both forms (`replace(…, ' ', 'T')`), so no live defect was found.
+- 34 existing production files and 10 test files switched to the shared names (not counting the new `dbtime` and invariant files or the regenerated `dbgen` comment). Every writer formats exactly the text it did before; no stored value, column or SQL query changes. The SQL already reads `ban_expires` in both forms (`replace(…, ' ', 'T')`), so no live defect was found.
 - `TimeoutUser` keeps a two-line comment saying why it writes `SQLiteLayout`, the one write whose layout the old `sqliteDatetimeFormat` comment guarded.
 - `docs/code-style.md`: the invariant table gains `db-time-layouts`.
 
 ### Checks
 
-| Check                                                                                                   | Result                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `db-time-layouts` on the tree                                                                           | 24 violations before, 0 after                                                                                                                                         |
-| Invariant fixtures (call, constant, raw string, `time.DateTime`, aliased import, build-tagged file)     | 7 of 7 flagged; other layouts, `dbtime/` itself and `row.DateTime` are clean                                                                                          |
-| `dbtime` tests (exact stored text, both layouts parse to one instant, junk and offsets refused)         | pass                                                                                                                                                                  |
-| Break: a layout literal put back in `service/retention.go`                                              | `TestDBTimeLayouts_RealTreeIsClean` fails and names the line                                                                                                          |
-| Break: `TimeoutUser` writes `ISOLayout` instead of `SQLiteLayout` (the bug class)                       | 3 existing tests fail (`TestListActiveTimeoutExpiries_OnlyActive`, `TestTimeout_ExpiryLiftsAutomatically`, `TestUpdateProfile_DisplayNameAllowedAfterTimeoutExpired`) |
-| `go test -race` over `dbtime`, `invariants`, `auth`, `db`, `service`, `admin`, `api`, `cmd`, `internal` | pass                                                                                                                                                                  |
+| Check                                                                                                        | Result                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `db-time-layouts` on the tree                                                                                | 24 violations before, 0 after                                                                                                                                         |
+| Invariant fixtures (call, constant, raw string, `time.DateTime`, aliased and dot imports, build-tagged file) | 8 of 8 flagged; other layouts, `dbtime/` itself and `row.DateTime` are clean                                                                                          |
+| `dbtime` tests (exact stored text, both layouts parse to one instant, junk and offsets refused)              | pass                                                                                                                                                                  |
+| Break: a layout literal put back in `service/retention.go`                                                   | `TestDBTimeLayouts_RealTreeIsClean` fails and names the line                                                                                                          |
+| Break: `TimeoutUser` writes `ISOLayout` instead of `SQLiteLayout` (the bug class)                            | 3 existing tests fail (`TestListActiveTimeoutExpiries_OnlyActive`, `TestTimeout_ExpiryLiftsAutomatically`, `TestUpdateProfile_DisplayNameAllowedAfterTimeoutExpired`) |
+| `go test -race` over `dbtime`, `invariants`, `auth`, `db`, `service`, `admin`, `api`, `cmd`, `internal`      | pass                                                                                                                                                                  |
 
 ### Verdict
 

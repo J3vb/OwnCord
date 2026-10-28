@@ -9,7 +9,7 @@
 // must use the same layout; the expiry columns written from Go hold ISOLayout,
 // and their SQL compares against strftime('%Y-%m-%dT%H:%M:%SZ', 'now').
 //
-// MX-13: these layouts were typed by hand in 24 places under 8 names. The
+// MX-13: these layouts were typed by hand in 24 places under 9 names. The
 // db-time-layouts invariant (Server/invariants) keeps them here.
 package dbtime
 

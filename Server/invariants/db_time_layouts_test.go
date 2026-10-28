@@ -18,6 +18,7 @@ func TestDBTimeLayouts_HandWrittenLayoutIsFlagged(t *testing.T) {
 		"raw string":             "package ws\nvar layouts = []string{`2006-01-02T15:04:05Z`}\n",
 		"stdlib time.DateTime":   "package db\nimport \"time\"\nfunc f(t time.Time) string { return t.Format(time.DateTime) }\n",
 		"aliased time import":    "package db\nimport tm \"time\"\nfunc f(t tm.Time) string { return t.Format(tm.DateTime) }\n",
+		"dot-imported time":      "package db\nimport . \"time\"\nfunc f(t Time) string { return t.Format(DateTime) }\n",
 		"build-tagged file":      "//go:build otel\n\npackage telemetry\nconst l = \"2006-01-02 15:04:05\"\n",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -43,7 +44,7 @@ func TestDBTimeLayouts_OtherLayoutsAndTheHomePackageAreClean(t *testing.T) {
 		t.Errorf("internal/dbtime: %v, want one violation", got)
 	}
 	// A DateTime selector on something other than package time is not the layout.
-	sel := "package db\nfunc f() { _ = row.DateTime }\n"
+	sel := "package db\nimport . \"time\"\nvar _ Time\nfunc f() { _ = row.DateTime }\n"
 	if got := dbTimeLayoutViolations(t, "db/x.go", sel); len(got) != 0 {
 		t.Errorf("row.DateTime: %v, want none", got)
 	}

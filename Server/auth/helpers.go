@@ -92,7 +92,8 @@ func IsEffectivelyBanned(u *db.User) bool {
 }
 
 // IsSessionExpired reports whether the expiresAt timestamp string represents a
-// time in the past, in either stored layout (dbtime.Parse). Any string that cannot be parsed is treated as expired for safety.
+// time in the past, in either stored layout (dbtime.Parse). Any string that
+// cannot be parsed is treated as expired for safety.
 func IsSessionExpired(expiresAt string) bool {
 	t, ok := dbtime.Parse(expiresAt)
 	if !ok {
