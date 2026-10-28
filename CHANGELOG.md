@@ -133,10 +133,12 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- Right-clicking a voice user, a member, a message or a video tile while a channel, category or thread menu was open left both menus showing, and so did opening any menu from the keyboard. Opening a menu now always closes the one before it.
 - Unsent messages kept by the desktop app for a retry are now only read and saved for the server you are signed in to, the same way as saved logins.
 - Holding Ctrl+M or Ctrl+D toggled mute or deafen over and over, and holding Ctrl+K opened and closed the Quick Switcher. A held key now acts once.
 - The global mute and deafen shortcuts could be set to a Ctrl+Shift key the app or a text field already uses (Ctrl+Shift+K, redo, word select), so one press did two things. Settings now refuses those keys.
 - The banned members list showed Unban next to people ranked at or above you, which the server always refused. It now shows Unban only where it can work.
+- With a Chinese, Japanese or Korean input method, the Enter that picks a candidate also submitted the half-typed text in 13 fields, including the ban reason, nickname, login code, search and custom status. That Enter now only picks the candidate.
 
 **Voice and video**
 

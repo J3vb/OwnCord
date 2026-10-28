@@ -5,6 +5,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { isDisplayed } from "@lib/dialogOpen";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
@@ -519,7 +520,7 @@ export function createSettingsOverlay(
       "keydown",
       (e: KeyboardEvent) => {
         // An IME composition owns its keys (Enter commits, Escape cancels).
-        if (e.isComposing || e.keyCode === 229) {
+        if (isImeCommit(e)) {
           // Keep the page's Escape-to-close from seeing the IME's key.
           e.stopPropagation();
           return;

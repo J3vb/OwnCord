@@ -4,9 +4,8 @@
  * moderate voice in the row's channel (can_moderate_voice).
  */
 
-import { Disposable } from "@lib/disposable";
-import { createElement, setText, appendChildren, setOwnedTimeout } from "@lib/dom";
-import { createMenuItem, enableMenuKeyboard, clampMenuToViewport } from "@lib/context-menu";
+import { createElement, setText, appendChildren } from "@lib/dom";
+import { createMenuItem, openMenuShell } from "@lib/context-menu";
 import { createIcon } from "@lib/icons";
 import {
   setUserVolume,
@@ -15,9 +14,6 @@ import {
   getUserLocalMute,
 } from "@lib/livekitSession";
 import { voiceText as t } from "../../i18n/voice";
-
-/** No-op default until the keyboard model installs the real restorer. */
-const noop = (): void => {};
 
 /** Moderation section wiring. Passed only when the local user may moderate
  *  voice; the menu renders the section iff this is present, so the permission
@@ -55,34 +51,25 @@ export function showUserVolumeMenu(
   lifetimeSignal: AbortSignal,
   mod?: VoiceModMenuOptions | string,
 ): void {
-  // Remove any existing context menus and destroy their dismiss owners
-  document.querySelectorAll(".user-vol-menu").forEach((el) => {
-    const prev = (el as HTMLElement & { dismiss?: Disposable }).dismiss;
-    prev?.destroy();
-    el.remove();
-  });
-
   // Discord-width: a long notice (moderation unavailable) wraps instead of
-  // stretching the menu.
-  const menu = createElement("div", {
-    class: "context-menu user-vol-menu",
-    style: "max-width:240px",
+  // stretching the menu. The keyboard model leaves the slider a native Tab stop.
+  openMenuShell({
+    x,
+    y,
+    className: "user-vol-menu",
+    attrs: { style: "max-width:240px" },
+    signal: lifetimeSignal,
+    build: (menu, closeMenu) => buildVolumeMenu(menu, closeMenu, userId, username, mod),
   });
-  // One owner for the menu's whole life, so the keyboard model and the
-  // outside-click dismissal are torn down together (B9 A11Y-01).
-  const dismiss = new Disposable();
-  (menu as HTMLElement & { dismiss?: Disposable }).dismiss = dismiss;
+}
 
-  // Restores focus to the invoking row; replaced once the keyboard model is
-  // installed. Every close path funnels through closeMenu so focus never drops
-  // to <body> (A11Y-01).
-  let restoreFocus: () => void = noop;
-  const closeMenu = (): void => {
-    menu.remove();
-    dismiss.destroy();
-    restoreFocus();
-  };
-
+function buildVolumeMenu(
+  menu: HTMLElement,
+  closeMenu: () => void,
+  userId: number,
+  username: string,
+  mod: VoiceModMenuOptions | string | undefined,
+): void {
   const header = createElement(
     "div",
     {
@@ -157,45 +144,6 @@ export function showUserVolumeMenu(
   menu.appendChild(mute.item);
 
   if (mod !== undefined) appendVoiceModeration(menu, mod, closeMenu);
-
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
-  document.body.appendChild(menu);
-  clampMenuToViewport(menu, x, y);
-
-  // Keyboard model (A11Y-01): focus the first row on open, arrows/Home/End
-  // move, Escape closes and restores the invoking row. The slider stays a
-  // native Tab stop.
-  restoreFocus = enableMenuKeyboard(menu, { signal: dismiss.signal, onClose: closeMenu });
-
-  // Close on click outside — store the owner on the element for cleanup on re-open
-  setOwnedTimeout(
-    dismiss.signal,
-    () => {
-      document.addEventListener(
-        "mousedown",
-        (e: MouseEvent) => {
-          if (!menu.contains(e.target as Node)) closeMenu();
-        },
-        { signal: dismiss.signal },
-      );
-    },
-    0,
-  );
-
-  // Also clean up if the parent component is destroyed. Tied to dismiss's
-  // own signal (mirrors context-menu.ts's menuOwner pattern) so this bridge
-  // listener is torn down with the menu itself — otherwise it never runs
-  // (the lifetime signal is long-lived) and every right-click permanently
-  // accumulates one closure retaining a detached .user-vol-menu subtree.
-  lifetimeSignal.addEventListener(
-    "abort",
-    () => {
-      menu.remove();
-      dismiss.destroy();
-    },
-    { signal: dismiss.signal },
-  );
 }
 
 /**

@@ -4,6 +4,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -1745,7 +1746,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           // A CJK IME commits the current candidate on Enter, firing keydown
           // with isComposing true (or the legacy keyCode 229). Sending here
           // would ship the raw composition text instead of the committed word.
-          if (e.isComposing || e.keyCode === 229) return;
+          if (isImeCommit(e)) return;
           e.preventDefault();
           handleSend();
         }

@@ -70,22 +70,9 @@ export interface ContextMenuOptions {
   readonly className?: string;
 }
 
-/** The close hook of the open sidebar (channel or category) context menu. */
-let activeSidebarMenuClose: (() => void) | null = null;
-
-/**
- * Register `close` as the open sidebar menu, closing any previous one first.
- * Returns the unregister, which the menu's own close calls so it never
- * clears a successor.
- */
-export function registerSidebarMenu(close: () => void): () => void {
-  activeSidebarMenuClose?.();
-  document.querySelectorAll(".channel-ctx-menu").forEach((prev) => prev.remove());
-  activeSidebarMenuClose = close;
-  return () => {
-    if (activeSidebarMenuClose === close) activeSidebarMenuClose = null;
-  };
-}
+/** Tears down the one open menu, whatever kind it is. Opening any menu runs it
+ *  first, so a sidebar menu never stays open beside a member or tile menu. */
+let supersedeOpenMenu: (() => void) | null = null;
 
 /** Actionable menu rows, in any menu. Disabled rows are not navigable. */
 const MENU_ITEM_SELECTOR = ["menuitem", "menuitemcheckbox", "menuitemradio"]
@@ -412,12 +399,6 @@ function appendDetail(row: HTMLElement, text: string): void {
 /** No-op default until the keyboard model installs the real restorer. */
 const noop = (): void => {};
 
-// Tracks each open menu's per-invocation dismiss owner, so a menu swept away
-// by a same-class reopen can release its own teardown listener on the
-// caller's signal instead of leaving it pinned until the caller's signal
-// eventually aborts.
-const dismissOwners = new WeakMap<Element, Disposable>();
-
 /**
  * Keep a menu inside the viewport, anchored by its top-left, flipping to its
  * bottom/right edge when it does not fit — and never above the top margin.
@@ -425,9 +406,14 @@ const dismissOwners = new WeakMap<Element, Disposable>();
  * channel sidebar's own menus, so they cannot drift — a menu opened low in a
  * short window otherwise runs off and its last actions are unreachable (F9).
  */
-export function clampMenuToViewport(menu: HTMLElement, x: number, y: number): void {
+export function clampMenuToViewport(
+  menu: HTMLElement,
+  x: number,
+  y: number,
+  view: Window = window,
+): void {
   const margin = 8;
-  const { innerWidth: vw, innerHeight: vh } = window;
+  const { innerWidth: vw, innerHeight: vh } = view;
   const left = Math.min(x, vw - menu.offsetWidth - margin);
   menu.style.left = `${Math.max(margin, left)}px`;
   if (y + menu.offsetHeight > vh - margin) {
@@ -439,176 +425,238 @@ export function clampMenuToViewport(menu: HTMLElement, x: number, y: number): vo
   }
 }
 
-/**
- * Show a context menu at the given coordinates.
- * Automatically removes any existing menu with the same className.
- * Closes on click outside or when signal is aborted.
- */
-export function showContextMenu(opts: ContextMenuOptions): void {
-  const { x, y, items, signal, className, group } = opts;
-  const menuClass = className ?? "context-menu";
+/** Keep a long menu inside the window by capping its height and scrolling it,
+ *  anchored by its top-left (the video-tile menu). */
+function fitMenuScrolling(menu: HTMLElement, x: number, y: number, view: Window): void {
+  const margin = 8;
+  const room = view.innerHeight - 2 * margin;
+  if (menu.offsetHeight > room) {
+    menu.style.maxHeight = `${room}px`;
+    menu.style.overflowY = "auto";
+  }
+  const left = Math.min(x, view.innerWidth - menu.offsetWidth - margin);
+  const top = Math.min(y, view.innerHeight - menu.offsetHeight - margin);
+  menu.style.left = `${Math.max(margin, left)}px`;
+  menu.style.top = `${Math.max(margin, top)}px`;
+}
 
-  // Remove any existing context menu with same class, releasing its dismiss
-  // owner so its teardown listener on the caller's signal is dropped
-  // now rather than lingering until the caller itself is destroyed.
-  document.querySelectorAll(`.${menuClass}`).forEach((el) => {
-    dismissOwners.get(el)?.destroy();
-    el.remove();
+export interface MenuShellOptions {
+  readonly x: number;
+  readonly y: number;
+  /** Classes added after `context-menu`. */
+  readonly className?: string;
+  /** Extra attributes on the menu root (`data-testid`, `aria-label`, `style`). */
+  readonly attrs?: Readonly<Record<string, string>>;
+  /** The owner's lifetime: aborting it removes the menu. Omit only when the
+   *  caller closes the menu itself on teardown. */
+  readonly signal?: AbortSignal;
+  /** `outside` (default): a mousedown outside the menu closes it. `any-click`:
+   *  any click on the page closes it, inside included (the sidebar menus). */
+  readonly dismiss?: "outside" | "any-click";
+  /** `flip` (default): anchor by the bottom edge when it does not fit below.
+   *  `scroll`: cap the height and scroll instead. */
+  readonly fit?: "flip" | "scroll";
+  /** The document to mount in (a call's pop-out window). */
+  readonly doc?: Document;
+  /** Where focus goes on close when the opener has left the page. */
+  readonly restoreFocusTo?: () => HTMLElement | null;
+  /** Runs once when the menu goes away, by any path. */
+  readonly onClosed?: () => void;
+  /** Fills the menu before it is mounted. `close` closes it and returns focus
+   *  to the opener; `signal` aborts when the menu goes away. */
+  readonly build: (menu: HTMLDivElement, close: () => void, signal: AbortSignal) => void;
+}
+
+export interface OpenMenu {
+  readonly element: HTMLDivElement;
+  /** Close the menu and return focus to the opener. Safe to call twice. */
+  readonly destroy: () => void;
+}
+
+/**
+ * The one way a right-click menu opens. Closes whatever menu is open, builds
+ * the `.context-menu` root, mounts it (inside the full-screen element when
+ * there is one, so it can be seen), keeps it inside the window, re-placed on
+ * resize (an inline reveal form or submenu), installs the shared keyboard
+ * model, and wires the dismissal and the owner's teardown.
+ */
+export function openMenuShell(opts: MenuShellOptions): OpenMenu {
+  supersedeOpenMenu?.();
+  const doc = opts.doc ?? document;
+  const view = doc.defaultView ?? window;
+  const menu = createElement("div", {
+    ...opts.attrs,
+    class: opts.className === undefined ? "context-menu" : `context-menu ${opts.className}`,
   });
 
-  const menu = createElement("div", { class: `context-menu ${menuClass}` });
-  if (opts.ariaLabel !== undefined) menu.setAttribute("aria-label", opts.ariaLabel);
-
-  const dismiss = new Disposable();
-  dismissOwners.set(menu, dismiss);
-
+  const owner = new Disposable();
+  if (opts.onClosed !== undefined) owner.addCleanup(opts.onClosed);
+  let open = true;
   let restoreFocus: () => void = noop;
-  const closeMenu = (): void => {
+  const teardown = (): void => {
+    if (!open) return;
+    open = false;
+    if (supersedeOpenMenu === close) supersedeOpenMenu = null;
     menu.remove();
-    dismiss.destroy();
+    owner.destroy();
+  };
+  const close = (): void => {
+    if (!open) return;
+    teardown();
     restoreFocus();
   };
 
-  if (opts.onClosed !== undefined) dismiss.addCleanup(opts.onClosed);
+  const signal = opts.signal;
+  if (signal?.aborted === true) {
+    teardown();
+    return { element: menu, destroy: close };
+  }
 
-  /** One plain row: a focusable button that closes the menu, then acts. */
-  const buildRow = (item: ContextMenuItem): HTMLElement => {
-    const disabled = item.disabled === true;
-    const el = createMenuItem(
-      item.label,
-      rowClassOf(item),
-      item.testId !== undefined ? { testId: item.testId } : {},
-    );
-    if (item.content !== undefined) {
-      el.replaceChildren(item.content);
-      el.setAttribute("aria-label", item.label);
-    }
-    if (item.detail !== undefined) appendDetail(el, item.detail);
-    if (item.checked !== undefined) {
-      el.setAttribute("role", item.radio === true ? "menuitemradio" : "menuitemcheckbox");
-      el.setAttribute("aria-checked", String(item.checked));
-    }
-    if (item.title !== undefined) el.title = item.title;
-    if (disabled) el.setAttribute("aria-disabled", "true");
-    el.addEventListener(
-      "click",
-      (e) => {
-        if (disabled) return;
-        closeMenu();
-        item.onClick(e);
-      },
-      { signal },
-    );
-    return el;
+  opts.build(menu, close, owner.signal);
+  (doc.fullscreenElement ?? doc.body).appendChild(menu);
+  // A full close: focus inside the replaced menu goes back to its opener
+  // before this menu records where to return it.
+  supersedeOpenMenu = close;
+
+  // Placed after the rows are in, so the measured size is real.
+  const place = (): void => {
+    if (opts.fit === "scroll") fitMenuScrolling(menu, opts.x, opts.y, view);
+    else clampMenuToViewport(menu, opts.x, opts.y, view);
   };
-
-  let hasSeparator = false;
-  let groupRow: HTMLElement | null = null;
-  items.forEach((item, index) => {
-    if ("separator" in item) {
-      menu.appendChild(createElement("div", { class: "context-menu-sep", role: "separator" }));
-      hasSeparator = false;
-      return;
-    }
-    if (hasSeparator && item.danger) {
-      menu.appendChild(createElement("div", { class: "context-menu-sep" }));
-    }
-
-    const disabled = item.disabled === true;
-    const rowClass = rowClassOf(item);
-    const activate = (e: MouseEvent): void => {
-      if (disabled) return;
-      closeMenu();
-      item.onClick(e);
-    };
-    if (item.submenu !== undefined && !disabled) {
-      const { trigger, flyout } = createSubmenuTrigger(
-        item.label,
-        rowClass,
-        {
-          ...(item.testId !== undefined ? { testId: item.testId } : {}),
-          activates: true,
-          onActivate: activate,
-        },
-        dismiss.signal,
-      );
-      if (item.detail !== undefined) appendDetail(trigger, item.detail);
-      for (const sub of item.submenu) flyout.appendChild(buildRow(sub));
-      menu.append(trigger, flyout);
-      hasSeparator = !item.danger;
-      return;
-    }
-    const el = buildRow(item);
-    if (group !== undefined && index >= group.start && index < group.start + group.count) {
-      if (groupRow === null) {
-        groupRow = createElement("div", { class: "context-menu-group", role: "group" });
-        if (opts.groupLabel !== undefined) groupRow.setAttribute("aria-label", opts.groupLabel);
-        menu.appendChild(groupRow);
-      }
-      groupRow.appendChild(el);
-    } else {
-      menu.appendChild(el);
-    }
-    hasSeparator = !item.danger;
-  });
-
-  // Kept on screen: a menu opened near the bottom/right edge (a channel low
-  // in the sidebar at the 940x500 minimum window) otherwise runs off and its
-  // last actions are unreachable. Runs after the items are appended so the
-  // measured size is real, and again on resize (the purge reveal form, a
-  // nested submenu) so a later expand cannot push an action off-screen.
-  const clamp = (): void => clampMenuToViewport(menu, x, y);
-
-  document.body.appendChild(menu);
-  clamp();
-  const reposition = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(clamp);
-  if (reposition !== null) {
+  place();
+  if (typeof ResizeObserver !== "undefined") {
+    const reposition = new ResizeObserver(place);
     reposition.observe(menu);
-    dismiss.addCleanup(() => reposition.disconnect());
+    owner.addCleanup(() => reposition.disconnect());
   }
 
   restoreFocus = enableMenuKeyboard(menu, {
-    signal: dismiss.signal,
-    onClose: closeMenu,
+    signal: owner.signal,
+    onClose: close,
     ...(opts.restoreFocusTo !== undefined ? { restoreFocusTo: opts.restoreFocusTo } : {}),
   });
 
-  // Close on click outside (deferred so the opening click doesn't immediately close)
+  // Deferred so the click that opened the menu does not close it.
   setOwnedTimeout(
-    dismiss.signal,
+    owner.signal,
     () => {
-      document.addEventListener(
+      if (opts.dismiss === "any-click") {
+        doc.addEventListener("click", close, { signal: owner.signal });
+        return;
+      }
+      doc.addEventListener(
         "mousedown",
         (e: MouseEvent) => {
-          if (!menu.contains(e.target as Node)) {
-            closeMenu();
-          }
+          if (!(e.target instanceof Node && menu.contains(e.target))) close();
         },
-        { signal: dismiss.signal },
+        { signal: owner.signal },
       );
     },
     0,
   );
 
-  // Clean up if parent component is destroyed. If the caller's signal is
-  // already aborted, "abort" already fired and would never reach a listener
-  // added now, so tear down immediately instead of registering one. When it
-  // isn't, tie the listener's own lifetime to `dismiss`: once the menu is
-  // dismissed some other way (item click, outside click), `dismiss` is
-  // destroyed and this listener is dropped from the caller's signal instead of
-  // lingering — with its closure over `menu` — for the rest of the caller's
-  // lifetime.
-  if (signal.aborted) {
-    menu.remove();
-    dismiss.destroy();
-  } else {
-    signal.addEventListener(
-      "abort",
-      () => {
-        menu.remove();
-        dismiss.destroy();
-      },
-      { once: true, signal: dismiss.signal },
-    );
-  }
+  // The bridge listener lives only as long as the menu, so a long-lived owner
+  // does not collect one closure per right-click.
+  signal?.addEventListener("abort", teardown, { once: true, signal: owner.signal });
+
+  return { element: menu, destroy: close };
+}
+
+/**
+ * Show a context menu of plain rows at the given coordinates. Closes any other
+ * open menu, and closes on a click outside or when `signal` is aborted.
+ */
+export function showContextMenu(opts: ContextMenuOptions): void {
+  const { x, y, items, signal, className, group } = opts;
+  openMenuShell({
+    x,
+    y,
+    ...(className !== undefined ? { className } : {}),
+    ...(opts.ariaLabel !== undefined ? { attrs: { "aria-label": opts.ariaLabel } } : {}),
+    signal,
+    ...(opts.restoreFocusTo !== undefined ? { restoreFocusTo: opts.restoreFocusTo } : {}),
+    ...(opts.onClosed !== undefined ? { onClosed: opts.onClosed } : {}),
+    build: (menu, closeMenu, menuSignal) => {
+      /** One plain row: a focusable button that closes the menu, then acts. */
+      const buildRow = (item: ContextMenuItem): HTMLElement => {
+        const disabled = item.disabled === true;
+        const el = createMenuItem(
+          item.label,
+          rowClassOf(item),
+          item.testId !== undefined ? { testId: item.testId } : {},
+        );
+        if (item.content !== undefined) {
+          el.replaceChildren(item.content);
+          el.setAttribute("aria-label", item.label);
+        }
+        if (item.detail !== undefined) appendDetail(el, item.detail);
+        if (item.checked !== undefined) {
+          el.setAttribute("role", item.radio === true ? "menuitemradio" : "menuitemcheckbox");
+          el.setAttribute("aria-checked", String(item.checked));
+        }
+        if (item.title !== undefined) el.title = item.title;
+        if (disabled) el.setAttribute("aria-disabled", "true");
+        el.addEventListener(
+          "click",
+          (e) => {
+            if (disabled) return;
+            closeMenu();
+            item.onClick(e);
+          },
+          { signal },
+        );
+        return el;
+      };
+
+      let hasSeparator = false;
+      let groupRow: HTMLElement | null = null;
+      items.forEach((item, index) => {
+        if ("separator" in item) {
+          menu.appendChild(createElement("div", { class: "context-menu-sep", role: "separator" }));
+          hasSeparator = false;
+          return;
+        }
+        if (hasSeparator && item.danger) {
+          menu.appendChild(createElement("div", { class: "context-menu-sep" }));
+        }
+
+        const disabled = item.disabled === true;
+        const rowClass = rowClassOf(item);
+        const activate = (e: MouseEvent): void => {
+          if (disabled) return;
+          closeMenu();
+          item.onClick(e);
+        };
+        if (item.submenu !== undefined && !disabled) {
+          const { trigger, flyout } = createSubmenuTrigger(
+            item.label,
+            rowClass,
+            {
+              ...(item.testId !== undefined ? { testId: item.testId } : {}),
+              activates: true,
+              onActivate: activate,
+            },
+            menuSignal,
+          );
+          if (item.detail !== undefined) appendDetail(trigger, item.detail);
+          for (const sub of item.submenu) flyout.appendChild(buildRow(sub));
+          menu.append(trigger, flyout);
+          hasSeparator = !item.danger;
+          return;
+        }
+        const el = buildRow(item);
+        if (group !== undefined && index >= group.start && index < group.start + group.count) {
+          if (groupRow === null) {
+            groupRow = createElement("div", { class: "context-menu-group", role: "group" });
+            if (opts.groupLabel !== undefined) groupRow.setAttribute("aria-label", opts.groupLabel);
+            menu.appendChild(groupRow);
+          }
+          groupRow.appendChild(el);
+        } else {
+          menu.appendChild(el);
+        }
+        hasSeparator = !item.danger;
+      });
+    },
+  });
 }

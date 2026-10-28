@@ -55,21 +55,43 @@ function limitationText(reason: string | undefined): string | undefined {
   }
 }
 
-/** Your own share's second line (M-1): the capture rate, what holds the
+/** Your own share's second line (M-1): the capture rate (measured, or "set
+ *  to" where the browser only reports what the capture was opened at), what holds the
  *  encoder back, and which codec and encoder, e.g. "Capture 120 fps · Limited
  *  by CPU · VP8 · libvpx". Empty before anything is known; a note where the
  *  share has no sender stats to read (null: no sample yet). */
 export function senderText(sample: ShareSenderSample | null): string {
   if (sample === null) return t("tile.senderUnavailable");
   const parts = [
-    sample.captureFps !== undefined
-      ? t("tile.senderCapture", { fps: String(sample.captureFps) })
-      : undefined,
+    sample.captureFps === undefined
+      ? undefined
+      : sample.captureFpsSource === "configured"
+        ? t("tile.senderCaptureSet", { fps: String(sample.captureFps) })
+        : t("tile.senderCapture", { fps: String(sample.captureFps) }),
     limitationText(sample.limitation),
     sample.codec?.split("/").pop()?.toUpperCase(),
     sample.encoder,
   ];
   return parts.filter((p): p is string => p !== undefined && p !== "").join(" · ");
+}
+
+/** One line per encoder layer when the share sends more than one, widest
+ *  first, e.g. "1080p · 24 fps" over "720p · 30 fps"; a layer nobody watches
+ *  says "paused". Empty for a single layer: the second line already says it. */
+export function layersText(sample: ShareSenderSample | null): string {
+  const layers = sample?.layers ?? [];
+  if (layers.length < 2) return "";
+  return layers
+    .filter((l) => l.height !== undefined)
+    .map((l) => {
+      // Plain strings: the catalog would group 1080 as "1,080".
+      const height = String(l.height);
+      if (!l.active) return t("tile.senderLayerPaused", { height });
+      return l.sentFps === undefined
+        ? t("tile.qualityHeight", { height })
+        : t("tile.shareQuality", { height, fps: String(l.sentFps) });
+    })
+    .join("\n");
 }
 
 /** The chip's text and spoken name, or null when there is nothing to say. */

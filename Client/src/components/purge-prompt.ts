@@ -1,12 +1,11 @@
 /**
- * Shared "Purge Messages" context-menu section — the count prompt used by both
- * channel menus (the sidebar right-click menu and AdminActions'
- * createChannelContextMenu). The two menus predate each other and use different
- * class conventions, so the caller supplies the class names; the clamp, the
- * confirm step and the in-flight state live here once.
+ * "Purge Messages" context-menu section — the count prompt of the sidebar's
+ * channel menu. The caller supplies the class names; the clamp, the confirm
+ * step and the in-flight state live here.
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { isImeCommit } from "@lib/ime";
 import { createMenuItem } from "@lib/context-menu";
 import { shellText } from "../i18n/shell";
 
@@ -127,7 +126,7 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
   countInput.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && !isImeCommit(e)) {
         e.preventDefault();
         submit();
       }

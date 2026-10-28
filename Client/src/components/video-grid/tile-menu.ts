@@ -9,9 +9,8 @@
  * (channel-sidebar/volume-menu.ts), whose Mute and moderation rows it reuses.
  */
 
-import { Disposable } from "@lib/disposable";
-import { createElement, setText, appendChildren, setOwnedTimeout } from "@lib/dom";
-import { createMenuItem, enableMenuKeyboard } from "@lib/context-menu";
+import { createElement, setText, appendChildren } from "@lib/dom";
+import { createMenuItem, openMenuShell } from "@lib/context-menu";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
@@ -77,9 +76,6 @@ export interface SelfTileMenuOptions {
   readonly cameraLocked?: string | null;
 }
 
-/** No-op default until the keyboard model installs the real restorer. */
-const noop = (): void => {};
-
 function volumeRow(
   label: string,
   sliderLabel: string,
@@ -138,9 +134,9 @@ function actionItem(
 
 const sep = (): HTMLElement => createElement("div", { class: "context-menu-sep" });
 
-/** The menu shell: one at a time, placed inside the window (and inside the
- *  full-screen element, where it can be seen), keyboard model, closed by a
- *  click outside or when its tile goes. `build` fills it. */
+/** The tile's menu in the shared shell (inside the full-screen element when
+ *  there is one), closed by a click outside or when its tile goes. `build`
+ *  fills it. */
 function openMenu(
   x: number,
   y: number,
@@ -149,59 +145,17 @@ function openMenu(
   build: (menu: HTMLElement, close: () => void) => void,
   doc: Document = document,
 ): void {
-  const view = doc.defaultView ?? window;
-  doc.querySelectorAll(".video-tile-menu").forEach((el) => {
-    (el as HTMLElement & { dismiss?: Disposable }).dismiss?.destroy();
-    el.remove();
+  openMenuShell({
+    x,
+    y,
+    className: "video-tile-menu",
+    attrs: { "aria-label": label },
+    signal,
+    // A long menu in a small window scrolls rather than running off the bottom.
+    fit: "scroll",
+    doc,
+    build: (menu, close) => build(menu, close),
   });
-
-  const menu = createElement("div", { class: "context-menu video-tile-menu" });
-  menu.setAttribute("aria-label", label);
-  const dismiss = new Disposable();
-  (menu as HTMLElement & { dismiss?: Disposable }).dismiss = dismiss;
-  let restoreFocus: () => void = noop;
-  const closeMenu = (): void => {
-    menu.remove();
-    dismiss.destroy();
-    restoreFocus();
-  };
-  build(menu, closeMenu);
-
-  (doc.fullscreenElement ?? doc.body).appendChild(menu);
-  const margin = 8;
-  // A long menu in a small window scrolls rather than running off the bottom.
-  const room = view.innerHeight - 2 * margin;
-  if (menu.offsetHeight > room) {
-    menu.style.maxHeight = `${room}px`;
-    menu.style.overflowY = "auto";
-  }
-  const left = Math.min(x, view.innerWidth - menu.offsetWidth - margin);
-  const top = Math.min(y, view.innerHeight - menu.offsetHeight - margin);
-  menu.style.left = `${Math.max(margin, left)}px`;
-  menu.style.top = `${Math.max(margin, top)}px`;
-  restoreFocus = enableMenuKeyboard(menu, { signal: dismiss.signal, onClose: closeMenu });
-
-  setOwnedTimeout(
-    dismiss.signal,
-    () => {
-      doc.addEventListener(
-        "mousedown",
-        (e: MouseEvent) => {
-          if (!menu.contains(e.target as Node)) closeMenu();
-        },
-        { signal: dismiss.signal },
-      );
-    },
-    0,
-  );
-  signal.addEventListener(
-    "abort",
-    () => {
-      menu.remove();
-      dismiss.destroy();
-    },
-    { signal: dismiss.signal },
-  );
 }
 
 /** Your own camera tile's menu. Nothing opens when it would be empty. */

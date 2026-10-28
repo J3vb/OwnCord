@@ -1219,6 +1219,29 @@ describe("ServerPanel", () => {
       expect(container.querySelector(".modal-overlay")).toBeNull();
     });
 
+    it("Enter that commits an IME candidate in the host input does not save", () => {
+      const onAddProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      (container.querySelector(".btn-add-server") as HTMLElement).click();
+      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+      inputs[0]!.value = "IME Server";
+      inputs[1]!.value = "ime.example.com:8443";
+
+      inputs[1]!.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      expect(onAddProfile).not.toHaveBeenCalled();
+      inputs[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(onAddProfile).toHaveBeenCalledWith("IME Server", "ime.example.com:8443");
+    });
+
     it("submits on Enter key in host input", () => {
       const onAddProfile = vi.fn();
       const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);

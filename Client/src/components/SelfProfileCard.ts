@@ -11,6 +11,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { resolveDisplayName } from "@lib/avatar";
@@ -300,6 +301,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
     input.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
+        if (isImeCommit(e)) return;
         if (e.key === "Enter") {
           e.preventDefault();
           // A refused (over-limit) status keeps the card open with the hint.

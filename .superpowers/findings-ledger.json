@@ -1,5 +1,5 @@
 {
-  "nextId": 521,
+  "nextId": 523,
   "findings": [
     {
       "id": "OC-0001",
@@ -12041,6 +12041,52 @@
       "lens": "client-state",
       "finder": "owner",
       "fixedDate": "2026-10-27"
+    },
+    {
+      "id": "OC-0521",
+      "title": "Two right-click menus could be open at once",
+      "file": "Client/src/components/channel-sidebar/context-menu.ts",
+      "line": 148,
+      "severity": "low",
+      "why": "Each menu cleared only menus of its own kind. The channel, category and thread menus closed on a left click only, so a right-click (no click event) on a voice user, member, message or tile opened a second menu beside them; a menu opened from the keyboard fires no mousedown, so it left any open menu in place.",
+      "repro": "Right-click a channel, then right-click a member in the member list: both menus show. Or open a voice user's menu and press Shift+F10 on a channel row.",
+      "evidence": "Scout C1 in docs/plans/developer-maintainability-execution-2026-10-24.md (read from code), reproduced by Client/tests/unit/one-open-menu.test.ts on dev 91d7e54a (2 menus open).",
+      "suggestedFix": "Open every menu through one shell that closes the open menu first.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/one-open-menu.test.ts (each kind of menu replaces the one before it, by mouse and keyboard)",
+        "revertProof": "fail (2 menus open)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-28",
+      "hunt": "maintainability-mx-6",
+      "lens": "client-state",
+      "finder": "claude",
+      "fixedDate": "2026-10-28"
+    },
+    {
+      "id": "OC-0522",
+      "title": "Enter that commits an input-method candidate submitted half-typed text in 13 fields",
+      "file": "Client/src/features/moderation/BanDialog.ts",
+      "line": 320,
+      "severity": "medium",
+      "why": "A Chinese, Japanese or Korean input method commits its candidate with Enter, and the keydown arrives with isComposing true (or keyCode 229). Thirteen Enter handlers on text fields ignored that and submitted the raw composition: login code, server address, quick switcher, message search, nickname, ban reason, purge count, both game activity names, both custom status fields, the prompt dialog and sticker search.",
+      "repro": "With a Japanese IME on, open the ban dialog, type a reason in kana and press Enter to pick a kanji candidate: the ban is sent with the half-typed reason.",
+      "evidence": "Maintainability scout C2 (docs/plans/developer-maintainability-execution-2026-10-24.md), re-counted by Client/tests/unit/ime-enter-guard.test.ts: 13 unguarded handlers on dev 91d7e54a.",
+      "suggestedFix": "One isImeCommit(e) helper; every Enter handler on a text field returns early on it; a structural test keeps new ones guarded.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/ime-enter-guard.test.ts plus one isComposing Enter test per field (12 tests in 12 files)",
+        "revertProof": "fail (12 of 12 new tests fail with isImeCommit returning false)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-27",
+      "hunt": "maintainability-scout-2026-10-27",
+      "lens": "client-state",
+      "finder": "claude",
+      "fixedDate": "2026-10-28"
     }
   ]
 }

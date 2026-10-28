@@ -13,6 +13,7 @@
  */
 
 import { Disposable } from "./disposable";
+import { isImeCommit } from "./ime";
 import { createElement } from "./dom";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
 import { connectText } from "../i18n/connect";
@@ -328,7 +329,7 @@ export function createPromptModal(
   confirm.addEventListener("click", submit);
   cancel.addEventListener("click", () => instance.close());
   input.addEventListener("keydown", (e: KeyboardEvent) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !isImeCommit(e)) {
       e.preventDefault();
       submit();
     }
