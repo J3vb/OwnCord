@@ -453,6 +453,45 @@ Before the change, a press inside and a release on the backdrop closed one dialo
 
 No gate was weakened and no existing assertion changed. The count went from 15 files to 0 with a test that holds it. The change is kept.
 
+## MX-7 batch 2 + MX-10: admin body decoding and path ids (2026-10-28)
+
+Measured on a branch from `origin/dev` after batch 1 (`757138e`). Evidence level: **executed**. Batch 2 moves the 23 `json.NewDecoder` calls left in `Server/admin` to the shared decoder and drops `DecodeAllow`. MX-10 is the path ids: `pathInt64` let `0` and negative ids reach the service on every admin id route, and nine api handlers parsed an id by hand.
+
+### Counts
+
+Counted by `grep` over non-test files in `Server/admin` and `Server/api`, and held after the change by the `reply-helpers` invariant.
+
+| Measure (non-test files)                                   | Before                                                                                                                                                                                | After                                                                   |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `json.NewDecoder` outside the shared decoder, `admin`      | 23 in 17 files, frozen in `DecodeAllow`                                                                                                                                               | 0; `DecodeAllow` deleted, so any new one fails                          |
+| Replies to a body that does not decode, `admin`            | 4 messages ("invalid request body", "invalid JSON body", "invalid support bundle request", "expected one JSON object") plus 3 field-specific ones that also fired on a decode failure | 1: `400 BAD_REQUEST` "malformed request body"                           |
+| `admin` JSON routes answering an over-size body with 413   | 0 of 23 decode sites                                                                                                                                                                  | 23 of 23 (`413 PAYLOAD_TOO_LARGE`), the support bundle at its own 1 KiB |
+| Raw path-id parses (`strconv.ParseInt(chi.URLParam(...))`) | 9: 8 direct (`admin` 1, `api` 7) and the two-step one in `parsePluginID`                                                                                                              | 0 outside `pathInt64` and `pathID`, held by the invariant               |
+| `pathInt64` call sites accepting `0` and negative ids      | 17                                                                                                                                                                                    | 0                                                                       |
+
+### What changed
+
+- `admin/decode.go`: `decodeJSON`, `decodeOptionalJSON` and `decodeStrictJSON`, the same three as `api/decode.go`. A body that does not decode answers `400 BAD_REQUEST` "malformed request body" (admin keeps its `BAD_REQUEST` code; `api` uses `INVALID_INPUT`), and a body past the route's `http.MaxBytesReader` cap answers `413 PAYLOAD_TOO_LARGE`. No admin route accepted an empty body before, so none uses the optional form.
+- Where a handler folded a field check into the decode condition (AFK channel, config overrides, category order, access preview), the decode now fails with the shared reply and the field check keeps its own message.
+- The retention preview and the support bundle routes use `decodeStrictJSON`. The support bundle keeps its 1 KiB cap, set before the helper runs, and its "expected one JSON object" reply is now the shared malformed reply.
+- `admin.pathInt64` refuses an id below 1. `api` gets `pathID` (a positive id or false, writes nothing) in `api/path_id.go`; `parseIDParam` uses it, and the sticker, emoji, user-note, moderation and plugin handlers read their ids through it with the reply each already had (`BAD_REQUEST`, `INVALID_INPUT`, `http.NotFound`, plain-text `http.Error`). The registration route's own parse now goes through `pathInt64`.
+- The `reply-helpers` invariant also fails a `strconv.ParseInt`, `ParseUint` or `Atoi` of a `chi.URLParam` (directly or through a local variable) in `api` and `admin` outside `pathInt64` and `pathID`.
+- `docs/api.md` error table: `BAD_REQUEST` for the admin surface, 413 on every JSON route, and non-positive path ids.
+
+### Checks
+
+| Check                                                                                                         | Before                                            | After         |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ------------- |
+| `TestAdminAPI_PathIDRoutes_RefuseNonPositiveAndNonNumericIDs` (31 id positions × `0`, `-1`, `abc`)            | 58 of 93 subtests fail with `pathInt64` as it was | 93 of 93 pass |
+| `TestAdminAPI_JSONBodyRoutes_OverTheCapIs413AndMalformedIs400` (14 routes × malformed and over the cap)       | did not exist                                     | 28 of 28      |
+| `TestAdminAPI_SupportBundle_OverItsOneKiBCapIs413` (over the cap, padded after the value, strict, malformed)  | did not exist                                     | 6 of 6        |
+| `admin/decode_test.go` (valid, 5 bad bodies, cap mid-value, cap after the value, empty optional body, strict) | did not exist                                     | 6 tests pass  |
+| `reply-helpers` path-id and admin-decoder cases (violating and passing snippets)                              | did not exist                                     | pass          |
+
+### Verdict
+
+Kept. One reply for a bad admin body, 413 for an over-size one, and one rule for what a path id is on both surfaces. The visible change for clients is the message and status on the admin routes: "invalid request body" and its variants became "malformed request body", an over-size body is 413 instead of 400, and `/0` and `/-N` ids are refused at the handler instead of answering 404 or reaching the service. No existing test assertion changed.
+
 ## MX-15 one listen helper for preference changes (2026-10-28)
 
 Candidate D5 from scout round 2, on `dev` `4a5e0b2b`.

@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -83,8 +82,8 @@ func MountStickerRoutes(r chi.Router, svc *service.Services, store FileStore, li
 // stickerIDParam reads the {id} path segment. A value that is not a positive
 // integer is answered 400 here and false is returned.
 func stickerIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || id <= 0 {
+	id, ok := pathID(r, "id")
+	if !ok {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid sticker id")
 		return 0, false
 	}
@@ -323,8 +322,8 @@ func broadcastStickerSet(ctx context.Context, svc *service.Services, broadcaster
 // bytes never change for an id, so the response caches hard.
 func handleServeStickerImage(svc *service.Services, store FileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil || id <= 0 {
+		id, ok := pathID(r, "id")
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}

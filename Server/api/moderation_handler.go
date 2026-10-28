@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -100,8 +99,8 @@ func MountModerationRoutes(r chi.Router, svc *service.Services, broadcaster Prof
 }
 
 func moderationTargetIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	targetID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || targetID <= 0 {
+	targetID, ok := pathID(r, "id")
+	if !ok {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "id must be a positive integer")
 		return 0, false
 	}
@@ -214,8 +213,8 @@ func handleModerationAckNotice(svc *service.Services) http.HandlerFunc {
 			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
-		actionID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil || actionID <= 0 {
+		actionID, ok := pathID(r, "id")
+		if !ok {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "id must be a positive integer")
 			return
 		}

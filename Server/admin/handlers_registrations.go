@@ -5,9 +5,6 @@ import (
 	"errors"
 	"math"
 	"net/http"
-	"strconv"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -52,8 +49,8 @@ func handleDenyRegistration(users *service.UserService) http.HandlerFunc {
 
 func decideRegistration(decide func(ctx context.Context, actorID, userID int64) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil || id <= 0 {
+		id, err := pathInt64(r, "id")
+		if err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid registration id")
 			return
 		}
