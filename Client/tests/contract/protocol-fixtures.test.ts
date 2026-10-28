@@ -62,6 +62,7 @@ vi.spyOn(console, "info").mockImplementation(() => {});
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { expectConsole } from "../helpers/console";
+import { repoRoot } from "../helpers/repoRoot";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, resetChannelsStore, setChannels } from "../../src/stores/channels.store";
 import { membersStore, setMembers } from "../../src/stores/members.store";
@@ -113,7 +114,7 @@ interface WireTranscript {
   readonly connections: Record<string, readonly WireFrame[]>;
 }
 
-const FIXTURE_DIR = path.resolve(__dirname, "../../../protocol/fixtures/epoch-1");
+const FIXTURE_DIR = path.join(repoRoot, "protocol/fixtures/epoch-1");
 const FIXTURES = new Map<string, WireTranscript>(
   readdirSync(FIXTURE_DIR)
     .filter((f) => f.endsWith(".json"))
