@@ -26,7 +26,7 @@ describe("ipcBytes", () => {
 
 describe("raw-bytes IPC commands", () => {
   const dir = join(__dirname, "../../../src/platform/desktop");
-  const rawBytes = /invoke<\s*(ArrayBuffer|Uint8Array)\b/;
+  const rawBytes = /(?:invoke|tryInvoke|invokeOrThrow)<\s*(ArrayBuffer|Uint8Array)\b/;
   const files = readdirSync(dir).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
   const users = files.filter((f) => rawBytes.test(readFileSync(join(dir, f), "utf8")));
 

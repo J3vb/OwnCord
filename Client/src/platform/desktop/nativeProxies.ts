@@ -4,7 +4,7 @@
 // LiveKit tunnel from `LiveKitUrlResolver` (`lib/livekitUrlResolver.ts`),
 // whose instance fields become this module's state — the app has one LiveKit
 // session, and the class there now delegates here.
-import { invoke } from "@tauri-apps/api/core";
+import { invokeOrThrow, tryInvoke } from "./nativeInvoke";
 import { createLogger } from "@lib/logger";
 import type { NativeProxies } from "../contracts/nativeProxies";
 
@@ -78,7 +78,7 @@ async function ensureHttpProxy(host: string): Promise<string> {
 
   const start = (async () => {
     const { port, token } = await startTunnel("start_http_proxy", () =>
-      invoke<unknown>("start_http_proxy", { remoteHost: host }),
+      invokeOrThrow<unknown>("start_http_proxy", { remoteHost: host }),
     );
     httpLog.debug("tunnel ready", { host, port });
     return `http://127.0.0.1:${port}/${token}`;
@@ -149,7 +149,7 @@ async function startLiveKitTunnel(): Promise<TunnelEndpoint> {
     hostWithPort = serverHost.includes(":") ? serverHost : `${serverHost}:443`;
   }
   const tunnel = await startTunnel("start_livekit_proxy", () =>
-    invoke<unknown>("start_livekit_proxy", { remoteHost: hostWithPort }),
+    invokeOrThrow<unknown>("start_livekit_proxy", { remoteHost: hostWithPort }),
   );
   proxyPort = tunnel.port;
   livekitLog.info("LiveKit TLS proxy started on localhost", { port: tunnel.port });
@@ -220,7 +220,9 @@ function stopLiveKitProxy(): void {
   // any future reader inherits a value that no longer points at a running
   // proxy.
   proxyPort = null;
-  invoke("stop_livekit_proxy").catch((err) => livekitLog.warn("Failed to stop LiveKit proxy", err));
+  void tryInvoke("stop_livekit_proxy").then((result) => {
+    if (!result.ok) livekitLog.warn("Failed to stop LiveKit proxy", result.error);
+  });
 }
 
 export const nativeProxies: NativeProxies = {

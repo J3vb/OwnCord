@@ -378,3 +378,40 @@ Blocked storage made `getActiveThemeName`, `applyThemeByName`, the system-theme 
 ### Verdict against the stop rules
 
 No gate was weakened and no assertion changed; the only edits to existing tests make their `@lib/preferences` mocks keep the real module's new exports. The count went from 20 to 3 with a test that holds it. The change is kept.
+
+## MX-8 Tauri invoke wrapping (2026-10-28)
+
+Scout candidate C4 in the execution plan. Based on `origin/dev` `09d27cc4`. Evidence level: **executed** (lint, unit tests and a deliberate-break check; no native host was run).
+
+### Baseline count
+
+The repo already had the guard: `local/invoke-needs-try-catch` in `Client/eslint-rules.js`, set to `warn` for `src/platform/desktop/**`. Counted with `npx eslint -f json src/platform/desktop` on unchanged `dev`.
+
+| Measure                                                | Scout (2026-10-27) | Re-count before | After                      |
+| ------------------------------------------------------ | ------------------ | --------------- | -------------------------- |
+| `invoke-needs-try-catch` warnings                      | about 50           | 47 in 11 files  | 0; the rule is now `error` |
+| of which in `nativeVoiceService.ts`                    | 42 lines           | 25              | 0                          |
+| Files that import `@tauri-apps/*` (platform-contracts) | n/a                | 29              | 25                         |
+
+The scout's 42 for the voice file counted lines that mention `invoke(`, including the ones already in a try. A plain AST scan (call named `invoke` not inside a try-with-catch in its own function) finds 48: it misses `socket.ts`'s two `tauriInvoke` calls and wrongly counts `externalContent.ts`'s two callback calls and `nativeProxies.ts`'s `.catch` call. The lint rule's 47 is the number used.
+
+### What changed
+
+- `Client/src/platform/desktop/nativeInvoke.ts`: `tryInvoke` (never rejects; `{ ok, value }` or `{ ok: false, error }`) and `invokeOrThrow` (rejects with a `NativeCallError` whose `message` is the host's reason and whose `reason` is the raw value).
+- The helper sends the command before its first await, so fire-and-forget calls (`stop_livekit_proxy`, `frontend_ready`) reach the host in the same order as before. `message-list-media-release.test.ts` now mocks the core API with a pending call: its GIF used to fail to load only after the test ended, and now fails inside it.
+- `notifier.setUnreadBadge` is the worked example: a host with no badge command logs and resolves.
+- Every other site keeps its contract: it still rejects, now always with an `Error`. Callers that read the host's text (`ws.ts`'s "channel full", the camera "no frame" check, `connectErrorCode`) read `message`, which is unchanged. `externalContent.ts` maps `error.reason` to its failure class as before.
+- `nativeVoiceService.ts`: the 25 bare calls go through `invokeOrThrow`; no voice logic changed.
+- `eslint.config.js`: `invoke-needs-try-catch` from `warn` to `error`, with `nativeInvoke.ts` as the one skipped file; its canary moved to severity 2.
+- `tests/helpers/platform-command-inventory.ts` counts commands named through the two helpers, so the platform-contracts table still sees all 95.
+
+### Deliberate-break check
+
+| Break                                          | Before: what fails  | After: what fails                                                    |
+| ---------------------------------------------- | ------------------- | -------------------------------------------------------------------- |
+| `systemIdle.ts` restored to a bare `invoke`    | nothing (a warning) | `npm run lint` (error)                                               |
+| `tryInvoke`'s catch rethrows the raw rejection | n/a                 | 18 tests in the `nativeInvoke`, notifier and external-content suites |
+
+### Verdict against the stop rules
+
+No existing assertion was weakened. `ipcBytes.test.ts`'s raw-bytes pattern now also matches the helpers, so it still finds `externalContent.ts`. `ws-cert.test.ts` expected the raw string a declined certificate rejects with; it now checks the `NativeCallError` carries that string as both `reason` and `message`. The count went from 47 to 0 and the existing lint rule now holds it as an error. The change is kept.

@@ -5,6 +5,7 @@
 // startup chunk today, and this registry is statically reachable from the
 // entry.
 import { invoke } from "@tauri-apps/api/core";
+import { invokeOrThrow } from "./nativeInvoke";
 import type { AppProcess } from "../contracts/appProcess";
 
 export const appProcess: AppProcess = {
@@ -20,6 +21,6 @@ export const appProcess: AppProcess = {
     await relaunch();
   },
   async reportReady(): Promise<void> {
-    await invoke("frontend_ready");
+    await invokeOrThrow("frontend_ready");
   },
 };

@@ -9,14 +9,14 @@
  * (`lib/profiles.ts`). This seam would otherwise be the only way for any
  * other target to reach a pure type guard.
  */
+import { invokeOrThrow } from "./nativeInvoke";
 import type { SettingsSnapshot, SettingsStore } from "../contracts/settings";
 
 const STORAGE_KEY = "owncord:profiles";
 
 export const settings: SettingsStore = {
   async load(): Promise<SettingsSnapshot | null> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const stored = await invoke<Record<string, unknown>>("get_settings");
+    const stored = await invokeOrThrow<Record<string, unknown>>("get_settings");
     const raw = stored[STORAGE_KEY];
     if (raw === undefined || raw === null) return null;
     // Handed back exactly as stored — this seam reads the blob and says what
@@ -26,7 +26,6 @@ export const settings: SettingsStore = {
   },
 
   async save(data: SettingsSnapshot): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("save_settings", { key: STORAGE_KEY, value: data });
+    await invokeOrThrow("save_settings", { key: STORAGE_KEY, value: data });
   },
 };

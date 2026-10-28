@@ -17,6 +17,7 @@ import type {
 } from "../contracts/externalContent";
 import { createLogger } from "@lib/logger";
 import { ipcBytes } from "./ipcBytes";
+import { tryInvoke, type NativeResult } from "./nativeInvoke";
 
 const log = createLogger("externalContent");
 let warnedPostMessageIpc = false;
@@ -32,16 +33,11 @@ const FAILURES: readonly string[] = [
 
 // Each command is named literally at its call site below, so the
 // platform-contracts count (a grep for the literal command name) sees both.
-type Invoke = (typeof import("@tauri-apps/api/core"))["invoke"];
-
-async function call<T>(ask: (invoke: Invoke) => Promise<T>): Promise<ExternalContentResult<T>> {
-  try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return { ok: true, value: await ask(invoke) };
-  } catch (err) {
-    const failure = typeof err === "string" && FAILURES.includes(err) ? err : "unavailable";
-    return { ok: false, failure: failure as ExternalContentFailure };
-  }
+function settle<T>(result: NativeResult<T>): ExternalContentResult<T> {
+  if (result.ok) return result;
+  const { reason } = result.error;
+  const failure = typeof reason === "string" && FAILURES.includes(reason) ? reason : "unavailable";
+  return { ok: false, failure: failure as ExternalContentFailure };
 }
 
 /** The raster type of `bytes` by signature — the same allowlist the native
@@ -59,13 +55,13 @@ function sniffImageType(bytes: Uint8Array): string {
 }
 
 export const externalContent: ExternalContentBroker = {
-  preview: (partition, url) =>
-    call((invoke) => invoke<ExternalPreview>("external_preview", { partition, url })),
+  preview: async (partition, url) =>
+    settle(await tryInvoke<ExternalPreview>("external_preview", { partition, url })),
 
   async image(partition, source) {
     const args = "handle" in source ? { handle: source.handle } : { url: source.url };
-    const result = await call((invoke) =>
-      invoke<ArrayBuffer | number[]>("external_image", { partition, ...args }),
+    const result = settle(
+      await tryInvoke<ArrayBuffer | number[]>("external_image", { partition, ...args }),
     );
     if (!result.ok) return result;
     if (Array.isArray(result.value) && !warnedPostMessageIpc) {
