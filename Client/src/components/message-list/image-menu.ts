@@ -15,6 +15,7 @@ import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
 import { desktop } from "../../platform/desktop";
 import { imageMenuText } from "../../i18n/imageMenu";
+import { copyThenToast } from "@lib/clipboard";
 
 const log = createLogger("image-menu");
 
@@ -103,10 +104,7 @@ function copyImage(target: ImageMenuTarget): void {
 }
 
 function copyLink(link: string): void {
-  navigator.clipboard.writeText(link).then(
-    () => showToast(imageMenuText("linkCopied"), "success"),
-    () => showToast(imageMenuText("linkCopyFailed"), "error"),
-  );
+  copyThenToast(link, imageMenuText("linkCopied"), imageMenuText("linkCopyFailed"));
 }
 
 function openLink(link: string): void {

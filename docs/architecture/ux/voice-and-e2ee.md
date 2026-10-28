@@ -226,6 +226,11 @@ popup inherits the app's CSP. The stream's volume and mute go along into the win
 The tile shows **Bring back**, and closing the window returns the video and its controls; closing the main window closes every pop-out. Where
 no window opens the video stays in the grid and an error toast says "Couldn't open the pop-out window". Full screen on a
 popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it).
+**Ctrl + scroll** over a tile or a pop-out window zooms the video towards the pointer (up to 8x), and a
+drag pans it, edges never pulled into view; a pan is no click, so it never focuses or swaps the tile, and
+a plain scroll still scrolls the grid (`bindVideoZoom` in `src/lib/zoomPan.ts`, shared with the image
+lightbox). Scrolling back to 1x, a new or stopped stream, and popping out start it unzoomed; the
+mini-player and your own screen share's cover do not zoom.
 Choosing a text channel from the stream view, the open one included (`onChannelReselect` in
 `lib/channel-navigation.ts`), leaves it with voice still up, and the stream you watch keeps playing in
 a **mini-player** over the app (`features/voice/miniPlayer.ts`, loaded on first use; the tile's own video

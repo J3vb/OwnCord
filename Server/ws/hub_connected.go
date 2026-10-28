@@ -140,3 +140,42 @@ func (h *Hub) closeClientsForStop() {
 		}
 	}
 }
+
+// rebroadcastAfterDeviceLeft re-sends the user's presence when c, one of
+// several connections, has gone and its leaving changed what the user shows:
+// the game or song c reported, or a status (or custom status) only c held up.
+// No command from a live connection follows a closed or kicked device, so
+// without this the other members keep the departed device's game, song or
+// status until the user changes something else. A user with no connection
+// left gets the offline broadcast instead (shouldMarkOffline), and a
+// same-session replacement sends its own presence, so callers skip both.
+func (h *Hub) rebroadcastAfterDeviceLeft(c *Client) {
+	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
+	remaining := h.clientsOf(c.userID)
+	if len(remaining) == 0 || slices.Contains(remaining, c) {
+		return
+	}
+	// The list the user's last frame was merged from: c back in its place
+	// among the oldest-first connections.
+	at := slices.IndexFunc(remaining, func(r *Client) bool { return r.connectedAt.After(c.connectedAt) })
+	if at < 0 {
+		at = len(remaining)
+	}
+	before := slices.Insert(slices.Clone(remaining), at, c)
+	was, now := mergeLivePresence(before), mergeLivePresence(remaining)
+	if sameShownPresence(was, now) {
+		return
+	}
+	h.broadcastMergedPresenceLocked(c.userID, remaining, now)
+}
+
+// sameShownPresence reports whether two merged presences render the same to
+// other members: status, custom status text, game and song.
+func sameShownPresence(a, b livePresence) bool {
+	return a.status == b.status &&
+		a.customStatusExpiresAt == b.customStatusExpiresAt &&
+		sameText(a.customStatus, b.customStatus) &&
+		sameActivity(a.activity, b.activity) &&
+		sameListening(a.listening, b.listening)
+}

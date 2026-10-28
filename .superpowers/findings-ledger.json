@@ -1,5 +1,5 @@
 {
-  "nextId": 526,
+  "nextId": 527,
   "findings": [
     {
       "id": "OC-0001",
@@ -12136,6 +12136,29 @@
     },
     {
       "id": "OC-0525",
+      "title": "Closing one of several devices left its game, song or status showing to other members",
+      "file": "Server/ws/serve_pumps.go",
+      "line": 314,
+      "severity": "medium",
+      "why": "A device's teardown only broadcast presence when it was the user's last connection. With another device still connected, the merged presence dropped the closed device's game, song and status, but no frame went out, so other members kept the old values until the user changed something else. The failed-handshake teardown had the same gap.",
+      "repro": "Sign in on devices A and B. A reports a game or song and is online; B is idle. Close A. Other members still see the game or song and an online status.",
+      "evidence": "Vault issue #148 (nightly bug hunt at dev a1910a6c42). readPump's defer only emits presence under shouldMarkOffline, which is false while another connection remains.",
+      "suggestedFix": "When a non-final, non-replaced connection leaves, compare the user's merged presence with and without it and broadcast the new one if what others see changed.",
+      "fix": {
+        "commit": "pending",
+        "revertProof": "fail (the closing, invisible and kicked-device tests in multi_device_leave_test.go fail with the rebroadcast stubbed out)",
+        "test": "Server/ws/multi_device_leave_test.go"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-28",
+      "hunt": "nightly-bughunt",
+      "lens": "server-concurrency",
+      "finder": "claude",
+      "fixedDate": "2026-10-28"
+    },
+    {
+      "id": "OC-0526",
       "title": "Escape that cancels an input-method candidate also closed the dialog or popover and dropped the typed text",
       "file": "Client/src/lib/modalFactory.ts",
       "line": 148,

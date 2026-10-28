@@ -229,8 +229,14 @@ func (h *Hub) swapActivityLocked(c *Client, edit func(lp *livePresence) bool) {
 	// the merged one, so a game stopped on one device does not blank another
 	// device's still-running game.
 	conns := h.clientsOf(c.userID)
-	merged := mergeLivePresence(conns)
-	if merged.status == "" {
+	h.broadcastMergedPresenceLocked(c.userID, conns, mergeLivePresence(conns))
+}
+
+// broadcastMergedPresenceLocked sends merged, the user's presence across conns
+// (their live connections), as the frame that speaks for the user. An
+// unstamped presence sends nothing. The caller holds presenceMu.
+func (h *Hub) broadcastMergedPresenceLocked(userID int64, conns []*Client, merged livePresence) {
+	if merged.status == "" || len(conns) == 0 {
 		return
 	}
 	text := visibleCustomStatus(merged.customStatus, merged.customStatusExpiresAt, time.Now())
@@ -239,16 +245,16 @@ func (h *Hub) swapActivityLocked(c *Client, edit func(lp *livePresence) bool) {
 		// one per game start or stop is itself a sign the user is online. Only
 		// the player hears it, on every device; nothing public changed, so a
 		// queued connect entry stays as it is.
-		frame := buildPresenceMsg(c.userID, merged.status, text, merged.activity, merged.listening)
+		frame := buildPresenceMsg(userID, merged.status, text, merged.activity, merged.listening)
 		for _, own := range conns {
 			own.sendPresenceMsg(frame)
 		}
 		return
 	}
 	// Like every user-chosen presence, this supersedes a queued connect entry.
-	h.dropQueuedPresenceLocked(c.userID)
-	for _, ev := range presenceEvents(c.userID, merged.status, text, merged.activity, merged.listening) {
-		h.enqueueExpiredPresence(c, ev)
+	h.dropQueuedPresenceLocked(userID)
+	for _, ev := range presenceEvents(userID, merged.status, text, merged.activity, merged.listening) {
+		h.enqueueExpiredPresence(conns[0], ev)
 	}
 }
 

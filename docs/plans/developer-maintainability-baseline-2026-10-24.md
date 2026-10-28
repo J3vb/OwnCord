@@ -504,3 +504,41 @@ Counted with the new structural test, `Client/tests/unit/ime-escape-guard.test.t
 - The seven dialogs that opted out of Escape and kept their own document listener (`CreateChannelModal`, `EditChannelModal`, `DeleteChannelModal`, `CategoryModals`, `InviteManager`, `ForwardPicker`, `PollComposer`) pass `onEscape` instead.
 - The other Escape handlers return early on the helper inside their Escape branch.
 - Composing-Escape tests for `createModal` and the seven dialogs.
+- Startup closure budget raised one 500 B step, 102800 B to 103300 B: after merging MX-15 and MX-17 from `dev` the closure is 102838 B (the guard imports add about 50 B).
+
+## MX-17 one clipboard door for text copies (2026-10-28)
+
+Candidate D7 from scout round 2, on `dev` `54568145`.
+
+### Baseline count
+
+Counted with a grep for `.writeText(` over non-test files in `Client/src`, comments left out.
+
+| Measure                                         | Before                                                   | After                  |
+| ----------------------------------------------- | -------------------------------------------------------- | ---------------------- |
+| Direct `clipboard.writeText` calls              | 9 in 8 files (the scout's 8 plus `copyWithToast` itself) | 1 (`lib/clipboard.ts`) |
+| Copy-then-toast written out                     | 5                                                        | 0 (`copyThenToast`)    |
+| Copy-then-relabel written out                   | 3 (`content-parser.ts`, `LogsTab.ts` two)                | 0 (`copyThenRelabel`)  |
+| Discarded `setTimeout` in the lifecycle R3 list | 3 (2 in `content-parser.ts`)                             | 1                      |
+
+### What changed
+
+- `Client/src/lib/clipboard.ts`: `copyText` (resolves true or false, never rejects, a missing clipboard is a failure), `copyThenToast`, and `copyThenRelabel`, whose label reset is dropped when its owner's signal aborts and restarted by a second press.
+- The 8 files call it. `copyWithToast` in `developerTools.ts` keeps its signature and calls `copyThenToast`. `RecoverySections.ts` keeps its own reset, which also clears the screen-reader status.
+- `Client/src/features/clipboardDoor.test.ts` fails on `.writeText(` in any other file and pins the helpers.
+- The two `content-parser.ts` entries left the lifecycle R3 allowlist; `lib/clipboard.ts` joined the `lib-rest-6` Stryker shard.
+- `pendingResets` (a `WeakMap` keyed by the button) joined `tests/session-state-allowlist.json` as dom-owned.
+- Startup closure 102768 B to 102792 B (budget 102800 B).
+
+Not a defect fix, but two behaviours are new: a copy on a page with no clipboard now shows the failure text instead of throwing in the click handler, and a second press of a code block's Copy no longer has its label reset early by the first press's timer.
+
+### Deliberate-break check
+
+| Break                                                   | Result                                           |
+| ------------------------------------------------------- | ------------------------------------------------ |
+| A `navigator.clipboard.writeText` added to `lib/dom.ts` | `clipboardDoor.test.ts` fails and names the file |
+| `copyThenRelabel` stops cancelling the earlier reset    | "a second press restarts the wait" fails         |
+
+### Verdict against the stop rules
+
+No gate was weakened and no existing assertion changed. The count went from 9 to 1 with a test that holds it. The change is kept.

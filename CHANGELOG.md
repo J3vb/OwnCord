@@ -97,6 +97,10 @@ and only when it changes something a contributor or fork holder must do
 - Avatars and profile banners can be animated: upload a GIF, animated WebP or animated PNG. It shows its first frame and plays while you hover the message, member or DM row; the profile card plays it straight away. With reduced motion on it never plays. Avatars may now be up to 2 MB and banners up to 4 MB; group DM icons stay still.
 - The member list, profile and DMs show the music someone is listening to ("Listening to Spotify", with the song, the artist and a progress bar in the profile). The desktop app reads it from the song your media player reports to Windows or Linux; web browsers never count. To turn it off, or to hide one player, use Settings → Advanced → Activity (Share the music you're listening to, Your players). These choices stay on your computer.
 
+**Voice and video**
+
+- Zoom into a screen share or webcam: hold Ctrl and scroll over the stream, then drag to look around, as in the picture viewer. It works in the grid, focus view, full screen and the pop-out window; scroll back out to return to normal.
+
 ### Fixed
 
 **Login & connection**
