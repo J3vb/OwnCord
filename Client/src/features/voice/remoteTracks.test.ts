@@ -87,6 +87,10 @@ describe("RemoteTracks", () => {
           mimeType: "video/VP8",
           packetsLost: 1,
           packetsReceived: 999,
+          framesDropped: 4,
+          framesReceived: 604,
+          decoderImplementation: "ExternalDecoder",
+          jitterBufferDelay: 12.5,
         })),
       };
       const tracks = new RemoteTracks(() => roomWith("user-7:abc", "screen_share", track));
@@ -100,6 +104,10 @@ describe("RemoteTracks", () => {
         codec: "video/VP8",
         packetsLost: 1,
         packetsReceived: 999,
+        framesDropped: 4,
+        framesReceived: 604,
+        decoderImplementation: "ExternalDecoder",
+        jitterBufferDelay: 12.5,
       });
     });
 

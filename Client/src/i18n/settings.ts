@@ -373,8 +373,20 @@ export const settingsText = defineCatalog("settings", {
   "logs.openFolder": "Open Log Folder",
   "logs.openFolderFailed": "Could not open the log folder: {error}",
   "logs.exportFailed": "Export failed: {error}",
+  "logs.shareTesting": "Screen share testing",
+  "logs.shareRecord": "Record screen-share details",
+  "logs.shareRecordDesc":
+    "Keeps the last 3 minutes of screen-share stats on this computer. They go into the support bundle. Nothing is uploaded.",
+  "logs.shareMode": "Test mode",
+  "logs.shareModeDesc": "For testing only. Takes effect the next time you share.",
+  "logs.shareMode.legacy": "Normal (default)",
+  "logs.shareMode.detail-balanced": "Sharp text, smooth fallback",
+  "logs.shareMode.detail-framerate": "Sharp text, keep frame rate",
+  "logs.shareMode.motion-resolution": "Smooth motion, keep resolution",
+  "logs.shareMode.motion-balanced": "Smooth motion, balanced",
+  "logs.shareMode.motion-framerate": "Smooth motion, keep frame rate",
   "logs.bundleReadme":
-    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nSettings are copied from a fixed allowlist and the OS keychain is not read, so\nno password, session token, recovery kit, recovery code or 2FA secret is taken\nfrom them. The log files are NOT redacted: they are exported exactly as written\nand can contain anything the app logged. Read them before sharing this bundle,\nand share it only with someone you trust.\n",
+    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  share-diagnostics.json the recent screen-share stats (only when Record\n                         screen-share details was on and a share was recorded)\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nSettings are copied from a fixed allowlist and the OS keychain is not read, so\nno password, session token, recovery kit, recovery code or 2FA secret is taken\nfrom them. The log files are NOT redacted: they are exported exactly as written\nand can contain anything the app logged. Read them before sharing this bundle,\nand share it only with someone you trust.\n",
 
   "diagnostics.short.connection": "Server",
   "diagnostics.short.authentication": "Sign-in",

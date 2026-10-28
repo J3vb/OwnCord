@@ -1126,6 +1126,39 @@ describe("LiveKitSession", () => {
       expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
     });
 
+    it("records the share timeline while enabled and keeps it after leaving (plan 2b)", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "shareDiagnosticsV2" ? true : defaultVal,
+      );
+      try {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+        const sharePublication = {
+          track: {
+            mediaStreamTrack: {},
+            getSenderStats: async () => [{ framesPerSecond: 30, frameWidth: 1280 }],
+          },
+        };
+        mockRoom.localParticipant.getTrackPublication.mockImplementation((source: string) =>
+          source === "screenShare" ? sharePublication : undefined,
+        );
+        expect(session.getShareDiagnostics()).toBeNull();
+        await vi.advanceTimersByTimeAsync(1000);
+        const recorded = session.getShareDiagnostics();
+        expect(recorded?.samples).toHaveLength(1);
+        expect(recorded?.samples[0]?.sender).toMatchObject({ sentFps: 30, width: 1280 });
+        expect(session.getSessionDebugInfo().screenShareTimeline).toMatchObject({ samples: 1 });
+
+        session.leaveVoice(false);
+        await vi.advanceTimersByTimeAsync(3000);
+        // Polling stopped, but the timeline is still there for the bundle.
+        expect(session.getShareDiagnostics()?.samples).toHaveLength(1);
+      } finally {
+        mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+      }
+    });
+
     it("drops a sender stats read that outlived its share", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
