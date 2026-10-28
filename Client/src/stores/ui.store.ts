@@ -5,6 +5,7 @@
 
 import { createStore } from "@lib/store";
 import { registerSessionReset } from "@lib/sessionRegistry";
+import { loadStoredJson, saveStoredJson } from "@lib/preferences";
 import type { ContentViewId } from "../features/navigation/destinations";
 
 export interface UiState {
@@ -146,32 +147,22 @@ let currentServerHost: string | null = null;
  *  and set them in the store. */
 export function loadCollapsedCategories(serverHost: string): void {
   currentServerHost = serverHost;
-  try {
-    const raw = localStorage.getItem(COLLAPSED_KEY_PREFIX + serverHost);
-    if (raw === null) {
-      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
-      return;
-    }
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed) || !parsed.every((s) => typeof s === "string")) {
-      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
-      return;
-    }
-    const loaded: ReadonlySet<string> = new Set(parsed);
-    uiStore.setState((prev) => ({ ...prev, collapsedCategories: loaded }));
-  } catch {
-    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
-  }
+  const loaded: ReadonlySet<string> = loadStoredJson(
+    COLLAPSED_KEY_PREFIX + serverHost,
+    (v) =>
+      Array.isArray(v) && v.every((s) => typeof s === "string")
+        ? new Set<string>(v)
+        : new Set<string>(),
+    new Set<string>(),
+  );
+  uiStore.setState((prev) => ({ ...prev, collapsedCategories: loaded }));
 }
 
 /** Save collapsed categories to localStorage for the current server host. */
 function saveCollapsedCategories(categories: ReadonlySet<string>): void {
   if (currentServerHost === null) return;
-  try {
-    localStorage.setItem(COLLAPSED_KEY_PREFIX + currentServerHost, JSON.stringify([...categories]));
-  } catch {
-    // localStorage may be unavailable or full — silently ignore
-  }
+  // Storage unavailable or full: the state still applies for this session.
+  saveStoredJson(COLLAPSED_KEY_PREFIX + currentServerHost, [...categories]);
 }
 
 /** Toggle a category's collapsed state. Persists to localStorage for the current server. */

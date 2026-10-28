@@ -5,6 +5,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { readStored, writeStored } from "@lib/preferences";
 import { createElement, appendChildren } from "@lib/dom";
 import { createMemberList } from "@components/MemberList";
 import { buildVoiceModOptions } from "@components/ChannelSidebar";
@@ -93,7 +94,7 @@ export function createSidebarMemberSection(
   }
 
   // Restore saved height
-  const savedHeight = localStorage.getItem(LS_KEY_HEIGHT);
+  const savedHeight = readStored(LS_KEY_HEIGHT);
   if (savedHeight !== null) {
     applyMemberHeight(`${savedHeight}px`);
   }
@@ -140,12 +141,9 @@ export function createSidebarMemberSection(
       if (!wasDragging || pendingHeight === null) return;
       const height = pendingHeight;
       pendingHeight = null;
-      try {
-        localStorage.setItem(LS_KEY_HEIGHT, String(height));
-      } catch {
-        // Storage unavailable or full: the height still applies for this
-        // session, it just is not remembered.
-      }
+      // Storage unavailable or full: the height still applies for this
+      // session, it just is not remembered.
+      writeStored(LS_KEY_HEIGHT, String(height));
     },
     { signal: resizeOwner.signal },
   );
@@ -155,7 +153,7 @@ export function createSidebarMemberSection(
   });
 
   // --- Collapse state ---
-  const savedCollapsed = localStorage.getItem(LS_KEY_COLLAPSED);
+  const savedCollapsed = readStored(LS_KEY_COLLAPSED);
   let membersCollapsed = savedCollapsed === "true";
   const memberContent = createElement("div", { class: "sidebar-members-content" });
 
@@ -167,7 +165,7 @@ export function createSidebarMemberSection(
     if (membersCollapsed) {
       applyMemberHeight("auto");
     } else {
-      const h = localStorage.getItem(LS_KEY_HEIGHT);
+      const h = readStored(LS_KEY_HEIGHT);
       applyMemberHeight(h !== null ? `${h}px` : null);
     }
   }
@@ -177,7 +175,7 @@ export function createSidebarMemberSection(
 
   memberHeader.addEventListener("click", () => {
     membersCollapsed = !membersCollapsed;
-    localStorage.setItem(LS_KEY_COLLAPSED, String(membersCollapsed));
+    writeStored(LS_KEY_COLLAPSED, String(membersCollapsed));
     applyMembersCollapsed();
   });
 

@@ -311,3 +311,31 @@ describe("system theme", () => {
     expect(getActiveThemeName()).toBe("neon-glow");
   });
 });
+
+describe("themes with unusable storage", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  function blockStorage(): void {
+    const blocked = (): never => {
+      throw new DOMException("storage blocked", "SecurityError");
+    };
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(blocked);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(blocked);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(blocked);
+  }
+
+  it("reads the default theme instead of throwing at startup", () => {
+    blockStorage();
+    expect(getActiveThemeName()).toBe("neon-glow");
+  });
+
+  it("still paints a chosen theme when it cannot be remembered", () => {
+    blockStorage();
+    expect(() => applyTheme("midnight")).not.toThrow();
+    expect(document.body.classList.contains("theme-midnight")).toBe(true);
+    expect(() => applyThemeChoice("system")).not.toThrow();
+  });
+});

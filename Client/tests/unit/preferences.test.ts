@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { loadPref, savePref, STORAGE_PREFIX } from "../../src/lib/preferences";
+import {
+  loadPref,
+  loadStoredJson,
+  readStored,
+  removeStored,
+  savePref,
+  saveStoredJson,
+  storedKeys,
+  STORAGE_PREFIX,
+  writeStored,
+} from "../../src/lib/preferences";
 import { expectConsole } from "../helpers/console";
 
 /**
@@ -164,6 +174,52 @@ describe("preferences", () => {
     it("round-trips a boolean", () => {
       savePref("bool", false);
       expect(loadPref("bool", true)).toBe(false);
+    });
+  });
+
+  // ── guarded raw access ───────────────────────────────────
+
+  describe("guarded raw access", () => {
+    it("round-trips raw strings and JSON under full keys", () => {
+      expect(writeStored("owncord:raw", "v")).toBe(true);
+      expect(readStored("owncord:raw")).toBe("v");
+      expect(saveStoredJson("owncord:list", [1, 2])).toBe(true);
+      expect(loadStoredJson("owncord:list", (v) => (Array.isArray(v) ? v : []), [])).toEqual([
+        1, 2,
+      ]);
+      expect(storedKeys().sort()).toEqual(["owncord:list", "owncord:raw"]);
+      expect(removeStored("owncord:raw")).toBe(true);
+      expect(readStored("owncord:raw")).toBeNull();
+    });
+
+    it("falls back when the JSON is corrupt or the parser rejects it", () => {
+      localStorage.setItem("owncord:bad", "{not json");
+      expect(loadStoredJson("owncord:bad", () => "parsed", "fallback")).toBe("fallback");
+      localStorage.setItem("owncord:wrong", "42");
+      const reject = (): string => {
+        throw new Error("wrong shape");
+      };
+      expect(loadStoredJson("owncord:wrong", reject, "fallback")).toBe("fallback");
+    });
+
+    it("never throws when storage is blocked", () => {
+      const blocked = (): never => {
+        throw new DOMException("storage blocked", "SecurityError");
+      };
+      const spies = [
+        vi.spyOn(Storage.prototype, "getItem").mockImplementation(blocked),
+        vi.spyOn(Storage.prototype, "setItem").mockImplementation(blocked),
+        vi.spyOn(Storage.prototype, "removeItem").mockImplementation(blocked),
+      ];
+      try {
+        expect(readStored("k")).toBeNull();
+        expect(writeStored("k", "v")).toBe(false);
+        expect(removeStored("k")).toBe(false);
+        expect(saveStoredJson("k", [1])).toBe(false);
+        expect(loadStoredJson("k", () => "parsed", "fallback")).toBe("fallback");
+      } finally {
+        for (const spy of spies) spy.mockRestore();
+      }
     });
   });
 });

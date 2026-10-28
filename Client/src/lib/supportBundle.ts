@@ -16,6 +16,7 @@
  */
 import type { Platform } from "../platform/contracts";
 import { settingsText } from "../i18n/settings";
+import { readStored } from "./preferences";
 
 export const SETTINGS_PREFIX = "owncord:settings:";
 
@@ -281,7 +282,7 @@ export async function exportSupportBundle(
       userAgent: navigator.userAgent,
     },
     profiles: snapshot?.profiles,
-    storage: localStorage,
+    storage: { getItem: readStored },
     voiceDiagnostics,
     now,
   });

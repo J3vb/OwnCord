@@ -18,6 +18,7 @@ import { ApiClientError, type ApiClient, type UserNote } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { setOwnedTimeout } from "@lib/dom";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
+import { readStored, removeStored, writeStored } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { userNotesEnabled } from "@lib/serverCapabilities";
 
@@ -89,50 +90,35 @@ function scopedNoteKey(userId: number, host: string): string {
 
 /** The note kept on this device, "" when none or storage is unusable. */
 export function loadLocalNote(host: string, userId: number): string {
-  try {
-    if (host === "") return localStorage.getItem(legacyNoteKey(userId)) ?? "";
+  if (host === "") return readStored(legacyNoteKey(userId)) ?? "";
 
-    const scoped = localStorage.getItem(scopedNoteKey(userId, host));
-    if (scoped !== null) return scoped;
+  const scoped = readStored(scopedNoteKey(userId, host));
+  if (scoped !== null) return scoped;
 
-    // Miss at the scoped key: migrate the pre-scoping legacy note through
-    // `migrateLegacyValue`, which moves it under the key of the FIRST host
-    // opened post-upgrade and no other. User ids are per-server autoincrement
-    // integers, so a legacy note left readable would show server A's private
-    // note about user N for the unrelated user N on every other server
-    // (OC-0329) — the same shape channel-mutes.ts fixed for OC-0288.
-    return migrateLegacyValue(legacyNoteKey(userId), scopedNoteKey(userId, host)) ?? "";
-  } catch {
-    return "";
-  }
+  // Miss at the scoped key: migrate the pre-scoping legacy note through
+  // `migrateLegacyValue`, which moves it under the key of the FIRST host
+  // opened post-upgrade and no other. User ids are per-server autoincrement
+  // integers, so a legacy note left readable would show server A's private
+  // note about user N for the unrelated user N on every other server
+  // (OC-0329) — the same shape channel-mutes.ts fixed for OC-0288.
+  return migrateLegacyValue(legacyNoteKey(userId), scopedNoteKey(userId, host)) ?? "";
 }
 
 /** Keep `text` on this device. */
 export function saveLocalNote(host: string, userId: number, text: string): void {
-  try {
-    const key = host !== "" ? scopedNoteKey(userId, host) : legacyNoteKey(userId);
-    localStorage.setItem(key, text);
-  } catch {
-    // localStorage may be unavailable or full -- silently ignore
-  }
+  // Storage unavailable or full: the note is simply not kept.
+  writeStored(host !== "" ? scopedNoteKey(userId, host) : legacyNoteKey(userId), text);
 }
 
 /** Move a local note the server overrides out of the upload path, keeping its text. */
 function keepLocalNote(host: string, userId: number, text: string): void {
-  try {
-    localStorage.setItem(`${KEPT_NOTE_PREFIX}${host}:${userId}`, text);
-  } catch {
-    return;
-  }
+  if (!writeStored(`${KEPT_NOTE_PREFIX}${host}:${userId}`, text)) return;
   removeLocalNote(host, userId);
 }
 
 function removeLocalNote(host: string, userId: number): void {
-  try {
-    localStorage.removeItem(host !== "" ? scopedNoteKey(userId, host) : legacyNoteKey(userId));
-  } catch {
-    // Nothing to do: the note is already on the server.
-  }
+  // Storage unusable: nothing to do, the note is already on the server.
+  removeStored(host !== "" ? scopedNoteKey(userId, host) : legacyNoteKey(userId));
 }
 
 // ---------------------------------------------------------------------------

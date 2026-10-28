@@ -33,7 +33,7 @@
  * DM; muting that DM still does, through the mute gate.
  */
 
-import { loadPref, savePref } from "./preferences";
+import { loadPref, savePref, storedKeys } from "./preferences";
 import { getChannelMutesHost } from "./channel-mutes";
 
 export const DEFAULT_NOTIFICATION_LEVEL = "mentions" as const;
@@ -89,11 +89,7 @@ export function settleNotificationLevelDefault(): void {
 }
 
 function hasOwnCordState(): boolean {
-  try {
-    return Object.keys(localStorage).some((key) => key.startsWith("owncord:"));
-  } catch {
-    return false;
-  }
+  return storedKeys().some((key) => key.startsWith("owncord:"));
 }
 
 export function setGlobalNotificationLevel(level: NotificationLevel): void {
