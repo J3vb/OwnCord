@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { repoRoot } from "../helpers/repoRoot";
 
 const { mockFetch } = vi.hoisted(() => ({ mockFetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
@@ -12,7 +13,7 @@ vi.mock("../../src/lib/httpProxy", () => ({
 }));
 import { createApiClient } from "../../src/lib/api";
 
-const apiDocs = readFileSync(path.resolve(__dirname, "../../../docs/api.md"), "utf8");
+const apiDocs = readFileSync(path.join(repoRoot, "docs/api.md"), "utf8");
 const routes = new Set(
   [...apiDocs.matchAll(/^\|\s+(GET|PATCH|POST|PUT|DELETE)\s+\|\s+`([^`]+)`\s+\|/gm)].map(
     (match) => `${match[1]} ${match[2]}`,

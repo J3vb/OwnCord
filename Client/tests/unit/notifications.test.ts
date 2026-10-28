@@ -31,7 +31,8 @@ const { testPrefs } = vi.hoisted(() => ({
 }));
 
 // Mock the preference store shared by the settings panel and lib modules
-vi.mock("../../src/lib/preferences", () => ({
+vi.mock("../../src/lib/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),

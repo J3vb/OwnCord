@@ -8,8 +8,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { JSDOM } from "jsdom";
+import { repoRoot } from "./repoRoot";
 
-const ADMIN_STATIC = path.resolve(__dirname, "../../../Server/admin/static");
+const ADMIN_STATIC = path.join(repoRoot, "Server/admin/static");
 
 function asset(href: string): string {
   if (!href.startsWith("/admin/")) throw new Error(`unexpected admin asset path ${href}`);

@@ -15,6 +15,7 @@ import {
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
 import { appendToggleRows, createToggle } from "./helpers";
+import { removeStored, storedKeys } from "@lib/preferences";
 import { buildGameActivityRows } from "./GameActivityRows";
 import { buildMusicActivityRows } from "./MusicActivityRows";
 import { settingsText as t } from "../../i18n/settings";
@@ -496,14 +497,7 @@ function clearLocalStoragePreservingUserData(): void {
     "owncord:theme:custom:",
     "owncord:settings:notificationLevel",
   ];
-  const keysToRemove: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (key !== null && !PRESERVE_PREFIXES.some((p) => key.startsWith(p))) {
-      keysToRemove.push(key);
-    }
-  }
-  for (const key of keysToRemove) {
-    localStorage.removeItem(key);
+  for (const key of storedKeys()) {
+    if (!PRESERVE_PREFIXES.some((p) => key.startsWith(p))) removeStored(key);
   }
 }

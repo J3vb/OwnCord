@@ -18,7 +18,7 @@
  * and `notificationSounds` live in localStorage next to it.
  */
 
-import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
+import { loadPref, readStored, removeStored, savePref, STORAGE_PREFIX } from "./preferences";
 import { registerSessionReset } from "./sessionRegistry";
 
 /**
@@ -130,7 +130,7 @@ function parseMuted(raw: unknown): Map<number, number | null> {
  *  "present but happens to equal the fallback". An empty saved mute list is
  *  real data (the user unmuted everything) and must not be treated as a miss. */
 function keyExists(key: string): boolean {
-  return localStorage.getItem(STORAGE_PREFIX + key) !== null;
+  return readStored(STORAGE_PREFIX + key) !== null;
 }
 
 /** The stored entries (`null` = until turned off), expired ones included.
@@ -163,7 +163,7 @@ function readMuted(): ReadonlyMap<number, number | null> {
   if (keyExists(MUTED_KEY)) {
     const legacy = parseMuted(loadPref<unknown[]>(MUTED_KEY, []));
     writeMuted(legacy);
-    localStorage.removeItem(STORAGE_PREFIX + MUTED_KEY);
+    removeStored(STORAGE_PREFIX + MUTED_KEY);
     return legacy;
   }
 

@@ -5,6 +5,7 @@
  */
 
 import { Disposable } from "./disposable";
+import { readStored } from "./preferences";
 
 let owner: Disposable | null = null;
 
@@ -17,7 +18,7 @@ export const SYNC_OS_MOTION_DEFAULT = true;
 
 /** The user's manual reducedMotion preference, stored by savePref as JSON. */
 function manualPreference(): boolean {
-  const raw = localStorage.getItem("owncord:settings:reducedMotion");
+  const raw = readStored("owncord:settings:reducedMotion");
   if (raw === null) return false;
   try {
     return JSON.parse(raw) === true;
