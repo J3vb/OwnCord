@@ -294,5 +294,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		if !h.isConnected(c.userID) {
 			h.QueuePresence(c.userID, db.StatusOffline, nil)
 		}
+	} else if !replaced {
+		h.rebroadcastAfterDeviceLeft(c)
 	}
 }

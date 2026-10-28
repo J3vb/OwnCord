@@ -14,6 +14,7 @@ import type { RecoveryKitStatus } from "@lib/api";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { accountText as t } from "../../i18n/account";
 import { createStatusRow, setStatusIcon, type StatusKind } from "../../features/settings/status";
+import { copyText } from "@lib/clipboard";
 
 const MUTED = "color:var(--text-muted);font-size:13px;margin-bottom:12px";
 // --text-danger is the qualified error-text token; --red (the fill) reads
@@ -84,10 +85,9 @@ export function buildShownOnce(
       // left to copy, and no closure keeps the secret alive.
       const text = code.textContent ?? "";
       if (text === "") return;
-      void navigator.clipboard
-        .writeText(text)
-        .then(() => restore(t("recovery.copied")))
-        .catch(() => restore(t("recovery.copyFailed")));
+      void copyText(text).then((ok) =>
+        restore(ok ? t("recovery.copied") : t("recovery.copyFailed")),
+      );
     },
     { signal },
   );
