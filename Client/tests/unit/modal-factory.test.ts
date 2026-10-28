@@ -339,6 +339,24 @@ describe("createPromptModal", () => {
     expect(onSubmit).toHaveBeenCalledExactlyOnceWith("");
   });
 
+  it("Enter that commits an IME candidate does not submit", () => {
+    const onSubmit = vi.fn();
+    createPromptModal({ title: "t", onSubmit }, container);
+
+    const input = getInput();
+    input.value = "half";
+    const ev = new KeyboardEvent("keydown", {
+      key: "Enter",
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(ev);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
   it("Enter submits and prevents the default", () => {
     const onSubmit = vi.fn();
     createPromptModal({ title: "t", onSubmit }, container);

@@ -2,6 +2,7 @@
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal } from "@lib/modalFactory";
@@ -564,7 +565,7 @@ export function createServerPanel(
     hostAddrInput.addEventListener(
       "keydown",
       (e) => {
-        if (e.key === "Enter") handleSave();
+        if (e.key === "Enter" && !isImeCommit(e)) handleSave();
       },
       { signal: modalOwner.signal },
     );

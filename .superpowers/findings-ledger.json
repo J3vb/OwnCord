@@ -1,5 +1,5 @@
 {
-  "nextId": 521,
+  "nextId": 522,
   "findings": [
     {
       "id": "OC-0001",
@@ -12041,6 +12041,29 @@
       "lens": "client-state",
       "finder": "owner",
       "fixedDate": "2026-10-27"
+    },
+    {
+      "id": "OC-0521",
+      "title": "Enter that commits an input-method candidate submitted half-typed text in 13 fields",
+      "file": "Client/src/features/moderation/BanDialog.ts",
+      "line": 320,
+      "severity": "medium",
+      "why": "A Chinese, Japanese or Korean input method commits its candidate with Enter, and the keydown arrives with isComposing true (or keyCode 229). Thirteen Enter handlers on text fields ignored that and submitted the raw composition: login code, server address, quick switcher, message search, nickname, ban reason, purge count, both game activity names, both custom status fields, the prompt dialog and sticker search.",
+      "repro": "With a Japanese IME on, open the ban dialog, type a reason in kana and press Enter to pick a kanji candidate: the ban is sent with the half-typed reason.",
+      "evidence": "Maintainability scout C2 (docs/plans/developer-maintainability-execution-2026-10-24.md), re-counted by Client/tests/unit/ime-enter-guard.test.ts: 13 unguarded handlers on dev 91d7e54a.",
+      "suggestedFix": "One isImeCommit(e) helper; every Enter handler on a text field returns early on it; a structural test keeps new ones guarded.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/ime-enter-guard.test.ts plus one isComposing Enter test per field (12 tests in 12 files)",
+        "revertProof": "fail (12 of 12 new tests fail with isImeCommit returning false)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-27",
+      "hunt": "maintainability-scout-2026-10-27",
+      "lens": "client-state",
+      "finder": "claude",
+      "fixedDate": "2026-10-28"
     }
   ]
 }

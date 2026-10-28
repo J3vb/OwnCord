@@ -8,6 +8,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
@@ -164,7 +165,7 @@ export function createCategoryNameModal(options: CategoryNameModalOptions): Moun
     input.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+        if (e.key !== "Enter" || isImeCommit(e)) return;
         if (saveBtn.hasAttribute("disabled")) return;
         e.preventDefault();
         void submit();

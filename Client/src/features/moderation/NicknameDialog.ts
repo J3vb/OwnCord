@@ -18,6 +18,7 @@
  */
 
 import { errorText } from "@lib/api";
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText } from "@lib/dom";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import {
@@ -179,7 +180,7 @@ export function openNicknameDialog(options: NicknameDialogOptions): ModalInstanc
   reset.addEventListener("click", () => void send(null));
   save.addEventListener("click", submitText);
   input.addEventListener("keydown", (e: KeyboardEvent) => {
-    if (e.key !== "Enter") return;
+    if (e.key !== "Enter" || isImeCommit(e)) return;
     e.preventDefault();
     submitText();
   });

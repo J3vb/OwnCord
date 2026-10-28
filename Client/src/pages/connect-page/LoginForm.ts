@@ -2,6 +2,7 @@
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
+import { isImeCommit } from "@lib/ime";
 import { createIcon } from "@lib/icons";
 import { ApiClientError, TransportError, errorText } from "@lib/api";
 import { normaliseInviteCode } from "@lib/deep-link";
@@ -695,7 +696,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     totpInput.addEventListener(
       "keydown",
       (e) => {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !isImeCommit(e)) {
           e.preventDefault();
           void handleTotpSubmit();
         }

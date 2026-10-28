@@ -126,6 +126,23 @@ describe("SelfProfileCard from the user bar", () => {
     expect(document.activeElement).toBe(trigger());
   });
 
+  it("Enter that commits an IME candidate neither commits nor closes", () => {
+    trigger().click();
+    const input = q<HTMLInputElement>("[data-testid='spc-custom-input']")!;
+    input.value = "half";
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(card()).not.toBeNull();
+    expect(input.value).toBe("half");
+  });
+
   it("the custom status can be set (trimmed, capped at 128) and cleared", () => {
     trigger().click();
     const input = q<HTMLInputElement>("[data-testid='spc-custom-input']")!;

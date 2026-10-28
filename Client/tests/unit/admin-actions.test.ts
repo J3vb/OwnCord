@@ -470,6 +470,35 @@ describe("AdminActions", () => {
       result.destroy();
     });
 
+    it("purge ignores an Enter in the count that commits an IME candidate", async () => {
+      const onPurge = vi.fn(async () => {});
+      const { result } = makeMenu({ onPurge });
+
+      (
+        result.element.querySelector('[data-testid="ctx-purge-messages"]') as HTMLDivElement
+      ).click();
+      const input = result.element.querySelector(
+        '[data-testid="purge-count-input"]',
+      ) as HTMLInputElement;
+      input.value = "2";
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      expect(onPurge).not.toHaveBeenCalled();
+
+      input.value = "20";
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await vi.waitFor(() => {
+        expect(onPurge).toHaveBeenCalledExactlyOnceWith(20);
+      });
+      result.destroy();
+    });
+
     it("purge falls back to the default count for a non-numeric entry", async () => {
       const onPurge = vi.fn(async () => {});
       const { result } = makeMenu({ onPurge });

@@ -5,6 +5,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -204,6 +205,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
         // Keystrokes inside the input must not reach the dropdown's own
         // Enter/Escape handling, which would close the menu mid-edit.
         e.stopPropagation();
+        if (isImeCommit(e)) return;
         if (e.key === "Enter") {
           e.preventDefault();
           // A refused (over-limit) status keeps the menu open with the hint.
