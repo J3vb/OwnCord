@@ -418,9 +418,12 @@ export function openPollComposer(opts: PollComposerOptions): void {
         closePicker();
         owner.destroy();
       },
-      // Escape and the backdrop are handled below, so they can wait out a post.
+      // Escape closes the open picker first, then waits out a post like the backdrop.
       closeOnBackdrop: false,
-      closeOnEscape: false,
+      onEscape: () => {
+        if (picker !== null) closePicker();
+        else close();
+      },
       className: "poll-composer",
       overlayAttrs: { "data-testid": "poll-composer" },
       ariaLabelledBy: "poll-title",
@@ -434,15 +437,6 @@ export function openPollComposer(opts: PollComposerOptions): void {
   const close = (): void => {
     if (!busy) modal?.destroy();
   };
-  document.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.key !== "Escape") return;
-      if (picker !== null) closePicker();
-      else close();
-    },
-    { signal },
-  );
   closeOnBackdropClick(modal.overlay, () => close(), signal);
   closeBtn.addEventListener("click", close, { signal });
   cancelBtn.addEventListener("click", close, { signal });

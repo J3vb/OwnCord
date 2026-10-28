@@ -266,16 +266,13 @@ Scout candidate C2 in the execution plan. Based on `origin/dev` `91d7e54a`. Evid
 
 ### Baseline count
 
-Counted with the new structural test, `Client/tests/unit/ime-enter-guard.test.ts`, run against unchanged `dev`. It reads every function in `Client/src` that compares a key to `"Enter"` and skips Enter-or-Space button activation.
+Counted with the new structural test, `Client/tests/unit/ime-escape-guard.test.ts`, run against unchanged `dev`. It reads every function in `Client/src` that compares `.key` or `.code` to `"Escape"` and counts one whose Escape branch no `isImeCommit` call covers (a guard inside an Enter-only branch does not count). The scout's 44 came from a coarser scan that took any `isImeCommit` or `isComposing` in the function as a guard; the scoped scan also finds the composer's reply-cancel Escape (guarded only for Enter), three handlers with an inline `isComposing` check, and three key-capture handlers on `.code`.
 
-| Measure                                                  | Scout (2026-10-27) | Re-count before | After                     |
-| -------------------------------------------------------- | ------------------ | --------------- | ------------------------- |
-| Enter handlers on a text field with no composition guard | 9                  | 13              | 0, held by the test       |
-| Handlers with an inline `isComposing` guard              | 7 files            | 8 (7 files)     | 0; all call `isImeCommit` |
-| Inline `e.isComposing \|\| e.keyCode === 229` copies     | 7 files            | 8 in 7 files    | 0 outside `lib/ime.ts`    |
-| Exempt Enter handlers (no text field)                    | n/a                | n/a             | 1: `miniPlayer.ts`        |
-
-The scout missed four unguarded fields: the custom status in `StatusPicker.ts` and `SelfProfileCard.ts`, the prompt input in `lib/modalFactory.ts`, and the sticker search in `StickerPicker.ts`. All 13 are fixed here, since the defect and the fix are the same. `GlobalKeybinds.ts`'s Ctrl+Enter ring answer checked `isComposing` only; it now uses the helper, which adds the `keyCode` 229 case.
+| Measure                                                | Before | After                                 |
+| ------------------------------------------------------ | ------ | ------------------------------------- |
+| Escape handlers with no composition guard              | 51     | 0, held by the test                   |
+| `closeOnEscape: false` dialogs with their own listener | 7      | 0, held by the test                   |
+| Exempt Escape handlers                                 | n/a    | 3 key-capture buttons (no text field) |
 
 ### What changed
 
@@ -295,7 +292,7 @@ The scout missed four unguarded fields: the custom status in `StatusPicker.ts` a
 
 ### Not done
 
-Escape during composition still closes `createModal` dialogs and the self profile card, because their Escape listeners are on `document`. That is a different key and a different fix (the dialog helper), so it is left for a follow-up and not counted here.
+Escape during composition still closed `createModal` dialogs and the self profile card, because their Escape listeners are on `document`. That was left for MX-11 (below).
 
 ### Verdict against the stop rules
 
@@ -452,3 +449,24 @@ Before the change, a press inside and a release on the backdrop closed one dialo
 ### Verdict against the stop rules
 
 No gate was weakened and no existing assertion changed. The count went from 15 files to 0 with a test that holds it. The change is kept.
+
+## MX-11 IME Escape guard (2026-10-28)
+
+Follow-up to MX-5. Based on `origin/dev`. Evidence level: **executed** (unit tests in jsdom; no input method was run in the app).
+
+### Baseline count
+
+Counted with the new structural test, `Client/tests/unit/ime-escape-guard.test.ts`, run against unchanged `dev`. It reads every function in `Client/src` that compares a key to `"Escape"`.
+
+| Measure                                                | Before | After               |
+| ------------------------------------------------------ | ------ | ------------------- |
+| Escape handlers with no composition guard              | 44     | 0, held by the test |
+| `closeOnEscape: false` dialogs with their own listener | 7      | 0, held by the test |
+| Exempt Escape handlers                                 | n/a    | 0                   |
+
+### What changed
+
+- `createModal`'s Escape listener returns early on `isImeCommit(e)` and gains an `onEscape` option (what Escape does instead of closing: a busy guard, an unsaved-changes prompt, a nested picker).
+- The seven dialogs that opted out of Escape and kept their own document listener (`CreateChannelModal`, `EditChannelModal`, `DeleteChannelModal`, `CategoryModals`, `InviteManager`, `ForwardPicker`, `PollComposer`) pass `onEscape` instead.
+- The other Escape handlers return early on the helper inside their Escape branch.
+- Composing-Escape tests for `createModal` and the seven dialogs.

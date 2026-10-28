@@ -16,6 +16,7 @@
  * the opener's CSP (HTML policy-container inheritance), so it runs under the
  * app's policy; tests/e2e/stream-popout.spec.ts checks that.
  */
+import { isImeCommit } from "@lib/ime";
 import { createElement } from "../../lib/dom";
 import { Disposable } from "../../lib/disposable";
 import { createIcon } from "../../lib/icons";
@@ -175,7 +176,7 @@ export function openPopout(opts: PopoutOptions): Popout | null {
   }
 
   function onKey(e: KeyboardEvent): void {
-    if (isFullscreenKey(e) || (e.key === "Escape" && fullscreen)) {
+    if (isFullscreenKey(e) || (e.key === "Escape" && !isImeCommit(e) && fullscreen)) {
       e.preventDefault();
       toggleFullscreen();
     }

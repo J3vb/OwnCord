@@ -340,7 +340,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   // closes it.
   let escapeTaken = false;
   const onEscapeCapture = (e: KeyboardEvent): void => {
-    if (e.key !== "Escape") return;
+    if (e.key !== "Escape" || isImeCommit(e)) return;
     escapeTaken = handlers.isSuspended?.() === true || dialogOpen();
   };
   // Ctrl+Enter answers a ringing call. It is taken in the capture phase,
@@ -354,8 +354,8 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     runGlobal(e, "accept-ring", () => handlers.onAcceptRing?.());
   };
   const onEscape = (e: KeyboardEvent): void => {
-    if (e.key !== "Escape" || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (escapeTaken || e.defaultPrevented || e.isComposing || e.repeat) return;
+    if (e.key !== "Escape" || isImeCommit(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (escapeTaken || e.defaultPrevented || e.repeat) return;
     if (isTypingTarget(e.target) && !isComposer(e.target)) return;
     // Escape in the thread panel's composer must not mark the parent read.
     if (inThreadPanel(e.target)) return;

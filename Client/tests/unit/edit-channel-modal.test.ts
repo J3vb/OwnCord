@@ -697,6 +697,19 @@ describe("EditChannelModal", () => {
       modal.destroy?.();
     });
 
+    it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () => {
+      const onClose = vi.fn();
+      const { modal } = makeModal({ onClose });
+
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+      );
+      expect(onClose).not.toHaveBeenCalled();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      modal.destroy?.();
+    });
+
     it("ignores Escape after destroy", () => {
       const onClose = vi.fn();
       const { modal } = makeModal({ onClose });

@@ -210,7 +210,7 @@ export function buildGamesSection(signal: AbortSignal): HTMLElement[] {
           editing = null;
           renderList();
           focusRename(gameKey(game.name));
-        } else if (e.key === "Escape") {
+        } else if (e.key === "Escape" && !isImeCommit(e)) {
           e.preventDefault();
           // The settings overlay closes on Escape; this one only ends the edit.
           e.stopPropagation();
@@ -319,7 +319,7 @@ export function buildGamesSection(signal: AbortSignal): HTMLElement[] {
     filter.addEventListener(
       "keydown",
       (e) => {
-        if (e.key === "Escape") {
+        if (e.key === "Escape" && !isImeCommit(e)) {
           e.preventDefault();
           e.stopPropagation();
           closePicker();
@@ -372,7 +372,7 @@ export function buildGamesSection(signal: AbortSignal): HTMLElement[] {
           e.preventDefault();
           e.stopPropagation();
           save();
-        } else if (e.key === "Escape") {
+        } else if (e.key === "Escape" && !isImeCommit(e)) {
           e.preventDefault();
           e.stopPropagation();
           closePicker();

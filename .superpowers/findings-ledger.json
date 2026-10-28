@@ -1,5 +1,5 @@
 {
-  "nextId": 525,
+  "nextId": 526,
   "findings": [
     {
       "id": "OC-0001",
@@ -12125,6 +12125,29 @@
         "commit": "pending",
         "revertProof": "fail (all 18 new drag-select tests fail on dev fd5fb934)",
         "test": "Client/tests/unit/{search-overlay,quick-switcher,settings-overlay,create-channel-modal,edit-channel-modal,delete-channel-modal,category-modals,invite-manager,poll-composer,forward-picker,cert-mismatch-modal,cert-first-use-modal,identity-mismatch-modal,lightbox-gallery,whats-new-dialog}.test.ts, Client/tests/unit/components/QuickSwitchOverlay.test.ts (stays open when a drag-select ends on the backdrop), Client/src/features/dialogBackdropDoor.test.ts"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-28",
+      "hunt": "maintainability-scout-2026-10-27",
+      "lens": "client-state",
+      "finder": "claude",
+      "fixedDate": "2026-10-28"
+    },
+    {
+      "id": "OC-0525",
+      "title": "Escape that cancels an input-method candidate also closed the dialog or popover and dropped the typed text",
+      "file": "Client/src/lib/modalFactory.ts",
+      "line": 148,
+      "severity": "medium",
+      "why": "A Chinese, Japanese or Korean input method cancels its candidate with Escape, and the keydown arrives with isComposing true (or keyCode 229). Forty-eight Escape handlers ignored that: every dialog built on createModal, seven dialogs with their own Escape listener, and the popovers, pickers, profile cards, overlays and menus that close on Escape. Escape closed them and the composition and any typed text were lost.",
+      "repro": "With a Japanese IME on, open the channel create dialog or the emoji picker search, type kana and press Escape to cancel the candidate: the dialog closes and the typed text is gone.",
+      "evidence": "Maintainability candidate MX-11, follow-up to MX-5 (OC-0522). Client/tests/unit/ime-escape-guard.test.ts counts 51 Escape handlers without a guard on dev, 3 of them exempt key captures.",
+      "suggestedFix": "Every Escape handler returns early on isImeCommit(e); createModal gains an onEscape option so the seven dialogs that kept their own listener use the shared one; a structural test keeps new handlers guarded and holds closeOnEscape: false at zero.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/ime-escape-guard.test.ts plus composing-Escape tests in modal-factory, create-channel-modal, edit-channel-modal, delete-channel-modal, category-modals, invite-manager, forward-picker and poll-composer",
+        "revertProof": "fail (removing the guard in createModal fails 7 tests: modal-factory, the structural test and four dialog tests; removing the composer guard fails its reply test)"
       },
       "confidence": "high",
       "status": "fixed",

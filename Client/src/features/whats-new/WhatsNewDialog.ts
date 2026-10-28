@@ -4,6 +4,7 @@
  * live on Settings › About, which the dialog links to.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "../../lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/a11y";
 import { closeOnBackdropClick } from "../../lib/modalFactory";
@@ -108,7 +109,7 @@ export function showWhatsNewDialog(
   document.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape" && !isImeCommit(e)) close();
     },
     { signal: disposable.signal },
   );

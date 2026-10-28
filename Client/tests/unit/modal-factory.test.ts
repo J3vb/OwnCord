@@ -109,6 +109,53 @@ describe("createModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("Escape that cancels an IME candidate does not close; a plain Escape after it does", () => {
+    const onClose = vi.fn();
+    createModal({ content: document.createElement("div"), onClose }, container);
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 229 }));
+    expect(onClose).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("onEscape runs instead of closing, and not while an IME composes", () => {
+    const onClose = vi.fn();
+    const onEscape = vi.fn();
+    const inst = createModal(
+      { content: document.createElement("div"), onClose, onEscape },
+      container,
+    );
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect(onEscape).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onEscape).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.contains(inst.overlay)).toBe(true);
+    inst.destroy();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("onEscape is ignored when closeOnEscape is false", () => {
+    const onEscape = vi.fn();
+    const inst = createModal(
+      { content: document.createElement("div"), closeOnEscape: false, onEscape },
+      container,
+    );
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onEscape).not.toHaveBeenCalled();
+    inst.destroy();
+  });
+
   it("close() removes from DOM", () => {
     const content = document.createElement("div");
     const inst = createModal({ content }, container);

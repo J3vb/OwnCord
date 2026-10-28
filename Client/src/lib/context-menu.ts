@@ -8,6 +8,7 @@
  * nested submenu.
  */
 
+import { isImeCommit } from "./ime";
 import { Disposable } from "./disposable";
 import { createElement, setOwnedTimeout } from "./dom";
 import { setRovingTabindex } from "./a11y";
@@ -194,7 +195,7 @@ export function enableMenuKeyboard(menu: HTMLElement, opts: MenuKeyboardOptions)
     (e: KeyboardEvent) => {
       // Escape closes the whole menu from anywhere inside it, submenu or
       // inline reveal form (the ban reason/duration fields) alike.
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !isImeCommit(e)) {
         e.preventDefault();
         e.stopPropagation();
         close();
