@@ -20,6 +20,7 @@ import { createElement } from "../../lib/dom";
 import { Disposable } from "../../lib/disposable";
 import { createIcon } from "../../lib/icons";
 import { syncVideoSurface } from "../../lib/videoSurface";
+import { bindVideoZoom } from "../../lib/zoomPan";
 import { voiceText } from "../../i18n/voice";
 
 /** How often to check whether the window was closed (the system's close
@@ -182,6 +183,10 @@ export function openPopout(opts: PopoutOptions): Popout | null {
   }
 
   setFullscreen(false);
+  // Ctrl + wheel and drag zoom the stream here as on its tile; the window
+  // opens unzoomed.
+  const zoom = new Disposable();
+  bindVideoZoom(root, zoom.signal);
   const popout = openPopoutWindow({
     title: opts.title,
     content: root,
@@ -198,9 +203,15 @@ export function openPopout(opts: PopoutOptions): Popout | null {
       doc.addEventListener("keydown", onKey, { signal });
       void opts.video.play()?.catch(() => {});
     },
-    onClosed: opts.onClosed,
+    onClosed: (byUser) => {
+      zoom.destroy();
+      opts.onClosed(byUser);
+    },
   });
-  if (popout === null) return null;
+  if (popout === null) {
+    zoom.destroy();
+    return null;
+  }
   label = popout.label;
   button.addEventListener("click", toggleFullscreen);
   root.addEventListener("dblclick", toggleFullscreen);
