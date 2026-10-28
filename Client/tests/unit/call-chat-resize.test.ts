@@ -135,4 +135,61 @@ describe("createCallChatResize", () => {
     resize.refit(900);
     expect(width()).toBe("");
   });
+
+  it("saves under the call chat width key and tags the handle for tests", () => {
+    resize = createCallChatResize(column);
+    resize.attach();
+    expect(handle()?.getAttribute("data-testid")).toBe("call-chat-resize");
+    handle()?.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+    expect(localStorage.getItem("owncord:settings:callChatWidth")).toBe("640");
+  });
+
+  it("a drag is capped by the column width measured when it starts", () => {
+    resize = createCallChatResize(column);
+    resize.attach();
+    const h = handle();
+    if (h === null) throw new Error("no handle");
+    h.setPointerCapture = vi.fn();
+    h.releasePointerCapture = vi.fn();
+    // The column shrank since attach and no refit has been reported.
+    column.getBoundingClientRect = () => ({ width: 800 }) as DOMRect;
+    pointer("pointerdown", 700);
+    pointer("pointermove", 0);
+    expect(width()).toBe("440px");
+  });
+
+  it("attach leaves a handle that is already in the column where it is", () => {
+    resize = createCallChatResize(column);
+    resize.attach();
+    const after = document.createElement("span");
+    column.appendChild(after);
+    resize.attach();
+    expect(column.firstElementChild).toBe(handle());
+    expect(column.lastElementChild).toBe(after);
+  });
+
+  it("destroy removes the handle and the width, and a later attach does nothing", () => {
+    resize = createCallChatResize(column);
+    resize.attach();
+    expect(width()).toBe("360px");
+    resize.destroy();
+    expect(handle()).toBeNull();
+    expect(width()).toBe("");
+    resize.attach();
+    expect(handle()).toBeNull();
+    expect(width()).toBe("");
+  });
+
+  it("destroy mid-drag saves where the drag ended", () => {
+    resize = createCallChatResize(column);
+    resize.attach();
+    const h = handle();
+    if (h === null) throw new Error("no handle");
+    h.setPointerCapture = vi.fn();
+    h.releasePointerCapture = vi.fn();
+    pointer("pointerdown", 700);
+    pointer("pointermove", 650);
+    resize.destroy();
+    expect(localStorage.getItem("owncord:settings:callChatWidth")).toBe("410");
+  });
 });
