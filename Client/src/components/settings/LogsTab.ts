@@ -2,7 +2,7 @@
  * Logs settings tab — log viewer with filtering, level control, live updates.
  */
 
-import { createElement, appendChildren, clearChildren, setOwnedTimeout } from "@lib/dom";
+import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import {
   getLogBuffer,
   clearLogBuffer,
@@ -25,6 +25,7 @@ import { createDisclosure } from "../../features/settings/status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
+import { copyThenRelabel } from "@lib/clipboard";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -146,28 +147,12 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       "click",
       () => {
         refreshDiag();
-        void navigator.clipboard
-          .writeText(diagPanel.textContent ?? "")
-          .then(() => {
-            diagCopy.textContent = t("logs.copied");
-            setOwnedTimeout(
-              buildSignal,
-              () => {
-                diagCopy.textContent = t("logs.copyDiagnostics");
-              },
-              1500,
-            );
-          })
-          .catch(() => {
-            diagCopy.textContent = t("logs.copyFailed");
-            setOwnedTimeout(
-              buildSignal,
-              () => {
-                diagCopy.textContent = t("logs.copyDiagnostics");
-              },
-              1500,
-            );
-          });
+        copyThenRelabel(
+          diagPanel.textContent ?? "",
+          diagCopy,
+          { idle: t("logs.copyDiagnostics"), done: t("logs.copied"), failed: t("logs.copyFailed") },
+          { signal: buildSignal },
+        );
       },
       { signal: buildSignal },
     );
@@ -318,28 +303,12 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
             return `${base}\n${dataStr}`;
           })
           .join("\n");
-        void navigator.clipboard
-          .writeText(text)
-          .then(() => {
-            copyBtn.textContent = t("logs.copied");
-            setOwnedTimeout(
-              buildSignal,
-              () => {
-                copyBtn.textContent = t("logs.copyAll");
-              },
-              1500,
-            );
-          })
-          .catch(() => {
-            copyBtn.textContent = t("logs.copyFailed");
-            setOwnedTimeout(
-              buildSignal,
-              () => {
-                copyBtn.textContent = t("logs.copyAll");
-              },
-              1500,
-            );
-          });
+        copyThenRelabel(
+          text,
+          copyBtn,
+          { idle: t("logs.copyAll"), done: t("logs.copied"), failed: t("logs.copyFailed") },
+          { signal: buildSignal },
+        );
       },
       { signal: buildSignal },
     );
