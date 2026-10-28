@@ -64,6 +64,7 @@ pub enum GameSource {
     Epic,
     Gog,
     Battlenet,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Lutris,
     List,
     Manual,
