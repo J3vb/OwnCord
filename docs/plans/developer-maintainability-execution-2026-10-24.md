@@ -29,7 +29,7 @@ The source plan was written against `54df237d` (2026-10-24). Two PRs merged on 2
 | 8 | **Rust badge proof is split by platform.** Verified: pure helpers have unit tests; Windows, macOS and the live D-Bus send cannot be proved on Linux. Documented prerequisites exist. | `cargo test --lib`, `linux-webrtc-toolchain.sh` | None demonstrated | None | None | None | None | None | **No change** (recorded as a limit) |
 | 9 | **Bare-path file to `ci-select` silently means "everything".** Verified: parsed as 0 paths, all capabilities true; the empty-diff behaviour is pinned by a test. Safe direction. | `contributing.md` command block (already shows `--name-status`) | Prevents a confused reader | Folded into row 1 as one sentence | Low | Folded into row 1 | Trivial | None | **Do now (inside R-1a)** |
 
-Rows 1, 2, 3 and 9 are R-1. Row 4 is R-1c and may be dropped. Rows 5 and 6 are candidates for a later pilot and are **not authorized** by this plan.
+Rows 1, 2, 3 and 9 are R-1. Row 4 is R-1c and may be dropped. Rows 5 and 6 are candidates for a later pilot and are **not authorized** by this plan. Row 10 is added below under [Candidate task](#candidate-task-added-2026-10-27-one-backdrop-close-for-dialogs).
 
 ## Measure, then compare
 
@@ -110,6 +110,26 @@ Record per run: calls, files opened, wrong turns, whether the answer matches the
 ## Recommended next assignment
 
 Implement R-1 exactly as above (rows 1, 2, 3, 9 and, if the code settles it, 4), in one Sonnet session and one PR into `dev`, with the before/after comparison appended to the baseline. It is cheap, reversible and measurable. Afterwards, decide whether to stop or run a **conditional** code pilot: row 5 (three dialog tests, no production edit) is the better-evidenced candidate; row 6 only if a Go change shows the cost. Neither is authorized by this plan.
+
+## Candidate task added 2026-10-27: one backdrop close for dialogs
+
+**Source.** Raised by the owner from the 8.13 work (PR #2842): many dialogs close when a drag-select ends on the backdrop. Not authorized yet; it needs the same baseline, change and comparison as any pilot.
+
+**Verified on `dev` `1afda4b2` (2026-10-27, by grep, not by running the app).**
+
+- `Client/src/lib/modalFactory.ts` has `createModal`, 31 non-test files mention it, and it closes on a backdrop `click` whose `e.target === overlay` (line 115) plus Escape.
+- Eleven other files carry their own backdrop check: `CertMismatchModal.ts` (two), `IdentityMismatchModal.ts`, `WhatsNewDialog.ts`, `message-list/attachments.ts`, `SearchOverlay.ts`, `SettingsOverlay.ts`, `QuickSwitcher.ts`, `QuickSwitchOverlay.ts`, `CategoryModals.ts`, `PollComposer.ts` and `ForwardPicker.ts`. The last three use `createModal` and add their own check on `modal.overlay`.
+- The channel dialogs (`CreateChannelModal`, `EditChannelModal`, `DeleteChannelModal`) and `InviteManager` were named in the request but have no such check under that pattern; how they close was not traced.
+
+**Shared helper (depends on #2842).** The hypothesis that `createModal` itself closed on drag-select was right: it is ledger finding OC-0520, and PR [#2842](https://github.com/J3vb/OwnCord/pull/2842) (open when this was written, not merged) fixes it in the helper by remembering where the press started, with unit tests that send a synthetic press and click. This task does not plan that fix again and starts only after #2842 merges. That fix does **not** reach the eleven files above that bypass `createModal`, and the three that add a second check on `modal.overlay` may still close on a drag-select. Whether each one does was not tested.
+
+**Smallest useful change, in order, after #2842 merges.**
+
+1. Confirm on one bypassing dialog (for example `SearchOverlay`) that a press inside and a release on the backdrop closes it today, using the same synthetic-event test style as #2842. Record the result per dialog family.
+2. Move dialogs onto `createModal`, or onto one small exported backdrop helper, in small batches. Each batch keeps the dialog's Escape, focus and close behaviour and adds the drag-select test.
+3. Add a structural test beside `Client/src/features/dispatcherDoor.test.ts` that fails on a new hand-written backdrop `e.target === ...` check under `Client/src`, with the existing files listed as a shrink-only allowlist.
+
+**Measurement.** Count of files with a hand-written backdrop check (11 now, plus `modalFactory.ts`); the drag-select test passing for each migrated dialog; the structural test failing on a deliberately added check. No saving is claimed. **Risk:** medium, since dialogs hold focus and Escape behaviour that must stay the same. **Disposition:** later, as a client pilot; it competes with row 5 for the client slot and the owner decides the order.
 
 ## Inputs for later phases
 
