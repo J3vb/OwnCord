@@ -87,6 +87,7 @@ import {
   type VoiceRowInputs,
   type VoiceUserContext,
 } from "../features/channels/voiceRowModel";
+import { PREF_CHANGE_EVENT } from "@lib/preferences";
 
 // The per-user volume menu loads on its first open (O-6b).
 const volumeMenuScreen = createLazyScreen(
@@ -1090,7 +1091,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     const muteSource = eventSource(CHANNEL_MUTE_CHANGED, () => ({}));
     // The Hide Muted Channels preference; any other key reruns the projection
     // and compares equal.
-    const hideMutedSource = eventSource("owncord:pref-change", isHideMutedChannels);
+    const hideMutedSource = eventSource(PREF_CHANGE_EVENT, isHideMutedChannels);
     sidebarSel = select(
       [
         voiceStore,

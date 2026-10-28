@@ -27,7 +27,7 @@ import { followedThreadsStore } from "../../stores/followedThreads.store";
 import { isChannelMuted } from "../../lib/channel-mutes";
 import { channelLevelResolver } from "../../lib/notificationLevel";
 import { Disposable } from "../../lib/disposable";
-import { loadPref } from "../../lib/preferences";
+import { loadPref, onPrefChange } from "../../lib/preferences";
 import type { Notifier } from "../../platform/contracts/notifications";
 
 /**
@@ -87,7 +87,7 @@ export function startUnreadBadge(badge: Pick<Notifier, "setUnreadBadge">): () =>
   owner.addCleanup(dmStore.subscribe(sync));
   owner.addCleanup(followedThreadsStore.subscribe(sync));
   // Mutes and the notification level are prefs; every write announces itself.
-  window.addEventListener("owncord:pref-change", sync, { signal: owner.signal });
+  onPrefChange("any", sync, owner.signal);
   window.addEventListener("focus", resync, { signal: owner.signal });
   document.addEventListener("visibilitychange", resync, { signal: owner.signal });
   sync();

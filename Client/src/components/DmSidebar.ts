@@ -31,6 +31,7 @@ import { requestsText } from "../i18n/requests";
 import { voiceText } from "../i18n/voice";
 import { getChannelMute } from "@lib/channel-mutes";
 import { openDmContextMenu, openLeaveConfirm, type DmMenuConvo } from "./dmContextMenu";
+import { onPrefChange } from "@lib/preferences";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -627,13 +628,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
     // A row's time is "3:04 PM" today and "Sep 29" after midnight.
     atEachMidnight(disposable.signal, () => update(rendered));
     // A clock-format change relabels the row times in place.
-    window.addEventListener(
-      "owncord:pref-change",
-      ((e: CustomEvent<{ key: string }>) => {
-        if (e.detail.key === "timeFormat") update(rendered);
-      }) as EventListener,
-      { signal: disposable.signal },
-    );
+    onPrefChange(["timeFormat"], () => update(rendered), disposable.signal);
 
     // Nothing to list: say so, with the way to start (Discord's DM list does).
     emptyState = createElement("div", {

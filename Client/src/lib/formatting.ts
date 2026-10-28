@@ -6,7 +6,7 @@
 import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
-import { loadPref } from "@lib/preferences";
+import { loadPref, onPrefChange } from "@lib/preferences";
 import { getTimeFormat, refreshTimeFormat } from "@lib/timeFormat";
 import { setOwnedTimeout } from "@lib/dom";
 import { messageStatusText } from "../i18n/messageStatus";
@@ -193,13 +193,10 @@ export function shouldGroup(prev: Message, curr: Message): boolean {
 
 /** Cached value of the roleColors preference. Invalidated on pref change. */
 let roleColorsEnabled = loadPref<boolean>("roleColors", true);
-window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
-  if (e.detail.key === "roleColors") {
-    roleColorsEnabled = loadPref<boolean>("roleColors", true);
-  } else if (e.detail.key === "timeFormat") {
-    refreshTimeFormat();
-  }
-}) as EventListener);
+onPrefChange(["roleColors", "timeFormat"], (key) => {
+  if (key === "roleColors") roleColorsEnabled = loadPref<boolean>("roleColors", true);
+  else refreshTimeFormat();
+});
 
 export function getUserRole(userId: number): string {
   return membersStore.getState().members.get(userId)?.role ?? "member";

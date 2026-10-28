@@ -9,7 +9,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
 import { createZoomPan, PAN_MIN_SCALE } from "@lib/zoomPan";
-import { loadPref } from "@lib/preferences";
+import { loadPref, onPrefChange } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
 import { formatByteSize } from "@lib/connectionStats";
@@ -106,11 +106,9 @@ export interface LightboxHandle {
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
 let animateGifsPref = loadPref<boolean>("animateGifs", true);
-window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
-  if (e.detail.key === "animateGifs") {
-    animateGifsPref = loadPref<boolean>("animateGifs", true);
-  }
-}) as EventListener);
+onPrefChange(["animateGifs"], () => {
+  animateGifsPref = loadPref<boolean>("animateGifs", true);
+});
 
 // -- Server host state --------------------------------------------------------
 

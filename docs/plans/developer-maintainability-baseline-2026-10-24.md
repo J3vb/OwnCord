@@ -452,3 +452,37 @@ Before the change, a press inside and a release on the backdrop closed one dialo
 ### Verdict against the stop rules
 
 No gate was weakened and no existing assertion changed. The count went from 15 files to 0 with a test that holds it. The change is kept.
+
+## MX-15 one listen helper for preference changes (2026-10-28)
+
+Candidate D5 from scout round 2, on `dev` `4a5e0b2b`.
+
+### Baseline count
+
+Counted with a grep for the event name over non-test files in `Client/src`, comments left out.
+
+| Measure                                                | Before                                                       | After                                                       |
+| ------------------------------------------------------ | ------------------------------------------------------------ | ----------------------------------------------------------- |
+| Files naming `owncord:pref-change` (besides its own)   | 20                                                           | 0                                                           |
+| Hand-written subscriptions                             | 21 (20 `addEventListener`, 1 `eventSource`)                  | 0 (20 `onPrefChange`, 1 `eventSource` on the exported name) |
+| Ways the changed key was read                          | 3 (8 `as EventListener`, 5 `as CustomEvent`, 2 `instanceof`) | 1 (inside `onPrefChange`)                                   |
+| App-lifetime pref listeners in the lifecycle allowlist | 6                                                            | 6 (now found as `onPrefChange` without a signal)            |
+
+### What changed
+
+- `Client/src/lib/preferences.ts`: `PREF_CHANGE_EVENT` and `onPrefChange(keys, handler, signal?)`. `keys` is a list or `"any"`; the handler gets the changed key; an event without a key reaches only `"any"` listeners. It returns a remove function, which `onUserStatusChange` and `onStatusTimerChange` pass on.
+- The 20 files call it. Each handler body is unchanged apart from the key check moving into the key list.
+- `Client/src/features/prefChangeDoor.test.ts` fails on the event name in any other file and pins the helper's filtering.
+- `tests/unit/lifecycle-ownership.test.ts` counts `onPrefChange` without a signal as a bare window listener, so its R1 allowlist and the 16 app-lifetime floor are unchanged.
+- Four tests that mocked `lib/preferences` with only `loadPref`/`savePref` now spread the real module (the MX-9 pattern); no assertion changed.
+
+### Deliberate-break check
+
+| Break                                                      | Result                                            |
+| ---------------------------------------------------------- | ------------------------------------------------- |
+| The event name added to `lib/timeFormat.ts`                | `prefChangeDoor.test.ts` fails and names the file |
+| The helper fires a keyed listener for an event with no key | `prefChangeDoor.test.ts` fails                    |
+
+### Verdict against the stop rules
+
+No gate was weakened and no existing assertion changed. The count went from 21 to 0 with a test that holds it. The change is kept.
