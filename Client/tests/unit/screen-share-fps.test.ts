@@ -35,6 +35,7 @@ import {
   cameraSimulcastLayers,
   videoLayerOptions,
   screenShareDegradation,
+  screenVideoPublishOptions,
   SCREENSHARE_PRESETS,
   SCREENSHARE_SIMULCAST_LAYERS,
   SCREENSHARE_PUBLISH_BITRATES,
@@ -48,6 +49,12 @@ const SCREENSHARE_AUDIO_CAPTURE = {
   autoGainControl: false,
   channelCount: 2,
 };
+
+function setPolicy(value: unknown): void {
+  mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+    key === "shareMotionPolicy" ? value : defaultVal,
+  );
+}
 
 describe("screen share FPS", () => {
   beforeEach(() => {
@@ -261,4 +268,52 @@ describe("videoLayerOptions", () => {
       expect(videoLayerOptions("screen", codec, "source", 30)).toEqual({ simulcast: false });
     },
   );
+  describe("shareMotionPolicy test arm", () => {
+    const QUALITIES = ["low", "medium", "high", "source"] as const;
+    const ARMS = [
+      ["detail-balanced", "detail", "balanced"],
+      ["detail-framerate", "detail", "maintain-framerate"],
+      ["motion-resolution", "motion", "maintain-resolution"],
+      ["motion-balanced", "motion", "balanced"],
+      ["motion-framerate", "motion", "maintain-framerate"],
+    ] as const;
+
+    it("legacy leaves capture options and degradation exactly as before", () => {
+      for (const quality of QUALITIES) {
+        const opts = getScreenShareCaptureOptions(quality, 30);
+        expect(opts.contentHint).toBe(SCREENSHARE_PRESETS[quality].contentHint);
+      }
+      expect(getScreenShareCaptureOptions("low", 30).contentHint).toBeUndefined();
+      expect(screenVideoPublishOptions("vp8", "high", 30).degradationPreference).toBe(
+        "maintain-resolution",
+      );
+      expect(screenVideoPublishOptions("vp8", "source", 120).degradationPreference).toBe(
+        "balanced",
+      );
+    });
+
+    it.each(ARMS)("%s sets hint %s and degradation %s for every quality", (policy, hint, deg) => {
+      setPolicy(policy);
+      for (const quality of QUALITIES) {
+        expect(getScreenShareCaptureOptions(quality, 30).contentHint).toBe(hint);
+        expect(screenVideoPublishOptions("vp8", quality, 30).degradationPreference).toBe(deg);
+      }
+      expect(getScreenShareCaptureOptions("source", 60).contentHint).toBe(hint);
+    });
+
+    it("does not touch the rest of the capture options", () => {
+      const before = getScreenShareCaptureOptions("high", 60);
+      setPolicy("motion-balanced");
+      const after = getScreenShareCaptureOptions("high", 60);
+      expect({ ...after, contentHint: before.contentHint }).toEqual(before);
+    });
+
+    it("an unknown stored value behaves as legacy", () => {
+      setPolicy("sideways");
+      expect(getScreenShareCaptureOptions("low", 30).contentHint).toBeUndefined();
+      expect(screenVideoPublishOptions("vp8", "medium", 30).degradationPreference).toBe(
+        "maintain-resolution",
+      );
+    });
+  });
 });

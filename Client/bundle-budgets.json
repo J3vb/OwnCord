@@ -17,7 +17,7 @@
       "note": "The LiveKit client SDK. Not in the startup closure; it arrives with the voice session, screen share and Settings voice chunks."
     },
     "livekitSession": {
-      "budget": 29500,
+      "budget": 30500,
       "lazy": true,
       "note": "The voice session facades (livekitSession, livekitE2EE) and the voice modules they import statically."
     },

@@ -155,6 +155,43 @@ describe("buildSupportBundle", () => {
     ]);
   });
 
+  it("adds share-diagnostics.json after voice-diagnostics.json only when a timeline exists", () => {
+    const timeline = { policy: "legacy", policyVersion: "2b-1", samples: [{ t: 1000 }] };
+    const entries = readZip(buildSupportBundle(sources({ shareDiagnostics: timeline })));
+    const names = entries.map((e) => e.name);
+    expect(names.indexOf("share-diagnostics.json")).toBe(
+      names.indexOf("voice-diagnostics.json") + 1,
+    );
+    expect(
+      JSON.parse(text(entries.find((e) => e.name === "share-diagnostics.json")!.data)),
+    ).toEqual(timeline);
+    for (const none of [null, undefined]) {
+      const bare = readZip(buildSupportBundle(sources({ shareDiagnostics: none })));
+      expect(bare.map((e) => e.name)).not.toContain("share-diagnostics.json");
+    }
+  });
+
+  it("lists share-diagnostics.json in the README and keeps the share test settings", () => {
+    const entries = readZip(
+      buildSupportBundle(
+        sources({
+          storage: storageWith({
+            "owncord:settings:shareDiagnosticsV2": "true",
+            "owncord:settings:shareMotionPolicy": '"motion-balanced"',
+          }),
+        }),
+      ),
+    );
+    expect(text(entries.find((e) => e.name === "README.txt")!.data)).toContain(
+      "share-diagnostics.json",
+    );
+    const settings = JSON.parse(text(entries.find((e) => e.name === "settings.json")!.data));
+    expect(settings.settings).toMatchObject({
+      shareDiagnosticsV2: true,
+      shareMotionPolicy: "motion-balanced",
+    });
+  });
+
   it("records OS and webview in app.json, and no server version (CLI-03, decision 7)", () => {
     const entries = readZip(buildSupportBundle(sources()));
     const app = JSON.parse(text(entries.find((e) => e.name === "app.json")!.data));
@@ -318,5 +355,18 @@ describe("exportSupportBundle", () => {
     ).toEqual({ hasRoom: true });
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("adds the share timeline passed by the caller", async () => {
+    desktop.fileSaver.pickSaveLocation.mockResolvedValue("/tmp/bundle.zip");
+    const timeline = { policy: "legacy", samples: [{ t: 1000 }] };
+
+    await exportSupportBundle(desktop as never, {}, timeline);
+
+    const [, bytes] = desktop.fileSaver.writeFile.mock.calls[0]! as [string, Uint8Array];
+    const entries = readZip(bytes);
+    expect(
+      JSON.parse(text(entries.find((e) => e.name === "share-diagnostics.json")!.data)),
+    ).toEqual(timeline);
   });
 });

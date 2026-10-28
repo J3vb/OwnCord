@@ -159,6 +159,8 @@ const SETTINGS_ALLOWLIST = [
   "screenShareFps",
   "screenShareQuality",
   "streamQuality",
+  "shareDiagnosticsV2",
+  "shareMotionPolicy",
   "developerMode",
   "logs_min_level",
 ] as const;
@@ -184,6 +186,9 @@ export interface SupportBundleSources {
   readonly profiles: unknown;
   readonly storage: Pick<Storage, "getItem">;
   readonly voiceDiagnostics: unknown;
+  /** The recorded screen-share timeline; absent or null when nothing was
+   *  recorded, which leaves `share-diagnostics.json` out. */
+  readonly shareDiagnostics?: unknown;
   readonly now: Date;
 }
 
@@ -244,6 +249,9 @@ export function buildSupportBundle(src: SupportBundleSources): Uint8Array {
         }),
       },
       { name: "voice-diagnostics.json", data: json(src.voiceDiagnostics) },
+      ...(src.shareDiagnostics === undefined || src.shareDiagnostics === null
+        ? []
+        : [{ name: "share-diagnostics.json", data: json(src.shareDiagnostics) }]),
       ...src.logs.map((file) => ({ name: `logs/${file.name}`, data: encoder.encode(file.text) })),
       ...src.nativeLogs.map((file) => ({
         name: `logs/${file.name}`,
@@ -261,6 +269,7 @@ export function buildSupportBundle(src: SupportBundleSources): Uint8Array {
 export async function exportSupportBundle(
   desktop: Pick<Platform, "fileSaver" | "appMetadata" | "logFiles" | "settings">,
   voiceDiagnostics: unknown,
+  shareDiagnostics?: unknown,
 ): Promise<boolean> {
   const now = new Date();
   const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, "-");
@@ -283,6 +292,7 @@ export async function exportSupportBundle(
     profiles: snapshot?.profiles,
     storage: localStorage,
     voiceDiagnostics,
+    shareDiagnostics,
     now,
   });
   await desktop.fileSaver.writeFile(path, bundle);
