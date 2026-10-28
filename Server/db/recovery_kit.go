@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // RecoveryKit is the server's whole knowledge of an account's recovery kit
@@ -29,7 +30,7 @@ func (d *DB) UpsertRecoveryKit(ctx context.Context, userID int64, verifier strin
 	if err := d.q.UpsertRecoveryKit(ctx, dbgen.UpsertRecoveryKitParams{
 		UserID:    userID,
 		Verifier:  verifier,
-		CreatedAt: time.Now().UTC().Format(sessionTimeLayout),
+		CreatedAt: time.Now().UTC().Format(dbtime.ISOLayout),
 	}); err != nil {
 		return fmt.Errorf("UpsertRecoveryKit: %w", err)
 	}
@@ -71,7 +72,7 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newP
 	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 
-	now := time.Now().UTC().Format(sessionTimeLayout)
+	now := time.Now().UTC().Format(dbtime.ISOLayout)
 	res, err := q.ConsumeRecoveryKit(ctx, dbgen.ConsumeRecoveryKitParams{UsedAt: &now, UserID: userID, Verifier: verifier})
 	if err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryKit consume: %w", err)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 var (
@@ -195,7 +196,7 @@ func deliveryTargetChannel(ctx context.Context, q *dbgen.Queries, p MessageDeliv
 	if p.ForumPost == nil {
 		return p.ChannelID, nil
 	}
-	now := time.Now().UTC().Format(ThreadActivityLayout)
+	now := time.Now().UTC().Format(dbtime.ISOLayout)
 	return insertForumPost(ctx, q, p.ChannelID, p.UserID, p.ForumPost, now)
 }
 

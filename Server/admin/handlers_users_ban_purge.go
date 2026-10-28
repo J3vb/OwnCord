@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -144,7 +145,7 @@ func patchUserIsPurgeRetry(r *http.Request, users *service.UserService, id int64
 	if target.BanExpires == nil {
 		return false
 	}
-	have, ok := parseBanExpiry(*target.BanExpires)
+	have, ok := dbtime.Parse(*target.BanExpires)
 	if !ok {
 		return false
 	}
@@ -171,15 +172,4 @@ func patchUserPurge(r *http.Request, hub HubBroadcaster, mod *service.Moderation
 		slog.Warn("admin ban purge incomplete", "actor_id", actor, "target_id", id, "deleted", res.Deleted, "err", res.Err)
 	}
 	return &banPurgeOutcome{Deleted: res.Deleted, Complete: res.Complete && res.Err == nil}
-}
-
-// parseBanExpiry reads users.ban_expires, stored as a UTC timestamp in either
-// of the layouts the database writes.
-func parseBanExpiry(s string) (time.Time, bool) {
-	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05Z"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, true
-		}
-	}
-	return time.Time{}, false
 }

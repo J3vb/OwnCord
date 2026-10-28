@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // PushSubscription is one Web Push subscription (migration 045, B5-4), as
@@ -127,7 +128,7 @@ func (d *DB) DeletePushSubscription(ctx context.Context, userID, id int64) (bool
 // yet, so the rotation half is skipped (time-only).
 func (d *DB) SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error) {
 	n, err := d.q.SweepPushSubscriptions(ctx, dbgen.SweepPushSubscriptionsParams{
-		Cutoff: cutoff.UTC().Format("2006-01-02 15:04:05"),
+		Cutoff: cutoff.UTC().Format(dbtime.SQLiteLayout),
 		KeyID:  keyID,
 	})
 	if err != nil {
