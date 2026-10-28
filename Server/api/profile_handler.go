@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -221,8 +220,7 @@ var allowedAvatarMIME = map[string]bool{
 // funlen limit; the field logic is unchanged.
 func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string, currentUsername string) (updateProfileRequest, bool) {
 	var req updateProfileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+	if !decodeJSON(w, r, &req) {
 		return req, false
 	}
 
@@ -420,8 +418,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 		}
 
 		var req changePasswordRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 

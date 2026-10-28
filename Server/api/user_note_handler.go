@@ -7,7 +7,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -68,7 +67,10 @@ func handlePutUserNote(notes *service.UserNoteService) http.HandlerFunc {
 		var in struct {
 			Note *string `json:"note"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Note == nil {
+		if !decodeJSON(w, r, &in) {
+			return
+		}
+		if in.Note == nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "invalid request body")
 			return
 		}

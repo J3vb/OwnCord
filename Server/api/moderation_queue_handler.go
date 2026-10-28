@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -170,7 +169,7 @@ func handleModerationQueueList(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		rows, err := svc.Reports.Queue(r.Context(), actorID, r.URL.Query().Get("state"))
@@ -196,7 +195,7 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -247,7 +246,7 @@ func handleModerationQueueAssign(svc *service.Services, hub ModQueueBroadcaster)
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -273,7 +272,7 @@ func handleModerationQueueNote(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -285,8 +284,7 @@ func handleModerationQueueNote(svc *service.Services) http.HandlerFunc {
 		}
 		var req addNoteRequest
 		r.Body = http.MaxBytesReader(w, r.Body, 16384)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		if err := svc.Reports.Note(r.Context(), actorID, id, req.Body); err != nil {
@@ -301,7 +299,7 @@ func handleModerationQueueClose(svc *service.Services, hub ModQueueBroadcaster) 
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -313,8 +311,7 @@ func handleModerationQueueClose(svc *service.Services, hub ModQueueBroadcaster) 
 		}
 		var req closeReportRequest
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		state, err := svc.Reports.Close(r.Context(), actorID, id, req.Outcome)
@@ -338,7 +335,7 @@ func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) ht
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -350,8 +347,7 @@ func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) ht
 		}
 		var req actOnReportRequest
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		detail, err := svc.Reports.Get(r.Context(), actorID, id)
@@ -379,7 +375,7 @@ func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) ht
 			}
 			msgID, perr := strconv.ParseInt(msgIDStr, 10, 64)
 			if perr != nil || msgID <= 0 {
-				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "BAD_REQUEST", Message: "message_id is required for removal"})
+				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "message_id is required for removal")
 				return
 			}
 			params.MessageID = msgID

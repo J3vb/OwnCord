@@ -7,7 +7,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -71,8 +70,7 @@ func handleAddGIFFavorite(favorites *service.GIFFavoriteService) http.HandlerFun
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, gifFavMaxBody)
 		var in gifFavoriteJSON
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "invalid request body")
+		if !decodeJSON(w, r, &in) {
 			return
 		}
 		if !allowedGIFFavoriteURL(in.URL) || !allowedGIFFavoriteURL(in.PreviewURL) {

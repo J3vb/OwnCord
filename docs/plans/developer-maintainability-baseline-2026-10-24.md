@@ -217,3 +217,40 @@ Before, the answer to "are the late-reply and teardown paths pinned?" was "no", 
 ### Verdict against the stop rules
 
 No production code changed, no gate was weakened, and every break that survived before now fails a test. The change is kept.
+
+## MX-7 batch 1: api error replies and body decoding (2026-10-28)
+
+Measured on a branch from `origin/dev` `91d7e54a`. Evidence level: **executed**. Batch 1 is the `Server/api` package. `Server/admin` decoders are batch 2 and plain-text `http.Error` replies batch 3; both are counted here so later batches have a baseline.
+
+### Counts
+
+Counted with the new `reply-helpers` invariant (`Server/invariants/reply_helpers.go`) run against `dev`, and checked by `grep` over non-test files. The scout's numbers from 2026-10-27 (58, 53, 28) had grown by the time this ran.
+
+| Measure (non-test files)                                | Before                                                                                                                                                    | After                                           |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `errorResponse{…}` built by hand outside `writeErr`     | 60 (all in `api`, 10 files)                                                                                                                               | 0, held by the invariant                        |
+| `json.NewDecoder` outside the shared decoder, `api`     | 32 in 17 files                                                                                                                                            | 0, held by the invariant                        |
+| `json.NewDecoder` outside the shared decoder, `admin`   | 23 in 17 files                                                                                                                                            | 23, frozen per file in `DecodeAllow`            |
+| `http.Error` plain-text replies                         | 31 in 6 files (17 in the plugin admin API)                                                                                                                | 31 (batch 3)                                    |
+| Different replies to a body that does not decode, `api` | 6 code and message pairs (`INVALID_INPUT` or `BAD_REQUEST`; "malformed request body", "malformed JSON body", "invalid request body", "invalid JSON body") | 1: `400 INVALID_INPUT` "malformed request body" |
+| `api` JSON routes answering an over-size body with 413  | 0 of 32 decode sites                                                                                                                                      | 32 of 32 (`413 PAYLOAD_TOO_LARGE`)              |
+
+### What changed
+
+- `api/decode.go`: `decodeJSON`, `decodeOptionalJSON` (an empty body is allowed, as the invite and 2FA-disable routes did by hand) and `decodeStrictJSON` (unknown fields and trailing data refused, as the privacy route did by hand). A body past the route's `http.MaxBytesReader` cap answers `413 PAYLOAD_TOO_LARGE`, the code the upload route already used.
+- 60 hand-built error replies became `writeErr` calls with the same status, code and message.
+- Where a handler folded a field check into the decode condition (user note, nickname, privacy), the decode now fails with the shared reply and the field check keeps its own message.
+- `docs/api.md`: the error table now lists `PAYLOAD_TOO_LARGE`, and no longer says the plugin route has the API's only 413.
+
+### Checks
+
+| Check                                                                                                               | Before (`dev` + the new test)                  | After                                                                         |
+| ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| `TestJSONBodyRoutes_ShareOneReplyForTheSameBadBody` (5 routes × malformed and over-size)                            | 2 of 10 cases pass                             | 10 of 10                                                                      |
+| `reply-helpers` invariant on the tree                                                                               | 92 violations (60 literals, 32 `api` decoders) | 0                                                                             |
+| `api/decode_test.go` (helper: valid, 5 bad bodies, cap mid-value, cap after the value, empty optional body, strict) | did not exist                                  | 6 tests pass                                                                  |
+| `TestPushSubscriptions_RejectsMalformed`, 9 KiB body                                                                | expected 400                                   | expects 413 `PAYLOAD_TOO_LARGE`; the one existing test whose contract changed |
+
+### Verdict
+
+Kept. One reply per bad body instead of six, 413 for an over-size body on every `api` JSON route, and a ratchet that stops new hand-built replies. The visible change for clients is the code on 8 routes that answered `BAD_REQUEST` for a malformed body (DM create, group DM create, rename, add members and owner transfer, invite create, channel purge, sticker edit) and 413 instead of 400 for an over-size body. The client never branches on `BAD_REQUEST` from REST, and shows the server's message for a code it has no copy for. No savings in time or tokens are claimed.

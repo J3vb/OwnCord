@@ -1,9 +1,7 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -48,12 +46,8 @@ func MountInviteRoutes(r chi.Router, svc *service.Services) {
 func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createInviteRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			if err != io.EOF {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "malformed JSON body")
-				return
-			}
-			req = createInviteRequest{}
+		if !decodeOptionalJSON(w, r, &req) {
+			return
 		}
 
 		user, ok := requireUser(w, r)

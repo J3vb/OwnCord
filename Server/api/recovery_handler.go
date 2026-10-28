@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -50,8 +49,7 @@ func handleEnrolRecoveryKit(svc AuthService) http.HandlerFunc {
 			return
 		}
 		var req enrolRecoveryKitRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed request body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		issue, err := svc.EnrolRecoveryKit(r.Context(), p, req.Password, req.KitSecret)
@@ -87,8 +85,7 @@ func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 	proxyNets := parseCIDRList(trustedProxies)
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req recoverRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed request body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		secret := req.KitSecret
@@ -96,22 +93,22 @@ func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			secret = req.Credential
 		}
 		if req.Username == "" || secret == "" || req.NewPassword == "" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "username, kit_secret (or credential) and new_password are required"})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username, kit_secret (or credential) and new_password are required")
 			return
 		}
 		// Bound and normalise the username as login does: it becomes a limiter
 		// key and, on the fifth failure, a lockout row, so it must stay small.
 		if len(req.Username) > maxLoginUsernameLen*4 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "username too long"})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username too long")
 			return
 		}
 		req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 		if err := auth.ValidateUsername(req.Username); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: err.Error()})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return
 		}
 		if err := auth.ValidatePasswordStrength(req.NewPassword); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: err.Error()})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return
 		}
 		res, err := svc.RecoverWithKit(r.Context(), service.RecoverInput{

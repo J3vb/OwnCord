@@ -301,8 +301,8 @@ func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
 			Padding:           strings.Repeat("x", 9<<10),
 		}
 		rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, oversized)
-		if rr.Code != http.StatusBadRequest {
-			t.Fatalf("oversized body: status = %d %s, want 400", rr.Code, rr.Body.String())
+		if rr.Code != http.StatusRequestEntityTooLarge || decodeErr(t, rr).Error != "PAYLOAD_TOO_LARGE" {
+			t.Fatalf("oversized body: status = %d %s, want 413 PAYLOAD_TOO_LARGE", rr.Code, rr.Body.String())
 		}
 	})
 }

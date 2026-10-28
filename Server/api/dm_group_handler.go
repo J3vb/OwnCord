@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -81,13 +80,11 @@ func allowGroupMutation(w http.ResponseWriter, limiter *auth.RateLimiter, userID
 	return false
 }
 
-// decodeGroupBody reads a small JSON body into v, writing the 400 on failure.
+// decodeGroupBody reads a small JSON body into v under the group cap,
+// writing the error reply on failure.
 func decodeGroupBody(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, dmGroupMaxBody)).Decode(v); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
-		return false
-	}
-	return true
+	r.Body = http.MaxBytesReader(w, r.Body, dmGroupMaxBody)
+	return decodeJSON(w, r, v)
 }
 
 // fanOutGroupChange tells every member who is in the group after a committed

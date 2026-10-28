@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -253,8 +252,7 @@ func handlePurgeMessages(svc *service.Services, broadcaster PurgeBroadcaster) ht
 		}
 
 		var req purgeRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 
@@ -436,38 +434,38 @@ func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned
 func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrRateLimited):
-		writeJSON(w, http.StatusTooManyRequests, errorResponse{Error: "RATE_LIMITED", Message: err.Error()})
+		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
 	case errors.Is(err, service.ErrBadRequest):
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "BAD_REQUEST", Message: err.Error()})
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	case errors.Is(err, service.ErrNotFound):
-		writeJSON(w, http.StatusNotFound, errorResponse{Error: "NOT_FOUND", Message: err.Error()})
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
 	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
 		// B5-7: the response carries the code and nothing else.
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "NSFW_ACKNOWLEDGEMENT_REQUIRED"})
+		writeErr(w, http.StatusForbidden, "NSFW_ACKNOWLEDGEMENT_REQUIRED", "")
 	case errors.Is(err, service.ErrTimedOut):
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "TIMED_OUT", Message: err.Error()})
+		writeErr(w, http.StatusForbidden, "TIMED_OUT", err.Error())
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "FORBIDDEN", Message: err.Error()})
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
 	case errors.Is(err, service.ErrDeletedMessage):
 		// The target is already gone — a state, not a failure. 404 would be
 		// wrong here: the moderation client clears the report on 404, which
 		// would hide the removal's own outcome. 409 ALREADY_DELETED is the
 		// "already in the requested end state" twin of DUPLICATE_REPORT, so
 		// the caller gets a clean typed refusal instead of a 500.
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "ALREADY_DELETED", Message: err.Error()})
+		writeErr(w, http.StatusConflict, "ALREADY_DELETED", err.Error())
 	case errors.Is(err, service.ErrGroupDMFull):
 		// Before ErrConflict, which it wraps: the group has no room left.
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "GROUP_DM_FULL", Message: err.Error()})
+		writeErr(w, http.StatusConflict, "GROUP_DM_FULL", err.Error())
 	case errors.Is(err, service.ErrConflict):
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "CONFLICT", Message: err.Error()})
+		writeErr(w, http.StatusConflict, "CONFLICT", err.Error())
 	case errors.Is(err, service.ErrInternal):
 		// ErrorContext so the enriching handler attaches req_id/trace_id,
 		// linking this 500 to its request log line and trace.
 		slog.ErrorContext(ctx, "service error", "error", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "INTERNAL_ERROR", Message: "an internal error occurred"})
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
 	default:
 		slog.ErrorContext(ctx, "service error", "error", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "INTERNAL_ERROR", Message: "internal error"})
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
 	}
 }
 

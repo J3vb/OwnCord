@@ -286,7 +286,7 @@ func writeFileAccessError(w http.ResponseWriter, r *http.Request, fileID string,
 	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
 		// B5-7: the response carries the code and nothing else — no detail
 		// that could distinguish it from any other refusal on this route.
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "NSFW_ACKNOWLEDGEMENT_REQUIRED"})
+		writeErr(w, http.StatusForbidden, "NSFW_ACKNOWLEDGEMENT_REQUIRED", "")
 	case errors.Is(err, service.ErrForbidden):
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "you do not have access to this file")
 	default:
