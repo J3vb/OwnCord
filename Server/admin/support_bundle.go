@@ -8,9 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -130,17 +128,8 @@ func (s *supportBundles) take(id, hash, session string, actor int64) (supportSna
 }
 
 func supportJSON(w http.ResponseWriter, r *http.Request, out any) bool {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(out); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid support bundle request")
-		return false
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "expected one JSON object")
-		return false
-	}
-	return true
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	return decodeStrictJSON(w, r, out)
 }
 
 func (s *supportBundles) preview(w http.ResponseWriter, r *http.Request) {

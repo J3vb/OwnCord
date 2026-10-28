@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/service"
@@ -37,8 +36,7 @@ func handlePutForumSettings(channels *service.ChannelService, hub HubBroadcaster
 			return
 		}
 		var req forumSettingsRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		in := service.ForumSettingsInput{

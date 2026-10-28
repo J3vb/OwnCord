@@ -13,7 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -226,8 +225,8 @@ func handleDeleteEmoji(svc *service.Services, store FileStore, broadcaster Emoji
 		if !ok {
 			return
 		}
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil || id <= 0 {
+		id, ok := pathID(r, "id")
+		if !ok {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid emoji id")
 			return
 		}
@@ -276,8 +275,8 @@ func broadcastEmojiSet(ctx context.Context, svc *service.Services, broadcaster E
 // — a replacement is a new row), which is what lets it be cached hard.
 func handleServeEmojiImage(svc *service.Services, store FileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil || id <= 0 {
+		id, ok := pathID(r, "id")
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}

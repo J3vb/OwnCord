@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -86,8 +85,7 @@ func handlePutChannelRetention(retention *service.RetentionService) http.Handler
 			return
 		}
 		var req putChannelRetentionRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		if retention == nil {
@@ -139,10 +137,7 @@ func handlePostRetentionPreview(retention *service.RetentionService) http.Handle
 			Proposed service.RetentionChange `json:"proposed"`
 			Revision string                  `json:"revision"`
 		}
-		decoder := json.NewDecoder(r.Body)
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeStrictJSON(w, r, &req) {
 			return
 		}
 		preview, err := retention.PreviewChange(r.Context(), actorFromContext(r), req.Proposed, req.Revision)

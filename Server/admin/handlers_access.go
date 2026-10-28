@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -55,7 +54,10 @@ func handlePreviewAccess(channels *service.ChannelService) http.HandlerFunc {
 			return
 		}
 		var req previewAccessRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RoleID < 0 || req.UserID < 0 {
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		if req.RoleID < 0 || req.UserID < 0 {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}

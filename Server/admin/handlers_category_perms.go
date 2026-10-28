@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -57,8 +56,7 @@ func categoryPermSetup(channels *service.ChannelService, w http.ResponseWriter, 
 		return 0, 0, nil, false
 	}
 	if req != nil {
-		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, req) {
 			return 0, 0, nil, false
 		}
 	}

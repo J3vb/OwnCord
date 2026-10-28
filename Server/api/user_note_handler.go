@@ -11,9 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -25,8 +22,8 @@ type userNoteJSON struct {
 
 // parseNoteTarget reads the {userId} path parameter.
 func parseNoteTarget(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "userId"), 10, 64)
-	if err != nil || id <= 0 {
+	id, ok := pathID(r, "userId")
+	if !ok {
 		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "invalid user id")
 		return 0, false
 	}

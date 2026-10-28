@@ -2,8 +2,6 @@ package invariants
 
 import (
 	"go/token"
-	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -49,29 +47,54 @@ func TestReplyHelpers_OutsideScopeIsNotChecked(t *testing.T) {
 	}
 }
 
-func TestReplyHelpers_DecodeAllowIsARatchet(t *testing.T) {
-	const listed = "admin/handlers_users.go" // DecodeAllow count 1
-	head := "package admin\nimport \"encoding/json\"\n"
-	none := head + "func a() {}\n"
-	one := head + "func a() { json.NewDecoder(r.Body) }\n"
-	two := one + "func b() { json.NewDecoder(r.Body) }\n"
-	if got := replyHelperViolations(t, listed, one); len(got) != 0 {
-		t.Errorf("listed file at its count: %v, want none", got)
+func TestReplyHelpers_AdminDecoderOutsideTheHelperIsFlagged(t *testing.T) {
+	src := "package admin\nimport \"encoding/json\"\nfunc h() { json.NewDecoder(r.Body).Decode(&v) }\n"
+	if got := replyHelperViolations(t, "admin/handlers_users.go", src); len(got) != 1 {
+		t.Fatalf("violations = %v, want one: admin has no decoder allowance left", got)
 	}
-	if got := replyHelperViolations(t, listed, two); len(got) != 1 {
-		t.Errorf("listed file one over its count: %v, want one violation", got)
-	}
-	if got := replyHelperViolations(t, listed, none); len(got) != 1 {
-		t.Errorf("listed file under its count: %v, want one stale violation", got)
+	helper := "package admin\nimport \"encoding/json\"\nfunc decodeStrictJSON() { json.NewDecoder(r.Body) }\n"
+	if got := replyHelperViolations(t, "admin/decode.go", helper); len(got) != 0 {
+		t.Errorf("admin decodeStrictJSON: %v, want none", got)
 	}
 }
 
-func TestReplyHelpers_DecodeAllowFilesExist(t *testing.T) {
-	root := serverRoot(t)
-	for rel := range DecodeAllow {
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
-			t.Errorf("DecodeAllow lists %s, which does not exist: %v", rel, err)
+const pathIDHead = "package admin\nimport (\n\t\"strconv\"\n\t\"github.com/go-chi/chi/v5\"\n)\n"
+
+func TestReplyHelpers_RawPathIDParseIsFlagged(t *testing.T) {
+	for name, body := range map[string]string{
+		"direct ParseInt":  "func h() { strconv.ParseInt(chi.URLParam(r, \"id\"), 10, 64) }\n",
+		"direct ParseUint": "func h() { strconv.ParseUint(chi.URLParam(r, \"id\"), 10, 64) }\n",
+		"direct Atoi":      "func h() { strconv.Atoi(chi.URLParam(r, \"id\")) }\n",
+		"via a variable":   "func h() { raw := chi.URLParam(r, \"id\"); strconv.ParseInt(raw, 10, 64) }\n",
+		"via var decl":     "func h() { var raw = chi.URLParam(r, \"id\"); strconv.Atoi(raw) }\n",
+		"inside a closure": "func h() { f := func() { raw := chi.URLParam(r, \"id\"); strconv.Atoi(raw) }; f() }\n",
+	} {
+		for _, rel := range []string{"admin/handlers_roles.go", "api/sticker_handler.go"} {
+			if got := replyHelperViolations(t, rel, pathIDHead+body); len(got) != 1 {
+				t.Errorf("%s in %s: %v, want one violation", name, rel, got)
+			}
 		}
+	}
+}
+
+func TestReplyHelpers_PathIDHelpersAndQueryParsesAreClean(t *testing.T) {
+	helper := pathIDHead + "func pathInt64() { strconv.ParseInt(chi.URLParam(r, \"id\"), 10, 64) }\n"
+	if got := replyHelperViolations(t, "admin/helpers.go", helper); len(got) != 0 {
+		t.Errorf("pathInt64: %v, want none", got)
+	}
+	apiHelper := pathIDHead + "func pathID() { strconv.ParseInt(chi.URLParam(r, \"id\"), 10, 64) }\n"
+	if got := replyHelperViolations(t, "api/path_id.go", apiHelper); len(got) != 0 {
+		t.Errorf("pathID: %v, want none", got)
+	}
+	// The same name in another file is not the helper.
+	if got := replyHelperViolations(t, "admin/other.go", helper); len(got) != 1 {
+		t.Errorf("pathInt64 in another file: %v, want one violation", got)
+	}
+	// A query value, or a parse of a variable that never held a URL param.
+	other := pathIDHead + "func h() { raw := r.URL.Query().Get(\"n\"); strconv.Atoi(raw); strconv.Atoi(\"7\") }\n" +
+		"func g() { raw := chi.URLParam(r, \"id\"); _ = raw }\nfunc k(raw string) { strconv.Atoi(raw) }\n"
+	if got := replyHelperViolations(t, "api/some_handler.go", other); len(got) != 0 {
+		t.Errorf("non-URL-param parses: %v, want none", got)
 	}
 }
 

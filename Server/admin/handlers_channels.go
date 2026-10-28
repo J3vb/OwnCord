@@ -99,8 +99,7 @@ func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) h
 			return
 		}
 		var req createChannelRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 
@@ -177,8 +176,7 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 			VoiceMaxUsers: existing.VoiceMaxUsers,
 			VoiceMaxVideo: existing.VoiceMaxVideo,
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 

@@ -38,7 +38,10 @@ func handlePutAFKChannel(channels *service.ChannelService, hub HubBroadcaster) h
 			return
 		}
 		var req afkChannelRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.ChannelID) == 0 {
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		if len(req.ChannelID) == 0 {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "channel_id is required (a channel id, or null to clear)")
 			return
 		}

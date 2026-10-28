@@ -488,9 +488,8 @@ func parseLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 // parseIDParam extracts and validates a chi URL param as int64.
 // Writes a 400 response and returns false on failure.
 func parseIDParam(w http.ResponseWriter, r *http.Request, param string) (int64, bool) {
-	raw := chi.URLParam(r, param)
-	id, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || id <= 0 {
+	id, ok := pathID(r, param)
+	if !ok {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", param+" must be a positive integer")
 		return 0, false
 	}
