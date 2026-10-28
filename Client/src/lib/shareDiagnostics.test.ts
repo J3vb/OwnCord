@@ -70,6 +70,44 @@ describe("ShareDiagnosticsRecorder", () => {
     ac.abort();
   });
 
+  it("labels a share with the test mode it started under, not a later pick", async () => {
+    const h = harness();
+    h.state.policy = "motion-balanced";
+    const rec = new ShareDiagnosticsRecorder(h.deps);
+    const ac = new AbortController();
+    rec.start(ac.signal);
+    await vi.advanceTimersByTimeAsync(1000);
+    // Picked mid-share: it only applies to the next share.
+    h.state.policy = "legacy";
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(rec.snapshot().samples.map((s) => s.policy)).toEqual([
+      "motion-balanced",
+      "motion-balanced",
+    ]);
+    expect(rec.snapshot().policy).toBe("motion-balanced");
+    // The next share picks it up.
+    h.state.epoch = {};
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(rec.snapshot().samples.at(-1)).toMatchObject({ shareGeneration: 2, policy: "legacy" });
+    ac.abort();
+  });
+
+  it("keeps t and startedAt on one origin when sharing starts late", async () => {
+    const h = harness();
+    h.state.epoch = undefined;
+    vi.setSystemTime(new Date("2026-10-28T10:00:00Z"));
+    const rec = new ShareDiagnosticsRecorder(h.deps);
+    const ac = new AbortController();
+    rec.start(ac.signal);
+    await vi.advanceTimersByTimeAsync(60_000);
+    h.state.epoch = {};
+    await vi.advanceTimersByTimeAsync(1000);
+    const snap = rec.snapshot();
+    expect(snap.startedAt).toBe("2026-10-28T10:00:00.000Z");
+    expect(snap.samples[0]?.t).toBe(61_000);
+    ac.abort();
+  });
+
   it("does not overlap polls when a read is slow", async () => {
     const h = harness();
     h.readSender.mockImplementation(

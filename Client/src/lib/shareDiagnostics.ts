@@ -86,6 +86,9 @@ export class ShareDiagnosticsRecorder {
   private started = false;
   private lastEpoch: object | undefined;
   private generation = 0;
+  /** The test mode the live share was published under: read once when the
+   *  share first shows up, since a change only applies to the next share. */
+  private sharePolicy: string | undefined;
 
   constructor(private readonly deps: RecorderDeps) {}
 
@@ -95,6 +98,7 @@ export class ShareDiagnosticsRecorder {
     if (this.started || signal.aborted) return;
     this.started = true;
     this.startMs = this.deps.now();
+    this.startedAt = new Date().toISOString();
     const tick = (): void => {
       void this.poll(signal).finally(() => {
         setOwnedTimeout(signal, tick, SHARE_POLL_MS);
@@ -105,7 +109,7 @@ export class ShareDiagnosticsRecorder {
 
   snapshot(): ShareDiagnosticsSnapshot {
     return {
-      policy: this.deps.policy(),
+      policy: this.sharePolicy ?? this.deps.policy(),
       policyVersion: SHARE_POLICY_VERSION,
       startedAt: this.startedAt,
       dropped: this.dropped,
@@ -126,6 +130,8 @@ export class ShareDiagnosticsRecorder {
     this.sizes = [];
     this.bytes = 0;
     this.dropped = 0;
+    // `t` and `startedAt` share one origin.
+    this.startMs = this.deps.now();
     this.startedAt = new Date().toISOString();
   }
 
@@ -135,10 +141,13 @@ export class ShareDiagnosticsRecorder {
       const epoch = this.deps.shareEpoch();
       const watched = this.deps.watchedShares();
       if (epoch === undefined && watched.length === 0) return;
-      if (epoch !== undefined && epoch !== this.lastEpoch) this.generation += 1;
+      if (epoch !== undefined && epoch !== this.lastEpoch) {
+        this.generation += 1;
+        this.sharePolicy = this.deps.policy();
+      }
       this.lastEpoch = epoch;
       const generation = this.generation;
-      const policy = this.deps.policy();
+      const policy = (epoch !== undefined ? this.sharePolicy : undefined) ?? this.deps.policy();
 
       const [sender, viewers] = await Promise.all([
         epoch === undefined ? null : this.safe("sender", () => this.deps.readSender()),
@@ -153,7 +162,6 @@ export class ShareDiagnosticsRecorder {
       // A read that resolves under a newer share must not be filed under it.
       const senderCurrent = this.deps.shareEpoch() === epoch;
       const t = this.deps.now() - this.startMs;
-      if (this.samples.length === 0) this.startedAt = new Date().toISOString();
       this.push({
         t,
         shareGeneration: generation,
