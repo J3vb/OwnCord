@@ -4,6 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
+import { readStored } from "@lib/preferences";
 import {
   THEMES,
   applyAccent,
@@ -51,7 +52,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     activeThemeName in THEMES || activeThemeName === SYSTEM_THEME ? activeThemeName : null;
   const currentFontSize = loadPref<number>("fontSize", 16);
   const currentCompact = loadPref<boolean>("compactMode", false);
-  let hasStoredAccent = localStorage.getItem("owncord:settings:accentColor") !== null;
+  let hasStoredAccent = readStored("owncord:settings:accentColor") !== null;
   const defaultAccent = getDefaultAccent(paletteOf(activeThemeName));
 
   // Theme selector

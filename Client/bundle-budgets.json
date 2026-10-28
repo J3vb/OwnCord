@@ -3,7 +3,7 @@
   "ratchet": "Headroom grant 2026-10-17 (measured at dev e5eb0ee8): MainPage, startup and css set 3-5 % above measured. A later raise goes up in 500 B steps, explained in its PR. The B9-26 re-baseline rule (2026-09-25) is history: bundle-budget-history.md.",
   "history": "Raise reasons go in the commit and PR that change a budget, never in a note here (two lanes appending to one note conflict). Reasoning before 2026-10-17: bundle-budget-history.md.",
   "startup": {
-    "budget": 102300,
+    "budget": 102800,
     "note": "JS of the entry's static closure: index.html's entry file and everything its static imports reach (CSS is on the css line). A new eagerly-imported chunk joins it automatically."
   },
   "chunks": {

@@ -1,5 +1,5 @@
 {
-  "nextId": 523,
+  "nextId": 524,
   "findings": [
     {
       "id": "OC-0001",
@@ -12079,6 +12079,29 @@
         "commit": "pending",
         "test": "Client/tests/unit/ime-enter-guard.test.ts plus one isComposing Enter test per field (12 tests in 12 files)",
         "revertProof": "fail (12 of 12 new tests fail with isImeCommit returning false)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-27",
+      "hunt": "maintainability-scout-2026-10-27",
+      "lens": "client-state",
+      "finder": "claude",
+      "fixedDate": "2026-10-28"
+    },
+    {
+      "id": "OC-0523",
+      "title": "Blocked or unusable storage made the startup theme read and the member-list collapse click throw",
+      "file": "Client/src/lib/themes.ts",
+      "line": 246,
+      "severity": "low",
+      "why": "getActiveThemeName, applyThemeByName and the system-theme repaint called localStorage with no guard, and so did the member list's collapse toggle and saved-height read. When the page may not use storage (blocked site data, a private window, some embedded browsers; more likely in the browser client than in Tauri) each of these threw instead of falling back, so the theme code failed at startup and a click on the Members header threw.",
+      "repro": "In the browser client, block site data for the server's origin and reload: the stored-theme read throws before the default theme applies. In a unit test, make Storage.prototype.getItem/setItem throw and call getActiveThemeName().",
+      "evidence": "Maintainability scout C5 (docs/plans/developer-maintainability-execution-2026-10-24.md). New tests in Client/tests/unit/themes.test.ts and Client/tests/unit/sidebar-member-section.test.ts fail on dev 09d27cc4.",
+      "suggestedFix": "Route every storage access through guarded helpers in lib/preferences.ts and hold it with a structural test.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/themes.test.ts (themes with unusable storage), Client/tests/unit/sidebar-member-section.test.ts (still collapses on click when storage is blocked), Client/src/features/storageDoor.test.ts",
+        "revertProof": "fail (3 new tests fail on dev 09d27cc4)"
       },
       "confidence": "high",
       "status": "fixed",

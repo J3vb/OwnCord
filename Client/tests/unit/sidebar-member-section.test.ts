@@ -291,6 +291,27 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
+    it("still collapses on click when storage is blocked", () => {
+      const blocked = (): never => {
+        throw new DOMException("storage blocked", "SecurityError");
+      };
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(blocked);
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(blocked);
+
+      try {
+        const section = createSidebarMemberSection(defaultOpts());
+        container.appendChild(section.element);
+        const header = container.querySelector(".sidebar-members-header") as HTMLElement;
+        expect(header.classList.contains("collapsed")).toBe(false);
+
+        expect(() => header.click()).not.toThrow();
+        expect(header.classList.contains("collapsed")).toBe(true);
+        section.destroy();
+      } finally {
+        vi.restoreAllMocks();
+      }
+    });
+
     it("toggles collapsed state when header is clicked", () => {
       const section = createSidebarMemberSection(defaultOpts());
       container.appendChild(section.element);

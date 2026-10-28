@@ -337,3 +337,44 @@ Counted with the new `reply-helpers` invariant (`Server/invariants/reply_helpers
 ### Verdict
 
 Kept. One reply per bad body instead of six, 413 for an over-size body on every `api` JSON route, and a ratchet that stops new hand-built replies. The visible change for clients is the code on 8 routes that answered `BAD_REQUEST` for a malformed body (DM create, group DM create, rename, add members and owner transfer, invite create, channel purge, sticker edit) and 413 instead of 400 for an over-size body. The client never branches on `BAD_REQUEST` from REST, and shows the server's message for a code it has no copy for. No savings in time or tokens are claimed.
+
+## MX-9 guarded storage access (2026-10-28)
+
+Scout candidate C5 in the execution plan. Based on `origin/dev` `09d27cc4`. Evidence level: **executed** (unit tests and a deliberate-break check in jsdom; the app was not run with storage blocked).
+
+### Baseline count
+
+Counted the way the new structural test, `Client/src/features/storageDoor.test.ts`, counts: every non-test `.ts` file under `Client/src` that names `localStorage` outside a comment.
+
+| Measure                                                           | Scout (2026-10-27) | Re-count before | After                        |
+| ----------------------------------------------------------------- | ------------------ | --------------- | ---------------------------- |
+| Files touching `localStorage`                                     | 17                 | 20              | 3, held by the test          |
+| App files (outside `lib/preferences.ts` and the browser platform) | 17                 | 17              | 0                            |
+| Copies of the read-parse-validate body                            | 5                  | 5               | 0; all call `loadStoredJson` |
+| Unguarded calls                                                   | "several"          | 15 in 6 files   | 0                            |
+
+The scout's 17 left out `lib/preferences.ts` and the two browser-platform stores. Those three stay: `preferences.ts` is the door, and `platform/browser/settings.ts` and `credentials.ts` are the browser's settings and credential stores, which have their own guards and report failure through the platform contract. The allowlist is shrink-only (the test also fails on an entry that no longer touches storage).
+
+### What changed
+
+- `Client/src/lib/preferences.ts`: guarded `readStored`, `writeStored`, `removeStored`, `storedKeys`, `loadStoredJson(key, parse, fallback)` and `saveStoredJson` beside `loadPref`/`savePref`. A failed read reads as absent, a failed write returns `false`, nothing throws. `readMigratedStringPref` reads through them too.
+- The 17 app files call those helpers. Keys and stored values are unchanged.
+- `legacyKeyMigration.ts` migrates nothing when the legacy key cannot be removed, as before (it used to get that from the throw).
+- Six test files that mocked `@lib/preferences` with only `loadPref`/`savePref` now spread the real module.
+- New tests: blocked storage in `themes.test.ts` (startup read, apply), `sidebar-member-section.test.ts` (collapse click), `legacy-key-migration.test.ts` (remove fails), and the helpers in `preferences.test.ts`.
+
+### Defect found
+
+Blocked storage made `getActiveThemeName`, `applyThemeByName`, the system-theme repaint and the member list's collapse click throw. Ledger entry OC-0523 (low; storage is only blocked in unusual browser setups).
+
+### Deliberate-break check
+
+`readStored`/`writeStored`/`removeStored` were made to call storage without their `try` and the new tests were run, then the change was reverted.
+
+| Break                    | Before: tests that fail     | After: tests that fail                                   |
+| ------------------------ | --------------------------- | -------------------------------------------------------- |
+| Unguarded storage access | 0 (no test blocked storage) | 9: the 5 new tests plus 4 existing storage-failure tests |
+
+### Verdict against the stop rules
+
+No gate was weakened and no assertion changed; the only edits to existing tests make their `@lib/preferences` mocks keep the real module's new exports. The count went from 20 to 3 with a test that holds it. The change is kept.

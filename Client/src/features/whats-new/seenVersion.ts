@@ -4,22 +4,17 @@
  * only a later, different version counts as an update worth announcing.
  */
 
+import { readStored, writeStored } from "@lib/preferences";
+
 const SEEN_KEY = "owncord:whats-new:seen-version";
 
 function readSeen(): string | null {
-  try {
-    return localStorage.getItem(SEEN_KEY);
-  } catch {
-    return null;
-  }
+  return readStored(SEEN_KEY);
 }
 
 export function markVersionSeen(version: string): void {
-  try {
-    localStorage.setItem(SEEN_KEY, version);
-  } catch {
-    // Storage unavailable: the notes may show again next start, nothing worse.
-  }
+  // Storage unavailable: the notes may show again next start, nothing worse.
+  writeStored(SEEN_KEY, version);
 }
 
 /** True when this start is the first one on a version other than the last one
