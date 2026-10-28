@@ -10,6 +10,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -43,7 +44,7 @@ func banPurgeMsg(t *testing.T, database *db.DB, channelID, userID int64, age tim
 	if err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
-	ts := time.Now().UTC().Add(-age).Format(searchTSLayout)
+	ts := time.Now().UTC().Add(-age).Format(dbtime.SQLiteLayout)
 	if _, err := database.ExecContext(ctx, `UPDATE messages SET timestamp = ? WHERE id = ?`, ts, id); err != nil {
 		t.Fatalf("stamp message: %v", err)
 	}

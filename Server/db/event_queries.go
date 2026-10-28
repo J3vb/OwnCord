@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // ── Event persistence (Phase B Step 7) ──────────────────────────────────────
@@ -197,7 +199,7 @@ var eventPruneStatementHookForTest func()
 // pruneBatchSize rows, yielding the writer connection between statements.
 // Returns the total rows deleted.
 func (d *DB) PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
-	cutoffStr := cutoff.UTC().Format(sqliteTimeLayout)
+	cutoffStr := cutoff.UTC().Format(dbtime.SQLiteLayout)
 	var total int64
 	for {
 		if eventPruneStatementHookForTest != nil {
@@ -254,7 +256,7 @@ func scanEventRows(rows rowsScanner) ([]PersistedEvent, error) {
 func parseSQLiteTime(s string) time.Time {
 	// SQLite CURRENT_TIMESTAMP returns "YYYY-MM-DD HH:MM:SS" in UTC.
 	for _, layout := range []string{
-		"2006-01-02 15:04:05",
+		dbtime.SQLiteLayout,
 		time.RFC3339,
 		time.RFC3339Nano,
 	} {

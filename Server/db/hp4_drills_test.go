@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/internal/alphasnap"
 )
 
@@ -360,7 +361,7 @@ func TestHP4_D5_OrphanSweepCanStrandAFile(t *testing.T) {
 	// Their messages are soft-deleted and the rows are older than the
 	// sweep's grace period; the files exist on disk, size per the row.
 	storageDir := t.TempDir()
-	old := time.Now().Add(-2 * time.Hour).UTC().Format(sqliteTimeLayout)
+	old := time.Now().Add(-2 * time.Hour).UTC().Format(dbtime.SQLiteLayout)
 	for _, a := range picked {
 		if _, err := database.ExecContext(ctx, `UPDATE messages SET deleted = 1, content = '' WHERE id = ?`, a.messageID); err != nil {
 			t.Fatalf("soft-delete message: %v", err)

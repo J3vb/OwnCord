@@ -9,6 +9,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -100,7 +101,7 @@ func TestHandlePresenceUpdate_StoresExpiryAndTagsLivePresence(t *testing.T) {
 	if res.SetPresence == nil || res.SetPresence.customStatus == nil || res.SetPresence.customStatusExpiresAt == "" {
 		t.Fatalf("SetPresence = %+v, want text and the expiry tag", res.SetPresence)
 	}
-	at, err := time.Parse(service.CustomStatusExpiryLayout, res.SetPresence.customStatusExpiresAt)
+	at, err := time.Parse(dbtime.ISOLayout, res.SetPresence.customStatusExpiresAt)
 	if err != nil || time.Until(at) < 59*time.Minute || time.Until(at) > 61*time.Minute {
 		t.Fatalf("tag %q is not about an hour away (%v)", res.SetPresence.customStatusExpiresAt, err)
 	}
@@ -117,7 +118,7 @@ func TestHandlePresenceUpdate_GuardDropsExpiredText(t *testing.T) {
 	svc, _, user, database := newPresenceFixture(t)
 	ctx := context.Background()
 	text := "stale"
-	past := time.Now().UTC().Add(-time.Minute).Format(service.CustomStatusExpiryLayout)
+	past := time.Now().UTC().Add(-time.Minute).Format(dbtime.ISOLayout)
 	if err := database.UpdateUserPresence(ctx, user.ID, db.StatusOnline, &text, &past); err != nil {
 		t.Fatal(err)
 	}
@@ -138,8 +139,8 @@ func TestHandlePresenceUpdate_GuardDropsExpiredText(t *testing.T) {
 func TestAuthOK_CustomStatusExpiresAt(t *testing.T) {
 	_, hub, user, _ := newPresenceFixture(t)
 	text := "heads down"
-	future := time.Now().UTC().Add(time.Hour).Format(service.CustomStatusExpiryLayout)
-	past := time.Now().UTC().Add(-time.Hour).Format(service.CustomStatusExpiryLayout)
+	future := time.Now().UTC().Add(time.Hour).Format(dbtime.ISOLayout)
+	past := time.Now().UTC().Add(-time.Hour).Format(dbtime.ISOLayout)
 	read := func(u *db.User) map[string]any {
 		var env struct {
 			Payload struct {

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // RetentionChange describes exactly one proposed edit. Nil Days removes a
@@ -159,7 +161,7 @@ func retentionEffectTx(ctx context.Context, tx *sql.Tx, w RetentionWindow, obser
 	cutoff := observed.UTC().Add(-time.Duration(w.Days) * 24 * time.Hour)
 	e.Cutoff = cutoff.Format(time.RFC3339)
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates,
-		w.ChannelID, cutoff.Format(sqliteTimeLayout)).Scan(&e.WouldDelete); err != nil {
+		w.ChannelID, cutoff.Format(dbtime.SQLiteLayout)).Scan(&e.WouldDelete); err != nil {
 		return e, err
 	}
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE channel_id = ? AND pinned <> 0`, w.ChannelID).Scan(&e.ProtectedPinned)

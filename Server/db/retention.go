@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // RetentionDaysKey is the settings row holding the server-wide retention
@@ -182,7 +184,7 @@ const retentionCandidates = `channel_id = ? AND pinned = 0 AND timestamp < ?`
 func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error) {
 	var n int64
 	if err := d.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates,
-		channelID, cutoff.UTC().Format(sqliteTimeLayout)).Scan(&n); err != nil {
+		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout)).Scan(&n); err != nil {
 		return 0, fmt.Errorf("CountRetentionCandidates: %w", err)
 	}
 	return n, nil
@@ -222,7 +224,7 @@ func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff 
 	defer tx.Rollback() //nolint:errcheck
 
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE `+retentionCandidates+` ORDER BY id LIMIT ?`,
-		channelID, cutoff.UTC().Format(sqliteTimeLayout), limit)
+		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout), limit)
 	if err != nil {
 		return runID, nil, nil, fmt.Errorf("SweepRetention select: %w", err)
 	}

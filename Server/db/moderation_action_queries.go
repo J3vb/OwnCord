@@ -10,18 +10,8 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
-
-// sqliteDatetimeFormat matches SQLite's own datetime('now') output
-// ("YYYY-MM-DD HH:MM:SS", space-separated, no zone suffix) — created_at,
-// acknowledged_at and lifted_at on this table are all set that way by SQL
-// DEFAULTs and UPDATEs. Every Go-computed timestamp this file compares
-// against one of those columns (expires_at, and RetireModerationActions'
-// cutoff) MUST use this same format: SQLite compares TEXT dates lexically,
-// and 'T' (0x54) sorts after ' ' (0x20), so an RFC3339 "...T...Z" value
-// compares as greater than a same-day datetime('now') value regardless of
-// the actual times — the bug this format constant exists to not reintroduce.
-const sqliteDatetimeFormat = "2006-01-02 15:04:05"
 
 // ModerationAction is one row of the moderator-action ledger (migration 049,
 // B5-9): every warning, timeout, kick, ban and removal. ActorToken is filled
@@ -292,7 +282,9 @@ func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID 
 		return 0, nil, fmt.Errorf("TimeoutUser begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-	expires := expiresAt.UTC().Format(sqliteDatetimeFormat)
+	// SQLiteLayout, not ISOLayout: this table's other timestamps come from
+	// datetime('now'), and its SQL compares expires_at with them as text.
+	expires := expiresAt.UTC().Format(dbtime.SQLiteLayout)
 	id, err = recordModerationAction(ctx, tx, "timeout", targetID, actorID, reportID, reason, &expires)
 	if err != nil {
 		return 0, nil, err
@@ -489,7 +481,7 @@ func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason strin
 
 	var expiresStr *string
 	if expires != nil {
-		s := expires.UTC().Format("2006-01-02T15:04:05Z")
+		s := expires.UTC().Format(dbtime.ISOLayout)
 		expiresStr = &s
 	}
 	reasonCopy := reason
@@ -565,7 +557,7 @@ func (d *DB) RetireModerationActions(ctx context.Context, days int) (int64, erro
 	if days <= 0 {
 		return 0, nil
 	}
-	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(sqliteDatetimeFormat)
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour).Format(dbtime.SQLiteLayout)
 	if tableExists(ctx, d.writer, "appeals") {
 		n, err := d.q.RetireRetiredCandidatesExcludingAppealed(ctx, &cutoff)
 		if err != nil {

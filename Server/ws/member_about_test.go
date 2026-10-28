@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -40,7 +41,7 @@ func TestBuildReady_MembersCarryAboutAndCreatedAt(t *testing.T) {
 	}
 	for id, m := range members {
 		s, _ := m["created_at"].(string)
-		if _, err := time.Parse(db.MemberCreatedAtLayout, s); err != nil {
+		if _, err := time.Parse(dbtime.ISOLayout, s); err != nil {
 			t.Errorf("member %d created_at %q: %v", id, s, err)
 		}
 	}
@@ -90,7 +91,7 @@ func TestMemberJoin_CarriesAboutAndCreatedAt(t *testing.T) {
 			t.Errorf("member_join about = %v", parsed.Payload.User["about"])
 		}
 		s, _ := parsed.Payload.User["created_at"].(string)
-		if _, err := time.Parse(db.MemberCreatedAtLayout, s); err != nil {
+		if _, err := time.Parse(dbtime.ISOLayout, s); err != nil {
 			t.Errorf("member_join created_at %q: %v", s, err)
 		}
 		return
