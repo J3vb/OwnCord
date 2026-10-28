@@ -69,7 +69,7 @@ import { renderMentions, renderMessageContent } from "./content-parser";
 import { markdownToPlainText } from "@lib/markdown";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
-import { renderUrlEmbeds } from "./media";
+import { isLoneImageEmbed, renderUrlEmbeds } from "./media";
 import {
   isGalleryImage,
   renderAttachment,
@@ -749,7 +749,7 @@ export function renderMessage(
       wrap.style.display = "contents";
       wrap.appendChild(body);
       box.appendChild(wrap);
-    } else if (!isVoiceOnly(msg)) box.appendChild(body);
+    } else if (!isVoiceOnly(msg) && !isLoneImageEmbed(msg.content)) box.appendChild(body);
     if (msg.editedAt !== null) {
       box.appendChild(
         createElement(

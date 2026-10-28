@@ -1023,6 +1023,43 @@ describe("renderers", () => {
   // renderInlineImage (via renderMessage)
   // ---------------------------------------------------------------------------
 
+  describe("a message that is only an image link", () => {
+    function render(content: string): HTMLElement {
+      const msg = makeMessage({ content });
+      const el = renderMessage(msg, false, [msg], makeOpts(), new AbortController().signal);
+      container.appendChild(el);
+      return el;
+    }
+
+    it("shows the GIF and hides the link text, like a GIF picker pick", () => {
+      const url = "https://static.klipy.com/ii/abc/cat.gif";
+      const el = render(`  ${url}\n`);
+      expect(el.querySelector(".msg-image")).not.toBeNull();
+      expect(el.querySelector(".msg-text")).toBeNull();
+      expect(el.querySelector(`a[href="${url}"]`)).toBeNull();
+    });
+
+    it("keeps the link text when the image link comes with other words", () => {
+      const url = "https://example.com/cat.gif";
+      const el = render(`look ${url}`);
+      expect(el.querySelector(".msg-image")).not.toBeNull();
+      expect(el.querySelector(`a.msg-link[href="${url}"]`)).not.toBeNull();
+    });
+
+    it("keeps the text of two image links, an embed-suppressed one and a non-image one", () => {
+      for (const content of [
+        "https://example.com/a.gif https://example.com/b.gif",
+        "<https://example.com/a.gif>",
+        "||https://example.com/a.gif||",
+        "https://example.com/page.html",
+      ]) {
+        const el = render(content);
+        expect(el.querySelector(".msg-text"), content).not.toBeNull();
+        el.remove();
+      }
+    });
+  });
+
   describe("renderInlineImage — img element and lightbox behaviour", () => {
     it("creates an img element with the correct src attribute", async () => {
       const url = "https://example.com/photo.jpg";

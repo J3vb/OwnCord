@@ -525,6 +525,16 @@ export function extractUrls(content: string): string[] {
   return (matches ?? []).map(stripUrlTrailingPunctuation);
 }
 
+/** True when the message is nothing but one image or GIF link that renders
+ *  inline, such as a pick from the GIF picker. The image stands in for the
+ *  link, so the row hides the address text, as Discord does. */
+export function isLoneImageEmbed(content: string): boolean {
+  const trimmed = content.trim();
+  if (!inlineMediaPref || !isDirectImageUrl(trimmed) || !isSafeUrl(trimmed)) return false;
+  const urls = extractUrls(trimmed);
+  return urls.length === 1 && urls[0] === trimmed;
+}
+
 /** One URL's embed (YouTube player, inline image, link card), or null when
  *  it gets none. Concealed until the viewer consented to it (B9-8). */
 function renderUrlEmbed(url: string): HTMLElement | null {
