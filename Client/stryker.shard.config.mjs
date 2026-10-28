@@ -109,6 +109,7 @@ export const shards = {
     "src/lib/publicAssets.ts",
     "src/lib/deviceManager.ts",
     "src/lib/touchInput.ts",
+    "src/lib/zoomPan.ts",
     "src/lib/ptt.ts",
     "src/lib/voiceTokenManager.ts",
     "src/features/channels/voiceRow.view.ts",
@@ -267,6 +268,7 @@ export const shards = {
   ],
   "lib-rest-6": [
     "src/lib/a11y.ts",
+    "src/lib/clipboard.ts",
     "src/lib/admin-panel.ts",
     "src/lib/notifications.ts",
     "src/lib/soundPrefs.ts",

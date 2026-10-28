@@ -23,6 +23,8 @@ import {
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { loadPref, savePref } from "@lib/preferences";
 import { syncVideoSurface, videoSurfaceOf } from "@lib/videoSurface";
+import { bindVideoZoom } from "@lib/zoomPan";
+import type { ZoomPan } from "@lib/zoomPan";
 import type { MountableComponent } from "@lib/safe-render";
 import { voiceText } from "../i18n/voice";
 import { viewersLabel } from "./video-grid/viewers";
@@ -357,6 +359,8 @@ interface CellEntry {
   applyVolume?: (volume: number, muted: boolean) => void;
   /** The volume controls (remote tiles only): they go along into a pop-out. */
   volumeOverlay?: HTMLElement;
+  /** Ctrl + wheel zoom and drag pan on the tile's video. */
+  zoom?: ZoomPan;
   /** The previous receiver sample, for the frame rate. */
   prevSample?: StreamSample;
   /** The view last reported for the tile, as JSON. */
@@ -1463,6 +1467,7 @@ export function createVideoGrid(): VideoGridComponent {
     }
     if (isFullscreen(tileId)) leaveFullscreen();
     entry.mini?.close();
+    entry.zoom?.reset();
     // Popping out a stopped tile means watching it: its video is hidden.
     if (entry.el.classList.contains("video-cell--stopped")) setWatching(tileId, true);
     const username = entry.el.querySelector(".video-username")?.textContent ?? entry.name;
@@ -1614,6 +1619,7 @@ export function createVideoGrid(): VideoGridComponent {
     if (stopped) {
       entry.popout?.close();
       entry.mini?.close();
+      entry.zoom?.reset();
     }
     if (!stopped) entry.lost = false;
     cell.classList.toggle("video-cell--stopped", stopped);
@@ -1807,6 +1813,8 @@ export function createVideoGrid(): VideoGridComponent {
         oldTracks.length === newTracks.length &&
         oldTracks.every((t, i) => t.id === newTracks[i]?.id);
       if (!tracksMatch) {
+        // A new picture starts unzoomed: the old view may frame nothing.
+        existing.zoom?.reset();
         video.srcObject = stream;
         syncVideoSurface(video);
         video.play()?.catch((err) => {
@@ -1915,6 +1923,10 @@ export function createVideoGrid(): VideoGridComponent {
     });
 
     const entry: CellEntry = { el: cell, video, config, listeners: new Disposable(), name: "" };
+    // Your own screen share shows its cover, not the picture: nothing to zoom.
+    if (config?.isSelf !== true || !config.isScreenshare) {
+      entry.zoom = bindVideoZoom(cell, entry.listeners.signal);
+    }
     // F toggles full screen from anywhere in the tile (not while typing), a
     // double-click too. The theatre fallback's own keys are on the document
     // (onTheatreKey).

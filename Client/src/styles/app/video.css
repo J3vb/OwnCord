@@ -103,6 +103,24 @@ video[hidden] + .video-surface {
   height: 100%;
   object-fit: contain;
 }
+/* Ctrl + wheel zoom and drag pan (lib/zoomPan.ts bindVideoZoom): the host
+   tile or pop-out carries the view, its picture shows it. The individual
+   properties apply outside `transform`, so your own camera's mirror stays. */
+.video-cell video,
+.video-cell .video-surface,
+.video-popout video,
+.video-popout .video-surface {
+  translate: var(--video-pan, none);
+  scale: var(--video-scale, none);
+}
+.video-zoomed,
+.video-zoomed .video-cell-select {
+  cursor: grab;
+}
+.video-panning,
+.video-panning .video-cell-select {
+  cursor: grabbing;
+}
 /* A camera fills its grid tile, cropped at the edges as Discord does. Focused
    or full screen it shows the whole frame again. Screen shares always do. */
 .video-cell[data-stream-type="camera"]:not(.focused):not(:fullscreen):not(.video-cell--theatre)
@@ -323,6 +341,7 @@ video[hidden] + .video-surface {
 .video-popout {
   position: fixed;
   inset: 0;
+  overflow: hidden;
   background: #000; /* intentional: letterbox bars, as on a tile */
 }
 .video-popout video,

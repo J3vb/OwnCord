@@ -336,6 +336,10 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 				if !hub.isConnected(c.userID) {
 					hub.QueuePresence(c.userID, db.StatusOffline, nil)
 				}
+			} else if !replaced {
+				// Another device stays: its presence is now the user's, so
+				// the game, song or status this one held must not linger.
+				hub.rebroadcastAfterDeviceLeft(c)
 			}
 		}
 	}()
