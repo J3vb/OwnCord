@@ -329,4 +329,41 @@ describe("changeScreenshareSource with the app's sound", () => {
     expect(rig.audio!.replaceTrack).not.toHaveBeenCalled();
     expect(freshVideo!.stop).toHaveBeenCalled();
   });
+  it("releases the new window's sound when the swap fails before the share takes it", async () => {
+    const rig = await setup({ audio: "app" });
+    const h = handle("app-b");
+    openAppAudio.mockResolvedValue(h);
+    const [freshVideo] = pick("window", false);
+    rig.video.replaceTrack.mockRejectedValueOnce(new Error("sender gone"));
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expectConsole("error", /\[screenShare\] Failed to change screenshare source/);
+    expect(h.close).toHaveBeenCalledTimes(1);
+    expect(freshVideo!.stop).toHaveBeenCalled();
+    expect(rig.deps.onError).toHaveBeenCalledWith("Couldn't change what you're sharing");
+    expect(rig.state.appAudio).toBeUndefined();
+    expect(rig.oldHandle.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the new window's sound when a stop lands after the video was swapped", async () => {
+    const rig = await setup({ audio: "app" });
+    const h = handle("app-b");
+    openAppAudio.mockResolvedValue(h);
+    const [freshVideo] = pick("window", false);
+    rig.audio!.replaceTrack.mockImplementationOnce((next: MediaStreamTrack) => {
+      rig.audio!.mediaStreamTrack = next;
+      rig.state.generation = 1;
+      return Promise.resolve(rig.audio!);
+    });
+    const oldApp = rig.state.appAudio;
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(h.close).toHaveBeenCalledTimes(1);
+    expect(freshVideo!.stop).toHaveBeenCalled();
+    expect(rig.state.appAudio).toBe(oldApp);
+    expect(voiceStore.getState().localShareRev).toBe(0);
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+  });
 });

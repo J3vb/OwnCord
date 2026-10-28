@@ -40,7 +40,7 @@ import {
 } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { startVoiceUiSounds } from "../../src/features/voice/uiSounds";
-import { noteVoiceMoved } from "../../src/features/voice/moveHint";
+import { noteVoiceMoved, isVoiceMovePending } from "../../src/features/voice/moveHint";
 import type { ReadyVoiceState, VoiceStatePayload } from "@lib/types";
 
 function voiceState(channelId: number, userId: number): VoiceStatePayload {
@@ -585,6 +585,395 @@ describe("voice UI sounds", () => {
       testPrefs.set("soundStream", false);
       setPeerWatching(2, [1]);
       voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe("voice UI sounds: session start, teardown and ordering", () => {
+  const peerRow = (userId: number, screenshare = false) => ({
+    ...SELF,
+    userId,
+    username: `u${String(userId)}`,
+    screenshare,
+  });
+  const signIn = (): void => {
+    authStore.setState((prev) => ({ ...prev, user: { id: 1, username: "me" } as never }));
+  };
+  /** Restart the sounds on top of whatever the store holds now. */
+  const restartOn = (patch: Partial<ReturnType<typeof voiceStore.getState>>): void => {
+    stop();
+    voiceStore.setState((prev) => ({ ...prev, ...patch }));
+    voiceStore.flush();
+    playVoiceSound.mockClear();
+    stop = startVoiceUiSounds();
+  };
+
+  describe("a session that is already running when the sounds start", () => {
+    it("sounds the leave of a connected session", () => {
+      vi.useFakeTimers();
+      restartOn({ currentChannelId: 10, voiceStatus: "connected" });
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+      vi.advanceTimersByTime(250);
+
+      expect(playVoiceSound.mock.calls).toEqual([["leave"]]);
+    });
+
+    it("sounds the leave of a session that is reconnecting", () => {
+      vi.useFakeTimers();
+      restartOn({ currentChannelId: 10, voiceStatus: "reconnecting" });
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+      vi.advanceTimersByTime(250);
+
+      expect(playVoiceSound.mock.calls).toEqual([["leave"]]);
+    });
+
+    it("plays nothing when a join that never connected is abandoned", () => {
+      vi.useFakeTimers();
+      restartOn({ currentChannelId: 10, voiceStatus: "securing" });
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+      vi.advanceTimersByTime(1000);
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays nothing when a join that is still opening is abandoned", () => {
+      vi.useFakeTimers();
+      restartOn({ currentChannelId: 10, voiceStatus: "joining" });
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+      vi.advanceTimersByTime(1000);
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("your own leave", () => {
+    function connectTo(channelId: number): void {
+      joinVoiceChannel(channelId);
+      voiceStore.flush();
+      setVoiceStatus("connected");
+      voiceStore.flush();
+    }
+
+    it("sounds one leave when two leaves land inside the grace period", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      leaveVoiceChannel();
+      voiceStore.flush();
+      connectTo(20);
+      leaveVoiceChannel();
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+
+      vi.advanceTimersByTime(1000);
+
+      expect(playVoiceSound.mock.calls).toEqual([["leave"]]);
+    });
+
+    it("sounds nothing for a leave that signing out overtakes", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      playVoiceSound.mockClear();
+      leaveVoiceChannel();
+      voiceStore.flush();
+
+      authStore.setState((prev) => ({ ...prev, isAuthenticated: false }));
+      resetVoiceStore();
+      voiceStore.flush();
+      vi.advanceTimersByTime(1000);
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("sounds nothing for a leave still waiting when the sounds are stopped", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      playVoiceSound.mockClear();
+      leaveVoiceChannel();
+      voiceStore.flush();
+
+      stop();
+      vi.advanceTimersByTime(1000);
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("holds the leave back while a moderator move is noted, even one noted first", () => {
+      vi.useFakeTimers();
+      connectTo(10);
+      playVoiceSound.mockClear();
+      noteVoiceMoved(20);
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+      vi.advanceTimersByTime(1000);
+
+      expect(isVoiceMovePending()).toBe(true);
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("the move note", () => {
+    it("is forgotten when the sounds are stopped", () => {
+      noteVoiceMoved(20);
+      stop();
+      expect(isVoiceMovePending()).toBe(false);
+    });
+
+    it("is forgotten when signing out resets the session", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
+      voiceStore.flush();
+      noteVoiceMoved(20);
+
+      authStore.setState((prev) => ({ ...prev, isAuthenticated: false }));
+      resetVoiceStore();
+      voiceStore.flush();
+
+      expect(isVoiceMovePending()).toBe(false);
+    });
+
+    it("survives updates that happen while no channel is joined", () => {
+      noteVoiceMoved(20);
+
+      setLocalMuted(true);
+      voiceStore.flush();
+
+      expect(isVoiceMovePending()).toBe(true);
+    });
+
+    it("survives the leave of a live call that the move follows", () => {
+      vi.useFakeTimers();
+      restartOn({ currentChannelId: 10, voiceStatus: "connected" });
+      noteVoiceMoved(20);
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+
+      expect(isVoiceMovePending()).toBe(true);
+    });
+
+    it("survives a leave that happens while deafened, and is not spent by the next update", () => {
+      restartOn({ currentChannelId: 10, voiceStatus: "connected", localDeafened: true });
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+      noteVoiceMoved(20);
+      setLocalMuted(true);
+      voiceStore.flush();
+
+      expect(isVoiceMovePending()).toBe(true);
+    });
+
+    it("survives a leave that happens under Do Not Disturb, and is not spent by the next update", () => {
+      testPrefs.set("userStatus", "dnd");
+      restartOn({ currentChannelId: 10, voiceStatus: "connected" });
+
+      leaveVoiceChannel();
+      voiceStore.flush();
+      noteVoiceMoved(20);
+      setLocalMuted(true);
+      voiceStore.flush();
+
+      expect(isVoiceMovePending()).toBe(true);
+    });
+  });
+
+  describe("signing out and back in", () => {
+    it("does not read the old deafen flag as an undeafen at the next update", () => {
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10, localDeafened: true }));
+      voiceStore.flush();
+      authStore.setState((prev) => ({ ...prev, isAuthenticated: false }));
+      resetVoiceStore();
+      voiceStore.flush();
+      authStore.setState((prev) => ({ ...prev, isAuthenticated: true }));
+      playVoiceSound.mockClear();
+
+      setLocalMuted(true);
+      voiceStore.flush();
+
+      expect(playVoiceSound.mock.calls).toEqual([["mute"]]);
+    });
+  });
+
+  describe("deafen and the sound switches", () => {
+    it("plays no deafen sound under Do Not Disturb", () => {
+      testPrefs.set("userStatus", "dnd");
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+
+      setLocalDeafened(true);
+      voiceStore.flush();
+      setLocalDeafened(false);
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays no deafen sound when the voice sounds are off", () => {
+      testPrefs.set("voiceSounds", false);
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+
+      setLocalDeafened(true);
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("switching channels and rosters", () => {
+    it("sounds no mute in the update that starts a channel switch", () => {
+      restartOn({ currentChannelId: 10, voiceStatus: "connected" });
+
+      joinVoiceChannel(20);
+      setLocalMuted(true);
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("sounds the mute that comes with a roster change in another channel while none is joined", () => {
+      updateVoiceState(voiceState(20, 2));
+      setLocalMuted(true);
+      voiceStore.flush();
+
+      expect(playVoiceSound.mock.calls).toEqual([["mute"]]);
+    });
+
+    it("plays nothing when your own row arrives in the roster of your channel", () => {
+      signIn();
+      voiceStore.setState((prev) => ({
+        ...prev,
+        currentChannelId: 10,
+        voiceUsers: new Map([[10, new Map([[2, peerRow(2)]])]]),
+      }));
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+
+      updateVoiceState(voiceState(10, 1));
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+
+    it("plays nothing when your own row leaves the roster of your channel", () => {
+      signIn();
+      voiceStore.setState((prev) => ({
+        ...prev,
+        currentChannelId: 10,
+        voiceUsers: new Map([
+          [
+            10,
+            new Map([
+              [1, peerRow(1)],
+              [2, peerRow(2)],
+            ]),
+          ],
+        ]),
+      }));
+      voiceStore.flush();
+      playVoiceSound.mockClear();
+
+      removeVoiceUser({ channel_id: 10, user_id: 1 });
+      voiceStore.flush();
+
+      expect(playVoiceSound).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("people watching your stream after your own join", () => {
+    const T0 = new Date("2026-10-21T10:00:00Z");
+    function sharingRoomJoined(moved: boolean): void {
+      vi.useFakeTimers();
+      vi.setSystemTime(T0);
+      signIn();
+      voiceStore.setState((prev) => ({
+        ...prev,
+        voiceUsers: new Map([
+          [
+            10,
+            new Map([
+              [1, peerRow(1, true)],
+              [2, peerRow(2)],
+              [3, peerRow(3)],
+            ]),
+          ],
+        ]),
+      }));
+      voiceStore.flush();
+      if (moved) noteVoiceMoved(10);
+      joinVoiceChannel(10);
+      voiceStore.flush();
+      setVoiceStatus("connected");
+      voiceStore.flush();
+    }
+
+    it("treats the watch sets sent on a join as a re-sync until the window has passed", () => {
+      sharingRoomJoined(false);
+      expect(playVoiceSound.mock.calls).toEqual([["join"]]);
+      playVoiceSound.mockClear();
+
+      vi.advanceTimersByTime(1999);
+      setPeerWatching(2, [1]);
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1);
+      setPeerWatching(3, [1]);
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["viewerJoin"]]);
+    });
+
+    it("treats the watch sets sent after a moderator move the same way", () => {
+      sharingRoomJoined(true);
+      expect(playVoiceSound.mock.calls).toEqual([["moved"]]);
+      playVoiceSound.mockClear();
+
+      vi.advanceTimersByTime(1000);
+      setPeerWatching(2, [1]);
+      voiceStore.flush();
+      expect(playVoiceSound).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(1500);
+      setPeerWatching(3, [1]);
+      voiceStore.flush();
+      expect(playVoiceSound.mock.calls).toEqual([["viewerJoin"]]);
+    });
+
+    it("plays no viewer sound when no signed-in user id is known", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(T0);
+      voiceStore.setState((prev) => ({
+        ...prev,
+        currentChannelId: 10,
+        voiceStatus: "connected",
+        voiceUsers: new Map([
+          [
+            10,
+            new Map([
+              [0, peerRow(0, true)],
+              [2, peerRow(2)],
+            ]),
+          ],
+        ]),
+      }));
+      voiceStore.flush();
+      vi.advanceTimersByTime(5000);
+      playVoiceSound.mockClear();
+
+      setPeerWatching(2, [0]);
+      voiceStore.flush();
+
       expect(playVoiceSound).not.toHaveBeenCalled();
     });
   });
