@@ -23,7 +23,7 @@
 
 import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, onPrefChange, savePref } from "@lib/preferences";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import type { MemberPanel } from "../../features/members/memberPanel";
@@ -223,14 +223,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   );
   // The layout key is deliberately not listened to here: MainPage's one layout
   // handler orders the destroy of one host before the create of the other.
-  window.addEventListener(
-    "owncord:pref-change",
-    (e) => {
-      const key = e instanceof CustomEvent ? (e.detail as { key?: string } | null)?.key : undefined;
-      if (key === MEMBER_OPEN_PREF) sync();
-    },
-    { signal: owner.signal },
-  );
+  onPrefChange([MEMBER_OPEN_PREF], () => sync(), owner.signal);
 
   narrow?.addEventListener(
     "change",

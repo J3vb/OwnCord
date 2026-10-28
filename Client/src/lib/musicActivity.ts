@@ -54,6 +54,7 @@ import {
   toMediaPrefs,
 } from "./musicActivityPrefs";
 import type { MediaPrefs, MediaReading } from "../platform/contracts/mediaDetector";
+import { onPrefChange } from "./preferences";
 
 const log = createLogger("musicActivity");
 
@@ -296,14 +297,13 @@ export function startMusicActivity(options: MusicActivityOptions): MusicActivity
   disposable.addCleanup(unsubState);
   disposable.addCleanup(unsubReady);
   disposable.addCleanup(() => clearInterval(timer));
-  window.addEventListener(
-    "owncord:pref-change",
-    (e) => {
-      const key = (e as CustomEvent<{ key?: string }>).detail?.key;
+  onPrefChange(
+    [MUSIC_ACTIVITY_PREF_KEY, MUSIC_PREFS_KEY],
+    (key) => {
       if (key === MUSIC_ACTIVITY_PREF_KEY) onSettingChanged();
-      else if (key === MUSIC_PREFS_KEY) onPlayerPrefsChanged();
+      else onPlayerPrefsChanged();
     },
-    { signal: disposable.signal },
+    disposable.signal,
   );
 
   setMusicRefusalHandler((code, id) => {

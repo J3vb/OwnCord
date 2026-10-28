@@ -47,7 +47,7 @@ import {
   type EffectiveKeybinds,
 } from "@lib/keybinds";
 import { inputMode } from "@lib/inputMode";
-import { loadPref } from "@lib/preferences";
+import { loadPref, onPrefChange } from "@lib/preferences";
 
 const log = createLogger("global-keybinds");
 
@@ -222,17 +222,9 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     cachedTable ??= buildTable(loadEffectiveKeybinds());
     return cachedTable;
   };
-  const onPrefChange = (e: Event): void => {
-    const key = e instanceof CustomEvent ? (e.detail as { key?: unknown } | null)?.key : undefined;
-    // The effective set also derives from the mute/deafen keys and push to talk.
-    if (
-      key === KEYBINDS_PREF ||
-      key === GLOBAL_MUTE_VK_PREF ||
-      key === GLOBAL_DEAFEN_VK_PREF ||
-      key === "pttVk"
-    ) {
-      cachedTable = null;
-    }
+  // The effective set also derives from the mute/deafen keys and push to talk.
+  const onKeybindPrefChange = (): void => {
+    cachedTable = null;
   };
 
   /** Run the rebindable action bound to this keydown. True when the key was
@@ -374,7 +366,11 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   window.addEventListener("keydown", onEscapeCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onAcceptRingCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onEscape, { signal: owner.signal });
-  window.addEventListener("owncord:pref-change", onPrefChange, { signal: owner.signal });
+  onPrefChange(
+    [KEYBINDS_PREF, GLOBAL_MUTE_VK_PREF, GLOBAL_DEAFEN_VK_PREF, "pttVk"],
+    onKeybindPrefChange,
+    owner.signal,
+  );
   return () => owner.destroy();
 }
 

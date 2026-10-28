@@ -30,6 +30,7 @@ import {
 import { voiceText } from "../../i18n/voice";
 import { dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
 import { rowActivity } from "../../features/members/listeningLine";
+import { onPrefChange } from "@lib/preferences";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -402,13 +403,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // A row's time is "3:04 PM" today and "Sep 29" after midnight.
   atEachMidnight(listLifecycle.signal, renderDmListItems);
   // A clock-format change relabels the preview times in place.
-  window.addEventListener(
-    "owncord:pref-change",
-    ((e: CustomEvent<{ key: string }>) => {
-      if (e.detail.key === "timeFormat") renderDmListItems();
-    }) as EventListener,
-    { signal: listLifecycle.signal },
-  );
+  onPrefChange(["timeFormat"], () => renderDmListItems(), listLifecycle.signal);
 
   // A mute toggled from a row menu (or Settings) is not in a store.
   window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDmListItems(), {

@@ -14,7 +14,8 @@ import { dmStore } from "../../src/stores/dm.store";
 
 const { testPrefs } = vi.hoisted(() => ({ testPrefs: new Map<string, unknown>() }));
 
-vi.mock("../../src/lib/preferences", () => ({
+vi.mock("../../src/lib/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),

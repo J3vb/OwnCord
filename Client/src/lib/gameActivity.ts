@@ -53,6 +53,7 @@ import {
   toDetectPrefs,
 } from "./gameActivityPrefs";
 import type { DetectedGame, DetectPrefs } from "../platform/contracts/gameDetector";
+import { onPrefChange } from "./preferences";
 
 const log = createLogger("gameActivity");
 
@@ -271,14 +272,13 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
   disposable.addCleanup(unsubState);
   disposable.addCleanup(unsubReady);
   disposable.addCleanup(() => clearInterval(timer));
-  window.addEventListener(
-    "owncord:pref-change",
-    (e) => {
-      const key = (e as CustomEvent<{ key?: string }>).detail?.key;
+  onPrefChange(
+    [GAME_ACTIVITY_PREF_KEY, GAME_PREFS_KEY],
+    (key) => {
       if (key === GAME_ACTIVITY_PREF_KEY) onSettingChanged();
-      else if (key === GAME_PREFS_KEY) onGamePrefsChanged();
+      else onGamePrefsChanged();
     },
-    { signal: disposable.signal },
+    disposable.signal,
   );
 
   setActivityRefusalHandler((code, id) => {

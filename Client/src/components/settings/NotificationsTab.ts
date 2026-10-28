@@ -37,6 +37,7 @@ import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
+import { onPrefChange } from "@lib/preferences";
 
 const LEVEL_LABELS: Readonly<Record<NotificationLevel, () => string>> = {
   all: () => t("notifications.level.all"),
@@ -592,7 +593,7 @@ function buildChannelLevelsSection(signal: AbortSignal): HTMLDivElement {
   render();
   // Every write announces itself as a pref change, including one from a menu
   // while this tab is open.
-  window.addEventListener("owncord:pref-change", render, { signal });
+  onPrefChange("any", render, signal);
   window.addEventListener("storage", render, { signal });
   return wrapper;
 }
