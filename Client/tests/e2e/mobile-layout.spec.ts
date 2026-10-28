@@ -104,6 +104,24 @@ for (const profile of PROFILES) {
       await noHorizontalScroll(page);
     });
 
+    test("the composer clears a gesture bar reported only as the max bottom inset", async ({
+      page,
+    }) => {
+      // Chrome on Android with viewport-fit=cover: content runs under the
+      // gesture bar while the dynamic inset can read 0.
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Emulation.setSafeAreaInsetsOverride", {
+        insets: { top: 0, left: 0, right: 0, bottom: 0, bottomMax: 24 },
+      });
+      await signIn(page);
+      const composer = await page.locator(".message-input-wrap").boundingBox();
+      const viewport = page.viewportSize();
+      expect((composer?.y ?? 0) + (composer?.height ?? 0)).toBeLessThanOrEqual(
+        (viewport?.height ?? 0) - 24,
+      );
+      await cdp.detach();
+    });
+
     test("the drawer's channel rows fill its width", async ({ page }) => {
       await signIn(page);
       await page.locator("[data-testid='sidebar-toggle']").click();
