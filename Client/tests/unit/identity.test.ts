@@ -406,6 +406,28 @@ describe("getOrCreateIdentityKeyPair", () => {
     expect(invokeMock.mock.calls.some((c) => c[0] === "save_identity_key")).toBe(false);
   });
 
+  it("retries after a failed keyring read instead of replaying the cached rejection", async () => {
+    let failing = true;
+    const store = new Map<string, string>();
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "load_identity_key") {
+        if (failing) return Promise.reject(new Error("keychain locked"));
+        return Promise.resolve(store.get(args!.host as string) ?? null);
+      }
+      if (cmd === "save_identity_key") {
+        store.set(args!.host as string, args!.key as string);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await expect(getOrCreateIdentityKeyPair("chat.example", 1)).rejects.toThrow("keychain locked");
+    failing = false;
+
+    const kp = await getOrCreateIdentityKeyPair("chat.example", 1);
+    expect(kp.publicKey).toBeDefined();
+    expect(store.has("1@chat.example")).toBe(true);
+  });
+
   it("stays quiet when the store round-trips the key", async () => {
     let savedBlob: string | undefined;
     invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
