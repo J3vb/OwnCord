@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -68,8 +67,7 @@ func handleFileReport(svc *service.Services, hub ModQueueBroadcaster) http.Handl
 		}
 		var req fileReportRequest
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 
@@ -125,11 +123,11 @@ func handleMyReports(svc *service.Services) http.HandlerFunc {
 func writeReportServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrDuplicateReport):
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "DUPLICATE_REPORT", Message: err.Error()})
+		writeErr(w, http.StatusConflict, "DUPLICATE_REPORT", err.Error())
 	case errors.Is(err, service.ErrSelfReview):
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "SELF_REVIEW", Message: err.Error()})
+		writeErr(w, http.StatusForbidden, "SELF_REVIEW", err.Error())
 	case errors.Is(err, service.ErrBadRequest):
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: err.Error()})
+		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 	default:
 		writeServiceError(ctx, w, err)
 	}

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -102,8 +101,7 @@ func handleFileAppeal(svc *service.Services) http.HandlerFunc {
 		}
 		var req fileAppealRequest
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		publicID, err := svc.Appeals.Submit(r.Context(), user.ID, req.ActionID, req.Body)
@@ -164,7 +162,7 @@ func handleAppealQueueList(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		rows, err := svc.Appeals.Queue(r.Context(), actorID, r.URL.Query().Get("state"))
@@ -189,7 +187,7 @@ func handleAppealQueueGet(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		publicID := chi.URLParam(r, "id")
@@ -221,7 +219,7 @@ func handleAppealQueueAssign(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		publicID := chi.URLParam(r, "id")
@@ -241,14 +239,13 @@ func handleAppealQueueDecide(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		publicID := chi.URLParam(r, "id")
 		var req decideAppealRequest
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		if err := svc.Appeals.Decide(r.Context(), actorID, publicID, req.Outcome, req.Note); err != nil {
@@ -267,13 +264,13 @@ func handleAppealQueueDecide(svc *service.Services) http.HandlerFunc {
 func writeAppealServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrAlreadyAppealed):
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "ALREADY_APPEALED", Message: err.Error()})
+		writeErr(w, http.StatusConflict, "ALREADY_APPEALED", err.Error())
 	case errors.Is(err, service.ErrSelfReview):
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "SELF_REVIEW", Message: err.Error()})
+		writeErr(w, http.StatusForbidden, "SELF_REVIEW", err.Error())
 	case errors.Is(err, service.ErrReversalFailed):
 		// F1 review: the decision's effect could not be applied, so neither
 		// it nor the decision itself committed.
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "REVERSAL_FAILED", Message: err.Error()})
+		writeErr(w, http.StatusConflict, "REVERSAL_FAILED", err.Error())
 	default:
 		writeServiceError(ctx, w, err)
 	}

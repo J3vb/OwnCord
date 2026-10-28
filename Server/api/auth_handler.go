@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -150,8 +149,7 @@ type registrationPendingResponse struct {
 // rejection response itself when the input cannot be used.
 func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerRequest, bool) {
 	var req registerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+	if !decodeJSON(w, r, &req) {
 		return req, false
 	}
 
@@ -226,8 +224,7 @@ func handleLogin(svc AuthService, trustedProxies []string) http.HandlerFunc {
 // response itself when the input cannot be used.
 func loginReadRequest(w http.ResponseWriter, r *http.Request) (loginRequest, bool) {
 	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+	if !decodeJSON(w, r, &req) {
 		return req, false
 	}
 
@@ -300,8 +297,7 @@ func handleDeleteAccount(svc AuthService) http.HandlerFunc {
 		}
 
 		var req deleteAccountRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 
@@ -368,15 +364,15 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 		status, code = http.StatusInternalServerError, "INTERNAL_ERROR"
 		if _, bare := err.(interface{ Is(error) bool }); !bare {
 			slog.ErrorContext(ctx, "auth service returned a non-refusal error", "error", err)
-			writeJSON(w, status, errorResponse{Error: code, Message: "internal error"})
+			writeErr(w, status, code, "internal error")
 			return
 		}
 	default:
 		slog.ErrorContext(ctx, "auth service returned a non-refusal error", "error", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "INTERNAL_ERROR", Message: "internal error"})
+		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
 		return
 	}
-	writeJSON(w, status, errorResponse{Error: code, Message: err.Error()})
+	writeErr(w, status, code, err.Error())
 }
 
 // writeAuthBusy answers an admission refusal (B4-4) as 429 AUTH_BUSY, a code

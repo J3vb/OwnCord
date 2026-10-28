@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -246,8 +245,7 @@ func handleUpdateSticker(svc *service.Services, broadcaster StickerBroadcaster) 
 			return
 		}
 		var in stickerPatch
-		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
+		if !decodeJSON(w, r, &in) {
 			return
 		}
 		current, err := svc.Stickers.Get(r.Context(), id)
