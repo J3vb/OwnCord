@@ -232,7 +232,8 @@ vi.mock("../../src/features/voice/native/videoRenderer", () => ({
 }));
 
 const prefs = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/preferences")>()),
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
   savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));

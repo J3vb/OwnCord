@@ -9,6 +9,7 @@
  * as a peer that decodes everything.
  */
 
+import { readStored } from "@lib/preferences";
 import { isLinuxDesktop } from "./native/platform";
 import { nativeVideoCodecs } from "./native/videoCodecs";
 
@@ -34,11 +35,7 @@ let memo: readonly VideoCodecName[] | null = null;
 
 function devForcesVp8(): boolean {
   if (!import.meta.env.DEV) return false;
-  try {
-    return localStorage.getItem(DEV_VP8_ONLY_KEY) !== null;
-  } catch {
-    return false;
-  }
+  return readStored(DEV_VP8_ONLY_KEY) !== null;
 }
 
 function probeReceiver(): readonly VideoCodecName[] {

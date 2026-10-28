@@ -103,6 +103,17 @@ describe("migrateLegacyValue", () => {
     expect(localStorage.getItem(CLAIM)).toBeNull();
   });
 
+  it("migrates nothing when the legacy key cannot be removed", () => {
+    localStorage.setItem(LEGACY, "30");
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("storage blocked", "SecurityError");
+    });
+
+    expect(migrateLegacyValue(LEGACY, HOST_A)).toBeNull();
+    expect(localStorage.getItem(HOST_A)).toBeNull();
+    expect(localStorage.getItem(LEGACY)).toBe("30");
+  });
+
   it("reads unusable storage as null", () => {
     localStorage.setItem(LEGACY, "30");
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {

@@ -3,6 +3,7 @@
 // loads on first use, into the main-page chunk.
 
 import { resolveEmoji } from "@stores/emoji.store";
+import { loadStoredJson, saveStoredJson } from "@lib/preferences";
 
 const MAX_RECENT = 20;
 const RECENT_KEY = "owncord:recent-emoji";
@@ -16,15 +17,11 @@ const RECENT_KEY = "owncord:recent-emoji";
  * filtering — this is the list the write path must preserve.
  */
 function readStoredRecent(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENT_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((e): e is string => typeof e === "string");
-  } catch {
-    return [];
-  }
+  return loadStoredJson(
+    RECENT_KEY,
+    (v) => (Array.isArray(v) ? v.filter((e): e is string => typeof e === "string") : []),
+    [],
+  );
 }
 
 /**
@@ -60,9 +57,6 @@ export function getRecentEmoji(): string[] {
 export function addRecentEmoji(emoji: string): void {
   const recent = readStoredRecent().filter((e) => e !== emoji);
   recent.unshift(emoji);
-  try {
-    localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, MAX_RECENT)));
-  } catch {
-    // localStorage full or unavailable — ignore
-  }
+  // Storage full or unavailable: the Recent row is a convenience only.
+  saveStoredJson(RECENT_KEY, recent.slice(0, MAX_RECENT));
 }

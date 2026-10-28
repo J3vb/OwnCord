@@ -12,12 +12,79 @@
 export const STORAGE_PREFIX = "owncord:settings:";
 
 // ---------------------------------------------------------------------------
+// Guarded storage access
+//
+// The only module that touches `localStorage` (src/features/storageDoor.test.ts
+// holds that). Storage can be missing, blocked, full or hold anything, so every
+// call here is guarded: a read that fails reads as absent, a write that fails
+// returns false, and nothing throws to the caller. Keys are full keys; the
+// pref helpers below add STORAGE_PREFIX themselves.
+// ---------------------------------------------------------------------------
+
+/** The string stored under `key`, or null when there is none or storage is unusable. */
+export function readStored(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Store `value` under `key`; false when storage is full or unusable. */
+export function writeStored(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Remove `key`; false when storage is unusable. */
+export function removeStored(key: string): boolean {
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Every stored key, or none when storage is unusable. */
+export function storedKeys(): string[] {
+  try {
+    return Object.keys(localStorage);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The JSON value under `key`, passed through `parse` (which narrows it and may
+ * throw). `fallback` when the key is absent, unparsable or rejected.
+ */
+export function loadStoredJson<T>(key: string, parse: (value: unknown) => T, fallback: T): T {
+  const raw = readStored(key);
+  if (raw === null) return fallback;
+  try {
+    return parse(JSON.parse(raw));
+  } catch {
+    return fallback;
+  }
+}
+
+/** Store `value` as JSON under `key`; false when storage is full or unusable. */
+export function saveStoredJson(key: string, value: unknown): boolean {
+  return writeStored(key, JSON.stringify(value));
+}
+
+// ---------------------------------------------------------------------------
 // Preference helpers
 // ---------------------------------------------------------------------------
 
 export function loadPref<T>(key: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(STORAGE_PREFIX + key);
+    const raw = readStored(STORAGE_PREFIX + key);
     if (raw === null) return fallback;
     const parsed: unknown = JSON.parse(raw);
     // Basic typeof guard against corrupted localStorage (covers boolean,
@@ -56,7 +123,7 @@ export function readMigratedStringPref<T extends string>(
   fallback: T,
   allowedValues: readonly T[],
 ): T {
-  const currentRaw = localStorage.getItem(STORAGE_PREFIX + key);
+  const currentRaw = readStored(STORAGE_PREFIX + key);
   if (currentRaw !== null) {
     try {
       const currentValue: unknown = JSON.parse(currentRaw);
@@ -68,7 +135,7 @@ export function readMigratedStringPref<T extends string>(
     }
   }
 
-  const legacyRaw = localStorage.getItem(key);
+  const legacyRaw = readStored(key);
   if (legacyRaw !== null) {
     let legacyValue: unknown = legacyRaw;
     try {
