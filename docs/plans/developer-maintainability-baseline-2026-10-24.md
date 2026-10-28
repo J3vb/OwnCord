@@ -415,3 +415,40 @@ The scout's 42 for the voice file counted lines that mention `invoke(`, includin
 ### Verdict against the stop rules
 
 No existing assertion was weakened. `ipcBytes.test.ts`'s raw-bytes pattern now also matches the helpers, so it still finds `externalContent.ts`. `ws-cert.test.ts` expected the raw string a declined certificate rejects with; it now checks the `NativeCallError` carries that string as both `reason` and `message`. The count went from 47 to 0 and the existing lint rule now holds it as an error. The change is kept.
+
+## MX-4 one backdrop close for dialogs (2026-10-28)
+
+Candidate "one backdrop close for dialogs" from the execution plan, on `dev` `fd5fb934`. It follows the `createModal` fix for OC-0520 (#2842), which did not reach dialogs with their own backdrop check.
+
+### Baseline count
+
+Counted with the structural test's pattern (a `.target` compared with an overlay, backdrop, root or scrim element) over non-test files in `Client/src`.
+
+| Measure                              | Before                                        | After                      |
+| ------------------------------------ | --------------------------------------------- | -------------------------- |
+| Dialog files with their own check    | 15 (16 sites; `CertMismatchModal.ts` has two) | 0                          |
+| Shared guard (`lib/modalFactory.ts`) | 1                                             | 1 (`closeOnBackdropClick`) |
+| Other matches, allowlisted           | 1 (`miniPlayer.ts`, a keydown guard)          | 1                          |
+| Drag-select tests on those dialogs   | 0                                             | 18                         |
+
+The scout counted 11. The four it left out (`CreateChannelModal`, `EditChannelModal`, `DeleteChannelModal`, `InviteManager`) do have the check, written as `e.target === instance?.overlay`.
+
+Before the change, a press inside and a release on the backdrop closed one dialog of each kind in a throwaway test: `SearchOverlay` (mounted overlay), `CreateChannelModal` (`createModal` plus its own check) and `WhatsNewDialog` (hand-built overlay).
+
+### What changed
+
+- `Client/src/lib/modalFactory.ts`: the #2842 logic moved into an exported `closeOnBackdropClick(overlay, onClose, signal)`; `createModal` calls it.
+- The 15 files call it in place of their click listener. Each keeps its own close callback, so Escape, focus, the forward picker's "wait while sending" guard and the certificate and identity prompts' "backdrop rejects" are unchanged.
+- `Client/src/features/dialogBackdropDoor.test.ts` fails on a new hand-written check outside the helper; its allowlist is shrink-only (an entry that no longer matches fails too).
+- Ledger entry OC-0524 (low): the same drag-select close in the 15 files, plus an image pan in the lightbox that ended on the backdrop.
+
+### Deliberate-break check
+
+| Break                                                   | Result                                                |
+| ------------------------------------------------------- | ----------------------------------------------------- |
+| The 15 files reverted to `dev` with the new tests kept  | all 18 new drag-select tests fail                     |
+| A new `e.target === overlay` added to `PollComposer.ts` | `dialogBackdropDoor.test.ts` fails and names the file |
+
+### Verdict against the stop rules
+
+No gate was weakened and no existing assertion changed. The count went from 15 files to 0 with a test that holds it. The change is kept.

@@ -1,5 +1,5 @@
 {
-  "nextId": 524,
+  "nextId": 525,
   "findings": [
     {
       "id": "OC-0001",
@@ -12106,6 +12106,29 @@
       "confidence": "high",
       "status": "fixed",
       "found": "2026-10-27",
+      "hunt": "maintainability-scout-2026-10-27",
+      "lens": "client-state",
+      "finder": "claude",
+      "fixedDate": "2026-10-28"
+    },
+    {
+      "id": "OC-0524",
+      "title": "Dialogs outside the shared modal factory still closed when a drag-select ended on the backdrop",
+      "file": "Client/src/components/SearchOverlay.ts",
+      "line": 501,
+      "severity": "low",
+      "why": "OC-0520 fixed the drag-select close inside createModal only. Fifteen files kept their own e.target === overlay click check (some on top of createModal with closeOnBackdrop off), so a press inside and a release on the backdrop still read as a backdrop click there, and an image pan in the lightbox that ended on the backdrop closed it too.",
+      "repro": "Open search (or Settings, the quick switcher, a channel or category dialog, the poll composer, the forward picker, the What's new dialog), press inside a text field, drag past the dialog edge and release on the backdrop: the dialog closes.",
+      "evidence": "Maintainability candidate MX-4 (docs/plans/developer-maintainability-execution-2026-10-24.md). New drag-select tests fail on dev fd5fb934 for every dialog listed in the fix.",
+      "suggestedFix": "Close every dialog on its backdrop through one shared guard that remembers where the press started, and hold it with a structural test.",
+      "fix": {
+        "commit": "pending",
+        "revertProof": "fail (all 18 new drag-select tests fail on dev fd5fb934)",
+        "test": "Client/tests/unit/{search-overlay,quick-switcher,settings-overlay,create-channel-modal,edit-channel-modal,delete-channel-modal,category-modals,invite-manager,poll-composer,forward-picker,cert-mismatch-modal,cert-first-use-modal,identity-mismatch-modal,lightbox-gallery,whats-new-dialog}.test.ts, Client/tests/unit/components/QuickSwitchOverlay.test.ts (stays open when a drag-select ends on the backdrop), Client/src/features/dialogBackdropDoor.test.ts"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-28",
       "hunt": "maintainability-scout-2026-10-27",
       "lens": "client-state",
       "finder": "claude",
