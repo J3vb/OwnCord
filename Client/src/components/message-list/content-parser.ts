@@ -44,6 +44,7 @@ import {
   type InlineStyle,
 } from "@lib/markdown";
 import { highlightCode, resolveLanguage, type CodeToken } from "./syntax-highlight";
+import { copyThenRelabel } from "@lib/clipboard";
 
 // -- Regex constants ----------------------------------------------------------
 
@@ -955,16 +956,16 @@ function renderParsedCodeBlock(segment: Extract<ParsedSegment, { kind: "code" }>
   const copyBtn = createElement("button", { class: "msg-codeblock-copy" });
   setText(copyBtn, messagingText("code.copy"));
   copyBtn.addEventListener("click", () => {
-    void navigator.clipboard
-      .writeText(code)
-      .then(() => {
-        setText(copyBtn, messagingText("code.copied"));
-        setTimeout(() => setText(copyBtn, messagingText("code.copy")), 2000);
-      })
-      .catch(() => {
-        setText(copyBtn, messagingText("code.copyFailed"));
-        setTimeout(() => setText(copyBtn, messagingText("code.copy")), 2000);
-      });
+    copyThenRelabel(
+      code,
+      copyBtn,
+      {
+        idle: messagingText("code.copy"),
+        done: messagingText("code.copied"),
+        failed: messagingText("code.copyFailed"),
+      },
+      { ms: 2000 },
+    );
   });
 
   wrap.appendChild(block);

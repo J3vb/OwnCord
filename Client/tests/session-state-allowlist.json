@@ -414,6 +414,12 @@
       "binding": "lastCounters",
       "category": "pure-cache",
       "reason": "WeakMap keyed by the share's RTCRtpSender; a new share is a new sender and a closed one is collected with its entry, so nothing outlives the session that published it"
+    },
+    {
+      "file": "lib/clipboard.ts",
+      "binding": "pendingResets",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by the copy button; a pending label reset goes with its button, and an owner's signal drops it on abort"
     }
   ]
 }
