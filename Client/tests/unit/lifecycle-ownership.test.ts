@@ -382,6 +382,16 @@ for (const rel of sourceFiles) {
           }
         }
       }
+      // `onPrefChange(keys, handler)` with no signal is a bare window listener
+      // under another name (lib/preferences.ts), so R1 counts it as one.
+      if (name === "onPrefChange" && node.arguments.length < 3) {
+        bareListeners++;
+        bareListenerFiles.add(rel);
+        r1Found.push([
+          `${rel}|window|owncord:pref-change`,
+          `${rel}:${line(node)} onPrefChange without a signal`,
+        ]);
+      }
       if (name === "setTimeout" || name === "setInterval") {
         const discarded = ts.isExpressionStatement(node.parent) || ts.isVoidExpression(node.parent);
         if (name === "setTimeout" && discarded) {
