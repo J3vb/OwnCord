@@ -578,6 +578,11 @@ function refreshExternalItems(): void {
     const hadFocus = el.contains(document.activeElement);
     const next = renderUrlEmbed(url);
     if (next === null) {
+      const text = el.parentElement?.querySelector<HTMLElement>("[data-lone-image-text]");
+      if (text != null) {
+        text.hidden = false;
+        text.style.display = "contents";
+      }
       el.remove();
       continue;
     }

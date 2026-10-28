@@ -749,7 +749,13 @@ export function renderMessage(
       wrap.style.display = "contents";
       wrap.appendChild(body);
       box.appendChild(wrap);
-    } else if (!isVoiceOnly(msg) && !isLoneImageEmbed(msg.content)) box.appendChild(body);
+    } else if (isLoneImageEmbed(msg.content)) {
+      // The image stands in for its link; the text comes back if the embed goes.
+      const wrap = createElement("div", { "data-lone-image-text": "" });
+      wrap.hidden = true;
+      wrap.appendChild(body);
+      box.appendChild(wrap);
+    } else if (!isVoiceOnly(msg)) box.appendChild(body);
     if (msg.editedAt !== null) {
       box.appendChild(
         createElement(
