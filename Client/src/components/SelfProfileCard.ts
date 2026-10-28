@@ -306,7 +306,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
           e.preventDefault();
           // A refused (over-limit) status keeps the card open with the hint.
           if (commitCustom()) close();
-        } else if (e.key === "Escape") {
+        } else if (e.key === "Escape" && !isImeCommit(e)) {
           e.preventDefault();
           e.stopPropagation();
           input.value = lastCommittedCustom;
@@ -629,7 +629,8 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
         // Escape inside an open list closes that list, like ArrowLeft; the
         // card's own Escape (document level) then sees it was handled.
         const leaves =
-          e.key === "ArrowLeft" || (e.key === "Escape" && ownerOfDuration !== undefined);
+          e.key === "ArrowLeft" ||
+          (e.key === "Escape" && !isImeCommit(e) && ownerOfDuration !== undefined);
         if (leaves && (ownerOfDuration !== undefined || rowStatus !== undefined)) {
           const owner = ownerOfDuration ?? rowStatus;
           if (owner === undefined || expanded !== owner) return;
@@ -743,7 +744,7 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       "keydown",
       (e: KeyboardEvent) => {
         // The emoji picker already took this Escape (closing itself).
-        if (e.key === "Escape" && !e.defaultPrevented) {
+        if (e.key === "Escape" && !isImeCommit(e) && !e.defaultPrevented) {
           e.preventDefault();
           input.value = lastCommittedCustom;
           close();

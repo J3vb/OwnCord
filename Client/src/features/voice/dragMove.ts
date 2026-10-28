@@ -10,6 +10,7 @@
  * re-render often) cannot strand one.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "../../lib/disposable";
 import { setOwnedTimeout } from "../../lib/dom";
 import { channelsStore } from "../../stores/channels.store";
@@ -181,7 +182,7 @@ export function attachVoiceUserDrag(
       document.addEventListener(
         "keydown",
         (ev) => {
-          if (ev.key !== "Escape" || cancelled) return;
+          if (ev.key !== "Escape" || isImeCommit(ev) || cancelled) return;
           ev.preventDefault();
           if (ghost === null) {
             end();

@@ -6,6 +6,7 @@
  * Uses the existing .modal-overlay / .cert-* CSS classes from login.css.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -106,7 +107,7 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && overlay?.isConnected === true) onReject();
+        if (e.key === "Escape" && !isImeCommit(e) && overlay?.isConnected === true) onReject();
       },
       { signal: disposable.signal },
     );
@@ -213,7 +214,7 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && overlay?.isConnected === true) onReject();
+        if (e.key === "Escape" && !isImeCommit(e) && overlay?.isConnected === true) onReject();
       },
       { signal: disposable.signal },
     );

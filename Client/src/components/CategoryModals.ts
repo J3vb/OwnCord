@@ -55,7 +55,8 @@ function openDialog(
     {
       content: header,
       closeOnBackdrop: false,
-      closeOnEscape: false,
+      // Escape cancels and never confirms.
+      onEscape: () => parts.onClose(),
       overlayAttrs: { "data-testid": parts.testId },
       ariaLabelledBy: parts.titleId,
     },
@@ -63,16 +64,6 @@ function openDialog(
   );
   appendChildren(instance.modal, parts.body, parts.footer);
   closeOnBackdropClick(instance.overlay, () => parts.onClose(), disposable.signal);
-  // Escape cancels and never confirms. Document-level so it works wherever focus
-  // sits; guarded on the overlay still being attached because the listener
-  // lives until destroy() aborts it.
-  document.addEventListener(
-    "keydown",
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape" && instance.overlay.isConnected) parts.onClose();
-    },
-    { signal: disposable.signal },
-  );
   return instance;
 }
 

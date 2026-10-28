@@ -175,7 +175,7 @@ export function createStickerPicker(options: StickerPickerOptions): {
   root.addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !isImeCommit(e)) {
         e.preventDefault();
         options.onClose();
       }

@@ -47,4 +47,22 @@ describe("category dialogs close on their backdrop", () => {
       dialog.destroy?.();
     },
   );
+
+  it.each(dialogs)(
+    "%s ignores Escape that cancels an IME candidate, and a plain Escape still closes",
+    (_name, _testId, make) => {
+      const onClose = vi.fn();
+      const dialog = make(onClose);
+      const container = document.createElement("div");
+      document.body.appendChild(container);
+      dialog.mount(container);
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+      );
+      expect(onClose).not.toHaveBeenCalled();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(onClose).toHaveBeenCalledOnce();
+      dialog.destroy?.();
+    },
+  );
 });

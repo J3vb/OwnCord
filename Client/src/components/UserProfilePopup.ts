@@ -10,6 +10,7 @@
  * A11y: role="dialog", aria-label, focus trap, return focus on close.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
@@ -542,7 +543,7 @@ export function createUserProfilePopup(
             else if (e.key === "ArrowUp") focusRoleOption(at - 1);
             else if (e.key === "Home") focusRoleOption(0);
             else if (e.key === "End") focusRoleOption(-1);
-            else if (e.key === "Escape") {
+            else if (e.key === "Escape" && !isImeCommit(e)) {
               e.stopPropagation();
               closeRoleMenu(true);
               return;
@@ -670,7 +671,7 @@ export function createUserProfilePopup(
             else if (e.key === "ArrowUp") focusRoleOption(at - 1);
             else if (e.key === "Home") focusRoleOption(0);
             else if (e.key === "End") focusRoleOption(-1);
-            else if (e.key === "Escape") {
+            else if (e.key === "Escape" && !isImeCommit(e)) {
               // Closes the list only; the card stays.
               e.stopPropagation();
               closeRoleMenu(true);
@@ -949,7 +950,7 @@ export function createUserProfilePopup(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && isOpen()) {
+        if (e.key === "Escape" && !isImeCommit(e) && isOpen()) {
           close();
         }
       },

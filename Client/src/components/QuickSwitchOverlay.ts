@@ -4,6 +4,7 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
@@ -172,7 +173,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
     document.addEventListener(
       "keydown",
       (e) => {
-        if (e.key === "Escape") options.onClose();
+        if (e.key === "Escape" && !isImeCommit(e)) options.onClose();
       },
       { signal: disposable.signal },
     );
