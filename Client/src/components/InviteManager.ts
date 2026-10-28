@@ -7,7 +7,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import { shellText } from "../i18n/shell";
 
@@ -342,15 +342,7 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     );
 
     // Click overlay to close
-    instance.overlay.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === instance?.overlay) {
-          options.onClose();
-        }
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(instance.overlay, () => options.onClose(), disposable.signal);
   }
 
   function destroy(): void {

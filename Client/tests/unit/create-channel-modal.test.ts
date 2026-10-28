@@ -537,6 +537,18 @@ describe("CreateChannelModal", () => {
     modal.destroy?.();
   });
 
+  it("stays open when a drag-select ends on the backdrop", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal("Text Channels", { onClose });
+    const overlayEl = container.querySelector(
+      "[data-testid='create-channel-modal']",
+    ) as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onClose).not.toHaveBeenCalled();
+    modal.destroy?.();
+  });
+
   it("clears previous error when submitting valid data after error", async () => {
     const onCreate = vi
       .fn()

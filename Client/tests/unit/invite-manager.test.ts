@@ -215,6 +215,17 @@ describe("InviteManager", () => {
     mgr.destroy?.();
   });
 
+  it("stays open when a drag-select ends on the backdrop", () => {
+    const opts = makeOptions();
+    const mgr = createInviteManager(opts);
+    mgr.mount(container);
+    const overlayEl = container.querySelector(".modal-overlay") as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(opts.onClose).not.toHaveBeenCalled();
+    mgr.destroy?.();
+  });
+
   it("create failure calls onError", async () => {
     const opts = makeOptions({
       onCreateInvite: vi.fn(

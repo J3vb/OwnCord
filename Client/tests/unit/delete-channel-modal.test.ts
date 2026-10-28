@@ -181,6 +181,18 @@ describe("DeleteChannelModal", () => {
     modal.destroy?.();
   });
 
+  it("stays open when a drag-select ends on the backdrop", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal({ onClose });
+    const overlayEl = container.querySelector(
+      "[data-testid='delete-channel-modal']",
+    ) as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onClose).not.toHaveBeenCalled();
+    modal.destroy?.();
+  });
+
   // ── dialog accessibility contract (DC-13) ──────────────────────────────────
 
   it("stamps dialog semantics named by the header title", () => {

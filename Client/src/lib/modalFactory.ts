@@ -55,6 +55,37 @@ export interface ModalInstance {
 }
 
 /**
+ * Close `overlay` on a click on the backdrop itself. A press that starts
+ * inside the dialog and is released on the backdrop (drag-selecting an input's
+ * text past its edge) also fires a click on the overlay; only a press that
+ * started on the backdrop closes. Every dialog closes on its backdrop through
+ * this one guard (src/features/dialogBackdropDoor.test.ts).
+ */
+export function closeOnBackdropClick(
+  overlay: HTMLElement,
+  onClose: () => void,
+  signal: AbortSignal,
+): void {
+  let pressStartedInside = false;
+  overlay.addEventListener(
+    "pointerdown",
+    (e) => {
+      pressStartedInside = e.target !== overlay;
+    },
+    { capture: true, signal },
+  );
+  overlay.addEventListener(
+    "click",
+    (e) => {
+      const startedInside = pressStartedInside;
+      pressStartedInside = false;
+      if (e.target === overlay && !startedInside) onClose();
+    },
+    { signal },
+  );
+}
+
+/**
  * Create and append a modal overlay to the given container (default: document.body).
  * Returns a ModalInstance for lifecycle control.
  */
@@ -108,29 +139,8 @@ export function createModal(
     }
   }
 
-  // Backdrop click. A press that starts inside the dialog and is released on
-  // the backdrop (drag-selecting an input's text past its edge) also fires a
-  // click on the overlay; only a press that started on the backdrop closes.
   if (closeOnBackdrop) {
-    let pressStartedInside = false;
-    overlay.addEventListener(
-      "pointerdown",
-      (e) => {
-        pressStartedInside = e.target !== overlay;
-      },
-      { capture: true, signal: disposable.signal },
-    );
-    overlay.addEventListener(
-      "click",
-      (e) => {
-        const startedInside = pressStartedInside;
-        pressStartedInside = false;
-        if (e.target === overlay && !startedInside) {
-          handleClose();
-        }
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(overlay, handleClose, disposable.signal);
   }
 
   // Escape key

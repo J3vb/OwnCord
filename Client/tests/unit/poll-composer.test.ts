@@ -223,4 +223,15 @@ describe("the poll dialog", () => {
     abort.abort();
     expect(document.querySelector('[data-testid="poll-composer"]')).toBeNull();
   });
+
+  it("stays open when a drag-select ends on the backdrop, and a backdrop click still closes", () => {
+    open();
+    const overlay = $("poll-composer");
+    $("poll-question").dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(document.querySelector('[data-testid="poll-composer"]')).not.toBeNull();
+    overlay.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(document.querySelector('[data-testid="poll-composer"]')).toBeNull();
+  });
 });

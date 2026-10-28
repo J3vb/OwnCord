@@ -231,6 +231,17 @@ describe("ForwardPicker", () => {
     expect(q("[data-testid=forward-picker]")).toBeNull();
   });
 
+  it("stays open when a drag-select ends on the backdrop, and a backdrop click still closes", () => {
+    open();
+    const overlay = q("[data-testid=forward-picker]");
+    overlay.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(q("[data-testid=forward-picker]")).not.toBeNull();
+    overlay.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(document.querySelector("[data-testid=forward-picker]")).toBeNull();
+  });
+
   it("frees Done and Escape once a failed batch has resolved", async () => {
     open();
     pick(2);

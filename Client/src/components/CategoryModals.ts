@@ -11,7 +11,7 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import { shellText } from "../i18n/shell";
 import { categoryErrorText } from "../features/channels/categoryActions";
@@ -62,13 +62,7 @@ function openDialog(
     container,
   );
   appendChildren(instance.modal, parts.body, parts.footer);
-  instance.overlay.addEventListener(
-    "click",
-    (e) => {
-      if (e.target === instance.overlay) parts.onClose();
-    },
-    { signal: disposable.signal },
-  );
+  closeOnBackdropClick(instance.overlay, () => parts.onClose(), disposable.signal);
   // Escape cancels and never confirms. Document-level so it works wherever focus
   // sits; guarded on the overlay still being attached because the listener
   // lives until destroy() aborts it.
