@@ -33,14 +33,17 @@ var pathIDSites = map[string]map[string]bool{
 // enforces MX-10: a strconv.ParseInt, ParseUint or Atoi of a chi.URLParam
 // (directly, or through a local variable assigned from one) is a violation
 // outside pathInt64 and pathID, which refuse an id of 0 or below, so a route
-// cannot take an id the others reject.
+// cannot take an id the others reject. MX-7 part 3 adds http.Error: it answers
+// text/plain, so a client that reads the JSON envelope gets no code; an
+// api or admin route answers through writeErr instead.
 var replyHelpers = Rule{
 	ID:    replyHelpersID,
 	Scope: []string{"api", "admin"},
 	Check: func(f *ast.File, fset *token.FileSet, rel string) []Violation {
 		helpers := replyHelperSites[rel]
 		jsonNames, _ := importNames(f, "encoding/json")
-		var literals, decoders []token.Pos
+		httpNames, _ := importNames(f, "net/http")
+		var literals, decoders, plainText []token.Pos
 		ast.Inspect(f, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.CompositeLit:
@@ -48,6 +51,10 @@ var replyHelpers = Rule{
 					literals = append(literals, n.Pos())
 				}
 			case *ast.CallExpr:
+				if isPkgCall(n, httpNames, "Error") {
+					plainText = append(plainText, n.Pos())
+					return true
+				}
 				sel, ok := n.Fun.(*ast.SelectorExpr)
 				if !ok || sel.Sel.Name != "NewDecoder" {
 					return true
@@ -58,7 +65,7 @@ var replyHelpers = Rule{
 			}
 			return true
 		})
-		out := make([]Violation, 0, len(literals)+len(decoders))
+		out := make([]Violation, 0, len(literals)+len(decoders)+len(plainText))
 		for _, pos := range literals {
 			out = append(out, Violation{
 				Rule: replyHelpersID,
@@ -75,6 +82,14 @@ var replyHelpers = Rule{
 				Msg: "json.NewDecoder outside the shared decoder: read a request body with decodeJSON " +
 					"(decodeOptionalJSON when it may be empty, decodeStrictJSON to refuse unknown fields), " +
 					"which answers a bad or over-size body the same way on every route.",
+			})
+		}
+		for _, pos := range plainText {
+			out = append(out, Violation{
+				Rule: replyHelpersID,
+				File: rel,
+				Line: fset.Position(pos).Line,
+				Msg:  "http.Error answers plain text: answer with writeErr(w, status, code, msg) so the client gets the JSON error envelope.",
 			})
 		}
 		out = append(out, rawPathIDs(f, fset, rel)...)

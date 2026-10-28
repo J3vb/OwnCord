@@ -401,3 +401,28 @@ func TestClientUpdate_Epoch1ResponseShape(t *testing.T) {
 		t.Errorf("204 body length = %d, want 0 (body: %q)", rr204.Body.Len(), rr204.Body.String())
 	}
 }
+
+// TestClientUpdate_ErrorIsJSONEnvelope pins MX-7 part 3: the update check's
+// error answers the standard JSON envelope, not plain text.
+func TestClientUpdate_ErrorIsJSONEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	rr := httptest.NewRecorder()
+	buildClientUpdateRouter(u).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/client-update/windows-x86_64-nsis/1.0.0", nil))
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body: %s", rr.Code, rr.Body.String())
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var env struct{ Error, Message string }
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil || env.Error != "UPDATE_CHECK_FAILED" || env.Message == "" {
+		t.Errorf("body = %s (%v), want the UPDATE_CHECK_FAILED envelope", rr.Body.String(), err)
+	}
+}

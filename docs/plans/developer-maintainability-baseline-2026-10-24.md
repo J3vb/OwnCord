@@ -654,3 +654,43 @@ Left as they were: an optional id (`mark_read` `message_id`, `thread_focus` `thr
 ### Verdict
 
 Kept. One id parser and one error text, five ids no longer reach a handler as 0 or a negative number, and a rule stops a new hand-written read. No saving in time or tokens is claimed.
+
+## MX-7 part 3: plain-text error replies (2026-10-28)
+
+Measured on a branch from `origin/dev` `e98934fe`. Evidence level: **executed** (unit tests; the admin panel was not opened). This closes MX-7; MX-16 (REST error codes as constants) can start.
+
+### Counts
+
+Counted with `grep -rn "http\.Error(" Server --include=*.go` over non-test files, and with the `reply-helpers` invariant, which now flags `http.Error` in `api` and `admin`.
+
+| Measure (non-test files)                                        | Before                                                                   | After                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------ |
+| `http.Error` plain-text replies, `api` and `admin`              | 24: plugin admin API 17, client update 3, admin log stream 4             | 0, held by the invariant       |
+| `http.Error` plain-text replies, rest of the server             | 7: plugin asset server 3, LiveKit webhook 3, WebSocket upgrade refusal 1 | 7, kept on purpose (see below) |
+| Log-stream refusals sent as JSON text under `text/plain`        | 3                                                                        | 0                              |
+| Plugin upload that trips the size cap mid-parse                 | `400` "invalid multipart upload"                                         | `413 PAYLOAD_TOO_LARGE`        |
+| Routes documented as an exception to the JSON envelope (api.md) | 1 (plugin admin)                                                         | 0                              |
+
+### What changed
+
+- `api/plugins_handler.go`: every error goes through `writeErr`. Codes: `503 PLUGINS_DISABLED` (runtime off, the `PUSH_DISABLED`/`GIF_DISABLED` pattern), `400 INVALID_INPUT` for body problems (as batch 1), `415 UNSUPPORTED_MEDIA_TYPE`, `413 PAYLOAD_TOO_LARGE`, `400 BAD_REQUEST` for a bad path id (as `parseIDParam`), `404 NOT_FOUND`, `500 INTERNAL_ERROR`. Messages are unchanged.
+- `api/client_update.go`: `400 INVALID_INPUT` and `502 UPDATE_CHECK_FAILED` (the admin update check's code). The Tauri updater reads only the status.
+- `admin/logstream.go`: the three refusals already built the envelope by hand and sent it as `text/plain`; they now use `writeErr`. "streaming not supported" is `500 INTERNAL_ERROR`.
+- The admin panel's `pluginApi` already read `message` from a JSON body, so it shows the same text; only its comment changed.
+- `docs/api.md` drops the plugin plain-text exception and lists `PLUGINS_DISABLED`, `UNSUPPORTED_MEDIA_TYPE` and `UPDATE_CHECK_FAILED`.
+
+Kept as plain text: the plugin asset server (`plugin/host_ui.go`, files loaded by an iframe), the LiveKit webhook (only LiveKit reads it, and only the status) and the WebSocket upgrade refusal (a browser WebSocket cannot read the body). The plain `http.NotFound` on file, emoji and sticker image routes is the same case and was not counted.
+
+### Checks
+
+| Check                                                                                          | Before (`dev` handlers + the new tests) | After              |
+| ---------------------------------------------------------------------------------------------- | --------------------------------------- | ------------------ |
+| `TestPluginsHandler_ErrorsUseTheJSONEnvelope` (10 error paths), list-failure and mid-parse 413 | 12 of 12 fail                           | 12 pass            |
+| `TestHandleLogStream_RefusalsAreJSON` (no ticket, unknown ticket, no session, no permission)   | 4 of 4 fail (`text/plain`)              | 4 pass             |
+| `TestClientUpdate_ErrorIsJSONEnvelope`                                                         | fails                                   | passes             |
+| `reply-helpers` invariant on the tree                                                          | 24 violations                           | 0                  |
+| Existing `api`, `admin` and `invariants` tests                                                 | pass                                    | pass, none changed |
+
+### Verdict
+
+Kept. Every error a JSON client of `api` or `admin` can get is now one shape, the last documented exception is gone, and the guard stops a new plain-text reply. No saving in time or tokens is claimed.

@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Changed
+
+**Server (operators)**
+
+- The plugin admin API, the client update check and the admin log stream now answer errors in the standard JSON shape (`{"error": "...", "message": "..."}`) instead of plain text. A plugin upload over 16 MiB now answers `413 PAYLOAD_TOO_LARGE` even when the size cap trips mid-upload.
+
 ## v2.5.0
 
 **OwnCord 2.5** (the sixth public beta) brings voice messages, stickers, animated avatars, videos that play straight from the chat and iPhone photos that show as pictures. You can now stay signed in on several devices at once, and members can see the game or music someone is playing. Roles get new permissions (Move Members, Manage Backups and more) and presets. Under the surface, dialogs, menus and Japanese, Chinese and Korean typing behave the same everywhere.
