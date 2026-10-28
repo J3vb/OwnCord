@@ -141,6 +141,7 @@ impl GlobalKeysStatus {
     }
 
     /// The same status with the portal's refusal of our session recorded.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(crate) fn with_refused(mut self, refused: bool) -> Self {
         self.session_refused = refused;
         self

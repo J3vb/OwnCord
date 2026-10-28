@@ -37,6 +37,9 @@ func (h *Hub) voiceJoinSwitchCapacityOK(ctx context.Context, c *Client, channelI
 		// moves it (voiceJoinMoveCall), which is the same destructive leave.
 		if holder := h.voiceClient(c.userID); holder != nil && holder != c {
 			cur = holder.voice.channel()
+		} else if e := h.voiceReg.voiceGrace.get(c.userID); e != nil {
+			// Or parked in the reconnect grace window, which the move ends too.
+			cur = e.snap.chID
 		}
 	}
 	if cur <= 0 || cur == channelID || maxUsers <= 0 {
