@@ -31,13 +31,13 @@ func parseChatForward(userID int64, reqID string, raw json.RawMessage) (Command,
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid chat_forward payload: %w", err)
 	}
-	chID, err := p.ChannelID.Int64()
-	if err != nil || chID <= 0 {
-		return nil, fmt.Errorf("channel_id must be a positive integer")
+	chID, err := positiveID(p.ChannelID, "channel_id")
+	if err != nil {
+		return nil, err
 	}
-	msgID, err := p.MessageID.Int64()
-	if err != nil || msgID <= 0 {
-		return nil, fmt.Errorf("message_id must be a positive integer")
+	msgID, err := positiveID(p.MessageID, "message_id")
+	if err != nil {
+		return nil, err
 	}
 	if p.ClientMessageID == "" {
 		return nil, fmt.Errorf("client_message_id is required")
