@@ -357,7 +357,7 @@ The scout's 42 for the voice file counted lines that mention `invoke(`, includin
 ### What changed
 
 - `Client/src/platform/desktop/nativeInvoke.ts`: `tryInvoke` (never rejects; `{ ok, value }` or `{ ok: false, error }`) and `invokeOrThrow` (rejects with a `NativeCallError` whose `message` is the host's reason and whose `reason` is the raw value).
-- The helper loads the core API per call with a dynamic `import()`, as most sites did, so timing and the startup chunk stay as they were, and a chunk that fails to load comes back as a failed command.
+- The helper sends the command before its first await, so fire-and-forget calls (`stop_livekit_proxy`, `frontend_ready`) reach the host in the same order as before. `message-list-media-release.test.ts` now mocks the core API with a pending call: its GIF used to fail to load only after the test ended, and now fails inside it.
 - `notifier.setUnreadBadge` is the worked example: a host with no badge command logs and resolves.
 - Every other site keeps its contract: it still rejects, now always with an `Error`. Callers that read the host's text (`ws.ts`'s "channel full", the camera "no frame" check, `connectErrorCode`) read `message`, which is unchanged. `externalContent.ts` maps `error.reason` to its failure class as before.
 - `nativeVoiceService.ts`: the 25 bare calls go through `invokeOrThrow`; no voice logic changed.
@@ -369,7 +369,7 @@ The scout's 42 for the voice file counted lines that mention `invoke(`, includin
 | Break                                          | Before: what fails  | After: what fails                                                    |
 | ---------------------------------------------- | ------------------- | -------------------------------------------------------------------- |
 | `systemIdle.ts` restored to a bare `invoke`    | nothing (a warning) | `npm run lint` (error)                                               |
-| `tryInvoke`'s catch rethrows the raw rejection | n/a                 | 19 tests in the `nativeInvoke`, notifier and external-content suites |
+| `tryInvoke`'s catch rethrows the raw rejection | n/a                 | 18 tests in the `nativeInvoke`, notifier and external-content suites |
 
 ### Verdict against the stop rules
 

@@ -3,7 +3,7 @@
 // missing bridge) comes back as a value or a typed error, never as the raw
 // string the host rejected with. `local/invoke-needs-try-catch` is an error
 // everywhere in the folder but this file.
-import type { InvokeArgs } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 
 /** A host command that failed. `reason` is what the host rejected with
  *  (usually a string, sometimes a `{stage, message}` object), kept for callers
@@ -32,12 +32,10 @@ function reasonText(reason: unknown): string {
   return String(reason);
 }
 
-/** Runs `command`; never rejects. The core API stays a dynamic import, as it
- *  was at most call sites: the registry is reachable from the entry, and a
- *  chunk that fails to load is one more failure to hand back. */
+/** Runs `command`; never rejects. The command is sent before the first await,
+ *  so fire-and-forget callers keep their order with the host. */
 export async function tryInvoke<T>(command: string, args?: InvokeArgs): Promise<NativeResult<T>> {
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
     const value = await (args === undefined ? invoke<T>(command) : invoke<T>(command, args));
     return { ok: true, value };
   } catch (reason) {
