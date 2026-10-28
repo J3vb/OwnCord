@@ -52,6 +52,7 @@ and only when it changes something a contributor or fork holder must do
 **Accounts & admin**
 
 - You can now stay signed in on several devices at once, up to 10 connections per account. A new device no longer signs the others out, and the "Signed in elsewhere" / "Use here" prompt no longer appears when another device connects. Only reloading the app on the same device replaces its older connection. You show as online while any device is connected, and bans, signing out everywhere and an admin disconnect still end every device. The admin panel's online counts now count people, not connections. Update the app on every device: with an older app voice may not show correctly across devices.
+- Server replies to a malformed request body now use one message, "malformed request body", on every route, and a body over the size limit answers `413 PAYLOAD_TOO_LARGE` instead of `400`. Admin routes answer `400 BAD_REQUEST` for an id of 0 or below in the path before looking anything up.
 
 **Voice and video**
 

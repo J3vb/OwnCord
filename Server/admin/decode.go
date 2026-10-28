@@ -17,7 +17,8 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 // decodeOptionalJSON is decodeJSON for a route whose body may be left out:
-// an empty body leaves v as it was and returns true.
+// an empty body leaves v as it was and returns true. No admin route takes an
+// optional body yet; it is kept so admin offers the same three forms as api.
 func decodeOptionalJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return decodeBody(w, json.NewDecoder(r.Body), v, true)
 }
@@ -46,8 +47,8 @@ func decodeBody(w http.ResponseWriter, dec *json.Decoder, v any, optional bool) 
 	return false
 }
 
-// writeBodyErr answers a body that failed to decode. err is nil for a body
-// that decoded but carried trailing data.
+// writeBodyErr answers a body that failed to decode. err is the decoder's
+// error, or nil when a second JSON value followed the first.
 func writeBodyErr(w http.ResponseWriter, err error) {
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		writeErr(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body is too large")

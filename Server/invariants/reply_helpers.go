@@ -58,7 +58,7 @@ var replyHelpers = Rule{
 			}
 			return true
 		})
-		var out []Violation
+		out := make([]Violation, 0, len(literals)+len(decoders))
 		for _, pos := range literals {
 			out = append(out, Violation{
 				Rule: replyHelpersID,
@@ -84,27 +84,15 @@ var replyHelpers = Rule{
 
 // rawPathIDs reports every strconv.ParseInt, ParseUint or Atoi in f whose
 // argument is a chi.URLParam call, or a local variable assigned from one in
-// the same function, outside the file's path-id helper.
+// the same function, outside the file's path-id helper. It is a guard, not a
+// proof: a wrapped argument (strings.TrimSpace(chi.URLParam(...))),
+// chi.RouteContext(r).URLParam, r.PathValue and package-level func literals
+// are not followed.
 func rawPathIDs(f *ast.File, fset *token.FileSet, rel string) []Violation {
 	chiNames := chiImportNames(f)
 	strconvNames, _ := importNames(f, "strconv")
 	if len(chiNames) == 0 || len(strconvNames) == 0 {
 		return nil
-	}
-	isCall := func(e ast.Expr, pkgs map[string]bool, fns ...string) bool {
-		call, ok := e.(*ast.CallExpr)
-		if !ok {
-			return false
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return false
-		}
-		pkg, ok := sel.X.(*ast.Ident)
-		if !ok || !pkgs[pkg.Name] {
-			return false
-		}
-		return slices.Contains(fns, sel.Sel.Name)
 	}
 	var out []Violation
 	for _, d := range f.Decls {
@@ -112,47 +100,80 @@ func rawPathIDs(f *ast.File, fset *token.FileSet, rel string) []Violation {
 		if !ok || fd.Body == nil || pathIDSites[rel][enclosingSymbol(f, fd.Pos())] {
 			continue
 		}
-		fromParam := map[string]bool{}
-		ast.Inspect(fd.Body, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.AssignStmt:
-				if len(n.Lhs) == len(n.Rhs) {
-					for i, rhs := range n.Rhs {
-						if id, ok := n.Lhs[i].(*ast.Ident); ok && isCall(rhs, chiNames, "URLParam") {
-							fromParam[id.Name] = true
-						}
-					}
-				}
-			case *ast.ValueSpec:
-				if len(n.Names) == len(n.Values) {
-					for i, v := range n.Values {
-						if isCall(v, chiNames, "URLParam") {
-							fromParam[n.Names[i].Name] = true
-						}
-					}
-				}
-			}
-			return true
-		})
-		ast.Inspect(fd.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok || len(call.Args) == 0 || !isCall(call, strconvNames, "ParseInt", "ParseUint", "Atoi") {
-				return true
-			}
-			arg := call.Args[0]
-			if id, ok := arg.(*ast.Ident); isCall(arg, chiNames, "URLParam") || (ok && fromParam[id.Name]) {
-				out = append(out, Violation{
-					Rule: replyHelpersID,
-					File: rel,
-					Line: fset.Position(call.Pos()).Line,
-					Msg: "a URL parameter parsed by hand: read a path id with pathInt64 (admin) or pathID / parseIDParam (api), " +
-						"which refuse 0 and negative ids so every route takes the same ids.",
-				})
-			}
-			return true
-		})
+		for _, pos := range rawParseSites(fd.Body, chiNames, strconvNames, urlParamLocals(fd.Body, chiNames)) {
+			out = append(out, Violation{
+				Rule: replyHelpersID,
+				File: rel,
+				Line: fset.Position(pos).Line,
+				Msg: "a URL parameter parsed by hand: read a path id with pathInt64 (admin) or pathID / parseIDParam (api), " +
+					"which refuse 0 and negative ids so every route takes the same ids.",
+			})
+		}
 	}
 	return out
+}
+
+// isPkgCall reports whether e is a call of pkg.fn for a pkg in pkgs and an fn
+// in fns.
+func isPkgCall(e ast.Expr, pkgs map[string]bool, fns ...string) bool {
+	call, ok := e.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkgs[pkg.Name] && slices.Contains(fns, sel.Sel.Name)
+}
+
+// urlParamLocals returns the names of the variables body assigns from a
+// chi.URLParam call.
+func urlParamLocals(body *ast.BlockStmt, chiNames map[string]bool) map[string]bool {
+	fromParam := map[string]bool{}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			if len(n.Lhs) != len(n.Rhs) {
+				return true
+			}
+			for i, rhs := range n.Rhs {
+				if id, ok := n.Lhs[i].(*ast.Ident); ok && isPkgCall(rhs, chiNames, "URLParam") {
+					fromParam[id.Name] = true
+				}
+			}
+		case *ast.ValueSpec:
+			if len(n.Names) != len(n.Values) {
+				return true
+			}
+			for i, v := range n.Values {
+				if isPkgCall(v, chiNames, "URLParam") {
+					fromParam[n.Names[i].Name] = true
+				}
+			}
+		}
+		return true
+	})
+	return fromParam
+}
+
+// rawParseSites returns the strconv number parses in body whose argument is a
+// chi.URLParam call or one of the fromParam locals.
+func rawParseSites(body *ast.BlockStmt, chiNames, strconvNames, fromParam map[string]bool) []token.Pos {
+	var sites []token.Pos
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 || !isPkgCall(call, strconvNames, "ParseInt", "ParseUint", "Atoi") {
+			return true
+		}
+		arg := call.Args[0]
+		if id, ok := arg.(*ast.Ident); isPkgCall(arg, chiNames, "URLParam") || (ok && fromParam[id.Name]) {
+			sites = append(sites, call.Pos())
+		}
+		return true
+	})
+	return sites
 }
 
 // chiImportNames returns the identifiers bound to go-chi/chi/v5 in f. The
