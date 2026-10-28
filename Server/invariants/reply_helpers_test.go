@@ -65,6 +65,10 @@ func TestReplyHelpers_PlainTextErrorIsFlagged(t *testing.T) {
 			t.Errorf("%s: violations = %v, want one under an import alias", rel, got)
 		}
 	}
+	dot := "package api\nimport . \"net/http\"\nfunc f() { Error(w, \"nope\", 400) }\n"
+	if got := replyHelperViolations(t, "api/x.go", dot); len(got) != 1 {
+		t.Errorf("dot-import: violations = %v, want one", got)
+	}
 	// Outside api and admin (asset server, LiveKit webhook, WebSocket upgrade)
 	// plain text is the reply.
 	src := "package ws\nimport \"net/http\"\nfunc f() { http.Error(w, \"full\", 503) }\n"

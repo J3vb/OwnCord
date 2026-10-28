@@ -42,8 +42,12 @@ var replyHelpers = Rule{
 	Check: func(f *ast.File, fset *token.FileSet, rel string) []Violation {
 		helpers := replyHelperSites[rel]
 		jsonNames, _ := importNames(f, "encoding/json")
-		httpNames, _ := importNames(f, "net/http")
+		httpNames, httpDots := importNames(f, "net/http")
 		var literals, decoders, plainText []token.Pos
+		// A dot-import would let Error(w, …) through unqualified.
+		for _, d := range httpDots {
+			plainText = append(plainText, d.Pos())
+		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.CompositeLit:
