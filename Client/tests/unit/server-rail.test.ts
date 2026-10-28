@@ -25,6 +25,7 @@ interface Opts {
   currentName?: string;
   joinInvite?: (t: string) => boolean;
   onOpenDm?: (dm: DmChannel) => void;
+  onShowServer?: () => void;
 }
 
 const mounted: Array<{ destroy?: () => void }> = [];
@@ -42,6 +43,7 @@ async function mountRail(o: Opts = {}) {
     joinInvite,
     newFolderId: () => "fid",
     ...(o.onOpenDm !== undefined ? { onOpenDm: o.onOpenDm } : {}),
+    ...(o.onShowServer !== undefined ? { onShowServer: o.onShowServer } : {}),
   });
   rail.mount(document.body);
   mounted.push(rail);
@@ -78,6 +80,23 @@ describe("ServerRail", () => {
     for (const r of mounted.splice(0)) r.destroy?.();
     document.body.innerHTML = "";
     dmStore.setState(() => ({ channels: [] }));
+  });
+
+  it("clicking the connected server goes back to its channels", async () => {
+    const onShowServer = vi.fn();
+    const { switchServer } = await mountRail({ onShowServer });
+    setSidebarMode("dms");
+    servers()[0]!.click();
+    expect(onShowServer).toHaveBeenCalledTimes(1);
+    expect(switchServer).not.toHaveBeenCalled();
+  });
+
+  it("closes its open dialog when the rail is destroyed", async () => {
+    const { rail } = await mountRail();
+    document.querySelector<HTMLElement>('[data-testid="server-rail-join"]')?.click();
+    expect(document.querySelector('[data-testid="server-rail-join-dialog"]')).not.toBeNull();
+    rail.destroy?.();
+    expect(document.querySelector('[data-testid="server-rail-join-dialog"]')).toBeNull();
   });
 
   it("shows the unread DM total on Home and hides it at zero", async () => {

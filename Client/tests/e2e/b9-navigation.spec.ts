@@ -20,6 +20,7 @@ import {
   MOCK_MESSAGES,
   submitLogin,
   waitForWsReady,
+  openDmRow,
 } from "./helpers";
 import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/b9-accessibility";
 
@@ -89,7 +90,7 @@ test.describe("B9-4 shared navigation", () => {
     await expectNoView(page);
 
     // DM mode: opening it opens no view by itself.
-    await page.locator("[data-testid='dm-entry']").first().click();
+    await openDmRow(page);
     await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
     await expectNoView(page);
 
@@ -190,7 +191,7 @@ test.describe("B9-4 shared navigation", () => {
     expect(await keyboardReachable(page, gear)).toBe(true);
 
     // channels → DM
-    await page.locator("[data-testid='dm-entry']").first().click();
+    await openDmRow(page);
     await expect(header).toHaveText("otheruser");
     await expectNoView(page);
 

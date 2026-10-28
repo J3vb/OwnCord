@@ -70,7 +70,7 @@
   transform: translateY(-1px);
 }
 .server-rail-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 .server-rail-btn.active {
@@ -93,7 +93,7 @@
 }
 .server-rail-home {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .server-rail-badge {
   position: absolute;

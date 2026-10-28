@@ -189,7 +189,7 @@ test.describe("Invite Manager", () => {
   });
 
   test("invite button opens invite manager overlay", async ({ page }) => {
-    const inviteBtn = page.getByRole("button", { name: /invite/i });
+    const inviteBtn = page.getByRole("button", { name: "Invite", exact: true });
     await expect(inviteBtn).toBeVisible({ timeout: 3_000 });
     await inviteBtn.click();
 
@@ -198,21 +198,21 @@ test.describe("Invite Manager", () => {
   });
 
   test("invite manager shows invite list", async ({ page }) => {
-    await page.getByRole("button", { name: /invite/i }).click();
+    await page.getByRole("button", { name: "Invite", exact: true }).click();
 
     const items = page.locator(".invite-item");
     await expect(items.first()).toBeVisible({ timeout: 3_000 });
   });
 
   test("invite manager has create invite button", async ({ page }) => {
-    await page.getByRole("button", { name: /invite/i }).click();
+    await page.getByRole("button", { name: "Invite", exact: true }).click();
 
     const createBtn = page.locator(".invite-manager__create");
     await expect(createBtn).toBeVisible({ timeout: 3_000 });
   });
 
   test("Escape closes invite manager", async ({ page }) => {
-    await page.getByRole("button", { name: /invite/i }).click();
+    await page.getByRole("button", { name: "Invite", exact: true }).click();
     const overlay = page.locator(".modal-overlay");
     await expect(overlay).toBeVisible({ timeout: 3_000 });
 
@@ -221,7 +221,7 @@ test.describe("Invite Manager", () => {
   });
 
   test("clicking overlay backdrop closes invite manager", async ({ page }) => {
-    await page.getByRole("button", { name: /invite/i }).click();
+    await page.getByRole("button", { name: "Invite", exact: true }).click();
     const overlay = page.locator(".modal-overlay");
     await expect(overlay).toBeVisible({ timeout: 3_000 });
 
@@ -231,7 +231,7 @@ test.describe("Invite Manager", () => {
   });
 
   test("close button closes invite manager", async ({ page }) => {
-    await page.getByRole("button", { name: /invite/i }).click();
+    await page.getByRole("button", { name: "Invite", exact: true }).click();
     const overlay = page.locator(".modal-overlay");
     await expect(overlay).toBeVisible({ timeout: 3_000 });
 

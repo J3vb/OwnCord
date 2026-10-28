@@ -76,10 +76,10 @@ test.describe("Profile switch (B7-13)", () => {
     await login(page, A);
     const deletedBeforeSwitch = await deletedCredentials(page);
 
-    await page.locator("button[title='Switch server']").click();
-    const overlay = page.locator("[data-testid='quick-switch-overlay']");
-    await expect(overlay).toBeVisible();
-    await overlay.locator("[data-testid='server-item']", { hasText: "Server B" }).click();
+    // At desktop width the server rail is the switcher.
+    await page
+      .locator("[data-testid='server-rail-server'][data-host='other.example:8443']")
+      .click();
 
     // Back on the connect page with B selected and both profiles kept.
     await expect(page.locator(".connect-form, .login-form")).toBeVisible({ timeout: 5000 });

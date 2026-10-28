@@ -4,6 +4,7 @@ import {
   mockTauriConnect,
   mockTauriFullSessionWithMessages,
   navigateToMainPageReady,
+  openHome,
 } from "./helpers";
 import {
   Q1,
@@ -414,7 +415,8 @@ test.describe("B9-2 keyboard journey at large text and reduced motion", () => {
     await page.goto("/");
     await navigateToMainPageReady(page);
 
-    const opener = page.locator(".sidebar-dm-section .category-add-btn");
+    await openHome(page);
+    const opener = page.locator(".dm-section-label .dm-add");
     await opener.focus();
     await page.keyboard.press("Enter");
     const dialog = page.locator(".dm-member-picker-modal");

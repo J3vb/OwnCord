@@ -8,7 +8,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { showContextMenu, type ContextMenuItem } from "@lib/context-menu";
-import { createPromptModal } from "@lib/modalFactory";
+import { createPromptModal, type ModalInstance } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import type { ServerProfile } from "@lib/profiles";
 import {
@@ -53,6 +53,8 @@ export interface ServerRailOptions {
   /** Whether pasted text is a usable invite; when true it has been handed on. */
   readonly joinInvite: (text: string) => boolean;
   readonly newFolderId?: () => string;
+  /** Back to the connected server's channels (a click on its own icon). */
+  readonly onShowServer?: () => void;
   /** Open a DM from its icon under Home. */
   readonly onOpenDm?: (dm: DmChannel) => void;
 }
@@ -215,7 +217,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
 
   function activateServer(host: string): void {
     if (host === options.currentHost) {
-      setSidebarMode("channels");
+      if (options.onShowServer !== undefined) options.onShowServer();
+      else setSidebarMode("channels");
       return;
     }
     if (leaving) return;
@@ -229,19 +232,29 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     options.addServer();
   }
 
+  // The rail's dialogs close with it: a session that ends while one is open
+  // must not leave it (and its focus trap) over the connect page.
+  const openModals = new Set<ModalInstance>();
+  function own(modal: ModalInstance): void {
+    for (const m of openModals) if (!m.overlay.isConnected) openModals.delete(m);
+    openModals.add(modal);
+  }
+
   function openJoin(): void {
-    openServerRailJoinModal({ onSubmit: options.joinInvite });
+    own(openServerRailJoinModal({ onSubmit: options.joinInvite }));
   }
 
   function promptRename(folder: Extract<RailItem, { kind: "folder" }>): void {
-    createPromptModal({
-      title: serverRailText("renameFolder"),
-      label: serverRailText("renameLabel"),
-      initialValue: folder.name,
-      maxLength: FOLDER_NAME_MAX,
-      testId: "server-rail-rename-input",
-      onSubmit: (value) => commit(renameFolder(reconciled(), folder.id, value)),
-    });
+    own(
+      createPromptModal({
+        title: serverRailText("renameFolder"),
+        label: serverRailText("renameLabel"),
+        initialValue: folder.name,
+        maxLength: FOLDER_NAME_MAX,
+        testId: "server-rail-rename-input",
+        onSubmit: (value) => commit(renameFolder(reconciled(), folder.id, value)),
+      }),
+    );
   }
 
   // --- Context menus (also the keyboard route for every drag operation) ----
@@ -637,6 +650,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
   }
 
   function destroy(): void {
+    for (const modal of openModals) modal.close();
+    openModals.clear();
     disposable.destroy();
     root?.remove();
     root = null;

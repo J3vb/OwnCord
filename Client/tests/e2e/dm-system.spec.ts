@@ -9,15 +9,13 @@
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_AUTH_OK,
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
-  MOCK_CHANNELS,
-  MOCK_ROLES,
   MOCK_PINNED_MESSAGES,
   submitLogin,
-  navigateToMainPage,
   waitForWsReady,
+  openHome,
+  dmRows,
   emitWsMessage,
 } from "./helpers";
 
@@ -43,21 +41,6 @@ const MOCK_DM_CHANNELS = [
     unread_count: 2,
   },
 ];
-
-const MOCK_READY_WITH_DMS = {
-  type: "ready",
-  payload: {
-    channels: MOCK_CHANNELS,
-    members: [
-      { id: 1, username: "testuser", avatar: "", status: "online", role: "admin" },
-      { id: 2, username: "otheruser", avatar: "", status: "online", role: "member" },
-      { id: 3, username: "thirduser", avatar: "", status: "idle", role: "member" },
-    ],
-    voice_states: [],
-    roles: MOCK_ROLES,
-    dm_channels: MOCK_DM_CHANNELS,
-  },
-};
 
 // ---------------------------------------------------------------------------
 // Custom mock session with DM support
@@ -93,11 +76,8 @@ async function navigateToMainPageWithDms(page: import("@playwright/test").Page):
   const appLayout = page.locator("[data-testid='app-layout']");
   await expect(appLayout).toBeVisible({ timeout: 15_000 });
   await waitForWsReady(page);
-  // Wait for the DM section to render in the unified sidebar
-  // In channels mode: DM section = .sidebar-dm-section, DM entries = [data-testid="dm-entry"]
-  await expect(page.locator(".sidebar-dm-section, [data-testid='dm-entry']").first()).toBeVisible({
-    timeout: 5_000,
-  });
+  // At desktop width DMs live behind the server rail's Home button.
+  await expect(page.getByTestId("server-rail-home")).toBeVisible({ timeout: 5_000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -111,25 +91,26 @@ test.describe("DM System — Sidebar Mode", () => {
     await navigateToMainPageWithDms(page);
   });
 
-  test("DM section shows in sidebar with DM items", async ({ page }) => {
-    // The unified sidebar should show DM section
-    const dmSection = page.locator(".sidebar-dm-section");
-    await expect(dmSection.first()).toBeVisible({ timeout: 5_000 });
+  test("Home in the server rail lists the DMs; the channel sidebar has no DM section", async ({
+    page,
+  }) => {
+    await expect(page.locator(".sidebar-dm-section")).toBeHidden();
+    await openHome(page);
 
-    // DM items should be visible in the sidebar
-    const dmItems = page.locator("[data-testid='dm-entry']");
+    const dmItems = dmRows(page);
     await expect(async () => {
       const count = await dmItems.count();
       expect(count).toBeGreaterThan(0);
     }).toPass({ timeout: 5_000 });
   });
 
-  test("clicking DM item switches sidebar to DM mode", async ({ page }) => {
-    // DM items must be visible in the unified sidebar
-    const dmItem = page.locator("[data-testid='dm-entry']").first();
+  test("opening a DM from Home marks it active in DM mode", async ({ page }) => {
+    await openHome(page);
+    const dmItem = dmRows(page).first();
     await expect(dmItem).toBeVisible({ timeout: 5_000 });
 
     await dmItem.click();
+    await expect(dmItem).toHaveClass(/active/);
 
     // DM back header should appear (proves DM mode is active)
     const backHeader = page.locator("[data-testid='dm-back-header']");
@@ -137,7 +118,8 @@ test.describe("DM System — Sidebar Mode", () => {
   });
 
   test("DM sidebar shows 'Back to Server' header", async ({ page }) => {
-    const dmItem = page.locator("[data-testid='dm-entry']").first();
+    await openHome(page);
+    const dmItem = dmRows(page).first();
     await expect(dmItem).toBeVisible({ timeout: 5_000 });
 
     await dmItem.click();
@@ -151,7 +133,8 @@ test.describe("DM System — Sidebar Mode", () => {
   });
 
   test("'Back to Server' returns to channel sidebar", async ({ page }) => {
-    const dmItem = page.locator("[data-testid='dm-entry']").first();
+    await openHome(page);
+    const dmItem = dmRows(page).first();
     await expect(dmItem).toBeVisible({ timeout: 5_000 });
 
     await dmItem.click();
@@ -163,7 +146,7 @@ test.describe("DM System — Sidebar Mode", () => {
     await backHeader.click();
 
     // Channel sidebar should be visible again (channel items appear)
-    const channelItem = page.locator(".channel-item").first();
+    const channelItem = page.locator(".channel-item").filter({ visible: true }).first();
     await expect(channelItem).toBeVisible({ timeout: 5_000 });
 
     // Back header should be gone
@@ -184,7 +167,8 @@ test.describe("DM System — WS Events", () => {
 
   test("dm_channel_open adds DM to sidebar", async ({ page }) => {
     // Count existing DM items before the event
-    const dmItemsBefore = await page.locator("[data-testid='dm-entry']").count();
+    await openHome(page);
+    const dmItemsBefore = await dmRows(page).count();
 
     // Emit a dm_channel_open event for a new user
     await emitWsMessage(page, {
@@ -201,14 +185,15 @@ test.describe("DM System — WS Events", () => {
 
     // The DM item count should increase after the event
     await expect(async () => {
-      const dmItemsAfter = await page.locator("[data-testid='dm-entry']").count();
+      const dmItemsAfter = await dmRows(page).count();
       expect(dmItemsAfter).toBeGreaterThan(dmItemsBefore);
     }).toPass({ timeout: 5_000 });
   });
 
   test("dm_channel_close removes DM from sidebar", async ({ page }) => {
     // Count existing DM items before the event
-    const dmItemsBefore = await page.locator("[data-testid='dm-entry']").count();
+    await openHome(page);
+    const dmItemsBefore = await dmRows(page).count();
 
     // Emit a dm_channel_close event
     await emitWsMessage(page, {
@@ -220,12 +205,14 @@ test.describe("DM System — WS Events", () => {
 
     // Verify the DM was removed by checking the DOM count decreased
     await expect(async () => {
-      const dmItemsAfter = await page.locator("[data-testid='dm-entry']").count();
+      const dmItemsAfter = await dmRows(page).count();
       expect(dmItemsAfter).toBeLessThan(dmItemsBefore);
     }).toPass({ timeout: 5_000 });
   });
 
   test("incoming chat_message in DM updates unread count", async ({ page }) => {
+    const homeBadge = page.getByTestId("server-rail-home-badge");
+    const before = (await homeBadge.isVisible()) ? Number(await homeBadge.textContent()) : 0;
     // Send a message to a DM channel that is not active
     await emitWsMessage(page, {
       type: "chat_message",
@@ -244,8 +231,11 @@ test.describe("DM System — WS Events", () => {
       },
     });
 
-    // The unread count should increment. In channels mode, DM entries use .dm-unread-badge
-    await expect(page.locator(".dm-unread-badge").first()).toBeVisible({ timeout: 5_000 });
+    // The unread DM shows on the rail: a badge on Home and the DM's own icon under it.
+    await expect(homeBadge).toHaveText(String(before + 1), { timeout: 5_000 });
+    await expect(
+      page.locator("[data-testid='server-rail-dm'][data-channel-id='101']"),
+    ).toBeVisible();
   });
 });
 
@@ -261,7 +251,8 @@ test.describe("DM System — Message Display", () => {
   });
 
   test("sending message in DM echoes back in chat", async ({ page }) => {
-    const dmItem = page.locator("[data-testid='dm-entry']").first();
+    await openHome(page);
+    const dmItem = dmRows(page).first();
     await expect(dmItem).toBeVisible({ timeout: 5_000 });
 
     await dmItem.click();
@@ -279,7 +270,8 @@ test.describe("DM System — Message Display", () => {
   });
 
   test("receiving WS chat_message in active DM shows in chat", async ({ page }) => {
-    const dmItem = page.locator("[data-testid='dm-entry']").first();
+    await openHome(page);
+    const dmItem = dmRows(page).first();
     await expect(dmItem).toBeVisible({ timeout: 5_000 });
 
     await dmItem.click();

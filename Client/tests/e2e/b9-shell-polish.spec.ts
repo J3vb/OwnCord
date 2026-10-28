@@ -23,6 +23,7 @@ import {
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   navigateToMainPageReady,
+  openDmRow,
 } from "./helpers";
 import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/b9-accessibility";
 
@@ -139,7 +140,7 @@ test.describe("B9-21 shell polish", () => {
   });
 
   test("DM mode keeps the search input and focus across a refresh", async ({ page }) => {
-    await page.locator("[data-testid='dm-entry']").first().click();
+    await openDmRow(page);
     await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
 
     const search = page.locator(".dm-search");
@@ -202,7 +203,11 @@ test.describe("B9-21 shell polish", () => {
   });
 });
 
+// The embedded DM preview shows only where the server rail does not: at 800px
+// or less (a desktop window at 200 % zoom), inside the sidebar drawer.
 test.describe("B9-21 DM preview list", () => {
+  test.use({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
+
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
@@ -217,6 +222,9 @@ test.describe("B9-21 DM preview list", () => {
     );
     await page.goto("/");
     await navigateToMainPageReady(page);
+    await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
+    await page.locator("[data-testid='sidebar-toggle']").click();
+    await expect(page.locator("[data-testid='unified-sidebar']")).toHaveClass(/drawer-open/);
   });
 
   test("the embedded DM preview is a single Tab stop and arrow-navigable", async ({ page }) => {

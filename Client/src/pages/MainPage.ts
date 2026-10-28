@@ -1204,6 +1204,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             switchServer: switchToServer,
             addServer,
             onOpenDm: (dm) => sidebar.openDm(dm),
+            onShowServer: () => sidebar.returnToChannel(),
             joinInvite: (text) => {
               const invite = parseInviteInput(text);
               if (invite === null) return false;
