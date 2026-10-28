@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { isLinuxDesktop } from "./platform";
+import { isLinuxDesktop, isWindowsDesktop } from "./platform";
 
 const WEBKITGTK =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";
@@ -39,5 +39,39 @@ describe("isLinuxDesktop", () => {
   });
   it("is false on Android", () => {
     expect(withEnvironment(ANDROID, true, true)).toBe(false);
+  });
+});
+
+describe("isLinuxDesktop host checks", () => {
+  it("is false without a navigator, even when the Tauri host marker is present", () => {
+    vi.stubGlobal("navigator", undefined);
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    expect(isLinuxDesktop()).toBe(false);
+  });
+  it("is false on a Linux user agent when the Tauri host marker is absent", () => {
+    vi.stubGlobal("navigator", { userAgent: WEBKITGTK });
+    expect(isLinuxDesktop()).toBe(false);
+  });
+});
+
+describe("isWindowsDesktop", () => {
+  it("is true in the Tauri app on Windows (WebView2)", () => {
+    vi.stubGlobal("navigator", { userAgent: WEBVIEW2 });
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    expect(isWindowsDesktop()).toBe(true);
+  });
+  it("is false for a Windows browser without a Tauri host", () => {
+    vi.stubGlobal("navigator", { userAgent: WEBVIEW2 });
+    expect(isWindowsDesktop()).toBe(false);
+  });
+  it("is false in the Tauri app on Linux", () => {
+    vi.stubGlobal("navigator", { userAgent: WEBKITGTK });
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    expect(isWindowsDesktop()).toBe(false);
+  });
+  it("is false without a navigator, even when the Tauri host marker is present", () => {
+    vi.stubGlobal("navigator", undefined);
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    expect(isWindowsDesktop()).toBe(false);
   });
 });
