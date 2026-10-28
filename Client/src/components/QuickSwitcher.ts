@@ -5,6 +5,7 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/ime";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import { createIcon } from "@lib/icons";
 import { channelsStore } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
@@ -213,12 +214,6 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     }
   }
 
-  function handleBackdropClick(e: MouseEvent): void {
-    if (e.target === root) {
-      options.onClose();
-    }
-  }
-
   function handleGlobalKeydown(e: KeyboardEvent): void {
     // Same case-insensitive, altKey-excluding match as
     // OverlayManagers.ts's open handler (OC-0150) — otherwise this close
@@ -295,7 +290,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     // Event listeners
     input.addEventListener("input", handleInput, { signal });
     input.addEventListener("keydown", handleKeydown, { signal });
-    root.addEventListener("click", handleBackdropClick, { signal });
+    closeOnBackdropClick(root, () => options.onClose(), signal);
     document.addEventListener("keydown", handleGlobalKeydown, { signal });
 
     // Delegated row click — renderResults() rebuilds every row from scratch

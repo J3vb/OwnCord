@@ -7,6 +7,7 @@
 import { Disposable } from "@lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import { shellText } from "../i18n/shell";
 
@@ -43,13 +44,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
     });
 
     // Close on backdrop click (not on modal content)
-    root.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === root) options.onClose();
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(root, () => options.onClose(), disposable.signal);
 
     const modal = createElement("div", { class: "quick-switch-modal" });
     applyDialogSemantics(modal, { label: shellText("quickSwitch.label") });

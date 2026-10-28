@@ -30,6 +30,28 @@ describe("QuickSwitchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("stays open when a drag-select ends on the backdrop, and a backdrop click still closes", () => {
+    const onClose = vi.fn();
+    const overlay = createQuickSwitchOverlay({
+      profiles: [{ name: "My Server", host: "localhost:8443" }],
+      currentHost: "localhost:8443",
+      onSwitch: vi.fn(),
+      onAddServer: vi.fn(),
+      onClose,
+    });
+    overlay.mount(container);
+    const root = container.querySelector<HTMLElement>("[data-testid='quick-switch-overlay']")!;
+    root
+      .querySelector(".quick-switch-modal")!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    root.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onClose).not.toHaveBeenCalled();
+    root.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    root.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onClose).toHaveBeenCalledOnce();
+    overlay.destroy?.();
+  });
+
   it("highlights current server", () => {
     const overlay = createQuickSwitchOverlay({
       profiles: [{ name: "My Server", host: "localhost:8443" }],

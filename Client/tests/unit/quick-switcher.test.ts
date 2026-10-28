@@ -212,6 +212,14 @@ describe("QuickSwitcher", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("stays open when a drag-select ends on the backdrop", () => {
+    switcher.mount(container);
+    const overlayEl = container.querySelector(".quick-switcher-overlay") as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("destroy removes DOM", () => {
     switcher.mount(container);
     expect(container.querySelector(".quick-switcher-overlay")).not.toBeNull();
