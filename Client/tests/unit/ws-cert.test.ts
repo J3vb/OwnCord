@@ -739,9 +739,14 @@ describe("acceptCertFingerprint edge cases", () => {
         ? Promise.reject("certificate not accepted")
         : Promise.resolve(undefined),
     );
-    await expect(client.acceptCertFingerprint("localhost:8443", "sha256:NEW")).rejects.toBe(
-      "certificate not accepted",
-    );
+    await expect(
+      client.acceptCertFingerprint("localhost:8443", "sha256:NEW"),
+    ).rejects.toMatchObject({
+      name: "NativeCallError",
+      command: "accept_cert_fingerprint",
+      reason: "certificate not accepted",
+      message: "certificate not accepted",
+    });
 
     // A later close must still schedule the reconnect loop; the decline cannot
     // leave the mismatch latch blocking every redial until restart.

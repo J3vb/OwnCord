@@ -146,12 +146,13 @@ export default tseslint.config(
     },
   },
   {
-    // Warn, not error: the 46 bare invokes that predate the rule are wrapped as
-    // their files are touched (docs/code-style.md, "Custom ESLint rules").
+    // nativeInvoke.ts is the shared door the rest of the folder calls through;
+    // its own `invoke` sits in tryInvoke's try.
     files: ["src/platform/desktop/**/*.ts"],
+    ignores: ["src/platform/desktop/nativeInvoke.ts"],
     plugins: { local: localRules },
     rules: {
-      "local/invoke-needs-try-catch": "warn",
+      "local/invoke-needs-try-catch": "error",
     },
   },
   {

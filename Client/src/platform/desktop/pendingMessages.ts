@@ -8,20 +8,21 @@
  * a browser build's drafts in memory and never writes message text to Web
  * Storage.
  */
-import { isTauri, invoke } from "@tauri-apps/api/core";
+import { isTauri } from "@tauri-apps/api/core";
+import { invokeOrThrow } from "./nativeInvoke";
 import type { PendingMessageStore } from "../contracts/pendingMessages";
 
 export const pendingMessages: PendingMessageStore = {
   async load(owner) {
     if (!isTauri()) return null;
-    return invoke<string | null>("load_pending_messages", { ...owner });
+    return invokeOrThrow<string | null>("load_pending_messages", { ...owner });
   },
   async save(owner, value) {
     if (!isTauri()) return;
-    await invoke("save_pending_messages", { ...owner, value });
+    await invokeOrThrow("save_pending_messages", { ...owner, value });
   },
   async delete(owner) {
     if (!isTauri()) return;
-    await invoke("delete_pending_messages", { ...owner });
+    await invokeOrThrow("delete_pending_messages", { ...owner });
   },
 };

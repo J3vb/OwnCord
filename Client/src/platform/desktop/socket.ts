@@ -8,6 +8,7 @@
 // call, because a fresh login — and every test — must not inherit the
 // previous connection's listeners or its certificate registration.
 import { createLogger } from "@lib/logger";
+import { NativeCallError } from "./nativeInvoke";
 import type {
   SocketCertEvent,
   SocketConnectOptions,
@@ -284,7 +285,11 @@ function createSocketConnection(): SocketConnection {
       // i18n-exempt: internal desktop seam guard, never rendered
       throw new Error("Tauri APIs not available");
     }
-    await tauriInvoke("accept_cert_fingerprint", { host, fingerprint });
+    try {
+      await tauriInvoke("accept_cert_fingerprint", { host, fingerprint });
+    } catch (err) {
+      throw new NativeCallError("accept_cert_fingerprint", err);
+    }
     log.info("Accepted new cert fingerprint", { host });
   }
 
@@ -296,7 +301,12 @@ function createSocketConnection(): SocketConnection {
         // i18n-exempt: internal desktop seam guard, never rendered
         throw new Error("Tauri APIs not available");
       }
-      await tauriInvoke("ws_send", { message: text });
+      try {
+        await tauriInvoke("ws_send", { message: text });
+      } catch (err) {
+        // ws.ts reads the host's reason ("channel full") from the message.
+        throw new NativeCallError("ws_send", err);
+      }
     },
     acceptCertificate,
 

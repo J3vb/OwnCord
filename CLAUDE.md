@@ -102,8 +102,10 @@ and proceeds, so a reviewer can see what was assumed.
   `src/platform/desktop/` (the only place a `@tauri-apps` import may appear).
   The `catch` turns the rejection into a typed result or a user-visible
   error; never let it reach the caller unhandled or `void` it away. The
-  webview keeps working when the Rust side fails. Existing bare
-  `await invoke(...)` calls are backlog: wrap the ones you touch.
+  webview keeps working when the Rust side fails. `nativeInvoke.ts` holds the
+  shared door (`tryInvoke` returns a result, `invokeOrThrow` rejects with a
+  `NativeCallError` that keeps the host's reason), and
+  `local/invoke-needs-try-catch` fails a bare `invoke` everywhere else there.
 - **WebSocket state stays isolated per connection attempt.** `src/lib/ws.ts`
   tags each `connect()` with a generation counter so a stale socket's events
   cannot touch the live connection. New code follows it: a handler checks it

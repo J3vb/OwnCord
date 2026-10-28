@@ -6,10 +6,10 @@
 // too; each invoke turns a rejection into a typed result (status reads as
 // `none`, bind and configure reject with a `GlobalKeysError`) and never
 // reaches a caller unhandled. The event API is a static import, the
-// same as the sibling `trayStatus.ts`; the core API is dynamic because the
-// registry is reachable from the entry and `invoke` was not a startup
-// dependency.
+// same as the sibling `trayStatus.ts`; the polling commands go through
+// `nativeInvoke.ts` and reject with a `NativeCallError`.
 import { listen } from "@tauri-apps/api/event";
+import { invokeOrThrow } from "./nativeInvoke";
 import type { GlobalKeysStatus, GlobalShortcuts } from "../contracts/globalShortcuts";
 
 // The portal commands themselves (the invokes in try/catch, the payload
@@ -42,16 +42,16 @@ function subscribe(
 
 export const globalShortcuts: GlobalShortcuts = {
   async start() {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("voice_shortcuts_start");
+    await invokeOrThrow("voice_shortcuts_start");
   },
   async supported() {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<boolean>("voice_shortcuts_supported");
+    return invokeOrThrow<boolean>("voice_shortcuts_supported");
   },
   async setKeys(keys) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("voice_shortcuts_set_keys", { muteVk: keys.muteVk, deafenVk: keys.deafenVk });
+    await invokeOrThrow("voice_shortcuts_set_keys", {
+      muteVk: keys.muteVk,
+      deafenVk: keys.deafenVk,
+    });
   },
   async status() {
     try {

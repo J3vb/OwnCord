@@ -32,6 +32,7 @@ import { voiceStore, setPttPollingLive, isPttPollingLive } from "@stores/voice.s
 import { createLogger } from "@lib/logger";
 import { vkName, pttReleaseDelayMs } from "@lib/ptt";
 import { inputMode } from "@lib/inputMode";
+import { invokeOrThrow } from "./nativeInvoke";
 import type { PushToTalk } from "../contracts/pushToTalk";
 import type { GlobalKeysStatus } from "../contracts/globalShortcuts";
 import { globalShortcuts } from "./globalShortcuts";
@@ -278,9 +279,8 @@ async function stopBinding(clearKey: boolean): Promise<void> {
 
   const precedingStop = nativeStop;
   const stopping = Promise.resolve().then(async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    if (clearKey && generation === version) await invoke("ptt_set_key", { vkCode: 0 });
-    if (shouldStopNative) await invoke("ptt_stop");
+    if (clearKey && generation === version) await invokeOrThrow("ptt_set_key", { vkCode: 0 });
+    if (shouldStopNative) await invokeOrThrow("ptt_stop");
   });
   // A repeated Clear must not hide an earlier stop that is still joining
   // its thread. Starts wait for all outstanding stops; this caller only
@@ -360,8 +360,7 @@ async function gateBoundMic(attempt: PttBinding): Promise<void> {
 
 /** Use Rust-side polling to capture the next key press (for the binding UI). */
 async function captureKeyPress(): Promise<number> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<number>("ptt_listen_for_key");
+  return invokeOrThrow<number>("ptt_listen_for_key");
 }
 
 /** Whether the host can observe global key state (false on macOS / pure

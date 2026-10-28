@@ -90,6 +90,12 @@ function walk(node: ts.Node, visit: (node: ts.Node) => void): void {
 /** Follow the platform service bindings to the SDK, rather than spelling a
  * wrapper name. The checker handles aliases, generics and typed callbacks;
  * declarations/assignments/returns cover the lazy getInvoke and socket bindings. */
+const INVOKE_HELPERS = new Set(["tryInvoke", "invokeOrThrow"]);
+
+function isHelperFile(file: ts.SourceFile): boolean {
+  return file.fileName.replaceAll("\\", "/").endsWith("src/platform/desktop/nativeInvoke.ts");
+}
+
 export function platformInvokes(
   program: ts.Program,
   files: ts.SourceFile[],
@@ -166,6 +172,15 @@ export function platformInvokes(
     }
     return false;
   }
+  function isInvokeHelper(call: ts.CallExpression): boolean {
+    const decl = checker.getResolvedSignature(call)?.getDeclaration();
+    return (
+      decl !== undefined &&
+      ts.isFunctionDeclaration(decl) &&
+      isHelperFile(decl.getSourceFile()) &&
+      INVOKE_HELPERS.has(decl.name?.text ?? "")
+    );
+  }
   let importers = 0;
   for (const file of files) {
     let importsTauri = false;
@@ -177,7 +192,11 @@ export function platformInvokes(
           : undefined;
       if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith("@tauri-apps/"))
         importsTauri = true;
-      if (!ts.isCallExpression(node) || !isInvoke(node.expression)) return;
+      if (!ts.isCallExpression(node)) return;
+      // `nativeInvoke.ts` is the shared door: its own `invoke` forwards a
+      // variable, and each call through its helpers names the command.
+      if (isHelperFile(file)) return;
+      if (!isInvoke(node.expression) && !isInvokeHelper(node)) return;
       const command = node.arguments[0];
       if (!command || !ts.isStringLiteralLike(command)) {
         throw new Error(`Nonliteral platform command in ${file.fileName}: ${node.getText()}`);

@@ -100,7 +100,7 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 29    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 25    |
 | Distinct `invoke` command names called from `Client/src/`  | 95    |
 | `#[tauri::command]` handlers in `Client/src-tauri/`        | 98    |
 | TS calls with no matching Rust handler                     | 0     |
@@ -119,7 +119,8 @@ desktop/browser seam.
 
 Reproduce with `cd Client && npm test -- tests/unit/platform-contracts-counts.test.ts`.
 The test reads real static/dynamic imports, follows the platform service's invoke
-bindings (including aliases, lazy helpers and nested generic calls), and parses
+bindings (including aliases, lazy helpers, nested generic calls and the
+`tryInvoke`/`invokeOrThrow` helpers in `platform/desktop/nativeInvoke.ts`), and parses
 all Rust registration lists. Comments, string examples and unregistered
 `#[tauri::command]` functions do not count. The handler row is the union across
 platforms and features, including Linux native voice and optional devtools.
