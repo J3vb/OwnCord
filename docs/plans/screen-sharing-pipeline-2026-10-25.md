@@ -1,6 +1,6 @@
 # Screen-sharing performance and pipeline plan
 
-**Status:** design only, 2026-10-25. No implementation or performance qualification has been completed by this plan.
+**Status:** in progress. PR 2 is split into 2a (per-layer sender stats from counter deltas, measured versus configured capture rate, stale-read guard; 2026-10-28), 2b (bounded diagnostics recorder and viewer stats) and 2c (generated motion fixture and Windows baseline prompt). No performance qualification has been completed.
 **Related:** [issue #2805](https://github.com/J3vb/OwnCord/issues/2805).
 **Inspected baseline:** `dev` at `1184d69c4239a71eb856bb0eec12483eccf401c1`; LiveKit JS `2.22.3` in `Client/package-lock.json`; managed SFU default `1.13.7` in `Server/ws/livekit_download.go`. Record the actual externally configured SFU version in every trial.
 **Authority:** [plan index](README.md); [current project status](../STATUS.md). This plan proposes reliability work for existing sharing, not a new release commitment.

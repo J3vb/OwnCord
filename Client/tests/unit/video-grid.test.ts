@@ -2046,8 +2046,23 @@ describe("VideoGrid", () => {
         expect(sender().hidden).toBe(false);
         expect(sender().textContent).toBe("Capture 120 fps · Limited by CPU · VP8 · libvpx");
 
+        // Each simulcast layer gets its own line in the tooltip.
+        getLocalShareStats.mockResolvedValue({
+          sentFps: 24,
+          captureFps: 60,
+          captureFpsSource: "configured",
+          layers: [
+            { active: true, height: 1080, sentFps: 24 },
+            { active: false, height: 720 },
+          ],
+        });
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(sender().textContent).toBe("Capture set to 60 fps");
+        expect(sender().title).toBe("1080p · 24 fps\n720p paused");
+
         getLocalShareStats.mockResolvedValue({ sentFps: 117, limitation: "none" });
         await vi.advanceTimersByTimeAsync(2000);
+        expect(sender().title).toBe("");
         expect(detail()).toBe("1080p · 117 fps · No audio");
         expect(sender().textContent).toBe("Not limited");
 
@@ -2254,7 +2269,9 @@ describe("VideoGrid", () => {
       Object.defineProperty(video, "srcObject", {
         configurable: true,
         get: () => given.at(-1) ?? stream,
-        set: (v: unknown) => given.push(v),
+        set: (v: unknown) => {
+          given.push(v);
+        },
       });
 
       popup.win.closed = true;
@@ -2278,7 +2295,9 @@ describe("VideoGrid", () => {
       Object.defineProperty(video, "srcObject", {
         configurable: true,
         get: () => stream,
-        set: (v: unknown) => given.push(v),
+        set: (v: unknown) => {
+          given.push(v);
+        },
       });
 
       control(SCREEN, "pop-in").click();

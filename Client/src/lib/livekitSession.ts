@@ -1130,9 +1130,16 @@ export class LiveKitSession {
   /** What your screen share is sending; the last sample also goes into the
    *  support bundle's voice diagnostics. */
   async getLocalScreenshareStats(): Promise<ShareSenderSample | null> {
+    const shared = this.localScreenshareTrack();
     const sample = await this._remoteTracks.getLocalScreenshareStats();
+    // A read that outlived its share says nothing about the one now live.
+    if (this.localScreenshareTrack() !== shared) return null;
     this._shareSender = sample;
     return sample;
+  }
+
+  private localScreenshareTrack(): object | undefined {
+    return this._room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track;
   }
 
   /** Your screen share is publishing its audio too. */
