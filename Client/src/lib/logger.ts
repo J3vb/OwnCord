@@ -1,6 +1,6 @@
 // Step 1.12 — Structured client-side logger
 
-import { readMigratedStringPref } from "./preferences";
+import { onPrefChange, readMigratedStringPref } from "./preferences";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -136,11 +136,10 @@ export function applyStoredLogLevel(fallback: LogLevel): void {
 // Live updates: the Logs settings tab persists level changes via savePref,
 // which dispatches "owncord:pref-change" for same-window listeners.
 if (typeof window !== "undefined") {
-  window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
-    if (e.detail?.key !== MIN_LEVEL_PREF_KEY) return;
+  onPrefChange([MIN_LEVEL_PREF_KEY], () => {
     const stored = readStoredLogLevel();
     if (stored !== "") currentLevel = stored;
-  }) as EventListener);
+  });
 }
 
 /**

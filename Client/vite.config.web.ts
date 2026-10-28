@@ -16,6 +16,14 @@ const BROWSER_INDEX = resolve(root, "src/platform/browser/index.ts");
 const PUBLIC_DIR = resolve(root, "public");
 
 /**
+ * Vite hands plugins `/`-separated ids on every OS, while `resolve()` on
+ * Windows returns `\\`-separated paths, so compare with both sides on `/`.
+ */
+export function isDesktopRegistry(id: string): boolean {
+  return id.replaceAll("\\", "/") === DESKTOP_INDEX.replaceAll("\\", "/");
+}
+
+/**
  * Redirect the desktop registry to the browser one. Matches on the resolved
  * absolute path, so `../platform/desktop`, `../../platform/desktop/index` and
  * any alias spelling are all caught. Imports of a desktop submodule are left
@@ -30,7 +38,7 @@ export function browserPlatform(): Plugin {
       // can name the registry.
       if (!/(^|\/)desktop(\/index(\.ts)?)?$/.test(source)) return undefined;
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
-      return resolved !== null && resolved.id === DESKTOP_INDEX ? BROWSER_INDEX : undefined;
+      return resolved !== null && isDesktopRegistry(resolved.id) ? BROWSER_INDEX : undefined;
     },
   };
 }

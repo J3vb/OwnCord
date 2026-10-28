@@ -44,7 +44,8 @@ vi.mock("@lib/icons", () => ({
   },
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
   loadPref: loadPrefMock,
   savePref: vi.fn(),
 }));

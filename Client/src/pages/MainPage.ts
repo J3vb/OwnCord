@@ -38,7 +38,7 @@ import {
   globalKeysErrorCode,
   portalBoundBefore,
 } from "@lib/globalKeys";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, onPrefChange, savePref } from "@lib/preferences";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import type { GameActivityLoop } from "@lib/gameActivity";
@@ -1231,12 +1231,9 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       memberColumn.sync();
     });
     const layoutOwner = new Disposable();
-    window.addEventListener(
-      "owncord:pref-change",
-      (e) => {
-        const key =
-          e instanceof CustomEvent ? (e.detail as { key?: string } | null)?.key : undefined;
-        if (key !== MEMBER_LAYOUT_PREF) return;
+    onPrefChange(
+      [MEMBER_LAYOUT_PREF],
+      () => {
         if (loadMemberLayout() === "right") {
           sidebar.syncMemberSection();
           memberColumn?.sync();
@@ -1245,7 +1242,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           sidebar.syncMemberSection();
         }
       },
-      { signal: layoutOwner.signal },
+      layoutOwner.signal,
     );
     unsubscribers.push(() => {
       layoutOwner.destroy();

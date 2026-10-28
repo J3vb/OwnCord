@@ -16,7 +16,7 @@
  */
 
 import type { UserStatus } from "./types";
-import { loadPref, savePref } from "./preferences";
+import { loadPref, onPrefChange, savePref } from "./preferences";
 
 export const USER_STATUS_PREF_KEY = "userStatus";
 /** Where the current status came from. Separate key so an older client's
@@ -77,15 +77,7 @@ export function onUserStatusChange(
   onChange: (status: UserStatus) => void,
   options?: { signal?: AbortSignal },
 ): () => void {
-  const handler = (e: Event): void => {
-    const detail = (e as CustomEvent<{ key?: string }>).detail;
-    if (detail?.key !== USER_STATUS_PREF_KEY) return;
-    onChange(loadUserStatus());
-  };
-  window.addEventListener("owncord:pref-change", handler, { signal: options?.signal });
-  return () => {
-    window.removeEventListener("owncord:pref-change", handler);
-  };
+  return onPrefChange([USER_STATUS_PREF_KEY], () => onChange(loadUserStatus()), options?.signal);
 }
 
 // ---------------------------------------------------------------------------
@@ -160,13 +152,5 @@ export function onStatusTimerChange(
   onChange: (timer: StatusTimer | null) => void,
   options?: { signal?: AbortSignal },
 ): () => void {
-  const handler = (e: Event): void => {
-    const detail = (e as CustomEvent<{ key?: string }>).detail;
-    if (detail?.key !== STATUS_TIMER_PREF_KEY) return;
-    onChange(loadStatusTimer());
-  };
-  window.addEventListener("owncord:pref-change", handler, { signal: options?.signal });
-  return () => {
-    window.removeEventListener("owncord:pref-change", handler);
-  };
+  return onPrefChange([STATUS_TIMER_PREF_KEY], () => onChange(loadStatusTimer()), options?.signal);
 }

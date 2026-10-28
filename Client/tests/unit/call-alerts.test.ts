@@ -15,7 +15,8 @@ const { testPrefs, showCall, clearCall, requestAttention, showToast } = vi.hoist
   showToast: vi.fn(),
 }));
 
-vi.mock("../../src/lib/preferences", () => ({
+vi.mock("../../src/lib/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),

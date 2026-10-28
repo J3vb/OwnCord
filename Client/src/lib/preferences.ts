@@ -11,6 +11,9 @@
 
 export const STORAGE_PREFIX = "owncord:settings:";
 
+/** The window event `savePref` fires; listen through `onPrefChange`. */
+export const PREF_CHANGE_EVENT = "owncord:pref-change";
+
 // ---------------------------------------------------------------------------
 // Guarded storage access
 //
@@ -96,12 +99,39 @@ export function loadPref<T>(key: string, fallback: T): T {
   }
 }
 
+/**
+ * Run `handler` with the changed key whenever `savePref` writes one of `keys`
+ * in this window, or any key when `keys` is "any" (an event without a key
+ * reaches only "any" listeners, as ""). Without `signal` the listener lives as
+ * long as the app; tests/unit/lifecycle-ownership.test.ts counts such a call
+ * the same as a bare listener. Returns a function that removes it.
+ */
+export function onPrefChange(
+  keys: readonly string[] | "any",
+  handler: (key: string) => void,
+  signal?: AbortSignal,
+): () => void {
+  const listener = (e: Event): void => {
+    const detail: unknown = (e as Partial<CustomEvent<unknown>>).detail;
+    const key =
+      typeof detail === "object" &&
+      detail !== null &&
+      "key" in detail &&
+      typeof detail.key === "string"
+        ? detail.key
+        : "";
+    if (keys === "any" || (key !== "" && keys.includes(key))) handler(key);
+  };
+  window.addEventListener(PREF_CHANGE_EVENT, listener, { signal });
+  return () => window.removeEventListener(PREF_CHANGE_EVENT, listener);
+}
+
 export function savePref(key: string, value: unknown): void {
   try {
     localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(value));
     // Dispatch a custom event so same-window listeners can invalidate caches.
     // The native `storage` event only fires for cross-tab changes.
-    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key } }));
+    window.dispatchEvent(new CustomEvent(PREF_CHANGE_EVENT, { detail: { key } }));
   } catch (err) {
     // console, not ./logger: logger reads its level from this module, so
     // importing it here would be an import cycle.

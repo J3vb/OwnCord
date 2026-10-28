@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { captureLogs } from "../helpers/log-capture";
 import type { NativeMicTestEnvelope } from "../../src/platform/contracts/nativeVoice";
 
 const startMicTest = vi.fn();
@@ -140,5 +141,63 @@ describe("native microphone probe", () => {
       name: "AbortError",
     });
     expect(startMicTest).not.toHaveBeenCalled();
+  });
+
+  it("opens the capture with every audio processing option off", async () => {
+    const probe = probeNativeMicrophone("", ac.signal);
+    await vi.advanceTimersByTimeAsync(PROBE_WINDOW_MS);
+    await probe;
+    expect(startMicTest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          enhancedNoiseSuppression: false,
+        },
+      }),
+    );
+  });
+
+  it("listens for cancellation once", async () => {
+    const add = vi.spyOn(ac.signal, "addEventListener");
+    const probe = probeNativeMicrophone("", ac.signal);
+    await vi.advanceTimersByTimeAsync(PROBE_WINDOW_MS);
+    await probe;
+    const aborts = add.mock.calls.filter(([type]) => type === "abort");
+    expect(aborts.length).toBeGreaterThan(0);
+    for (const [, , options] of aborts) expect(options).toMatchObject({ once: true });
+  });
+
+  it("leaves no unhandled rejection when the start throws and the signal is cancelled later", async () => {
+    vi.useRealTimers();
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", record);
+    try {
+      startMicTest.mockImplementation(() => {
+        throw new Error("bridge down");
+      });
+      await expect(probeNativeMicrophone("", ac.signal)).rejects.toThrow("bridge down");
+      ac.abort(new Error("late cancel"));
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", record);
+    }
+  });
+
+  it("logs that there was nothing to stop when the start failed", async () => {
+    const logs = captureLogs();
+    startMicTest.mockRejectedValue(new Error("no input device"));
+    await expect(probeNativeMicrophone("", ac.signal)).rejects.toThrow("no input device");
+    await vi.advanceTimersByTimeAsync(1);
+    const entries = logs.find("The microphone probe left nothing to stop");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.component).toBe("micProbe");
+    expect(entries[0]?.data).toMatchObject({ error: "no input device" });
   });
 });
