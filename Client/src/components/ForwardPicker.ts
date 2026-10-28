@@ -12,7 +12,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
 import { showToast } from "@lib/toast";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
@@ -335,12 +335,12 @@ export function openForwardPicker(opts: ForwardPickerOptions): void {
     },
     { signal },
   );
-  modal.overlay.addEventListener(
-    "click",
-    (e) => {
-      if (e.target === modal?.overlay && !busy) modal.destroy();
+  closeOnBackdropClick(
+    modal.overlay,
+    () => {
+      if (!busy) modal?.destroy();
     },
-    { signal },
+    signal,
   );
   closeBtn.addEventListener("click", () => modal?.destroy(), { signal });
   cancelBtn.addEventListener("click", () => modal?.destroy(), { signal });

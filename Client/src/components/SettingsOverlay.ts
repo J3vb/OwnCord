@@ -9,6 +9,7 @@ import { isImeCommit } from "@lib/ime";
 import { isDisplayed } from "@lib/dialogOpen";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import type { IconName } from "@lib/icons";
@@ -778,13 +779,7 @@ export function createSettingsOverlay(
     appendChildren(panel, sidebar, contentArea, closeWrap);
 
     // Click backdrop (outside panel) to close
-    root.addEventListener(
-      "click",
-      (e: MouseEvent) => {
-        if (e.target === root) requestClose();
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(root, () => requestClose(), disposable.signal);
 
     root.appendChild(panel);
     // Don't build the active tab while the overlay is closed (DP-52): its

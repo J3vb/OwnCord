@@ -16,7 +16,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
 import { newClientMessageId } from "@lib/pendingMessages";
 import { listCustomEmoji } from "@stores/emoji.store";
 import {
@@ -443,13 +443,7 @@ export function openPollComposer(opts: PollComposerOptions): void {
     },
     { signal },
   );
-  modal.overlay.addEventListener(
-    "click",
-    (e) => {
-      if (e.target === modal?.overlay) close();
-    },
-    { signal },
-  );
+  closeOnBackdropClick(modal.overlay, () => close(), signal);
   closeBtn.addEventListener("click", close, { signal });
   cancelBtn.addEventListener("click", close, { signal });
   postBtn.addEventListener("click", () => void post(), { signal });

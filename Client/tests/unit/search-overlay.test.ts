@@ -452,6 +452,17 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("stays open when a drag-select ends on the backdrop", () => {
+    const opts = makeOptions();
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+    const overlayEl = container.querySelector(".search-overlay") as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(opts.onClose).not.toHaveBeenCalled();
+    overlay.destroy?.();
+  });
+
   it("does not close when clicking inside the box", () => {
     const opts = makeOptions();
     const overlay = createSearchOverlay(opts);

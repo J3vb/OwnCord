@@ -19,7 +19,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
 import { canManageChannels } from "@lib/permissions";
 import { forumsEnabled } from "@lib/serverCapabilities";
@@ -566,15 +566,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     appendChildren(instance.modal, body, footer);
 
     // Close on backdrop click
-    instance.overlay.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === instance?.overlay) {
-          requestClose();
-        }
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(instance.overlay, () => requestClose(), disposable.signal);
 
     // Escape cancels — never saves. Document-level so it works wherever focus
     // sits; guarded on the overlay still being attached because the listener

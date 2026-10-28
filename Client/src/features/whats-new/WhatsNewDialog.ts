@@ -6,6 +6,7 @@
 
 import { Disposable } from "../../lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/a11y";
+import { closeOnBackdropClick } from "../../lib/modalFactory";
 import { createElement, appendChildren } from "../../lib/dom";
 import { createIcon } from "../../lib/icons";
 import { whatsNewText as t } from "../../i18n/whatsNew";
@@ -103,13 +104,7 @@ export function showWhatsNewDialog(
 
   appendChildren(modal, header, body, footer);
   overlay.appendChild(modal);
-  overlay.addEventListener(
-    "click",
-    (e) => {
-      if (e.target === overlay) close();
-    },
-    { signal: disposable.signal },
-  );
+  closeOnBackdropClick(overlay, () => close(), disposable.signal);
   document.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {

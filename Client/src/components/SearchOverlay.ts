@@ -8,6 +8,7 @@
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem, SearchResponse } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -501,12 +502,6 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     }
   }
 
-  function handleBackdropClick(e: MouseEvent): void {
-    if (e.target === root) {
-      options.onClose();
-    }
-  }
-
   // Single delegated listener for the results container, registered once at
   // mount time. renderResults() re-creates row elements on every search and
   // on every arrow-key navigation, so binding a listener directly to each row
@@ -638,7 +633,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     // body after a result click; the input still drives arrow/Enter combobox
     // behaviour and the handler gates those on the event target.
     document.addEventListener("keydown", handleKeydown, { signal });
-    root.addEventListener("click", handleBackdropClick, { signal });
+    closeOnBackdropClick(root, () => options.onClose(), signal);
     resultsDiv.addEventListener("click", handleResultsClick, { signal });
 
     requestAnimationFrame(() => input.focus());
