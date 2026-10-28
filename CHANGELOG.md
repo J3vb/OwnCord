@@ -159,18 +159,11 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - Holding Ctrl+M, Ctrl+D or Ctrl+K repeated the action over and over. A held key now acts once.
 - The global mute and deafen shortcuts could be set to keys the app already uses. Settings now refuses those.
 - With a Chinese, Japanese or Korean input method, the Enter that picks a candidate also sent the half-typed text. It now only picks the candidate.
+- With a Chinese, Japanese or Korean input method, the Escape that cancels a candidate also closed the dialog or menu you were typing in. It now only cancels the candidate.
 - Unsent messages saved for a retry now stay with the server you are signed in to.
 - In the web portal on Android, the message bar and call buttons sat under the gesture bar. They now sit above it.
 - In the Linux AppImage, links and Open Log Folder now open, and launching the app a second time raises the open window.
 - The Linux app no longer crashes when its terminal is closed, and writes one log file instead of two.
-- Right-clicking a voice user, a member, a message or a video tile while a channel, category or thread menu was open left both menus showing, and so did opening any menu from the keyboard. Opening a menu now always closes the one before it.
-- Unsent messages kept by the desktop app for a retry are now only read and saved for the server you are signed in to, the same way as saved logins.
-- Holding Ctrl+M or Ctrl+D toggled mute or deafen over and over, and holding Ctrl+K opened and closed the Quick Switcher. A held key now acts once.
-- The global mute and deafen shortcuts could be set to a Ctrl+Shift key the app or a text field already uses (Ctrl+Shift+K, redo, word select), so one press did two things. Settings now refuses those keys.
-- The banned members list showed Unban next to people ranked at or above you, which the server always refused. It now shows Unban only where it can work.
-- With a Chinese, Japanese or Korean input method, the Enter that picks a candidate also submitted the half-typed text in 13 fields, including the ban reason, nickname, login code, search and custom status. That Enter now only picks the candidate.
-- With a Chinese, Japanese or Korean input method, the Escape that cancels a candidate also closed the dialog, popover or menu you were typing in and dropped the text. That Escape now only cancels the candidate. This covers every dialog, picker, profile card and overlay.
-- On Android Chrome the web portal's message bar and call buttons sat partly under the gesture bar. They now sit above it.
 
 **Voice and video**
 

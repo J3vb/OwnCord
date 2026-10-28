@@ -110,6 +110,7 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - Holding Ctrl+M, Ctrl+D or Ctrl+K repeated the action over and over. A held key now acts once.
 - The global mute and deafen shortcuts could be set to keys the app already uses. Settings now refuses those.
 - With a Chinese, Japanese or Korean input method, the Enter that picks a candidate also sent the half-typed text. It now only picks the candidate.
+- With a Chinese, Japanese or Korean input method, the Escape that cancels a candidate also closed the dialog or menu you were typing in. It now only cancels the candidate.
 - Unsent messages saved for a retry now stay with the server you are signed in to.
 - In the web portal on Android, the message bar and call buttons sat under the gesture bar. They now sit above it.
 - In the Linux AppImage, links and Open Log Folder now open, and launching the app a second time raises the open window.
