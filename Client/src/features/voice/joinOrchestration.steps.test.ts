@@ -974,16 +974,45 @@ describe("the session state when a join ends", () => {
   });
 });
 
-describe("handleVoiceToken", () => {
-  const connectedState = (room: Room, channelId = 1): SessionState => ({
-    type: "connected",
-    room,
-    channelId,
-    latestToken: "old",
-    lastUrl: "u",
-    lastDirectUrl: undefined,
-  });
+const connectedState = (room: Room, channelId = 1): SessionState => ({
+  type: "connected",
+  room,
+  channelId,
+  latestToken: "old",
+  lastUrl: "u",
+  lastDirectUrl: undefined,
+});
 
+/** connectAndSetup that runs `steps[n]` on its nth call and never runs away. */
+const scripted = (ctx: ReturnType<typeof setup>, steps: Array<() => void>) => {
+  let n = 0;
+  ctx.host.connectAndSetup.mockImplementation(async () => {
+    if (n >= 6) throw new Error("drain did not stop");
+    steps[n++]?.();
+    return true as const;
+  });
+};
+
+const queueAfter = (
+  ctx: ReturnType<typeof setup>,
+  pendingJoin: { token: string; url: string; channelId: number },
+): void => {
+  ctx.host.setState({ type: "connecting", pendingJoin, joinGeneration: 1 });
+};
+
+/** The session turns out connected to `current` as the queue is read. */
+const connectedWhenQueueIsRead = (ctx: ReturnType<typeof setup>, current: SessionState): void => {
+  const original = ctx.host.setState.getMockImplementation()!;
+  ctx.host.setState.mockImplementation((state: SessionState) => {
+    original(state);
+    if (state.type === "connecting" && state.pendingJoin === null) {
+      original(current);
+      ctx.host.setState.mockImplementation(original);
+    }
+  });
+};
+
+describe("handleVoiceToken", () => {
   it("rejoins instead of refreshing when the SDK has given up on the room", async () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 1 }));
     const ctx = setup(connectedState(fakeRoom("disconnected")));
@@ -1035,22 +1064,6 @@ describe("handleVoiceToken", () => {
 
   describe("draining queued joins", () => {
     const next = { token: "t2", url: "u2", channelId: 4 };
-    /** connectAndSetup that runs `steps[n]` on its nth call and never runs away. */
-    const scripted = (ctx: ReturnType<typeof setup>, steps: Array<() => void>) => {
-      let n = 0;
-      ctx.host.connectAndSetup.mockImplementation(async () => {
-        if (n >= 6) throw new Error("drain did not stop");
-        steps[n++]?.();
-        return true as const;
-      });
-    };
-    const queueAfter = (
-      ctx: ReturnType<typeof setup>,
-      pendingJoin: { token: string; url: string; channelId: number },
-    ): void => {
-      ctx.host.setState({ type: "connecting", pendingJoin, joinGeneration: 1 });
-    };
-
     beforeEach(() => {
       voiceStore.setState((prev) => ({ ...prev, currentChannelId: 2 }));
     });
@@ -1072,21 +1085,6 @@ describe("handleVoiceToken", () => {
       ]);
       expect(ctx.getState()).toMatchObject({ type: "connecting", pendingJoin: null });
     });
-
-    /** The session turns out connected to `current` as the queue is read. */
-    const connectedWhenQueueIsRead = (
-      ctx: ReturnType<typeof setup>,
-      current: SessionState,
-    ): void => {
-      const original = ctx.host.setState.getMockImplementation()!;
-      ctx.host.setState.mockImplementation((state: SessionState) => {
-        original(state);
-        if (state.type === "connecting" && state.pendingJoin === null) {
-          original(current);
-          ctx.host.setState.mockImplementation(original);
-        }
-      });
-    };
 
     it("refreshes the token instead of rejoining when the session is already connected to the queued channel", async () => {
       const ctx = setup();

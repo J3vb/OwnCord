@@ -291,20 +291,20 @@ describe("the native room's capture settings", () => {
   });
 });
 
-describe("a change of the local participant's permissions", () => {
-  async function connectedRoom() {
-    const ctx = setup();
-    const room = (await ctx.lifecycle.createRoom(1)) as unknown as FakeRoom;
-    ctx.connect(room as unknown as Room);
-    const handler = room.handlers.get("ParticipantPermissionsChanged")!;
-    return {
-      ...ctx,
-      room,
-      local: room.localParticipant,
-      fire: (participant: unknown) => handler(undefined, participant),
-    };
-  }
+async function connectedRoom() {
+  const ctx = setup();
+  const room = (await ctx.lifecycle.createRoom(1)) as unknown as FakeRoom;
+  ctx.connect(room as unknown as Room);
+  const handler = room.handlers.get("ParticipantPermissionsChanged")!;
+  return {
+    ...ctx,
+    room,
+    local: room.localParticipant,
+    fire: (participant: unknown) => handler(undefined, participant),
+  };
+}
 
+describe("a change of the local participant's permissions", () => {
   it("re-reads the share grant and drops video the grant no longer allows", async () => {
     const { fire, local, room, host } = await connectedRoom();
 
@@ -397,14 +397,14 @@ describe("a change of the local participant's permissions", () => {
   });
 });
 
-describe("leaveVoice", () => {
-  async function liveSession() {
-    const ctx = setup();
-    const room = (await ctx.lifecycle.createRoom(1)) as unknown as FakeRoom;
-    ctx.connect(room as unknown as Room);
-    return { ...ctx, room };
-  }
+async function liveSession() {
+  const ctx = setup();
+  const room = (await ctx.lifecycle.createRoom(1)) as unknown as FakeRoom;
+  ctx.connect(room as unknown as Room);
+  return { ...ctx, room };
+}
 
+describe("leaveVoice", () => {
   it("tells the server by default and releases every collaborator", async () => {
     const logs = captureLogs();
     const ctx = await liveSession();

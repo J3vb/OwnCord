@@ -131,13 +131,15 @@ describe("ownIdentityTitle", () => {
   });
 });
 
+const overlays = (): NodeListOf<Element> => document.querySelectorAll(".modal-overlay");
+
+const button = (label: string): HTMLButtonElement => {
+  const found = [...document.querySelectorAll("button")].find((b) => b.textContent === label);
+  if (found === undefined) throw new Error(`no button ${label}`);
+  return found;
+};
+
 describe("openIdentityMismatchModal", () => {
-  const overlays = (): NodeListOf<Element> => document.querySelectorAll(".modal-overlay");
-  const button = (label: string): HTMLButtonElement => {
-    const found = [...document.querySelectorAll("button")].find((b) => b.textContent === label);
-    if (found === undefined) throw new Error(`no button ${label}`);
-    return found;
-  };
   let lifetime: AbortController;
 
   beforeEach(() => {
