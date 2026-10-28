@@ -104,6 +104,7 @@ and only when it changes something a contributor or fork holder must do
 - Rejecting a server's changed certificate while the app was still signing in left the Auto-connecting spinner running forever. The sign-in now stops and the login form says the certificate was not accepted.
 - After picking a server with a remembered password, switching to another server or typing a different address kept the password box filled, and Log in then failed with a raw error. The remembered password now clears when the server changes.
 - Selecting the address in the Add server box by dragging past the edge of the field closed the box when you let go. It now stays open; only a click that starts outside the box closes it, and the same goes for the app's other dialogs.
+- Panning a zoomed image in the image viewer and letting go outside the image closed the viewer. It now stays open.
 
 **Accounts & admin**
 
