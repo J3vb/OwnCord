@@ -85,7 +85,7 @@
     "livekit-client": "2.23.0"
   },
   "overrides": {
-    "qs": "^6.15.3",
+    "qs": "6.16.1",
     "test-exclude": "^8.0.0"
   }
 }
