@@ -12,12 +12,22 @@ vi.mock("../../lib/e2eeCrypto", () => ({
 }));
 const decode = vi.hoisted(() => ({ list: vi.fn() }));
 vi.mock("./decodeCaps", () => ({ localVideoDecode: () => decode.list() }));
+const log = vi.hoisted(() => ({
+  tags: [] as string[],
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
 vi.mock("../../lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  createLogger: (tag: string) => {
+    log.tags.push(tag);
+    return log;
+  },
 }));
 
 import { getOrCreateIdentityKeyPair } from "../../lib/identity";
-import { exportPublicKey, signEphemeralKey } from "../../lib/e2eeCrypto";
+import { computeKeyFingerprint, exportPublicKey, signEphemeralKey } from "../../lib/e2eeCrypto";
 import { E2EEIdentity, rawFromBase64 } from "./e2eeIdentity";
 
 const PAIR = { privateKey: "priv", publicKey: "pub" } as unknown as CryptoKeyPair;
@@ -200,5 +210,80 @@ describe("E2EEIdentity", () => {
       public_key: EPHEMERAL,
       video_decode: ["vp8", "h264"],
     });
+  });
+});
+
+describe("E2EEIdentity unsigned announces", () => {
+  it("carries exactly the public key and decode list when there is no host", async () => {
+    const payload = await setup(null).identity.buildAnnouncePayload(EPHEMERAL);
+    expect(payload).toStrictEqual({ public_key: EPHEMERAL, video_decode: ["vp8", "h264"] });
+  });
+
+  it("carries no signature field when signing fails", async () => {
+    vi.mocked(signEphemeralKey).mockRejectedValueOnce(new Error("keyring"));
+    const payload = await setup().identity.buildAnnouncePayload(EPHEMERAL);
+    expect(payload).toStrictEqual({ public_key: EPHEMERAL, video_decode: ["vp8", "h264"] });
+  });
+
+  it("drops a signature that has no key to verify it when the export fails", async () => {
+    vi.mocked(exportPublicKey).mockRejectedValueOnce(new Error("export"));
+    const payload = await setup().identity.buildAnnouncePayload(EPHEMERAL);
+    expect(payload).toStrictEqual({ public_key: EPHEMERAL, video_decode: ["vp8", "h264"] });
+  });
+
+  it("logs why the announce went out unsigned", async () => {
+    const failure = new Error("keyring");
+    vi.mocked(signEphemeralKey).mockRejectedValueOnce(failure);
+    await setup().identity.buildAnnouncePayload(EPHEMERAL);
+    expect(log.error).toHaveBeenCalledWith(
+      "E2EE: failed to sign announce — sending unsigned",
+      failure,
+    );
+  });
+
+  it("logs a missing user id instead of signing", async () => {
+    auth.user = null;
+    await setup().identity.buildAnnouncePayload(EPHEMERAL);
+    expect(log.warn).toHaveBeenCalledWith(
+      "E2EE: no authenticated user id yet — announcing unsigned instead of scoping under a placeholder id",
+    );
+  });
+});
+
+describe("E2EEIdentity.safetyNumber", () => {
+  it("is null before an identity key is loaded", async () => {
+    await expect(setup().identity.safetyNumber()).resolves.toBeNull();
+    expect(computeKeyFingerprint).not.toHaveBeenCalled();
+  });
+
+  it("is the fingerprint of the key the announce was signed with", async () => {
+    vi.mocked(computeKeyFingerprint).mockResolvedValue("12345 67890");
+    const { identity } = setup();
+    await identity.buildAnnouncePayload(EPHEMERAL);
+    await expect(identity.safetyNumber()).resolves.toBe("12345 67890");
+    expect(computeKeyFingerprint).toHaveBeenCalledWith("pub");
+  });
+
+  it("is null again once the identity key is cleared", async () => {
+    vi.mocked(computeKeyFingerprint).mockResolvedValue("12345 67890");
+    const { identity } = setup();
+    await identity.buildAnnouncePayload(EPHEMERAL);
+    identity.clearIdentityKeyPair();
+    await expect(identity.safetyNumber()).resolves.toBeNull();
+  });
+
+  it("is null, and says why, when the fingerprint cannot be computed", async () => {
+    const failure = new Error("digest");
+    vi.mocked(computeKeyFingerprint).mockRejectedValue(failure);
+    const { identity } = setup();
+    await identity.buildAnnouncePayload(EPHEMERAL);
+    await expect(identity.safetyNumber()).resolves.toBeNull();
+    expect(log.warn).toHaveBeenCalledWith("E2EE: could not compute own safety number", failure);
+  });
+});
+
+describe("log tag", () => {
+  it("keeps the E2EE log lines under their original tag", () => {
+    expect(log.tags).toContain("livekitE2EE");
   });
 });

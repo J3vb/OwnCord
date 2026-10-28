@@ -3,8 +3,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("../../lib/e2eeCrypto", () => ({
   generateRoomKey: vi.fn(() => new Uint8Array([9])),
 }));
+const log = vi.hoisted(() => ({
+  tags: [] as string[],
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
 vi.mock("../../lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  createLogger: (tag: string) => {
+    log.tags.push(tag);
+    return log;
+  },
 }));
 
 import { E2EEEpoch } from "./e2eeEpoch";
@@ -38,6 +48,7 @@ function setup() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.clearAllMocks();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -201,5 +212,53 @@ describe("rotation timer", () => {
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(ROTATION_MS);
     expect(epoch.epoch).toBe(0);
+  });
+});
+
+describe("rotation diagnostics", () => {
+  it("logs the interval when the timer is armed", () => {
+    const { epoch } = setup();
+    epoch.startKeyRotationTimer();
+    expect(log.debug).toHaveBeenCalledWith("E2EE: key rotation timer started", {
+      intervalMs: ROTATION_MS,
+    });
+  });
+
+  it("logs the channel and epoch of a periodic rotation and the peers it reached", async () => {
+    const { epoch } = setup();
+    await epoch.rotateKeyPeriodically();
+    expect(log.info).toHaveBeenCalledWith("E2EE: periodic key rotation", {
+      channelId: 1,
+      epoch: 1,
+    });
+    expect(log.info).toHaveBeenCalledWith("E2EE: distributed periodically rotated key", {
+      peerCount: 1,
+    });
+  });
+
+  it("logs a failed rotation with its error", async () => {
+    const { epoch, host } = setup();
+    const failure = new Error("wrap");
+    host.distributeRoomKey.mockRejectedValueOnce(failure);
+    await epoch.rotateKeyPeriodically();
+    expect(log.error).toHaveBeenCalledWith("E2EE: periodic key rotation failed", failure);
+    expect(log.info).not.toHaveBeenCalledWith(
+      "E2EE: distributed periodically rotated key",
+      expect.anything(),
+    );
+  });
+
+  it("stays quiet when a superseded rotation stops early", async () => {
+    const { epoch, host } = setup();
+    host.applyRoomKey.mockResolvedValueOnce(false);
+    await epoch.rotateKeyPeriodically();
+    expect(log.info).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("log tag", () => {
+  it("keeps the E2EE log lines under their original tag", () => {
+    expect(log.tags).toContain("livekitE2EE");
   });
 });
