@@ -176,7 +176,7 @@ func (c *Client) getChannelID() int64 {
 type livePresence struct {
 	status       string
 	customStatus *string
-	// customStatusExpiresAt is the stored expiry (db.CustomStatusExpiryLayout)
+	// customStatusExpiresAt is the stored expiry (dbtime.ISOLayout)
 	// of customStatus, "" when it has none. It is the tag the expirer's
 	// CustomStatusExpired compares: only a connection still showing the status
 	// that expired is cleared.

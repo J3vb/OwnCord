@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // Attachment represents a row in the attachments table.
@@ -269,7 +270,7 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 // preventing a race where an attachment linked between SELECT and DELETE
 // would have its file deleted while the DB row survives.
 func (d *DB) DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error) {
-	files, err := d.q.DeleteOrphanedAttachments(ctx, cutoff.UTC().Format(sqliteTimeLayout))
+	files, err := d.q.DeleteOrphanedAttachments(ctx, cutoff.UTC().Format(dbtime.SQLiteLayout))
 	if err != nil {
 		return nil, fmt.Errorf("DeleteOrphanedAttachments: %w", err)
 	}

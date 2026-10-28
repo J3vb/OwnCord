@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -139,7 +140,7 @@ func ParseThreadCursor(raw string) (ThreadCursor, error) {
 	if err != nil || id < 1 {
 		return ThreadCursor{}, fmt.Errorf("%w: before is not a thread cursor", ErrBadRequest)
 	}
-	if _, perr := time.Parse(db.ThreadActivityLayout, activity); perr != nil && activity != "" {
+	if _, perr := time.Parse(dbtime.ISOLayout, activity); perr != nil && activity != "" {
 		return ThreadCursor{}, fmt.Errorf("%w: before is not a thread cursor", ErrBadRequest)
 	}
 	return ThreadCursor{Activity: activity, ID: id}, nil

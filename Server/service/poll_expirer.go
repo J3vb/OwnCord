@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -90,7 +91,7 @@ func (e *PollExpirer) Sweep(ctx context.Context) error {
 	e.mu.Unlock()
 	var first error
 	for {
-		now := e.now().UTC().Format(db.CustomStatusExpiryLayout)
+		now := e.now().UTC().Format(dbtime.ISOLayout)
 		rows, err := e.st.ListDuePolls(ctx, now, e.batch)
 		if err != nil {
 			return fmt.Errorf("list due polls: %w", err)
@@ -176,7 +177,7 @@ func (e *PollExpirer) nextSleep(ctx context.Context) (sleep time.Duration, faile
 	if !ok {
 		return e.maxSleep, false
 	}
-	at, err := time.Parse(db.CustomStatusExpiryLayout, next)
+	at, err := time.Parse(dbtime.ISOLayout, next)
 	if err != nil {
 		slog.Warn("poll expirer: unparseable expiry", "expires_at", next, "err", err)
 		return e.retryAfter, false

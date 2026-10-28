@@ -7,12 +7,9 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
-
-// CustomStatusExpiryLayout is how users.custom_status_expires_at is written
-// (db.CustomStatusExpiryLayout), exported for the transports that compare it.
-const CustomStatusExpiryLayout = db.CustomStatusExpiryLayout
 
 // MinCustomStatusExpirySeconds and MaxCustomStatusExpirySeconds bound
 // presence_update's custom_status_expires_in, in seconds.
@@ -100,7 +97,7 @@ func (e *CustomStatusExpirer) Sweep(ctx context.Context) error {
 	notifier := e.notifier
 	e.mu.Unlock()
 	for {
-		now := e.now().UTC().Format(db.CustomStatusExpiryLayout)
+		now := e.now().UTC().Format(dbtime.ISOLayout)
 		rows, err := e.st.ListExpiredCustomStatuses(ctx, now, expirerBatch)
 		if err != nil {
 			return fmt.Errorf("list expired custom statuses: %w", err)
@@ -190,7 +187,7 @@ func (e *CustomStatusExpirer) nextSleep(ctx context.Context) (sleep time.Duratio
 	if !ok {
 		return e.maxSleep, false
 	}
-	at, err := time.Parse(db.CustomStatusExpiryLayout, next)
+	at, err := time.Parse(dbtime.ISOLayout, next)
 	if err != nil {
 		slog.Warn("custom status expirer: unparseable expiry", "expires_at", next, "err", err)
 		return e.retryAfter, false

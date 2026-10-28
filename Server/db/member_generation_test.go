@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // Migration 057's triggers are the ready path's only invalidation signal for
@@ -141,8 +142,8 @@ func TestListMembers_AboutAndCreatedAtRFC3339(t *testing.T) {
 	if got.About == nil || *got.About != about {
 		t.Errorf("About = %v, want %q", got.About, about)
 	}
-	if _, err := time.Parse(db.MemberCreatedAtLayout, got.CreatedAt); err != nil {
-		t.Errorf("CreatedAt %q is not %s: %v", got.CreatedAt, db.MemberCreatedAtLayout, err)
+	if _, err := time.Parse(dbtime.ISOLayout, got.CreatedAt); err != nil {
+		t.Errorf("CreatedAt %q is not %s: %v", got.CreatedAt, dbtime.ISOLayout, err)
 	}
 	u, err := database.GetUserByID(ctx, uid)
 	if err != nil {
