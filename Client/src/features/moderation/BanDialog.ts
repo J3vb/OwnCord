@@ -33,6 +33,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { errorText, TransportError, type BanMemberResponse } from "@lib/api";
 import { createElement, setOwnedTimeout, setText } from "@lib/dom";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
@@ -317,7 +318,7 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
   cancel.addEventListener("click", () => modal.close());
   confirm.addEventListener("click", () => void send());
   reasonInput.addEventListener("keydown", (e: KeyboardEvent) => {
-    if (e.key !== "Enter") return;
+    if (e.key !== "Enter" || isImeCommit(e)) return;
     e.preventDefault();
     void send();
   });

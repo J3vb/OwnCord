@@ -5,6 +5,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { isImeCommit } from "@lib/ime";
 import { createMenuItem } from "@lib/context-menu";
 import { shellText } from "../i18n/shell";
 
@@ -125,7 +126,7 @@ export function appendPurgeSection(menu: HTMLElement, opts: PurgeSectionOptions)
   countInput.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && !isImeCommit(e)) {
         e.preventDefault();
         submit();
       }

@@ -131,6 +131,30 @@ describe("QuickSwitcher", () => {
     expect(items[3]!.classList.contains("quick-switcher__item--active")).toBe(true);
   });
 
+  it("keys an IME is composing with do not select, move or close", () => {
+    switcher.mount(container);
+    const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", keyCode: 229, bubbles: true }),
+    );
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+
+    expect(onSelectChannel).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    const items = container.querySelectorAll(".quick-switcher__item");
+    expect(items[0]!.classList.contains("quick-switcher__item--active")).toBe(true);
+  });
+
   it("Enter selects the active channel", () => {
     switcher.mount(container);
     const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;

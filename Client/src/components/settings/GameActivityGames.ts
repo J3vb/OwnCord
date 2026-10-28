@@ -10,6 +10,7 @@
  */
 
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
+import { isImeCommit } from "@lib/ime";
 import { createIcon } from "@lib/icons";
 import {
   MAX_GAME_NAME_CHARS,
@@ -200,6 +201,7 @@ export function buildGamesSection(signal: AbortSignal): HTMLElement[] {
     input.addEventListener(
       "keydown",
       (e) => {
+        if (isImeCommit(e)) return;
         if (e.key === "Enter") {
           e.preventDefault();
           e.stopPropagation();
@@ -365,6 +367,7 @@ export function buildGamesSection(signal: AbortSignal): HTMLElement[] {
     input.addEventListener(
       "keydown",
       (e) => {
+        if (isImeCommit(e)) return;
         if (e.key === "Enter") {
           e.preventDefault();
           e.stopPropagation();

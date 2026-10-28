@@ -4,6 +4,7 @@
 // never sets innerHTML.
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { stickersStore, type Sticker } from "@stores/stickers.store";
@@ -162,7 +163,7 @@ export function createStickerPicker(options: StickerPickerOptions): {
   searchInput.addEventListener(
     "keydown",
     (e) => {
-      if (e.key !== "Enter") return;
+      if (e.key !== "Enter" || isImeCommit(e)) return;
       const first = body.querySelector<HTMLElement>(".sp-item");
       if (first === null) return;
       e.preventDefault();

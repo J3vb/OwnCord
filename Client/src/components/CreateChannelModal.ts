@@ -10,6 +10,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
@@ -220,7 +221,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     nameInput.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+        if (e.key !== "Enter" || isImeCommit(e)) return;
         if (nameInput.value.trim() === "" || createBtn.hasAttribute("disabled")) return;
         e.preventDefault();
         void submit();

@@ -6,6 +6,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem, SearchResponse } from "@lib/types";
@@ -459,6 +460,8 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   }
 
   function handleKeydown(e: KeyboardEvent): void {
+    // While an input method composes, Enter, arrows and Escape belong to it.
+    if (isImeCommit(e)) return;
     if (e.key === "Escape") {
       e.preventDefault();
       // Escape closes from anywhere: focus moves to the body after clicking a

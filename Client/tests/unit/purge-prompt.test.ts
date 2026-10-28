@@ -50,6 +50,30 @@ describe("appendPurgeSection", () => {
     });
   });
 
+  it("ignores an Enter in the count that commits an IME candidate", async () => {
+    const onPurge = vi.fn(async () => {});
+    mount(onPurge);
+
+    q<HTMLElement>("ctx-purge-messages").click();
+    const input = q<HTMLInputElement>("purge-count-input");
+    input.value = "2";
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(onPurge).not.toHaveBeenCalled();
+
+    input.value = "20";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => {
+      expect(onPurge).toHaveBeenCalledExactlyOnceWith(20);
+    });
+  });
+
   it("falls back to the default count for a non-numeric entry", async () => {
     const onPurge = vi.fn(async () => {});
     mount(onPurge);

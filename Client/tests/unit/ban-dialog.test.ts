@@ -121,6 +121,26 @@ describe("ban dialog", () => {
     expect(notify).toHaveBeenCalledExactlyOnceWith("Banned alice for 24h", "success");
   });
 
+  it("Enter that commits an IME candidate does not submit a half-typed reason", async () => {
+    const submit = vi.fn(async () => ({}));
+    setup(submit);
+    q("ban-reason-input").dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(submit).not.toHaveBeenCalled();
+    expect(dialog()).not.toBeNull();
+    q("ban-reason-input").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    );
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
   it("Enter in the reason field submits once", async () => {
     const submit = vi.fn(async () => ({}));
     setup(submit);

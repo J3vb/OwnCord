@@ -139,6 +139,24 @@ describe("nickname dialog", () => {
     expect(submit.mock.calls).toEqual([["Dave"], ["Dave"]]);
   });
 
+  it("Enter that commits an IME candidate does not save a half-typed nickname", async () => {
+    const submit = vi.fn(async () => ({}));
+    setup(submit);
+    type("Dave");
+    input().dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(submit).not.toHaveBeenCalled();
+    input().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
   it("double submit sends once", async () => {
     let resolve!: (v: unknown) => void;
     const submit = vi.fn(() => new Promise((r) => (resolve = r)));

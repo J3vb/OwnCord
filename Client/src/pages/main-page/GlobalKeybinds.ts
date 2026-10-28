@@ -26,6 +26,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
@@ -347,7 +348,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   // ring the key reaches the message box untouched.
   const onAcceptRingCapture = (e: KeyboardEvent): void => {
     if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
-    if (e.repeat || e.isComposing || handlers.isSuspended?.() === true || dialogOpen()) return;
+    if (e.repeat || isImeCommit(e) || handlers.isSuspended?.() === true || dialogOpen()) return;
     if (handlers.ringActive?.() !== true) return;
     e.stopPropagation();
     runGlobal(e, "accept-ring", () => handlers.onAcceptRing?.());

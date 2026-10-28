@@ -129,6 +129,22 @@ describe("StickerPicker", () => {
     expect(keys[0]).toMatch(/^owncord:recent-stickers:\d+:/);
   });
 
+  it("Enter that commits an IME candidate in the search box picks nothing", () => {
+    load();
+    const { picker, onSelect } = make();
+    search(picker.element, "sleep");
+    picker.element.querySelector(".sp-search")!.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(onSelect).not.toHaveBeenCalled();
+    picker.destroy();
+  });
+
   it("Enter in the search box picks the first match", () => {
     load();
     const { picker, onSelect } = make();

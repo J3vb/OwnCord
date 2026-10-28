@@ -507,6 +507,42 @@ describe("Settings > Activity > Your games", () => {
     host.remove();
   });
 
+  it("an Enter that commits an IME candidate saves neither a rename nor an added name", async () => {
+    recordSeen("Factorio");
+    const host = mount();
+    q(host, "game-rename").click();
+    const rename = q<HTMLInputElement>(host, "game-rename-input");
+    type(rename, "Half");
+    rename.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(loadGamePrefs().renames).toEqual({});
+    expect(q<HTMLInputElement>(host, "game-rename-input")).toBe(rename);
+    key(rename, "Escape");
+
+    q(host, "game-add").click();
+    await tick();
+    all(host, "game-picker-item")[0]!.click();
+    const name = q<HTMLInputElement>(host, "game-picker-name");
+    type(name, "Half");
+    name.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(loadGamePrefs().manual).toEqual([]);
+    expect(q(host, "game-picker").hidden).toBe(false);
+    host.remove();
+  });
+
   it("Enter in the name step saves, a blank name is refused, and Esc closes the picker", async () => {
     const host = mount();
     q(host, "game-add").click();

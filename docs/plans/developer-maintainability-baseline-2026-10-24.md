@@ -259,3 +259,44 @@ Correction to the scout row: `tile-menu.ts` and the member menu did keep inside 
 ### Verdict against the stop rules
 
 No gate weakened, no assertion loosened; the deleted tests belonged to deleted code, and the purge ones moved. The count goes from 7 to 0 and is held by a test. Kept.
+
+## MX-5 IME Enter guard (2026-10-28)
+
+Scout candidate C2 in the execution plan. Based on `origin/dev` `91d7e54a`. Evidence level: **executed** (unit tests and a deliberate-break check in jsdom; no input method was run in the app).
+
+### Baseline count
+
+Counted with the new structural test, `Client/tests/unit/ime-enter-guard.test.ts`, run against unchanged `dev`. It reads every function in `Client/src` that compares a key to `"Enter"` and skips Enter-or-Space button activation.
+
+| Measure                                                  | Scout (2026-10-27) | Re-count before | After                     |
+| -------------------------------------------------------- | ------------------ | --------------- | ------------------------- |
+| Enter handlers on a text field with no composition guard | 9                  | 13              | 0, held by the test       |
+| Handlers with an inline `isComposing` guard              | 7 files            | 8 (7 files)     | 0; all call `isImeCommit` |
+| Inline `e.isComposing \|\| e.keyCode === 229` copies     | 7 files            | 8 in 7 files    | 0 outside `lib/ime.ts`    |
+| Exempt Enter handlers (no text field)                    | n/a                | n/a             | 1: `miniPlayer.ts`        |
+
+The scout missed four unguarded fields: the custom status in `StatusPicker.ts` and `SelfProfileCard.ts`, the prompt input in `lib/modalFactory.ts`, and the sticker search in `StickerPicker.ts`. All 13 are fixed here, since the defect and the fix are the same. `GlobalKeybinds.ts`'s Ctrl+Enter ring answer checked `isComposing` only; it now uses the helper, which adds the `keyCode` 229 case.
+
+### What changed
+
+- `Client/src/lib/ime.ts`: `isImeCommit(e)`, true while an input method owns the key.
+- 13 unguarded handlers return early on it. `SearchOverlay` and `QuickSwitcher` check it at the top of the handler, so composing arrows and Escape also stay with the input method.
+- The 8 inline guards call the helper instead.
+- `ime-enter-guard.test.ts`: fails on a new Enter handler without the helper, on an exemption that no longer exists, and on an inline copy of the guard.
+- One test per field (12 tests; one covers both game activity fields) that sends Enter with `isComposing: true` and checks nothing was submitted.
+
+### Deliberate-break check
+
+`isImeCommit` was made to return `false` and the 12 test files were run, then the change was reverted.
+
+| Break                         | Before: tests that fail | After: tests that fail |
+| ----------------------------- | ----------------------- | ---------------------- |
+| No composition guard on Enter | 0 (no test sent one)    | 12 of 12 new tests     |
+
+### Not done
+
+Escape during composition still closes `createModal` dialogs and the self profile card, because their Escape listeners are on `document`. That is a different key and a different fix (the dialog helper), so it is left for a follow-up and not counted here.
+
+### Verdict against the stop rules
+
+No gate was weakened, no existing test changed, and the count went from 13 to 0 with a test that holds it. The change is kept.

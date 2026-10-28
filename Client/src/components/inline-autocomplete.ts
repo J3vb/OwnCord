@@ -18,6 +18,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, clearChildren, appendChildren } from "@lib/dom";
 
 export interface InlineAutocompleteConfig<T> {
@@ -178,7 +179,7 @@ export function createInlineAutocomplete<T>(
   function handleKeydown(e: KeyboardEvent): boolean {
     if (suggestions.length === 0) return false;
     // An IME's commit-Enter (or arrow/Esc while composing) belongs to the IME.
-    if (e.isComposing || e.keyCode === 229) return false;
+    if (isImeCommit(e)) return false;
     switch (e.key) {
       case "ArrowDown":
         e.preventDefault();

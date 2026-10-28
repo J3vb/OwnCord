@@ -91,6 +91,30 @@ describe("StatusPicker", () => {
     expect(input.value).toBe("in a meeting");
   });
 
+  it("Enter that commits an IME candidate does not commit the custom status", () => {
+    const onCustomStatusChange = vi.fn();
+    picker = createStatusPicker({
+      currentStatus: "online",
+      onStatusChange: vi.fn(),
+      currentCustomStatus: "",
+      onCustomStatusChange,
+    });
+    picker.mount(container);
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="custom-status-input"]')!;
+    input.value = "half";
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+
+    expect(onCustomStatusChange).not.toHaveBeenCalled();
+  });
+
   it("commits on blur and clears with an empty value", () => {
     const onCustomStatusChange = vi.fn();
     picker = createStatusPicker({
