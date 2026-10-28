@@ -104,6 +104,7 @@ import {
 } from "@lib/read-state";
 import { idMentionsEnabled, readPointerEnabled } from "@lib/serverCapabilities";
 import { markMessageUnread } from "./message-list/mark-unread";
+import { onPrefChange } from "@lib/preferences";
 
 // -- Options ------------------------------------------------------------------
 
@@ -2841,13 +2842,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Switching the 12h/24h clock preference relabels the rendered rows in
     // place, the same way midnight does. Owned by disposable.signal, so the
     // listener dies with the component.
-    window.addEventListener(
-      "owncord:pref-change",
-      ((e: CustomEvent<{ key: string }>) => {
-        if (e.detail.key === "timeFormat") relabelRenderedTimes();
-      }) as EventListener,
-      { signal: disposable.signal },
-    );
+    onPrefChange(["timeFormat"], relabelRenderedTimes, disposable.signal);
   }
 
   /**
