@@ -8,6 +8,7 @@ import { closeOnBackdropClick } from "@lib/modalFactory";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/media-visibility";
+import { createZoomPan, PAN_MIN_SCALE } from "@lib/zoomPan";
 import { loadPref } from "@lib/preferences";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
@@ -2075,111 +2076,49 @@ export function openImageLightbox(
 
   overlay.appendChild(toolbar);
 
-  // Zoom & pan state
-  let scale = 1;
-  let panX = 0;
-  let panY = 0;
-  let isDragging = false;
-  let dragStartX = 0;
-  let dragStartY = 0;
-  let panStartX = 0;
-  let panStartY = 0;
-
-  function applyTransform(): void {
-    img.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
-  }
-
-  function resetZoom(): void {
-    scale = 1;
-    panX = 0;
-    panY = 0;
-    applyTransform();
-  }
-
-  function onMove(e: MouseEvent): void {
-    if (!isDragging) return;
-    panX = panStartX + (e.clientX - dragStartX);
-    panY = panStartY + (e.clientY - dragStartY);
-    applyTransform();
-  }
-
-  function onUp(): void {
-    if (isDragging) {
-      isDragging = false;
-      overlay.classList.remove("dragging");
-    }
-  }
+  const view = createZoomPan({
+    min: 0.5,
+    max: 10,
+    apply: (transform) => {
+      img.style.transform = transform;
+    },
+    centre: () => {
+      const rect = img.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    },
+    onDrag: (dragging) => overlay.classList.toggle("dragging", dragging),
+  });
 
   function close(): void {
+    view.cancelDrag();
     overlay.remove();
     disposable.destroy();
     if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     if (activeLightboxClose === close) activeLightboxClose = null;
   }
 
-  // Mouse wheel zoom
   imgWrap.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.15 : 0.15;
-    const newScale = Math.max(0.5, Math.min(10, scale + delta * scale));
-    // Zoom towards cursor position
-    const rect = img.getBoundingClientRect();
-    const cx = e.clientX - rect.left - rect.width / 2;
-    const cy = e.clientY - rect.top - rect.height / 2;
-    const factor = newScale / scale;
-    panX = panX - cx * (factor - 1);
-    panY = panY - cy * (factor - 1);
-    scale = newScale;
-    applyTransform();
+    view.wheel(e);
   });
-
-  // Single click to toggle zoom, with drag detection to avoid zoom on pan
-  let clickStartX = 0;
-  let clickStartY = 0;
 
   img.addEventListener("mousedown", (e) => {
     // A right-click opens the image menu; only the primary button pans.
     if (e.button !== 0) return;
     e.preventDefault();
-    clickStartX = e.clientX;
-    clickStartY = e.clientY;
-
-    if (scale > 1.1) {
-      // Zoomed in — start panning
-      isDragging = true;
-      dragStartX = e.clientX;
-      dragStartY = e.clientY;
-      panStartX = panX;
-      panStartY = panY;
-      overlay.classList.add("dragging");
-    }
+    view.press(e);
   });
 
+  // A click toggles 3x towards the pointer; the end of a pan is no click.
   img.addEventListener("click", (e) => {
     e.stopPropagation();
-    // Only toggle zoom if mouse didn't move (not a pan gesture)
-    const dx = Math.abs(e.clientX - clickStartX);
-    const dy = Math.abs(e.clientY - clickStartY);
-    if (dx > 5 || dy > 5) return;
-
-    if (scale > 1.1) {
-      resetZoom();
-    } else {
-      // Zoom to 3x towards click position
-      const rect = img.getBoundingClientRect();
-      const cx = e.clientX - rect.left - rect.width / 2;
-      const cy = e.clientY - rect.top - rect.height / 2;
-      scale = 3;
-      panX = -cx * 2;
-      panY = -cy * 2;
-      applyTransform();
-    }
+    if (view.movedSincePress(e.clientX, e.clientY)) return;
+    if (view.scale > PAN_MIN_SCALE) view.reset();
+    else view.zoomAt(3, e.clientX, e.clientY);
   });
 
   // Use a Disposable for cleanup of document-level listeners to prevent leaks
   const disposable = new Disposable();
-  document.addEventListener("mousemove", onMove, { signal: disposable.signal });
-  document.addEventListener("mouseup", onUp, { signal: disposable.signal });
 
   // One save path for the menu's Save Image and the Download button. It reads
   // the current image once, at the click, so a step cannot redirect it.
@@ -2269,15 +2208,9 @@ export function openImageLightbox(
     }
     // Ctrl/Cmd with these keys zooms the whole app, not the image.
     if (e.ctrlKey || e.metaKey) return;
-    if (e.key === "+" || e.key === "=") {
-      scale = Math.min(10, scale * 1.3);
-      applyTransform();
-    }
-    if (e.key === "-") {
-      scale = Math.max(0.5, scale / 1.3);
-      applyTransform();
-    }
-    if (e.key === "0") resetZoom();
+    if (e.key === "+" || e.key === "=") view.setScale(view.scale * 1.3);
+    if (e.key === "-") view.setScale(view.scale / 1.3);
+    if (e.key === "0") view.reset();
   }
   document.addEventListener("keydown", onKey, { signal: disposable.signal });
 
@@ -2296,11 +2229,7 @@ export function openImageLightbox(
       setCurrent: (next) => {
         current = next;
       },
-      resetView: () => {
-        isDragging = false;
-        overlay.classList.remove("dragging");
-        resetZoom();
-      },
+      resetView: () => view.reset(),
       closeMenu: () => imageMenuModule?.closeImageMenu(),
       // The menu's own class (image-menu.ts MENU_CLASS): asked of the DOM so it
       // holds even before the lazy menu module has loaded.

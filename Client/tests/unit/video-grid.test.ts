@@ -797,6 +797,89 @@ describe("VideoGrid", () => {
     });
   });
 
+  describe("Ctrl + wheel zoom and drag pan", () => {
+    const tile = (id: number) =>
+      container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
+    const zoomIn = (el: Element): void => {
+      for (let i = 0; i < 5; i++) {
+        el.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -1, ctrlKey: true, bubbles: true, cancelable: true }),
+        );
+      }
+    };
+    const scaleOf = (el: HTMLElement): number =>
+      Number(el.style.getPropertyValue("--video-scale") || "1");
+
+    it("zooms a webcam and a screen share, and leaves a plain wheel to scroll", () => {
+      grid.addStream(1, "Alice", fakeStream(), makeTileConfig());
+      grid.addStream(2, "Bob (Screen)", fakeStream(), makeTileConfig({ isScreenshare: true }));
+      const plain = new WheelEvent("wheel", { deltaY: -1, bubbles: true, cancelable: true });
+      tile(1).dispatchEvent(plain);
+      expect(plain.defaultPrevented).toBe(false);
+      expect(scaleOf(tile(1))).toBe(1);
+
+      zoomIn(tile(1).querySelector("video")!);
+      zoomIn(tile(2).querySelector(".video-cell-select")!);
+      expect(scaleOf(tile(1))).toBeGreaterThan(2);
+      expect(scaleOf(tile(2))).toBeGreaterThan(2);
+    });
+
+    it("a drag that pans a zoomed tile does not open it in focus view", () => {
+      grid.addStream(1, "Alice", fakeStream(), makeTileConfig());
+      grid.addStream(2, "Bob", fakeStream(), makeTileConfig());
+      const select = tile(1).querySelector<HTMLButtonElement>(".video-cell-select")!;
+      zoomIn(select);
+      const at = (type: string, x: number) =>
+        new MouseEvent(type, { clientX: x, clientY: 50, bubbles: true, cancelable: true });
+
+      select.dispatchEvent(at("mousedown", 50));
+      document.dispatchEvent(at("mousemove", 120));
+      document.dispatchEvent(at("mouseup", 120));
+      select.dispatchEvent(at("click", 120));
+      expect(grid.getFocusedTileId()).toBeNull();
+
+      select.dispatchEvent(at("mousedown", 50));
+      document.dispatchEvent(at("mouseup", 50));
+      select.dispatchEvent(at("click", 50));
+      expect(grid.getFocusedTileId()).toBe(1);
+    });
+
+    it("a new stream on a zoomed tile starts unzoomed", () => {
+      grid.addStream(1, "Alice", fakeStreamWithTrack().stream, makeTileConfig());
+      zoomIn(tile(1));
+      expect(scaleOf(tile(1))).toBeGreaterThan(1);
+
+      grid.addStream(1, "Alice", fakeStreamWithTrack().stream, makeTileConfig());
+      expect(scaleOf(tile(1))).toBe(1);
+      expect(tile(1).classList.contains("video-zoomed")).toBe(false);
+    });
+
+    it("a stopped tile drops its zoom", () => {
+      grid.addStream(2, "Bob (Screen)", fakeStream(), makeTileConfig({ isScreenshare: true }));
+      zoomIn(tile(2));
+      tile(2).querySelector<HTMLButtonElement>("[data-tile-control='stop']")!.click();
+      expect(scaleOf(tile(2))).toBe(1);
+    });
+
+    it("your own screen share, which shows its cover, does not zoom", () => {
+      grid.addStream(
+        1,
+        "Your screen",
+        fakeStream(),
+        makeTileConfig({ isSelf: true, isScreenshare: true }),
+      );
+      zoomIn(tile(1));
+      expect(scaleOf(tile(1))).toBe(1);
+    });
+
+    it("the picture takes the view through the individual transform properties", () => {
+      for (const sel of [".video-cell video", ".video-popout video"]) {
+        expect(cascadedDeclaration(sel, "scale")).not.toBeNull();
+        expect(cascadedDeclaration(sel, "translate")).not.toBeNull();
+      }
+    });
+  });
+
   // -----------------------------------------------------------------------
   // Focus mode tests (Spec 2)
   // -----------------------------------------------------------------------
@@ -2231,6 +2314,27 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).querySelector("video")).toBeNull();
       expect(cell(SCREEN).querySelector(".video-popped")).not.toBeNull();
       expect(control(SCREEN, "pip").getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("zooms and pans in the window as on the tile, starting unzoomed", () => {
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      const wheelIn = () =>
+        new WheelEvent("wheel", { deltaY: -1, ctrlKey: true, bubbles: true, cancelable: true });
+      cell(SCREEN).dispatchEvent(wheelIn());
+      expect(cell(SCREEN).style.getPropertyValue("--video-scale")).not.toBe("");
+
+      control(SCREEN, "pip").click();
+      expect(cell(SCREEN).style.getPropertyValue("--video-scale")).toBe("");
+      const root = popup.doc.querySelector<HTMLElement>(".video-popout")!;
+      root.querySelector("video")!.dispatchEvent(wheelIn());
+      root.dispatchEvent(wheelIn());
+      expect(Number(root.style.getPropertyValue("--video-scale"))).toBeGreaterThan(1.3);
+
+      // The drag follows the pointer in the window's own document.
+      root.dispatchEvent(new MouseEvent("mousedown", { clientX: 0, clientY: 0, bubbles: true }));
+      expect(root.classList.contains("video-panning")).toBe(true);
+      popup.doc.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      expect(root.classList.contains("video-panning")).toBe(false);
     });
 
     it("offers Pop out where picture-in-picture is missing too (WebKitGTK)", () => {
