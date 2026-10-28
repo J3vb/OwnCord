@@ -20,14 +20,27 @@ import type {
   Room,
 } from "livekit-client";
 
+// Pass-through wrapper: the real store still updates; the spy only records the
+// speaker lists the handlers publish.
+vi.mock("@stores/voice.store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@stores/voice.store")>();
+  return { ...actual, setSpeakers: vi.fn(actual.setSpeakers) };
+});
+
 import { createRoomEventHandlers } from "@lib/roomEventHandlers";
 import { onRoom } from "../../src/features/voice/releaseRoom";
-import { voiceJoinSnapshot } from "@lib/voiceJoinTrace";
+import { beginJoinAttempt, finishJoinAttempt, voiceJoinSnapshot } from "@lib/voiceJoinTrace";
 import type { RoomEventDeps } from "@lib/roomEventHandlers";
-import { voiceStore, setEncryptionDegraded, joinVoiceChannel } from "@stores/voice.store";
+import {
+  voiceStore,
+  setEncryptionDegraded,
+  setSpeakers,
+  joinVoiceChannel,
+} from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
 import type { AudioElements } from "@lib/audioElements";
 import { expectConsole } from "../helpers/console";
+import { captureLogs } from "../helpers/log-capture";
 
 // ── fakes ──────────────────────────────────────────────────────────────────
 
@@ -1671,5 +1684,716 @@ describe("a stalled signal resume", () => {
     expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
     expect(h.room.disconnect).not.toHaveBeenCalled();
     expect(h.spies.leaveVoice).not.toHaveBeenCalled();
+  });
+});
+
+// ── join timing marks ──────────────────────────────────────────────────────
+
+describe("join timing marks", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("stamps the first local track publication on the active join", () => {
+    const h = build();
+    const id = beginJoinAttempt(12);
+    vi.advanceTimersByTime(30);
+
+    h.handlers.handleLocalTrackPublished({
+      source: Track.Source.Camera,
+    } as LocalTrackPublication);
+    finishJoinAttempt(id);
+
+    expect(voiceJoinSnapshot().lastJoins[0]?.timings.localTrackMs).toBe(30);
+  });
+
+  it("stamps the first remote track subscription on the active join", () => {
+    const h = build();
+    const id = beginJoinAttempt(12);
+    vi.advanceTimersByTime(55);
+
+    h.handlers.handleTrackSubscribed(
+      audioTrack(),
+      remotePub(Track.Source.Microphone),
+      participant("user-7:tok"),
+    );
+    finishJoinAttempt(id);
+
+    expect(voiceJoinSnapshot().lastJoins[0]?.timings.remoteTrackMs).toBe(55);
+  });
+});
+
+// ── track routing edge cases ───────────────────────────────────────────────
+
+function unknownTrack(): RemoteTrack & { detach: ReturnType<typeof vi.fn> } {
+  return {
+    kind: Track.Kind.Unknown,
+    sid: "UT_1",
+    detach: vi.fn(),
+    mediaStreamTrack: { id: "mst" } as MediaStreamTrack,
+  } as unknown as RemoteTrack & { detach: ReturnType<typeof vi.fn> };
+}
+
+describe("track routing edge cases", () => {
+  it("plays screen-share audio from an unparseable identity instead of unsubscribing it", () => {
+    const h = build();
+    const audio = remotePub(Track.Source.ScreenShareAudio);
+
+    h.handlers.handleTrackSubscribed(audioTrack(), audio, participant("garbage"));
+
+    expect(audio.setSubscribed).not.toHaveBeenCalled();
+    expect(h.audioElements.handleTrackSubscribedAudio).toHaveBeenCalledTimes(1);
+  });
+
+  it("builds the video stream from the subscribed track", () => {
+    const h = build();
+    h.spies.isWatched.mockReturnValue(true);
+    const video = videoTrack();
+
+    h.handlers.handleTrackSubscribed(
+      video,
+      remotePub(Track.Source.Camera),
+      participant("user-7:tok"),
+    );
+
+    const stream = h.spies.onRemoteVideo.mock.calls[0]?.[1] as unknown as { tracks: unknown[] };
+    expect(stream.tracks).toEqual([video.mediaStreamTrack]);
+  });
+
+  it("ignores a subscribed track that is neither audio nor video", () => {
+    const h = build();
+    const camera = remotePub(Track.Source.Camera);
+
+    h.handlers.handleTrackSubscribed(unknownTrack(), camera, participant("user-7:tok"));
+
+    expect(camera.setSubscribed).not.toHaveBeenCalled();
+    expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
+    expect(h.audioElements.handleTrackSubscribedAudio).not.toHaveBeenCalled();
+  });
+
+  it("ignores an unsubscribed track that is neither audio nor video", () => {
+    const h = build();
+    const track = unknownTrack();
+
+    h.handlers.handleTrackUnsubscribed(
+      track,
+      remotePub(Track.Source.Camera),
+      participant("user-7:tok"),
+    );
+
+    expect(track.detach).not.toHaveBeenCalled();
+    expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
+    expect(h.audioElements.handleTrackUnsubscribedAudio).not.toHaveBeenCalled();
+  });
+
+  it("never treats an unparseable identity as watched, even if the lookup says yes", () => {
+    const h = build();
+    h.spies.isWatched.mockReturnValue(true);
+    const camera = remotePub(Track.Source.Camera);
+
+    h.handlers.handleTrackPublished(camera, participant("garbage"));
+
+    expect(camera.setSubscribed).toHaveBeenCalledWith(false);
+    expect(camera.setSubscribed).not.toHaveBeenCalledWith(true);
+    expect(h.spies.onRemoteVideo).not.toHaveBeenCalled();
+  });
+
+  it("reports a removed camera as not a screen share", () => {
+    const h = build();
+
+    h.handlers.handleTrackUnpublished(remotePub(Track.Source.Camera), participant("user-9:tok"));
+
+    expect(h.spies.onRemoteVideoRemoved).toHaveBeenCalledWith(9, false);
+  });
+});
+
+// ── speaker lists ──────────────────────────────────────────────────────────
+
+describe("published speaker lists", () => {
+  function remote(h: Harness, identity: string): RemoteParticipant {
+    const mic = { source: Track.Source.Microphone, isMuted: false };
+    const p = {
+      identity,
+      sid: `PA_${identity}`,
+      getTrackPublication: (source: Track.Source) =>
+        source === Track.Source.Microphone ? mic : undefined,
+    } as unknown as RemoteParticipant;
+    h.room.remoteParticipants.set(identity, p);
+    return p;
+  }
+
+  function seed(userIds: number[]): void {
+    voiceStore.setState((prev) => {
+      const users = new Map<number, VoiceUser>(
+        userIds.map((id) => [
+          id,
+          {
+            userId: id,
+            username: `u${id}`,
+            muted: false,
+            deafened: false,
+            speaking: false,
+            camera: false,
+            screenshare: false,
+          },
+        ]),
+      );
+      return { ...prev, currentChannelId: 12, voiceUsers: new Map([[12, users]]) };
+    });
+  }
+
+  const speaking = (id: number) => voiceStore.getState().voiceUsers.get(12)?.get(id)?.speaking;
+  const lastPublished = () => vi.mocked(setSpeakers).mock.calls.at(-1)?.[0];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(setSpeakers).mockClear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("lists speakers in ascending user id order", () => {
+    seed([3, 7, 9]);
+    const h = build();
+
+    h.handlers.handleActiveSpeakersChanged([
+      remote(h, "user-9:tok"),
+      remote(h, "user-3:tok"),
+      remote(h, "user-7:tok"),
+    ]);
+
+    expect(lastPublished()).toEqual({ channel_id: 12, speakers: [3, 7, 9] });
+  });
+
+  it("lists a held speaker together with the live ones, in order", () => {
+    seed([3, 7, 9]);
+    const h = build();
+    const u9 = remote(h, "user-9:tok");
+    const u3 = remote(h, "user-3:tok");
+    const u7 = remote(h, "user-7:tok");
+    h.handlers.handleActiveSpeakersChanged([u9, u3, u7]);
+
+    h.handlers.handleActiveSpeakersChanged([u7, u3]);
+
+    expect(lastPublished()).toEqual({ channel_id: 12, speakers: [3, 7, 9] });
+  });
+
+  it("leaves an unparseable identity out of the list", () => {
+    seed([7]);
+    const h = build();
+
+    h.handlers.handleActiveSpeakersChanged([remote(h, "garbage"), remote(h, "user-7:tok")]);
+
+    expect(lastPublished()).toEqual({ channel_id: 12, speakers: [7] });
+  });
+
+  it("shows the local user as speaking when LiveKit lists them", () => {
+    seed([1, 7]);
+    const h = build();
+    const me = { identity: "user-1:tok", sid: "PA_me" } as unknown as Participant;
+
+    h.handlers.handleActiveSpeakersChanged([me]);
+
+    expect(lastPublished()).toEqual({ channel_id: 12, speakers: [1] });
+    expect(speaking(1)).toBe(true);
+  });
+
+  it("keeps the local user's ring when their own microphone mutes", () => {
+    seed([1]);
+    const h = build();
+    const me = { identity: "user-1:tok", sid: "PA_me" } as unknown as Participant;
+    h.handlers.handleActiveSpeakersChanged([me]);
+    vi.mocked(setSpeakers).mockClear();
+
+    h.handlers.handleTrackMuted(pub(Track.Source.Microphone), me);
+
+    expect(setSpeakers).not.toHaveBeenCalled();
+    expect(speaking(1)).toBe(true);
+  });
+
+  it("schedules nothing when no speaker is on hold", () => {
+    seed([7]);
+    const h = build();
+
+    h.handlers.handleActiveSpeakersChanged([remote(h, "user-7:tok")]);
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears the hold of the speaker whose hold ends first", () => {
+    seed([7, 8]);
+    const h = build();
+    const u7 = remote(h, "user-7:tok");
+    const u8 = remote(h, "user-8:tok");
+    h.handlers.handleActiveSpeakersChanged([u7, u8]);
+
+    h.handlers.handleActiveSpeakersChanged([u8]); // 7 held until 200
+    vi.advanceTimersByTime(100);
+    const schedule = vi.spyOn(globalThis, "setTimeout");
+    h.handlers.handleActiveSpeakersChanged([]); // 8 held until 300
+    // The next wake-up is when the earliest hold ends, 100 ms from now.
+    expect(schedule.mock.calls.at(-1)?.[1]).toBe(100);
+    schedule.mockRestore();
+
+    vi.advanceTimersByTime(99);
+    expect(speaking(7)).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(speaking(7)).toBe(false);
+    expect(speaking(8)).toBe(true);
+    vi.advanceTimersByTime(100);
+    expect(speaking(8)).toBe(false);
+  });
+
+  it("does not republish when a participant who was not speaking leaves or mutes", () => {
+    seed([7, 9]);
+    const h = build();
+    const u7 = remote(h, "user-7:tok");
+    h.handlers.handleActiveSpeakersChanged([u7]);
+    vi.mocked(setSpeakers).mockClear();
+
+    h.handlers.handleParticipantDisconnected(participant("user-9:tok"));
+    h.handlers.handleTrackMuted(pub(Track.Source.Microphone), participant("user-9:tok"));
+
+    expect(setSpeakers).not.toHaveBeenCalled();
+    expect(speaking(7)).toBe(true);
+  });
+
+  it("clears a speaker on hold at once when they leave", () => {
+    seed([7]);
+    const h = build();
+    const u7 = remote(h, "user-7:tok");
+    h.handlers.handleActiveSpeakersChanged([u7]);
+    h.handlers.handleActiveSpeakersChanged([]);
+    expect(speaking(7)).toBe(true);
+
+    h.handlers.handleParticipantDisconnected(u7);
+
+    expect(speaking(7)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears a speaker on hold at once when they mute", () => {
+    seed([7]);
+    const h = build();
+    const u7 = remote(h, "user-7:tok");
+    h.handlers.handleActiveSpeakersChanged([u7]);
+    h.handlers.handleActiveSpeakersChanged([]);
+
+    h.handlers.handleTrackMuted(pub(Track.Source.Microphone), u7);
+
+    expect(speaking(7)).toBe(false);
+  });
+
+  it("forgets live speakers when the SDK reconnects", () => {
+    seed([7]);
+    const h = build();
+    h.handlers.handleActiveSpeakersChanged([remote(h, "user-7:tok")]);
+
+    h.handlers.handleSdkReconnected();
+    h.handlers.handleActiveSpeakersChanged([]);
+
+    expect(speaking(7)).toBe(false);
+  });
+
+  it("forgets a speaker on hold when the SDK reconnects", () => {
+    seed([7]);
+    const h = build();
+    h.handlers.handleActiveSpeakersChanged([remote(h, "user-7:tok")]);
+    h.handlers.handleActiveSpeakersChanged([]);
+
+    h.handlers.handleSdkReconnected();
+    h.handlers.handleActiveSpeakersChanged([]);
+
+    expect(speaking(7)).toBe(false);
+  });
+
+  it("forgets a speaker on hold when the session resets", () => {
+    seed([7]);
+    const h = build();
+    h.handlers.handleActiveSpeakersChanged([remote(h, "user-7:tok")]);
+    h.handlers.handleActiveSpeakersChanged([]);
+
+    h.handlers.resetEncryptionRecovery();
+    h.handlers.handleActiveSpeakersChanged([]);
+
+    expect(speaking(7)).toBe(false);
+  });
+});
+
+// ── autoplay unlock listener ───────────────────────────────────────────────
+
+describe("autoplay unlock listener lifecycle", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("registers one one-shot click listener while playback is blocked", () => {
+    const add = vi.spyOn(document, "addEventListener");
+    const h = build();
+    h.room.canPlaybackAudio = false;
+
+    h.handlers.handleAudioPlaybackChanged();
+    expectConsole("warn", /Audio playback blocked by browser/);
+
+    const clicks = add.mock.calls.filter(([type]) => type === "click");
+    expect(clicks).toHaveLength(1);
+    expect(clicks[0]?.[2]).toEqual({ once: true });
+    h.handlers.removeAutoplayUnlock();
+  });
+
+  it("removes the listener itself once the click has been handled", () => {
+    const remove = vi.spyOn(document, "removeEventListener");
+    const h = build();
+    h.room.canPlaybackAudio = false;
+    h.handlers.handleAudioPlaybackChanged();
+    expectConsole("warn", /Audio playback blocked by browser/);
+    remove.mockClear();
+
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(remove.mock.calls.filter(([type]) => type === "click")).toHaveLength(1);
+  });
+
+  it("leaves no stray listener behind when the blocked event repeats", () => {
+    const h = build();
+    h.room.canPlaybackAudio = false;
+    h.handlers.handleAudioPlaybackChanged();
+    h.handlers.handleAudioPlaybackChanged();
+    expectConsole("warn", /Audio playback blocked by browser/);
+    expectConsole("warn", /Audio playback blocked by browser/);
+
+    h.handlers.removeAutoplayUnlock();
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(h.room.startAudio).not.toHaveBeenCalled();
+  });
+
+  it("drops a pending listener when the room is abandoned for the reconnect loop", () => {
+    const h = build();
+    h.room.canPlaybackAudio = false;
+    h.handlers.handleAudioPlaybackChanged();
+    expectConsole("warn", /Audio playback blocked by browser/);
+
+    h.handlers.handleDisconnected(DisconnectReason.SERVER_SHUTDOWN);
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(h.spies.attemptAutoReconnect).toHaveBeenCalled();
+    expect(h.room.startAudio).not.toHaveBeenCalled();
+  });
+});
+
+// ── disconnect, reconnect and stall edge cases ─────────────────────────────
+
+describe("disconnect and reconnect state", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("clears the voice channel from the store on a client-initiated disconnect", () => {
+    const h = build();
+    joinVoiceChannel(12);
+    expect(voiceStore.getState().currentChannelId).toBe(12);
+
+    h.handlers.handleDisconnected(DisconnectReason.CLIENT_INITIATED);
+
+    expect(h.spies.leaveVoice).toHaveBeenCalledWith(false);
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+  });
+
+  it("leaves a join that is still securing without a stall timer", () => {
+    const h = build();
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "securing" }));
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(30_000);
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+    expect(voiceStore.getState().voiceStatus).toBe("securing");
+  });
+
+  it("does not abandon a rejoined room whose SDK reconnected after a stale timer fired", () => {
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+    let current: Room = {} as Room;
+    const h = build({ getRoom: () => current });
+
+    h.handlers.handleSdkReconnecting();
+    vi.advanceTimersByTime(5000);
+    current = h.room as unknown as Room;
+    h.handlers.handleSdkReconnecting();
+    // The first room's budget passes; the rejoined room is not the one that stalled.
+    vi.advanceTimersByTime(6000);
+    h.handlers.handleSdkReconnected();
+    vi.advanceTimersByTime(30_000);
+
+    expect(h.spies.attemptAutoReconnect).not.toHaveBeenCalled();
+    expect(h.room.disconnect).not.toHaveBeenCalled();
+  });
+});
+
+// ── encryption recovery timers ─────────────────────────────────────────────
+
+describe("encryption recovery timers", () => {
+  const bob = { identity: "bob", isLocal: false } as Participant;
+  const decryptFailed = () =>
+    new Error(
+      "InvalidKey: Decryption failed: The operation failed for an operation-specific reason",
+    );
+
+  /** A peer failing past the grace window: degraded, quiet-gap recovery pending. */
+  function degradeByDecrypt(h: Harness): void {
+    for (let i = 0; i < 4; i++) {
+      h.handlers.handleEncryptionError(decryptFailed(), bob);
+      vi.advanceTimersByTime(1000);
+    }
+    expectConsole("warn", /receive-side decrypt failure/);
+    expectConsole("warn", /receive-side decrypt failure/);
+    expectConsole("warn", /receive-side decrypt failure/);
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("schedules no recovery for a tolerated failure while the call is not degraded", () => {
+    const h = build();
+
+    h.handlers.handleEncryptionError(decryptFailed(), bob);
+    expectConsole("warn", /receive-side decrypt failure/);
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("pushes the recovery back while a degraded peer keeps failing after a key install", () => {
+    const h = build();
+    degradeByDecrypt(h);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+
+    vi.advanceTimersByTime(60_000);
+    h.handlers.noteRoomKeyInstalled();
+    h.handlers.handleEncryptionError(decryptFailed(), bob);
+    expectConsole("warn", /receive-side decrypt failure/);
+
+    // The original deadline (65 s after the last failure) passes with no recovery.
+    vi.advanceTimersByTime(6000);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    // 65 s of quiet after the latest failure clears it.
+    vi.advanceTimersByTime(60_000);
+    expect(voiceStore.getState().encryptionDegraded).toBe(false);
+  });
+
+  it("does not let decrypt recovery clear a degradation something else caused first", () => {
+    const h = build();
+    h.handlers.handleEncryptionError(new Error("E2EE worker crashed"));
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+
+    degradeByDecrypt(h);
+    vi.advanceTimersByTime(120_000);
+
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cancels a pending recovery when another error degrades the call", () => {
+    const h = build();
+    degradeByDecrypt(h);
+    expect(vi.getTimerCount()).toBe(1);
+
+    h.handlers.handleEncryptionError(new Error("E2EE worker crashed"));
+    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cancels a pending recovery when an unencrypted track is refused", () => {
+    const h = build();
+    degradeByDecrypt(h);
+    expect(vi.getTimerCount()).toBe(1);
+
+    h.handlers.handleTrackPublished(
+      withEncryption(remotePub(Track.Source.Microphone), Encryption_Type.NONE),
+      participant("user-7:tok"),
+    );
+    expectConsole("warn", /without end-to-end encryption/);
+
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(120_000);
+    expect(voiceStore.getState().encryptionDegraded).toBe(true);
+  });
+
+  it("cancels a pending recovery when the session resets", () => {
+    const h = build();
+    degradeByDecrypt(h);
+    expect(vi.getTimerCount()).toBe(1);
+
+    h.handlers.resetEncryptionRecovery();
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+// ── log lines ──────────────────────────────────────────────────────────────
+
+describe("room event log lines", () => {
+  const COMPONENT = "roomEventHandlers";
+
+  it("records which sender and source a refused unencrypted track came from", () => {
+    const logs = captureLogs();
+    const h = build();
+    const mic = withEncryption(remotePub(Track.Source.Microphone), Encryption_Type.NONE);
+
+    h.handlers.handleTrackPublished(mic, participant("user-7:tok"));
+    expectConsole("warn", /without end-to-end encryption/);
+
+    expect(
+      logs.find("Refusing a remote track published without end-to-end encryption"),
+    ).toMatchObject([
+      { level: "warn", component: COMPONENT, data: { userId: 7, source: Track.Source.Microphone } },
+    ]);
+  });
+
+  it("records that a mute was re-applied to a newly published microphone", () => {
+    const logs = captureLogs();
+    const h = build();
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+
+    h.handlers.handleLocalTrackPublished({
+      source: Track.Source.Microphone,
+    } as LocalTrackPublication);
+
+    expect(logs.find("LocalTrackPublished: re-applied mute to mic track")).toMatchObject([
+      { level: "debug", component: COMPONENT },
+    ]);
+  });
+
+  it("records a remote video track subscribed and unsubscribed, with user and track", () => {
+    const logs = captureLogs();
+    const h = build();
+    h.spies.isWatched.mockReturnValue(true);
+    const track = videoTrack();
+
+    h.handlers.handleTrackSubscribed(track, pub(Track.Source.Camera), participant("user-7:tok"));
+    h.handlers.handleTrackUnsubscribed(track, pub(Track.Source.Camera), participant("user-7:tok"));
+
+    expect(logs.find("Remote video track subscribed")).toMatchObject([
+      { level: "debug", component: COMPONENT, data: { userId: 7, trackSid: "VT_1" } },
+    ]);
+    expect(logs.find("Remote video track unsubscribed")).toMatchObject([
+      { level: "debug", component: COMPONENT, data: { userId: 7, trackSid: "VT_1" } },
+    ]);
+  });
+
+  it("records when audio playback is allowed", () => {
+    const logs = captureLogs();
+    const h = build();
+    h.room.canPlaybackAudio = true;
+
+    h.handlers.handleAudioPlaybackChanged();
+
+    expect(logs.find("Audio playback is now allowed")).toMatchObject([
+      { level: "info", component: COMPONENT },
+    ]);
+  });
+
+  it("records the unlock only after the browser accepts the gesture", async () => {
+    const logs = captureLogs();
+    const h = build();
+    h.room.canPlaybackAudio = false;
+    let accept: () => void = () => {};
+    h.room.startAudio.mockReturnValue(new Promise<void>((resolve) => (accept = resolve)));
+    h.handlers.handleAudioPlaybackChanged();
+    expectConsole("warn", /Audio playback blocked by browser/);
+
+    document.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Promise.resolve();
+    expect(logs.find("Audio playback unlocked via user gesture")).toEqual([]);
+
+    accept();
+    await vi.waitFor(() =>
+      expect(logs.find("Audio playback unlocked via user gesture")).toMatchObject([
+        { level: "info", component: COMPONENT },
+      ]),
+    );
+  });
+
+  it("records a disconnect with its reason, and the deferral while a connect is under way", () => {
+    const logs = captureLogs();
+    const h = build({ isConnecting: () => true });
+
+    h.handlers.handleDisconnected(DisconnectReason.SERVER_SHUTDOWN);
+
+    expect(logs.find("LiveKit room disconnected")).toMatchObject([
+      { level: "info", component: COMPONENT, data: { reason: DisconnectReason.SERVER_SHUTDOWN } },
+    ]);
+    expect(
+      logs.find("Disconnect during connect/reconnect — deferring to retry loop"),
+    ).toMatchObject([{ level: "info", component: COMPONENT }]);
+  });
+
+  it("records the budget a stalled resume spent", () => {
+    vi.useFakeTimers();
+    try {
+      const logs = captureLogs();
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+      const h = build();
+
+      h.handlers.handleSdkReconnecting();
+      vi.advanceTimersByTime(10_000);
+      expectConsole("warn", /LiveKit resume stalled/);
+
+      expect(
+        logs.find("LiveKit resume stalled — abandoning room for the reconnect loop"),
+      ).toMatchObject([{ level: "warn", component: COMPONENT, data: { budgetMs: 10_000 } }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("names the sender and the error for a decrypt failure that is tolerated", () => {
+    const logs = captureLogs();
+    const h = build();
+    const bob = { identity: "bob", isLocal: false } as Participant;
+
+    h.handlers.handleEncryptionError(new Error("InvalidKey: Decryption failed"), bob);
+    expectConsole("warn", /receive-side decrypt failure/);
+
+    expect(
+      logs.find("LiveKit E2EE receive-side decrypt failure — tolerating key rotation race"),
+    ).toMatchObject([
+      {
+        level: "warn",
+        component: COMPONENT,
+        data: { participant: "bob", error: { error: "InvalidKey: Decryption failed" } },
+      },
+    ]);
+  });
+
+  it("names the sender and the error for an encryption failure that degrades the call", () => {
+    const logs = captureLogs();
+    const h = build();
+    const bob = { identity: "bob", isLocal: false } as Participant;
+
+    h.handlers.handleEncryptionError(new Error("native decrypt failure"), bob);
+    expectConsole("error", /LiveKit E2EE encryption error/);
+
+    expect(logs.find("LiveKit E2EE encryption error — call may not be secured")).toMatchObject([
+      {
+        level: "error",
+        component: COMPONENT,
+        data: { participant: "bob", error: { error: "native decrypt failure" } },
+      },
+    ]);
   });
 });

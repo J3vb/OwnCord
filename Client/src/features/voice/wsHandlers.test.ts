@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   handleVoiceDisconnected,
   handleVoiceE2eeAnnounce,
+  handleVoiceE2eeOffer,
   handleVoiceError,
   handleVoiceJoinRollback,
   handleVoiceLeave,
@@ -9,6 +10,7 @@ import {
   handleVoiceState,
   handleVoiceWatching,
   handleVoiceWatchError,
+  rollbackVideoOnError,
   snapshotReadyVoice,
 } from "./wsHandlers";
 import {
@@ -22,6 +24,8 @@ import {
   streamViewers,
   isWatchingResync,
   clearPeerWatching,
+  setPeerWatching,
+  setPeerVideoDecode,
 } from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
@@ -38,6 +42,9 @@ vi.mock("../../lib/livekitSession", () => ({
   leaveVoice: vi.fn(),
   handleParticipantLeft: vi.fn(async () => {}),
   handleE2EEAnnounce: vi.fn(async () => {}),
+  handleE2EEOffer: vi.fn(async () => {}),
+  disableCamera: vi.fn(),
+  disableScreenshare: vi.fn(),
   isVoiceSessionActive: vi.fn(() => false),
   isAutoReconnecting: vi.fn(() => false),
   failPendingRejoin: vi.fn(),
@@ -46,15 +53,28 @@ vi.mock("../../lib/livekitSession", () => ({
   retryWatching: vi.fn(),
 }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/screenShare", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/screenShare")>();
+  return { ...actual, rollbackPendingVideo: vi.fn() };
+});
 import {
   setMuted,
   setDeafened,
   leaveVoice,
   handleParticipantLeft,
   handleE2EEAnnounce,
+  handleE2EEOffer,
+  disableCamera,
+  disableScreenshare,
+  isVoiceSessionActive,
+  failPendingRejoin,
+  reconcileVideoFlags,
   resendWatching,
   retryWatching,
 } from "../../lib/livekitSession";
+import { rollbackPendingVideo } from "../../lib/screenShare";
+import { expectConsole } from "../../../tests/helpers/console";
+import { captureLogs } from "../../../tests/helpers/log-capture";
 import { showToast } from "../../lib/toast";
 
 function voiceState(overrides: Partial<Payload<"voice_state">>): Payload<"voice_state"> {
@@ -738,5 +758,732 @@ describe("handleVoiceE2eeAnnounce identity key", () => {
       identity_public_key: bad as unknown as string,
     });
     await vi.waitFor(() => expect(handleE2EEAnnounce).toHaveBeenCalledWith(5, "k", undefined));
+  });
+});
+
+// ── additional behaviour ────────────────────────────────────────────────────
+
+/** Lets lazy `import()` hand-offs and their continuations finish. */
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
+
+const clockWith = (id: number | null): ReconnectClock =>
+  ({ voiceRejoinChannelId: id }) as ReconnectClock;
+
+const connect = (): void => {
+  joinVoiceChannel(4);
+  setVoiceStatus("connected");
+};
+
+async function awaitAfkMoveNoted(): Promise<void> {
+  const socket = socketStub();
+  handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clockWith(null));
+  await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+}
+
+const sentTypes = (socket: { send: ReturnType<typeof vi.fn> }): string[] =>
+  socket.send.mock.calls.map((call) => (call[0] as { type: string }).type);
+
+describe("handleVoiceState moderator flags", () => {
+  beforeEach(() => {
+    setVoiceStatus("joining");
+  });
+
+  it("does not treat the member's own deafen as a moderator's", async () => {
+    voiceStore.setState((prev) => ({ ...prev, localDeafened: true }));
+    const socket = socketStub();
+
+    handleVoiceState(socket, voiceState({ deafened: true, server_deafened: false }));
+    await settle();
+
+    expect(sentTypes(socket)).not.toContain("voice_deafen");
+    expect(setDeafened).not.toHaveBeenCalled();
+  });
+
+  it("marks a moderator's deafen while it lasts and clears the mark when it is lifted", async () => {
+    handleVoiceState(socketStub(), voiceState({ deafened: true, server_deafened: true }));
+    await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(true));
+    expect(voiceStore.getState().moderatorDeafened).toBe(true);
+    voiceStore.setState((prev) => ({ ...prev, localDeafened: true }));
+
+    handleVoiceState(socketStub(), voiceState({ deafened: false, server_deafened: false }));
+    await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(false));
+
+    expect(voiceStore.getState().moderatorDeafened).toBe(false);
+  });
+
+  it("leaves a mute alone when no moderator flag has ever been recorded", async () => {
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localMuted: true,
+      localServerMuted: undefined,
+    }));
+
+    handleVoiceState(socketStub(), voiceState({ muted: false, server_muted: false }));
+    await settle();
+
+    expect(setMuted).not.toHaveBeenCalled();
+  });
+
+  it("leaves a deafen alone when no moderator flag has ever been recorded", async () => {
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localDeafened: true,
+      localServerDeafened: undefined,
+    }));
+    const socket = socketStub();
+
+    handleVoiceState(socket, voiceState({ deafened: false, server_deafened: false }));
+    await settle();
+
+    expect(setDeafened).not.toHaveBeenCalled();
+    expect(sentTypes(socket)).not.toContain("voice_deafen");
+  });
+});
+
+describe("snapshotReadyVoice resync details", () => {
+  it("restates a mute toggled offline when no moderator flag was ever recorded", async () => {
+    connect();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localMuted: true,
+      localServerMuted: undefined,
+      localServerDeafened: undefined,
+    }));
+    const socket = socketStub();
+
+    snapshotReadyVoice()(socket, readyWith([voiceState({ muted: false })]));
+    await settle();
+
+    expect(socket.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+    expect(setMuted).not.toHaveBeenCalled();
+  });
+
+  it("restates a deafen toggled offline when no moderator flag was ever recorded", async () => {
+    connect();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localDeafened: true,
+      localServerMuted: undefined,
+      localServerDeafened: undefined,
+    }));
+    const socket = socketStub();
+
+    snapshotReadyVoice()(socket, readyWith([voiceState({ deafened: false })]));
+    await settle();
+
+    expect(socket.send).toHaveBeenCalledWith({
+      type: "voice_deafen",
+      payload: { deafened: true },
+    });
+    expect(setDeafened).not.toHaveBeenCalled();
+  });
+
+  it("restates a mute toggled offline when the server explicitly reports no moderator mute", () => {
+    connect();
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+    const socket = socketStub();
+
+    snapshotReadyVoice()(socket, readyWith([voiceState({ muted: false, server_muted: false })]));
+
+    expect(socket.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+  });
+
+  it("restates a deafen toggled offline when the server explicitly reports no moderator deafen", () => {
+    connect();
+    voiceStore.setState((prev) => ({ ...prev, localDeafened: true }));
+    const socket = socketStub();
+
+    snapshotReadyVoice()(
+      socket,
+      readyWith([voiceState({ deafened: false, server_deafened: false })]),
+    );
+
+    expect(socket.send).toHaveBeenCalledWith({
+      type: "voice_deafen",
+      payload: { deafened: true },
+    });
+  });
+
+  it("does not restate anything while a moderator deafen is lifted during the outage", async () => {
+    connect();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localDeafened: true,
+      localServerDeafened: true,
+      moderatorDeafened: true,
+    }));
+    const socket = socketStub();
+
+    snapshotReadyVoice()(
+      socket,
+      readyWith([voiceState({ deafened: false, server_deafened: false })]),
+    );
+
+    expect(socket.send).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(false));
+  });
+
+  it("does not restate a deafen while a moderator deafen is in force", () => {
+    connect();
+    voiceStore.setState((prev) => ({ ...prev, localDeafened: true, localMuted: true }));
+    const socket = socketStub();
+
+    snapshotReadyVoice()(socket, readyWith([voiceState({ server_deafened: true })]));
+
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it("matches no self row while signed out", async () => {
+    connect();
+    authStore.setState((prev) => ({ ...prev, user: null }));
+
+    snapshotReadyVoice()(socketStub(), readyWith([voiceState({ user_id: 0, server_muted: true })]));
+    await settle();
+
+    expect(setMuted).not.toHaveBeenCalled();
+    expect(resendWatching).not.toHaveBeenCalled();
+  });
+
+  it("forgets what other members were watching, as the server re-sends none of it", () => {
+    connect();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([[4, new Map([[7, member(7)]])]]),
+    }));
+    setPeerWatching(7, [8]);
+    expect(voiceStore.getState().peerWatching?.size).toBe(1);
+
+    snapshotReadyVoice()(socketStub(), readyWith([voiceState({}), voiceState({ user_id: 7 })]));
+
+    expect(voiceStore.getState().peerWatching?.size).toBe(0);
+  });
+
+  it("treats a peer now in another channel as having left this one", async () => {
+    connect();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([[4, new Map([[7, member(7)]])]]),
+    }));
+    setPeerVideoDecode(7, ["vp8"]);
+
+    snapshotReadyVoice()(
+      socketStub(),
+      readyWith([voiceState({}), voiceState({ user_id: 7, channel_id: 5 })]),
+    );
+
+    await vi.waitFor(() => expect(handleParticipantLeft).toHaveBeenCalledWith(7));
+    expect(handleParticipantLeft).toHaveBeenCalledTimes(1);
+    expect(voiceStore.getState().peerVideoDecode?.has(7)).toBe(false);
+  });
+
+  it("keeps a peer who is still in the channel, and forgets none of the others' decode lists", async () => {
+    connect();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([
+        [
+          4,
+          new Map([
+            [7, member(7)],
+            [8, member(8)],
+          ]),
+        ],
+      ]),
+    }));
+    setPeerVideoDecode(8, ["vp9"]);
+
+    snapshotReadyVoice()(socketStub(), readyWith([voiceState({}), voiceState({ user_id: 8 })]));
+    await vi.waitFor(() => expect(handleParticipantLeft).toHaveBeenCalledWith(7));
+
+    expect(handleParticipantLeft).toHaveBeenCalledTimes(1);
+    expect(voiceStore.getState().peerVideoDecode?.get(8)).toEqual(["vp9"]);
+  });
+
+  it("does not compare rosters across a channel change", async () => {
+    connect();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([
+        [
+          4,
+          new Map([
+            [7, member(7)],
+            [8, member(8)],
+          ]),
+        ],
+      ]),
+    }));
+
+    snapshotReadyVoice()(socketStub(), readyWith([voiceState({ channel_id: 5 })]));
+
+    await vi.waitFor(() => expect(resendWatching).toHaveBeenCalledTimes(1));
+    expect(handleParticipantLeft).not.toHaveBeenCalled();
+    expect(reconcileVideoFlags).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [true, false],
+    [false, true],
+    [true, true],
+    [false, false],
+  ])("reconciles camera=%s screenshare=%s with the server's row", async (camera, screenshare) => {
+    connect();
+
+    snapshotReadyVoice()(socketStub(), readyWith([voiceState({ camera, screenshare })]));
+
+    await vi.waitFor(() => expect(reconcileVideoFlags).toHaveBeenCalledWith(camera, screenshare));
+  });
+
+  it("reconciles false for flags the server row omits", async () => {
+    connect();
+
+    snapshotReadyVoice()(socketStub(), readyWith([voiceState({})]));
+
+    await vi.waitFor(() => expect(reconcileVideoFlags).toHaveBeenCalledWith(false, false));
+  });
+});
+
+describe("handleVoiceMoved session handling", () => {
+  beforeEach(() => {
+    clearAfkMove();
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[4, { id: 4, name: "Parking", type: "voice", afk: true } as never]]),
+    }));
+  });
+
+  it("cancels a pending restart-rejoin for the old channel", async () => {
+    const clock = clockWith(3);
+    const socket = socketStub();
+
+    handleVoiceMoved(socket, { to_channel_id: 4 }, clock);
+
+    expect(clock.voiceRejoinChannelId).toBeNull();
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+  });
+
+  it("leaves the old media session without telling the server, then joins the new channel", async () => {
+    joinVoiceChannel(3);
+    setVoiceStatus("connected");
+    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true, encryptionDegraded: true }));
+    const socket = socketStub();
+
+    handleVoiceMoved(socket, { to_channel_id: 4 }, clockWith(null));
+
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+    expect(leaveVoice).toHaveBeenCalledWith(false);
+    const state = voiceStore.getState();
+    expect(state.currentChannelId).toBe(4);
+    expect(state.voiceStatus).toBe("joining");
+    // The old session's flags do not follow the member into the new channel.
+    expect(state.localServerMuted).toBe(false);
+    expect(state.encryptionDegraded).toBe(false);
+  });
+
+  it("forgets an AFK move still awaiting its join when a moderator move follows", async () => {
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clockWith(null));
+    handleVoiceMoved(socket, { to_channel_id: 5 }, clockWith(null));
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalledTimes(2));
+
+    ack(4);
+
+    expect(showToast).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleVoiceDisconnected session handling", () => {
+  beforeEach(() => {
+    clearAfkMove();
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[4, { id: 4, name: "Parking", type: "voice", afk: true } as never]]),
+    }));
+  });
+
+  it("cancels a pending restart-rejoin", async () => {
+    joinVoiceChannel(4);
+    const clock = clockWith(4);
+
+    handleVoiceDisconnected({ channel_id: 4, reason: "Removed" }, clock);
+
+    expect(clock.voiceRejoinChannelId).toBeNull();
+    await vi.waitFor(() => expect(leaveVoice).toHaveBeenCalledWith(false));
+  });
+
+  it("forgets an AFK move awaiting its join", async () => {
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clockWith(null));
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+
+    handleVoiceDisconnected({ channel_id: 4, reason: "Removed" }, clockWith(null));
+    // The member joins this channel again by hand; no stale AFK note explains it.
+    joinVoiceChannel(4);
+    ack(4);
+
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining("idle"), "info");
+  });
+
+  it("ignores a frame for a channel the member has already left for another", async () => {
+    joinVoiceChannel(5);
+    const clock = clockWith(5);
+
+    handleVoiceDisconnected({ channel_id: 4, reason: "Removed" }, clock);
+    await settle();
+
+    expect(clock.voiceRejoinChannelId).toBe(5);
+    expect(leaveVoice).not.toHaveBeenCalled();
+    expect(voiceStore.getState().currentChannelId).toBe(5);
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("shows a default reason when the server gives none", async () => {
+    joinVoiceChannel(4);
+
+    handleVoiceDisconnected({ channel_id: 4, reason: "" }, clockWith(null));
+
+    expect(showToast).toHaveBeenCalledWith("You were disconnected from voice", "error");
+    await vi.waitFor(() => expect(leaveVoice).toHaveBeenCalledWith(false));
+  });
+});
+
+describe("handleVoiceLeave session handling", () => {
+  beforeEach(() => {
+    clearAfkMove();
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[4, { id: 4, name: "Parking", type: "voice", afk: true } as never]]),
+    }));
+  });
+
+  it("ends an AFK move when the member's own leave arrives", async () => {
+    await awaitAfkMoveNoted();
+
+    handleVoiceLeave({ channel_id: 3, user_id: 9 }, clockWith(null));
+    ack(4);
+
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("keeps an AFK move when someone else leaves", async () => {
+    await awaitAfkMoveNoted();
+
+    handleVoiceLeave({ channel_id: 3, user_id: 10 }, clockWith(null));
+    ack(4);
+
+    expect(showToast).toHaveBeenCalledWith("Moved to Parking because you were idle", "info");
+  });
+
+  it("cancels a pending restart-rejoin on the member's own leave only", () => {
+    const own = clockWith(4);
+    handleVoiceLeave({ channel_id: 4, user_id: 9 }, own);
+    expect(own.voiceRejoinChannelId).toBeNull();
+
+    const other = clockWith(4);
+    handleVoiceLeave({ channel_id: 4, user_id: 10 }, other);
+    expect(other.voiceRejoinChannelId).toBe(4);
+  });
+
+  it("does not clear a channel joined between the leave and the media teardown", async () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+
+    handleVoiceLeave({ channel_id: 4, user_id: 9 }, clockWith(null));
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+    joinVoiceChannel(5);
+    await vi.waitFor(() => expect(leaveVoice).toHaveBeenCalledWith(false));
+
+    expect(voiceStore.getState().currentChannelId).toBe(5);
+  });
+
+  it("leaves the store to the reconnect loop while it owns the session", async () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("reconnecting");
+
+    handleVoiceLeave({ channel_id: 4, user_id: 9 }, clockWith(null));
+
+    expect(voiceStore.getState().currentChannelId).toBe(4);
+    await vi.waitFor(() => expect(leaveVoice).toHaveBeenCalledWith(false));
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+  });
+});
+
+describe("handleVoiceE2eeAnnounce and offer hand-off", () => {
+  it("still hands the key to the session when the decode list cannot be recorded", async () => {
+    voiceStore.setState((prev) => ({ ...prev, peerVideoDecode: {} as never }));
+
+    handleVoiceE2eeAnnounce(announce(["vp8"]));
+
+    expectConsole("warn", /could not record video_decode/);
+    await vi.waitFor(() => expect(handleE2EEAnnounce).toHaveBeenCalledWith(5, "k", undefined));
+  });
+
+  it("passes an offer's sender, key and iv to the session", async () => {
+    handleVoiceE2eeOffer({ from_user_id: 6, encrypted_key: "ek", iv: "iv1" });
+
+    await vi.waitFor(() => expect(handleE2EEOffer).toHaveBeenCalledWith(6, "ek", "iv1"));
+  });
+});
+
+describe("handleVoiceWatchError retry", () => {
+  beforeEach(() => {
+    resetWatchRequest();
+  });
+
+  it("does not retry for a refusal other than rate limiting", async () => {
+    noteWatchSent("w1");
+
+    expect(handleVoiceWatchError(err("FORBIDDEN"), "w1")).toBe(true);
+    await settle();
+
+    expect(retryWatching).not.toHaveBeenCalled();
+  });
+
+  it("survives a failed retry", async () => {
+    vi.mocked(retryWatching).mockRejectedValueOnce(new Error("no session"));
+    noteWatchSent("w1");
+
+    expect(handleVoiceWatchError(err("RATE_LIMITED"), "w1")).toBe(true);
+    await vi.waitFor(() => expect(retryWatching).toHaveBeenCalledTimes(1));
+    await settle();
+  });
+});
+
+describe("handleVoiceJoinRollback session teardown", () => {
+  beforeEach(() => {
+    resetJoinRequest();
+    vi.mocked(isVoiceSessionActive).mockReturnValue(false);
+  });
+
+  it("abandons a pending rejoin but keeps the server membership when no session is live", async () => {
+    joinVoiceChannel(4);
+
+    handleVoiceJoinRollback(refusal("FORBIDDEN"), undefined);
+
+    await vi.waitFor(() => expect(failPendingRejoin).toHaveBeenCalledTimes(1));
+    expect(leaveVoice).not.toHaveBeenCalled();
+  });
+
+  it("tells the server to drop a session that is live or still connecting", async () => {
+    vi.mocked(isVoiceSessionActive).mockReturnValue(true);
+    joinVoiceChannel(4);
+
+    handleVoiceJoinRollback(refusal("FORBIDDEN"), undefined);
+
+    await vi.waitFor(() => expect(leaveVoice).toHaveBeenCalledWith(true));
+  });
+
+  it("forgets a pending AFK move when its join is refused", async () => {
+    clearAfkMove();
+    const socket = socketStub();
+    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clockStub());
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+    resetJoinRequest();
+    noteJoinSent("j1");
+
+    handleVoiceJoinRollback(refusal("FORBIDDEN"), "j1");
+    joinVoiceChannel(4);
+    ack(4);
+
+    expect(showToast).not.toHaveBeenCalled();
+  });
+});
+
+describe("video limit refusals", () => {
+  beforeEach(() => {
+    vi.mocked(rollbackPendingVideo).mockReset();
+  });
+
+  it("consumes VIDEO_LIMIT with a toast and turns the camera off when the frame has no id", async () => {
+    expect(handleVoiceError({ code: "VIDEO_LIMIT", message: "" }, undefined)).toBe(true);
+
+    expect(showToast).toHaveBeenCalledWith(
+      "That voice channel has reached its video limit",
+      "error",
+    );
+    await vi.waitFor(() => expect(disableCamera).toHaveBeenCalledTimes(1));
+    expect(disableScreenshare).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the camera enable that the id correlates to", async () => {
+    vi.mocked(rollbackPendingVideo).mockReturnValue("camera");
+
+    expect(handleVoiceError({ code: "VIDEO_LIMIT", message: "" }, "cam-1")).toBe(true);
+
+    await vi.waitFor(() => expect(disableCamera).toHaveBeenCalledTimes(1));
+    expect(rollbackPendingVideo).toHaveBeenCalledWith("cam-1");
+    expect(disableScreenshare).not.toHaveBeenCalled();
+  });
+
+  it("rolls back the screen share enable that the id correlates to", async () => {
+    vi.mocked(rollbackPendingVideo).mockReturnValue("screen");
+
+    handleVoiceError({ code: "VIDEO_LIMIT", message: "" }, "scr-1");
+
+    await vi.waitFor(() => expect(disableScreenshare).toHaveBeenCalledTimes(1));
+    expect(disableCamera).not.toHaveBeenCalled();
+  });
+
+  it("rolls nothing back for an id that no longer correlates", async () => {
+    vi.mocked(rollbackPendingVideo).mockReturnValue(undefined);
+
+    expect(handleVoiceError({ code: "VIDEO_LIMIT", message: "" }, "old-1")).toBe(true);
+    await vi.waitFor(() => expect(rollbackPendingVideo).toHaveBeenCalledWith("old-1"));
+    await settle();
+
+    expect(disableCamera).not.toHaveBeenCalled();
+    expect(disableScreenshare).not.toHaveBeenCalled();
+  });
+});
+
+describe("rollbackVideoOnError", () => {
+  beforeEach(() => {
+    vi.mocked(rollbackPendingVideo).mockReset();
+  });
+
+  it("turns the camera off for a refused camera enable", async () => {
+    vi.mocked(rollbackPendingVideo).mockReturnValue("camera");
+
+    rollbackVideoOnError("cam-1");
+
+    await vi.waitFor(() => expect(disableCamera).toHaveBeenCalledTimes(1));
+    expect(disableScreenshare).not.toHaveBeenCalled();
+  });
+
+  it("turns the screen share off for a refused screen share enable", async () => {
+    vi.mocked(rollbackPendingVideo).mockReturnValue("screen");
+
+    rollbackVideoOnError("scr-1");
+
+    await vi.waitFor(() => expect(disableScreenshare).toHaveBeenCalledTimes(1));
+    expect(disableCamera).not.toHaveBeenCalled();
+  });
+
+  it("changes nothing for an id that does not correlate", async () => {
+    vi.mocked(rollbackPendingVideo).mockReturnValue(undefined);
+
+    rollbackVideoOnError("old-1");
+    await vi.waitFor(() => expect(rollbackPendingVideo).toHaveBeenCalledWith("old-1"));
+    await settle();
+
+    expect(disableCamera).not.toHaveBeenCalled();
+    expect(disableScreenshare).not.toHaveBeenCalled();
+  });
+
+  it("does nothing without an id", async () => {
+    rollbackVideoOnError(undefined);
+    await settle();
+
+    expect(rollbackPendingVideo).not.toHaveBeenCalled();
+    expect(disableCamera).not.toHaveBeenCalled();
+  });
+});
+
+describe("snapshotReadyVoice self row selection", () => {
+  it("applies the member's own row, not another member's row listed before it", async () => {
+    connect();
+
+    snapshotReadyVoice()(
+      socketStub(),
+      readyWith([
+        voiceState({ user_id: 7, server_muted: true, server_deafened: true }),
+        voiceState({}),
+      ]),
+    );
+    await settle();
+
+    expect(setMuted).not.toHaveBeenCalled();
+    expect(setDeafened).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localServerMuted).toBe(false);
+  });
+
+  it("does nothing for another device's call: no watch re-send, no moderator enforcement", async () => {
+    const socket = socketStub();
+
+    snapshotReadyVoice()(socket, readyWith([voiceState({ server_muted: true })]));
+    await settle();
+
+    expect(resendWatching).not.toHaveBeenCalled();
+    expect(isWatchingResync()).toBe(false);
+    expect(setMuted).not.toHaveBeenCalled();
+    expect(handleParticipantLeft).not.toHaveBeenCalled();
+    expect(reconcileVideoFlags).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleVoiceState for another member", () => {
+  it("leaves this client's channel, moderation and toasts alone", async () => {
+    joinVoiceChannel(3);
+    setVoiceStatus("connected");
+    const socket = socketStub();
+
+    handleVoiceState(
+      socket,
+      voiceState({ user_id: 10, channel_id: 4, server_muted: true, server_deafened: true }),
+    );
+    await settle();
+
+    expect(voiceStore.getState().currentChannelId).toBe(3);
+    expect(voiceStore.getState().voiceStatus).toBe("connected");
+    expect(voiceStore.getState().voiceUsers.get(4)?.has(10)).toBe(true);
+    expect(setMuted).not.toHaveBeenCalled();
+    expect(setDeafened).not.toHaveBeenCalled();
+    expect(socket.send).not.toHaveBeenCalled();
+    expect(showToast).not.toHaveBeenCalled();
+  });
+});
+
+describe("voice handler log lines", () => {
+  it("records a moderator move with its destination", async () => {
+    const logs = captureLogs();
+    const socket = socketStub();
+
+    handleVoiceMoved(socket, { to_channel_id: 4 }, clockWith(null));
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
+
+    expect(logs.find("Moved to another voice channel by a moderator")).toMatchObject([
+      { level: "info", component: "dispatcher", data: { toChannelId: 4 } },
+    ]);
+  });
+
+  it("records a frame for a channel already left, with that channel", async () => {
+    const logs = captureLogs();
+    joinVoiceChannel(5);
+
+    handleVoiceDisconnected({ channel_id: 4, reason: "Removed" }, clockWith(5));
+    await settle();
+
+    expect(logs.find("Ignoring stale voice_disconnected for a channel already left")).toMatchObject(
+      [{ level: "info", component: "dispatcher", data: { channelId: 4 } }],
+    );
+    expect(logs.find("Disconnected from voice by a moderator")).toEqual([]);
+  });
+
+  it("records a moderator disconnect with its channel", async () => {
+    const logs = captureLogs();
+    joinVoiceChannel(4);
+
+    handleVoiceDisconnected({ channel_id: 4, reason: "Removed" }, clockWith(null));
+    await vi.waitFor(() => expect(leaveVoice).toHaveBeenCalledWith(false));
+
+    expect(logs.find("Disconnected from voice by a moderator")).toMatchObject([
+      { level: "info", component: "dispatcher", data: { channelId: 4 } },
+    ]);
+  });
+
+  it("records why a rate-limited watch retry failed", async () => {
+    const logs = captureLogs();
+    const failure = new Error("no session");
+    vi.mocked(retryWatching).mockRejectedValueOnce(failure);
+    noteWatchSent("w1");
+
+    handleVoiceWatchError(err("RATE_LIMITED"), "w1");
+    await vi.waitFor(() => expect(logs.find("voice_watch retry failed")).toHaveLength(1));
+
+    expect(logs.find("voice_watch retry failed")[0]).toMatchObject({
+      level: "debug",
+      component: "dispatcher",
+      data: { error: "no session" },
+    });
   });
 });
