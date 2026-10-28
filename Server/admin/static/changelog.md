@@ -1,3 +1,153 @@
+## v2.5.0
+
+**OwnCord 2.5** (the sixth public beta) brings voice messages, stickers, animated avatars, videos that play straight from the chat and iPhone photos that show as pictures. You can now stay signed in on several devices at once, and members can see the game or music someone is playing. Roles get new permissions (Move Members, Manage Backups and more) and presets. Under the surface, dialogs, menus and Japanese, Chinese and Korean typing behave the same everywhere.
+
+It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together, and **update the app on every device you use**: an older app may show voice wrongly across devices. **This release changes the database.** The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.4 without restoring that copy.
+
+### Highlights
+
+- **Several devices at once**: stay signed in on up to 10 connections per account. A new device no longer signs the others out, and joining voice on another device moves your call there.
+- **Voice messages**: record up to 5 minutes from the message box and send it as a clip with a waveform and a speed control.
+- **Stickers**: one popup with GIFs, Stickers and Emoji tabs. Admins add stickers in the admin panel.
+- **Zoom into streams**: Ctrl + scroll on a screen share or webcam, then drag to look around.
+- **Videos play in chat**: the first frame shows right away and the clip streams while it plays. More video types (.mkv, .m4v, .3gp, .ogv) play inline.
+- **Photos and files**: iPhone photos (.heic, .heif) and .tiff show as pictures, and text and code files show a preview.
+- **Animated avatars and banners**: GIF, animated WebP or animated PNG, played on hover.
+- **Activity**: the member list, profile and DMs show the game someone is playing and the music they listen to. You choose what is shared.
+- **Welcome messages** greet new members in a channel the admin picks, with a Wave to say hi! button.
+
+### Added
+
+**Messages & files**
+
+- **Voice messages**: press the microphone in the message box to record, then send or discard. A message can be up to 5 minutes. The player shows a waveform, lets you seek and change the speed.
+- **Stickers**: the GIF, sticker and emoji buttons now open one popup with GIFs, Stickers and Emoji tabs. Click a sticker to send it at once, in channels, threads and DMs, also as a reply. A sticker an admin removed shows as "Deleted sticker: name".
+- Videos play straight from the chat: the first frame shows before you press play, and the clip streams instead of downloading in full first. If the server cannot stream a clip, the play button downloads it first.
+- More video types play inline: .3gp, .m4v, .mkv and .ogv. .avi files stay a download.
+- iPhone photos (.heic, .heif) and .tiff pictures show as images in chat and in the viewer. Download still gives you the original file. Files uploaded before this update stay download cards, and camera RAW files stay downloads.
+- Text and code files (.txt, .log, .json, .py, .js, .ts, .sql, .go, .md and more) show a preview: the first lines in a coloured code box, with Expand and Collapse. Files marked as spoilers stay a plain download.
+- A message that is only one image or GIF link (like a GIF picker pick) now shows just the image, without the link text.
+- Forum channels can be read as Cards, List, List and reader, or Feed, and the post panel can be resized by dragging its edge.
+
+**Members, roles and profiles**
+
+- Avatars and profile banners can be animated (GIF, animated WebP or animated PNG). They play while you hover the message, member or DM row; the profile card plays them straight away. With reduced motion on they never play. Avatars may now be up to 2 MB and banners up to 4 MB.
+- The member list, profile and DMs show the game someone is playing ("Playing VALORANT · for 42 min"). The desktop app finds games from Steam, Epic, GOG, Battle.net, Heroic, Lutris and Wine, plus a built-in list. Under Settings → Advanced → Activity you can add any program as a game, rename one, hide one or turn it all off.
+- They also show the music someone is listening to, with the song, artist and a progress bar in the profile. The app reads what your media player reports to Windows or Linux. Turn it off, or hide one player, under Settings → Advanced → Activity.
+- New role permission **Move Members**: move anyone between voice channels from the voice menu or by dragging. The person moved sees who moved them. The owner can stop it from moving the owner.
+- New role permission **Manage Backups**: take, list and download backups without being the owner. The backup schedule stays with the owner.
+- Seven more permissions that start with nobody: Restore Backups, Manage Config, Manage Updates, Manage Tokens, Issue Recovery, View Diagnostics and Erase Accounts. The first five can only be given out by the owner.
+- **Role presets** in the role editor: Super admin, Server manager, Moderator or Voice moderator fill in the matching boxes, which you can still change before saving.
+- No role has any of the new permissions after the upgrade.
+
+**Chat and admin**
+
+- **Welcome messages**: pick a text channel under Settings → Welcome messages in the admin panel, and a line greets each new member there once their account is ready. Off by default.
+- Admins add, rename and remove **stickers** on the new Stickers page of the admin panel (up to 60, PNG, GIF or WebP, up to 512 KB).
+- Admins can turn **game activity** off for the whole server in the admin panel.
+
+**Voice and video**
+
+- **Zoom into a screen share or webcam**: hold Ctrl and scroll over the stream, then drag to look around. It works in the grid, focus view, full screen and the pop-out window.
+- The call view is roomier, and the call chat beside it can be resized by dragging its edge.
+- Your own safety number now shows in voice and DM calls (the shield beside your name), so you can compare it with someone out of band.
+- Settings → Logs → **Screen share testing** can record screen-share details for 3 minutes, saved in the support bundle. It is off by default and only helps us track down slow screen shares.
+
+### Changed
+
+- **Several devices at once**: you stay online while any device is connected. Only reloading the app on the same device replaces its older connection. Bans, signing out everywhere and an admin disconnect still end every device. The admin panel's online counts now count people, not connections.
+- Voice encryption works across devices: each device keeps its own key, and others in the call check your voice against the device you call from. An older app may show a "changed key" warning when you switch devices.
+- Joining voice on another device moves your call there; the device you left shows "Call moved to another device".
+- The 120 fps screen share option is hidden for now: the Windows app's capture delivers about 60 fps anyway. A saved 120 fps setting shares at 60.
+
+**Server (operators)**
+
+- The bundled LiveKit voice server moves from 1.13.7 to 1.13.10 (a patch release, no configuration change).
+- Release server files and the Docker image now carry the browser client. It stays off until you set `server.browser_client_enabled: true`.
+- New `POST /api/v1/files/{id}/link` gives a one-hour link a video player can open without signing in. It stops working when the session ends, the account is banned or the channel is no longer readable, and a restart voids every link. **Keep reverse-proxy access logs private**, since a link works like a short-lived password for that file.
+- Server stickers live under `/api/v1/stickers`, stored with the other uploads.
+- A malformed request body now gets the same "malformed request body" reply on every route, and a body over the size limit answers `413 PAYLOAD_TOO_LARGE` instead of `400`. Admin routes answer `400 BAD_REQUEST` for a path id of 0 or below.
+
+### Fixed
+
+**Login & connection**
+
+- Rejecting a server's changed certificate while signing in left the spinner running forever. The login form now says the certificate was not accepted.
+- A remembered password stayed filled in after you switched to another server. It now clears when the server changes.
+- A drag-select that ended outside a dialog, or a pan in the image viewer that ended outside the image, closed it. Dialogs now only close on a click that starts outside them.
+
+**Accounts & admin**
+
+- A ban now also ends a connection that was still signing in at that moment.
+- Account recovery now spends exactly the kit it checked.
+- A moderator could appeal their own channel purge. A purge is not a sanction, so it can no longer be appealed.
+- The setup wizard could save a TLS choice the server then could not start with. It now refuses those choices.
+- The username box cut some names (rare CJK and mathematical letters) at 16 characters. It now takes the full 32.
+- The banned list showed Unban for people ranked at or above you. It now shows it only where it works.
+
+**Chat**
+
+- The default blocked upload types now cover more web page and SVG extensions. A list you saved yourself is kept.
+- Deleting an edited message now lowers the mention badges it actually raised, including `@everyone`.
+- A reconnect during a permission change could leave the channel list out of date until a restart. It now loads the full list.
+- Portrait phone photos showed small in a landscape box. New uploads keep their upright shape.
+- Switching channels during a jump to an older message could make that channel open on the old messages later. It now opens on the latest.
+- An `@name` inside a `[text](link)` link could turn into a profile button. It now stays part of the link.
+- The who-reacted tooltip could show stale names after a channel switch or reconnect. It now reloads.
+- Clicking a followed forum post in the sidebar from another channel showed the post list but not the post. It now opens the post.
+- Chat no longer jumps while images and YouTube cards load, and a reopened channel lands where you were.
+
+**Direct messages**
+
+- Deleting a message request and later opening the conversation yourself now counts as accepting it, so replies reach you.
+- A group's "call ended" notice now goes to the current members.
+- Someone added to a group during a call now sees who is in the call, and people you saw in a call no longer stay on screen as ghosts after you leave and rejoin the group.
+- A group call that was ringing when you left the group no longer reports a missed call.
+
+**Desktop UI**
+
+- Opening a menu while another was open left both showing. Opening a menu now always closes the one before it.
+- Holding Ctrl+M, Ctrl+D or Ctrl+K repeated the action over and over. A held key now acts once.
+- The global mute and deafen shortcuts could be set to keys the app already uses. Settings now refuses those.
+- With a Chinese, Japanese or Korean input method, the Enter that picks a candidate also sent the half-typed text. It now only picks the candidate.
+- Unsent messages saved for a retry now stay with the server you are signed in to.
+- In the web portal on Android, the message bar and call buttons sat under the gesture bar. They now sit above it.
+- In the Linux AppImage, links and Open Log Folder now open, and launching the app a second time raises the open window.
+- The Linux app no longer crashes when its terminal is closed, and writes one log file instead of two.
+
+**Voice and video**
+
+- A participant whose connection briefly dropped could leave others deaf and muted until the next join or leave (self-hosted LiveKit with webhooks). The call now recovers right away.
+- Switching voice channel while the first was still connecting could get stuck on "Securing". It now connects.
+- Switching camera mid-call left your own tile frozen or black. It now follows the new camera.
+- After a network drop over about 15 seconds, the call could come back with your camera off and you missing from the channel. It now rejoins properly.
+- After a reconnect, ended cameras and screen shares stayed as frozen tiles. They are now removed.
+- When unmuting failed because the mic could not open, others still saw you unmuted. They now see you muted.
+- Windows: an H.264 screen share or camera always fell back to VP8. It now stays on H.264 and uses the graphics card (not on Intel graphics).
+- Linux: voice slowly used up sound-server connections until the whole desktop went silent. Fixed.
+- Linux: some webcams sent only about 5 frames a second. The camera now keeps 30 fps, and Settings → Voice & Video shows your call camera during a call.
+- Linux: someone else's camera or screen share could freeze after the first picture, and a VP9 camera could stay black. Their video now keeps playing.
+- Linux: Wayland global shortcuts now work on desktops whose portal names no keys.
+- Linux: the Diagnostics mic check now fails on a muted or blocked microphone instead of passing.
+
+### Known issues
+
+- **Screen shares of fast games can drop to 20-40 fps** for some people. We're looking into it; the new Screen share testing recorder helps.
+- **Not yet tested by hand for this release:** several devices at once, the new menus, Japanese typing, the phone layout of the web portal, and the Linux app on X11, GNOME Wayland and KDE Wayland.
+- **A call tile with only a profile picture has no right-click menu** yet; right-click the person in the voice channel instead.
+- **On Linux**, a Wayland screen share is limited to 60 fps, and Diagnostics cannot test incoming media.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on Update Now; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal prompts every member.** Compare the new fingerprint with the server owner out of band before accepting.
+- **The browser client is built in but off by default**, and there is no phone app yet.
+
+### Under the hood
+
+- Several security hardening fixes.
+- Dialogs, right-click menus, saved settings and desktop calls each go through one shared helper, and server API errors through shared replies, so they behave the same everywhere.
+- Many more client tests (voice, E2EE, screen share, websocket handlers) and nightly mutation testing.
+- CI re-runs failed jobs once on its own, and a PR's supply-chain scan only fails on advisories it adds.
+- Database changes 080 to 085 (Move Members, Manage Backups, owner-type permissions, stickers, voice message details, per-device identity keys), each with a rollback script.
+
 ## v2.4.0-beta.1
 
 **OwnCord 2.4 beta 1** (the fifth public beta) is the community release of the self-hosted chat app with channels, direct messages, voice and video, and file sharing. It adds threads, forum channels, polls, message forwarding, several roles per member, nicknames, real channel categories, an AFK channel and much fuller group DMs. Chat, the member list and Settings work much more like Discord's, the Linux app catches up with Windows, and self-hosting gets sturdier: fewer ports for Docker, safer backup restores and Prometheus metrics.
