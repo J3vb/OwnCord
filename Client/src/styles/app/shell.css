@@ -1,10 +1,15 @@
 /* ═══ Layout ═══ */
+/* Chrome on Android draws a viewport-fit=cover page under the gesture bar but
+   can report its dynamic bottom inset as 0; the static max inset is the bar. */
+:root {
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), env(safe-area-max-inset-bottom, 0px));
+}
 .app {
   display: flex;
   flex: 1;
   min-height: 0;
   /* Notch and home-indicator insets; 0 on desktop. */
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) var(--safe-bottom)
     env(safe-area-inset-left);
 }
 

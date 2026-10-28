@@ -140,6 +140,7 @@ and only when it changes something a contributor or fork holder must do
 - The global mute and deafen shortcuts could be set to a Ctrl+Shift key the app or a text field already uses (Ctrl+Shift+K, redo, word select), so one press did two things. Settings now refuses those keys.
 - The banned members list showed Unban next to people ranked at or above you, which the server always refused. It now shows Unban only where it can work.
 - With a Chinese, Japanese or Korean input method, the Enter that picks a candidate also submitted the half-typed text in 13 fields, including the ban reason, nickname, login code, search and custom status. That Enter now only picks the candidate.
+- On Android Chrome the web portal's message bar and call buttons sat partly under the gesture bar. They now sit above it.
 
 **Voice and video**
 
