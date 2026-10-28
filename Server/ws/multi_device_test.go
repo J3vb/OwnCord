@@ -1064,3 +1064,34 @@ func TestMultiDevice_ModeratorFlagsFollowADeviceChange(t *testing.T) {
 		t.Fatal("A still holds a stash that would be applied a second time")
 	}
 }
+
+func TestMultiDevice_FullChannelJoinKeepsCallParkedByAnotherDevice(t *testing.T) {
+	f := newMDFix(t)
+	if err := f.db.SetChannelVoiceMaxUsers(context.Background(), f.voiceB, 1); err != nil {
+		t.Fatalf("SetChannelVoiceMaxUsers: %v", err)
+	}
+	f.join(f.observer(f.text), f.voiceB)
+	a := f.dev("session-a", f.text)
+	token := f.join(a, f.voiceA)
+	f.dropSocket(a)
+	if f.hub.voiceReg.voiceGrace.get(f.uid) == nil {
+		t.Fatal("precondition: A's call should be parked")
+	}
+	b := f.dev("session-b", f.text)
+
+	f.hub.handleMessage(b.c, voiceFrame(t, "voice_join", "join", map[string]any{"channel_id": f.voiceB}))
+	b.settle()
+
+	if !b.sawErrorCode(ErrCodeChannelFull) {
+		t.Fatalf("B's join to a full channel was not refused as full; got %s", b.types())
+	}
+	if f.hub.voiceReg.voiceGrace.get(f.uid) == nil {
+		t.Fatal("the refused join ended A's parked call")
+	}
+	if r := f.row(f.uid); r == nil || r.ChannelID != f.voiceA {
+		t.Fatalf("A's voice row changed: %+v", r)
+	}
+	if !f.sfu.has(RoomName(f.voiceA), participantIdentity(f.uid, token)) {
+		t.Fatal("the refused join removed A's LiveKit participant")
+	}
+}
