@@ -21,6 +21,7 @@
  * `aria-pressed`.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { loadPref, onPrefChange, savePref } from "@lib/preferences";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
@@ -238,7 +239,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     column,
     "keydown",
     (e) => {
-      if (e.key !== "Escape" || e.isComposing || narrow?.matches !== true || !narrowOpen) return;
+      if (e.key !== "Escape" || isImeCommit(e) || narrow?.matches !== true || !narrowOpen) return;
       const search = body.querySelector<HTMLInputElement>('[data-testid="member-search"]');
       if (search !== null && search.value !== "") return;
       e.preventDefault();

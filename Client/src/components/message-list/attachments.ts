@@ -3,6 +3,7 @@
  * Also owns the server host state and URL resolution used by other modules.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { closeOnBackdropClick } from "@lib/modalFactory";
 import { createElement, appendChildren, setText } from "@lib/dom";
@@ -2189,7 +2190,7 @@ export function openImageLightbox(
   closeOnBackdropClick(overlay, close, disposable.signal);
 
   function onKey(e: KeyboardEvent): void {
-    if (e.key === "Escape") close();
+    if (e.key === "Escape" && !isImeCommit(e)) close();
     // The Menu key / Shift+F10 open the image's menu from whichever toolbar
     // button has focus, centred on the image.
     if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {

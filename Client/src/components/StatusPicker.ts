@@ -215,7 +215,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
           // skips a focused one, so a TIMED_OUT rollback arriving right after
           // this commit could not re-seed the refused text out of it.
           dotEl?.focus();
-        } else if (e.key === "Escape") {
+        } else if (e.key === "Escape" && !isImeCommit(e)) {
           e.preventDefault();
           input.value = lastCommittedCustom;
           hint.reset();
@@ -299,7 +299,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && isOpen()) {
+        if (e.key === "Escape" && !isImeCommit(e) && isOpen()) {
           e.preventDefault();
           closeDropdown();
           dotEl?.focus();

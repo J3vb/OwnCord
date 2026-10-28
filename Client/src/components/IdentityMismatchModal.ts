@@ -4,6 +4,7 @@
  * copy load with the main page instead of the startup chunk.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -107,7 +108,7 @@ export function createIdentityMismatchModal(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && overlay?.isConnected === true) onReject();
+        if (e.key === "Escape" && !isImeCommit(e) && overlay?.isConnected === true) onReject();
       },
       { signal: disposable.signal },
     );

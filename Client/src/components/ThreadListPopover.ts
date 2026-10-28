@@ -10,6 +10,7 @@
  * first use, never at startup.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon } from "@lib/icons";
@@ -221,7 +222,7 @@ export function openThreadListPopover(options: ThreadListPopoverOptions): Thread
   document.addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !isImeCommit(e)) {
         e.stopPropagation();
         close();
       }

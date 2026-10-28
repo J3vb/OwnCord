@@ -242,6 +242,16 @@ describe("ForwardPicker", () => {
     expect(document.querySelector("[data-testid=forward-picker]")).toBeNull();
   });
 
+  it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () => {
+    open();
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect(q("[data-testid=forward-picker]")).not.toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.querySelector("[data-testid=forward-picker]")).toBeNull();
+  });
+
   it("frees Done and Escape once a failed batch has resolved", async () => {
     open();
     pick(2);

@@ -8,6 +8,7 @@
 // keeps loading on first use and the owner keeps every behaviour that depends
 // on the composer (inserting an emoji, sending a GIF or a sticker).
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { stickersText } from "../i18n/stickers";
@@ -164,7 +165,7 @@ export function createExpressionPopup(options: ExpressionPopupOptions): Expressi
   root.addEventListener(
     "keydown",
     (e) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || isImeCommit(e)) return;
       e.preventDefault();
       options.onClose();
     },

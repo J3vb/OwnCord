@@ -224,6 +224,32 @@ describe("the poll dialog", () => {
     expect(document.querySelector('[data-testid="poll-composer"]')).toBeNull();
   });
 
+  it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () => {
+    open();
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect(document.querySelector('[data-testid="poll-composer"]')).not.toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.querySelector('[data-testid="poll-composer"]')).toBeNull();
+  });
+
+  it("Escape closes an open emoji picker first, then the composer; composing Escape does neither", async () => {
+    open();
+    $<HTMLButtonElement>("poll-emoji-1").click();
+    await flush();
+    expect($("poll-emoji-1").getAttribute("aria-expanded")).toBe("true");
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect($("poll-emoji-1").getAttribute("aria-expanded")).toBe("true");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect($("poll-emoji-1").getAttribute("aria-expanded")).toBe("false");
+    expect(document.querySelector('[data-testid="poll-composer"]')).not.toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.querySelector('[data-testid="poll-composer"]')).toBeNull();
+  });
+
   it("stays open when a drag-select ends on the backdrop, and a backdrop click still closes", () => {
     open();
     const overlay = $("poll-composer");

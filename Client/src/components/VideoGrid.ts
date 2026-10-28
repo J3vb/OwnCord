@@ -3,6 +3,7 @@
  * Replaces the chat area when cameras are active.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { openMenuOnKeyboard } from "@lib/context-menu";
@@ -949,6 +950,7 @@ export function createVideoGrid(): VideoGridComponent {
    *  the default. */
   function onTheatreKey(e: KeyboardEvent): void {
     if (theatreTile === null || e.defaultPrevented) return;
+    if (e.key === "Escape" && isImeCommit(e)) return;
     if (e.key !== "Escape" && !isFullscreenKey(e)) return;
     e.preventDefault();
     leaveTheatre();
@@ -1383,7 +1385,7 @@ export function createVideoGrid(): VideoGridComponent {
     pop.addEventListener(
       "keydown",
       (e) => {
-        if (e.key !== "Escape") return;
+        if (e.key !== "Escape" || isImeCommit(e)) return;
         e.stopPropagation();
         pop.remove();
         chip.setAttribute("aria-expanded", "false");

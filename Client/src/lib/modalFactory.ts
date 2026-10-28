@@ -29,6 +29,13 @@ export interface ModalOptions {
   readonly closeOnBackdrop?: boolean;
   /** Close when the Escape key is pressed. Default: true. */
   readonly closeOnEscape?: boolean;
+  /**
+   * What Escape does instead of closing: a busy guard, an unsaved-changes
+   * prompt, closing a nested picker first. Default: close. Only used when
+   * `closeOnEscape` is true. Escape that cancels an input-method candidate
+   * never reaches it.
+   */
+  readonly onEscape?: () => void;
   /** Additional CSS class on the .modal container (e.g. "dm-member-picker-modal"). */
   readonly className?: string;
   /** Additional attributes on the overlay element (e.g. data-testid). */
@@ -98,6 +105,7 @@ export function createModal(
     onClose,
     closeOnBackdrop = true,
     closeOnEscape = true,
+    onEscape,
     className,
     overlayAttrs,
     ariaLabel,
@@ -148,9 +156,9 @@ export function createModal(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape") {
-          handleClose();
-        }
+        if (e.key !== "Escape" || isImeCommit(e)) return;
+        if (onEscape !== undefined) onEscape();
+        else handleClose();
       },
       { signal: disposable.signal },
     );
