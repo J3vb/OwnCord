@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -39,8 +38,7 @@ func handleIssueRecoveryCredential(authSvc *service.AuthService) http.HandlerFun
 			return
 		}
 		var req issueRecoveryCredentialRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid JSON body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		issue, err := authSvc.IssueRecoveryAssist(r.Context(), actorFromContext(r), id, req.Verification)

@@ -439,7 +439,10 @@ Three things to know before you open a PR:
 This is the end-to-end procedure for cutting a release. Every step runs on
 `main` or against it. The order matters, because the release workflow
 (`release.yml`) stops on any missing input. In the examples below,
-`vX.Y.Z-beta.N` stands for the version you are releasing.
+`vX.Y.Z` stands for the version you are releasing. From 2.5.0 on, versions
+carry no `-beta.N` suffix: a release with new features bumps the minor number,
+a fixes-only release bumps the patch number. The project is still a beta; the
+release notes say so.
 
 1. **Reconcile `main` into `dev` first, if the last release was squashed.**
    A release PR that was squash-merged makes `dev` and `main` drift apart. You
@@ -456,7 +459,7 @@ This is the end-to-end procedure for cutting a release. Every step runs on
    mismatch fails the whole run. Make this edit at release time, not earlier.
 
 3. **Write the release notes under the tag heading in `CHANGELOG.md`.**
-   `release.yml` finds the `## vX.Y.Z-beta.N` heading (a title may follow the
+   `release.yml` finds the `## vX.Y.Z` heading (a title may follow the
    tag) and copies everything up to the next `## ` heading. If that section is
    missing or empty, it stops the publish. Normally you rename
    `## Unreleased` to the tag, then start a fresh `## Unreleased` above it.
@@ -493,7 +496,7 @@ This is the end-to-end procedure for cutting a release. Every step runs on
    `dev` and `main` sharing history. Squash is still the rule for PRs into
    `dev`.
 
-7. **Run the Linux checklist and check the nightly, then tag on `main`.** Cut the tag (`vX.Y.Z-beta.N`) on
+7. **Run the Linux checklist and check the nightly, then tag on `main`.** Cut the tag (`vX.Y.Z`) on
    the merge commit.
    - The release ruleset forbids deleting a tag. So a failed first run costs
      you the next version number, not a rewrite.

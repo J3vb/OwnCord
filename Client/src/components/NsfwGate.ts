@@ -12,6 +12,7 @@
  * leaves the sidebar and header usable, so declining is ordinary navigation.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -122,7 +123,7 @@ export function createNsfwGate(options: NsfwGateOptions): MountableComponent {
     root.addEventListener(
       "keydown",
       (e) => {
-        if (e.key === "Escape") {
+        if (e.key === "Escape" && !isImeCommit(e)) {
           e.preventDefault();
           onCancel();
         }

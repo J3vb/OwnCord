@@ -28,9 +28,9 @@ func parseChatSend(userID int64, reqID string, raw json.RawMessage) (Command, er
 		}
 		stickerID = *p.StickerID
 	}
-	chID, err := p.ChannelID.Int64()
+	chID, err := positiveID(p.ChannelID, "channel_id")
 	if err != nil {
-		return nil, fmt.Errorf("channel_id must be integer: %w", err)
+		return nil, err
 	}
 	if len(p.Attachments) > 10 {
 		return nil, fmt.Errorf("too many attachments (max 10)")

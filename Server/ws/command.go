@@ -299,30 +299,24 @@ func (c CallDeclineCmd) UserID() int64 { return c.userID }
 // ── Command constructors ────────────────────────────────────────────────────
 
 // parseModTarget parses the (channel, target user) pair every voice moderation
-// payload carries. Both must be positive: a non-positive id can only come from
-// a malformed client, and rejecting at parse time keeps the handlers free of
-// id-shape checks.
-func parseModTarget(channelID, userID json.Number) (int64, int64, error) {
-	chID, err := channelID.Int64()
+// payload carries; channelField names the channel key in the error. Both must
+// be positive: a non-positive id can only come from a malformed client, and
+// rejecting at parse time keeps the handlers free of id-shape checks.
+func parseModTarget(channelID, userID json.Number, channelField string) (int64, int64, error) {
+	chID, err := positiveID(channelID, channelField)
 	if err != nil {
-		return 0, 0, fmt.Errorf("channel_id must be integer: %w", err)
+		return 0, 0, err
 	}
-	if chID <= 0 {
-		return 0, 0, fmt.Errorf("channel_id must be positive")
-	}
-	targetID, err := userID.Int64()
+	targetID, err := positiveID(userID, "user_id")
 	if err != nil {
-		return 0, 0, fmt.Errorf("user_id must be integer: %w", err)
-	}
-	if targetID <= 0 {
-		return 0, 0, fmt.Errorf("user_id must be positive")
+		return 0, 0, err
 	}
 	return chID, targetID, nil
 }
 
-// parseCallChannelID parses the lone channel_id both call signalling payloads
-// carry. Shared so call_ring and call_decline cannot drift on what counts as a
-// valid channel reference.
+// parseCallChannelID parses the lone channel_id the call signalling, typing,
+// focus, read and voice_join payloads carry. Shared so they cannot drift on
+// what counts as a valid channel reference.
 func parseCallChannelID(msgType string, raw json.RawMessage) (int64, error) {
 	var p struct {
 		ChannelID json.Number `json:"channel_id"`
@@ -330,14 +324,7 @@ func parseCallChannelID(msgType string, raw json.RawMessage) (int64, error) {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return 0, fmt.Errorf("invalid %s payload: %w", msgType, err)
 	}
-	chID, err := p.ChannelID.Int64()
-	if err != nil {
-		return 0, fmt.Errorf("channel_id must be integer: %w", err)
-	}
-	if chID <= 0 {
-		return 0, fmt.Errorf("channel_id must be positive")
-	}
-	return chID, nil
+	return positiveID(p.ChannelID, "channel_id")
 }
 
 // commandConstructors maps message types to functions that parse payloads
@@ -371,9 +358,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid chat_edit payload: %w", err)
 		}
-		msgID, err := p.MessageID.Int64()
+		msgID, err := positiveID(p.MessageID, "message_id")
 		if err != nil {
-			return nil, fmt.Errorf("message_id must be integer: %w", err)
+			return nil, err
 		}
 		return ChatEditCmd{
 			userID:    userID,
@@ -390,9 +377,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid chat_delete payload: %w", err)
 		}
-		msgID, err := p.MessageID.Int64()
+		msgID, err := positiveID(p.MessageID, "message_id")
 		if err != nil {
-			return nil, fmt.Errorf("message_id must be integer: %w", err)
+			return nil, err
 		}
 		return ChatDeleteCmd{
 			userID:    userID,
@@ -441,9 +428,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid reaction_add payload: %w", err)
 		}
-		msgID, err := p.MessageID.Int64()
+		msgID, err := positiveID(p.MessageID, "message_id")
 		if err != nil {
-			return nil, fmt.Errorf("message_id must be integer: %w", err)
+			return nil, err
 		}
 		return ReactionAddCmd{userID: userID, MessageID: msgID, Emoji: p.Emoji}, nil
 	},
@@ -456,9 +443,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid reaction_remove payload: %w", err)
 		}
-		msgID, err := p.MessageID.Int64()
+		msgID, err := positiveID(p.MessageID, "message_id")
 		if err != nil {
-			return nil, fmt.Errorf("message_id must be integer: %w", err)
+			return nil, err
 		}
 		return ReactionRemoveCmd{userID: userID, MessageID: msgID, Emoji: p.Emoji}, nil
 	},
@@ -528,7 +515,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_mod_mute payload: %w", err)
 		}
-		chID, targetID, err := parseModTarget(p.ChannelID, p.UserID)
+		chID, targetID, err := parseModTarget(p.ChannelID, p.UserID, "channel_id")
 		if err != nil {
 			return nil, err
 		}
@@ -544,7 +531,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_mod_deafen payload: %w", err)
 		}
-		chID, targetID, err := parseModTarget(p.ChannelID, p.UserID)
+		chID, targetID, err := parseModTarget(p.ChannelID, p.UserID, "channel_id")
 		if err != nil {
 			return nil, err
 		}
@@ -559,7 +546,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_mod_move payload: %w", err)
 		}
-		toChID, targetID, err := parseModTarget(p.ToChannelID, p.UserID)
+		toChID, targetID, err := parseModTarget(p.ToChannelID, p.UserID, "to_channel_id")
 		if err != nil {
 			return nil, err
 		}
@@ -573,12 +560,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_mod_kick payload: %w", err)
 		}
-		targetID, err := p.UserID.Int64()
+		targetID, err := positiveID(p.UserID, "user_id")
 		if err != nil {
-			return nil, fmt.Errorf("user_id must be integer: %w", err)
-		}
-		if targetID <= 0 {
-			return nil, fmt.Errorf("user_id must be positive")
+			return nil, err
 		}
 		return VoiceModKickCmd{userID: userID, TargetID: targetID}, nil
 	},

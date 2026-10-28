@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -139,8 +138,7 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 			return
 		}
 		var updates map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &updates) {
 			return
 		}
 

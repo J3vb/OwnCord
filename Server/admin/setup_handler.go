@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net"
@@ -244,8 +243,7 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 		return req, "", false
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return req, "", false
 	}
 

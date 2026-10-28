@@ -16,6 +16,7 @@
  * accessible name track the state for the keyboard model.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { focusDialog } from "@lib/a11y";
@@ -110,7 +111,7 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   // Only an Escape pressed in the drawer or on its toggle: one in a dialog
   // opened from the drawer is that dialog's to handle.
   owner.onEvent(document, "keydown", (e: KeyboardEvent) => {
-    if (e.key !== "Escape" || !open) return;
+    if (e.key !== "Escape" || isImeCommit(e) || !open) return;
     const target = e.target;
     const inDrawer =
       target === document.body ||

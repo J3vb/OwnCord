@@ -526,7 +526,7 @@ export function createSettingsOverlay(
           e.stopPropagation();
           return;
         }
-        if (e.key === "Escape" && searchBox.value !== "") {
+        if (e.key === "Escape" && !isImeCommit(e) && searchBox.value !== "") {
           // The first Escape only clears; the next one closes the panel.
           e.preventDefault();
           e.stopPropagation();
@@ -751,7 +751,12 @@ export function createSettingsOverlay(
       "keydown",
       (e: KeyboardEvent) => {
         // The Log Out prompt owns Escape while it is open.
-        if (e.key === "Escape" && closeLogoutPrompt === null && root?.classList.contains("open")) {
+        if (
+          e.key === "Escape" &&
+          !isImeCommit(e) &&
+          closeLogoutPrompt === null &&
+          root?.classList.contains("open")
+        ) {
           requestClose();
         } else if (
           closeLogoutPrompt === null &&

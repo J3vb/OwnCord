@@ -16,6 +16,7 @@
  * closure.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
@@ -221,7 +222,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   renameInput.addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !isImeCommit(e)) {
         e.stopPropagation();
         endRename();
       }

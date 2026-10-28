@@ -2,6 +2,7 @@
 // (which proxies Klipy). Uses @lib/dom helpers exclusively. Never sets
 // innerHTML with user content.
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
@@ -518,7 +519,7 @@ export function createGifPicker(options: GifPickerOptions): {
   root.addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !isImeCommit(e)) {
         e.preventDefault();
         options.onClose();
       }

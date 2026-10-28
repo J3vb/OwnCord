@@ -202,6 +202,21 @@ describe("InviteManager", () => {
     mgr.destroy?.();
   });
 
+  it("Escape that cancels an IME candidate does not call onClose", () => {
+    const opts = makeOptions();
+    const mgr = createInviteManager(opts);
+    mgr.mount(container);
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect(opts.onClose).not.toHaveBeenCalled();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(opts.onClose).toHaveBeenCalledOnce();
+
+    mgr.destroy?.();
+  });
+
   it("clicking overlay backdrop calls onClose", () => {
     const opts = makeOptions();
     const mgr = createInviteManager(opts);

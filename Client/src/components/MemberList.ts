@@ -4,6 +4,7 @@
  * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
+import { isImeCommit } from "@lib/ime";
 import { createElement } from "@lib/dom";
 import { reconcileModels } from "@lib/reconcile";
 import { select } from "@lib/select";
@@ -934,7 +935,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     search.addEventListener(
       "keydown",
       (e) => {
-        if (e.isComposing || e.key !== "Escape" || search.value === "") return;
+        if (e.key !== "Escape" || isImeCommit(e) || search.value === "") return;
         e.preventDefault();
         e.stopPropagation();
         search.value = "";

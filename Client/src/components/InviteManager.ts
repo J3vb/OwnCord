@@ -314,32 +314,21 @@ export function createInviteManager(options: InviteManagerOptions): MountableCom
     );
     appendChildren(footer, expiry.wrap, maxUses.wrap, createBtn);
 
-    // Overlay/modal shell, dialog semantics, focus trap and focus
-    // save/restore all come from the shared factory; only the backdrop and
-    // Escape wiring stay here, since this component's onClose is decoupled
+    // Overlay/modal shell, dialog semantics, focus trap, focus save/restore and
+    // the IME-safe Escape listener come from the shared factory; only the
+    // backdrop wiring stays here, since this component's onClose is decoupled
     // from destroy() (see the caller's onClose, which calls destroy()).
     instance = createModal(
       {
         content: header,
         closeOnBackdrop: false,
-        closeOnEscape: false,
+        onEscape: () => options.onClose(),
         ariaLabelledBy: "invite-manager-title",
       },
       container,
     );
     appendChildren(instance.modal, body, footer);
     renderList();
-
-    // Escape key
-    document.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        if (e.key === "Escape") {
-          options.onClose();
-        }
-      },
-      { signal: disposable.signal },
-    );
 
     // Click overlay to close
     closeOnBackdropClick(instance.overlay, () => options.onClose(), disposable.signal);

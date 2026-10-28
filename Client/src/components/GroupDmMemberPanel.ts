@@ -12,6 +12,7 @@
  * profile, Escape closes the panel when focus is inside it.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren } from "@lib/dom";
@@ -403,14 +404,14 @@ export function createGroupDmMemberPanel(
     window.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape") escapeTaken = dialogOpen();
+        if (e.key === "Escape" && !isImeCommit(e)) escapeTaken = dialogOpen();
       },
       { capture: true, signal },
     );
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key !== "Escape" || !open) return;
+        if (e.key !== "Escape" || isImeCommit(e) || !open) return;
         if (escapeTaken || e.defaultPrevented) return;
         if (panel === null || !panel.contains(document.activeElement)) return;
         e.preventDefault();

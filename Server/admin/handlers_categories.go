@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -70,8 +69,7 @@ func handleCreateCategory(channels *service.ChannelService, hub HubBroadcaster) 
 			return
 		}
 		var req categoryNameRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		change, err := channels.CreateCategory(r.Context(), actorFromContext(r), req.Name)
@@ -96,8 +94,7 @@ func handleRenameCategory(channels *service.ChannelService, hub HubBroadcaster) 
 			return
 		}
 		var req categoryNameRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		change, err := channels.RenameCategory(r.Context(), actorFromContext(r), id, req.Name)
@@ -121,7 +118,10 @@ func handleReorderCategories(channels *service.ChannelService, hub HubBroadcaste
 			return
 		}
 		var req categoryOrderRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.IDs == nil {
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		if req.IDs == nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 			return
 		}

@@ -8,13 +8,13 @@ live in the [changelog](../CHANGELOG.md) and the linked pages.
 builds (`scripts/verify-release-status.mjs`), so add the row in the release PR,
 together with the changelog section.
 
-_Last updated 2026-10-23._
+_Last updated 2026-10-29._
 
 ## Current release
 
-**v2.4.0-beta.1**, published 2026-10-23. It is still a beta and a hobby
-project: desktop only (Windows and Linux, x64 and ARM64). Update the server and
-the desktop app together.
+**v2.5.0**, published 2026-10-29. It is still a beta and a hobby project:
+desktop only (Windows and Linux, x64 and ARM64). Update the server and the
+desktop app together. From 2.5 on, version numbers drop the `-beta.N` suffix.
 
 ## Releases
 
@@ -24,6 +24,7 @@ Newest first, one line each. The full notes are the matching section of
 <!-- prettier-ignore -->
 | Version | Date | What it brought |
 | --- | --- | --- |
+| v2.5.0 | 2026-10-29 | Several devices at once, voice messages, stickers, videos that stream in chat, iPhone photos, animated avatars, game and music activity, zoom on streams and new role permissions. |
 | v2.4.0-beta.1 | 2026-10-23 | Threads, forum channels, polls, forwarding, several roles per member, nicknames, real categories, an AFK channel, fuller group DMs, Discord-style chat and Linux on par with Windows. |
 | v2.3.0-beta.1 | 2026-10-14 | A call view with tiles and pop-out, Input Mode and Push to Talk on modifier keys, a stream card with Change source, What's new after an update, faster channel switching. |
 | v2.2.0-beta.3 | 2026-10-11 | Click-to-watch streams, GIF favorites, inline video, member actions behind a reverse proxy, steadier scrolling and speaking rings. |

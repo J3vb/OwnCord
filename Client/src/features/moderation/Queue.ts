@@ -44,6 +44,7 @@
  * its read is authorized again like any other.
  */
 
+import { isImeCommit } from "@lib/ime";
 import {
   ApiClientError,
   errorText,
@@ -576,7 +577,7 @@ function renderReports(
       "keydown",
       (e: KeyboardEvent) => {
         // Escape closes the report first; the view's own Escape is the next one.
-        if (e.key !== "Escape" || e.defaultPrevented) return;
+        if (e.key !== "Escape" || isImeCommit(e) || e.defaultPrevented) return;
         e.preventDefault();
         closeToRow();
       },

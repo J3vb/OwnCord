@@ -46,8 +46,8 @@ func decodeBody(w http.ResponseWriter, dec *json.Decoder, v any, optional bool) 
 	return false
 }
 
-// writeBodyErr answers a body that failed to decode. err is nil for a body
-// that decoded but carried trailing data.
+// writeBodyErr answers a body that failed to decode. err is the decoder's
+// error, or nil when a second JSON value followed the first.
 func writeBodyErr(w http.ResponseWriter, err error) {
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		writeErr(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body is too large")

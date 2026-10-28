@@ -266,16 +266,13 @@ Scout candidate C2 in the execution plan. Based on `origin/dev` `91d7e54a`. Evid
 
 ### Baseline count
 
-Counted with the new structural test, `Client/tests/unit/ime-enter-guard.test.ts`, run against unchanged `dev`. It reads every function in `Client/src` that compares a key to `"Enter"` and skips Enter-or-Space button activation.
+Counted with the new structural test, `Client/tests/unit/ime-escape-guard.test.ts`, run against unchanged `dev`. It reads every function in `Client/src` that compares `.key` or `.code` to `"Escape"` and counts one whose Escape branch no `isImeCommit` call covers (a guard inside an Enter-only branch does not count). The scout's 44 came from a coarser scan that took any `isImeCommit` or `isComposing` in the function as a guard; the scoped scan also finds the composer's reply-cancel Escape (guarded only for Enter), three handlers with an inline `isComposing` check, and three key-capture handlers on `.code`.
 
-| Measure                                                  | Scout (2026-10-27) | Re-count before | After                     |
-| -------------------------------------------------------- | ------------------ | --------------- | ------------------------- |
-| Enter handlers on a text field with no composition guard | 9                  | 13              | 0, held by the test       |
-| Handlers with an inline `isComposing` guard              | 7 files            | 8 (7 files)     | 0; all call `isImeCommit` |
-| Inline `e.isComposing \|\| e.keyCode === 229` copies     | 7 files            | 8 in 7 files    | 0 outside `lib/ime.ts`    |
-| Exempt Enter handlers (no text field)                    | n/a                | n/a             | 1: `miniPlayer.ts`        |
-
-The scout missed four unguarded fields: the custom status in `StatusPicker.ts` and `SelfProfileCard.ts`, the prompt input in `lib/modalFactory.ts`, and the sticker search in `StickerPicker.ts`. All 13 are fixed here, since the defect and the fix are the same. `GlobalKeybinds.ts`'s Ctrl+Enter ring answer checked `isComposing` only; it now uses the helper, which adds the `keyCode` 229 case.
+| Measure                                                | Before | After                                 |
+| ------------------------------------------------------ | ------ | ------------------------------------- |
+| Escape handlers with no composition guard              | 51     | 0, held by the test                   |
+| `closeOnEscape: false` dialogs with their own listener | 7      | 0, held by the test                   |
+| Exempt Escape handlers                                 | n/a    | 3 key-capture buttons (no text field) |
 
 ### What changed
 
@@ -295,7 +292,7 @@ The scout missed four unguarded fields: the custom status in `StatusPicker.ts` a
 
 ### Not done
 
-Escape during composition still closes `createModal` dialogs and the self profile card, because their Escape listeners are on `document`. That is a different key and a different fix (the dialog helper), so it is left for a follow-up and not counted here.
+Escape during composition still closed `createModal` dialogs and the self profile card, because their Escape listeners are on `document`. That was left for MX-11 (below).
 
 ### Verdict against the stop rules
 
@@ -453,6 +450,45 @@ Before the change, a press inside and a release on the backdrop closed one dialo
 
 No gate was weakened and no existing assertion changed. The count went from 15 files to 0 with a test that holds it. The change is kept.
 
+## MX-7 batch 2 + MX-10: admin body decoding and path ids (2026-10-28)
+
+Measured on a branch from `origin/dev` after batch 1 (`757138e`). Evidence level: **executed**. Batch 2 moves the 23 `json.NewDecoder` calls left in `Server/admin` to the shared decoder and drops `DecodeAllow`. MX-10 is the path ids: `pathInt64` let `0` and negative ids reach the service on every admin id route, and nine api handlers parsed an id by hand.
+
+### Counts
+
+Counted by `grep` over non-test files in `Server/admin` and `Server/api`, and held after the change by the `reply-helpers` invariant.
+
+| Measure (non-test files)                                   | Before                                                                                                                                                                                | After                                                                   |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `json.NewDecoder` outside the shared decoder, `admin`      | 23 in 17 files, frozen in `DecodeAllow`                                                                                                                                               | 0; `DecodeAllow` deleted, so any new one fails                          |
+| Replies to a body that does not decode, `admin`            | 4 messages ("invalid request body", "invalid JSON body", "invalid support bundle request", "expected one JSON object") plus 3 field-specific ones that also fired on a decode failure | 1: `400 BAD_REQUEST` "malformed request body"                           |
+| `admin` JSON routes answering an over-size body with 413   | 0 of 23 decode sites                                                                                                                                                                  | 23 of 23 (`413 PAYLOAD_TOO_LARGE`), the support bundle at its own 1 KiB |
+| Raw path-id parses (`strconv.ParseInt(chi.URLParam(...))`) | 9: 8 direct (`admin` 1, `api` 7) and the two-step one in `parsePluginID`                                                                                                              | 0 outside `pathInt64` and `pathID`, held by the invariant               |
+| `pathInt64` call sites accepting `0` and negative ids      | 17                                                                                                                                                                                    | 0                                                                       |
+
+### What changed
+
+- `admin/decode.go`: `decodeJSON`, `decodeOptionalJSON` and `decodeStrictJSON`, the same three as `api/decode.go`. A body that does not decode answers `400 BAD_REQUEST` "malformed request body" (admin keeps its `BAD_REQUEST` code; `api` uses `INVALID_INPUT`), and a body past the route's `http.MaxBytesReader` cap answers `413 PAYLOAD_TOO_LARGE`. No admin route accepted an empty body before, so none uses the optional form.
+- Where a handler folded a field check into the decode condition (AFK channel, config overrides, category order, access preview), the decode now fails with the shared reply and the field check keeps its own message.
+- The retention preview and the support bundle routes use `decodeStrictJSON`. The support bundle keeps its 1 KiB cap, set before the helper runs, and its "expected one JSON object" reply is now the shared malformed reply.
+- `admin.pathInt64` refuses an id below 1. `api` gets `pathID` (a positive id or false, writes nothing) in `api/path_id.go`; `parseIDParam` uses it, and the sticker, emoji, user-note, moderation and plugin handlers read their ids through it with the reply each already had (`BAD_REQUEST`, `INVALID_INPUT`, `http.NotFound`, plain-text `http.Error`). The registration route's own parse now goes through `pathInt64`.
+- The `reply-helpers` invariant also fails a `strconv.ParseInt`, `ParseUint` or `Atoi` of a `chi.URLParam` (directly or through a local variable) in `api` and `admin` outside `pathInt64` and `pathID`.
+- `docs/api.md` error table: `BAD_REQUEST` for the admin surface, 413 on every JSON route, and non-positive path ids.
+
+### Checks
+
+| Check                                                                                                         | Before                                            | After         |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | ------------- |
+| `TestAdminAPI_PathIDRoutes_RefuseNonPositiveAndNonNumericIDs` (31 id positions × `0`, `-1`, `abc`)            | 58 of 93 subtests fail with `pathInt64` as it was | 93 of 93 pass |
+| `TestAdminAPI_JSONBodyRoutes_OverTheCapIs413AndMalformedIs400` (14 routes × malformed and over the cap)       | did not exist                                     | 28 of 28      |
+| `TestAdminAPI_SupportBundle_OverItsOneKiBCapIs413` (over the cap, padded after the value, strict, malformed)  | did not exist                                     | 6 of 6        |
+| `admin/decode_test.go` (valid, 5 bad bodies, cap mid-value, cap after the value, empty optional body, strict) | did not exist                                     | 6 tests pass  |
+| `reply-helpers` path-id and admin-decoder cases (violating and passing snippets)                              | did not exist                                     | pass          |
+
+### Verdict
+
+Kept. One reply for a bad admin body, 413 for an over-size one, and one rule for what a path id is on both surfaces. The visible change for clients is the message and status on the admin routes: "invalid request body" and its variants became "malformed request body", an over-size body is 413 instead of 400, and `/0` and `/-N` ids are refused at the handler instead of answering 404 or reaching the service. No existing test assertion changed.
+
 ## MX-15 one listen helper for preference changes (2026-10-28)
 
 Candidate D5 from scout round 2, on `dev` `4a5e0b2b`.
@@ -486,6 +522,28 @@ Counted with a grep for the event name over non-test files in `Client/src`, comm
 ### Verdict against the stop rules
 
 No gate was weakened and no existing assertion changed. The count went from 21 to 0 with a test that holds it. The change is kept.
+
+## MX-11 IME Escape guard (2026-10-28)
+
+Follow-up to MX-5. Based on `origin/dev`. Evidence level: **executed** (unit tests in jsdom; no input method was run in the app).
+
+### Baseline count
+
+Counted with the new structural test, `Client/tests/unit/ime-escape-guard.test.ts`, run against unchanged `dev`. It reads every function in `Client/src` that compares a key to `"Escape"`.
+
+| Measure                                                | Before | After               |
+| ------------------------------------------------------ | ------ | ------------------- |
+| Escape handlers with no composition guard              | 44     | 0, held by the test |
+| `closeOnEscape: false` dialogs with their own listener | 7      | 0, held by the test |
+| Exempt Escape handlers                                 | n/a    | 0                   |
+
+### What changed
+
+- `createModal`'s Escape listener returns early on `isImeCommit(e)` and gains an `onEscape` option (what Escape does instead of closing: a busy guard, an unsaved-changes prompt, a nested picker).
+- The seven dialogs that opted out of Escape and kept their own document listener (`CreateChannelModal`, `EditChannelModal`, `DeleteChannelModal`, `CategoryModals`, `InviteManager`, `ForwardPicker`, `PollComposer`) pass `onEscape` instead.
+- The other Escape handlers return early on the helper inside their Escape branch.
+- Composing-Escape tests for `createModal` and the seven dialogs.
+- Startup closure budget raised one 500 B step, 102800 B to 103300 B: after merging MX-15 and MX-17 from `dev` the closure is 102838 B (the guard imports add about 50 B).
 
 ## MX-17 one clipboard door for text copies (2026-10-28)
 
@@ -561,3 +619,38 @@ The scout counted 7 names; it missed `searchTSLayout` and the service copy of `C
 ### Verdict
 
 Kept. 24 hand-typed layouts and 9 names became 2 names and one parser, and the invariant stops a new copy. Test files still spell the layouts out on purpose: they check the stored text independently of the names. No savings in time or tokens are claimed.
+
+## MX-12 WebSocket payload ids (2026-10-28)
+
+Scout candidate D4 in the execution plan; the WebSocket twin of MX-10. Based on `origin/dev` `3eacc98a`. Evidence level: **executed** (unit tests and a deliberate-break check; no client was run against it).
+
+### Baseline count
+
+Counted with `grep -rn "\.Int64()" Server/ws --include=*.go` over non-test files, and with the new `ws-payload-ids` invariant.
+
+| Measure (non-test files in `Server/ws`)                                                                                      | Before                                                                                                         | After                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Raw `json.Number.Int64()` calls                                                                                              | 16                                                                                                             | 2: `positiveID` and `duration_hours`                                                   |
+| Raw `Int64()` calls that read an id                                                                                          | 15                                                                                                             | 1 (`positiveID`), held by the invariant                                                |
+| Private id parsers (`parseModTarget`, `parseCallChannelID`, `parsePollMessageID`, `parseReadPointerMessageID`, `positiveID`) | 5, with 3 different error texts ("must be integer", "must be positive", "must be a positive integer")          | 1 helper, 1 text; `parseCallChannelID` and `parseModTarget` stay as thin callers of it |
+| Ids that accepted 0 and negatives at parse time (the service refused them later)                                             | 5 (`channel_id` in `chat_send`; `message_id` in `chat_edit`, `chat_delete`, `reaction_add`, `reaction_remove`) | 0                                                                                      |
+
+### What changed
+
+- `Server/ws/ids.go`: `positiveID(n, field)`, moved from `command_thread.go`. Every id read in `command.go`, `command_chat_send.go`, `command_forward.go`, `command_poll.go` and `command_read.go` calls it. `parseModTarget` takes the channel field name, so a bad `to_channel_id` is named as such.
+- A parse error of any of these commands reaches the client as one frame: `BAD_REQUEST` with the message `invalid payload` (`handleMessage`); the specific text is logged only. The code and frame are unchanged. For the five newly checked ids only the message changed: the service already refused them with `BAD_REQUEST` and its own text, now they get `invalid payload` before the service (and before its rate limiter). The client matches none of the old texts.
+- `Server/invariants/ws_payload_ids.go`: rule `ws-payload-ids` fails a zero-argument `.Int64()` in `ws` outside `positiveID`, with `duration_hours` in `command_poll.go` allowed by field name.
+- `docs/protocol.md` and `docs/code-style.md` describe the rule. `CHANGELOG.md` has one line.
+
+Left as they were: an optional id (`mark_read` `message_id`, `thread_focus` `thread_id`) is still absent-or-`null` allowed and checked when present; `reply_to` and `sticker_id` in `chat_send` are decoded as `*int64` (the `sticker_id` is checked, `reply_to` is validated by the service) and do not use `Int64()`.
+
+### Checks
+
+| Check                                                                                                                | Before                                                                                | After    |
+| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------- |
+| `TestPayloadIDs_RequiredIDsRefuseBadValues` (every required id of 25 commands x zero, negative, 1.5, missing, `"x"`) | the five ids above fail on 0 and -1 (10 cases), checked by putting the old reads back | all pass |
+| `ws-payload-ids` invariant (5 snippet tests and the real tree)                                                       | did not exist                                                                         | pass     |
+
+### Verdict
+
+Kept. One id parser and one error text, five ids no longer reach a handler as 0 or a negative number, and a rule stops a new hand-written read. No saving in time or tokens is claimed.

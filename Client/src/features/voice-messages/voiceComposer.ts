@@ -10,6 +10,7 @@
  * one button that is disabled while an upload runs, so a clip is never sent twice.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -239,7 +240,7 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key !== "Escape" || e.defaultPrevented) return;
+        if (e.key !== "Escape" || isImeCommit(e) || e.defaultPrevented) return;
         e.preventDefault();
         e.stopPropagation();
         cancel();

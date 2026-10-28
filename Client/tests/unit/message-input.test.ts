@@ -493,6 +493,29 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
+  it("an Escape that cancels an IME candidate keeps the reply", () => {
+    const comp = createMessageInput(makeOptions());
+    comp.mount(container);
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    const escape = (isComposing: boolean): KeyboardEvent => {
+      const e = new KeyboardEvent("keydown", {
+        key: "Escape",
+        isComposing,
+        bubbles: true,
+        cancelable: true,
+      });
+      textarea.dispatchEvent(e);
+      return e;
+    };
+
+    comp.setReplyTo(44, "replyuser");
+    expect(escape(true).defaultPrevented).toBe(false);
+    expect(container.querySelector(".reply-bar")?.classList.contains("visible")).toBe(true);
+    expect(escape(false).defaultPrevented).toBe(true);
+
+    comp.destroy?.();
+  });
+
   // ── ArrowUp on empty textarea dispatches edit-last-message ──
 
   it("ArrowUp on empty textarea dispatches edit-last-message custom event", () => {

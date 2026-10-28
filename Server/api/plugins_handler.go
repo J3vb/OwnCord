@@ -13,7 +13,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/admin"
@@ -263,9 +262,8 @@ func hasZipMagic(b []byte) bool {
 }
 
 func parsePluginID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	idStr := chi.URLParam(r, "id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil || id <= 0 {
+	id, ok := pathID(r, "id")
+	if !ok {
 		http.Error(w, "invalid plugin id", http.StatusBadRequest)
 		return 0, false
 	}

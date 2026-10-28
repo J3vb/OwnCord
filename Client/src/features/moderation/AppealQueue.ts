@@ -22,6 +22,7 @@
  * appeal can still take it and the view is live.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { ApiClientError, serverErrorText, type ModerationAppealFilter } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
@@ -327,7 +328,7 @@ export function renderAppeals(
       "keydown",
       (e: KeyboardEvent) => {
         // Escape closes the appeal first; the view's own Escape is the next one.
-        if (e.key !== "Escape" || e.defaultPrevented) return;
+        if (e.key !== "Escape" || isImeCommit(e) || e.defaultPrevented) return;
         e.preventDefault();
         closeToRow();
       },

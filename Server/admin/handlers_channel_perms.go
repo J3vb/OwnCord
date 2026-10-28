@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -99,8 +98,7 @@ func overrideMutationSetup(channels *service.ChannelService, w http.ResponseWrit
 		return nil, 0, nil, false
 	}
 	if req != nil {
-		if err := json.NewDecoder(r.Body).Decode(req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, req) {
 			return nil, 0, nil, false
 		}
 	}

@@ -315,9 +315,11 @@ export function openForwardPicker(opts: ForwardPickerOptions): void {
         owner.destroy();
         if (unsent > 0) showToast(forwardText("toast.stopped", { count: unsent }), "warning");
       },
-      // Escape and the backdrop are handled below, so they can wait out a batch.
+      // Escape and the backdrop wait out a batch.
       closeOnBackdrop: false,
-      closeOnEscape: false,
+      onEscape: () => {
+        if (!busy) modal?.destroy();
+      },
       className: "forward-picker",
       overlayAttrs: { "data-testid": "forward-picker" },
       ariaLabelledBy: "forward-title",
@@ -328,13 +330,6 @@ export function openForwardPicker(opts: ForwardPickerOptions): void {
   );
   appendChildren(modal.modal, body, footer);
 
-  document.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.key === "Escape" && !busy) modal?.destroy();
-    },
-    { signal },
-  );
   closeOnBackdropClick(
     modal.overlay,
     () => {

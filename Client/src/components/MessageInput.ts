@@ -1752,7 +1752,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         }
         // An Escape that cancels something is used up: the app-wide Escape
         // (mark the channel read) leaves a prevented key alone.
-        if (e.key === "Escape") {
+        if (e.key === "Escape" && !isImeCommit(e)) {
           if (state.replyTo !== null) {
             e.preventDefault();
             clearReply();

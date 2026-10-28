@@ -102,15 +102,16 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
 
     appendChildren(footer, cancelBtn, deleteBtn);
 
-    // Overlay/modal shell, dialog semantics, focus trap and focus
-    // save/restore all come from the shared factory; only the backdrop and
-    // Escape wiring stay here, since this component's onClose is decoupled
+    // Overlay/modal shell, dialog semantics, focus trap, focus save/restore and
+    // the IME-safe Escape listener come from the shared factory; only the
+    // backdrop wiring stays here, since this component's onClose is decoupled
     // from destroy() (see the caller's onClose, which calls destroy()).
     instance = createModal(
       {
         content: header,
         closeOnBackdrop: false,
-        closeOnEscape: false,
+        // Escape cancels — it must never stand in for the destructive confirm.
+        onEscape: () => onClose(),
         overlayAttrs: { "data-testid": "delete-channel-modal" },
         ariaLabelledBy: "delete-channel-title",
       },
@@ -120,19 +121,6 @@ export function createDeleteChannelModal(options: DeleteChannelModalOptions): Mo
 
     // Close on backdrop click
     closeOnBackdropClick(instance.overlay, () => onClose(), disposable.signal);
-
-    // Escape cancels — it must never stand in for the destructive confirm.
-    // Document-level so it works wherever focus sits; guarded on the overlay
-    // still being attached because the listener lives until destroy() aborts it.
-    document.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        if (e.key === "Escape" && instance?.overlay.isConnected === true) {
-          onClose();
-        }
-      },
-      { signal: disposable.signal },
-    );
   }
 
   function destroy(): void {
