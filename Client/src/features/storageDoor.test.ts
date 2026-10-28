@@ -18,7 +18,8 @@ const ALLOWED = [
 ];
 
 function withoutComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  // `//` after a `:` is a URL in a string, not a comment.
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
 const touching = readdirSync(srcDir, { recursive: true, encoding: "utf8" })
