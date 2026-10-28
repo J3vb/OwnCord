@@ -170,12 +170,6 @@
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
-      "file": "lib/context-menu.ts",
-      "binding": "dismissOwners",
-      "category": "dom-owned",
-      "reason": "WeakMap keyed by the open menu element"
-    },
-    {
       "file": "lib/formatting.ts",
       "binding": "parsedTimestampCache",
       "category": "pure-cache",
