@@ -19,6 +19,8 @@ import {
   MOCK_MESSAGES,
   submitLogin,
   waitForWsReady,
+  openDmRow,
+  openHome,
 } from "./helpers";
 import {
   findUnnamedControls,
@@ -116,7 +118,7 @@ const inboxReads = async (page: Page): Promise<number> =>
 
 /** Go to DM mode, where "Message Requests (N)" sits at the top. */
 async function toDmMode(page: Page): Promise<void> {
-  await page.locator("[data-testid='dm-entry']").first().click();
+  await openDmRow(page);
   await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
 }
 
@@ -134,12 +136,8 @@ test.describe("B9-5 Message Requests inbox", () => {
   test("open a request, read it as plain text, leave — nothing fetched, nothing accepted", async ({
     page,
   }) => {
-    // The DM header badge counts requests apart from unread (Q2).
-    const badge = page.locator("[data-testid='dm-requests-badge']");
-    await expect(badge).toBeVisible();
-    await expect(badge).toHaveText("22 pending message requests");
-    await expect(page.locator(".dm-header-unread-badge")).toBeHidden();
-
+    // At desktop width the DM header lives behind Home; DM mode lists the
+    // requests with their count (the header badge is covered at narrow width below).
     await toDmMode(page);
     await expect(entry(page)).toHaveText("Message Requests (2)");
 
@@ -210,7 +208,8 @@ test.describe("B9-5 Message Requests inbox", () => {
       [],
     );
     // Still pending: leaving is not accepting.
-    await expect(badge).toHaveText("22 pending message requests");
+    await openHome(page);
+    await expect(entry(page)).toHaveText("Message Requests (2)");
   });
 
   test("live frames update the count, and a reconnect restores the server's inbox", async ({
@@ -284,6 +283,25 @@ test.describe("B9-5 Message Requests inbox", () => {
         }
       }
     }
+  });
+});
+
+test.describe("B9-5 DM header badge at narrow width", () => {
+  // The embedded DM header shows where the server rail does not: at 800px or
+  // less (a desktop window at 200 % zoom), inside the sidebar drawer.
+  test.use({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
+
+  test("the DM header badge counts requests apart from unread (Q2)", async ({ page }) => {
+    await page.addInitScript(mockScript());
+    await page.goto("/");
+    await signIn(page);
+    await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
+    await page.locator("[data-testid='sidebar-toggle']").click();
+
+    const badge = page.locator("[data-testid='dm-requests-badge']");
+    await expect(badge).toBeVisible();
+    await expect(badge).toHaveText("22 pending message requests");
+    await expect(page.locator(".dm-header-unread-badge")).toBeHidden();
   });
 });
 

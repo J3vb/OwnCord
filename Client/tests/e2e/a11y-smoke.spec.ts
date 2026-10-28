@@ -4,6 +4,7 @@ import {
   mockTauriFullSessionWithMessages,
   navigateToMainPageReady,
   openSettings,
+  openHome,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -74,8 +75,9 @@ test.describe("A11y smoke — dialogs, focus, live regions", () => {
   });
 
   test("a factory modal (member picker) traps Tab inside the dialog", async ({ page }) => {
-    // Open the DM member picker via the "+" on the embedded DM section.
-    const newDmBtn = page.locator(".sidebar-dm-section .category-add-btn");
+    // Open the DM member picker via the "+" in the Home DM list.
+    await openHome(page);
+    const newDmBtn = page.locator(".dm-section-label .dm-add");
     await expect(newDmBtn).toBeVisible({ timeout: 5_000 });
     await newDmBtn.click();
 

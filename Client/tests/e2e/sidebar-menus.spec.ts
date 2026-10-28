@@ -25,6 +25,7 @@ import {
   navigateToMainPage,
   navigateToMainPageReady,
   waitForWsReady,
+  openDmRow,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -166,12 +167,10 @@ async function mockDmSession(page: Page): Promise<void> {
   );
 }
 
-/** Boot to the full DM sidebar (dms mode) from the channels-mode preview row. */
+/** Boot to the full DM sidebar (dms mode) through the server rail's Home. */
 async function openDmSidebar(page: Page): Promise<void> {
   await submitLoginAndWait(page);
-  const dmEntry = page.locator("[data-testid='dm-entry']").first();
-  await expect(dmEntry).toBeVisible({ timeout: 5_000 });
-  await dmEntry.click();
+  await openDmRow(page);
   await expect(page.locator(`.dm-item[data-channel-id="${DM_ONE_TO_ONE_ID}"]`)).toBeVisible({
     timeout: 5_000,
   });
@@ -414,6 +413,12 @@ test.describe("Member list section", () => {
   test("dragging the resize handle grows the section and saves the height", async ({ page }) => {
     const section = page.locator("[data-testid='sidebar-members']");
     const handle = page.locator(".sidebar-resize-handle");
+    // Start from a saved height well under the 65 % cap, so the drag has room
+    // to grow however much space the sidebar leaves the section at this size.
+    await page.evaluate(() => localStorage.setItem("owncord:member-list-height", "200"));
+    await page.reload();
+    await submitLoginAndWait(page);
+    await expect(section).toHaveCSS("height", "200px");
     await handle.scrollIntoViewIfNeeded();
 
     const startHeight = await section.evaluate((el: HTMLElement) => el.offsetHeight);

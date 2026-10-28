@@ -211,10 +211,23 @@ test.describe("B9-18 connect and shell text", () => {
     const sidebar = page.locator("[data-testid='unified-sidebar']");
     await expect(sidebar.locator(".server-online")).toHaveText(/^\d+ online$/);
     await expect(sidebar.locator("[data-testid='invite-btn']")).toHaveAccessibleName("Invite");
+    await expect(sidebar.locator(".sidebar-members-header .category-name")).toHaveText("MEMBERS");
+    const rail = page.getByTestId("server-rail");
+    await expect(rail).toHaveAccessibleName("Servers");
+    await expect(rail.getByTestId("server-rail-home")).toHaveAccessibleName("Home");
+    await expect(rail.getByTestId("server-rail-add")).toHaveAccessibleName("Add a server");
+    await expect(rail.getByTestId("server-rail-join")).toHaveAccessibleName(
+      "Join with an invite link",
+    );
+
+    // The embedded DM section and the quick switcher show where the rail does
+    // not: at 800px or less (a desktop window at 200 % zoom), in the drawer.
+    await page.setViewportSize({ width: 640, height: 400 });
+    await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
+    await page.locator("[data-testid='sidebar-toggle']").click();
     await expect(sidebar.locator(".sidebar-dm-section .category-name")).toHaveText(
       "DIRECT MESSAGES",
     );
-    await expect(sidebar.locator(".sidebar-members-header .category-name")).toHaveText("MEMBERS");
     await page.getByRole("button", { name: "Switch server", exact: true }).click();
     const overlay = page.locator("[data-testid='quick-switch-overlay']");
     await expect(overlay.getByRole("dialog", { name: "Switch server" })).toBeVisible();
@@ -244,13 +257,16 @@ test.describe("B9-18 connect and shell text", () => {
       await expectWhole(el);
     }
     for (const [el, english] of [
-      [sidebar.locator(".sidebar-dm-section .category-name"), "DIRECT MESSAGES"],
       [sidebar.locator(".sidebar-members-header .category-name"), "MEMBERS"],
     ] as const) {
       await expect(el).toHaveText(expanded(english));
       await expectWhole(el);
     }
     expect(await findUnnamedControls(sidebar)).toEqual([]);
+    // The server rail replaces the embedded DM section at this width.
+    const rail = page.getByTestId("server-rail");
+    await expect(rail.getByTestId("server-rail-home")).toHaveAccessibleName(expanded("Home"));
+    expect(await findUnnamedControls(rail)).toEqual([]);
     const userBar = page.locator("[data-testid='user-bar']");
     expect(await findUnnamedControls(userBar)).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
@@ -260,7 +276,11 @@ test.describe("B9-18 connect and shell text", () => {
     });
 
     // The quick switcher: named by expanded text, reachable, Escape closes it
-    // and focus goes back to its opener.
+    // and focus goes back to its opener. It is the switcher where the server
+    // rail is not shown (800px or less), so open it from the sidebar drawer.
+    await page.setViewportSize({ width: 640, height: 400 });
+    await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
+    await page.locator("[data-testid='sidebar-toggle']").click();
     const switchBtn = userBar.locator("[data-testid='disconnect-btn']");
     await expect(switchBtn).toHaveAccessibleName(expanded("Switch server"));
     await switchBtn.focus();
@@ -285,6 +305,7 @@ test.describe("B9-18 connect and shell text", () => {
     await switchBtn.click();
     await overlay.locator("[data-testid='add-server-btn']").click();
     await expect(page.locator(".connect-form")).toBeVisible({ timeout: 5_000 });
+    await page.setViewportSize({ width: 940, height: 500 });
     for (const [el, english] of [
       [page.locator(".server-panel-header h2"), "Servers"],
       [page.locator(".btn-add-server"), "+ Add Server"],

@@ -65,7 +65,8 @@ import {
 import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/read-state";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
-import { authStore, clearAuth } from "@stores/auth.store";
+import { authStore } from "@stores/auth.store";
+import { addServer, switchToServer } from "../../features/server-rail/switchServer";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import {
   channelsStore,
@@ -76,7 +77,7 @@ import {
   type CategoryRef,
 } from "@stores/channels.store";
 import { keepDmForCall, releaseKeptDm } from "../../features/direct-messages/keptCallDms";
-import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
+import { dmStore, closeDmLocally, restoreDmChannel, type DmChannel } from "@stores/dm.store";
 import { clearChannelVoiceUsers, voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
@@ -169,6 +170,8 @@ export interface SidebarAreaResult {
   readonly returnToChannel: () => void;
   /** Open (or start) the 1:1 DM with a user, as the member list's Message. */
   readonly messageUser: (userId: number) => void;
+  /** Open an existing DM, as a click on its row does. */
+  readonly openDm: (dm: DmChannel) => void;
   /** Build one member panel with the shared callback wiring (Message, Call and
    *  voice moderation). The one factory every host uses; the caller owns the
    *  result and must destroy it before another host builds one. */
@@ -1392,17 +1395,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           currentHost,
           onSwitch: (host, _name) => {
             closeQuickSwitch();
-            // Store target for ConnectPage to auto-select after navigation
-            sessionStorage.setItem("owncord:quick-switch-target", host);
-            // Tear the session down (clears auth -> ws disconnect -> navigate
-            // to connect) but keep this server's saved sign-in (B7-13).
-            clearAuth("server_switch");
+            switchToServer(host);
           },
           onAddServer: () => {
             closeQuickSwitch();
-            // Navigate to ConnectPage so the user can add a new server,
-            // keeping this server's saved sign-in like a switch (B7-13).
-            clearAuth("server_switch");
+            addServer();
           },
           onClose: closeQuickSwitch,
         });
@@ -1494,6 +1491,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     },
     returnToChannel,
     messageUser: (userId) => void handleCreateDm(userId, dmDeps),
+    openDm: (dm) => selectDmConversation(dm, dmDeps),
     buildMemberPanel,
     syncMemberSection,
     renameGroup,

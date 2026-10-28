@@ -17,6 +17,7 @@ import { startTestServer, TEST_PASSWORD, type TestServer } from "../support/serv
 
 // Four senders need more sign-ups and sign-ins than one IP gets a minute.
 const test = base.extend({
+  // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
   server: async ({}, use, info) => {
     const server = await startTestServer({
       env: { ...process.env, OWNCORD_SECURITY_AUTH_RATE_LIMIT_MULTIPLIER: "10" },
@@ -138,7 +139,7 @@ const item = (page: Page, name: string) =>
 const outcome = (page: Page) => page.locator("[data-testid='requests-outcome']");
 
 async function openInbox(page: Page, count: number): Promise<void> {
-  await page.locator("[data-testid='dm-requests-badge']").click();
+  await page.getByTestId("server-rail-home").click();
   const entry = page.locator("[data-testid='dm-requests-entry']");
   await expect(entry).toHaveText(`Message Requests (${count})`);
   await entry.click();
@@ -299,7 +300,10 @@ test.describe("B9-6 Message Request decisions (real server)", () => {
       await expect(
         bob.locator(".msg-text", { hasText: "still here after your reconnect" }),
       ).toHaveCount(1);
-      await expect(bob.locator("[data-testid='dm-requests-badge']")).toBeHidden();
+      // No pending request left: Home's "Message Requests" row shows no count.
+      await bob.getByTestId("server-rail-home").click();
+      await expect(bob.locator(".dm-sidebar-header")).toBeVisible();
+      await expect(bob.locator("[data-testid='dm-requests-entry']")).toHaveText("Message Requests");
       expect(await server.api("/api/v1/dm-requests", undefined, other)).toEqual({ requests: [] });
     } finally {
       alice.close();

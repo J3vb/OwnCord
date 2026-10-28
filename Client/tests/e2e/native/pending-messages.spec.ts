@@ -44,7 +44,9 @@ async function signIn(page: Page, host: string): Promise<void> {
     await submit.click();
   }
   await expect(layout).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator(".channel-item").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".channel-item").filter({ visible: true }).first()).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form

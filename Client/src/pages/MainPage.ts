@@ -2,6 +2,12 @@
 // Composes standalone components; never sets innerHTML with user content.
 // Delegates sidebar and chat-area DOM construction to sub-orchestrators.
 
+import { addServer, loadSavedServers, switchToServer } from "../features/server-rail/switchServer";
+import {
+  confirmAndJoinInvite,
+  currentServerName,
+  parseInviteInput,
+} from "../features/server-rail/joinInvite";
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/safe-render";
@@ -1179,6 +1185,40 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const memberColumnBody = createElement("div", { class: "member-column-body" });
     memberColumnEl.appendChild(memberColumnBody);
 
+    // The server rail sits left of the sidebar. The web portal serves exactly
+    // one server, so it has none there. The slot holds the rail's width while
+    // the rail loads on demand, keeping it out of the eager MainPage chunk.
+    let railSlot: HTMLDivElement | null = null;
+    if (!__OWNCORD_WEB__) {
+      railSlot = createElement("div", { class: "server-rail-slot" });
+      app.classList.add("has-server-rail");
+      const slot = railSlot;
+      const railHost = api.getConfig().host ?? "";
+      void import("@components/ServerRail")
+        .then(({ createServerRail }) => {
+          if (tornDown) return;
+          const rail = createServerRail({
+            currentHost: railHost,
+            currentName: authStore.getState().serverName ?? "",
+            loadServers: loadSavedServers,
+            switchServer: switchToServer,
+            addServer,
+            onOpenDm: (dm) => sidebar.openDm(dm),
+            onShowServer: () => sidebar.returnToChannel(),
+            joinInvite: (text) => {
+              const invite = parseInviteInput(text);
+              if (invite === null) return false;
+              confirmAndJoinInvite(invite, currentServerName(railHost));
+              return true;
+            },
+          });
+          rail.mount(slot);
+          unsubscribers.push(() => rail.destroy?.());
+        })
+        .catch((err: unknown) => log.warn("Server rail failed to load", err));
+    }
+
+    if (railSlot !== null) app.appendChild(railSlot);
     appendChildren(
       app,
       sidebar.sidebarWrapper,

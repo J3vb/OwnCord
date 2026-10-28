@@ -287,6 +287,10 @@ export const shards = {
   // 38902717516 and 38926807609 they used most of lib-rest-1's 90 minutes.
   "lib-rest-9": [
     "src/lib/icons.ts",
+    "src/lib/serverRailLayout.ts",
+    "src/lib/dmUnread.ts",
+    "src/features/server-rail/joinInvite.ts",
+    "src/features/server-rail/switchServer.ts",
     "src/lib/imageHeader.ts",
     "src/features/channels/categoryActions.ts",
     "src/features/channels/collapsedMigration.ts",

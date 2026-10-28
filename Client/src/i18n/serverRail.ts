@@ -1,0 +1,46 @@
+import { defineCatalog } from "./format";
+
+/** The desktop server rail and its invite dialog. Their own catalog so the
+ *  copy loads with the main page chunk, not the startup closure. */
+export const serverRailText = defineCatalog("serverRail", {
+  label: "Servers",
+  home: "Home",
+  homeUnread: {
+    one: "Home, {count} unread direct message",
+    other: "Home, {count} unread direct messages",
+  },
+  homeMark: "OC",
+  dmUnread: {
+    one: "{name}, {count} unread message",
+    other: "{name}, {count} unread messages",
+  },
+  homeDirect: "Direct messages",
+  add: "Add a server",
+  join: "Join with an invite link",
+  folder: "Folder",
+  folderNamed: "Folder: {name}",
+  currentSuffix: "{name} (current server)",
+  moveUp: "Move up",
+  moveDown: "Move down",
+  groupNext: "Create folder with next server",
+  removeFromFolder: "Remove from folder",
+  renameFolder: "Rename folder",
+  renameLabel: "Folder name",
+  folderColor: "Folder colour",
+  "color.blurple": "Blurple",
+  "color.green": "Green",
+  "color.amber": "Amber",
+  "color.red": "Red",
+  "color.pink": "Pink",
+  "color.grey": "Grey",
+  ungroup: "Ungroup",
+  expand: "Expand folder",
+  collapse: "Collapse folder",
+  menu: "Server options",
+  folderMenu: "Folder options",
+  joinTitle: "Join with an invite link",
+  joinLabel: "Paste an invite link",
+  joinPlaceholder: "owncord://invite/…",
+  joinConfirm: "Continue",
+  joinInvalid: "That isn't a valid invite link.",
+});
