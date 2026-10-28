@@ -202,6 +202,7 @@ vi.mock("../../src/pages/main-page/SidebarArea", () => ({
   createSidebarArea: (...args: unknown[]) => {
     mockCreateSidebarArea(...args);
     const sidebarWrapper = document.createElement("div");
+    sidebarWrapper.className = "unified-sidebar";
     // One stand-in member list per panel: the factory both hosts share.
     const buildMemberPanel = () => {
       const element = document.createElement("div");
@@ -4329,7 +4330,7 @@ describe("MainPage — focus fallback skips hidden sidebar buttons", () => {
   // the hidden button's focus; the assertion reads the inline style instead.
   it("lands focus on the first visible sidebar button, not a hidden one", () => {
     const sidebar = container.querySelector<HTMLElement>(
-      "[data-testid='app-layout'] > :first-child",
+      "[data-testid='app-layout'] > .unified-sidebar",
     )!;
     const hiddenInvite = document.createElement("button");
     hiddenInvite.style.display = "none";
@@ -4377,7 +4378,7 @@ describe("MainPage — focus fallback when the channel is declined", () => {
   // as Read) is hidden while nothing is unread, and focusing a hidden button is
   // a silent no-op that leaves focus on <body>.
   it("lands on a visible sidebar button, skipping a hidden first one", () => {
-    const sidebar = container.querySelector("[data-testid='app-layout']")!.firstElementChild!;
+    const sidebar = container.querySelector("[data-testid='app-layout'] > .unified-sidebar")!;
     const hidden = document.createElement("button");
     hidden.style.display = "none";
     const shown = document.createElement("button");

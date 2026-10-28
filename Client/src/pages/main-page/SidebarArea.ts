@@ -65,7 +65,8 @@ import {
 import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/read-state";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
-import { authStore, clearAuth } from "@stores/auth.store";
+import { authStore } from "@stores/auth.store";
+import { addServer, switchToServer } from "../../features/server-rail/switchServer";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import {
   channelsStore,
@@ -1392,17 +1393,11 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
           currentHost,
           onSwitch: (host, _name) => {
             closeQuickSwitch();
-            // Store target for ConnectPage to auto-select after navigation
-            sessionStorage.setItem("owncord:quick-switch-target", host);
-            // Tear the session down (clears auth -> ws disconnect -> navigate
-            // to connect) but keep this server's saved sign-in (B7-13).
-            clearAuth("server_switch");
+            switchToServer(host);
           },
           onAddServer: () => {
             closeQuickSwitch();
-            // Navigate to ConnectPage so the user can add a new server,
-            // keeping this server's saved sign-in like a switch (B7-13).
-            clearAuth("server_switch");
+            addServer();
           },
           onClose: closeQuickSwitch,
         });

@@ -1,0 +1,226 @@
+/* ── Server rail: compact squircles ── */
+/* Holds the rail's width while the rail chunk loads (MainPage). */
+.server-rail-slot {
+  display: flex;
+  flex: none;
+  width: 58px;
+  background: var(--bg-tertiary);
+  min-height: 0;
+}
+.server-rail {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 58px;
+  box-sizing: border-box;
+  padding: 10px 0;
+  gap: 6px;
+  background: var(--bg-tertiary);
+  min-height: 0;
+}
+.server-rail-scroll {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.server-rail-scroll::-webkit-scrollbar {
+  display: none;
+}
+.server-rail-top,
+.server-rail-list,
+.server-rail-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.server-rail-footer {
+  flex: none;
+}
+.server-rail-item {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 58px;
+  flex: none;
+}
+.server-rail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  overflow: hidden;
+}
+.server-rail-btn:hover {
+  transform: translateY(-1px);
+}
+.server-rail-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.server-rail-btn.active {
+  box-shadow:
+    0 0 0 2px var(--bg-tertiary),
+    0 0 0 4px var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .server-rail-btn:hover {
+    transform: none;
+  }
+}
+.server-rail-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+}
+.server-rail-home {
+  background: var(--accent);
+  color: #fff;
+}
+.server-rail-sep {
+  width: 26px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border);
+  flex: none;
+}
+.server-rail-action {
+  background: transparent;
+  border: 1.5px dashed color-mix(in srgb, var(--text-muted) 55%, transparent);
+  color: var(--text-muted);
+  box-sizing: border-box;
+  font-weight: 400;
+}
+.server-rail-action:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+/* Folders */
+.server-rail-folder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 46px;
+  box-sizing: border-box;
+  padding: 3px 0;
+  border: 1.5px solid var(--folder-color);
+  border-radius: 12px;
+  flex: none;
+}
+.server-rail-folder:not(.collapsed) {
+  background: color-mix(in srgb, var(--folder-color) 12%, transparent);
+}
+.server-rail-folder .server-rail-item {
+  width: 100%;
+}
+.server-rail-folder-glyph {
+  display: flex;
+  color: var(--folder-color);
+}
+.server-rail-folder-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  width: 28px;
+  height: 28px;
+}
+.server-rail-mini {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 0;
+  overflow: hidden;
+}
+
+/* Drag and drop */
+.server-rail-item.drop-before::before,
+.server-rail-item.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.server-rail-item.drop-before::before {
+  top: -4px;
+}
+.server-rail-item.drop-after::after {
+  bottom: -4px;
+}
+.server-rail-item.drop-into .server-rail-btn {
+  box-shadow: 0 0 0 2px var(--green);
+}
+
+/* The portal serves one server, and the drawer layouts have no room for a rail. */
+@media (max-width: 800px) {
+  .server-rail-slot,
+  .server-rail {
+    display: none;
+  }
+}
+
+/* Join dialog */
+.server-rail-join-form {
+  padding: 20px;
+  min-width: 320px;
+}
+.server-rail-join-form h3 {
+  margin: 0 0 12px;
+}
+.server-rail-join-label {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.server-rail-join-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+}
+.server-rail-join-input::placeholder {
+  color: var(--text-muted);
+}
+.server-rail-join-error {
+  margin: 6px 0 0;
+  color: var(--text-danger);
+  font-size: 0.8rem;
+}
+.server-rail-join-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.server-rail-join-actions .btn {
+  flex: 1;
+}
