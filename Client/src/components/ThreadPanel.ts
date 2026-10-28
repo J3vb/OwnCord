@@ -20,7 +20,7 @@ import { isImeCommit } from "@lib/ime";
 import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
+import { createConfirmModal } from "@lib/confirmModal";
 import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { readableRoleColor } from "@lib/themes";
@@ -244,46 +244,22 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   function confirmDelete(): void {
     const t = thread();
     if (t === undefined) return;
-    const content = createElement("div");
-    const titleId = `thread-delete-title-${threadId}`;
-    const header = createElement("div", { class: "modal-header" });
-    header.appendChild(createElement("h3", { id: titleId }, threadsText("delete.title")));
-    const body = createElement("div", { class: "modal-body" });
-    body.appendChild(
-      createElement(
-        "p",
-        { class: "modal-danger-text" },
-        threadsText("delete.body", { name: t.name }),
-      ),
-    );
-    const footer = createElement("div", { class: "modal-footer" });
-    const cancel = createElement(
-      "button",
-      { class: "btn-modal-cancel", type: "button", "data-testid": "thread-delete-cancel" },
-      shellText("common.cancel"),
-    );
-    const confirm = createElement(
-      "button",
-      { class: "btn-danger", type: "button", "data-testid": "thread-delete-confirm" },
-      threadsText("delete.confirm"),
-    );
-    footer.append(cancel, confirm);
-    content.append(header, body, footer);
-    const modal = createModal({
-      content,
-      ariaLabelledBy: titleId,
-      overlayAttrs: { "data-testid": "thread-delete-modal" },
+    createConfirmModal({
+      title: threadsText("delete.title"),
+      titleId: `thread-delete-title-${threadId}`,
+      body: threadsText("delete.body", { name: t.name }),
+      confirmLabel: threadsText("delete.confirm"),
+      testId: "thread-delete-modal",
+      confirmTestId: "thread-delete-confirm",
+      cancelTestId: "thread-delete-cancel",
       signal,
       fallbackFocus: () => deleteBtn,
+      onConfirm: () => {
+        if (!sendThreadDelete(ws, threadId)) {
+          showToast(threadsText("toast.notConnected"), "error");
+        }
+      },
     });
-    cancel.addEventListener("click", () => modal.close());
-    confirm.addEventListener("click", () => {
-      modal.close();
-      if (!sendThreadDelete(ws, threadId)) {
-        showToast(threadsText("toast.notConnected"), "error");
-      }
-    });
-    cancel.focus();
   }
 
   /** The name, status and the actions this viewer may use, from the thread's current state. */
@@ -548,34 +524,15 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   }
 
   function confirmDeleteMessage(messageId: number): void {
-    const content = createElement("div");
-    const titleId = `thread-msg-delete-title-${messageId}`;
-    const header = createElement("div", { class: "modal-header" });
-    header.appendChild(createElement("h3", { id: titleId }, messagingText("delete.title")));
-    const body = createElement("div", { class: "modal-body" });
-    body.appendChild(
-      createElement("p", { class: "modal-danger-text" }, messagingText("delete.body")),
-    );
-    const footer = createElement("div", { class: "modal-footer" });
-    const cancel = createElement(
-      "button",
-      { class: "btn-modal-cancel", type: "button" },
-      shellText("common.cancel"),
-    );
-    const confirm = createElement(
-      "button",
-      { class: "btn-danger", type: "button", "data-testid": "thread-msg-delete-confirm" },
-      messagingText("delete.confirm"),
-    );
-    footer.append(cancel, confirm);
-    content.append(header, body, footer);
-    const modal = createModal({ content, ariaLabelledBy: titleId, signal });
-    cancel.addEventListener("click", () => modal.close());
-    confirm.addEventListener("click", () => {
-      modal.close();
-      sendDelete(messageId);
+    createConfirmModal({
+      title: messagingText("delete.title"),
+      titleId: `thread-msg-delete-title-${messageId}`,
+      body: messagingText("delete.body"),
+      confirmLabel: messagingText("delete.confirm"),
+      confirmTestId: "thread-msg-delete-confirm",
+      signal,
+      onConfirm: () => sendDelete(messageId),
     });
-    cancel.focus();
   }
 
   // ── Mount ─────────────────────────────────────────────────────────────────

@@ -25,7 +25,7 @@
 
 import { createElement, setText, clearChildren, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
+import { createConfirmModal } from "@lib/confirmModal";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import type { PollAnswer, PollView } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
@@ -33,7 +33,6 @@ import { uiStore } from "@stores/ui.store";
 import type { Message } from "@stores/messages.store";
 import type { MessageRenderOptions } from "./renderers";
 import { pollCardText } from "../../i18n/pollCard";
-import { shellText } from "../../i18n/shell";
 import {
   answerPercent,
   canEndPoll,
@@ -133,35 +132,17 @@ function timeLeftText(poll: PollView, now: number): string {
 
 /** Ask for confirmation before ending a poll. */
 function confirmEnd(messageId: number, signal: AbortSignal, onConfirm: () => void): void {
-  const titleId = `poll-end-title-${messageId}`;
-  const content = createElement("div");
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, pollCardText("endConfirm.title")));
-  const body = createElement("div", { class: "modal-body" });
-  body.appendChild(createElement("p", {}, pollCardText("endConfirm.body")));
-  const footer = createElement("div", { class: "modal-footer" });
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": "poll-end-cancel" },
-    shellText("common.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    { class: "btn-danger", type: "button", "data-testid": "poll-end-confirm" },
-    pollCardText("endConfirm.confirm"),
-  );
-  footer.append(cancel, confirm);
-  content.append(header, body, footer);
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "poll-end-modal" },
+  createConfirmModal({
+    title: pollCardText("endConfirm.title"),
+    titleId: `poll-end-title-${messageId}`,
+    // A plain paragraph: ending a poll is final but not an alarm.
+    body: createElement("p", {}, pollCardText("endConfirm.body")),
+    confirmLabel: pollCardText("endConfirm.confirm"),
+    testId: "poll-end-modal",
+    confirmTestId: "poll-end-confirm",
+    cancelTestId: "poll-end-cancel",
     signal,
-  });
-  cancel.addEventListener("click", () => modal.close());
-  confirm.addEventListener("click", () => {
-    modal.close();
-    onConfirm();
+    onConfirm,
   });
 }
 

@@ -21,7 +21,7 @@
  * confirmation, so an offer made before a demotion is not sent.
  */
 
-import { createModal } from "@lib/modalFactory";
+import { createConfirmModal } from "@lib/confirmModal";
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
@@ -349,35 +349,16 @@ function confirmEnforce(
   fallbackFocus: () => HTMLElement | null,
   onConfirm: () => void,
 ): void {
-  const titleId = `mod-confirm-${++actSeq}`;
-  const content = createElement("div");
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, t(ENFORCE[kind].headingKey)));
-  const body = createElement("div", { class: "modal-body" });
-  body.appendChild(createElement("p", { class: "modal-danger-text" }, t(ENFORCE[kind].bodyKey)));
-  const footer = createElement("div", { class: "modal-footer" });
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button" },
-    t("confirm.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    { class: "btn-danger", type: "button", "data-testid": "mod-confirm" },
-    t(ENFORCE[kind].confirmKey),
-  );
-  footer.append(cancel, confirm);
-  content.append(header, body, footer);
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "mod-confirm-dialog" },
+  createConfirmModal({
+    title: t(ENFORCE[kind].headingKey),
+    titleId: `mod-confirm-${++actSeq}`,
+    body: t(ENFORCE[kind].bodyKey),
+    confirmLabel: t(ENFORCE[kind].confirmKey),
+    cancelLabel: t("confirm.cancel"),
+    testId: "mod-confirm-dialog",
+    confirmTestId: "mod-confirm",
     signal,
     fallbackFocus,
-  });
-  cancel.addEventListener("click", () => modal.close());
-  confirm.addEventListener("click", () => {
-    modal.close();
-    onConfirm();
+    onConfirm,
   });
 }
