@@ -1191,6 +1191,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     let railSlot: HTMLDivElement | null = null;
     if (!__OWNCORD_WEB__) {
       railSlot = createElement("div", { class: "server-rail-slot" });
+      app.classList.add("has-server-rail");
       const slot = railSlot;
       const railHost = api.getConfig().host ?? "";
       void import("@components/ServerRail")
@@ -1202,6 +1203,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             loadServers: loadSavedServers,
             switchServer: switchToServer,
             addServer,
+            onOpenDm: (dm) => sidebar.openDm(dm),
             joinInvite: (text) => {
               const invite = parseInviteInput(text);
               if (invite === null) return false;

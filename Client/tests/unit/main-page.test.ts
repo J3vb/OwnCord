@@ -240,6 +240,7 @@ vi.mock("../../src/pages/main-page/SidebarArea", () => ({
       children: [],
       unsubscribers: [() => leftPanel?.destroy()],
       openQuickSwitch: vi.fn(),
+      openDm: vi.fn(),
       rememberChannel: mockRememberChannel,
       forgetChannel: vi.fn(),
       returnToChannel: mockReturnToChannel,

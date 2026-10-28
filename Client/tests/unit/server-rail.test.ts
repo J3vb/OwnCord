@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServerRail } from "@components/ServerRail";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
+import { dmStore, setDmChannels, type DmChannel } from "@stores/dm.store";
 import { RAIL_LAYOUT_KEY } from "@lib/serverRailLayout";
 import type { ServerProfile } from "@lib/profiles";
 
@@ -23,7 +24,10 @@ interface Opts {
   currentHost?: string;
   currentName?: string;
   joinInvite?: (t: string) => boolean;
+  onOpenDm?: (dm: DmChannel) => void;
 }
+
+const mounted: Array<{ destroy?: () => void }> = [];
 
 async function mountRail(o: Opts = {}) {
   const switchServer = vi.fn();
@@ -37,11 +41,29 @@ async function mountRail(o: Opts = {}) {
     addServer,
     joinInvite,
     newFolderId: () => "fid",
+    ...(o.onOpenDm !== undefined ? { onOpenDm: o.onOpenDm } : {}),
   });
   rail.mount(document.body);
+  mounted.push(rail);
   await Promise.resolve();
   await Promise.resolve();
   return { rail, switchServer, addServer, joinInvite };
+}
+
+function dm(channelId: number, unreadCount: number): DmChannel {
+  const user = { id: channelId, username: `u${channelId}`, avatar: "", status: "online" as const };
+  return {
+    channelId,
+    recipient: user,
+    participants: [user],
+    name: "",
+    isGroup: false,
+    lastMessageId: null,
+    lastMessage: "",
+    lastMessageAt: "",
+    unreadCount,
+    mentionCount: 0,
+  };
 }
 
 const servers = () =>
@@ -53,7 +75,47 @@ describe("ServerRail", () => {
     setSidebarMode("channels");
   });
   afterEach(() => {
+    for (const r of mounted.splice(0)) r.destroy?.();
     document.body.innerHTML = "";
+    dmStore.setState(() => ({ channels: [] }));
+  });
+
+  it("shows the unread DM total on Home and hides it at zero", async () => {
+    await mountRail();
+    const badge = document.querySelector<HTMLElement>('[data-testid="server-rail-home-badge"]')!;
+    const home = document.querySelector<HTMLElement>('[data-testid="server-rail-home"]')!;
+    expect(badge.hidden).toBe(true);
+    expect(home.getAttribute("aria-label")).toBe("Home");
+    setDmChannels([dm(1, 2), dm(2, 3)]);
+    dmStore.flush();
+    expect(badge.hidden).toBe(false);
+    expect(badge.textContent).toBe("5");
+    expect(home.getAttribute("aria-label")).toBe("Home, 5 unread direct messages");
+    setDmChannels([dm(1, 0)]);
+    dmStore.flush();
+    expect(badge.hidden).toBe(true);
+  });
+
+  it("lists only DMs with unread messages under Home, newest first, and opens one", async () => {
+    const onOpenDm = vi.fn();
+    await mountRail({ onOpenDm });
+    const older = { ...dm(1, 2), lastMessageAt: "2026-10-28T10:00:00Z" };
+    const newer = { ...dm(2, 1), lastMessageAt: "2026-10-28T11:00:00Z" };
+    setDmChannels([older, dm(3, 0), newer]);
+    dmStore.flush();
+    const icons = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[data-testid="server-rail-dm"]'),
+    );
+    expect(icons.map((b) => b.dataset["channelId"])).toEqual(["2", "1"]);
+    expect(icons[1]!.getAttribute("aria-label")).toBe("u1, 2 unread messages");
+    icons[0]!.click();
+    expect(onOpenDm).toHaveBeenCalledWith(expect.objectContaining({ channelId: 2 }));
+    setDmChannels([
+      { ...older, unreadCount: 0 },
+      { ...newer, unreadCount: 0 },
+    ]);
+    dmStore.flush();
+    expect(document.querySelectorAll('[data-testid="server-rail-dm"]')).toHaveLength(0);
   });
 
   it("renders saved servers plus the current one, with initials and nav semantics", async () => {

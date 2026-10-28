@@ -95,6 +95,50 @@
   background: var(--accent);
   color: #fff;
 }
+.server-rail-badge {
+  position: absolute;
+  right: 6px;
+  bottom: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 2px solid var(--bg-tertiary);
+  background: var(--red);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 12px;
+  text-align: center;
+  pointer-events: none;
+}
+.server-rail-dms {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.server-rail-dms:empty {
+  display: none;
+}
+.server-rail-dm {
+  background: transparent;
+}
+.server-rail-dm-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+}
+.server-rail-dm-avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .server-rail-sep {
   width: 26px;
   height: 2px;
@@ -176,6 +220,23 @@
   box-shadow: 0 0 0 2px var(--green);
 }
 
+/* With the rail showing, DMs live behind Home and the rail does the
+   switching, so the sidebar's DM section, its OC mark and the user bar's
+   switch button step aside. The narrow drawer layout has no rail and keeps
+   them. */
+@media (min-width: 801px) {
+  .app.has-server-rail .sidebar-dm-section,
+  .app.has-server-rail .unified-sidebar-header .server-icon-sm,
+  .app.has-server-rail .user-bar [data-testid="disconnect-btn"] {
+    display: none;
+  }
+  .app.has-server-rail .unified-sidebar-header > .server-icon-sm + * {
+    max-width: 100%;
+  }
+  .app.has-server-rail .user-bar .ub-controls {
+    gap: 6px;
+  }
+}
 /* The portal serves one server, and the drawer layouts have no room for a rail. */
 @media (max-width: 800px) {
   .server-rail-slot,

@@ -34,6 +34,11 @@ import {
   type RailLayout,
 } from "@lib/serverRailLayout";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
+import { dmDisplayName, dmStore, type DmChannel } from "@stores/dm.store";
+import { CHANNEL_MUTE_CHANGED } from "@lib/channel-mutes";
+import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
+import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
+import { formatBadgeCount } from "@lib/formatting";
 import { serverRailText } from "../i18n/serverRail";
 import { openServerRailJoinModal } from "./ServerRailJoinModal";
 
@@ -48,6 +53,8 @@ export interface ServerRailOptions {
   /** Whether pasted text is a usable invite; when true it has been handed on. */
   readonly joinInvite: (text: string) => boolean;
   readonly newFolderId?: () => string;
+  /** Open a DM from its icon under Home. */
+  readonly onOpenDm?: (dm: DmChannel) => void;
 }
 
 type DropZone = "before" | "after" | "into";
@@ -161,6 +168,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
   let root: HTMLElement | null = null;
   let list: HTMLElement | null = null;
   let homeBtn: HTMLButtonElement | null = null;
+  let renderDms: (() => void) | null = null;
 
   const nav = createElement("nav", {
     class: "server-rail",
@@ -488,6 +496,42 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     return box;
   }
 
+  function dmItem(dm: DmChannel): HTMLElement {
+    const name = dmDisplayName(dm);
+    const count = dmUnreadCount(dm);
+    const label = serverRailText("dmUnread", { name, count });
+    const wrapper = createElement("div", { class: "server-rail-item" });
+    const btn = createElement("button", {
+      type: "button",
+      class: "server-rail-btn server-rail-dm",
+      title: name,
+      "aria-label": label,
+      "data-testid": "server-rail-dm",
+      "data-channel-id": String(dm.channelId),
+    });
+    const subject = dm.isGroup
+      ? { username: name, avatar: dm.icon ?? null }
+      : { username: dm.recipient.username, avatar: dm.recipient.avatar };
+    btn.appendChild(
+      createAvatarElement(subject, {
+        className: "server-rail-dm-avatar",
+        background: pickAvatarColor(subject.username),
+        decorative: true,
+      }),
+    );
+    btn.addEventListener("click", () => {
+      const live = dmStore.getState().channels.find((c) => c.channelId === dm.channelId);
+      options.onOpenDm?.(live ?? dm);
+    });
+    const badge = createElement(
+      "span",
+      { class: "server-rail-badge", "aria-hidden": "true" },
+      formatBadgeCount(count),
+    );
+    appendChildren(wrapper, btn, badge);
+    return wrapper;
+  }
+
   function render(): void {
     if (list === null) return;
     clearChildren(list);
@@ -515,8 +559,32 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       createElement("span", { class: "server-rail-home-mark" }, serverRailText("homeMark")),
     );
     homeBtn.addEventListener("click", () => setSidebarMode("dms"));
-    homeWrap.appendChild(homeBtn);
+    // DMs live behind Home, so their unread total shows on it, and each
+    // conversation with something unread gets its own icon under it.
+    const homeBadge = createElement("span", {
+      class: "server-rail-badge",
+      "aria-hidden": "true",
+      "data-testid": "server-rail-home-badge",
+    });
+    appendChildren(homeWrap, homeBtn, homeBadge);
+    const dmList = createElement("div", { class: "server-rail-dms" });
+    renderDms = (): void => {
+      const channels = dmStore.getState().channels;
+      const total = totalDmUnread(channels);
+      homeBadge.hidden = total === 0;
+      setText(homeBadge, formatBadgeCount(total));
+      homeBtn?.setAttribute(
+        "aria-label",
+        total === 0 ? serverRailText("home") : serverRailText("homeUnread", { count: total }),
+      );
+      clearChildren(dmList);
+      const unread = channels
+        .filter((c) => dmUnreadCount(c) > 0)
+        .toSorted((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
+      for (const dm of unread) dmList.appendChild(dmItem(dm));
+    };
     top.appendChild(homeWrap);
+    top.appendChild(dmList);
     top.appendChild(createElement("div", { class: "server-rail-sep", role: "presentation" }));
 
     list = createElement("div", { class: "server-rail-list" });
@@ -546,7 +614,14 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     container.appendChild(nav);
 
     disposable.onStoreChange(uiStore, (s) => s.sidebarMode, render);
+    disposable.onStoreChange(
+      dmStore,
+      (s) => s.channels,
+      () => renderDms?.(),
+    );
+    window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDms?.(), { signal });
     render();
+    renderDms?.();
 
     void options
       .loadServers()

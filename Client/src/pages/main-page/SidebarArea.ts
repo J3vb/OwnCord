@@ -77,7 +77,7 @@ import {
   type CategoryRef,
 } from "@stores/channels.store";
 import { keepDmForCall, releaseKeptDm } from "../../features/direct-messages/keptCallDms";
-import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
+import { dmStore, closeDmLocally, restoreDmChannel, type DmChannel } from "@stores/dm.store";
 import { clearChannelVoiceUsers, voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
@@ -170,6 +170,8 @@ export interface SidebarAreaResult {
   readonly returnToChannel: () => void;
   /** Open (or start) the 1:1 DM with a user, as the member list's Message. */
   readonly messageUser: (userId: number) => void;
+  /** Open an existing DM, as a click on its row does. */
+  readonly openDm: (dm: DmChannel) => void;
   /** Build one member panel with the shared callback wiring (Message, Call and
    *  voice moderation). The one factory every host uses; the caller owns the
    *  result and must destroy it before another host builds one. */
@@ -1489,6 +1491,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     },
     returnToChannel,
     messageUser: (userId) => void handleCreateDm(userId, dmDeps),
+    openDm: (dm) => selectDmConversation(dm, dmDeps),
     buildMemberPanel,
     syncMemberSection,
     renameGroup,

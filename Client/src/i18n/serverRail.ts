@@ -5,7 +5,15 @@ import { defineCatalog } from "./format";
 export const serverRailText = defineCatalog("serverRail", {
   label: "Servers",
   home: "Home",
+  homeUnread: {
+    one: "Home, {count} unread direct message",
+    other: "Home, {count} unread direct messages",
+  },
   homeMark: "OC",
+  dmUnread: {
+    one: "{name}, {count} unread message",
+    other: "{name}, {count} unread messages",
+  },
   homeDirect: "Direct messages",
   add: "Add a server",
   join: "Join with an invite link",

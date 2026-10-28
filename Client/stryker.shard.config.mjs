@@ -288,6 +288,7 @@ export const shards = {
   "lib-rest-9": [
     "src/lib/icons.ts",
     "src/lib/serverRailLayout.ts",
+    "src/lib/dmUnread.ts",
     "src/features/server-rail/joinInvite.ts",
     "src/features/server-rail/switchServer.ts",
     "src/lib/imageHeader.ts",
