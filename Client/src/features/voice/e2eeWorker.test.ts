@@ -16,6 +16,8 @@ import { E2EEWorker } from "./e2eeWorker";
 // reset. Those tests re-import against this already-loaded instance instead,
 // so the singleton stays one.
 import * as appLogger from "../../lib/logger";
+import { captureLogs } from "../../../tests/helpers/log-capture";
+import { expectConsole } from "../../../tests/helpers/console";
 
 function setup() {
   const state = { generation: 0, roomKey: null as Uint8Array | null };
@@ -193,5 +195,53 @@ describe("E2EEWorker.clearRoomKey on the Linux native backend", () => {
     vi.doUnmock("./native/platform");
     vi.doUnmock("../../platform/desktop");
     vi.doUnmock("../../lib/logger");
+  });
+});
+
+const KEY = new Uint8Array([5]);
+
+async function loadWorker(linux: boolean) {
+  vi.resetModules();
+  vi.doMock("../../lib/logger", () => appLogger);
+  vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => linux }));
+  const clearRoomKey = vi.fn(async () => undefined);
+  const setRoomKey = vi.fn(async () => undefined);
+  vi.doMock("../../platform/desktop", () => ({
+    desktop: { nativeVoice: { setRoomKey, clearRoomKey } },
+  }));
+  const { E2EEWorker: LoadedWorker } = await import("./e2eeWorker");
+  const worker = new LoadedWorker({ getSessionGeneration: () => 1, getRoomKey: () => KEY });
+  return { worker, clearRoomKey, setRoomKey };
+}
+
+function unmock(): void {
+  vi.doUnmock("./native/platform");
+  vi.doUnmock("../../platform/desktop");
+  vi.doUnmock("../../lib/logger");
+}
+
+describe("E2EEWorker.clearRoomKey backends", () => {
+  it("leaves the native backend alone away from Linux", async () => {
+    const { worker, clearRoomKey } = await loadWorker(false);
+    worker.clearRoomKey();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(clearRoomKey).not.toHaveBeenCalled();
+    unmock();
+  });
+
+  it("logs a failed native clear and still installs the next key", async () => {
+    const { worker, clearRoomKey, setRoomKey } = await loadWorker(true);
+    const logs = captureLogs();
+    clearRoomKey.mockRejectedValue(new Error("ipc closed"));
+    worker.clearRoomKey();
+    await expect(worker.applyRoomKey(KEY)).resolves.toBe(true);
+    expect(setRoomKey).toHaveBeenCalledWith("b64:5");
+    const entries = logs.find("native key clear failed");
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.level).toBe("warn");
+    expect(entries[0]?.data).toMatchObject({ error: "ipc closed" });
+    expectConsole("warn", "native key clear failed");
+    unmock();
   });
 });
