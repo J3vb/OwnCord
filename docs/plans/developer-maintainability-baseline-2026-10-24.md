@@ -217,3 +217,45 @@ Before, the answer to "are the late-reply and teardown paths pinned?" was "no", 
 ### Verdict against the stop rules
 
 No production code changed, no gate was weakened, and every break that survived before now fails a test. The change is kept.
+
+## MX-6 after (2026-10-28)
+
+Roadmap item MX-6 (scout candidate C1, hand-built context menus), run with the owner's go on the pre-flight plan. Based on `origin/dev` `91d7e54a`. Evidence level: **counted by grep and a structural test, behaviour reproduced by a unit test on the base commit**. No app run.
+
+### What changed
+
+- `Client/src/lib/context-menu.ts`: one shell, `openMenuShell`, builds the `.context-menu` root, closes whatever menu is open, mounts the new one (inside the full-screen element when there is one), keeps it inside the window and re-places it on resize, installs the keyboard model and wires the dismissal and the owner's teardown. `showContextMenu` runs on it. `registerSidebarMenu` and the per-class sweep are gone.
+- Migrated onto the shell, behaviour kept (each menu keeps its own close rule: sidebar menus on any click, the rest on a click outside): channel, category and thread sidebar menus; voice-user volume menu; video-tile menus; member menu (`AdminActions.ts`, with `MemberList.ts`'s own placement and outside-click code removed).
+- `createChannelContextMenu` in `AdminActions.ts` had no caller outside its tests and is deleted. Its purge tests now test `appendPurgeSection` directly (`purge-prompt.test.ts`), so purge coverage is kept.
+- Guard: `Client/tests/unit/context-menu-roots.test.ts` fails on a hand-built `.context-menu` root outside the shell; shrink-only allowlist, empty.
+- Finding OC-0521 (two menus open at once) recorded as fixed.
+
+### Counts
+
+| Measure                                                                                          | Before (`91d7e54a`) | After             |
+| ------------------------------------------------------------------------------------------------ | ------------------- | ----------------- |
+| Hand-built `.context-menu` roots outside `lib/context-menu.ts`                                   | 7 in 6 files        | 0                 |
+| `clampMenuToViewport` / `registerSidebarMenu` / `enableMenuKeyboard` calls outside the shell     | 4 / 3 / 6           | 0 / 0 / 0         |
+| Copies of placement code (shared clamp plus inline copies in `MemberList.ts` and `tile-menu.ts`) | 3                   | 1 (two fit modes) |
+| Production lines in `Client/src` (diff)                                                          | n/a                 | +347, -637        |
+| Menus open after opening two (mouse right-click or Shift+F10)                                    | 2                   | 1                 |
+
+Correction to the scout row: `tile-menu.ts` and the member menu did keep inside the window, each with its own copy of the placement code; the real defect was only the second open menu.
+
+### Deliberate-break check
+
+`one-open-menu.test.ts` run against `origin/dev` `91d7e54a`: the three "one open menu" tests fail with 2 menus open (sidebar plus volume menu; volume after thread; thread by keyboard beside volume). The four `openMenuShell` tests fail there because the shell does not exist. All 7 pass after.
+
+### Commands run
+
+| Command (in `Client/`)                                   | Status   | Result                                                                                                                                                                                           |
+| -------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npx tsc --noEmit -p tsconfig.json`                      | executed | clean.                                                                                                                                                                                           |
+| `npx eslint` on every changed file                       | executed | clean. `npm run lint` on the whole tree fails on one `await-thenable` error in `src/lib/audioPipeline.ts`, which this change does not touch and which fails the same on the clean base checkout. |
+| `npm run knip`, `node scripts/check-mutation-shards.mjs` | executed | clean.                                                                                                                                                                                           |
+| `npm run test:coverage`                                  | executed | 683 files, 14929 passed, 0 failed.                                                                                                                                                               |
+| `npm run build:budget && npm run check:budgets`          | executed | all budgets ok.                                                                                                                                                                                  |
+
+### Verdict against the stop rules
+
+No gate weakened, no assertion loosened; the deleted tests belonged to deleted code, and the purge ones moved. The count goes from 7 to 0 and is held by a test. Kept.

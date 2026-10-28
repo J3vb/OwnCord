@@ -4,7 +4,7 @@
  * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
-import { createElement, setOwnedTimeout } from "@lib/dom";
+import { createElement } from "@lib/dom";
 import { reconcileModels } from "@lib/reconcile";
 import { select } from "@lib/select";
 import { shallowEqual } from "@lib/store";
@@ -25,7 +25,7 @@ import { assignableRoleNames, outranksPosition } from "../features/moderation/ro
 import { memberTimeoutsStore } from "../features/moderation/store";
 import { canMention, mentionInComposer } from "../features/messaging/activeComposer";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
-import { openMenuOnKeyboard } from "@lib/context-menu";
+import { openMenuOnKeyboard, type OpenMenu } from "@lib/context-menu";
 import { Permission, type ReadyRole } from "@lib/types";
 import { manageNicknamesEnabled, multiRoleEnabled } from "@lib/serverCapabilities";
 import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
@@ -141,7 +141,7 @@ function timeoutStateOf(userId: number): "active" | "none" | "unknown" {
   return map.has(userId) ? "active" : "none";
 }
 
-let activeMenu: { element: HTMLDivElement; destroy(): void } | null = null;
+let activeMenu: OpenMenu | null = null;
 
 /** Bumped by every open, close and list teardown. The menu module loads lazily
  *  on the first right-click; a load that finishes after a newer open or a
@@ -157,22 +157,6 @@ function closeActiveMenu(): void {
   if (activeMenu !== null) {
     activeMenu.destroy();
     activeMenu = null;
-  }
-}
-
-// One outside-click owner per open menu: destroyed when the menu closes and
-// when the list is torn down.
-let menuDismiss: Disposable | null = null;
-
-function releaseMenuDismiss(): void {
-  menuDismiss?.destroy();
-  menuDismiss = null;
-}
-
-function handleOutsideClick(e: MouseEvent): void {
-  if (activeMenu !== null && !activeMenu.element.contains(e.target as Node)) {
-    closeActiveMenu();
-    releaseMenuDismiss();
   }
 }
 
@@ -407,7 +391,6 @@ function createMemberItem(
         gates.canManageNicknames);
 
     closeActiveMenu();
-    releaseMenuDismiss();
     const seq = menuOpenSeq;
     menuRowKey = `u:${member.id}`;
 
@@ -424,7 +407,11 @@ function createMemberItem(
         if (seq === menuOpenSeq) menuRowKey = null;
         return;
       }
+      // Kept on screen and re-placed when it resizes, so the ban form expanding
+      // cannot push Confirm Ban and Block off the bottom at the 940x500 minimum.
       const created = createMemberContextMenu({
+        x: clientX,
+        y: clientY,
         userId: member.id,
         username: member.username,
         currentRole: member.role,
@@ -471,11 +458,9 @@ function createMemberItem(
           if (activeMenu !== created) return;
           activeMenu = null;
           menuRowKey = null;
-          releaseMenuDismiss();
         },
       });
       activeMenu = created;
-      placeMenu(created.element, clientX, clientY);
     });
   };
   item.addEventListener(
@@ -491,49 +476,6 @@ function createMemberItem(
   openMenuOnKeyboard(item, openContextMenu, signal);
 
   return item;
-}
-
-/** Mount the menu at the anchor and arrange its dismissal. */
-function placeMenu(menuEl: HTMLDivElement, clientX: number, clientY: number): void {
-  // Position at the anchor, kept on screen: a member low in the list at the
-  // 940x500 minimum window opened the menu past the bottom edge, leaving
-  // Force Logout, Ban and Block unreachable. When it does not fit below
-  // the anchor it is anchored by its bottom edge instead. The placement
-  // is re-run whenever the menu resizes, so the ban form expanding later
-  // cannot push Confirm Ban and Block off-screen from either anchor.
-  menuEl.style.position = "fixed";
-  menuEl.style.zIndex = "1000";
-  document.body.appendChild(menuEl);
-  const margin = 8;
-  const place = (): void => {
-    const { innerWidth: vw, innerHeight: vh } = window;
-    const height = menuEl.offsetHeight;
-    const left = Math.min(clientX, vw - menuEl.offsetWidth - margin);
-    menuEl.style.left = `${Math.max(margin, left)}px`;
-    if (clientY + height > vh - margin) {
-      const bottom = Math.min(vh - clientY, vh - height - margin);
-      menuEl.style.top = "";
-      menuEl.style.bottom = `${Math.max(margin, bottom)}px`;
-    } else {
-      menuEl.style.bottom = "";
-      menuEl.style.top = `${clientY}px`;
-    }
-  };
-  place();
-
-  // Close on outside click (deferred so this click doesn't close it)
-  const dismiss = new Disposable();
-  menuDismiss = dismiss;
-  const resizeObserver = new ResizeObserver(place);
-  resizeObserver.observe(menuEl);
-  dismiss.addCleanup(() => resizeObserver.disconnect());
-  setOwnedTimeout(
-    dismiss.signal,
-    () => {
-      document.addEventListener("mousedown", handleOutsideClick, { signal: dismiss.signal });
-    },
-    0,
-  );
 }
 
 /** Rows that fit in the scroller, at least one: the PageUp/PageDown stride. */
@@ -1030,7 +972,6 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     closeActiveMenu();
     for (const close of ownPopupClosers) close();
     ownPopupClosers.clear();
-    releaseMenuDismiss();
     if (frameId !== null) {
       cancelAnimationFrame(frameId);
       frameId = null;

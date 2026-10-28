@@ -5,15 +5,7 @@
  * does not close it (OC-0282).
  */
 
-import { Disposable } from "@lib/disposable";
-import { createElement, setOwnedTimeout } from "@lib/dom";
-import {
-  createMenuItem,
-  enableMenuKeyboard,
-  openMenuOnKeyboard,
-  clampMenuToViewport,
-  registerSidebarMenu,
-} from "@lib/context-menu";
+import { createMenuItem, openMenuOnKeyboard, openMenuShell } from "@lib/context-menu";
 import { shellText } from "../../i18n/shell";
 
 export interface ThreadMenuActions {
@@ -30,62 +22,44 @@ export function attachThreadContextMenu(
   lifetimeSignal: AbortSignal,
 ): void {
   function openMenu(anchorX: number, anchorY: number): void {
-    const menu = createElement("div", {
-      class: "context-menu channel-ctx-menu",
-      "data-testid": "thread-context-menu",
-    });
-    menu.style.left = `${anchorX}px`;
-    menu.style.top = `${anchorY}px`;
-
-    const menuOwner = new Disposable();
-    const closeMenu = (): void => {
-      unregister();
-      menu.remove();
-      menuOwner.destroy();
-    };
-    const unregister = registerSidebarMenu(closeMenu);
-
-    const add = (label: string, testId: string, run: (() => void) | null): void => {
-      const item = createMenuItem(
-        label,
-        run === null ? "context-menu-item disabled" : "context-menu-item",
-        {
-          testId,
-        },
-      );
-      if (run === null) {
-        item.setAttribute("aria-disabled", "true");
-      } else {
-        item.addEventListener(
-          "click",
-          () => {
-            closeMenu();
-            run();
-          },
-          { signal: lifetimeSignal },
+    openMenuShell({
+      x: anchorX,
+      y: anchorY,
+      className: "channel-ctx-menu",
+      attrs: { "data-testid": "thread-context-menu" },
+      signal: lifetimeSignal,
+      dismiss: "any-click",
+      build: (menu, closeMenu) => {
+        const add = (label: string, testId: string, run: (() => void) | null): void => {
+          const item = createMenuItem(
+            label,
+            run === null ? "context-menu-item disabled" : "context-menu-item",
+            {
+              testId,
+            },
+          );
+          if (run === null) {
+            item.setAttribute("aria-disabled", "true");
+          } else {
+            item.addEventListener(
+              "click",
+              () => {
+                closeMenu();
+                run();
+              },
+              { signal: lifetimeSignal },
+            );
+          }
+          menu.appendChild(item);
+        };
+        add(
+          shellText("channel.markRead"),
+          "ctx-thread-mark-read",
+          actions.hasUnread() ? actions.onMarkRead : null,
         );
-      }
-      menu.appendChild(item);
-    };
-    add(
-      shellText("channel.markRead"),
-      "ctx-thread-mark-read",
-      actions.hasUnread() ? actions.onMarkRead : null,
-    );
-    add(shellText("channel.threadUnfollow"), "ctx-thread-unfollow", actions.onUnfollow);
-
-    document.body.appendChild(menu);
-    clampMenuToViewport(menu, anchorX, anchorY);
-    const restoreFocus = enableMenuKeyboard(menu, { signal: menuOwner.signal, onClose: closeMenu });
-    menuOwner.addCleanup(restoreFocus);
-    lifetimeSignal.addEventListener("abort", closeMenu, { signal: menuOwner.signal });
-    setOwnedTimeout(
-      menuOwner.signal,
-      () => {
-        document.addEventListener("click", closeMenu, { signal: menuOwner.signal });
+        add(shellText("channel.threadUnfollow"), "ctx-thread-unfollow", actions.onUnfollow);
       },
-      0,
-    );
+    });
   }
 
   el.addEventListener(

@@ -10,8 +10,7 @@
  * called "owner" or "admin".
  */
 
-import { Disposable } from "@lib/disposable";
-import { createElement, setOwnedTimeout } from "@lib/dom";
+import { createElement } from "@lib/dom";
 import { channelsStore, updateChannelPosition, type Channel } from "@stores/channels.store";
 import {
   hasPermission,
@@ -33,10 +32,8 @@ import {
 import {
   createMenuItem,
   createSubmenuTrigger,
-  enableMenuKeyboard,
   openMenuOnKeyboard,
-  clampMenuToViewport,
-  registerSidebarMenu,
+  openMenuShell,
 } from "@lib/context-menu";
 import {
   NOTIFICATION_LEVELS,
@@ -130,23 +127,21 @@ export function attachChannelContextMenu(
 
   /** Build, mount and wire the menu at a viewport anchor. */
   function openMenu(anchorX: number, anchorY: number): void {
-    // Remove any existing context menu (and run its close hook).
-    const menu = createElement("div", {
-      class: "context-menu channel-ctx-menu",
-      "data-testid": "channel-context-menu",
+    // lifetimeSignal (not the per-render `signal`): the menu is mounted on
+    // document.body, independent of the row that opened it, so an unrelated
+    // re-render must not close it (OC-0282).
+    openMenuShell({
+      x: anchorX,
+      y: anchorY,
+      className: "channel-ctx-menu",
+      attrs: { "data-testid": "channel-context-menu" },
+      signal: lifetimeSignal,
+      dismiss: "any-click",
+      build: (menu, closeMenu) => buildChannelMenu(menu, closeMenu),
     });
-    menu.style.left = `${anchorX}px`;
-    menu.style.top = `${anchorY}px`;
+  }
 
-    // Close menu on click elsewhere — use a per-menu Disposable
-    const menuOwner = new Disposable();
-    const closeMenu = (): void => {
-      unregister();
-      menu.remove();
-      menuOwner.destroy();
-    };
-    const unregister = registerSidebarMenu(closeMenu);
-
+  function buildChannelMenu(menu: HTMLElement, closeMenu: () => void): void {
     const addItem = (
       label: string,
       className: string,
@@ -374,33 +369,6 @@ export function attachChannelContextMenu(
         onDone: () => closeMenu(),
       });
     }
-
-    document.body.appendChild(menu);
-
-    // Keep the full menu (Edit/Delete/Purge) inside the viewport when opened
-    // near the bottom/right edge; a later resize is not expected for this
-    // static menu, so a single placement is enough.
-    clampMenuToViewport(menu, anchorX, anchorY);
-
-    // Focus the first item on open; Escape/close restores focus to the row.
-    const restoreFocus = enableMenuKeyboard(menu, { signal: menuOwner.signal, onClose: closeMenu });
-    menuOwner.addCleanup(restoreFocus);
-
-    // Tie this bridge listener's own lifetime to menuOwner so it does not
-    // outlive the menu it belongs to — closeMenu (which aborts menuOwner)
-    // already fires far more often than the sidebar's own teardown.
-    // lifetimeSignal (not the per-render `signal`): the menu is mounted on
-    // document.body, independent of the row that opened it, so an unrelated
-    // re-render must not close it (OC-0282).
-    lifetimeSignal.addEventListener("abort", closeMenu, { signal: menuOwner.signal });
-    // Defer so this click event doesn't immediately close it
-    setOwnedTimeout(
-      menuOwner.signal,
-      () => {
-        document.addEventListener("click", closeMenu, { signal: menuOwner.signal });
-      },
-      0,
-    );
   }
 
   el.addEventListener(
