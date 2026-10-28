@@ -133,6 +133,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- Right-clicking a voice user, a member, a message or a video tile while a channel, category or thread menu was open left both menus showing, and so did opening any menu from the keyboard. Opening a menu now always closes the one before it.
 - Unsent messages kept by the desktop app for a retry are now only read and saved for the server you are signed in to, the same way as saved logins.
 - Holding Ctrl+M or Ctrl+D toggled mute or deafen over and over, and holding Ctrl+K opened and closed the Quick Switcher. A held key now acts once.
 - The global mute and deafen shortcuts could be set to a Ctrl+Shift key the app or a text field already uses (Ctrl+Shift+K, redo, word select), so one press did two things. Settings now refuses those keys.

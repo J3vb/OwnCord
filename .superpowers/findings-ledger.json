@@ -1,5 +1,5 @@
 {
-  "nextId": 522,
+  "nextId": 523,
   "findings": [
     {
       "id": "OC-0001",
@@ -12044,6 +12044,29 @@
     },
     {
       "id": "OC-0521",
+      "title": "Two right-click menus could be open at once",
+      "file": "Client/src/components/channel-sidebar/context-menu.ts",
+      "line": 148,
+      "severity": "low",
+      "why": "Each menu cleared only menus of its own kind. The channel, category and thread menus closed on a left click only, so a right-click (no click event) on a voice user, member, message or tile opened a second menu beside them; a menu opened from the keyboard fires no mousedown, so it left any open menu in place.",
+      "repro": "Right-click a channel, then right-click a member in the member list: both menus show. Or open a voice user's menu and press Shift+F10 on a channel row.",
+      "evidence": "Scout C1 in docs/plans/developer-maintainability-execution-2026-10-24.md (read from code), reproduced by Client/tests/unit/one-open-menu.test.ts on dev 91d7e54a (2 menus open).",
+      "suggestedFix": "Open every menu through one shell that closes the open menu first.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/one-open-menu.test.ts (each kind of menu replaces the one before it, by mouse and keyboard)",
+        "revertProof": "fail (2 menus open)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-28",
+      "hunt": "maintainability-mx-6",
+      "lens": "client-state",
+      "finder": "claude",
+      "fixedDate": "2026-10-28"
+    },
+    {
+      "id": "OC-0522",
       "title": "Enter that commits an input-method candidate submitted half-typed text in 13 fields",
       "file": "Client/src/features/moderation/BanDialog.ts",
       "line": 320,

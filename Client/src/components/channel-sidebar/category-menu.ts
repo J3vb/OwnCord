@@ -8,23 +8,15 @@
  * page wired. Opened by right-click on the header or, on its arrow button,
  * Shift+F10 / the Menu key.
  *
- * The menu is mounted on document.body and shares the channel menu's class, so
- * opening either one removes the other.
+ * The menu is mounted on document.body; opening any other menu closes it.
  */
 
-import { Disposable } from "@lib/disposable";
-import { createElement, setOwnedTimeout } from "@lib/dom";
+import { createElement } from "@lib/dom";
 import { getChannelsByCategory, type CategoryRef } from "@stores/channels.store";
 import { canManageChannels, visibleCategories } from "@lib/permissions";
 import { collapseCategories, isCategoryCollapsed, toggleCategory } from "@stores/ui.store";
 import { hasUnread, markChannelsRead } from "@lib/read-state";
-import {
-  createMenuItem,
-  enableMenuKeyboard,
-  openMenuOnKeyboard,
-  clampMenuToViewport,
-  registerSidebarMenu,
-} from "@lib/context-menu";
+import { createMenuItem, openMenuOnKeyboard, openMenuShell } from "@lib/context-menu";
 import { shellText } from "../../i18n/shell";
 import { canMoveCategory } from "../../features/channels/categoryActions";
 
@@ -55,21 +47,18 @@ export function attachCategoryContextMenu(
   lifetimeSignal: AbortSignal,
 ): void {
   function openMenu(anchorX: number, anchorY: number): void {
-    const menu = createElement("div", {
-      class: "context-menu channel-ctx-menu category-ctx-menu",
-      "data-testid": "category-context-menu",
+    openMenuShell({
+      x: anchorX,
+      y: anchorY,
+      className: "channel-ctx-menu category-ctx-menu",
+      attrs: { "data-testid": "category-context-menu" },
+      signal: lifetimeSignal,
+      dismiss: "any-click",
+      build: (menu, closeMenu) => buildCategoryMenu(menu, closeMenu),
     });
-    menu.style.left = `${anchorX}px`;
-    menu.style.top = `${anchorY}px`;
+  }
 
-    const menuOwner = new Disposable();
-    const closeMenu = (): void => {
-      unregister();
-      menu.remove();
-      menuOwner.destroy();
-    };
-    const unregister = registerSidebarMenu(closeMenu);
-
+  function buildCategoryMenu(menu: HTMLElement, closeMenu: () => void): void {
     const addItem = (
       label: string,
       className: string,
@@ -176,21 +165,6 @@ export function attachCategoryContextMenu(
         for (const add of manage) add();
       }
     }
-
-    document.body.appendChild(menu);
-    clampMenuToViewport(menu, anchorX, anchorY);
-
-    const restoreFocus = enableMenuKeyboard(menu, { signal: menuOwner.signal, onClose: closeMenu });
-    menuOwner.addCleanup(restoreFocus);
-
-    lifetimeSignal.addEventListener("abort", closeMenu, { signal: menuOwner.signal });
-    setOwnedTimeout(
-      menuOwner.signal,
-      () => {
-        document.addEventListener("click", closeMenu, { signal: menuOwner.signal });
-      },
-      0,
-    );
   }
 
   header.addEventListener(
