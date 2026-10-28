@@ -79,6 +79,8 @@ export const shards = {
     "src/features/voice/cameraSwitch.ts",
     "src/features/voice/codecSwitch.ts",
     "src/features/voice/shareSenderStats.ts",
+    "src/lib/shareDiagnostics.ts",
+    "src/lib/shareFlags.ts",
     "src/features/voice/e2eeWorker.ts",
     "src/features/voice/native/counters.ts",
     "src/features/voice/native/devices.ts",

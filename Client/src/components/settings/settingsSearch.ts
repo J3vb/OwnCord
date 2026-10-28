@@ -260,6 +260,11 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("logs.voiceDiagnostics"),
     s("logs.filter"),
     s("logs.minLevel"),
+    s("logs.shareTesting"),
+    s("logs.shareRecord"),
+    s("logs.shareRecordDesc"),
+    s("logs.shareMode"),
+    s("logs.shareModeDesc"),
   ],
   About: () => [
     s("updates.label"),

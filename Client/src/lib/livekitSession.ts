@@ -2,6 +2,8 @@
 import { Room, Track } from "livekit-client";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import type { ShareSenderSample } from "../features/voice/shareSenderStats";
+import { ShareDiagnosticsRecorder, type ShareDiagnosticsSnapshot } from "./shareDiagnostics";
+import { getShareDiagnosticsEnabled, getShareMotionPolicy } from "./shareFlags";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -18,6 +20,7 @@ import {
 import { loadPref } from "@lib/preferences";
 import { inputMode } from "@lib/inputMode";
 import { createLogger } from "@lib/logger";
+import { Disposable } from "@lib/disposable";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";
 import { E2EEManager } from "@lib/livekitE2EE";
@@ -128,6 +131,10 @@ export class LiveKitSession {
   private _watchRetry: ReturnType<typeof setTimeout> | null = null;
   /** Your screen share's last sender sample, for the support bundle. */
   private _shareSender: ShareSenderSample | null = null;
+  /** The screen-share timeline of the current (or last) room session, and
+   *  the owner whose signal stops its polling when the session ends. */
+  private _shareDiag: ShareDiagnosticsRecorder | null = null;
+  private _shareDiagOwner: Disposable | null = null;
   // Test-visibility proxies: the callbacks live on RemoteTracks.
   private get onRemoteVideoCallback(): RemoteVideoCallback | null {
     return this._remoteTracks.onRemoteVideoCallback;
@@ -482,7 +489,40 @@ export class LiveKitSession {
   // --- Room lifecycle (delegated to RoomLifecycle) ---
 
   private async createRoom(channelId?: number): Promise<Room> {
+    this.startShareDiagnostics();
     return this._lifecycle.createRoom(channelId);
+  }
+
+  /** One recorder per room session: a reconnect keeps it, leaveVoice stops
+   *  it, and the next join starts a fresh one. */
+  private startShareDiagnostics(): void {
+    if (this._shareDiagOwner !== null) return;
+    const recorder = new ShareDiagnosticsRecorder({
+      enabled: () => getShareDiagnosticsEnabled(),
+      policy: () => getShareMotionPolicy(),
+      shareEpoch: () => this.localScreenshareTrack(),
+      readSender: () => this._remoteTracks.getLocalScreenshareStats(),
+      watchedShares: () => this._remoteTracks.watchedScreenshares(),
+      readViewer: (id) => this._remoteTracks.getRemoteVideoStats(id, "screenshare"),
+      now: () => performance.now(),
+    });
+    const owner = new Disposable();
+    this._shareDiag = recorder;
+    this._shareDiagOwner = owner;
+    recorder.start(owner.signal);
+  }
+
+  /** Stops polling but keeps the timeline: a test usually ends by leaving
+   *  the call and then saving the support bundle. */
+  private stopShareDiagnostics(): void {
+    this._shareDiagOwner?.destroy();
+    this._shareDiagOwner = null;
+  }
+
+  /** The recorded screen-share timeline, or null when nothing was recorded. */
+  getShareDiagnostics(): ShareDiagnosticsSnapshot | null {
+    const snapshot = this._shareDiag?.snapshot();
+    return snapshot === undefined || snapshot.samples.length === 0 ? null : snapshot;
   }
 
   /** Update all extracted modules with a room reference. See RoomLifecycle. */
@@ -958,6 +998,7 @@ export class LiveKitSession {
       }
     }
     this._media.stopCodecSwitch();
+    this.stopShareDiagnostics();
     return this._lifecycle.leaveVoice(sendWs);
   }
 
@@ -1209,7 +1250,16 @@ export class LiveKitSession {
       );
     }
     if (!sharing) this._shareSender = null;
-    const info = { ...debug, screenShareSender: this._shareSender };
+    const timeline = this._shareDiag?.snapshot();
+    const info = {
+      ...debug,
+      screenShareSender: this._shareSender,
+      screenShareTimeline: {
+        samples: timeline?.samples.length ?? 0,
+        dropped: timeline?.dropped ?? 0,
+        policy: getShareMotionPolicy(),
+      },
+    };
     if (!isLinuxDesktop()) return info;
     // B7-11 rule 3: native resources are countable through the facade. Each
     // read asks the backend for a fresh snapshot, which the next read reports.
@@ -1297,6 +1347,7 @@ export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const setRemoteVideoWatched = session.setRemoteVideoWatched.bind(session);
 export const forgetRemoteVideoWatch = session.forgetRemoteVideoWatch.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
+export const getShareDiagnostics = session.getShareDiagnostics.bind(session);
 export const getLocalMicSettings = session.getLocalMicSettings.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
 export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(session);

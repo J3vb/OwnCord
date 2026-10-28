@@ -12,8 +12,15 @@ import {
 } from "@lib/logger";
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
-import { getSessionDebugInfo } from "@lib/livekitSession";
-import { savePref, readMigratedStringPref } from "./helpers";
+import { getSessionDebugInfo, getShareDiagnostics } from "@lib/livekitSession";
+import { savePref, readMigratedStringPref, appendToggleRows } from "./helpers";
+import {
+  SHARE_DIAGNOSTICS_KEY,
+  SHARE_MOTION_POLICIES,
+  SHARE_MOTION_POLICY_KEY,
+  getShareMotionPolicy,
+  isShareMotionPolicy,
+} from "@lib/shareFlags";
 import { createDisclosure } from "../../features/settings/status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
@@ -184,7 +191,9 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
         bundleBtn.disabled = true;
         bundleStatus.textContent = "";
         void import("@lib/supportBundle")
-          .then(({ exportSupportBundle }) => exportSupportBundle(desktop, getSessionDebugInfo()))
+          .then(({ exportSupportBundle }) =>
+            exportSupportBundle(desktop, getSessionDebugInfo(), getShareDiagnostics()),
+          )
           .then((saved) => {
             bundleStatus.textContent = saved ? t("logs.bundleSaved") : "";
           })
@@ -392,6 +401,61 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
     voiceTools.appendChild(diagRefresh);
     appendChildren(voice.details, voiceTools, diagPanel);
     section.appendChild(voice.details);
+
+    // ---- Screen share testing ---------------------------------------------
+
+    const shareCard = createElement("section", {
+      class: "settings-card",
+      "data-testid": "share-testing",
+      "aria-labelledby": "logs-share-testing-title",
+    });
+    const shareHead = createElement("div", { class: "settings-card-head" });
+    shareHead.appendChild(
+      createElement("h3", { id: "logs-share-testing-title" }, t("logs.shareTesting")),
+    );
+    shareCard.appendChild(shareHead);
+    appendToggleRows(
+      shareCard,
+      [
+        {
+          key: SHARE_DIAGNOSTICS_KEY,
+          label: t("logs.shareRecord"),
+          desc: t("logs.shareRecordDesc"),
+          fallback: false,
+        },
+      ],
+      buildSignal,
+    );
+    const modeRow = createElement("div", { class: "setting-row" });
+    const modeInfo = createElement("div", {});
+    appendChildren(
+      modeInfo,
+      createElement("div", { class: "setting-label" }, t("logs.shareMode")),
+      createElement("div", { class: "setting-desc" }, t("logs.shareModeDesc")),
+    );
+    const modeSelect = createElement("select", {
+      class: "settings-select",
+      "aria-label": t("logs.shareMode"),
+      "data-testid": "share-motion-policy",
+    });
+    for (const policy of SHARE_MOTION_POLICIES) {
+      modeSelect.appendChild(
+        createElement("option", { value: policy }, t(`logs.shareMode.${policy}`)),
+      );
+    }
+    modeSelect.value = getShareMotionPolicy();
+    modeSelect.addEventListener(
+      "change",
+      () => {
+        if (isShareMotionPolicy(modeSelect.value)) {
+          savePref(SHARE_MOTION_POLICY_KEY, modeSelect.value);
+        }
+      },
+      { signal: buildSignal },
+    );
+    appendChildren(modeRow, modeInfo, modeSelect);
+    shareCard.appendChild(modeRow);
+    section.appendChild(shareCard);
 
     // Live update: subscribe to new log entries
     unsubLogListener?.();

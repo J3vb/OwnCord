@@ -28,6 +28,12 @@ export interface StreamSample {
   readonly codec?: string;
   readonly packetsLost?: number;
   readonly packetsReceived?: number;
+  readonly framesDropped?: number;
+  readonly framesReceived?: number;
+  /** e.g. "ExternalDecoder", "libvpx" */
+  readonly decoderImplementation?: string;
+  /** Cumulative seconds frames spent in the jitter buffer. */
+  readonly jitterBufferDelay?: number;
 }
 
 /** What a remote video tile shows: nothing, or its rendered device pixels
@@ -49,6 +55,10 @@ interface StatsTrack {
         mimeType?: string;
         packetsLost?: number;
         packetsReceived?: number;
+        framesDropped?: number;
+        framesReceived?: number;
+        decoderImplementation?: string;
+        jitterBufferDelay?: number;
       }
     | undefined
   >;
@@ -133,6 +143,10 @@ export class RemoteTracks {
       codec: stats.mimeType,
       packetsLost: stats.packetsLost,
       packetsReceived: stats.packetsReceived,
+      framesDropped: stats.framesDropped,
+      framesReceived: stats.framesReceived,
+      decoderImplementation: stats.decoderImplementation,
+      jitterBufferDelay: stats.jitterBufferDelay,
     };
   }
 

@@ -44,6 +44,7 @@ import {
   type SenderStatsTrack,
   type ShareSenderSample,
 } from "../features/voice/shareSenderStats";
+import { getShareMotionPolicy, shareMotionArm } from "./shareFlags";
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
 import { channelPeerDecode } from "../features/voice/peerDecode";
@@ -276,7 +277,8 @@ export function screenVideoPublishOptions(
       maxFramerate: effectiveFps,
     },
     videoCodec: codec,
-    degradationPreference: screenShareDegradation(effectiveFps),
+    degradationPreference:
+      shareMotionArm(getShareMotionPolicy()).degradation ?? screenShareDegradation(effectiveFps),
   };
 }
 
@@ -291,6 +293,15 @@ export function screenVideoPublishOptions(
  *  constraint translation treats 0 as uncapped) and the frame rate is passed
  *  through the raw video constraints instead. */
 export function getScreenShareCaptureOptions(
+  quality: StreamQuality,
+  fps: number,
+): ScreenShareCaptureOptions {
+  const { contentHint } = shareMotionArm(getShareMotionPolicy());
+  const options = baseScreenShareCaptureOptions(quality, fps);
+  return contentHint === undefined ? options : { ...options, contentHint };
+}
+
+function baseScreenShareCaptureOptions(
   quality: StreamQuality,
   fps: number,
 ): ScreenShareCaptureOptions {
