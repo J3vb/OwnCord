@@ -496,7 +496,7 @@ export function openMenuShell(opts: MenuShellOptions): OpenMenu {
   const teardown = (): void => {
     if (!open) return;
     open = false;
-    if (supersedeOpenMenu === teardown) supersedeOpenMenu = null;
+    if (supersedeOpenMenu === close) supersedeOpenMenu = null;
     menu.remove();
     owner.destroy();
   };
@@ -514,7 +514,9 @@ export function openMenuShell(opts: MenuShellOptions): OpenMenu {
 
   opts.build(menu, close, owner.signal);
   (doc.fullscreenElement ?? doc.body).appendChild(menu);
-  supersedeOpenMenu = teardown;
+  // A full close: focus inside the replaced menu goes back to its opener
+  // before this menu records where to return it.
+  supersedeOpenMenu = close;
 
   // Placed after the rows are in, so the measured size is real.
   const place = (): void => {

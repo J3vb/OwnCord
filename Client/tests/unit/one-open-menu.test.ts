@@ -121,6 +121,24 @@ describe("one open menu", () => {
   });
 });
 
+describe("focus across a replaced menu", () => {
+  it("returns to the first menu's row, not to the page, when a second menu replaces it", async () => {
+    const first = threadRow();
+    first.focus();
+    shiftF10(first);
+    await Promise.resolve();
+    const firstMenu = document.querySelector('[data-testid="thread-context-menu"]')!;
+    expect(firstMenu.contains(document.activeElement)).toBe(true);
+
+    rightClick(threadRow());
+    const second = document.querySelector<HTMLElement>('[data-testid="thread-context-menu"]')!;
+    second.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+    expect(menus()).toEqual([]);
+    expect(document.activeElement).toBe(first);
+  });
+});
+
 describe("openMenuShell", () => {
   const open = (onClosed = vi.fn(), signal: AbortSignal = owner.signal) =>
     openMenuShell({
