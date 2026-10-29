@@ -39,7 +39,7 @@ use super::share_audio::ShareAudio;
 use super::video::{FrameServer, Observer};
 
 /// The only key index OwnCord ever uses. livekit-client's
-/// `ExternalE2EEKeyProvider.setKey(key)` writes index 0, and https://github.com/livekit/rust-sdks/issues/1280
+/// `ExternalE2EEKeyProvider.setKey(key)` writes index 0, and upstream livekit/rust-sdks issue 1280
 /// aborts the process on an out-of-range index, so this is a constant, not a
 /// parameter.
 pub const KEY_INDEX: i32 = 0;
@@ -444,7 +444,7 @@ pub struct Resources {
     /// Native camera capture threads alive (each holding a GStreamer
     /// pipeline and the device): zero once the camera is off.
     pub camera_captures: usize,
-    /// Process thread count, the observable for https://github.com/livekit/rust-sdks/issues/1408 (a leaked
+    /// Process thread count, the observable for upstream livekit/rust-sdks issue 1408 (a leaked
     /// FrameCryptor thread per cryptor) across repeated joins.
     pub threads: usize,
 }
@@ -1048,7 +1048,7 @@ impl NativeSession {
 
     /// Enable or disable the microphone. The first enable publishes; after
     /// that the publication stays and is muted in place (no renegotiation, no
-    /// new frame cryptor — https://github.com/livekit/rust-sdks/issues/1408), and the OS capture is stopped
+    /// new frame cryptor — upstream livekit/rust-sdks issue 1408), and the OS capture is stopped
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(
