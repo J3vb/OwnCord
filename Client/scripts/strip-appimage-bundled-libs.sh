@@ -56,6 +56,10 @@ if [ "$removed" -eq 0 ]; then
   exit 0
 fi
 
+# The extracted tree keeps the image's modes, which can be owner-only;
+# appimagetool refuses to pack a tree other users cannot read.
+chmod -R a+rX squashfs-root
+
 # --appimage-extract-and-run: run without FUSE (CI containers/runners).
 # ARCH is required when repacking on a host arch that differs from the
 # payload naming; here it always matches the runner.
