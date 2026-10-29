@@ -2,7 +2,7 @@
  * CreateChannelModal — modal for creating a new channel.
  *
  * The category is a <select> of the known categories and "No category",
- * pre-selected to the group the "+" was clicked on (WP 6.5b); the request
+ * pre-selected to the group the "+" was clicked on; the request
  * carries its `category_id`. The channel TYPE is never inferred from the
  * category: every type is offered under every category, and the type is
  * pre-selected only from the caller's hint (the synthetic Voice group's "+"
@@ -51,7 +51,7 @@ export interface CreateChannelModalOptions {
 /** Every channel type is creatable under every category. */
 export const CHANNEL_TYPES: readonly ChannelType[] = ["text", "voice", "announcement"] as const;
 
-/** The types the form offers: Forum only where the server supports it (WP 6.9d). */
+/** The types the form offers: Forum only where the server supports it. */
 export function offeredChannelTypes(): readonly ChannelType[] {
   return forumsEnabled() ? [...CHANNEL_TYPES, "forum"] : CHANNEL_TYPES;
 }

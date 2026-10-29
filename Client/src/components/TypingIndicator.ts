@@ -76,12 +76,12 @@ export function createTypingIndicator(options: TypingIndicatorOptions): Mountabl
       // Text
       appendTypingText(root, filtered);
     }
-    // When empty the bar stays in place as a reserved 24px row (DP-15), so
+    // When empty the bar stays in place as a reserved 24px row, so
     // typing start/stop does not shift the message list.
   }
 
   function mount(container: Element): void {
-    // Polite live region (DC-13): "X is typing" changes are announced without
+    // Polite live region: "X is typing" changes are announced without
     // interrupting whatever the screen reader is currently speaking.
     root = createElement("div", {
       class: "typing-bar",

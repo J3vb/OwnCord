@@ -100,7 +100,7 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
       on && own && msg.forward === undefined && msg.poll === undefined && msg.sticker === undefined,
     ),
     // A forward would copy only the poll's fallback text and drop the voting, so the server refuses it.
-    // A sticker message cannot be forwarded either (WP 8.8).
+    // A sticker message cannot be forwarded either.
     forward: gate(
       on &&
         opts.onForwardClick !== undefined &&

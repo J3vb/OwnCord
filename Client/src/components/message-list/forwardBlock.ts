@@ -1,5 +1,5 @@
 /**
- * The "Forwarded" frame around a forwarded message's body (WP 6.9a). The
+ * The "Forwarded" frame around a forwarded message's body. The
  * renderer fills `startForwardBlock`'s box with the text, files and embeds the
  * way it does for any message, then seals it with `endForwardBlock`, which adds
  * the source line. The block carries no author and no channel name, so the

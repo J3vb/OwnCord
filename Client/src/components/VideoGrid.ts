@@ -116,8 +116,8 @@ export interface VideoGridCallbacks {
   /** A tile left later than the removeStream call that ended it. */
   readonly onStreamRemoved?: () => void;
   /** Whether this user's voice state still says their screen share (or
-   *  camera) is on. A codec switch unpublishes and publishes the same track
-   *  (WP M-5b), so a watched stream whose owner still has it on gets a moment
+   *  camera) is on. A codec switch unpublishes and publishes the same track,
+   *  so a watched stream whose owner still has it on gets a moment
    *  to come back, keeping its watch, before its tile ends. */
   readonly isStreamLive?: (userId: number, screenshare: boolean) => boolean;
   /** Back to the full stream view of `tileId`, from its mini-player. */
@@ -413,7 +413,7 @@ function buildVolumeControls(config: TileConfig): {
 } {
   // Mic and screenshare audio state both survive tile rebuilds —
   // initialize from the same persisted values the sidebar volume menu
-  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Stream audio
+  // reads, instead of hardcoding "unmuted at 100%". Stream audio
   // plays on an element (volume caps at 1.0); voice has a gain node.
   const savedVolume = config.isScreenshare
     ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
@@ -460,7 +460,7 @@ function buildVolumeControls(config: TileConfig): {
 
   function commit(): void {
     if (config.isScreenshare) {
-      // BUG-102: Set actual volume, not just mute toggle. Slider 100 maps
+      // Set actual volume, not just mute toggle. Slider 100 maps
       // to element volume 1.0 (the attach-time default).
       muteScreenshareAudio(config.audioUserId, muted);
       if (!muted) setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
@@ -1398,7 +1398,7 @@ export function createVideoGrid(): VideoGridComponent {
     pop.focus();
   }
 
-  // --- Video layers (P3-07) -------------------------------------------------------
+  // --- Video layers -------------------------------------------------------
 
   /** Nothing while no one can see the tile (grid closed, app hidden or
    *  minimised, stopped); the top layer for the stream you are watching
@@ -1433,7 +1433,7 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   /** Report each remote tile's view when it changes. adaptiveStream is off
-   *  (it froze tiles, OC-0455), so this is what keeps hidden and small tiles
+   *  (it froze tiles), so this is what keeps hidden and small tiles
    *  from pulling the top layer. */
   function syncViews(): void {
     for (const [id, entry] of cells) {
@@ -1697,7 +1697,7 @@ export function createVideoGrid(): VideoGridComponent {
       detail.textContent = parts.join(" · ");
     };
     renderDetail(null);
-    // Why the share sends what it does (M-1): the capture rate, what limits
+    // Why the share sends what it does: the capture rate, what limits
     // the encoder, and which encoder. Filled once the first poll is back.
     const senderLine = createElement("div", { class: "video-self-stats" });
     senderLine.hidden = true;

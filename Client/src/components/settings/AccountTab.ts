@@ -63,7 +63,7 @@ const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const MAX_AVATAR_DIMENSION = 1024;
 /** Mirrors maxBannerFileBytes: what an animated banner, sent uncropped, may weigh. */
 const MAX_BANNER_BYTES = 4 * 1024 * 1024;
-/** Avatars and banners may move (WP 8.7): GIF joins the still types. */
+/** Avatars and banners may move: GIF joins the still types. */
 const ACCEPTED_AVATAR_TYPES = "image/png,image/jpeg,image/webp,image/gif";
 
 // ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@ function buildAvatarUploader(
 }
 
 // ---------------------------------------------------------------------------
-// Banner (WP 6.11d)
+// Banner
 // ---------------------------------------------------------------------------
 
 /** A banner is shown 5:2; 1200 px wide keeps it sharp and under the server's 1920x960 cap. */
@@ -373,7 +373,7 @@ const BANNER_MAX_WIDTH = 1200;
 /**
  * What goes up as the banner. A still picture is cropped to 5:2 and scaled
  * down; a GIF or an animated WebP/PNG goes as it is, since a canvas crop keeps
- * only its first frame (WP 8.7). The banner strip cover-crops it instead.
+ * only its first frame. The banner strip cover-crops it instead.
  */
 export async function prepareBannerFile(file: File): Promise<CropResult> {
   if (file.type === "image/gif" || (await isAnimatedFile(file))) {
@@ -802,7 +802,7 @@ function buildPasswordSection(options: SettingsOverlayOptions, signal: AbortSign
           }
           const warning = outcome?.warning;
           if (warning !== undefined && warning !== "") {
-            // A partial success (OC-0314): the password changed, but the
+            // A partial success: the password changed, but the
             // other sessions could not be revoked. The warning is the
             // instruction to revoke them by hand, so it stays in the form
             // — no green "changed successfully", no three-second fade.
@@ -1147,7 +1147,7 @@ function buildTotpSection(
   function render(afterSubmit = false): void {
     const enabled = authStore.getState().user?.totp_enabled === true;
     // The control the user just activated is being replaced, and removing it
-    // drops focus to <body> (B9-23). Unless the user has moved focus
+    // drops focus to <body>. Unless the user has moved focus
     // elsewhere, move it to the first rebuilt control instead.
     const restoreFocus = afterSubmit && focusIsOurs(contentArea);
 
@@ -1176,7 +1176,7 @@ function buildTotpSection(
   render();
 
   // auth_ok never carries totp_enabled, so the store's value can be a stale
-  // default until the profile has been read (OC-0354). Refresh when the
+  // default until the profile has been read. Refresh when the
   // section opens; rebuild only if the answer differs from what is shown,
   // so a form the user already started is not thrown away.
   const shownEnabled = authStore.getState().user?.totp_enabled === true;
@@ -1433,7 +1433,7 @@ function buildSessionsSection(options: SettingsOverlayOptions, signal: AbortSign
 }
 
 // ---------------------------------------------------------------------------
-// Message retention (B7-15c)
+// Message retention
 // ---------------------------------------------------------------------------
 
 /** The server-default retention window, when the server reported one. */
@@ -1489,7 +1489,7 @@ function buildDeleteAccountSection(
     {
       style: "color:var(--text-danger);font-size:13px;margin-bottom:12px;line-height:1.4",
     },
-    // B7-15c owner decision: no retention window here. Erasure hard-deletes
+    // No retention window here. Erasure hard-deletes
     // the account's messages and attachments at once (Server/db/erasure.go),
     // so a "kept N days" line would imply a grace period that does not exist.
     t("delete.warning"),
@@ -1499,7 +1499,7 @@ function buildDeleteAccountSection(
     "label",
     { class: "form-label", for: "delete-account-password" },
     // Same text as the placeholder, so the field's accessible name is
-    // unchanged by gaining a real <label> (B9-23).
+    // unchanged by gaining a real <label>.
     t("totp.passwordPlaceholder"),
   );
   const passwordInput = createElement("input", {
@@ -1789,7 +1789,7 @@ export function buildAccountTab(
         .then(() => {
           // The header shows the resolved display name, not the raw
           // username — mirror buildProfileFields' onSaved callback so the
-          // two writers of `.account-header-name` agree (OC-0188). The
+          // two writers of `.account-header-name` agree. The
           // store is already updated by the time this resolves, so read it
           // fresh rather than assuming the username *is* the display name.
           setText(

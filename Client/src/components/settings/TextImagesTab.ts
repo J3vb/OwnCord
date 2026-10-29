@@ -87,7 +87,7 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
   return section;
 }
 
-/** B9-8 (Q3): forget every server's external-content choice. Turning off one
+/** Forget every server's external-content choice. Turning off one
  *  of the toggles above does the same. */
 function buildConsentResetRow(signal: AbortSignal): HTMLDivElement {
   const row = createElement("div", { class: "setting-row" });

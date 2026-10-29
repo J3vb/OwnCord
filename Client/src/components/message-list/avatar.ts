@@ -49,7 +49,7 @@ export interface AvatarOptions {
    */
   readonly deferUntilVisible?: boolean;
   /**
-   * An animated avatar (WP 8.7) shows its first frame and plays while the row
+   * An animated avatar shows its first frame and plays while the row
    * around it is hovered (`"hover"`, the default), or plays from the start
    * (`"always"`: the profile popup). Never under reduced motion.
    */

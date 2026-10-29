@@ -97,7 +97,7 @@ export interface MessageInputOptions {
     file: File,
     signal?: AbortSignal,
     onProgress?: (fraction: number) => void,
-    /** Set for a voice message (WP 8.9): its length and waveform ride the upload. */
+    /** Set for a voice message: its length and waveform ride the upload. */
     voice?: VoiceUploadMeta,
   ) => Promise<{ id: string; url: string; filename: string }>;
   /** Withdraw an upload that will never be sent, so its quota is free at
@@ -105,12 +105,12 @@ export interface MessageInputOptions {
   readonly onDiscardUpload?: (id: string) => Promise<void>;
   readonly onTyping: () => void;
   /**
-   * Opens the poll dialog (WP 6.9b). Omit to leave the Poll button out; it is
+   * Opens the poll dialog. Omit to leave the Poll button out; it is
    * also left out on a server that does not advertise polls.
    */
   readonly onCreatePoll?: () => void;
   /**
-   * Sends a custom sticker at once (WP 8.8): `replyTo` and `replyPing` are the
+   * Sends a custom sticker at once: `replyTo` and `replyPing` are the
    * pending reply, if any. Omit to leave the sticker button and tab out; they
    * are also left out on a server that does not advertise stickers.
    */
@@ -160,12 +160,12 @@ export interface ReplyTarget {
 }
 
 /** A channel's unsent composer state, captured before a channel switch and
- *  restored when the user returns (UX-1). Uploads settled before the switch
+ *  restored when the user returns. Uploads settled before the switch
  *  keep their server id; an upload still in flight rides along in `uploads`. */
 export interface ComposerDraft {
   readonly content: string;
   readonly replyTo: ReplyTarget | null;
-  /** Users and roles picked from the mention popup (WP 6.3e). */
+  /** Users and roles picked from the mention popup. */
   readonly picks?: readonly PickedMention[];
   readonly attachments: readonly {
     readonly id: string;
@@ -373,7 +373,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** True once the server has told us GIFs are off, or if no GIF api was wired. */
   let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
-  /** The voice-message recorder bar (WP 8.9), owned by this composer. */
+  /** The voice-message recorder bar, owned by this composer. */
   let voice: VoiceComposer | null = null;
   let attachmentPreviewBar: HTMLDivElement | null = null;
   /** The composer's single refusal line. It stays until the user edits or
@@ -389,7 +389,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Set by mount(); backs togglePicker(). */
   let togglePickerOf: ((kind: "emoji" | "gif" | "sticker") => void) | null = null;
   let mentionPopup: MentionAutocompleteComponent | null = null;
-  /** Users and roles picked from the popup for this draft (WP 6.3e), by the
+  /** Users and roles picked from the popup for this draft, by the
    *  text now in the textarea. Send turns the spans still intact into id
    *  tokens, on a server that resolves them; an edited span is plain text. */
   let pickedMentions: PickedMention[] = [];
@@ -929,7 +929,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   function applyDisabledState(): void {
     if (textarea === null) return;
     const disabled = disabledReason !== null;
-    // UX-1 / DESIGN_SYSTEM "Disabled": a gated composer uses aria-disabled +
+    // DESIGN_SYSTEM "Disabled": a gated composer uses aria-disabled +
     // readOnly rather than the `disabled` attribute, because disabling a
     // focused element drops focus to <body> and loses the caret mid-sentence.
     // Send is refused in handleSend() with the reason; the buttons stay
@@ -1220,7 +1220,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const idx = pendingAttachments.findIndex((a) => a.previewEl === el);
     const att = idx !== -1 ? pendingAttachments[idx] : undefined;
     if (att !== undefined) {
-      // SRV-05: removing an in-flight attachment cancels its upload and frees
+      // Removing an in-flight attachment cancels its upload and frees
       // Send immediately, instead of leaving a doomed request running and the
       // composer blocked on it until the request settles.
       att.upload?.owner.destroy();
@@ -1646,7 +1646,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (gifUnavailable) {
       markGifUnavailable(gifBtn, messagingText("gif.disabled"));
     }
-    // The Sticker button (WP 8.8): only where the host can send one and the server has stickers.
+    // The Sticker button: only where the host can send one and the server has stickers.
     const sendSticker = options.onSendSticker;
     const stickerBtn =
       sendSticker !== undefined && stickersEnabled()
@@ -1659,7 +1659,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           })
         : null;
     stickerBtn?.appendChild(createIcon("sticker", 20));
-    // The Poll button (WP 6.9b): only where the host can open the dialog and the server has polls.
+    // The Poll button: only where the host can open the dialog and the server has polls.
     const createPoll = options.onCreatePoll;
     const pollBtn =
       createPoll !== undefined && pollsEnabled()
@@ -1682,7 +1682,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "data-testid": "send-btn",
     });
     sendBtn.appendChild(createIcon("send", 20));
-    // The mic (WP 8.9): where the composer can upload at all, unless a text-only composer.
+    // The mic: where the composer can upload at all, unless a text-only composer.
     const micBtn =
       options.onUploadFile !== undefined && options.noAttach !== true
         ? createElement("button", {
@@ -1844,7 +1844,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     sendBtn.addEventListener("click", handleSend, { signal });
 
-    // The GIF, sticker and emoji buttons share one tabbed popup (WP 8.8). Each
+    // The GIF, sticker and emoji buttons share one tabbed popup. Each
     // button opens it on its own tab; the active tab's button closes it.
     let popup: ExpressionPopup | null = null;
     // One outside-click owner for the open popup, destroyed when it closes.
@@ -2146,7 +2146,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       cancelAnimationFrame(resizeFrame);
       resizeFrame = null;
     }
-    // SRV-05: an unmount must not leave an upload running against a composer
+    // An unmount must not leave an upload running against a composer
     // that no longer exists, unless getDraft() handed it to the draft.
     for (const att of pendingAttachments) {
       if (att.upload === undefined) continue;
