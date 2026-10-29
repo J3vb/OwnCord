@@ -393,3 +393,100 @@ func TestVoiceJoinPassword_PayloadsNeverCarryTheHash(t *testing.T) {
 		}
 	}
 }
+
+// Attempts on different channels draw on one per-member budget.
+func TestVoiceJoinPassword_PerUserBudgetSpansChannels(t *testing.T) {
+	hub, database, limiter := newPasswordHub(t)
+	a := seedVoiceChan(t, database, "pw-user-a")
+	b := seedVoiceChan(t, database, "pw-user-b")
+	protectVoiceChannel(t, database, a, joinPasswordSecret)
+	protectVoiceChannel(t, database, b, joinPasswordSecret)
+	user := seedVoiceMember(t, database, "pw-user-budget")
+	c, send := connectPasswordClient(t, hub, user, a)
+
+	// Five tries on A and four on B, each channel inside its own limit.
+	for range 5 {
+		limiter.Allow(auth.Key(auth.Key("voice_join_password", user.ID), a), 5, time.Minute)
+		limiter.Allow(auth.Key("voice_join_password_user", user.ID), 10, time.Minute)
+	}
+	for range 4 {
+		limiter.Allow(auth.Key("voice_join_password_user", user.ID), 10, time.Minute)
+	}
+	// The tenth attempt is the last one allowed, on a fresh channel bucket.
+	if code := tryJoin(hub, c, send, b, "nope"); code != "WRONG_PASSWORD" {
+		t.Fatalf("tenth attempt answered %q, want WRONG_PASSWORD", code)
+	}
+	time.Sleep(1100 * time.Millisecond) // past the voice_join bucket
+	if code := tryJoin(hub, c, send, b, joinPasswordSecret); code != "RATE_LIMITED" {
+		t.Fatalf("eleventh attempt answered %q, want RATE_LIMITED", code)
+	}
+	if hasGrant(t, database, b, user.ID) {
+		t.Fatal("a rate-limited attempt must not store a grant")
+	}
+}
+
+func TestVoiceJoinPassword_ServerWideBackstop(t *testing.T) {
+	hub, database, limiter := newPasswordHub(t)
+	chanID := seedVoiceChan(t, database, "pw-backstop")
+	protectVoiceChannel(t, database, chanID, joinPasswordSecret)
+	user := seedVoiceMember(t, database, "pw-backstop-user")
+	c, send := connectPasswordClient(t, hub, user, chanID)
+
+	for range 60 {
+		limiter.Allow("voice_join_password_all", 60, time.Minute)
+	}
+	if code := tryJoin(hub, c, send, chanID, joinPasswordSecret); code != "RATE_LIMITED" {
+		t.Fatalf("code = %q, want RATE_LIMITED", code)
+	}
+}
+
+// The gate comes after the role rules: a member who may not join the channel
+// is told so, not asked for a password.
+func TestVoiceJoinPassword_RoleRulesAnswerFirst(t *testing.T) {
+	hub, database, _ := newPasswordHub(t)
+	chanID := seedVoiceChan(t, database, "pw-gate-order")
+	protectVoiceChannel(t, database, chanID, joinPasswordSecret)
+	cases := map[string]int64{
+		"no CONNECT_VOICE": permissions.ReadMessages,
+		"no READ_MESSAGES": permissions.ConnectVoice,
+	}
+	roleID := 40
+	for name, perms := range cases {
+		roleID++
+		if _, err := database.ExecContext(context.Background(),
+			`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (?, ?, ?, 10, 0)`,
+			roleID, name, perms); err != nil {
+			t.Fatal(err)
+		}
+		user := seedVoiceUserWithRole(t, database, "pw-gate-"+strings.ReplaceAll(name, " ", "-"), roleID)
+		c, send := connectPasswordClient(t, hub, user, chanID)
+		for _, pw := range []string{"", joinPasswordSecret} {
+			if code := tryJoin(hub, c, send, chanID, pw); code != "FORBIDDEN" {
+				t.Errorf("%s (password %q): code = %q, want FORBIDDEN", name, pw, code)
+			}
+		}
+	}
+}
+
+// A move that does not happen leaves no grant behind.
+func TestVoiceJoinPassword_FailedModeratorMoveStoresNoGrant(t *testing.T) {
+	hub, database, _ := newPasswordHub(t)
+	fromID := seedVoiceChan(t, database, "pw-nomove-from")
+	toID := seedVoiceChan(t, database, "pw-nomove-to")
+	protectVoiceChannel(t, database, toID, joinPasswordSecret)
+	actor := seedVoiceUserWithRole(t, database, "pw-nomove-actor", int(permissions.OwnerRoleID))
+	target := seedVoiceMember(t, database, "pw-nomove-target")
+	// A voice row with no live connection behind it.
+	if err := database.JoinVoiceChannel(context.Background(), target.ID, fromID); err != nil {
+		t.Fatal(err)
+	}
+	ac, asend := connectPasswordClient(t, hub, actor, fromID)
+
+	hub.HandleMessageForTest(ac, voiceModMoveMsg(target.ID, toID))
+	if code := receiveErrorCode(asend, 200*time.Millisecond); code != "VOICE_ERROR" {
+		t.Fatalf("move answered %q, want VOICE_ERROR", code)
+	}
+	if hasGrant(t, database, toID, target.ID) {
+		t.Fatal("a move that evicted nobody stored a grant")
+	}
+}

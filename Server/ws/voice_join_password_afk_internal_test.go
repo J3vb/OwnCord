@@ -35,3 +35,27 @@ func TestSweepAFK_MoveIntoProtectedAFKChannelNeedsNoPassword(t *testing.T) {
 		t.Fatal("the moved member's re-join of the protected AFK channel was refused")
 	}
 }
+
+// An AFK candidate that is skipped (it came back before the evict) gets no
+// grant for the AFK channel.
+func TestSweepAFK_SkippedMoveStoresNoGrant(t *testing.T) {
+	r := newAFKRig(t, 1)
+	alice := r.members[0]
+	hash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.db.ExecContext(context.Background(),
+		`UPDATE channels SET password_hash = ?, password_version = password_version + 1 WHERE id = ?`,
+		string(hash), r.afk); err != nil {
+		t.Fatal(err)
+	}
+	r.seat(alice, r.room)
+	// Not idle: the evict refuses it.
+	if r.hub.EvictForAFKMove(context.Background(), alice.c, r.room, time.Now().Add(-10*time.Minute), r.afk) {
+		t.Fatal("a member who is not idle was evicted")
+	}
+	if ok, err := r.db.HasChannelPasswordGrant(context.Background(), r.afk, alice.userID); err != nil || ok {
+		t.Fatalf("skipped AFK move: grant=%v err=%v, want none", ok, err)
+	}
+}

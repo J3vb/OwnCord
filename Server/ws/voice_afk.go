@@ -217,12 +217,6 @@ func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandi
 // lock_order.go is unchanged. No audit row: the move is the server's, not a
 // moderator's.
 func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idleSince time.Time, afkID int64) bool {
-	// The member's re-join of a password-protected AFK channel must not ask
-	// for the password: the move grants it first.
-	if gErr := grantPasswordForMove(ctx, h.readers.Dispatch, afkID, c.userID); gErr != nil {
-		slog.Warn("voice afk: granting the AFK channel password failed, member left in place", "user_id", c.userID, "err", gErr)
-		return false
-	}
 	if !h.afkEvict(ctx, c, fromCh, idleSince) {
 		return false
 	}
@@ -230,7 +224,14 @@ func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idle
 	if afkAfterEvictHook != nil {
 		afkAfterEvictHook()
 	}
-	if !c.trySendMsg(buildVoiceMoved(afkID, voiceMovedReasonAFK, 0)) {
+	// The member's re-join of a password-protected AFK channel must not ask
+	// for the password: the grant is stored now that the member is evicted,
+	// and a failure leaves them out of voice like a failed send.
+	gErr := grantPasswordForMove(ctx, h.readers.Dispatch, afkID, c.userID)
+	if gErr != nil {
+		slog.Warn("voice afk: granting the AFK channel password failed, member removed from voice instead of moved", "user_id", c.userID, "err", gErr)
+	}
+	if gErr != nil || !c.trySendMsg(buildVoiceMoved(afkID, voiceMovedReasonAFK, 0)) {
 		clearPendingModFlags(h, c.userID)
 		slog.Info("voice afk move: member was reconnecting, removed from voice instead of moved",
 			"user_id", c.userID, "from_channel_id", fromCh)

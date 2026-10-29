@@ -19,6 +19,26 @@ const (
 	voiceJoinPasswordWindow    = time.Minute
 )
 
+// Budgets that sit around the per-channel one: a member may try this many
+// passwords per window across all channels, and the whole server this many, so
+// guessing is bounded however many channels are protected.
+const (
+	voiceJoinPasswordUserLimit = 10
+	voiceJoinPasswordAllLimit  = 60
+)
+
+// voiceJoinPasswordAttemptAllowed spends one password attempt from the
+// member's budget across channels, then the member's budget for this channel,
+// then the server-wide one. Without a limiter every attempt is allowed.
+func (h *Hub) voiceJoinPasswordAttemptAllowed(userID, channelID int64) bool {
+	if h.limiter == nil {
+		return true
+	}
+	return h.limiter.Allow(auth.Key("voice_join_password_user", userID), voiceJoinPasswordUserLimit, voiceJoinPasswordWindow) &&
+		h.limiter.Allow(auth.Key(auth.Key("voice_join_password", userID), channelID), voiceJoinPasswordRateLimit, voiceJoinPasswordWindow) &&
+		h.limiter.Allow("voice_join_password_all", voiceJoinPasswordAllLimit, voiceJoinPasswordWindow)
+}
+
 // voiceJoinPasswordGate is the extra lock on a password-protected voice
 // channel (permissions.CanPassChannelPassword). It runs only for the user's own
 // voice_join, after CanJoinVoice: a moderator's move, the AFK move and the
@@ -48,8 +68,7 @@ func (h *Hub) voiceJoinPasswordGate(ctx context.Context, c *Client, sub permissi
 		return false
 	}
 
-	key := auth.Key(auth.Key("voice_join_password", c.userID), channelID)
-	if h.limiter != nil && !h.limiter.Allow(key, voiceJoinPasswordRateLimit, voiceJoinPasswordWindow) {
+	if !h.voiceJoinPasswordAttemptAllowed(c.userID, channelID) {
 		slog.Warn("ws voice_join: channel password attempts rate limited", "user_id", c.userID, "channel_id", channelID)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeRateLimited, "too many password attempts", reqID))
 		return false
@@ -104,4 +123,18 @@ func grantPasswordForMove(ctx context.Context, reader DispatchReader, channelID,
 		return fmt.Errorf("store channel password grant: %w", err)
 	}
 	return nil
+}
+
+// moveGrantStored stores the grant a moderator move needs for a protected
+// destination and reports whether the move may go on. An unprotected
+// destination needs none.
+func moveGrantStored(ctx context.Context, reader DispatchReader, protected bool, channelID, userID int64) bool {
+	if !protected {
+		return true
+	}
+	if err := grantPasswordForMove(ctx, reader, channelID, userID); err != nil {
+		slog.Error("ws voice_mod_move: granting the destination password failed", "err", err, "channel_id", channelID)
+		return false
+	}
+	return true
 }

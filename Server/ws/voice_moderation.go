@@ -313,19 +313,14 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 }
 
 // voiceModMoveDestinationOpen is the last pre-flight of a move: the
-// destination must have room for the target and, when it has a password, the
-// target is granted it.
+// destination must have room for the target.
 //
 // The capacity check is advisory, with JoinVoiceChannelIfCapacity's semantics.
 // The atomic one still runs on the re-join; this one keeps the common case from
 // dropping the target into a channel that is already full. The cap is the one
 // the target's own re-join is held to, so a target who moderates voice there is
 // not refused a move their join would be admitted to.
-//
-// The re-join this move hands off to would ask a password-protected
-// destination for its password. A move never does, so the grant is stored
-// before anyone is evicted.
-func voiceModMoveDestinationOpen(ctx context.Context, d VoiceDeps, destID int64, maxUsers int, protected bool, targetSub permissions.Subject, targetID int64) *Result {
+func voiceModMoveDestinationOpen(ctx context.Context, d VoiceDeps, destID int64, maxUsers int, targetSub permissions.Subject) *Result {
 	if destCap := voiceJoinCapacity(targetSub, maxUsers); destCap > 0 {
 		count, cErr := d.Voice.CountInChannel(ctx, destID)
 		if cErr != nil {
@@ -334,12 +329,6 @@ func voiceModMoveDestinationOpen(ctx context.Context, d VoiceDeps, destID int64,
 		}
 		if count >= destCap {
 			return &Result{Error: ClientError{Code: ErrCodeChannelFull, Message: "voice channel is full"}}
-		}
-	}
-	if protected {
-		if gErr := grantPasswordForMove(ctx, d.Reader, destID, targetID); gErr != nil {
-			slog.Error("ws voice_mod_move: granting the destination password failed", "err", gErr, "channel_id", destID)
-			return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check destination access"}}
 		}
 	}
 	return nil
@@ -403,7 +392,7 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 			Message: "user cannot connect to that voice channel",
 		}}
 	}
-	if r := voiceModMoveDestinationOpen(ctx, d, dest.ID, dest.VoiceMaxUsers, dest.PasswordProtected, targetSub, c.TargetID); r != nil {
+	if r := voiceModMoveDestinationOpen(ctx, d, dest.ID, dest.VoiceMaxUsers, targetSub); r != nil {
 		return *r
 	}
 
@@ -432,7 +421,11 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	blockVoiceRejoin(d.Mod, c.TargetID, state.ChannelID)
-	if !d.Mod.SendToVoiceDevice(c.TargetID, buildVoiceMoved(c.ToChannelID, "", info.UserID)) {
+	// The target's re-join would ask a password-protected destination for its
+	// password, which a move never does: the grant is stored now that the
+	// target is evicted, and a failure takes the same branch as a failed send.
+	if !moveGrantStored(ctx, d.Reader, dest.PasswordProtected, c.ToChannelID, c.TargetID) ||
+		!d.Mod.SendToVoiceDevice(c.TargetID, buildVoiceMoved(c.ToChannelID, "", info.UserID)) {
 		clearPendingModFlags(d.Mod, c.TargetID)
 		writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_kick", c.TargetID,
 			fmt.Sprintf("disconnected from channel %d (reconnecting, not moved to channel %d)", state.ChannelID, c.ToChannelID))
