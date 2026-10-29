@@ -1,5 +1,5 @@
 /**
- * Forward picker (WP 6.9a): a dialog to choose up to five channels or DMs for
+ * Forward picker: a dialog to choose up to five channels or DMs for
  * one message, optionally with a message of the sender's own, then send and
  * show each target's result. Loaded on the first Forward, through
  * ChannelController, so it stays out of the startup and MainPage chunks.

@@ -25,7 +25,7 @@ export interface PendingTextMessage {
 }
 // The owner and persistence shapes are the `PendingMessageStore` contract
 // (`src/platform/contracts/pendingMessages.ts`), whose desktop implementation
-// is `platform/desktop/pendingMessages.ts` (B7-4). Re-exported under the names
+// is `platform/desktop/pendingMessages.ts`. Re-exported under the names
 // this module's callers already import, so the move stayed a pure rename.
 export type { PendingMessageOwner, PendingMessageStore };
 export type { PendingMessageStore as PendingMessagePersistence };
@@ -56,7 +56,7 @@ export function pendingMessageExpired(
  * by default). Retry still resends it unchanged: the server deduplicates it
  * when the restored database holds its receipt, and otherwise refuses it with
  * BAD_REQUEST, which this lets the client label as a restore refusal while
- * keeping the text (OC-0476).
+ * keeping the text.
  */
 export function pendingMessageBeforeRestore(clientMessageId: string, floor = retryFloor): boolean {
   if (floor <= 0 || !ID_PATTERN.test(clientMessageId)) return false;

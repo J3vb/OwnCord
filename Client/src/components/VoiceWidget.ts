@@ -213,7 +213,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     statsPoller = createConnectionStatsPoller(() => getRoomForStats());
     statsUnlisten = statsPoller.onUpdate(updateSignalIcon);
     // The stats pane opens only on demand. A quality change updates the signal
-    // bars via onUpdate, but never expands the pane on its own (DP-41).
+    // bars via onUpdate, but never expands the pane on its own.
     statsPoller.start();
     // Paint the initial state now. updateSignalIcon only runs on a sample;
     // where none arrives (the first poll is 2 s out, or the native host has
@@ -251,7 +251,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
   /** Header E2EE status: dynamic label + a persistent "secured" lock once the
    *  room key is ready (docs/architecture/ux/voice-and-e2ee.md §2).
-   *  `encryptionDegraded` (OC-0002) is the SDK's own signal — via
+   *  `encryptionDegraded` is the SDK's own signal — via
    *  RoomEvent.EncryptionError, wired in livekitSession.ts's createRoom() —
    *  that the E2EE worker died after the key exchange already succeeded.
    *  voiceStatus alone reaches "connected" in that case, so the badge must
@@ -309,7 +309,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       btn.title = frozen ? reason : liveTitle(btn);
     }
     // Camera and share need the room, which exists only once the join has
-    // connected; before that the press would bounce off (D-08).
+    // connected; before that the press would bounce off.
     const joining = isConnecting(voiceStore.getState().voiceStatus);
     for (const btn of [cameraBtn, shareBtn]) {
       if (btn === null || frozen || !joining) continue;
@@ -656,7 +656,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     // A persistent line beside the Grant Microphone button: the button is
     // hidden while nothing is wrong, but when the user is in listen-only mode
-    // the state needs a reason and a next step (BPR-092), not just a button.
+    // the state needs a reason and a next step, not just a button.
     micNoticeEl = createElement("div", {
       // No `setting-desc`: its margin/font would apply even while this live
       // region is empty (it stays rendered but empty outside listen-only mode
@@ -724,7 +724,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     );
     // render() reads the DM call's header name from dmStore, but nothing above
     // fires when it changes — a DM rename/nickname update only touches dmStore,
-    // so the header went stale for the whole call (OC-0347).
+    // so the header went stale for the whole call.
     unsubs.push(
       dmStore.subscribeSelector(
         (s) => s.channels,

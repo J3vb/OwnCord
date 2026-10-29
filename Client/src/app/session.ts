@@ -152,7 +152,7 @@ export function startSession(
   authStore.setState((prev) => ({ ...prev, token }));
   lastConnectHost = host;
   lastConnectToken = token;
-  // UX-8: scope the last-channel store to this server before the dispatcher
+  // Scope the last-channel store to this server before the dispatcher
   // wires, so the first `ready` (which restores it) reads the right key.
   // It has to be here, not MainPage: the first ready arrives before MainPage
   // mounts, and it is what restores the last channel.
@@ -234,10 +234,10 @@ export function startSession(
     }),
   );
 
-  // BUG-135: Only persist credentials when the user opted in. The token is
+  // Only persist credentials when the user opted in. The token is
   // kept when Auto connect OR Remember password is ticked; the password only
   // when Remember is ticked. Declining both is an active instruction, not
-  // just an absence of one (OCV-022): a password stored under an earlier
+  // just an absence of one: a password stored under an earlier
   // opt-in must not outlive the opt-out, so the whole credential goes. The
   // username survives in the profile, so the form still prefills it.
   //
@@ -300,8 +300,8 @@ export function startSession(
   }
 
   // Update saved credentials when the current user changes their username.
-  // Guarded by the same remember-password opt-out as the initial save above
-  // (BUG-135). No password is passed: save_credential preserves the stored
+  // Guarded by the same remember-password opt-out as the initial save above.
+  // No password is passed: save_credential preserves the stored
   // one when none is supplied, which is why the plaintext no longer has to
   // make a round trip through JavaScript.
   sessionUnsubs.push(
@@ -348,7 +348,7 @@ export function startSession(
   // (setState() then dispatch() in the same handleMessage() call), so
   // authStore.setAuth() — run by the dispatcher's own auth_ok handler —
   // has not applied yet at that point. Reading straight from the payload
-  // sidesteps the race instead of racing it (OC-0063).
+  // sidesteps the race instead of racing it.
   const unsubAuthOk = ws.on("auth_ok", (payload) => {
     unsubAuthOk();
     // Ensure exactly one overlay exists at a time.
@@ -407,7 +407,7 @@ export function installLogoutTeardown(): void {
       // handler) is orphaned over the connect page with no remaining owner —
       // its only other teardown paths are its own onReady timer (never armed
       // without `ready`), the next startSession, onAutoLoginCancel, and the
-      // invite deep-link handler, none of which this path takes (OC-0157).
+      // invite deep-link handler, none of which this path takes.
       if (!isAuthenticated && (currentPage() === "main" || lastConnectHost !== "")) {
         // Leave voice channel before disconnecting so other clients see it
         // immediately. Gated on clearAuth's logoutWasInVoice snapshot rather
@@ -442,8 +442,8 @@ export function installLogoutTeardown(): void {
           // still valid, and the update the connect page offers relaunches
           // straight into auto-login with it (sessionStorage — and so the
           // skip flag below — does not survive that relaunch).
-          // A quick switch keeps it as well: switching back resumes with it
-          // (B7-13), and the departed session is left for that return.
+          // A quick switch keeps it as well: switching back resumes with it, and
+          // the departed session is left for that return.
           if (reason !== "protocol_epoch" && reason !== "server_switch") {
             if (__OWNCORD_WEB__) void deleteCredential(host, sessionToken || undefined);
             else void deleteCredential(host);

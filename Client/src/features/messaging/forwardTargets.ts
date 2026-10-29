@@ -1,5 +1,5 @@
 /**
- * Where a message can be forwarded (WP 6.9a): the pure half of the Forward
+ * Where a message can be forwarded: the pure half of the Forward
  * picker. It reads the channel, DM and block stores and writes none, so the
  * picker can call it on every store change.
  *

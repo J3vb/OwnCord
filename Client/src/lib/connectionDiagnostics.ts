@@ -26,7 +26,7 @@ const DIAGNOSTIC_LABEL_KEYS = {
   media: "diagnostics.stage.media",
 } as const satisfies Record<DiagnosticStage, string>;
 
-/** Resolve a stage's display label where it renders (B9-20). */
+/** Resolve a stage's display label where it renders. */
 export function diagnosticLabel(stage: DiagnosticStage): string {
   return t(DIAGNOSTIC_LABEL_KEYS[stage]);
 }

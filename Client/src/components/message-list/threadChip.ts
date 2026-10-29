@@ -1,5 +1,5 @@
 /**
- * The chip under a thread's starter message (WP 6.9c): the thread's name, how
+ * The chip under a thread's starter message: the thread's name, how
  * many messages it holds ("50+" past the cap), when it last had one, and an
  * archive mark. A click opens the thread's side panel.
  *

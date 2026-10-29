@@ -144,7 +144,7 @@ export type { SettingsStore as PersistenceBackend };
 
 /**
  * The settings backend. Its native half is `platform/desktop/settings.ts`
- * (B7-4) — the same `get_settings` / `save_settings` pair — and the validation
+ * — the same `get_settings` / `save_settings` pair — and the validation
  * of what comes back stays here, with the profile shape it is about and with
  * the file-import path that applies the same rule. Kept as a factory because
  * both call sites construct it that way.
@@ -158,7 +158,7 @@ export function createTauriBackend(): SettingsStore {
       if (!isValidStoredEnvelope(raw)) return null;
       // The envelope itself is well-formed; salvage whichever individual
       // profiles are valid rather than discarding the entire stored list
-      // because one entry is malformed (see OC-0060). Mirrors the per-item
+      // because one entry is malformed. Mirrors the per-item
       // tolerance importProfiles() already has.
       return {
         schemaVersion: raw.schemaVersion,

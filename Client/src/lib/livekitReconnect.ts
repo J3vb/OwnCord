@@ -67,7 +67,7 @@ export interface ReconnectDeps {
   rejoinVoice: () => void;
   /** Full session teardown, sending voice_leave to the server when the chat
    *  socket is connected (a socket still reconnecting cannot carry it; the
-   *  server's RT-8 grace window and reaper retire the membership instead).
+   *  server's grace window and reaper retire the membership instead).
    *
    *  Not a bare voice_leave frame: the give-up path is a real leave, so it owes
    *  the session everything leaveVoice(true) does — state back to "idle", the
@@ -98,7 +98,7 @@ export interface ReconnectDeps {
 
 /** Auto-reconnect budget, sized to outlast a companion LiveKit restart.
  *
- *  RT-9: the companion SFU restarts with exponential backoff (3 s, doubling,
+ *  The companion SFU restarts with exponential backoff (3 s, doubling,
  *  up to 60 s in `Server/ws/livekit_process.go`) plus its own start-up, so a
  *  2-attempt, 3 s-apart loop (about 6 s) gave up while the SFU was still
  *  coming back and ejected every call. The first 5 attempts span about 27 s (a
@@ -106,7 +106,7 @@ export interface ReconnectDeps {
  *  companion's 3 s + 6 s + 12 s restart ladder, and the 6 s cap keeps the
  *  retry gap small enough to resume the call promptly within the 30 s bar.
  *
- *  P2-T5 (DP-39, owner decision D-4): after those fast attempts the loop keeps
+ *  After those fast attempts the loop keeps
  *  trying every 15 s — a longer SFU restart or Wi-Fi drop resumes the call
  *  instead of ejecting the user — while the chat socket is connected or
  *  reconnecting and the channel still exists, and gives up 5 minutes after the
@@ -118,7 +118,7 @@ const RECONNECT_MAX_DELAY_MS = 6000;
 const SLOW_RECONNECT_DELAY_MS = 15_000;
 const RECONNECT_CEILING_MS = 5 * 60_000;
 
-/** OC-0014: the server's token TTL is 5 minutes, so a token older than this
+/** The server's token TTL is 5 minutes, so a token older than this
  *  is refreshed before the next attempt rather than failing it. */
 const TOKEN_REFRESH_AGE_MS = 4 * 60_000;
 
@@ -164,7 +164,7 @@ export async function attemptAutoReconnect(
     const slow = attempt > FAST_RECONNECT_ATTEMPTS;
     const delay = reconnectDelayMs(attempt);
     if (slow) {
-      // D-4: no attempt starts past the ceiling, and none waits on a chat
+      // No attempt starts past the ceiling, and none waits on a chat
       // socket closed for good or a channel that is already gone.
       if (Date.now() - startedAt + delay > RECONNECT_CEILING_MS || !deps.canKeepRetrying()) break;
       // A loop superseded by its failed attempt must not touch the shared token
@@ -173,7 +173,7 @@ export async function attemptAutoReconnect(
         log.info("Auto-reconnect aborted — user left or channel changed");
         return;
       }
-      // OC-0014: the attempt after this delay must carry a live token.
+      // The attempt after this delay must carry a live token.
       if (deps.tokenAgeMs() + delay > TOKEN_REFRESH_AGE_MS) {
         // oxlint-disable-next-line no-await-in-loop -- the refresh decision needs the current roster
         const held = (await deps.serverMembership()) === "held";
@@ -186,7 +186,7 @@ export async function attemptAutoReconnect(
       }
     }
     log.info("Auto-reconnect attempt", { attempt });
-    // RT-9: exponential backoff so the loop outlasts a companion restart.
+    // Exponential backoff so the loop outlasts a companion restart.
     // oxlint-disable-next-line no-await-in-loop -- intentional sequential polling with backoff delay
     await new Promise((r) => setTimeout(r, delay));
     // If user manually left or joined a different channel during the delay, abort.
@@ -197,7 +197,7 @@ export async function attemptAutoReconnect(
     if (!deps.canKeepRetrying()) break;
     // The old token is only good for a membership the server still holds:
     // wait out a chat socket that cannot say, and rejoin one it released
-    // (RT-8 grace expiry, an RT-3 reap, a restart).
+    // (grace expiry, a server reap, a restart).
     // oxlint-disable-next-line no-await-in-loop -- each attempt reads the roster as it is now
     const membership = await deps.serverMembership();
     if (superseded()) {
@@ -300,7 +300,7 @@ export async function attemptAutoReconnect(
       deps.sweepPublications(newRoom);
       logIceConnectionInfo(newRoom);
       newRoom.startAudio().catch((err) => log.debug("Failed to start audio after reconnect", err));
-      // RT-6: the saved input goes in before the mic is re-captured, as on
+      // The saved input goes in before the mic is re-captured, as on
       // the join path (joinOrchestration), so the reconnect opens it once.
       const savedInput = loadPref<string>("audioInputDevice", "");
       if (savedInput) {
@@ -322,7 +322,7 @@ export async function attemptAutoReconnect(
       // oxlint-disable-next-line no-await-in-loop -- sequential reconnect: must restore voice state after connect
       await deps.restoreLocalVoiceState("reconnect");
 
-      // OC-0009: mirrors connectAndSetup's post-connect checkpoints. This tail
+      // Mirrors connectAndSetup's post-connect checkpoints. This tail
       // keeps awaiting AFTER it has already installed "connected" into the
       // shared state, so superseded() — which expects "reconnecting" — can no
       // longer tell a still-current attempt from a superseded one. A newer join
@@ -338,7 +338,7 @@ export async function attemptAutoReconnect(
         return;
       }
 
-      // BUG-099: Reapply the saved output device after reconnect (matches initial join path;
+      // Reapply the saved output device after reconnect (matches initial join path;
       // the saved input went in above, before the mic was re-captured).
       const savedOutput = loadPref<string>("audioOutputDevice", "");
       if (savedOutput) {
@@ -390,9 +390,9 @@ export async function attemptAutoReconnect(
         deps.syncModuleRooms();
     }
   }
-  // Out of time (D-4), or the chat socket closed for good or the channel is
+  // Out of time, or the chat socket closed for good or the channel is
   // gone — give up and clean up. But first check this loop is still current
-  // (see OC-0009 in connectAndSetup).
+  // (see connectAndSetup).
   if (superseded()) {
     log.info("Auto-reconnect give-up skipped — superseded");
     return;

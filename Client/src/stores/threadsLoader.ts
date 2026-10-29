@@ -1,5 +1,5 @@
 /**
- * The way startup code reaches threadsStore (WP 6.9c). Most sessions never see
+ * The way startup code reaches threadsStore. Most sessions never see
  * a thread, so the store loads on first need (a thread frame, or a history row
  * carrying one) instead of weighing on the startup chunk. Work handed to
  * `withThreadsStore` runs in call order: queued while the chunk loads, then

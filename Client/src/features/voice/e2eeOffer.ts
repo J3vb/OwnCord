@@ -18,7 +18,7 @@ const log = createLogger("livekitE2EE");
  *  never captured, so each value keeps its single owner. */
 export interface E2EEOfferHost {
   getWs(): WsClient | null;
-  /** The announce chain an arriving offer must wait behind (OC-0002). */
+  /** The announce chain an arriving offer must wait behind. */
   getAnnounceChain(): Promise<void>;
   peerAttemptIsCurrent(userId: number): () => boolean;
   getPeerPublicKeys(): Map<number, CryptoKey>;
@@ -112,11 +112,11 @@ export class E2EEOffer {
    * the encrypted room key. Unwrap it and apply to the E2EE key provider.
    * Offers are applied one at a time, in delivery order.
    *
-   * Chained through _announceChain first (OC-0002): handleAnnounceInner only
+   * Chained through _announceChain first: handleAnnounceInner only
    * stores the sender's ECDH key after several awaits (identity-pin lookup,
    * signature verification, key import), while handleOfferInner's first
    * statement is a synchronous _peerPublicKeys lookup. An offer dispatched
-   * immediately behind that same sender's announce — the OC-0098 send order
+   * immediately behind that same sender's announce — the send order
    * guarantees exactly this WS delivery order — would otherwise reach the
    * lookup before the announce applied, and be dropped as "unknown peer"
    * with no retry until the next 5-minute rotation. Waiting on the announce
@@ -184,7 +184,7 @@ export class E2EEOffer {
         return;
       }
 
-      // Freshness (OC-0001): the epoch is GCM-authenticated, so it is the
+      // Freshness: the epoch is GCM-authenticated, so it is the
       // holder's own value. Equal is fine — the holder re-sends the current
       // key at the current epoch when a peer re-announces.
       if (epoch === null) {
@@ -218,8 +218,7 @@ export class E2EEOffer {
       // window up to unwrap, not this call. A teardown-and-rejoin-as-holder
       // landing here would otherwise have this stale continuation read the
       // NEW session's live _isKeyHolder/_roomKeyResolver below and stand it
-      // down / resolve it — corrupting a session this attempt no longer owns
-      // (OC-0010).
+      // down / resolve it — corrupting a session this attempt no longer owns.
       if (!isCurrent() || this._e2eeEpoch !== epochBefore || this._ecdhKeyPair !== keypair) {
         log.info("E2EE: discarding stale offer after setKey (epoch or session keypair changed)", {
           fromUserId,
@@ -263,7 +262,7 @@ export class E2EEOffer {
    *  channel) per second (Server/ws/voice_e2ee.go) — a whole rotation's
    *  offers can exceed it in a large channel, and everything past the cap is
    *  dropped with no client-side signal, starving the same tail peers (in
-   *  stable Map insertion order) on every subsequent rotation (OC-0005).
+   *  stable Map insertion order) on every subsequent rotation.
    *  Stay under it with margin rather than reading the limit back from the
    *  server. */
   private static readonly OFFER_RATE_LIMIT_PER_SEC = 60;
@@ -276,12 +275,12 @@ export class E2EEOffer {
    *  current OFFER_RATE_WINDOW_MS window — an INSTANCE-level sliding-window
    *  budget shared by every offer-send path (rotation, become-holder, its H3
    *  late-arrival pass, AND announce-driven offers), never a per-call
-   *  counter. A per-call counter (the original OC-0005 fix) resets to zero
+   *  counter. A per-call counter (the original fix) resets to zero
    *  on every distributeRoomKey invocation, so two back-to-back rotations —
    *  the second one run immediately by drainPendingRotationOrArmTimer —
    *  each got their own fresh budget and together could blow through the
-   *  server's single per-second window (OC-0155); handleAnnounceInner's
-   *  drain-time offer send bypassed the budget altogether (OC-0167). Reset
+   *  server's single per-second window; handleAnnounceInner's
+   *  drain-time offer send bypassed the budget altogether. Reset
    *  in clearState(). */
   private _offerSendTimes: number[] = [];
 
@@ -295,10 +294,10 @@ export class E2EEOffer {
 
   /**
    * Send one voice_e2ee_offer, pacing under the server's per-(sender,
-   * channel) sliding-window rate limit (OC-0005/OC-0155/OC-0167;
-   * Server/ws/voice_e2ee.go voiceE2EEOfferRateLimit=64/1s). Prunes this
-   * instance's send timestamps older than OFFER_RATE_WINDOW_MS, and if
-   * OFFER_RATE_LIMIT_PER_SEC sends already fall inside the window, waits for
+   * channel) sliding-window rate limit (Server/ws/voice_e2ee.go
+   * voiceE2EEOfferRateLimit=64/1s). Prunes this instance's send timestamps older
+   * than OFFER_RATE_WINDOW_MS, and if OFFER_RATE_LIMIT_PER_SEC sends already fall
+   * inside the window, waits for
    * the oldest of them to age out before sending — so every offer-send path
    * draws from ONE shared budget instead of each resetting its own.
    *
@@ -346,7 +345,7 @@ export class E2EEOffer {
    * its late-arrival (H3) pass, and the periodic rotation loop.
    *
    * Sends go through sendOfferPaced's shared instance-level budget to stay
-   * under the server's per-(sender,channel) rate limit (OC-0005/OC-0155) —
+   * under the server's per-(sender,channel) rate limit —
    * without this, a rotation (or two back-to-back rotations) in a large
    * channel silently drops every offer past the cap, and the same tail peers
    * stay stranded on the old key forever.

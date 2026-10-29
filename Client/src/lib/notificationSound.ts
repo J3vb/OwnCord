@@ -10,10 +10,9 @@
  * `setSinkId` where the host supports it (Chromium and WebView2 do). WebKitGTK,
  * the Linux webview, lacks `setSinkId`, so on the Linux desktop `playSpec`
  * sends the spec to the native host instead (`native_voice_play_sound`), which
- * synthesizes it and plays it on the saved output device, in or out of a call
- * (WP LP-6b); any host failure falls back to `playWeb`. Every gate (deafen,
+ * synthesizes it and plays it on the saved output device, in or out of a call;
+ * any host failure falls back to `playWeb`. Every gate (deafen,
  * DND, the switches) and the ring timers stay here, ahead of `playSpec`.
- * DP-40.
  */
 
 import { loadPref, onPrefChange } from "./preferences";
@@ -29,7 +28,7 @@ import { isLinuxDesktop } from "../features/voice/native/platform";
 const log = createLogger("notifications");
 
 let notifAudioCtx: AudioContext | null = null;
-/** The master gain every sound routes through (WP M-8): the "App sounds
+/** The master gain every sound routes through: the "App sounds
  *  volume" slider scales it, 100% being a gain of 1, i.e. the notes below
  *  exactly as they are. Lives and dies with `notifAudioCtx`. */
 let masterGain: GainNode | null = null;
@@ -55,7 +54,7 @@ export function cleanupNotificationAudio(): void {
 
 // The ring chime repeats until the call is answered, declined or times out —
 // unlike a message chime, which fires once. It is its own rising pattern, not
-// the message blip, so a call is told apart from a message by ear (DP-24).
+// the message blip, so a call is told apart from a message by ear.
 let ringInterval: ReturnType<typeof setInterval> | null = null;
 /** The chime burst currently sounding, so stopping the chime cuts the
  *  in-flight notes instead of leaving them under the ringback. */
@@ -68,13 +67,13 @@ export function startRingChime(): void {
   // the settings panel promises no notification sounds, and a ringing phone is
   // the loudest possible violation of that. The banner still appears.
   // D2(b): the call sound has its own toggle, so muting message sounds does
-  // not silence a ringing phone; the ring has its own switch too (WP M-8).
+  // not silence a ringing phone; the ring has its own switch too.
   // A ring that will not sound pre-empts nothing: the outgoing ringback goes on.
   if (loadUserStatus() === "dnd") return;
   if (!loadPref<boolean>("callSounds", true)) return;
   if (!soundSwitchOn("ring")) return;
   // A client is either calling or being called; an incoming ring pre-empts the
-  // outgoing ringback (DP-25 acceptance). The outgoing call keeps wanting its
+  // outgoing ringback. The outgoing call keeps wanting its
   // ringback, so it resumes when this chime ends.
   silenceRingback();
   playRingtone();
@@ -105,7 +104,7 @@ function stopRingtoneBurst(): void {
 
 // The outgoing call's ringback: a soft low tone the caller hears while the
 // callees ring, its own pattern so it is told apart from the callee's incoming
-// chime by ear (DP-25). The two never run at once on one client: you are
+// chime by ear. The two never run at once on one client: you are
 // either answering a call or placing one. An incoming ring pre-empts the
 // ringback, but the outgoing call is still ringing, so the ringback resumes
 // when that chime ends (unless the outgoing ring ended meanwhile).
@@ -232,7 +231,7 @@ interface Playing {
   stop(): void;
 }
 
-/** A sound as data (WP LP-6b): the one table both renderers draw from, so the
+/** A sound as data: the one table both renderers draw from, so the
  *  Web Audio and native notes cannot drift. */
 type ToneSpec = readonly NativeToneNote[];
 
@@ -263,7 +262,7 @@ const RINGTONE_TONE: ToneSpec = [note(0, 0.16, 0.25, 660), note(0.18, 0.16, 0.25
 
 /** One burst of the ringback: a single soft, low tone, slower than the
  *  incoming ringtone and quieter, so the caller and the callee hear different
- *  things (DP-25). */
+ *  things. */
 const RINGBACK_TONE: ToneSpec = [note(0, 0.5, 0.12, 440)];
 
 /** Render `spec` through Web Audio on the shared context, node for node as the
@@ -357,7 +356,7 @@ export function playNotificationSound(): void {
   playSpec(NOTIFICATION_TONE, "Notification sound");
 }
 
-/** The short voice UI sounds (DP-40): join/leave, a moderator's move,
+/** The short voice UI sounds: join/leave, a moderator's move,
  *  mute/unmute, deafen/undeafen, a stream starting and ending. */
 export type VoiceSound =
   | "join"

@@ -1,5 +1,5 @@
 /**
- * A forum channel's post list (WP 6.9d), mounted in the messages slot in place
+ * A forum channel's post list, mounted in the messages slot in place
  * of the message list: the guidelines banner (the channel topic), New Post, the
  * sort toggle, the tag filter, then the posts, then "Older posts" (archived).
  *

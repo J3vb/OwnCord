@@ -1,5 +1,5 @@
 /**
- * The channel the user last had open, per server (UX-8).
+ * The channel the user last had open, per server.
  *
  * Every launch or server switch used to re-select the first text channel,
  * silently moving the reader off where they were. Channel ids are per-server

@@ -1,4 +1,4 @@
-//! Which game is running, for the "Playing <game>" status (WP 8.3b).
+//! Which game is running, for the "Playing <game>" status.
 //!
 //! The scanner lists the user's own processes, matches them against the games
 //! installed through Steam, Epic, Heroic (Epic and GOG), GOG Galaxy,
@@ -144,7 +144,7 @@ impl Prefs {
 pub fn detect_game(prefs: Option<DetectPrefs>) -> Option<DetectedGame> {
     let procs = platform_processes()?;
     let prefs = Prefs::new(&prefs.unwrap_or_default());
-    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = crate::sync::lock(&STATE);
     detect_with(
         &procs,
         &mut state,

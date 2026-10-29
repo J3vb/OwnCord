@@ -4,7 +4,7 @@
  * Gated on MANAGE_CHANNELS, like every other channel-management affordance.
  *
  * Two gestures share the one in-flight drag and the one pair of document
- * listeners (WP 6.5c):
+ * listeners:
  *  - a channel row dragged within its category, onto a row or the header of
  *    another category, or into the uncategorized area (moves the channel);
  *  - a real category's header dragged onto another category (reorders them).
@@ -578,12 +578,12 @@ export function ensureGlobalDragListeners(owner: AbortSignal): void {
 /** Make a channel element draggable via mousedown (MANAGE_CHANNELS only).
  *  `signal` is per-render — it is aborted and replaced on every sidebar
  *  re-render, so it scopes only this row's own mousedown/mousemove/mouseup
- *  listeners (OC-0229: a stale row must not outlive the render that replaced
+ *  listeners (a stale row must not outlive the render that replaced
  *  it). `lifetimeSignal` is the sidebar's lifetime controller and is what
  *  owns the shared document-level drag listeners (see the module comment on
  *  `listenerOwners`): a mid-drag re-render must not tear those down or
  *  cancel the in-flight drag, or `retargetDetachedDrag` never gets a chance
- *  to run (OC-0296). */
+ *  to run. */
 export function attachDragHandlers(
   el: HTMLElement,
   channel: Channel,
@@ -677,7 +677,7 @@ export function attachDragHandlers(
 }
 
 /** Make a real category's header draggable to reorder the categories
- *  (MANAGE_CHANNELS only; WP 6.5c). Only a category with an id can be dragged:
+ *  (MANAGE_CHANNELS only). Only a category with an id can be dragged:
  *  the uncategorized area, the synthetic Voice group and a legacy name-only
  *  category have no place in the order. A press on the header's arrow or "+"
  *  stays a click. The drop calls `onReorderCategory` and changes nothing

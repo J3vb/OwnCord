@@ -1,5 +1,5 @@
 // The desktop platform implementation: every `Platform` member, each backed by
-// the native host. B7-4 and B7-5 filled it in one capability at a time,
+// the native host. It was filled in one capability at a time,
 // moving call sites out of `src/lib` as each landed.
 //
 // This registry is statically reachable from the entry, so anything a member

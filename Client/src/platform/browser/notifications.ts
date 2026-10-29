@@ -1,4 +1,4 @@
-// The browser notifier (6.13d): the Web Notification API and, for the unread
+// The browser notifier: the Web Notification API and, for the unread
 // count, the Badging API with the tab title as the fallback. There is no
 // window to flash from a page, so `flashTaskbar` and `requestAttention` do
 // nothing. Used only in a secure context (index.ts): the API needs one.

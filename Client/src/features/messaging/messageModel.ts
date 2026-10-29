@@ -66,7 +66,7 @@ export interface Message {
   readonly mentions?: readonly number[];
   /** Whether an honoured @everyone/@here is present. Optional, as above. */
   readonly mentionsEveryone?: boolean;
-  /** Server-resolved mentioned role IDs (WP 6.3f). Optional, as above. */
+  /** Server-resolved mentioned role IDs. Optional, as above. */
   readonly mentionRoles?: readonly number[];
   /** "call" for a server-written DM call log row; absent for an ordinary message. */
   readonly kind?: string;
@@ -74,13 +74,13 @@ export interface Message {
   readonly call?: CallInfo;
   /** The payload of a group DM system row (`kind` group_*); the render source, never `content`. */
   readonly groupEvent?: GroupEventInfo;
-  /** Set on a forwarded message (WP 6.9a): the snapshot's source, never an author. */
+  /** Set on a forwarded message: the snapshot's source, never an author. */
   readonly forward?: ForwardInfo;
-  /** Set on a poll message (WP 6.9b): the card's source, kept in version order by pollState.ts. */
+  /** Set on a poll message: the card's source, kept in version order by pollState.ts. */
   readonly poll?: PollView;
-  /** Set on a sticker message (WP 8.8): the image's source, or just the name once it is deleted. */
+  /** Set on a sticker message: the image's source, or just the name once it is deleted. */
   readonly sticker?: MessageStickerInfo;
-  /** Set on a thread's starter message (WP 6.9c); threadsStore holds the live state. */
+  /** Set on a thread's starter message; threadsStore holds the live state. */
   readonly thread?: ThreadInfo;
 }
 

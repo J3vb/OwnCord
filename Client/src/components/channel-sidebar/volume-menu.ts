@@ -26,7 +26,7 @@ export interface VoiceModMenuOptions {
   /** Voice channels the target can be moved to (the current one excluded). */
   readonly moveTargets: readonly { readonly id: number; readonly name: string }[];
   /** Mute, deafen and disconnect render only when their handler is present: a
-   *  Move Members-only role is given just `moveTargets` and `onMove` (WP 8.4b). */
+   *  Move Members-only role is given just `moveTargets` and `onMove`. */
   readonly onServerMute?: (muted: boolean) => void;
   readonly onServerDeafen?: (deafened: boolean) => void;
   readonly onMove: (toChannelId: number) => void;
@@ -41,7 +41,7 @@ export interface VoiceModMenuOptions {
  * (aborted only on sidebar destroy), NOT a per-render signal that gets
  * replaced on every redraw — this menu is mounted on document.body,
  * independent of any one render, and must not be torn down by an unrelated
- * re-render (OC-0282).
+ * re-render.
  */
 export function showUserVolumeMenu(
   userId: number,

@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Connect, sign-in, trust and session copy (B9-18): the connect page and its
+ * Connect, sign-in, trust and session copy: the connect page and its
  * server panel, login and two-factor forms, the incompatible-server notice,
  * the certificate trust prompts, the post-login overlay and the session
  * messages main.ts raises. It ships in the

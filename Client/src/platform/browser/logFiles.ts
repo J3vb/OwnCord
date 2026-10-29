@@ -1,4 +1,4 @@
-// Browser log files (6.13d): a bounded memory ring in place of files. A page
+// Browser log files: a bounded memory ring in place of files. A page
 // has no log directory, so `getDir` is null, `openFolder` is the existing
 // unavailable answer, and `readAll` is what the ring holds, as one entry, for
 // the support bundle. Nothing survives a reload.

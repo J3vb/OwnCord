@@ -1,5 +1,5 @@
 /**
- * The inline message editor (WP 3A-8): a textarea inside the message row, as
+ * The inline message editor: a textarea inside the message row, as
  * Discord does it. Lazy — loaded through inlineEditLoader.ts, so neither the
  * module nor its copy ships in the main-page chunk.
  *

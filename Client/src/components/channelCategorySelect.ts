@@ -1,5 +1,5 @@
 /**
- * The category <select> of the Create and Edit channel dialogs (WP 6.5b).
+ * The category <select> of the Create and Edit channel dialogs.
  *
  * The options are the categories the client knows (`getKnownCategories`: a
  * manager's list plus whatever the channels carry) and "No category". An option
@@ -47,7 +47,7 @@ export function setCategoryValue(select: HTMLSelectElement, value: string): void
 
 /**
  * The request fields for a chosen option value. "No category" sends both fields
- * so a server from before 6.5a, which reads only the name, clears it too; a
+ * so an older server, which reads only the name, clears it too; a
  * current server lets `category_id` win.
  */
 export function categoryFields(

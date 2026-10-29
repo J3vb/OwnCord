@@ -203,8 +203,8 @@ export function getUserRole(userId: number): string {
 }
 
 /**
- * Name colour for a member: the highest-position held role that has a colour
- * (WP 6.3d), the same rule as the member list, so chat and list agree. Without
+ * Name colour for a member: the highest-position held role that has a colour,
+ * the same rule as the member list, so chat and list agree. Without
  * `roleIds` (an older server), or when none of them carries a colour, it is
  * `roleColorVar` of the single role name, as before.
  */

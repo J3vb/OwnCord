@@ -27,7 +27,7 @@ function readStoredRecent(): string[] {
 /**
  * What the picker should show, which is a strict subset of what is stored.
  *
- * Display only — never feed this back into `localStorage` (OC-0363). The
+ * Display only — never feed this back into `localStorage`. The
  * recent list is a single key shared by every server this client connects to,
  * so a `:shortcode:` that does not resolve *here* is routinely alive on
  * another server, or alive on this one a moment later once `GET /emoji`
@@ -41,7 +41,7 @@ export function getRecentEmoji(): string[] {
     // leak as dead literal text into every other server's picker, and a
     // deleted emoji would do the same on its own server forever after. Plain
     // unicode entries (no colons) are never shortcode-shaped and pass through
-    // untouched (OC-0308).
+    // untouched.
     return readStoredRecent()
       .filter((e) => !(e.startsWith(":") && e.endsWith(":")) || resolveEmoji(e) !== null)
       .slice(0, MAX_RECENT);

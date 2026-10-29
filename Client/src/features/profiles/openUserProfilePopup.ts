@@ -39,7 +39,7 @@ export interface UserProfilePopupCallbacks {
   /** Change the member's role (MANAGE_ROLES). Omitted: no role picker. It
    *  reports its own failures; the card follows the roster, not this call. */
   readonly onChangeRole?: (userId: number, username: string, newRole: string) => Promise<void>;
-  /** Add / remove one role (WP 6.3d). Both set on a server that advertises
+  /** Add / remove one role. Both set on a server that advertises
    *  `multi_role`: the role area becomes chips. They report their own failures. */
   readonly onAddRole?: (userId: number, username: string, roleId: number) => Promise<void>;
   readonly onRemoveRole?: (userId: number, username: string, roleId: number) => Promise<void>;

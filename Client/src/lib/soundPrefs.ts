@@ -1,5 +1,5 @@
 /**
- * Preferences for the app's own sounds (WP M-8): one master volume and one
+ * Preferences for the app's own sounds: one master volume and one
  * on/off switch per sound. Kept in a leaf module (preferences only) so the
  * settings tab, the sound player, `notifications.ts` and the voice sound
  * subscriber can all read them without importing one another.

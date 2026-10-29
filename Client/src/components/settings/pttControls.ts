@@ -273,7 +273,7 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
     t("keybinds.pttHint"),
   );
 
-  // DP-30: how long the mic keeps transmitting after the key is released.
+  // How long the mic keeps transmitting after the key is released.
   const delayHeader = createElement(
     "div",
     { class: "settings-field-label" },

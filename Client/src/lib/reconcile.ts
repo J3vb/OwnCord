@@ -1,5 +1,5 @@
 /**
- * Minimal keyed-list reconciler (B9-21).
+ * Minimal keyed-list reconciler.
  *
  * The sidebars used to `clearChildren()` and rebuild every row on every store
  * notification — every message in another channel, every DM partner presence

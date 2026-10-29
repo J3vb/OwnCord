@@ -1,5 +1,5 @@
 /**
- * The Moderation Center's Appeals tab (B9-17): the appeal queue and the
+ * The Moderation Center's Appeals tab: the appeal queue and the
  * selected appeal, for MODERATE_MEMBERS holders. Queue.ts renders it the
  * first time the tab is chosen, so no appeal is read before that.
  *

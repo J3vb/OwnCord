@@ -1,5 +1,5 @@
 /**
- * One report's detail and evidence in the Moderation Center (B9-11).
+ * One report's detail and evidence in the Moderation Center.
  *
  * Only what the server returned is shown: the snapshot it captured when the
  * report was sent, never a read of the channel's live history. Every field is

@@ -8,7 +8,7 @@
  *   owncord://<code>                     (bare code — invite)
  *   owncord://message/<channelId>/<messageId>            message permalink
  *   owncord://message/<channelId>/<messageId>?host=<host>  a toast's launch URI
- *   owncord://channel/<channelId>?host=<host>  a call toast's launch URI (DP-24)
+ *   owncord://channel/<channelId>?host=<host>  a call toast's launch URI
  *
  * OwnCord invites are *registration* invites (a code you supply when creating
  * an account on a server), so an invite link can only pre-fill and open the
@@ -20,8 +20,8 @@
  *
  * Cold starts are handled via getCurrent(); while the app is already running,
  * the single-instance plugin (built with the "deep-link" feature) forwards the
- * link and onOpenUrl() fires. That native wiring is `platform/desktop/deepLinks.ts`
- * (B7-5); the parsers here are pure and need no native seam.
+ * link and onOpenUrl() fires. That native wiring is `platform/desktop/deepLinks.ts`;
+ * the parsers here are pure and need no native seam.
  */
 
 const SCHEME = "owncord";

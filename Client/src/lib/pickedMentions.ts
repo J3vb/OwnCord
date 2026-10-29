@@ -1,5 +1,5 @@
 /**
- * Picked mention spans <-> id tokens (WP 6.3e), for the composer and the edit
+ * Picked mention spans <-> id tokens, for the composer and the edit
  * box. Kept out of lib/mentions.ts, which the startup chunk carries, because
  * only the message list and the composer ever call it.
  */

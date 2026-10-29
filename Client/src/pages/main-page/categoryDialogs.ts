@@ -1,5 +1,5 @@
 /**
- * The sidebar's category management dialogs (WP 6.5b): Create, Rename and
+ * The sidebar's category management dialogs: Create, Rename and
  * Delete open a dialog in the sidebar's one modal slot, Move needs none. The
  * dialogs load on first use (`CategoryModals`), so they stay out of the
  * main-page chunk. Every REST call goes through `features/channels/
@@ -37,7 +37,7 @@ export interface CategoryDialogs {
   readonly rename: (category: CategoryRef) => void;
   readonly remove: (category: CategoryRef) => void;
   readonly move: (category: CategoryRef, direction: -1 | 1) => void;
-  /** A dragged header dropped before or after another (WP 6.5c). */
+  /** A dragged header dropped before or after another. */
   readonly place: (categoryId: number, targetId: number, before: boolean) => void;
 }
 

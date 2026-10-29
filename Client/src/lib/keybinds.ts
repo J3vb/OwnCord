@@ -1,5 +1,5 @@
 /**
- * Rebindable in-app actions (WP 3E-3c): the action table, the persisted
+ * Rebindable in-app actions: the action table, the persisted
  * `keybinds` preference, the one function capture and dispatch both use to
  * turn a keydown into a combo, and the conflict rules a rebind must pass.
  *

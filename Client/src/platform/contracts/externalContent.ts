@@ -1,9 +1,9 @@
 /**
- * The external-content broker (B7-16): the only way renderer code reaches
+ * The external-content broker: the only way renderer code reaches
  * content a message author or a fetched page named — link previews, oEmbed
  * titles, and every external image.
  *
- * Deliberately not an HTTP client (docs/trust-model.md, C-09 clause 1). The
+ * Deliberately not an HTTP client (docs/trust-model.md, clause 1). The
  * native broker parses the URL, resolves and classifies every address, follows
  * redirects by hand, and bounds time, bytes, type and concurrency; what comes
  * back is a typed minimum (clause 7). No status, header or body crosses this

@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** The profile card and the Settings > Advanced > Activity music section (WP 8.10). */
+/** The profile card and the Settings > Advanced > Activity music section. */
 export const listeningDetailsText = defineCatalog("listeningDetails", {
   "by.artist": "by {artist}",
   "progress.text": "{elapsed} / {total}",

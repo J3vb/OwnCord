@@ -1,11 +1,11 @@
 import { defineCatalog } from "./format";
 
 /**
- * The startup-safe slice of the messaging journey (B9-19): the message date
+ * The startup-safe slice of the messaging journey: the message date
  * stamps, the attachment download labels and the who-reacted tooltip.
  * `lib/formatting.ts` is statically reachable from the entry through its many
  * callers, so its copy lives here rather than in the main-page catalog
- * `messaging.ts`, the same way B9-9 split `mediaControls.ts` from `content.ts`.
+ * `messaging.ts`, the same way `mediaControls.ts` is split from `content.ts`.
  *
  * `message-list/attachments.ts` and `message-list/reaction-tooltip.ts` are no
  * longer in the entry's static closure. Attachments used to be pulled in

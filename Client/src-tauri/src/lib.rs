@@ -53,6 +53,7 @@ mod proxy_common;
 mod ptt;
 mod secret_store;
 mod shortcuts;
+mod sync;
 mod text;
 mod tofu;
 mod tray;
@@ -119,7 +120,7 @@ fn native_voice_state() -> NoNativeVoice {
     NoNativeVoice
 }
 
-/// The app-sound registry (WP LP-6b); off Linux the sounds stay in the webview.
+/// The app-sound registry; off Linux the sounds stay in the webview.
 #[cfg(target_os = "linux")]
 fn app_sounds_state() -> native_voice::app_sound::AppSounds {
     native_voice::app_sound::AppSounds::default()

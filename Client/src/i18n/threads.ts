@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
-/** The thread panel, Create Thread dialog and the channel's thread list (WP
- *  6.9c). Their own catalog so the copy loads with those lazy modules, not
+/** The thread panel, Create Thread dialog and the channel's thread list.
+ *  Their own catalog so the copy loads with those lazy modules, not
  *  with the main page. The starter chip's few words live in `messaging`. */
 export const threadsText = defineCatalog("threads", {
   "panel.label": "Thread",

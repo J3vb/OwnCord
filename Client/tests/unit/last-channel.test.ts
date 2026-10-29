@@ -6,6 +6,9 @@ import {
   viewChannel,
 } from "@lib/last-channel";
 import type { WsClient } from "@lib/ws";
+import { focusPayload } from "@lib/last-channel";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { channelsStore, resetChannelsStore, setChannels } from "@stores/channels.store";
 
 describe("last-channel (UX-8)", () => {
   beforeEach(() => {
@@ -61,5 +64,54 @@ describe("last-channel (UX-8)", () => {
     viewChannel(6, "voice", { send: vi.fn() } as unknown as WsClient);
 
     expect(loadLastChannel()).toBeNull();
+  });
+});
+
+describe("last-channel storage and focus details", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setLastChannelHost(null);
+    resetServerCapabilities();
+    resetChannelsStore();
+  });
+
+  it("keeps the unscoped key until a host is set, and scopes by host after", () => {
+    rememberLastChannel(9);
+    expect(localStorage.getItem("owncord:settings:lastChannel")).toBe("9");
+    setLastChannelHost("a.example");
+    expect(loadLastChannel()).toBeNull();
+    rememberLastChannel(10);
+    expect(localStorage.getItem("owncord:settings:lastChannel:a.example")).toBe("10");
+    setLastChannelHost(null);
+    expect(loadLastChannel()).toBe(9);
+  });
+
+  it.each([0, -3, 2.5])("treats a stored %s as nothing stored", (stored) => {
+    localStorage.setItem("owncord:settings:lastChannel", JSON.stringify(stored));
+    expect(loadLastChannel()).toBeNull();
+  });
+
+  it("accepts the smallest valid id", () => {
+    rememberLastChannel(1);
+    expect(loadLastChannel()).toBe(1);
+  });
+
+  it("focuses with the plain payload, or without marking read when the server keeps a read pointer", () => {
+    expect(focusPayload(4)).toEqual({ channel_id: 4 });
+    applyReadyCapabilities({ read_pointer: true });
+    expect(focusPayload(4)).toEqual({ channel_id: 4, read: false });
+    applyReadyCapabilities({});
+    expect(focusPayload(4)).toEqual({ channel_id: 4 });
+  });
+
+  it("sends the focus frame and clears the channel's badge when it is viewed", () => {
+    setChannels([
+      { id: 4, name: "general", type: "text", category: null, position: 0, unread_count: 3 },
+    ]);
+    const ws = { send: vi.fn() } as unknown as WsClient;
+    viewChannel(4, undefined, ws);
+    expect(ws.send).toHaveBeenCalledWith({ type: "channel_focus", payload: { channel_id: 4 } });
+    expect(channelsStore.getState().channels.get(4)?.unreadCount).toBe(0);
+    expect(loadLastChannel()).toBe(4);
   });
 });

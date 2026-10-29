@@ -27,7 +27,7 @@
  * fires hundreds of times a second and the timer's resolution is minutes, so
  * anything finer is pure cost.
  *
- * Where the platform reports system-wide input idle time (DP-33), a poll of
+ * Where the platform reports system-wide input idle time, a poll of
  * it decides when to go idle, so working in another app no longer counts as
  * being away. The DOM listeners stay: they are the fallback whenever the OS
  * cannot say, and they still bring the status back the instant the user

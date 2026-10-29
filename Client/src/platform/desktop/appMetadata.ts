@@ -1,4 +1,4 @@
-// The native app metadata. Lifted verbatim from `settings/LogsTab.ts` (B7-5).
+// The native app metadata. Lifted verbatim from `settings/LogsTab.ts`.
 //
 // The app API stays a dynamic `import()`: it is its own lazy chunk today, and
 // this registry is statically reachable from the entry.

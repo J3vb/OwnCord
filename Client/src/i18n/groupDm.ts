@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Group DM member management copy (WP 3B-11a): the member panel, the owner
+ * Group DM member management copy: the member panel, the owner
  * confirm dialogs and the Add / Remove / Make Owner error texts. It loads with
  * the lazily imported panel, so it stays out of the main page chunk; the header
  * toggle's label lives in `./requests.ts` with the other eager DM copy.

@@ -1,5 +1,5 @@
 /**
- * The Ban dialog (WP 3C-5c): one place that collects a reason, a ban length and
+ * The Ban dialog: one place that collects a reason, a ban length and
  * how much message history to delete, then sends the ban.
  *
  * The request is the caller's (`submit`); this module owns what the answer

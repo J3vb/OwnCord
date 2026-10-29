@@ -1,5 +1,5 @@
 /**
- * "Direct messages" at the top of the Settings Safety tab (WP 6.8f): the two
+ * "Direct messages" at the top of the Settings Safety tab: the two
  * per-member switches the server stores and enforces, "Allow direct messages
  * from server members" and "Message requests". Loaded on first open
  * (reports/safetyPane.ts) and only on a server with `dm_privacy`.

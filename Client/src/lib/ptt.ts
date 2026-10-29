@@ -4,7 +4,7 @@ import { loadPref } from "@lib/preferences";
 /**
  * Push-to-Talk display helpers. The PTT service itself — Rust-side
  * GetAsyncKeyState polling, so the key is NOT consumed/hijacked — is
- * `platform/desktop/pushToTalk.ts` (B7-5); callers reach it through the
+ * `platform/desktop/pushToTalk.ts`; callers reach it through the
  * desktop registry's `pushToTalk`.
  */
 
@@ -92,8 +92,8 @@ export function vkName(vk: number): string {
   return voiceText("key.unknown", { code: vk.toString(16).toUpperCase() });
 }
 
-/** How long push-to-talk keeps transmitting after the key is released
- *  (DP-30): 0–2000 ms, 20 ms by default, as Discord's. */
+/** How long push-to-talk keeps transmitting after the key is released:
+ * 0–2000 ms, 20 ms by default, as Discord's. */
 export const PTT_RELEASE_DELAY_DEFAULT_MS = 20;
 export const PTT_RELEASE_DELAY_MAX_MS = 2000;
 

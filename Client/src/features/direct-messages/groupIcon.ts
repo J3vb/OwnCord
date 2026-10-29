@@ -1,5 +1,5 @@
 /**
- * Group DM icon upload (WP 3B-11b): pick a picture, centre-crop it to a square,
+ * Group DM icon upload: pick a picture, centre-crop it to a square,
  * scale it down and send it. Loaded lazily from the DM row menu, so the canvas
  * work and its copy stay out of the main page chunk.
  *

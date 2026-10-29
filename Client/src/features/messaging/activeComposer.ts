@@ -1,7 +1,7 @@
 /**
  * The composer a "Mention" action should write into: the focused composer. The
  * channel's MessageInput claims the slot while it is mounted, and with a thread
- * panel open the thread's composer claims it too (WP 6.9c); whichever the user
+ * panel open the thread's composer claims it too; whichever the user
  * last focused (or mounted) is the one a mention lands in, and closing it hands
  * the slot back to the one still mounted. The member menu reads it without
  * importing the composer, so the menu stays in its own lazy chunk. No imports:

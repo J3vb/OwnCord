@@ -1,5 +1,5 @@
 /**
- * The device-local choices about music (WP 8.10): the players hidden from
+ * The device-local choices about music: the players hidden from
  * others and the players this device has seen. Stored like the sharing switch
  * (`owncord:settings:*` in `localStorage`); the server never learns any of it,
  * only the one shown song. Not part of support bundles.
@@ -16,7 +16,7 @@
 import { loadPref, savePref } from "./preferences";
 import type { MediaPrefs } from "../platform/contracts/mediaDetector";
 
-/** The device-local setting "Share the music you're listening to" (WP 8.10). */
+/** The device-local setting "Share the music you're listening to". */
 export const MUSIC_ACTIVITY_PREF_KEY = "shareMusicActivity";
 
 /** Whether this device shares the song being listened to. On unless turned off. */

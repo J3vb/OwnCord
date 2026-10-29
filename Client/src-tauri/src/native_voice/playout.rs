@@ -11,7 +11,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread::JoinHandle as Thread;
 use std::time::Duration;
 
@@ -25,6 +25,7 @@ use tokio::task::JoinHandle;
 use super::capture::{Apm, Reference, Shared};
 use super::session::{resolve_device, DeviceInfo};
 use super::stream_format::{pick_config, typed};
+use crate::sync::lock;
 
 pub const SAMPLE_RATE: u32 = 48_000;
 /// The key, and identity, of the mic test's one queue in its own mixer.
@@ -51,10 +52,6 @@ const PERIOD_FRAMES: u32 = SAMPLE_RATE / 50;
 /// only thing that notices it, and it is also the interval at which a dead
 /// stream is reopened.
 pub(super) const FOLLOW_EVERY: Duration = Duration::from_secs(2);
-
-pub(super) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|p| p.into_inner())
-}
 
 /// Which of a participant's volumes a queue follows, as on the web path: the
 /// microphone's (`RemoteParticipant.setVolume`) or the screen-share audio's

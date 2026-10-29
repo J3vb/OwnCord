@@ -95,7 +95,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
   // Single point of truth for both the list and the "N entries" counter above
   // it, so every render path (filter change, Clear, Refresh, live entry)
-  // keeps them in sync — see OC-0230.
+  // keeps them in sync.
   function renderLogEntries(): void {
     const entries = getLogBuffer();
     if (countEl !== null) {
@@ -157,7 +157,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       { signal: buildSignal },
     );
 
-    // Support bundle (B7-15c): lazily loaded so the zip writer stays off the
+    // Support bundle: lazily loaded so the zip writer stays off the
     // startup path. Everything is read and written on this machine.
     const bundleBtn = createElement(
       "button",
@@ -218,7 +218,10 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       },
       { signal: buildSignal },
     );
-    appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
+    // A page has no log folder (the browser keeps logs in memory), so the web
+    // build offers only the bundle.
+    if (__OWNCORD_WEB__) appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
+    else appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
     appendChildren(helpCard, helpHead, bundleNote, bundleStatus);
     section.appendChild(helpCard);
 

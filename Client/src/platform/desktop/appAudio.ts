@@ -1,4 +1,4 @@
-// Windows per-app share audio (`src-tauri/src/windows_app_audio.rs`, WP 6.7a).
+// Windows per-app share audio (`src-tauri/src/windows_app_audio.rs`).
 // Every host call is wrapped here: a rejection (no Tauri host, a non-Windows
 // build, a failed call) becomes a typed "unavailable" result, never a throw.
 import { invoke } from "@tauri-apps/api/core";

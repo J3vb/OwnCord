@@ -105,7 +105,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
    *  optimistic), so clearStreams() must key off any change of channel id,
    *  not just the transition to null — otherwise remote tiles from the old
    *  channel persist as dead MediaStreams and keep hasStreams() true
-   *  forever (OC-0012). */
+   *  forever. */
   let lastChannelId: number | null = null;
   /** Where the grid slot lives in the chat column, to put it back after the
    *  DM call panel has hosted it. */
@@ -239,7 +239,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     videoMode = false;
     focusedTileId = null;
     // Clear the grid's own focus state too — otherwise it stays pinned to
-    // whatever tile was focused and the next open (B5-15) reopens
+    // whatever tile was focused and the next open reopens
     // straight into a stale focus layout.
     videoGrid.setFocusedTile(null);
     localTileAdded = false;
@@ -267,7 +267,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     // VoiceCallbacks.onVoiceJoin moves currentChannelId straight from the
     // old channel to the new one without ever passing through null.
     // currentChannelId stays unchanged across auto-reconnect, so this does
-    // not fire on reconnect (B1-8, OC-0012).
+    // not fire on reconnect.
     if (channelId !== lastChannelId) {
       if (lastChannelId !== null) {
         videoGrid.clearStreams();
@@ -338,7 +338,7 @@ export function createVideoModeController(opts: VideoModeControllerOptions): Vid
     const currentUserId = getCurrentUserId();
     // Prefer the member's display name (same identity every other surface
     // shows for a rename — see ChannelSidebar.ts's voice roster) over the
-    // frozen voice-roster username (OC-0227).
+    // frozen voice-roster username.
     const member = membersStore.getState().members.get(currentUserId);
     const me = channelUsers.get(currentUserId);
     const myName = (member !== undefined ? memberDisplayName(member) : "") || me?.username;

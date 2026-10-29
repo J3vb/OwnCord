@@ -1,5 +1,5 @@
 /**
- * CategoryModals — the two dialogs of category management (WP 6.5b): a name
+ * CategoryModals — the two dialogs of category management: a name
  * prompt that serves Create and Rename, and the Delete confirmation. They
  * follow DeleteChannelModal's shape: the caller owns the request and the toast,
  * the dialog only re-arms its button and shows the inline error when the

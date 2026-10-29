@@ -1,5 +1,5 @@
 /**
- * A report's review controls in the Moderation Center (B9-12): take the
+ * A report's review controls in the Moderation Center: take the
  * report, add an internal note, close it with an outcome.
  *
  * Only what the server would accept from this reader is offered. The reporter

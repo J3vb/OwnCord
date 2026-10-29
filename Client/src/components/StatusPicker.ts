@@ -341,7 +341,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     // Skip the overwrite while the user is mid-edit (input focused) — an
     // unrelated store push (e.g. a role change) would otherwise clobber
     // in-progress typed text *and* reset the commit watermark, so the
-    // pending blur/Enter commit silently no-ops (OC-0369).
+    // pending blur/Enter commit silently no-ops.
     if (customInputEl !== null && document.activeElement === customInputEl) return;
     lastCommittedCustom = text;
     if (customInputEl !== null) customInputEl.value = text;
