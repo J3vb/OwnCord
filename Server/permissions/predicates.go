@@ -396,16 +396,16 @@ func AuthorizeVoiceModerator(s Subject) error {
 // channel: effective MOVE_MEMBERS there (so a per-channel deny holds) and
 // READ_MESSAGES so the room is visible to the mover; a DM call additionally
 // requires the actor to be a participant. Rank is deliberately not part of
-// it: a mover may move any member. MOVE_MEMBERS must be held explicitly:
-// ADMINISTRATOR does not stand in for it, so taking the bit off a role stops
-// that role moving anyone (it still passes READ_MESSAGES).
+// it: a mover may move any member. An Administrator ignores channel
+// overrides here as everywhere; that the base role holds the bit explicitly
+// is AuthorizeVoiceMover's VoiceMoverBase half.
 func CanMoveVoice(s Subject) error {
 	if s.Channel.Type == "dm" {
 		if err := dmMember(s); err != nil {
 			return err
 		}
 	}
-	if !s.Has(ReadMessages) || !HasPerm(s.EffectivePerms(), MoveMembers) {
+	if !s.Has(ReadMessages | MoveMembers) {
 		return missing(MoveMembers)
 	}
 	return nil

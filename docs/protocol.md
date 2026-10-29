@@ -634,9 +634,9 @@ servers omit it.
 `can_move_voice` is whether the caller may move voice participants in that
 channel regardless of rank. It is `permissions.AuthorizeVoiceMover`: the base
 role must hold `MOVE_MEMBERS` and the effective permission after both override
-layers must hold `READ_MESSAGES | MOVE_MEMBERS`. `MOVE_MEMBERS` must be held
-explicitly: `ADMINISTRATOR` passes `READ_MESSAGES` but does not stand in for
-`MOVE_MEMBERS`. It is independent of `can_moderate_voice`: a caller with only
+layers must hold `READ_MESSAGES | MOVE_MEMBERS`. The base role must hold
+`MOVE_MEMBERS` explicitly: `ADMINISTRATOR` does not stand in for it, though an
+Administrator that holds it ignores channel overrides as usual. It is independent of `can_moderate_voice`: a caller with only
 `MOVE_MEMBERS` gets `can_move_voice` true and `can_moderate_voice` false and may
 move but not mute, deafen or disconnect. The owner is a valid move target only
 while the owner-only setting `voice_owner_movable` is on, and each target takes
