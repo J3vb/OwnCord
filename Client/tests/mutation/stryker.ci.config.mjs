@@ -1,4 +1,4 @@
-import base from "./stryker.config.mjs";
+import base from "../../stryker.config.mjs";
 // A measured target: 54 killed, 31 compile errors, zero survivors (2026-09-08).
 export default {
   ...base,

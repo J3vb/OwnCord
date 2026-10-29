@@ -1,9 +1,10 @@
 import { defineConfig } from "@playwright/test";
-import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
+import { fromClientRoot } from "./clientRoot";
+import { quarantineGrepInvert } from "../../../scripts/check-quarantine.mjs";
 
 export default defineConfig({
-  outputDir: "test-results/admin",
-  testDir: "./tests/e2e/admin",
+  outputDir: fromClientRoot("test-results/admin"),
+  testDir: fromClientRoot("tests/e2e/admin"),
   // Known flakes tracked in tests/e2e/quarantine.json are excluded from the
   // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
   // docs/testing-behavior.md, scripts/check-quarantine.mjs.
@@ -18,8 +19,8 @@ export default defineConfig({
   globalTimeout: 10 * 60 * 1000,
   reporter: [
     ["list"],
-    ["html", { open: "never", outputFolder: "playwright-report/admin" }],
-    ["junit", { outputFile: "test-results/admin-junit.xml" }],
+    ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/admin") }],
+    ["junit", { outputFile: fromClientRoot("test-results/admin-junit.xml") }],
   ],
   use: {
     screenshot: "only-on-failure",

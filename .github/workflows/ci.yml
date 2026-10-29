@@ -770,7 +770,7 @@ jobs:
       # once. Wall time: about 3m40s on ubuntu-latest (first PR run, 2026-10-08).
       - name: Permissions mutation hotspot
         if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.permissions == 'true') }}
-        run: npx stryker run stryker.ci.config.mjs
+        run: npx stryker run tests/mutation/stryker.ci.config.mjs
 
   # Unit tests live in their own job so a suite failure is visible as exactly one
   # failing check instead of masking the static gates above. The suite is GREEN
@@ -1342,7 +1342,7 @@ jobs:
         uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
 
       # Fast feedback: this job runs the smoke set
-      # (Client/playwright.config.smoke.ts) against the Vite dev server.
+      # (Client/tests/e2e/config/playwright.config.smoke.ts) against the Vite dev server.
       # `client-e2e-parity` runs the complete suite against the built
       # bundle on every browser change, including when Change selection fails
       # (its own `if:` fail-safe), so the full suite is not repeated here.
@@ -1621,7 +1621,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.integration == 'true') }}
     runs-on: ubuntu-latest
-    # 40: playwright.config.fullstack.ts's 26-minute globalTimeout plus the
+    # 40: tests/e2e/config/playwright.config.fullstack.ts's 26-minute globalTimeout plus the
     # server and client builds and setup (a cold Playwright install may take 8).
     timeout-minutes: 40
     defaults:
@@ -1677,7 +1677,7 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.webclient == 'true') }}
     runs-on: ubuntu-latest
     continue-on-error: true
-    # playwright.config.web.ts's 12-minute globalTimeout plus the web and
+    # tests/e2e/config/playwright.config.web.ts's 12-minute globalTimeout plus the web and
     # server builds and a cold Playwright install.
     timeout-minutes: 25
     defaults:
@@ -1763,7 +1763,7 @@ jobs:
       - name: Test actual Rust transport and WebView2
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
-        run: npx playwright test --config playwright.config.native.ts --project native-core
+        run: npx playwright test --config tests/e2e/config/playwright.config.native.ts --project native-core
       # The exploratory suites were defined in the config but never selected, so
       # nine spec files were dead coverage. They reuse the binary built above
       # (native-no-auth drives the real connect page and auth flows;
@@ -1782,7 +1782,7 @@ jobs:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/native-suites
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: test-results/native-suites.xml
         run: >-
-          npx playwright test --config playwright.config.native.ts
+          npx playwright test --config tests/e2e/config/playwright.config.native.ts
           --project native-no-auth --project native-authenticated
           --project native-extra
           --output test-results/native-suites

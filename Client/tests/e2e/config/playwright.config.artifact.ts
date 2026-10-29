@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { fromClientRoot } from "./clientRoot";
 
 /** B7-17: installed release artifacts (not test builds) on all four targets.
  * Driven by .github/workflows/client-artifact-smoke.yml, which downloads the
@@ -7,8 +8,8 @@ import { defineConfig } from "@playwright/test";
  * CI only — the specs install software and wipe the production app profile.
  */
 export default defineConfig({
-  testDir: "./tests/e2e/artifact-smoke",
-  outputDir: "test-results/artifact",
+  testDir: fromClientRoot("tests/e2e/artifact-smoke"),
+  outputDir: fromClientRoot("test-results/artifact"),
   timeout: 300_000,
   expect: { timeout: 15_000 },
   // One installed app and one fixed debugging port at a time.
@@ -21,8 +22,8 @@ export default defineConfig({
   reporter: process.env.CI
     ? [
         ["list"],
-        ["html", { open: "never", outputFolder: "playwright-report/artifact" }],
-        ["junit", { outputFile: "test-results/artifact-junit.xml" }],
+        ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/artifact") }],
+        ["junit", { outputFile: fromClientRoot("test-results/artifact-junit.xml") }],
       ]
     : "list",
   use: { actionTimeout: 30_000, navigationTimeout: 45_000, trace: "off", video: "off" },

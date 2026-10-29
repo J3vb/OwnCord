@@ -1,5 +1,5 @@
 // @ts-check
-import base from "./stryker.config.mjs";
+import base from "../../stryker.config.mjs";
 
 // One explicit file list per shard. Explicit lists (not globs) are what makes
 // the union check in scripts/check-mutation-shards.mjs exact: the union of

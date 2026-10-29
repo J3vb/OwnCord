@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-// The web suite (playwright.config.web.ts) needs the browser bundle inside the
+// The web suite (tests/e2e/config/playwright.config.web.ts) needs the browser bundle inside the
 // binary. Every other E2E job builds with the committed placeholder only, so
 // the copy is opt-in: OWNCORD_E2E_EMBED_WEB=1 builds `dist-web/` (npm run
 // build:web) and copies it into Server/webclient/dist/ for the go build.
