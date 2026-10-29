@@ -1,0 +1,51 @@
+name: Spike Android APK
+on:
+  push:
+    branches: [spike/android-s0]
+    paths: ["Client/**", ".github/workflows/spike-android.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: Client
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: Client/package-lock.json
+      - name: Toolchains
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-linux-android
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "NDK: $ANDROID_NDK_LATEST_HOME"
+      - run: npm ci
+      - name: tauri android init
+        run: npx tauri android init --ci
+      - name: Patch manifest and add spike Kotlin
+        run: python3 spike-android/patch-gen.py
+      - name: Build debug APK (arm64)
+        run: |
+          start=$(date +%s)
+          npx tauri android build --debug --apk --target aarch64 --ci
+          echo "BUILD_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+      - name: Size
+        run: |
+          find src-tauri/gen/android/app/build/outputs -name '*.apk' -exec ls -l {} \;
+          echo "Build took $BUILD_SECONDS s" >> "$GITHUB_STEP_SUMMARY"
+          find src-tauri/gen/android/app/build/outputs -name '*.apk' -exec ls -l {} \; >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: owncord-spike-apk
+          path: Client/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          retention-days: 14

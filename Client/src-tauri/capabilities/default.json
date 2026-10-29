@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capability granting core permissions to the main window. NOTE: http:allow-fetch is the ONLY URL-scoped HTTP identifier — tauri-plugin-http validates the URL once, in the `fetch` command; `fetch_send` and `fetch_read_body` take an already-validated ResourceId and never consult a scope, so allow/deny blocks on those identifiers are inert. Do not re-add them.",
+  "description": "Default capability granting core permissions to the main window. NOTE: http:allow-fetch is the ONLY URL-scoped HTTP identifier \u2014 tauri-plugin-http validates the URL once, in the `fetch` command; `fetch_send` and `fetch_read_body` take an already-validated ResourceId and never consult a scope, so allow/deny blocks on those identifiers are inert. Do not re-add them.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -44,12 +44,6 @@
     "opener:default",
     "dialog:default",
     "process:allow-restart",
-    "window-state:default",
-    "autostart:allow-enable",
-    "autostart:allow-disable",
-    "autostart:allow-is-enabled",
-    "deep-link:default",
-    "deep-link:allow-register",
     {
       "identifier": "fs:allow-write-file",
       "allow": [
