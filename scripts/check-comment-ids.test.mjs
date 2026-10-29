@@ -71,7 +71,7 @@ test("phase-letter work packages count whole, and a UI action named Owner call d
 
 test("technical names that look like ids are not counted", () => {
   const src =
-    "// UTF-8, SHA-256, AES-128, P-256, RFC-6455 and HTTP-2 are not plan ids; #fff is a colour";
+    "// UTF-8, SHA-256, AES-128, P-256, RFC-6455, TEST-NET-1 and HTTP-2 are not plan ids; #fff is a colour";
   assert.deepEqual(ids(src, "go"), []);
 });
 
