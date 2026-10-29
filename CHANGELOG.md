@@ -51,8 +51,8 @@ and only when it changes something a contributor or fork holder must do
 
 **Server (operators)**
 
-- The plugin admin API, the client update check and the admin log stream now answer errors in the standard JSON shape (`{"error": "...", "message": "..."}`) instead of plain text. A plugin upload over 16 MiB now answers `413 PAYLOAD_TOO_LARGE` even when the size cap trips mid-upload.
-**Desktop UI**
+- Every error the server answers is now in the standard JSON shape (`{"error": "...", "message": "..."}`); the plugin admin API, the client update check, the admin log stream, plugin asset files, the LiveKit webhook and the WebSocket "server full" refusal used plain text. The "server full" refusal is `503 SERVER_BUSY`. A plugin upload over 16 MiB now answers `413 PAYLOAD_TOO_LARGE` even when the size cap trips mid-upload.
+  **Desktop UI**
 
 - Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
 

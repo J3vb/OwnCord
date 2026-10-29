@@ -58,30 +58,6 @@ func TestReplyHelpers_AdminDecoderOutsideTheHelperIsFlagged(t *testing.T) {
 	}
 }
 
-func TestReplyHelpers_PlainTextErrorIsFlagged(t *testing.T) {
-	for _, rel := range []string{"api/plugins_handler.go", "admin/logstream.go"} {
-		src := "package x\nimport h \"net/http\"\nfunc f() { h.Error(w, \"nope\", h.StatusBadRequest) }\n"
-		if got := replyHelperViolations(t, rel, src); len(got) != 1 {
-			t.Errorf("%s: violations = %v, want one under an import alias", rel, got)
-		}
-	}
-	dot := "package api\nimport . \"net/http\"\nfunc f() { Error(w, \"nope\", 400) }\n"
-	if got := replyHelperViolations(t, "api/x.go", dot); len(got) != 1 {
-		t.Errorf("dot-import: violations = %v, want one", got)
-	}
-	// Outside api and admin (asset server, LiveKit webhook, WebSocket upgrade)
-	// plain text is the reply.
-	src := "package ws\nimport \"net/http\"\nfunc f() { http.Error(w, \"full\", 503) }\n"
-	if got := replyHelperViolations(t, "ws/serve.go", src); len(got) != 0 {
-		t.Errorf("ws: violations = %v, want none", got)
-	}
-	// A local value named Error is not net/http's.
-	other := "package api\nfunc f() { errs.Error(w) }\n"
-	if got := replyHelperViolations(t, "api/x.go", other); len(got) != 0 {
-		t.Errorf("non-http Error: violations = %v, want none", got)
-	}
-}
-
 const pathIDHead = "package admin\nimport (\n\t\"strconv\"\n\t\"github.com/go-chi/chi/v5\"\n)\n"
 
 func TestReplyHelpers_RawPathIDParseIsFlagged(t *testing.T) {

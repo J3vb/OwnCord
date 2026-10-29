@@ -6233,7 +6233,7 @@ These endpoints are only registered when LiveKit voice is configured.
 
 ### POST /api/v1/livekit/webhook
 
-LiveKit webhook receiver. Uses LiveKit JWT verification. IP-restricted via `server.livekit_webhook_allowed_cidrs` (falls back to `server.admin_allowed_cidrs` when unset). Called by the LiveKit server, not by clients.
+LiveKit webhook receiver. Uses LiveKit JWT verification. IP-restricted via `server.livekit_webhook_allowed_cidrs` (falls back to `server.admin_allowed_cidrs` when unset). Called by the LiveKit server, not by clients. A missing or bad signature answers `401 UNAUTHORIZED`; a `participant_joined` that cannot be reconciled answers `503 SERVICE_UNAVAILABLE` so LiveKit retries it. Both use the standard JSON error envelope.
 
 ### GET /api/v1/livekit/health
 

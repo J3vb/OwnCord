@@ -13,6 +13,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -65,7 +66,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 		reject := func() {
 			hub.connRejects.Add(1)
 			w.Header().Set("Retry-After", "30")
-			http.Error(w, "server at connection capacity", http.StatusServiceUnavailable)
+			httperr.Write(w, http.StatusServiceUnavailable, ErrCodeServerBusy, "server at connection capacity")
 		}
 		// Fast-path refusal. It only ever refuses — never admits — so a stale
 		// unlocked read cannot let a connection past the ceiling; the

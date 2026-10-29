@@ -657,40 +657,47 @@ Kept. One id parser and one error text, five ids no longer reach a handler as 0 
 
 ## MX-7 part 3: plain-text error replies (2026-10-28)
 
-Measured on a branch from `origin/dev` `e98934fe`. Evidence level: **executed** (unit tests; the admin panel was not opened). This closes MX-7; MX-16 (REST error codes as constants) can start.
+Measured on a branch from `origin/dev` `e98934fe`, then merged with `02a8dd8b`. Evidence level: **executed** (unit tests; the admin panel was not opened). The owner chose to convert all 31, not only the 24 in `api` and `admin`. This closes MX-7; MX-16 (REST error codes as constants) can start.
 
 ### Counts
 
-Counted with `grep -rn "http\.Error(" Server --include=*.go` over non-test files, and with the `reply-helpers` invariant, which now flags `http.Error` in `api` and `admin`.
+Counted with `grep -rn "http\.Error(" Server --include=*.go` over non-test files, and with the new `plain-text-replies` invariant, which flags `http.Error` anywhere in the server (31 on `dev`, checked by putting the old files back).
 
-| Measure (non-test files)                                        | Before                                                                   | After                          |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------ |
-| `http.Error` plain-text replies, `api` and `admin`              | 24: plugin admin API 17, client update 3, admin log stream 4             | 0, held by the invariant       |
-| `http.Error` plain-text replies, rest of the server             | 7: plugin asset server 3, LiveKit webhook 3, WebSocket upgrade refusal 1 | 7, kept on purpose (see below) |
-| Log-stream refusals sent as JSON text under `text/plain`        | 3                                                                        | 0                              |
-| Plugin upload that trips the size cap mid-parse                 | `400` "invalid multipart upload"                                         | `413 PAYLOAD_TOO_LARGE`        |
-| Routes documented as an exception to the JSON envelope (api.md) | 1 (plugin admin)                                                         | 0                              |
+| Measure (non-test files)                                        | Before                                                                   | After                    |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------ |
+| `http.Error` plain-text replies, `api` and `admin`              | 24: plugin admin API 17, client update 3, admin log stream 4             | 0, held by the invariant |
+| `http.Error` plain-text replies, rest of the server             | 7: plugin asset server 3, LiveKit webhook 3, WebSocket upgrade refusal 1 | 0, held by the invariant |
+| Log-stream refusals sent as JSON text under `text/plain`        | 3                                                                        | 0                        |
+| Plugin upload that trips the size cap mid-parse                 | `400` "invalid multipart upload"                                         | `413 PAYLOAD_TOO_LARGE`  |
+| Routes documented as an exception to the JSON envelope (api.md) | 1 (plugin admin)                                                         | 0                        |
 
 ### What changed
 
 - `api/plugins_handler.go`: every error goes through `writeErr`. Codes: `503 PLUGINS_DISABLED` (runtime off, the `PUSH_DISABLED`/`GIF_DISABLED` pattern), `400 INVALID_INPUT` for body problems (as batch 1), `415 UNSUPPORTED_MEDIA_TYPE`, `413 PAYLOAD_TOO_LARGE`, `400 BAD_REQUEST` for a bad path id (as `parseIDParam`), `404 NOT_FOUND`, `500 INTERNAL_ERROR`. Messages are unchanged.
 - `api/client_update.go`: `400 INVALID_INPUT` and `502 UPDATE_CHECK_FAILED` (the admin update check's code). The Tauri updater reads only the status.
 - `admin/logstream.go`: the three refusals already built the envelope by hand and sent it as `text/plain`; they now use `writeErr`. "streaming not supported" is `500 INTERNAL_ERROR`.
+- New leaf package `Server/httperr` (`Write(w, status, code, msg)`) for handlers outside `api` and `admin`, which cannot import their `writeErr`. It keeps `http.Error`'s `X-Content-Type-Options: nosniff`.
+- `plugin/host_ui.go`: `403 FORBIDDEN` (symlink or non-regular asset), `500 INTERNAL_ERROR`. `ws/livekit_webhook.go`: `401 UNAUTHORIZED`, `503 SERVICE_UNAVAILABLE` (LiveKit still retries on the status). `ws/serve.go`: the over-capacity refusal is `503 SERVER_BUSY`, the WebSocket code a connect that waits too long already gets, with `Retry-After: 30` as before.
+- `invariants/plain_text_replies.go`: rule `plain-text-replies`, whole tree, also flags a dot-import of `net/http`. `reply-helpers` is unchanged.
 - The admin panel's `pluginApi` already read `message` from a JSON body, so it shows the same text; only its comment changed.
-- `docs/api.md` drops the plugin plain-text exception and lists `PLUGINS_DISABLED`, `UNSUPPORTED_MEDIA_TYPE` and `UPDATE_CHECK_FAILED`.
+- `docs/api.md` drops the plugin plain-text exception and lists `PLUGINS_DISABLED`, `UNSUPPORTED_MEDIA_TYPE` and `UPDATE_CHECK_FAILED`; the webhook and `max_ws_connections` docs name their codes.
 
-Kept as plain text: the plugin asset server (`plugin/host_ui.go`, files loaded by an iframe), the LiveKit webhook (only LiveKit reads it, and only the status) and the WebSocket upgrade refusal (a browser WebSocket cannot read the body). The plain `http.NotFound` on file, emoji and sticker image routes is the same case and was not counted.
+Not counted: the plain `http.NotFound` on file, emoji and sticker image routes (bytes for an `<img>`, a 404 with no body to read).
 
 ### Checks
 
-| Check                                                                                          | Before (`dev` handlers + the new tests) | After              |
-| ---------------------------------------------------------------------------------------------- | --------------------------------------- | ------------------ |
-| `TestPluginsHandler_ErrorsUseTheJSONEnvelope` (10 error paths), list-failure and mid-parse 413 | 12 of 12 fail                           | 12 pass            |
-| `TestHandleLogStream_RefusalsAreJSON` (no ticket, unknown ticket, no session, no permission)   | 4 of 4 fail (`text/plain`)              | 4 pass             |
-| `TestClientUpdate_ErrorIsJSONEnvelope`                                                         | fails                                   | passes             |
-| `reply-helpers` invariant on the tree                                                          | 24 violations                           | 0                  |
-| Existing `api`, `admin` and `invariants` tests                                                 | pass                                    | pass, none changed |
+| Check                                                                                                        | Before (`dev` handlers + the new tests) | After   |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------- |
+| `TestPluginsHandler_ErrorsUseTheJSONEnvelope` (10 error paths), list-failure and mid-parse 413               | 12 of 12 fail                           | 12 pass |
+| `TestHandleLogStream_RefusalsAreJSON` (no ticket, unknown ticket, no session, no permission)                 | 4 of 4 fail (`text/plain`)              | 4 pass  |
+| `TestClientUpdate_ErrorIsJSONEnvelope`                                                                       | fails                                   | passes  |
+| `TestAssetHandler_RefusalsAreJSON` (directory, symlink)                                                      | 2 of 2 fail                             | 2 pass  |
+| `TestWebhookHandler_RefusalIsJSON` (no header, bad token) and the envelope check added to the retry test (2) | 4 of 4 fail                             | 4 pass  |
+| Envelope check added to `TestServeWS_PendingHandshakesCountTowardCap`                                        | fails                                   | passes  |
+| `plain-text-replies` invariant on the tree                                                                   | 31 violations                           | 0       |
+
+No existing assertion was changed; two existing tests gained an envelope check.
 
 ### Verdict
 
-Kept. Every error a JSON client of `api` or `admin` can get is now one shape, the last documented exception is gone, and the guard stops a new plain-text reply. No saving in time or tokens is claimed.
+Kept. Every error the server answers is now one shape, the last documented exception is gone, and the guard stops a new plain-text reply anywhere. No saving in time or tokens is claimed.

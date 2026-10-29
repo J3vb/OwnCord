@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,10 +102,12 @@ func TestServeWS_PendingHandshakesCountTowardCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
+	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status with one pending handshake at cap 1 = %d, want 503", resp.StatusCode)
 	}
+	assertJSONError(t, resp.Header, body, ErrCodeServerBusy)
 }
 
 // Concurrent upgrades that all pass the capacity check together must still be
