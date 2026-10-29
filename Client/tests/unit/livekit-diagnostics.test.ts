@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { LoggerNames, RoomEvent, getLogger } from "livekit-client";
+import { LogLevel, LoggerNames, RoomEvent, getLogger, setLogLevel } from "livekit-client";
 import { addLogListener, type LogEntry } from "@lib/logger";
 import type { Room } from "livekit-client";
 
@@ -25,6 +25,7 @@ import type { SessionDebugDeps } from "@lib/livekitDiagnostics";
 import type { AudioPipeline } from "@lib/audioPipeline";
 import type { AudioElements } from "@lib/audioElements";
 import { expectConsole } from "../helpers/console";
+import { captureLogs } from "../helpers/log-capture";
 
 // ── fakes ──────────────────────────────────────────────────────────────────
 
@@ -554,5 +555,282 @@ describe("installLivekitLogging", () => {
     ]);
     expectConsole("warn", /\[livekit\] could not resume signal connection/);
     expectConsole("warn", /could not resume signal connection/);
+  });
+});
+
+// ── what each diagnostic writes to the log ─────────────────────────────────
+
+type Stat = Record<string, unknown>;
+
+const statsMap = (...reports: Stat[]): Map<string, Stat> =>
+  new Map(reports.map((r, i) => [String(i), r]));
+
+const succeededPair: Stat = {
+  id: "pair1",
+  type: "candidate-pair",
+  state: "succeeded",
+  localCandidateId: "lc1",
+  remoteCandidateId: "rc1",
+};
+
+/** Run logIceConnectionInfo on one subscriber transport and wait for its stats to settle. */
+async function logPairFor(
+  ...reports: Stat[]
+): Promise<ReturnType<ReturnType<typeof captureLogs>["find"]>> {
+  const logs = captureLogs();
+  const getStats = vi.fn().mockResolvedValue(statsMap(...reports));
+  logIceConnectionInfo(withEngine(fakeTransport({ getStats })));
+  await vi.waitFor(() => {
+    expect(getStats).toHaveBeenCalled();
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  return logs.find("ICE subscriber selected candidate pair");
+}
+
+describe("room event logging", () => {
+  it("logs each reconnect stage at its own level", () => {
+    const logs = captureLogs();
+    const { room, handlers } = fakeRoom();
+    attachDiagnosticListeners(room);
+
+    handlers.get(RoomEvent.Reconnecting)?.();
+    handlers.get(RoomEvent.Reconnected)?.();
+    handlers.get(RoomEvent.SignalReconnecting)?.();
+
+    expect(logs.entries.map((e) => [e.level, e.component, e.message])).toEqual([
+      ["warn", "livekitDiagnostics", "LiveKit room reconnecting"],
+      ["info", "livekitDiagnostics", "LiveKit room reconnected"],
+      ["debug", "livekitDiagnostics", "LiveKit signal reconnecting"],
+    ]);
+    expectConsole("warn", /LiveKit room reconnecting/);
+  });
+
+  it("logs a media device failure with its reason", () => {
+    const logs = captureLogs();
+    const { room, handlers } = fakeRoom();
+    attachDiagnosticListeners(room);
+
+    handlers.get(RoomEvent.MediaDevicesError)?.(new Error("no mic"));
+
+    expect(logs.find("LiveKit media device error")[0]?.data).toStrictEqual({ error: "no mic" });
+    expectConsole("error", /LiveKit media device error/);
+  });
+
+  it("logs the quality of the local connection only", () => {
+    const logs = captureLogs();
+    const { room, handlers } = fakeRoom();
+    attachDiagnosticListeners(room);
+
+    handlers.get(RoomEvent.ConnectionQualityChanged)?.("poor", { isLocal: false });
+    expect(logs.entries).toHaveLength(0);
+
+    handlers.get(RoomEvent.ConnectionQualityChanged)?.("excellent", { isLocal: true });
+    expect(logs.entries).toHaveLength(1);
+    expect(logs.entries[0]).toMatchObject({
+      level: "debug",
+      message: "Local connection quality changed",
+      data: { quality: "excellent" },
+    });
+  });
+});
+
+describe("ICE connection logging", () => {
+  it("reports the state of each transport under its own name", () => {
+    const logs = captureLogs();
+    logIceConnectionInfo(
+      withEngine(
+        fakeTransport({
+          iceConnectionState: "checking",
+          connectionState: "connecting",
+          signalingState: "have-local-offer",
+        }),
+        fakeTransport({
+          iceConnectionState: "connected",
+          connectionState: "connected",
+          signalingState: "stable",
+        }),
+      ),
+    );
+
+    expect(logs.find("ICE subscriber connection state")[0]?.data).toStrictEqual({
+      iceConnectionState: "checking",
+      connectionState: "connecting",
+      signalingState: "have-local-offer",
+    });
+    expect(logs.find("ICE publisher connection state")[0]?.data).toStrictEqual({
+      iceConnectionState: "connected",
+      connectionState: "connected",
+      signalingState: "stable",
+    });
+  });
+
+  it("logs nothing for a room without an engine", () => {
+    const logs = captureLogs();
+    logIceConnectionInfo({} as unknown as Room);
+    expect(logs.entries).toHaveLength(0);
+  });
+
+  it("names the selected pair's candidate types and protocol", async () => {
+    const found = await logPairFor(
+      succeededPair,
+      { id: "lc1", type: "local-candidate", candidateType: "srflx", protocol: "udp" },
+      { id: "rc1", type: "remote-candidate", candidateType: "relay" },
+    );
+
+    expect(found).toHaveLength(1);
+    expect(found[0]?.data).toStrictEqual({
+      localType: "srflx",
+      remoteType: "relay",
+      localProtocol: "udp",
+    });
+  });
+
+  it("reports the pair's own candidates, not other candidates in the report", async () => {
+    const found = await logPairFor(
+      succeededPair,
+      { id: "lc1", type: "local-candidate", candidateType: "srflx", protocol: "udp" },
+      { id: "rc1", type: "remote-candidate", candidateType: "relay" },
+      // Same kind, other ids.
+      { id: "lc2", type: "local-candidate", candidateType: "host", protocol: "tcp" },
+      { id: "rc2", type: "remote-candidate", candidateType: "host" },
+      // Same ids, other kinds.
+      { id: "lc1", type: "remote-candidate", candidateType: "prflx", protocol: "tcp" },
+      { id: "rc1", type: "local-candidate", candidateType: "prflx", protocol: "tcp" },
+    );
+
+    expect(found[0]?.data).toStrictEqual({
+      localType: "srflx",
+      remoteType: "relay",
+      localProtocol: "udp",
+    });
+  });
+
+  it("says unknown for what the candidates do not state", async () => {
+    const found = await logPairFor(
+      succeededPair,
+      { id: "lc1", type: "local-candidate" },
+      { id: "rc1", type: "remote-candidate" },
+    );
+
+    expect(found[0]?.data).toStrictEqual({
+      localType: "unknown",
+      remoteType: "unknown",
+      localProtocol: "unknown",
+    });
+  });
+
+  it("says unknown when the report does not contain the candidates", async () => {
+    const found = await logPairFor(succeededPair);
+
+    expect(found[0]?.data).toStrictEqual({
+      localType: "unknown",
+      remoteType: "unknown",
+      localProtocol: "unknown",
+    });
+  });
+
+  it("ignores pairs that have not succeeded and reports that are not pairs", async () => {
+    const lc = { id: "lc1", type: "local-candidate", candidateType: "host", protocol: "udp" };
+    expect(await logPairFor({ ...succeededPair, state: "in-progress" }, lc)).toHaveLength(0);
+    expect(await logPairFor({ ...succeededPair, state: "failed" }, lc)).toHaveLength(0);
+    expect(await logPairFor({ ...succeededPair, type: "transport" }, lc)).toHaveLength(0);
+    expect(await logPairFor({ ...succeededPair, type: "" }, lc)).toHaveLength(0);
+  });
+
+  it("logs once per succeeded pair and labels the publisher's pair", async () => {
+    const logs = captureLogs();
+    const getStats = vi
+      .fn()
+      .mockResolvedValue(
+        statsMap(succeededPair, { ...succeededPair, id: "pair2" }, { id: "x", type: "transport" }),
+      );
+    logIceConnectionInfo(withEngine(undefined, fakeTransport({ getStats })));
+    await vi.waitFor(() => {
+      expect(logs.find("ICE publisher selected candidate pair")).toHaveLength(2);
+    });
+    expect(logs.find("ICE subscriber selected candidate pair")).toHaveLength(0);
+  });
+
+  it("notes why the stats could not be read", async () => {
+    const logs = captureLogs();
+    logIceConnectionInfo(
+      withEngine(fakeTransport({ getStats: vi.fn().mockRejectedValue(new Error("pc closed")) })),
+    );
+    await vi.waitFor(() => {
+      expect(logs.find("Failed to get ICE stats")).toHaveLength(1);
+    });
+    expect(logs.find("Failed to get ICE stats")[0]).toMatchObject({
+      level: "debug",
+      data: { error: "Error: pc closed" },
+    });
+  });
+
+  it("notes why the connection info could not be read", () => {
+    const logs = captureLogs();
+    const room = {
+      get engine(): unknown {
+        throw new Error("internals moved");
+      },
+    } as unknown as Room;
+
+    logIceConnectionInfo(room);
+
+    expect(logs.find("Failed to access ICE connection info")).toHaveLength(1);
+    expect(logs.find("Failed to access ICE connection info")[0]).toMatchObject({
+      level: "debug",
+      data: { error: "Error: internals moved" },
+    });
+  });
+});
+
+describe("livekit-client log routing by level", () => {
+  it("keeps an SDK error at error level", () => {
+    installLivekitLogging();
+    const logs = captureLogs();
+
+    getLogger(LoggerNames.Engine).error("signal connection lost", { code: 7 });
+
+    // Installing more than once stacks the extension, so count what arrived.
+    const fromSdk = logs.entries.filter((e) => e.component === "livekit");
+    expect(fromSdk.length).toBeGreaterThan(0);
+    for (const entry of fromSdk) {
+      expect(entry).toMatchObject({
+        level: "error",
+        message: "signal connection lost",
+        data: { code: 7 },
+      });
+      expectConsole("error", /\[livekit\] signal connection lost/);
+    }
+    expectConsole("error", /signal connection lost/);
+  });
+
+  it("keeps the SDK's quieter output out of the OwnCord log and off the console", () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const entries: LogEntry[] = [];
+    const off = addLogListener((entry) => entries.push(entry));
+    const sdk = getLogger(LoggerNames.Engine);
+    const printed = (): string => [...info.mock.calls, ...debug.mock.calls].flat().join(" ");
+    try {
+      // The SDK was left chatty; installing narrows it to warnings and errors.
+      setLogLevel(LogLevel.debug);
+      installLivekitLogging();
+      sdk.info("websocket connected");
+      sdk.debug("ping sent");
+      expect(printed()).not.toContain("websocket connected");
+      expect(printed()).not.toContain("ping sent");
+
+      // Even if something widens it again, only warnings and errors are kept.
+      setLogLevel(LogLevel.debug);
+      sdk.info("websocket reconnected");
+      sdk.debug("ping received");
+      expect(entries.filter((e) => e.component === "livekit")).toEqual([]);
+    } finally {
+      off();
+      setLogLevel(LogLevel.warn);
+      info.mockRestore();
+      debug.mockRestore();
+    }
   });
 });
