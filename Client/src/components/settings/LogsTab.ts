@@ -24,6 +24,7 @@ import {
 import { createDisclosure } from "../../features/settings/status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
+import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
 import { copyThenRelabel } from "@lib/clipboard";
 
@@ -395,35 +396,38 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       ],
       buildSignal,
     );
-    const modeRow = createElement("div", { class: "setting-row" });
-    const modeInfo = createElement("div", {});
-    appendChildren(
-      modeInfo,
-      createElement("div", { class: "setting-label" }, t("logs.shareMode")),
-      createElement("div", { class: "setting-desc" }, t("logs.shareModeDesc")),
-    );
-    const modeSelect = createElement("select", {
-      class: "settings-select",
-      "aria-label": t("logs.shareMode"),
-      "data-testid": "share-motion-policy",
-    });
-    for (const policy of SHARE_MOTION_POLICIES) {
-      modeSelect.appendChild(
-        createElement("option", { value: policy }, t(`logs.shareMode.${policy}`)),
+    // The Linux native capture never applies the share test switch.
+    if (!isLinuxDesktop()) {
+      const modeRow = createElement("div", { class: "setting-row" });
+      const modeInfo = createElement("div", {});
+      appendChildren(
+        modeInfo,
+        createElement("div", { class: "setting-label" }, t("logs.shareMode")),
+        createElement("div", { class: "setting-desc" }, t("logs.shareModeDesc")),
       );
+      const modeSelect = createElement("select", {
+        class: "settings-select",
+        "aria-label": t("logs.shareMode"),
+        "data-testid": "share-motion-policy",
+      });
+      for (const policy of SHARE_MOTION_POLICIES) {
+        modeSelect.appendChild(
+          createElement("option", { value: policy }, t(`logs.shareMode.${policy}`)),
+        );
+      }
+      modeSelect.value = getShareMotionPolicy();
+      modeSelect.addEventListener(
+        "change",
+        () => {
+          if (isShareMotionPolicy(modeSelect.value)) {
+            savePref(SHARE_MOTION_POLICY_KEY, modeSelect.value);
+          }
+        },
+        { signal: buildSignal },
+      );
+      appendChildren(modeRow, modeInfo, modeSelect);
+      shareCard.appendChild(modeRow);
     }
-    modeSelect.value = getShareMotionPolicy();
-    modeSelect.addEventListener(
-      "change",
-      () => {
-        if (isShareMotionPolicy(modeSelect.value)) {
-          savePref(SHARE_MOTION_POLICY_KEY, modeSelect.value);
-        }
-      },
-      { signal: buildSignal },
-    );
-    appendChildren(modeRow, modeInfo, modeSelect);
-    shareCard.appendChild(modeRow);
     section.appendChild(shareCard);
 
     // Live update: subscribe to new log entries

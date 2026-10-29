@@ -499,7 +499,8 @@ export class LiveKitSession {
     if (this._shareDiagOwner !== null) return;
     const recorder = new ShareDiagnosticsRecorder({
       enabled: () => getShareDiagnosticsEnabled(),
-      policy: () => getShareMotionPolicy(),
+      // The Linux native capture never applies the test switch.
+      policy: () => (isLinuxDesktop() ? "legacy" : getShareMotionPolicy()),
       shareEpoch: () => this.localScreenshareTrack(),
       readSender: () => this._remoteTracks.getLocalScreenshareStats(),
       watchedShares: () => this._remoteTracks.watchedScreenshares(),
