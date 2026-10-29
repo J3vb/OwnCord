@@ -63,6 +63,7 @@ and only when it changes something a contributor or fork holder must do
 - A HEIC or TIFF photo waiting to send showed a broken-image icon in the composer; it now shows the file chip with its name, as does any picture the app cannot draw.
 - A picture waiting to send lost its preview after switching channels and back; it now keeps it.
 - A picture in chat whose file is damaged or unreadable showed a broken-image icon; it now shows the download card.
+- Hovering a reaction squeezed the names into a narrow box and split them mid-word ("LordJ / ebus"); the box now fits the names on one line and wraps only between words.
 
 ### Under the hood
 
