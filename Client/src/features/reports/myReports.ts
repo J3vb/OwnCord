@@ -1,5 +1,5 @@
 /**
- * "My reports" in the Settings Safety tab (B9-10, Q2): the caller's own
+ * "My reports" in the Settings Safety tab: the caller's own
  * reports from GET /api/v1/reports/mine — kind, reason, where each one stands
  * and when. The summary is all there is: evidence, assignee and notes are not
  * in it, and nothing here reads the moderation queue to fill a gap. A field

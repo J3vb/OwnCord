@@ -1,5 +1,5 @@
 /**
- * The forum settings editor's model (WP 6.9d-b2): a draft of a forum's tags and
+ * The forum settings editor's model: a draft of a forum's tags and
  * settings, the server's limits mirrored for early feedback, the merge of a
  * live `channel_update` into an unsaved draft, and the PUT body. Pure data,
  * no DOM and no store.

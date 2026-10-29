@@ -7,7 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// dmFirstContactGate runs the B5-6 gate for one non-sender participant
+// dmFirstContactGate runs the gate for one non-sender participant
 // (recipient, read with its trust of the sender by GetDMDeliveryTargets) of
 // a one-to-one DM p.UserID just sent into. It reports true when the send
 // effect for this recipient is already fully handled (a request was staged,
@@ -26,7 +26,7 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 	}
 	// "Cannot receive DMs" (community-services.md S1): a recipient that is not
 	// dmReachableUser gets no request row and no frame. The send itself still
-	// succeeds for the sender (decision 5).
+	// succeeds for the sender.
 	if !dmReachableUser(recipient) {
 		return true
 	}
@@ -48,7 +48,7 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 		// the pair and opened the DM, so this recipient is now a trusting
 		// participant. Mark the in-memory target so the delivery audience,
 		// mentions and push include them, announce the open once, and send
-		// no dm_request frame (WP 6.8e).
+		// no dm_request frame.
 		target.TrustsSender = true
 		if outcome.Opened {
 			result.OpenedDMFor = append(result.OpenedDMFor, recipientID)
@@ -68,7 +68,7 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 }
 
 // canonicalRequestPreview reads messageID fresh rather than trusting the
-// send's own cached content (Codex review round 2, P1): the WS dm_request
+// send's own cached content: the WS dm_request
 // frame's preview must never disagree with the REST inbox's
 // (db.DB.ListPendingMessageRequests joins first_message_id with
 // deleted = 0) — building it from cached content let a delete racing the

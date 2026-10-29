@@ -75,7 +75,7 @@ export interface SettingsOverlayOptions {
   onUploadAvatar(file: File): Promise<string>;
   /** Remove the avatar (3C-7a). Resolves once the server has cleared it. */
   onRemoveAvatar(): Promise<void>;
-  /** Upload a cropped banner image (WP 6.11d). Resolves with the stored URL.
+  /** Upload a cropped banner image. Resolves with the stored URL.
    *  Omitted: no banner upload control. */
   onUploadBanner?(file: File): Promise<string>;
   /** Remove the banner image. Omitted: no remove control. */
@@ -83,14 +83,14 @@ export interface SettingsOverlayOptions {
   onLogout(): void;
   onDeleteAccount(password: string): Promise<void>;
   /** The server-default retention sentence for the Account tab, or null when
-   *  the server did not report one (B7-15c). */
+   *  the server did not report one. */
   getRetentionNotice?(): string | null;
   onStatusChange(status: UserStatus): void;
   onEnableTotp(password: string): Promise<{ qr_uri: string; backup_codes: string[] }>;
   onConfirmTotp(password: string, code: string): Promise<void>;
   onDisableTotp(password: string): Promise<void>;
   /** Re-read the 2FA state from GET /users/me, the only response that
-   *  carries it, and put it in the auth store (OC-0354). */
+   *  carries it, and put it in the auth store. */
   onRefreshTotpStatus(): Promise<void>;
   /** Replace the emergency recovery codes (password-confirmed); resolves with
    *  the new set, which the tab shows once and never keeps. */
@@ -108,7 +108,7 @@ export interface SettingsOverlayOptions {
   onRevokeAllSessions(): Promise<RevokeAllSessionsResponse>;
   /** When false, the Account tab is hidden (e.g. on the connect page). Defaults to true. */
   isAuthenticated?: boolean;
-  /** Builds the Safety tab (B9-4, Q2). Absent until its feature ships, and then no tab shows. */
+  /** Builds the Safety tab. Absent until its feature ships, and then no tab shows. */
   safetyTab?: (signal: AbortSignal) => HTMLDivElement;
 }
 
@@ -147,7 +147,7 @@ const ACCOUNT = "Account" satisfies TabName;
 const ABOUT = "About" satisfies TabName;
 
 /**
- * What each tab is called on screen (B9-20 moved every label onto the seam).
+ * What each tab is called on screen.
  * The key order is the nav order: Discord's app-settings order, then the
  * OwnCord-only tabs.
  */
@@ -211,7 +211,7 @@ export function createSettingsOverlay(
    * Scopes the *current* tab build's element listeners. `renderActiveTab()`
    * aborts the previous one before building the next, so a discarded pane's
    * listeners are dropped immediately instead of accumulating on `disposable` for
-   * the whole overlay lifetime (OC-0268) — every render used to register
+   * the whole overlay lifetime — every render used to register
    * against `disposable.signal` directly, and nothing ever aborted a stale build's
    * registrations short of `destroy()`.
    */
@@ -454,7 +454,7 @@ export function createSettingsOverlay(
     // ("User Settings" / "App Settings") and the Log Out button also live in
     // here, and a tablist should own only tabs — but moving them out would
     // change the structure the e2e selectors pin down, so we accept that the
-    // non-tab children are presentational noise inside the tablist (DC-13).
+    // non-tab children are presentational noise inside the tablist.
     const sidebar = createElement("div", {
       class: "settings-sidebar",
       role: "tablist",
@@ -787,7 +787,7 @@ export function createSettingsOverlay(
     closeOnBackdropClick(root, () => requestClose(), disposable.signal);
 
     root.appendChild(panel);
-    // Don't build the active tab while the overlay is closed (DP-52): its
+    // Don't build the active tab while the overlay is closed: its
     // builders issue REST reads (sessions, TOTP and recovery-kit status) that
     // are wasted work until the panel is actually shown. The first open
     // rebuilds via show() → !contentLive, so its data is as fresh as any later

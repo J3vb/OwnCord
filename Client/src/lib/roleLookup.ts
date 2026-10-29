@@ -1,5 +1,5 @@
 /**
- * Role id by name (WP 6.3e), for a server that sends no `role_ids`: its user
+ * Role id by name, for a server that sends no `role_ids`: its user
  * names one role and nothing else.
  *
  * A leaf on purpose. Mention matching (lib/mentions.ts, in the startup chunk)

@@ -1,5 +1,5 @@
 /**
- * Pure helpers for a voice message's waveform and clock (WP 8.9). A waveform is
+ * Pure helpers for a voice message's waveform and clock. A waveform is
  * one byte (0-255) per bar; on the wire it is base64url without padding.
  */
 

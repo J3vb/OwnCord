@@ -151,7 +151,7 @@ export class RoomLifecycle {
     const quality = getCameraQuality();
     const screenQuality = getScreenShareQuality();
     const isSource = quality === "source";
-    // OC-0438: publish with the channel's configured audio bitrate — spreading
+    // Publish with the channel's configured audio bitrate — spreading
     // undefined omits audioPreset, leaving LiveKit's own default in place.
     const audioOptions = this.configuredAudioOptions(channelId ?? null);
     // livekit-client 2.22's Room constructor, when this registry exists,
@@ -175,7 +175,7 @@ export class RoomLifecycle {
       // quality to keep full resolution.
       dynacast: !isSource,
       // The device is not here: the join points capture at the saved input
-      // itself (joinOrchestration RT-6), non-exact so a missing one degrades.
+      // itself (joinOrchestration), non-exact so a missing one degrades.
       audioCaptureDefaults: micProcessingOptions(),
       videoCaptureDefaults: CAMERA_PRESETS[quality],
       publishDefaults: {
@@ -206,7 +206,7 @@ export class RoomLifecycle {
         worker: this._e2eeWorker,
       },
     });
-    // OC-0095: the Room constructor only wires up the E2EEManager — it never
+    // The Room constructor only wires up the E2EEManager — it never
     // enables encryption. Without this, LocalParticipant.encryptionType stays
     // NONE, the worker's encode transform takes the disabled passthrough
     // branch, and every frame reaches the SFU in plaintext even though the
@@ -319,7 +319,7 @@ export class RoomLifecycle {
       if (isMicPolicyGated()) return;
       this.applyMicMuteState(false).catch((err) => log.warn("Mic grant restoration failed", err));
     });
-    // OC-0002: the only SDK-level signal that the E2EE worker died after the
+    // The only SDK-level signal that the E2EE worker died after the
     // key exchange already succeeded — see roomEventHandlers.ts for detail.
     onRoom(newRoom, RoomEvent.EncryptionError, this._eventHandlers.handleEncryptionError);
     attachDiagnosticListeners(newRoom);
@@ -357,14 +357,14 @@ export class RoomLifecycle {
     }
     this.host.clearPendingReconnectFields();
     this.clearTokenRefreshTimer();
-    // OC-0029: a fresh join must never inherit the outgoing session's refresh
+    // A fresh join must never inherit the outgoing session's refresh
     // budget — otherwise a rejoin shortly after a leave could get silently
     // throttled for up to 60s with no refresh sent at all.
     this._tokenManager.resetBudget();
     this._audioPipeline.teardownAudioPipeline();
     this._eventHandlers.removeAutoplayUnlock();
     this._eventHandlers.resetEncryptionRecovery();
-    // OC-0042: bump first, mirroring doDisableCamera/doDisableScreenshare —
+    // Bump first, mirroring doDisableCamera/doDisableScreenshare —
     // a concurrent enableCamera()/enableScreenshare() still awaiting device
     // acquisition (getUserMedia/getDisplayMedia/publishTrack) when the user
     // leaves voice must detect it was superseded and discard its track

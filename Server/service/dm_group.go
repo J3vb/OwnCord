@@ -11,7 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// Group DM membership (WP 3B-10b): add, remove and owner transfer, plus the
+// Group DM membership: add, remove and owner transfer, plus the
 // system rows those and the leave and rename paths write.
 
 // GroupDMStore is the data access group DM membership needs beyond the DM reads

@@ -21,9 +21,9 @@ export interface DmMenuConvo {
   readonly userId: number;
   readonly username: string;
   readonly isGroup: boolean;
-  /** The group reports an owner (a server with WP 3B-10): the leave copy says it can be rejoined. */
+  /** The group reports an owner (a server that reports one): the leave copy says it can be rejoined. */
   readonly hasOwner?: boolean;
-  /** The group has an uploaded icon (WP 3B-11b): the menu offers Remove Group Icon. */
+  /** The group has an uploaded icon: the menu offers Remove Group Icon. */
   readonly hasIcon?: boolean;
   readonly unread: boolean;
   readonly muted: boolean;
@@ -168,7 +168,7 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
     });
   }
   // Any member may set or clear the icon, so this is not gated on ownership,
-  // only on the server being one that reports an owner (WP 3B-10).
+  // only on the server being one that reports an owner.
   if (isGroup && convo.hasOwner === true) {
     const change = actions.onChangeGroupIcon;
     if (change !== undefined) {

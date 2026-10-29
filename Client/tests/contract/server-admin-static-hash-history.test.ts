@@ -115,7 +115,7 @@ async function editSettings(booted: ReturnType<typeof boot>): Promise<HTMLInputE
   return input;
 }
 
-describe("Server/admin/static — hash history (UX-12a)", () => {
+describe("Server/admin/static — hash history", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();

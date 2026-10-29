@@ -35,7 +35,7 @@ func handleVoiceTokenRefreshV2(ctx context.Context, cmd Command, info ClientInfo
 	// client's own session state, and voice_join used to be the only place
 	// the gate was checked — so a user whose CONNECT_VOICE was revoked
 	// mid-session kept minting fresh SFU room-join grants, and a block imposed
-	// mid-session (OC-0018) kept re-issuing one for the blocker's DM. Refusing
+	// mid-session kept re-issuing one for the blocker's DM. Refusing
 	// alone would leave the live session in place, so the refusal also evicts:
 	// LeaveVoice runs handleVoiceLeave, which clears the client's voice state,
 	// deletes the voice_states row and removes the LiveKit participant. Fails

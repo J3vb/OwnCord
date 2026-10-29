@@ -33,7 +33,7 @@ const (
 // secret is ciphertext under this key, so replacing the file on a read error
 // (EACCES after a permissions change, EIO, a directory at the path, a
 // dangling symlink) would orphan every second factor on the server with no
-// way back (OC-0321). The corrupt-content branches fail closed too.
+// way back. The corrupt-content branches fail closed too.
 func LoadOrGenerateTOTPKey(dataDir string) ([]byte, error) {
 	return loadOrGenerateKeyFile(keyFileSpec{
 		env:       "OWNCORD_TOTP_KEY",
@@ -67,7 +67,7 @@ type keyFileSpec struct {
 }
 
 // loadOrGenerateKeyFile is the fail-closed key loader the TOTP key and the
-// erasure marker key (B4-10) share: the environment variable, else the file,
+// erasure marker key share: the environment variable, else the file,
 // else a fresh key written atomically — and only on a confirmed absence.
 func loadOrGenerateKeyFile(spec keyFileSpec, dataDir string) ([]byte, error) {
 	if envKey := os.Getenv(spec.env); envKey != "" {
@@ -131,7 +131,7 @@ func loadOrGenerateKeyFile(spec keyFileSpec, dataDir string) ([]byte, error) {
 // rename is the only step that makes the key visible, and it is atomic on
 // every filesystem the server runs on. A stale temp file from an earlier
 // interrupted run is removed first rather than failing the exclusive create.
-// Shared by the TOTP key and the erasure marker key (B4-10).
+// Shared by the TOTP key and the erasure marker key.
 func writeKeyFileAtomic(keyPath string, contents []byte) error {
 	name := filepath.Base(keyPath)
 	tmpPath := keyPath + ".tmp"
@@ -190,7 +190,7 @@ func EncryptTOTPSecret(key []byte, plaintext string) (string, error) {
 // continue to work.
 func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
 	// Backwards compatibility: if it doesn't look encrypted, return as-is.
-	// M-4: Log a warning so operators can detect unencrypted TOTP secrets
+	// Log a warning so operators can detect unencrypted TOTP secrets
 	// and migrate them (e.g. after key rotation or initial setup).
 	if len(ciphertext) < minEncryptedHexLen {
 		slog.Warn("TOTP secret returned as plaintext (too short for encrypted format) — consider encrypting legacy secrets")

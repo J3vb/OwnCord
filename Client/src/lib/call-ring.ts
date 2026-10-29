@@ -41,10 +41,10 @@ export interface RingControllerOptions {
   /** A new ring began: not a redial of the ring already on screen. The OS
    *  notification and the attention request hang off this, once per ring. */
   readonly onRingStart?: (state: RingState) => void;
-  /** The ring ended with nobody answering (DP-24): the timeout, or the ringer
-   *  hanging up first (D-07). An accept, a decline or a newer call is not a miss. */
+  /** The ring ended with nobody answering: the timeout, or the ringer
+   *  hanging up first. An accept, a decline or a newer call is not a miss. */
   readonly onMissed?: (state: RingState) => void;
-  /** The ring ended, however it ended; reported before `onMissed` (D-13).
+  /** The ring ended, however it ended; reported before `onMissed`.
    *  `reason` is set where the end is known: "superseded" is a ring replaced by
    *  a ring from another channel (3B-4), which the page reports as missed. */
   readonly onRingEnd?: (state: RingState, reason?: RingEndReason) => void;
@@ -172,7 +172,7 @@ export interface OutgoingCallState {
 export interface OutgoingCallOptions {
   readonly onChange: (state: OutgoingCallState | null) => void;
   /** The caller's ringback: true while `phase === "ringing"`, false the moment
-   *  the ring ends for any reason (DP-25). Never true after `clear`. */
+   *  the ring ends for any reason. Never true after `clear`. */
   readonly onRingback?: (playing: boolean) => void;
   /** Test seam for the 30s timer. */
   readonly setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
@@ -182,7 +182,7 @@ export interface OutgoingCallOptions {
 export interface OutgoingCall {
   /** A ring went out (or went out again) to these callees. `offline`: the
    *  1:1 callee shows as offline, so say so at once rather than ring back for
-   *  the whole window (D-14). */
+   *  the whole window. */
   readonly start: (channelId: number, calleeIds: readonly number[], offline?: boolean) => void;
   /** A callee's call_declined arrived. Ignored for any other channel. */
   readonly declined: (channelId: number, userId: number) => void;

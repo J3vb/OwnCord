@@ -74,7 +74,7 @@ type AuthResult struct {
 	Requires2FA  bool
 	User         *db.User
 	// PendingApproval is an approval-mode registration: the application is
-	// recorded, no session is issued, and an admin decides (B4-1).
+	// recorded, no session is issued, and an admin decides.
 	PendingApproval bool
 	// RecoveryCodesRemaining is set when an emergency recovery code, not a
 	// TOTP code, completed the second step: how many the account has left,
@@ -83,7 +83,7 @@ type AuthResult struct {
 }
 
 // TOTPEnrollment is what EnableTOTP hands the caller: the otpauth URI for
-// the authenticator app and the emergency recovery codes (BPR-046), shown
+// the authenticator app and the emergency recovery codes, shown
 // exactly once. The server keeps bcrypt hashes of the codes; the plaintext
 // exists only in this value.
 type TOTPEnrollment struct {
@@ -102,7 +102,7 @@ type TOTPChangeResult struct {
 
 // ─── Limits ──────────────────────────────────────────────────────────────────
 //
-// Moved from api/constants.go with the orchestration that reads them (B3-2).
+// Moved from api/constants.go with the orchestration that reads them.
 
 const (
 	// loginFailureThreshold is the number of failed login attempts (within
@@ -158,7 +158,7 @@ const (
 )
 
 // The password-confirmation lockout is shared with the change-password route
-// (api/profile_handler.go, the user family in B3-8), so one key space
+// (api/profile_handler.go), so one key space
 // ("pw_confirm_fail", "pw_confirm_lock") and one budget cover every route
 // that asks for the current password.
 const (
@@ -191,7 +191,7 @@ var (
 )
 
 // authError is one refusal the auth slice can return. Error() is the exact
-// public message the pre-B3-2 handler wrote — B3-1's characterization rows
+// public message the earlier handler wrote — the characterization tests
 // pin it byte for byte — and Is reports the category sentinel the transport
 // maps to a status and code, so errors.Is matches both the named value and
 // its category.
@@ -211,11 +211,11 @@ var (
 	ErrRegistrationPolicyUnavailable = &authError{ErrInternal, "failed to load registration policy"}
 	ErrRegistrationClosed            = &authError{ErrForbidden, "registration is currently closed"}
 	// ErrAccountPending is an approval-mode application trying to sign in
-	// before an admin approved it (B4-1).
+	// before an admin approved it.
 	ErrAccountPending = &authError{ErrForbidden, "account is awaiting approval"}
 	// ErrRegistrationRateLimited and ErrRegistrationQueueFull are the
-	// per-mode abuse limits of open and approval registration (owner
-	// decision 1): a per-address creation budget and a cap on the approval
+	// per-mode abuse limits of open and approval registration: a per-address
+	// creation budget and a cap on the approval
 	// queue. Both share the rate-limit category, so the client backs off.
 	ErrRegistrationRateLimited = &authError{ErrRateLimited, "too many registrations from this address, try again later"}
 	ErrRegistrationQueueFull   = &authError{ErrRateLimited, "registration queue is full, try again later"}
@@ -243,7 +243,7 @@ var (
 
 	// Password confirmation (account deletion and TOTP management).
 	ErrTooManyAttempts = &authError{ErrRateLimited, "too many failed attempts, try again later"}
-	// ErrAuthBusy is the B4-4 admission refusal: the process-wide budget for
+	// ErrAuthBusy is the admission refusal: the process-wide budget for
 	// expensive authentication work is exhausted, so this attempt ran no
 	// bcrypt and consumed no lockout attempt. Same category as the lockouts
 	// (429), but its own code, AUTH_BUSY, tells load from abuse; the queued
@@ -260,8 +260,8 @@ var (
 	// Second factor.
 	ErrTOTPChallengeInvalid = &authError{ErrUnauthorized, "invalid or expired two-factor challenge"}
 	ErrTOTPSecretUnreadable = &authError{ErrInternal, "failed to verify two-factor code"}
-	// ErrTOTPUnavailable is a store fault while loading the challenged user
-	// (OC-0377): an outage, not a bad challenge, so no attempt is charged.
+	// ErrTOTPUnavailable is a store fault while loading the challenged user:
+	// an outage, not a bad challenge, so no attempt is charged.
 	ErrTOTPUnavailable = &authError{ErrInternal, "two-factor verification temporarily unavailable"}
 	ErrTOTPCodeInvalid = &authError{ErrUnauthorized, "invalid two-factor code"}
 	// ErrTOTPAlreadyEnabled is written by the transport as 409
@@ -272,11 +272,11 @@ var (
 	ErrTOTPEnableFailed     = &authError{ErrInternal, "failed to enable two-factor authentication"}
 	ErrTOTPRequiredByServer = &authError{ErrForbidden, "two-factor authentication is required for this server"}
 	ErrTOTPDisableFailed    = &authError{ErrInternal, "failed to disable two-factor authentication"}
-	// ErrTOTPEnrollmentStage is a persister fault while staging an enrolment
-	// (B4-3): the pending secret could not be made durable, so none is staged.
+	// ErrTOTPEnrollmentStage is a persister fault while staging an enrolment:
+	// the pending secret could not be made durable, so none is staged.
 	ErrTOTPEnrollmentStage = &authError{ErrInternal, "failed to stage two-factor enrolment"}
 
-	// Recovery codes (B4-3).
+	// Recovery codes.
 	ErrRecoveryCodesRequireTOTP = &authError{ErrConflict, "enable two-factor authentication before requesting recovery codes"}
 	ErrRecoveryCodesFailed      = &authError{ErrInternal, "failed to issue recovery codes"}
 )
@@ -286,8 +286,8 @@ var (
 // AuthService owns the auth slice's orchestration: the lockout and
 // enumeration guards, the password and second-factor checks, session issue
 // and revoke, the audit writes and the member_ban broadcast on self-erasure.
-// Persistence stays in db behind Store. B3-2 moved every line here verbatim
-// from api/auth_handler.go and api/totp_handler.go at 71d867cb; B3-1's
+// Persistence stays in db behind Store. Every line here was moved verbatim
+// from api/auth_handler.go and api/totp_handler.go at 71d867cb; the
 // characterization rows pin the behaviour.
 type AuthService struct {
 	// issueMu serializes the two-budget reservation of IssueRecoveryAssist.
@@ -299,13 +299,13 @@ type AuthService struct {
 	usedCodes   *auth.UsedTOTPCodeStore
 	totpKey     []byte
 	broadcaster AuthBroadcaster
-	// erasure runs DeleteAccount's erasure (B4-9). NewAuthService builds a
+	// erasure runs DeleteAccount's erasure. NewAuthService builds a
 	// private one over st; the composition root swaps in the shared
 	// Services.Erasure (UseErasure) so the file storage is installed once.
 	erasure *ErasureService
 	// admissionWait bounds acquireAdmission's queue wait (P5-S02).
 	admissionWait time.Duration
-	// welcome greets a new member once their account exists (WP 8.6); nil
+	// welcome greets a new member once their account exists; nil
 	// greets nobody.
 	welcome *WelcomeService
 }
@@ -315,7 +315,7 @@ type AuthService struct {
 // encrypts TOTP secrets at rest; broadcaster may be nil. The three
 // second-factor stores — partial-login challenges, pending TOTP enrolments,
 // used TOTP codes — are created here with the fixed TTLs the route mount
-// used to own, and since B4-3 they persist through st (S-13): the database
+// used to own, and they persist through st: the database
 // is authoritative, so a restart keeps an in-flight challenge, a staged
 // enrolment and the replay window, and a store fault fails closed.
 func NewAuthService(st Store, limiter *auth.RateLimiter, totpKey []byte, broadcaster AuthBroadcaster) *AuthService {
@@ -343,7 +343,7 @@ func (s *AuthService) UseErasure(e *ErasureService) {
 	}
 }
 
-// UseWelcome makes Register greet each new member through w (WP 8.6). A nil w
+// UseWelcome makes Register greet each new member through w. A nil w
 // greets nobody.
 func (s *AuthService) UseWelcome(w *WelcomeService) {
 	s.welcome = w
@@ -373,8 +373,8 @@ func (s *AuthService) RegistrationPolicy(ctx context.Context) error {
 	return nil
 }
 
-// Per-mode abuse limits for the modes that need no invite (owner decision
-// 1): one address may create this many accounts or applications per day,
+// Per-mode abuse limits for the modes that need no invite:
+// one address may create this many accounts or applications per day,
 // and the approval queue is capped.
 const (
 	inviteFreeRegistrationsPerIPPerDay = 5
@@ -451,8 +451,8 @@ func (s *AuthService) createRegisteredAccount(ctx context.Context, mode Registra
 	return uid, token, err
 }
 
-// Register creates the account the current registration mode allows
-// (B4-1): invite mode consumes the invite and issues a session, open mode
+// Register creates the account the current registration mode allows:
+// invite mode consumes the invite and issues a session, open mode
 // issues a session without one, approval mode records a locked application
 // and issues nothing. Closed mode never reaches here (RegistrationPolicy
 // gates the route) but is refused again in case a caller skips the gate.
@@ -465,7 +465,7 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	// Hash password before consuming the invite so that a hashing failure
 	// does not burn a valid invite code.
 	// The hash is bcrypt at full cost, so it takes an admission slot like a
-	// compare does (B4-4): a burst of registrations cannot grow the CPU
+	// compare does: a burst of registrations cannot grow the CPU
 	// backlog past the budget, and a refusal burns nothing (queued, P5-S02).
 	release, err := s.acquireAdmission(ctx)
 	if err != nil {
@@ -482,7 +482,7 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	// persisted by CreateUserWithInvite's transaction, so the account, the
 	// invite use and the first session commit together: a fault at any step
 	// — the session insert included — rolls the whole registration back and
-	// burns nothing (OC-0376).
+	// burns nothing.
 	uid, token, err := s.createRegisteredAccount(ctx, mode, in, hash)
 	if err != nil {
 		// UNIQUE constraint violation → duplicate username → 400.
@@ -573,7 +573,7 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 		return nil, ErrBanned
 	}
 	// An approval-mode application holds the username and the password, but
-	// is not an account until an admin says so (B4-1).
+	// is not an account until an admin says so.
 	if user.PendingApproval() {
 		slog.Info("pending application login attempt", "user_id", user.ID, "ip", in.IP)
 		return nil, ErrAccountPending
@@ -623,13 +623,13 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrLockedOut
 	}
 
-	// BUG-110: Also check per-username lockout to prevent distributed brute force.
+	// Also check per-username lockout to prevent distributed brute force.
 	// F1: canonicalize the username the same way GetUserByUsername does (COLLATE
 	// NOCASE) before keying the lockout, so case variants of one account
 	// (admin/Admin/ADMIN) share a single bucket instead of each getting its own.
 	// NOCASE folds ASCII A-Z only, so the key must too (db.LowerASCII, not
 	// strings.ToLower): two accounts that differ only in non-ASCII case are
-	// two rows, and must never share a bucket (OC-0324).
+	// two rows, and must never share a bucket.
 	unameKey := db.LowerASCII(in.Username)
 	userLockKey := "login_user_lock:" + unameKey
 	// An address that signed in to this account recently is exempt from the
@@ -640,7 +640,7 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrLockedOut
 	}
 
-	// B4-4: take an admission slot before the attempt is reserved, so an
+	// Take an admission slot before the attempt is reserved, so an
 	// over-budget request is refused without charging the failure budgets
 	// and without a bcrypt compare; the slot goes back right after the
 	// compare. A burst queues (P5-S02), so the account is read once
@@ -711,7 +711,7 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		if !s.limiter.Check(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) {
 			s.limiter.Lockout(ctx, lockKey, loginLockoutDuration)
 		}
-		// BUG-110: per-username lockout on threshold.
+		// Per-username lockout on threshold.
 		if !s.limiter.Check(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 			s.limiter.Lockout(ctx, userLockKey, loginUserLockoutDuration)
 		}
@@ -737,9 +737,9 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 
 	// Refuse an exhausted per-user budget before touching the store: the
 	// read-only Check costs nothing and charges nothing, so rotating source
-	// IPs cannot drive user reads and secret decryptions past the cap
-	// (Codex P2 on PR #1454). The atomic Allow below still records the
-	// attempt only once the store read succeeded (OC-0377).
+	// IPs cannot drive user reads and secret decryptions past the cap.
+	// The atomic Allow below still records the
+	// attempt only once the store read succeeded.
 	totpRateLimitKey := auth.Key("totp_fail", challenge.UserID)
 	if !s.limiter.Check(totpRateLimitKey, totpFailureRateLimit, totpFailureWindow) {
 		return nil, ErrTooManyAttempts
@@ -763,10 +763,10 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 	// threshold with it would hand a distributed attacker more guesses.
 	// Mirrors loginUserFailureThreshold staying unscaled in authenticate.
 	// The reservation sits after the store read above, as in authenticate,
-	// so an outage does not consume attempts (OC-0377); it still precedes
+	// so an outage does not consume attempts; it still precedes
 	// the code compare, the check-then-act the up-front record closes.
 	// An emergency recovery code is matched against up to ten bcrypt hashes,
-	// so it takes an admission slot before the attempt is reserved (B4-4): a
+	// so it takes an admission slot before the attempt is reserved: a
 	// refusal charges nothing, and it queues for the slot like login does
 	// (P5-S02). A TOTP code is an HMAC and needs no slot.
 	canonical, isRecovery := auth.NormalizeRecoveryCode(code)
@@ -781,7 +781,7 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		return nil, ErrTooManyAttempts
 	}
 
-	// An emergency recovery code (B4-3) stands in for the TOTP code: it has a
+	// An emergency recovery code stands in for the TOTP code: it has a
 	// different shape, so the input routes itself. A recovery code is spent
 	// by the conditional update that consumed it, not by the replay window,
 	// so the Unmark below applies to TOTP codes only.
@@ -812,7 +812,7 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 		// expired) after this request marked its code. Release the code —
 		// if the winner is mid-recovery (Consume → issueSession failed →
 		// Restore), the restored token must not be stuck behind this mark
-		// until the authenticator rolls over (Codex P2 on PR #1454). A spent
+		// until the authenticator rolls over. A spent
 		// recovery code stays spent: the account holds nine more, and
 		// un-spending one would hand a racing verifier a second use.
 		if recoveryRemaining == nil {
@@ -823,8 +823,8 @@ func (s *AuthService) VerifyTOTP(ctx context.Context, partialToken, code string)
 
 	token, err := issueSession(ctx, s.st, user.ID, challenge.Device, challenge.IP)
 	if err != nil {
-		// The second factor was verified; a store fault must not discard it
-		// (OC-0378). The claim stays atomic and first — two concurrent
+		// The second factor was verified; a store fault must not discard it.
+		// The claim stays atomic and first — two concurrent
 		// verifies can never both reach issueSession — so on failure put the
 		// challenge back under the same token (the client still holds it) and
 		// release the accepted code: the retry completes the login without
@@ -909,7 +909,7 @@ func (s *AuthService) RegenerateRecoveryCodes(ctx context.Context, p Principal, 
 // issueRecoveryCodes generates a set and stores its hashes, replacing any
 // previous set.
 func (s *AuthService) issueRecoveryCodes(ctx context.Context, userID int64) ([]string, error) {
-	// Ten bcrypt hashes: one admission slot (B4-4), like the compare that
+	// Ten bcrypt hashes: one admission slot, like the compare that
 	// admitted the caller a moment ago.
 	release, admitted := s.limiter.Admission().TryAcquire()
 	if !admitted {
@@ -934,8 +934,8 @@ func (s *AuthService) challengeSecret(ctx context.Context, challengeUserID int64
 	user, err := s.st.GetUserByID(ctx, challengeUserID)
 	if err != nil {
 		// GetUserByID answers (nil, nil) for an unknown user, so a non-nil
-		// error is a store fault: report the outage, not a bad challenge
-		// (OC-0377). VerifyTOTP records no attempt for it.
+		// error is a store fault: report the outage, not a bad challenge.
+		// VerifyTOTP records no attempt for it.
 		slog.Error("verify-totp: GetUserByID failed", "err", err, "user_id", challengeUserID)
 		return nil, "", ErrTOTPUnavailable
 	}
@@ -988,7 +988,7 @@ func (s *AuthService) Logout(ctx context.Context, p Principal) error {
 	return nil
 }
 
-// DeleteAccount confirms the password, erases the account (B4-9: every data
+// DeleteAccount confirms the password, erases the account (every data
 // class the subject holds is hard-deleted in one transaction and the
 // subject's files are removed, journaled so an interruption resumes) and
 // broadcasts member_ban. Progressive lockout mirrors login: 3 failures →
@@ -1045,7 +1045,7 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 	}
 
 	slog.Info("account deleted", "user_id", user.ID, "ip", ip)
-	// The row is written unlinked from the start (B4-10): no id, no IP, the
+	// The row is written unlinked from the start: no id, no IP, the
 	// deletion marker's token in their place — on both sides, the subject
 	// being the actor too.
 	token := s.erasure.SubjectToken(user.ID)
@@ -1066,13 +1066,13 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 
 // EnableTOTP confirms the password and stages a pending secret; the returned
 // enrolment carries the otpauth URI for the authenticator app and the
-// emergency recovery codes (B4-3), whose hashes are stored now so they are
+// emergency recovery codes, whose hashes are stored now so they are
 // in place the moment ConfirmTOTP turns the second factor on. Staging again
 // replaces both the pending secret and the codes.
 func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password string) (*TOTPEnrollment, error) {
 	user := p.User
 
-	// BUG-111: Per-user lockout for password confirmation.
+	// Per-user lockout for password confirmation.
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
 	if s.limiter.IsLockedOut(lockKey) {
 		return nil, ErrTooManyAttempts
@@ -1111,7 +1111,7 @@ func (s *AuthService) EnableTOTP(ctx context.Context, p Principal, password stri
 func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, code string) (*TOTPChangeResult, error) {
 	user := p.User
 
-	// BUG-111: Per-user lockout for password confirmation.
+	// Per-user lockout for password confirmation.
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
 	if s.limiter.IsLockedOut(lockKey) {
 		return nil, ErrTooManyAttempts
@@ -1168,7 +1168,7 @@ func (s *AuthService) ConfirmTOTP(ctx context.Context, p Principal, password, co
 func (s *AuthService) DisableTOTP(ctx context.Context, p Principal, password string) (*TOTPChangeResult, error) {
 	user := p.User
 
-	// BUG-111: Per-user lockout for password confirmation.
+	// Per-user lockout for password confirmation.
 	lockKey := auth.Key("pw_confirm_lock", user.ID)
 	if s.limiter.IsLockedOut(lockKey) {
 		return nil, ErrTooManyAttempts
@@ -1226,7 +1226,7 @@ func (s *AuthService) confirmPassword(ctx context.Context, user *db.User, passwo
 	failKey := auth.Key("pw_confirm_fail", user.ID)
 	if err := s.requirePasswordConfirmation(user, password); err != nil {
 		if errors.Is(err, ErrAuthBusy) {
-			// Refused before any compare ran (B4-4): not an attempt, so not
+			// Refused before any compare ran: not an attempt, so not
 			// a failure to count.
 			return err
 		}
@@ -1277,7 +1277,7 @@ func (s *AuthService) require2FAEnabled(ctx context.Context) (bool, error) {
 }
 
 // requirePasswordConfirmation checks the confirming password inside one
-// admission slot (B4-4); ErrAuthBusy means the budget refused and no compare
+// admission slot; ErrAuthBusy means the budget refused and no compare
 // ran.
 func (s *AuthService) requirePasswordConfirmation(user *db.User, password string) error {
 	if password == "" {

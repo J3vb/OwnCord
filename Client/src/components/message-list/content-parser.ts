@@ -16,6 +16,7 @@ import { getChannelMutesHost } from "@lib/channel-mutes";
 import { normalizeHostForCertCompare } from "@lib/hostNormalize";
 import { requestInviteJoin } from "@lib/invite-navigation";
 import { jumpToMessage } from "@lib/message-navigation";
+import { showToast } from "@lib/toast";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { memberDisplayName, membersStore } from "@stores/members.store";
@@ -36,6 +37,7 @@ import {
   type TimestampStyle,
 } from "../../features/messaging/discordTimestamp";
 import { messagingText } from "../../i18n/messaging";
+import { desktop } from "../../platform/desktop";
 import {
   parseInline,
   parseBlocks,
@@ -506,6 +508,25 @@ function sameHost(a: string, b: string): boolean {
 }
 
 /**
+ * The web client is bound to the server that served it, so it cannot switch to
+ * another one: an invite for another server opens that server's own page in a
+ * new tab, where its browser client (if it hosts one) takes the code.
+ */
+function openInviteOnItsServer(code: string, host: string): void {
+  let url: URL;
+  try {
+    url = new URL(`https://${host}/`);
+  } catch {
+    showToast(messagingText("invite.openTabFailed"), "error");
+    return;
+  }
+  url.searchParams.set("invite", code);
+  desktop.urlOpener
+    .open(url.href)
+    .catch(() => showToast(messagingText("invite.openTabFailed"), "error"));
+}
+
+/**
  * Build the chip for a pasted `owncord://invite/…` link, or null when it does
  * not parse. Joining signs out of the current server, so a chip for another
  * server confirms first, and one for the server already open just says so.
@@ -536,6 +557,10 @@ function buildInviteLinkNode(url: string): HTMLSpanElement | null {
   chip.setAttribute("role", "link");
   chip.setAttribute("tabindex", "0");
   const go = (): void => {
+    if (__OWNCORD_WEB__ && invite.host !== undefined) {
+      openInviteOnItsServer(invite.code, invite.host);
+      return;
+    }
     const name = authStore.getState().serverName ?? current ?? "";
     const body =
       invite.host === undefined
@@ -694,7 +719,7 @@ function wrapResolvedMentions(text: string, info?: MentionInfo): DocumentFragmen
  * Re-resolve the @mention spans already rendered under `root` against the live
  * member store, and wrap plain @tokens inside it that now resolve. Called when
  * a membership/role/profile change bumps roleRevision, so the pills track a
- * rename without re-parsing or rebuilding the row (P4-02) — in both directions:
+ * rename without re-parsing or rebuilding the row — in both directions:
  * a token that stopped resolving is unwrapped to plain text, one that started
  * resolving becomes a pill. Scoped to the two regions mentions are rendered
  * into (.msg-text and .sm-text), so an author's display name or a reply

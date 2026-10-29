@@ -1,4 +1,4 @@
-// "Joined the server" welcome row (WP 8.6): the new member's avatar and one
+// "Joined the server" welcome row: the new member's avatar and one
 // greeting line, plus a Wave button. Drawn from `kind` and the author alone,
 // never from `content` (the server's English fallback for older clients). The
 // greeting is picked by message id, so every client shows the same line.

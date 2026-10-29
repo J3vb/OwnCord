@@ -150,7 +150,7 @@ export class RemoteTracks {
     };
   }
 
-  /** Ask the SFU for only what a user's stream shows (P3-07): the grid tile
+  /** Ask the SFU for only what a user's stream shows: the grid tile
    *  drives the layer because adaptiveStream is off (roomLifecycle.ts). The
    *  layer is set before enabling, so a re-shown tile resumes at its own
    *  size. */

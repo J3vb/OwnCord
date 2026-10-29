@@ -1,5 +1,5 @@
 /**
- * Pure builders for the text channel row and category group models (5.4d): the
+ * Pure builders for the text channel row and category group models: the
  * inputs in, the drawn values out. No builder reads a store, a preference or
  * the mute list; the sidebar hands them a `ChannelListInputs` snapshot and the
  * injected `isMuted`, and `tests/unit/channel-row-model.test.ts` runs them

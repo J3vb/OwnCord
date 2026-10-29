@@ -10,8 +10,8 @@ import (
 
 // requireOwnerGrantOnly refuses a change to the bits in changed (already
 // masked to permissions.OwnerGrantOnly, added or removed) unless the actor is
-// the owner or an Administrator. The owner-tier subset (WP 8.4d,
-// permissions.OwnerOnlyGrant) is stricter: only the owner may change it, so an
+// the owner or an Administrator. The owner-tier subset
+// (permissions.OwnerOnlyGrant) is stricter: only the owner may change it, so an
 // Administrator cannot hand an owner-tier bit to a role and take the power the
 // owner tier withholds from ADMINISTRATOR. It is a no-op for a zero mask.
 func requireOwnerGrantOnly(actor *db.Role, changed int64) error {
@@ -69,12 +69,12 @@ func (s *ModerationService) requireHeldRolesReplaceable(ctx context.Context, act
 // role-change in one call) can authorize the role change *before* committing
 // the other mutation: checking only at ChangeUserRole time means a refused
 // role change is discovered only after the ban already landed, leaving a
-// "failed" request half-applied (OC-0215). It returns the validated actor
+// "failed" request half-applied. It returns the validated actor
 // role, target user, and target role so callers that go on to commit (like
 // ChangeUserRole) don't need to re-fetch any of them.
 //
 // Replacing the member's roles also clears the ones they hold now, so an
-// owner-grant-only bit on any of them (WP 8.4a) is checked too;
+// owner-grant-only bit on any of them is checked too;
 // AddUserRole and RemoveUserRole leave the other roles in place and use
 // authorizeRoleAssignment alone.
 func (s *ModerationService) AuthorizeRoleChange(ctx context.Context, actorID, targetID, newRoleID int64) (actorRole *db.Role, target *db.User, newRole *db.Role, err error) {

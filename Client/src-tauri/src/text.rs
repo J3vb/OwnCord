@@ -1,4 +1,4 @@
-//! User-visible native text (B9-20, owner decision Q7).
+//! User-visible native text.
 //!
 //! Rust owns a few surfaces the renderer never draws: the tray menu and
 //! tooltip, the startup failure dialog, and the certificate/TOFU messages.
@@ -28,7 +28,7 @@ pub const TRAY_TOOLTIP: &str = "OwnCord";
 pub const TRAY_TOOLTIP_UNREAD_ONE: &str = "OwnCord — 1 unread mention";
 pub const TRAY_TOOLTIP_UNREAD: &str = "OwnCord — {count} unread mentions";
 
-/// The tray tooltip with the unread badge count (DP-27); plain at 0.
+/// The tray tooltip with the unread badge count; plain at 0.
 pub fn tray_tooltip(count: u32) -> String {
     match count {
         0 => TRAY_TOOLTIP.to_string(),
@@ -116,7 +116,7 @@ pub fn cert_mismatch(host: &str, stored: &str, current: &str) -> String {
     )
 }
 
-// --- Linux .deb update (LP-14b) -----------------------------------------
+// --- Linux .deb update -----------------------------------------
 //
 // The two `update …` strings are stable codes: the renderer matches their
 // prefix (`platform/desktop/updater.ts`) to choose its own catalog text, so do

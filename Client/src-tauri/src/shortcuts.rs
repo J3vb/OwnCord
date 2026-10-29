@@ -338,7 +338,7 @@ pub fn voice_shortcuts_start<R: Runtime>(app: AppHandle<R>) {
     if !global_keys_observable(false, crate::ptt::polling_available()) {
         return;
     }
-    let mut guard = SHORTCUT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = crate::sync::lock(&SHORTCUT_THREAD);
     if guard.is_some() {
         return; // thread already alive — Mutex is the authoritative check
     }
@@ -374,7 +374,7 @@ pub fn voice_shortcuts_start<R: Runtime>(app: AppHandle<R>) {
         // Self-cleanup, but only if this generation still owns the slot — a
         // normal stop already took the handle out, so this exists purely so a
         // panicked thread does not leave the slot stuck at Some.
-        let mut g = SHORTCUT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = crate::sync::lock(&SHORTCUT_THREAD);
         if matches!(g.as_ref(), Some((flag, _)) if Arc::ptr_eq(flag, &thread_shutdown)) {
             *g = None;
         }
@@ -400,7 +400,7 @@ pub fn voice_shortcuts_stop_internal() {
     // the thread locks SHORTCUT_THREAD on exit, so joining while holding it
     // would deadlock.
     let taken = {
-        let mut guard = SHORTCUT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = crate::sync::lock(&SHORTCUT_THREAD);
         guard.take()
     };
     if let Some((shutdown, handle)) = taken {
@@ -555,7 +555,7 @@ mod tests {
     fn stop_is_a_clean_noop_when_not_running() {
         voice_shortcuts_stop_internal();
         voice_shortcuts_stop_internal(); // idempotent
-        let g = SHORTCUT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        let g = crate::sync::lock(&SHORTCUT_THREAD);
         assert!(g.is_none(), "slot must stay empty when nothing was running");
     }
 }

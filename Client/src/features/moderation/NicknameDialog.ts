@@ -1,5 +1,5 @@
 /**
- * The Change Nickname dialog (WP 6.4c): one input, prefilled with the member's
+ * The Change Nickname dialog: one input, prefilled with the member's
  * current nickname, that sets another member's server nickname; Reset clears
  * it.
  *

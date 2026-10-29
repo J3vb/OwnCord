@@ -1,5 +1,5 @@
 /**
- * The voice-message recorder (WP 8.9). One recorder is one recording: start it,
+ * The voice-message recorder. One recorder is one recording: start it,
  * then stop it for the clip or cancel it. It captures the microphone with
  * MediaRecorder in the first container the webview supports, or, where
  * MediaRecorder is missing or supports none, as PCM (an AudioWorklet, or a

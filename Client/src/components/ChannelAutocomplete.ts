@@ -23,7 +23,7 @@ export interface ChannelSuggestion {
   readonly name: string;
   /** The channel's category, or "Voice channel" for an uncategorised voice one. */
   readonly detail: string;
-  /** Set for a forum channel, whose row draws the forum glyph (WP 6.9d). */
+  /** Set for a forum channel, whose row draws the forum glyph. */
   readonly forum?: true;
 }
 

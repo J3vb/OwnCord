@@ -274,7 +274,7 @@ test.describe("Search overlay", () => {
     await expect(second).toHaveClass(/search-result-item--active/);
   });
 
-  test("Enter jumps to the active hit, highlights it and keeps the panel open (DP-20)", async ({
+  test("Enter jumps to the active hit, highlights it and keeps the panel open", async ({
     page,
   }) => {
     await openOverlay(page);
@@ -293,9 +293,7 @@ test.describe("Search overlay", () => {
     await expect(page.locator(OVERLAY)).toHaveCount(0);
   });
 
-  test("clicking a result jumps to that message without closing the panel (DP-20)", async ({
-    page,
-  }) => {
+  test("clicking a result jumps to that message without closing the panel", async ({ page }) => {
     await openOverlay(page);
     await page.locator(INPUT).fill("hello");
 
@@ -345,7 +343,7 @@ test.describe("Search overlay", () => {
   });
 });
 
-test.describe("Search overlay — paging (DP-20)", () => {
+test.describe("Search overlay — paging", () => {
   // A page that carries the newest-first cursor for an older page.
   const PAGED_SEARCH_RESULTS = {
     results: SEARCH_RESULTS.results,

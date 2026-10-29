@@ -32,11 +32,11 @@
 //   - and the number of fetches in flight is capped, per Fetcher and across
 //     the process.
 //
-// The policy is documented as a contract in docs/trust-model.md, "Desktop
-// preview destination policy (C-09)", clauses 2 through 6. Clauses 1, 7 and 8
+// The policy is documented as a contract in docs/trust-model.md, the desktop
+// preview destination policy, clauses 2 through 6. Clauses 1, 7 and 8
 // are the desktop broker's and are B7's.
 //
-// # What is deliberately not here (B5 decision 2)
+// # What is deliberately not here
 //
 // Aggregate cross-caller byte budgets and byte-weighted cache eviction are
 // B7's, not this package's. The server's outbound surface is one hard-coded

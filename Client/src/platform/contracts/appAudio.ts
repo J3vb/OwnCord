@@ -1,5 +1,5 @@
 /**
- * Windows per-app share audio (WP 6.7): the host captures the sound of the
+ * Windows per-app share audio: the host captures the sound of the
  * app that owns a shared window and serves it to the page on a loopback
  * WebSocket (`src-tauri/src/windows_app_audio.rs`). One capture at a time; a
  * new `start` replaces the running one. Every operation resolves with a typed

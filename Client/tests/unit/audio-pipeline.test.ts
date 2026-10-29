@@ -574,7 +574,7 @@ describe("AudioPipeline", () => {
       expect(ctx.latest("source").track.id).toBe("mic-2");
     });
 
-    it("restarts on the system default while the saved mic is unplugged (DP-31)", async () => {
+    it("restarts on the system default while the saved mic is unplugged", async () => {
       prefs.set("audioInputDevice", "usb-mic");
       const pipeline = new AudioPipeline();
       const track = micTrack();

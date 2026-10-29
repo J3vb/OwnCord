@@ -15,7 +15,7 @@
 // WebKitGTK GPU stacks a captured canvas reaches a <video> as its first frames
 // only, and remote video froze on them.
 //
-// Lifecycle (B7-11): the owner (`NativeRoom`) disposes it when the track is
+// Lifecycle: the owner (`NativeRoom`) disposes it when the track is
 // unsubscribed or the room disconnects; dispose closes the socket, stops the
 // track, takes the canvas down and releases the GL context. The frame server
 // also closes every socket when the native session ends.

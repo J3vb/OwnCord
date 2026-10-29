@@ -16,8 +16,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// runConfigCLI implements `chatserver config reset-overrides [--all] [key ...]`
-// (WP 4.7a): drop settings saved from the admin panel while the server is
+// runConfigCLI implements `chatserver config reset-overrides [--all] [key ...]`:
+// drop settings saved from the admin panel while the server is
 // stopped, so an owner whose panel change made the panel unreachable can start
 // the server again without a shell or a hand-edit of the overrides file.
 //

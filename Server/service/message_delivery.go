@@ -52,15 +52,15 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 		// omitempty keeps a false ping hashing exactly as the struct did before
 		// the field existed, so receipts written earlier still match.
 		ReplyPing bool `json:",omitempty"`
-		// Same for the forwarded message's id (WP 6.9a): zero for every send
+		// Same for the forwarded message's id: zero for every send
 		// that predates forwarding.
 		ForwardOf int64 `json:",omitempty"`
-		// And the canonical poll input (WP 6.9b): empty for every send that
+		// And the canonical poll input: empty for every send that
 		// is not a poll_create, so older receipts hash the same.
 		Poll string `json:",omitempty"`
-		// And the forum post's title and tags (WP 6.9d).
+		// And the forum post's title and tags.
 		ForumPost string `json:",omitempty"`
-		// And the sticker's id (WP 8.8a): zero for every other send.
+		// And the sticker's id: zero for every other send.
 		StickerID int64 `json:",omitempty"`
 	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing, p.ForwardOf, p.Poll, p.ForumPost, p.StickerID})
 	if err != nil {
@@ -77,7 +77,7 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 // answerSendRetry runs ahead of the channel, permission and content gates. A
 // retry of an accepted send is answered from its receipt: the message already
 // exists, so a permission change since then must not turn its acknowledgment
-// into a refusal (ARCH-039). Otherwise it returns the parsed key, or nil for a
+// into a refusal. Otherwise it returns the parsed key, or nil for a
 // send without one.
 func (s *MessageService) answerSendRetry(ctx context.Context, p SendMessageParams) (*db.MessageDeliveryParams, *SendMessageResult, error) {
 	if err := s.sendMessageRateGate(p); err != nil {

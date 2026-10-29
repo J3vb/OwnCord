@@ -1,4 +1,4 @@
-// Touch input for phones and touchscreens (WP 6.13f2). Loaded lazily by
+// Touch input for phones and touchscreens. Loaded lazily by
 // app/globalGuards.ts, only when a coarse pointer exists. Everything is
 // closure state, so nothing is module-level and nothing needs a session reset.
 //

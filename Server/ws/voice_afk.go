@@ -1,6 +1,6 @@
 package ws
 
-// voice_afk.go — WP 6.10b: the AFK sweep and the AFK move.
+// voice_afk.go — the AFK sweep and the AFK move.
 //
 // A member who has been idle (presence status idle, livePresence.idleSince)
 // in a server voice channel for the AFK timeout is moved to the AFK channel.

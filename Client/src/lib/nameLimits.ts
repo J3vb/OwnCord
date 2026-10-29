@@ -1,4 +1,4 @@
-// Name and status limits (WP 3C-9): the client half of the server's
+// Name and status limits: the client half of the server's
 // character rules, kept to the cheap checks. The server stays the authority
 // (Server/auth/visible_text.go, Server/service/visible_text.go); this module
 // only stops a request the server would refuse on length or on a new

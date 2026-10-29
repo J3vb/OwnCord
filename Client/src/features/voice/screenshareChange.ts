@@ -1,5 +1,5 @@
 /**
- * Change source and Quality for a live screen share (WP 1C-1), loaded on first
+ * Change source and Quality for a live screen share, loaded on first
  * use from the stream card.
  *
  * Change source swaps the capture under the published track
@@ -133,7 +133,7 @@ export async function changeScreenshareSource(
     }
     let freshAudio: LocalTrack | undefined = fresh.find((t) => t.kind === Track.Kind.Audio);
     const oldAudio = live.tracks.find((t) => t.kind === Track.Kind.Audio);
-    // Windows (WP 6.7b): a window gets its app's sound as the "fresh audio".
+    // Windows: a window gets its app's sound as the "fresh audio".
     // The host replaces the capture of the window being left; leaving a
     // window for anything else stops it below.
     if (

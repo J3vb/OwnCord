@@ -13,8 +13,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// ModerationAction is one row of the moderator-action ledger (migration 049,
-// B5-9): every warning, timeout, kick, ban and removal. ActorToken is filled
+// ModerationAction is one row of the moderator-action ledger (migration 049):
+// every warning, timeout, kick, ban and removal. ActorToken is filled
 // by erasure (the audit_log two-token pattern) when the acting moderator has
 // since erased their own account; LiftedBy is a bare id with no token column
 // of its own, mirroring reports.assignee_id.
@@ -74,7 +74,7 @@ func moderationActionFromRow(r moderationActionRow) ModerationAction {
 // strictly outrank the target by role POSITION at write time. Every moderator
 // action routes through this one function, so a target promoted between the
 // service layer's initial (cached) check and this write is refused here
-// too, not sanctioned (B5-9 concurrent-role-change property test) — the
+// too, not sanctioned (the concurrent-role-change property test) — the
 // writer pool is a single connection (SetMaxOpenConns(1)), so no other write
 // transaction can be in flight while tx holds it, and the position read here
 // is therefore atomic with the insert against any concurrent role change.
@@ -114,7 +114,7 @@ func strictlyOutranks(ctx context.Context, tx *sql.Tx, actorID, targetID int64) 
 }
 
 // recordModerationAction is warning/timeout/kick/ban's one ledger write
-// (ModerationService's recordAction, plan item 2): a warning or timeout's
+// (ModerationService's recordAction): a warning or timeout's
 // entire effect, or the ledger row riding alongside kick/ban's existing
 // effect, in the same tx as that effect. The rank guard is re-validated
 // here, live, against the CURRENT roles table — never trusted from a
@@ -163,7 +163,7 @@ func recordModerationAction(ctx context.Context, tx *sql.Tx, kind string, target
 // the window between BeginTx (already open by the time this function runs;
 // BanUserWithAction's own effect write, BanUser, has already landed too)
 // and the rank snapshot itself. Test-only (nil in production): the
-// contention test's second interleaving (Codex review follow-up) uses this
+// contention test's second interleaving uses this
 // to force a concurrent role change to contend for the writer connection
 // one step earlier than moderationActionPreInsertHook does, so the "cannot
 // preempt an in-flight decision" property is proved at both ends of the
@@ -174,7 +174,7 @@ var moderationActionPreRankCheckHook func()
 // read both positions and before the insert — while tx, and so the writer's
 // one connection, is still held open. Test-only (nil in production),
 // mirroring ws's voiceModDeafenPreMuteRaceHook: it is the barrier a
-// db-package contention test (P2-12, Codex review) uses to force a REAL
+// db-package contention test uses to force a REAL
 // second writer — a role change on the same target, from another goroutine —
 // to actually contend for that one connection while this transaction is
 // open, rather than merely simulating the race by calling this function
@@ -183,8 +183,8 @@ var moderationActionPreInsertHook func()
 
 // moderationActionPreBeginTxHook, when non-nil, runs at the very top of
 // BanUserWithAction, before BeginTx is even called — no transaction open,
-// no connection held yet. Test-only (nil in production): P2-12 PARTIAL's
-// (Codex review round 3) gap in the original contention test used a barrier
+// no connection held yet. Test-only (nil in production): the original
+// contention test used a barrier
 // placed AFTER BeginTx, which stays green even if a future refactor moved
 // the rank-position read to run on a bare (non-tx) connection before
 // BeginTx — a regression that reopens exactly the window a live connection
@@ -196,17 +196,17 @@ var moderationActionPreBeginTxHook func()
 
 // recordLedgerRow is "removal"'s ledger write: no rank guard (see
 // recordModerationAction's doc comment for why one would be wrong here) —
-// a DELIBERATE, reviewed exception (Codex review DECISION, not a gap):
+// a DELIBERATE, reviewed exception, not a gap:
 // removal is governed by channel MANAGE_MESSAGES alone, as it always was
 // before this ledger existed, unlike warning/timeout/kick/ban, which all
-// additionally require the actor to outrank the target. BPR-072 assigns
-// removal to the MANAGE_MESSAGES bit on exactly that basis. This applies
+// additionally require the actor to outrank the target. Removal is assigned
+// to the MANAGE_MESSAGES bit on exactly that basis. This applies
 // through every entry point removal has, including the report-linked one
 // (ModerationService.ActOnReport, kind="removal") — there is no second,
 // stricter removal path anywhere that a rank check would apply to instead.
 // It carries, still, the absence-proof actor guard every kind carries, plus the
-// EXISTS(users) check B5-8's review round asks every moderator write to
-// carry (erasure.go, erasureUnlinkReports's sibling comment): a moderator
+// EXISTS(users) check every moderator write carries
+// (erasure.go, erasureUnlinkReports's sibling comment): a moderator
 // concurrently erased between the caller's authorization and this write
 // must not land as the actor of a ledger row. recordModerationAction gets
 // the same property incidentally, through the rank JOIN failing when the
@@ -261,16 +261,16 @@ func (d *DB) WarnUser(ctx context.Context, targetID, actorID int64, reportID *in
 // TimeoutUser writes a timeout row with the given expiry — its entire
 // effect is the row, read back into Subject.TimedOut for the predicates —
 // and, in the same transaction, supersedes (lifts) any other still-active
-// timeout row for targetID (P2-9, Codex review): without this a repeated
+// timeout row for targetID: without this a repeated
 // timeout left overlapping active rows and LiftTimeout only ever reached the
 // newest one, orphaning the rest.
 //
 // Ownership of an outstanding SFU mute lives on the voice session, not this
-// ledger (voice_states.server_muted_by, round 4, Codex review — see
+// ledger (voice_states.server_muted_by; see
 // migration 049's comment for the full rationale). Superseding a row that
 // owns a mute must transfer it to the NEW row, or that mute is stranded
 // once LiftTimeout stops acting on the superseded one — but the transfer
-// itself does NOT happen here (round 5, Codex review P2): it runs inside
+// itself does NOT happen here: it runs inside
 // MuteForTimeoutSession's own transaction, under the ws-layer per-target
 // lock the voice half already holds, so it can never land between that
 // lock's DB write and its paired SFU call (the exact gap a transfer here,
@@ -305,7 +305,7 @@ func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID 
 // transferVoiceMuteOwnership repoints voice_states.server_muted_by from any
 // of fromIDs onto toID, inside tx. Hand-rolled (a dynamic IN list, mirroring
 // the bulk-delete pattern in message_queries.go) rather than sqlc: the
-// number of superseded rows is unbounded in principle (P2-9's defensive
+// number of superseded rows is unbounded in principle (a defensive
 // lift-all applies here too), so no fixed-arity generated query fits.
 func transferVoiceMuteOwnership(ctx context.Context, tx *sql.Tx, fromIDs []int64, toID int64) error {
 	placeholders := make([]string, len(fromIDs))
@@ -323,14 +323,13 @@ func transferVoiceMuteOwnership(ctx context.Context, tx *sql.Tx, fromIDs []int64
 }
 
 // LiftTimeout ends targetID's active timeout(s) early. It re-checks the
-// actor strictly outranks the target LIVE, inside this transaction (P2-8,
-// Codex review — this previously had no rank re-check at all, so a demoted
+// actor strictly outranks the target LIVE, inside this transaction (this previously had no rank re-check at all, so a demoted
 // moderator could still cancel a superior's sanction), then lifts EVERY
-// still-active timeout row for targetID (P2-9: TimeoutUser's supersede keeps
+// still-active timeout row for targetID (TimeoutUser's supersede keeps
 // this to normally one row, but a defensive lift-all costs nothing). Returns
 // the ids just lifted, so the caller can clear whichever voice_states row (if
-// any) is currently owned by one of them (db.ClearServerMuteOwnedBy,
-// round 4) — session-bound for free, since ownership no longer lives on
+// any) is currently owned by one of them (db.ClearServerMuteOwnedBy) —
+// session-bound for free, since ownership no longer lives on
 // this ledger.
 func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
@@ -363,7 +362,7 @@ func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedID
 // LiftTimeoutActionsByID marks each of ids lifted (lifted_at IS NULL AND
 // kind = 'timeout', i.e. still active — an already-lifted or non-timeout id
 // is silently skipped, not an error), inside tx: callable inside a CALLER's
-// own transaction, not just LiftTimeout's (round 4, B5-10 addendum) — an
+// own transaction, not just LiftTimeout's — an
 // appeal overturn lifts a timeout by its specific action id inside the
 // appeal-decision transaction, and LiftTimeout above resolves ITS ids via
 // ListActiveTimeouts first, then calls this same primitive with them. This
@@ -466,8 +465,8 @@ func (d *DB) ListModerationActionsForReport(ctx context.Context, reportID int64)
 	return out, nil
 }
 
-// BanUserWithAction is BanUser plus a ledger row, in one transaction
-// (B5-9): a failure recording the row rolls the ban back too, so a ban
+// BanUserWithAction is BanUser plus a ledger row, in one transaction:
+// a failure recording the row rolls the ban back too, so a ban
 // never lands without the ledger entry an appeal will need to reference.
 func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error) {
 	if moderationActionPreBeginTxHook != nil {
@@ -503,9 +502,8 @@ func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason strin
 // ForceLogoutWithAction is ForceLogoutUser plus a ledger row, in one
 // transaction: a failure recording the row rolls the session revocation
 // back too. reason is the ledger row's text; empty falls back to the fixed
-// phrase "all sessions terminated" — every direct caller today (P2-10,
-// Codex review: only the report-linked path, ActOnReport, has a caller-
-// submitted reason to store).
+// phrase "all sessions terminated" — every direct caller today (only the
+// report-linked path, ActOnReport, has a caller-submitted reason to store).
 func (d *DB) ForceLogoutWithAction(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -530,8 +528,8 @@ func (d *DB) ForceLogoutWithAction(ctx context.Context, targetID, actorID int64,
 }
 
 // tableExists reports whether name is a table in the database's own schema
-// (sqlite_master), so a retention sweep can adapt to a table B5-10 has not
-// landed yet without a compile-time dependency on it.
+// (sqlite_master), so a retention sweep can adapt to a table (appeals) that may not
+// exist yet without a compile-time dependency on it.
 func tableExists(ctx context.Context, q interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }, name string) bool {
@@ -545,9 +543,8 @@ func tableExists(ctx context.Context, q interface {
 // acknowledged_at, timeout rows the same number of days after expires_at or
 // lifted_at when lifted early. Ban, kick and removal rows are never touched.
 //
-// B5-10 wires the join this comment used to say was missing: an id an
-// appeals row references (appeals.action_id) is excluded from the sweep —
-// decision 8's UNIQUE(action_id) memory that forbids re-appealing an action
+// An id an appeals row references (appeals.action_id) is excluded from the
+// sweep — the UNIQUE(action_id) memory that forbids re-appealing an action
 // must not be swept out from under a decided appeal. In ordinary operation
 // migration 050 has always run by the time this executes, so the
 // tableExists check below is a defensive fallback (a database caught

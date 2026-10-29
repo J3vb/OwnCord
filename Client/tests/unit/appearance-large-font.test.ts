@@ -32,7 +32,7 @@ function fontSize(): string {
   return document.documentElement.style.getPropertyValue("--font-size");
 }
 
-describe("Large Font raises the effective font size (OC-0319)", () => {
+describe("Large Font raises the effective font size", () => {
   beforeEach(() => {
     document.documentElement.className = "";
     document.documentElement.removeAttribute("style");

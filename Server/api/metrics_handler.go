@@ -39,7 +39,7 @@ type ServerMetrics struct {
 	// sequenced events were lost before delivery and is worth alerting on.
 	BroadcastDrops uint64 `json:"broadcast_drops"`
 	// TopicSheds counts channel frames dropped by the topic limiter before a
-	// seq was assigned (SRV-03) — replay cannot recover them, so like
+	// seq was assigned — replay cannot recover them, so like
 	// broadcast_drops any growth is worth alerting on.
 	TopicSheds     uint64 `json:"topic_sheds_total"`
 	LiveKitHealthy *bool  `json:"livekit_healthy,omitempty"`
@@ -85,7 +85,7 @@ type ServerMetrics struct {
 	DiskFreeMB *float64 `json:"disk_free_mb,omitempty"`
 	// DiskMinFreeMB is the reserved-headroom floor (server.min_free_disk_mb)
 	// the banner, /health and the upload path share; DiskLow is free < floor,
-	// present when free is known and a floor is set (B5-2 pressure signal).
+	// present when free is known and a floor is set (a disk pressure signal).
 	DiskMinFreeMB float64 `json:"disk_min_free_mb"`
 	DiskLow       *bool   `json:"disk_low,omitempty"`
 	// UploadStorageUsedMB is every attachment row's size summed — a storage
@@ -114,7 +114,7 @@ type ServerMetrics struct {
 	PermCacheHits   uint64 `json:"perm_cache_hits"`
 	PermCacheMisses uint64 `json:"perm_cache_misses"`
 
-	// Web Push dispatch (B5-11, behind HP-5) — aggregate counters only,
+	// Web Push dispatch — aggregate counters only,
 	// never per user. Zero on a server with dispatch off, which is the
 	// compiled default.
 	PushDispatched uint64 `json:"push_dispatched"`
@@ -125,7 +125,7 @@ type ServerMetrics struct {
 
 	// Windows holds the same latency, worst-hold and counter figures over the
 	// last minute ("1m") and fifteen minutes ("15m"), where every figure above
-	// is cumulative since boot (WP 4.3a). Omitted until the sampler has two
+	// is cumulative since boot. Omitted until the sampler has two
 	// samples, and when no windowed source is wired.
 	Windows map[string]*WindowMetrics `json:"windows,omitempty"`
 }

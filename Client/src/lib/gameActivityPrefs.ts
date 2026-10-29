@@ -1,5 +1,5 @@
 /**
- * The device-local choices about games (WP 8.3d): programs added by hand, games
+ * The device-local choices about games: programs added by hand, games
  * hidden from others, names changed for display, and the games this device has
  * detected. Stored like the sharing switch (`owncord:settings:*` in
  * `localStorage`); the server never learns any of it, only the one shown name.

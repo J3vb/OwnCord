@@ -15,7 +15,7 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { findUnnamedControls } from "./support/b9-accessibility";
+import { findUnnamedControls } from "./support/accessibility";
 import {
   buildTauriMockScript,
   mockTauriFullSessionWithVoice,

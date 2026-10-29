@@ -1,5 +1,5 @@
 /**
- * The followed-thread rows the sidebar and the unread badge draw (WP 6.9c).
+ * The followed-thread rows the sidebar and the unread badge draw.
  *
  * `threads.store` is a lazy chunk (most sessions never meet a thread), but the
  * sidebar and the badge are startup code. This small store is the seam: the

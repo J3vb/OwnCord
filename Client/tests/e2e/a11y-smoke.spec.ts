@@ -100,7 +100,7 @@ test.describe("A11y smoke — dialogs, focus, live regions", () => {
     await expect(modal).toHaveCount(0);
   });
 
-  test("the delete-confirm dialog is labelled, focuses Cancel, and Escape restores focus (P4-12)", async ({
+  test("the delete-confirm dialog is labelled, focuses Cancel, and Escape restores focus", async ({
     page,
   }) => {
     const row = page.locator("[data-testid='message-101']");

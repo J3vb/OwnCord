@@ -92,8 +92,8 @@ type CreateDMResult struct {
 	// and safe to announce (dm_channel_open, ready.dm_channels, GET /dms).
 	// Only meaningful when Created is true — GetOrCreateDMChannelGated's
 	// existing-channel branch never touches the other party's dm_open_state,
-	// so an existing channel's visibility is whatever it already was. B5-6:
-	// a brand-new one-to-one channel opens only the recipient's side too
+	// so an existing channel's visibility is whatever it already was.
+	// A brand-new one-to-one channel opens only the recipient's side too
 	// when the recipient already trusts the caller, decided atomically
 	// inside GetOrCreateDMChannelGated's own transaction — otherwise only
 	// the caller's side opens, and the recipient's opens at acceptance
@@ -177,7 +177,7 @@ func (s *DMService) CreateDM(ctx context.Context, userID, recipientID int64) (*C
 		}
 	}
 
-	// B5-6 (Codex review round 2, P1): the recipient's visibility is decided
+	// The recipient's visibility is decided
 	// INSIDE GetOrCreateDMChannelGated's own transaction (does the recipient
 	// already trust the caller?) and written once, atomically, with the
 	// channel and participants — no separate post-hoc CloseDM call for a
@@ -342,7 +342,7 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 		return nil, fmt.Errorf("%w: a group DM holds at most %d users", ErrBadRequest, db.MaxGroupDMParticipants)
 	}
 
-	// OC-0195 sibling: bound the raw bytes before cleanText (sanitizeToFixpoint)
+	// Bound the raw bytes before cleanText (sanitizeToFixpoint)
 	// runs — see cleanTextBounded's doc comment (user.go).
 	cleanName, err := cleanVisibleBounded(name, MaxGroupDMNameLen, "name")
 	if err != nil {
@@ -370,7 +370,7 @@ func (s *DMService) CreateGroupDM(ctx context.Context, userID int64, recipientID
 
 	// The channel, all dm_participants rows and all dm_open_state rows are
 	// already committed at this point, so this read must not turn a fully-
-	// persisted group DM into a reported failure (OC-0004): it runs
+	// persisted group DM into a reported failure: it runs
 	// uncancellable (context.WithoutCancel) so a client disconnect landing
 	// right after the commit can't fail it via ctx.Err(), and any other
 	// failure is logged rather than propagated so the caller still gets a
@@ -433,7 +433,7 @@ func (s *DMService) RenameGroupDM(ctx context.Context, userID, channelID int64, 
 		return nil, fmt.Errorf("%w: only group DMs can be named", ErrBadRequest)
 	}
 
-	// OC-0195 sibling: bound the raw bytes before cleanText (sanitizeToFixpoint)
+	// Bound the raw bytes before cleanText (sanitizeToFixpoint)
 	// runs — see cleanTextBounded's doc comment (user.go).
 	cleanName, err := cleanVisibleBounded(name, MaxGroupDMNameLen, "name")
 	if err != nil {
@@ -549,12 +549,12 @@ func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ri
 		return nil, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
 
-	// B5-6 (Codex P1-2): call_incoming/call_declined is a DM interaction
+	// Call_incoming/call_declined is a DM interaction
 	// like chat, typing and reactions — an untrusted recipient of a pending
 	// request must not learn the sender is present in voice either. Group
-	// DMs are untouched (decision 4), matching the block check above.
+	// DMs are untouched, matching the block check above.
 	//
-	// Codex review round 2, P2: a failed IsGroupDM lookup used to skip the
+	// A failed IsGroupDM lookup used to skip the
 	// trust filter entirely and ring every participant — fail closed
 	// instead: no ring targets at all rather than an unfiltered ring.
 	isGroup, gErr := s.st.IsGroupDM(ctx, channelID)
@@ -570,7 +570,7 @@ func (s *DMService) callTargets(ctx context.Context, userID, channelID int64, ri
 		if !isGroup {
 			trusted, tErr := s.st.IsTrustedSender(ctx, pid, userID)
 			if tErr == nil && !trusted && ring {
-				// D-03: tell the ringer at once rather than letting them
+				// Tell the ringer at once rather than letting them
 				// wait out a ring nobody will hear. A decline stays silent.
 				return nil, ErrCallNeedsAcceptance
 			}

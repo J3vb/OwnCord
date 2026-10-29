@@ -22,6 +22,10 @@ import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
 import { applyStoredAppearance } from "@lib/appearance";
+import {
+  applyStoredCustomTheme,
+  installCustomThemeEscape,
+} from "./features/custom-themes/customTheme";
 import { startZoom } from "./features/zoom/zoomKeys";
 import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/inputMode";
 import { configureSession, installLogoutTeardown, voiceSessionLeave } from "./app/session";
@@ -59,13 +63,17 @@ installGlobalErrorHandlers();
 // Start log persistence immediately after: an early startup failure (a missing
 // #app element, a failing lazy chunk) must still reach the on-disk log, not
 // just the in-memory ring. The listener is installed before the first render
-// and back-fills the bootstrap window (CLI-03).
+// and back-fills the bootstrap window.
 void initLogPersistence();
 
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
+// After the built-in theme and accent: a custom theme paints on top of them.
+applyStoredCustomTheme();
 // Native webview zoom: the stored level now, and the zoom keys everywhere.
 startZoom(() => import("./features/zoom").then((m) => m.appZoom), new Disposable().signal);
+// Ctrl+Shift+Backspace turns a custom CSS theme off, even one that hides the settings.
+installCustomThemeEscape(new Disposable().signal);
 
 // A profile from before automatic sensitivity keeps a tuned slider.
 migrateAutoInputSensitivity();
@@ -100,7 +108,7 @@ function handleUnauthorized(): void {
 const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
 // Diagnostics back the lazily loaded Settings > Diagnostics & logs panel, so their engine and
-// text stay out of the startup chunk (B9-20). The import resolves long before
+// text stay out of the startup chunk. The import resolves long before
 // the panel can be opened, and the panel's own module imports the same chunk.
 void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
   configureConnectionDiagnostics(api, ws);
@@ -142,12 +150,12 @@ installCertPrompts(ws, activePageId, navigate, rerunHealth);
 // tray's choice never reaches loadUserStatus(), so notifications.ts's DND
 // gate, autoIdle's "never touch a manual DND/invisible" guard, and
 // restoreSavedPresence() on the next reconnect all silently disagree with
-// what the tray just set (OC-0037). The send itself goes through the
+// what the tray just set. The send itself goes through the
 // session's shared PresenceSender (registered by MainPage.ts via
 // setActivePresenceSender) rather than a raw ws.send: the server enforces a
 // single 1-update/10s budget per user regardless of which surface sent the
 // frame, and a raw send here would open a second, uncoordinated budget that
-// silently drops whichever frame the server sees second (OC-0176). When no
+// silently drops whichever frame the server sees second. When no
 // session is mounted the optional call is a no-op, matching the old raw
 // ws.send's "safe no-op when disconnected" behavior, so no auth guard is
 // needed here.

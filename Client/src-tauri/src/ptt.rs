@@ -35,7 +35,7 @@ const VK_BACKTICK: i32 = 0xC0;
 
 /// Returns true if a VK code may be bound as the PTT key.
 ///
-/// Security hardening (BUG-136): only non-text keys qualify. Capture
+/// Security hardening: only non-text keys qualify. Capture
 /// (`ptt_listen_for_key`) and `ptt_set_key` both enforce this one list, so the
 /// poller never watches a key outside it.
 fn is_allowed_ptt_vk(vk: i32) -> bool {
@@ -48,7 +48,7 @@ fn is_allowed_ptt_vk(vk: i32) -> bool {
     // backtick key. The Windows/Meta key stays out. Escape is excluded: it's
     // also the Settings overlay's close key, so a capture in progress races the
     // panel tearing down and can bind PTT to Escape with no visible
-    // confirmation (OC-0334).
+    // confirmation.
     matches!(
         vk,
         0x10 | // Shift
@@ -501,7 +501,7 @@ pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
             return;
         }
     }
-    let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = crate::sync::lock(&PTT_THREAD);
     if guard.is_some() {
         return; // thread already alive — Mutex is the authoritative check
     }
@@ -539,7 +539,7 @@ pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
         // thread doesn't leave the slot stuck at `Some` and block future starts
         // — without a finishing thread ever clearing a newer thread's slot (the
         // handle-slot corruption in ATOMICRACE-001).
-        let mut g = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = crate::sync::lock(&PTT_THREAD);
         if matches!(g.as_ref(), Some((flag, _)) if Arc::ptr_eq(flag, &thread_shutdown)) {
             *g = None;
         }
@@ -574,7 +574,7 @@ pub fn ptt_stop_internal() {
     // while holding it would deadlock. Taking first (slot -> None) also lets a
     // concurrent ptt_start register a fresh generation without racing us.
     let taken = {
-        let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = crate::sync::lock(&PTT_THREAD);
         guard.take()
     };
 
@@ -771,7 +771,7 @@ mod tests {
     fn ptt_stop_is_noop_when_not_running() {
         ptt_stop_internal();
         ptt_stop_internal(); // idempotent
-        let g = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        let g = crate::sync::lock(&PTT_THREAD);
         assert!(g.is_none(), "slot must stay empty when nothing was running");
     }
 
@@ -849,7 +849,7 @@ mod tests {
             assert!(!is_allowed_ptt_vk(vk), "side modifier {vk:#04x}");
         }
         // Escape also closes the Settings overlay the capture UI lives in, so
-        // it must never be capturable as a PTT key (OC-0334).
+        // it must never be capturable as a PTT key.
         assert!(!is_allowed_ptt_vk(0x1B)); // Escape
     }
 

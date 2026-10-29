@@ -163,7 +163,7 @@ describe("SelfProfileCard from the user bar", () => {
     expect(loadCustomStatus()).toBe("");
   });
 
-  it("shows a hint and does not send an over-limit custom status (WP 3C-9)", () => {
+  it("shows a hint and does not send an over-limit custom status", () => {
     trigger().click();
     const input = q<HTMLInputElement>("[data-testid='spc-custom-input']")!;
     const hint = q<HTMLElement>("[data-testid='spc-custom-hint']")!;

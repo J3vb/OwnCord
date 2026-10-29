@@ -1,5 +1,5 @@
 /**
- * The Message Requests destination (B9-4, Q2): what the shell imports. The
+ * The Message Requests destination: what the shell imports. The
  * inbox view itself loads on first open, like the Settings Safety tab, so it
  * stays out of the MainPage chunk.
  */

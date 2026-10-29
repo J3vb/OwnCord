@@ -93,7 +93,7 @@ describe("restoreTheme", () => {
   });
 });
 
-describe("applyAccent (B9-2, owner decision Q8)", () => {
+describe("applyAccent", () => {
   const html = document.documentElement.style;
   const body = document.body.style;
 

@@ -9,7 +9,7 @@ import (
 )
 
 // RuntimeInputs is what StartRuntime consumes that earlier start stages
-// produce or the process supplies (WP 5.6g).
+// produce or the process supplies.
 type RuntimeInputs struct {
 	// Version is the server version the updater compares client releases
 	// against.

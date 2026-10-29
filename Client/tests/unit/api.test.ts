@@ -582,7 +582,7 @@ describe("API Client", () => {
     });
   });
 
-  describe("account recovery endpoints (B7-15b)", () => {
+  describe("account recovery endpoints", () => {
     it("recoverAccount POSTs /auth/recover with the secret in kit_secret", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ token: "t", requires_2fa: false }));
       await expect(api.recoverAccount("alice", "KIT-SECRET", "N3w-Pass!")).resolves.toEqual({
@@ -680,7 +680,7 @@ describe("API Client", () => {
       expect(body).toEqual({ password: "mypassword" });
     });
 
-    it("confirmTotp and disableTotp hand back the partial-success body on 200 (OC-0314)", async () => {
+    it("confirmTotp and disableTotp hand back the partial-success body on 200", async () => {
       // totp_handler.go answers 204 normally and 200 + warning when 2FA was
       // enabled/disabled but the other sessions could not be revoked.
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
@@ -1363,7 +1363,7 @@ describe("API Client", () => {
       expect(fetchCallUrl()).toBe("https://other-host:9443/api/v1/server-info");
     });
 
-    it("getServerInfo reads the B7-15a fields and tolerates unknown ones", async () => {
+    it("getServerInfo reads the registration and retention fields and tolerates unknown ones", async () => {
       mockFetch.mockResolvedValue(
         jsonResponse({
           ...SERVER_INFO,
@@ -1631,7 +1631,7 @@ describe("API Client", () => {
   });
 });
 
-describe("errorText (B9-20, Q7)", () => {
+describe("errorText", () => {
   it("shows catalog text for a mapped server code, not the server's message", () => {
     const err = new ApiClientError(429, "RATE_LIMITED", "rate limit exceeded");
     expect(errorText(err, "Failed to change password.")).toBe(
@@ -1639,7 +1639,7 @@ describe("errorText (B9-20, Q7)", () => {
     );
   });
 
-  it("shows catalog text for a REQUEST_TIMEOUT, not the server's English (WP 4.1b)", () => {
+  it("shows catalog text for a REQUEST_TIMEOUT, not the server's English", () => {
     expect(serverErrorText("REQUEST_TIMEOUT", "the server is busy, try again", "Fallback")).toBe(
       "The server is busy — retry in a moment",
     );

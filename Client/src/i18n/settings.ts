@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Settings copy (B9-3 Accessibility tab; B9-20 extends it): tab labels,
+ * Settings copy (including the Accessibility tab): tab labels,
  * Appearance, Notifications, Text & Images, Voice & Video, Keybinds,
  * Advanced, Logs and the connection-diagnostics panel. Loads with the lazily
  * loaded settings overlay, so none of it is in the startup chunk.
@@ -88,6 +88,47 @@ export const settingsText = defineCatalog("settings", {
   "appearance.accentAria": "Custom accent color (hex)",
   "appearance.accentNote":
     "Custom colours may reduce readability; text and focus indicators fall back to a readable colour when needed, and High Contrast restores tested colours.",
+  "appearance.customThemes": "Custom Themes",
+  "appearance.customThemes.desc":
+    "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed. Ctrl+Shift+Backspace turns a custom theme off.",
+  "appearance.customThemes.empty": "No custom themes yet.",
+  "appearance.customThemes.new": "New theme",
+  "appearance.customThemes.import": "Import .css",
+  "appearance.customThemes.use": "Use",
+  "appearance.customThemes.useAria": "Use {name}",
+  "appearance.customThemes.turnOff": "Turn off",
+  "appearance.customThemes.inUse": "In use",
+  "appearance.customThemes.edit": "Edit",
+  "appearance.customThemes.editAria": "Edit {name}",
+  "appearance.customThemes.copy": "Copy",
+  "appearance.customThemes.copyAria": "Copy the CSS of {name}",
+  "appearance.customThemes.copied": "Theme CSS copied",
+  "appearance.customThemes.copyFailed": "Could not copy the theme",
+  "appearance.customThemes.export": "Export",
+  "appearance.customThemes.exportAria": "Export {name} as a .css file",
+  "appearance.customThemes.exportFailed": "Could not save the theme file",
+  "appearance.customThemes.delete": "Delete",
+  "appearance.customThemes.deleteAria": "Delete {name}",
+  "appearance.customThemes.deleteTitle": "Delete {name}?",
+  "appearance.customThemes.deleteBody":
+    "The theme is removed from this device. Export it first to keep a copy.",
+  "appearance.customThemes.name": "Name",
+  "appearance.customThemes.css": "CSS",
+  "appearance.customThemes.save": "Save",
+  "appearance.customThemes.cancel": "Cancel",
+  "appearance.customThemes.untitled": "Untitled theme",
+  "appearance.customThemes.nameMissing": "Give the theme a name.",
+  "appearance.customThemes.tooBig": "The theme is too big. The limit is {limit} characters.",
+  "appearance.customThemes.outsideLink":
+    "Line {line} uses {found}. Themes cannot load outside files.",
+  "appearance.customThemes.outsideLinkNoLine":
+    "The theme uses {found}. Themes cannot load outside files.",
+  "appearance.customThemes.gone": "This theme was deleted. Cancel and make a new one.",
+  "appearance.customThemes.full": "You can keep up to {limit} custom themes. Delete one first.",
+  "appearance.customThemes.saveFailed": "Could not save the theme: this device's storage is full.",
+  "appearance.customThemes.applyFailed": "This theme could not be applied.",
+  "appearance.customThemes.imported": "Imported {name}",
+  "appearance.customThemes.importFailed": "Could not read that file.",
 
   "notifications.desktop.label": "Desktop Notifications",
   "notifications.desktop.desc": "Show desktop notifications for messages",

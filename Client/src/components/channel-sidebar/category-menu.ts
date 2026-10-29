@@ -3,7 +3,7 @@
  * Category and Collapse All Categories touch only the caller's own read state
  * and collapse preferences, so none needs a permission. A MANAGE_CHANNELS
  * holder also gets Create Category and, on a real category (one with an id),
- * Rename, Move Up / Move Down and Delete (WP 6.5b); the entries are decided each
+ * Rename, Move Up / Move Down and Delete; the entries are decided each
  * time the menu opens, from `canManageChannels` and from which callbacks the
  * page wired. Opened by right-click on the header or, on its arrow button,
  * Shift+F10 / the Menu key.

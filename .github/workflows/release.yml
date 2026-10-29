@@ -855,9 +855,10 @@ jobs:
       # Shared with ci.yml and nightly-docker-smoke.yml so the smoke itself is
       # exercised pre-merge — the first alpha.3 release run died here on a
       # smoke-harness bug (bare `docker run`, nowhere writable for the default
-      # config) that no pre-merge check had ever run.
+      # config) that no pre-merge check had ever run. Only this caller has the
+      # web bundle in the image, so only it asks for the browser-client phase.
       - name: Lifecycle-smoke Docker image
-        run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
+        run: bash Server/scripts/docker-smoke.sh --browser-client owncord-smoke:candidate
 
       # The config digest of the image this leg just smoked, read only after the
       # smoke passed. release-server-docker compares it against the digest it

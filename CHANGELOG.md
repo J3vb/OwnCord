@@ -47,11 +47,18 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+**Desktop UI**
+
+- Custom themes: Settings > Appearance > Custom Themes keeps a list of your own CSS themes, painted on top of the built-in theme. Write one, import or export a `.css` file, copy it to share. A theme cannot load anything from outside (`url()`, `@import`, fonts are refused), and Ctrl+Shift+Backspace turns a custom theme off.
+
 ### Changed
 
 **Server (operators)**
 
 - Every error the server answers is now in the standard JSON shape (`{"error": "...", "message": "..."}`); the plugin admin API, the client update check, the admin log stream, plugin asset files, the LiveKit webhook and the WebSocket "server full" refusal used plain text. The "server full" refusal is `503 SERVER_BUSY`. A plugin upload over 16 MiB now answers `413 PAYLOAD_TOO_LARGE` even when the size cap trips mid-upload.
+- The bundled LiveKit voice server moves from 1.13.10 to 1.13.11 (a patch release, no configuration change). Its new options for retransmit caps and upstream FlexFEC stay off unless you turn them on in your own `livekit.yaml`.
   **Desktop UI**
 
 - Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
@@ -66,9 +73,18 @@ and only when it changes something a contributor or fork holder must do
 - A picture in chat whose file is damaged or unreadable showed a broken-image icon; it now shows the download card.
 - Hovering a reaction squeezed the names into a narrow box and split them mid-word ("LordJ / ebus"); the box now fits the names on one line and wraps only between words.
 
+**Web client**
+
+- Clicking Join on another server's invite signed you out and failed; it now opens that server's page in a new tab and keeps you signed in.
+- Settings > About showed no version, and "What's new" never appeared; both now use the version the web client was built from.
+- Settings > Logs showed an "Open Log Folder" button that always failed; the web client keeps logs in memory, so the button is gone there.
+
 ### Under the hood
 
+- The release's Docker smoke test now also checks that the image serves the web client (`docker-smoke.sh --browser-client`), as the standalone server smoke already did.
 - Every error code the server can send is now listed once in the protocol schema and generated into server constants and a client type. A fork that adds a code adds it there and regenerates.
+- Desktop client moves to Tauri 2.12.5 and the latest patch releases of its plugins (updater, notification, dialog, opener, single-instance, deep-link).
+- The desktop app's Rust code locks shared state through one helper, and clippy rejects a lock taken any other way. On Linux, the native voice session no longer stops when an earlier error left the camera or screen-share slot locked.
 
 ## v2.5.0
 

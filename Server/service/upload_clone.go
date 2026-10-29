@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// FileCloner is the storage half of forwarding a file (WP 6.9a): Clone gives a
+// FileCloner is the storage half of forwarding a file: Clone gives a
 // stored file a second name, by hard link where the volume allows it. Delete
 // takes a clone back out when the forward that wanted it fails.
 // *storage.Storage satisfies it.

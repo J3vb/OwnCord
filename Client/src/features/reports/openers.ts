@@ -1,5 +1,5 @@
 /**
- * The report entry points (B9-10): each turns the local thing on screen into
+ * The report entry points: each turns the local thing on screen into
  * the dialog's targets, using only identifiers the client already holds.
  * Loaded on first use, so the report form stays out of the startup bundle.
  */

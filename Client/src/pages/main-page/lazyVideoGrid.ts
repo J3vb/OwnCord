@@ -1,5 +1,5 @@
 /**
- * The video grid, loaded on first use (O-6c). A synchronous stand-in for
+ * The video grid, loaded on first use. A synchronous stand-in for
  * `VideoGridComponent` that keeps the latest value of each piece of grid
  * state until the real grid's code has loaded, replays it into a fresh grid in
  * one run, and then forwards every call. Callers keep their types and their

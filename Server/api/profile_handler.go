@@ -24,7 +24,7 @@ import (
 // userResponse is the caller's own user record, the shape auth responses and
 // PATCH /users/me return. It lives beside the profile handler because this is
 // the file that still sees db.User; the auth handlers get it through
-// toUserResponse without naming db (B3-2).
+// toUserResponse without naming db.
 type userResponse struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
@@ -91,7 +91,7 @@ type updateProfileRequest struct {
 	// DisplayName and About are omitted = unchanged, "" = cleared. Both are
 	// length-checked in UserService, which is also the path a non-REST
 	// caller would take; DisplayName is additionally sanitized in this
-	// handler (before validateDisplayName runs — see the OC-0197 comment at
+	// handler (before validateDisplayName runs — see the comment at
 	// the call site) and UserService's own sanitize of it is then a no-op.
 	DisplayName *string `json:"display_name"`
 	About       *string `json:"about"`
@@ -115,7 +115,7 @@ type sessionResponse struct {
 	CreatedAt string `json:"created_at"`
 	LastUsed  string `json:"last_used"`
 	IsCurrent bool   `json:"is_current"`
-	// Unseen is the new-login signal (B4-7): true from the login that created
+	// Unseen is the new-login signal: true from the login that created
 	// the session until the account lists its sessions from another device.
 	// This listing acknowledges every row but the caller's own.
 	Unseen bool `json:"unseen"`
@@ -135,7 +135,7 @@ type ProfileBroadcaster interface {
 }
 
 // revokeAllSessionsRateLimitPerMinute bounds DELETE /api/v1/users/me/sessions
-// per account (Codex P2 on PR #1500). Every call revokes the caller's own
+// per account. Every call revokes the caller's own
 // session or API token, so the cap bounds how fast a fresh sign-in can
 // repeat it.
 const revokeAllSessionsRateLimitPerMinute = 5
@@ -201,7 +201,7 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 
 // allowedAvatarMIME is the set of still image types an avatar, banner or group
 // icon may be, matched against the type sniffed from the file's own bytes.
-// GIF is added per surface (imageLimits.AllowGIF, WP 8.7) where the client
+// GIF is added per surface (imageLimits.AllowGIF) where the client
 // freezes it to its first frame until hovered. SVG is absent, for the same reason emoji refuse it: it is markup with script
 // and external-fetch capability, and an avatar is rendered inline by
 // definition.
@@ -226,7 +226,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		return req, false
 	}
 
-	// OC-0151: bound the raw field before it ever reaches the fixpoint
+	// Bound the raw field before it ever reaches the fixpoint
 	// sanitizer below, for the same reason as the register path
 	// (auth_handler.go's registerReadRequest) — sanitizeToFixpoint's
 	// cost is quadratic in input length, and nothing bounds this field
@@ -262,7 +262,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		return req, false
 	}
 
-	// OC-0192: bound the raw field before it reaches the fixpoint
+	// Bound the raw field before it reaches the fixpoint
 	// sanitizer below, same reasoning as the username bound above —
 	// sanitizeToFixpoint's cost is quadratic in input length. Unlike
 	// username, an oversized avatar was previously only caught *after*
@@ -291,13 +291,13 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	// it is rendered wherever a username is, so control characters and
 	// bidi overrides are exactly as unwelcome here. Length and the
 	// empty-clears-it rule still live in UserService, but sanitizing has
-	// to happen *before* validateDisplayName, not after: OC-0197 found
-	// that validating the raw JSON string let an HTML-entity-encoded
+	// to happen *before* validateDisplayName, not after, because
+	// validating the raw JSON string let an HTML-entity-encoded
 	// control or bidi character (e.g. "&#x202e;") pass this check as
 	// harmless ASCII, only to be turned into the real character
 	// afterwards by UserService.UpdateProfile's cleanText call — the
 	// same sanitize-then-validate order the username path above already
-	// uses. OC-0192's raw-byte bound applies here too, now that
+	// uses. The raw-byte bound applies here too, now that
 	// sanitizing happens in this handler (UserService.UpdateProfile
 	// still bounds DisplayName/About the same way before its own
 	// cleanText calls, for any non-REST caller; cleanText's fixpoint
@@ -315,7 +315,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		req.DisplayName = &trimmed
 	}
 
-	// OC-0192 again: bound the raw colour before anything looks at it. The
+	// Bound the raw colour before anything looks at it. The
 	// longest valid value is 7 bytes; the service does the real validation.
 	if req.BannerColor != nil && len(*req.BannerColor) > maxBannerColorLen*4 {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "banner_color is too long")
@@ -412,7 +412,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 			return
 		}
 
-		// BUG-111: Per-user lockout to prevent password brute-force via stolen session.
+		// Per-user lockout to prevent password brute-force via stolen session.
 		lockKey := auth.Key("pw_confirm_lock", user.ID)
 		if limiter.IsLockedOut(lockKey) {
 			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many failed attempts, try again later")
@@ -430,7 +430,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 		}
 
 		// Verify old password using constant-time bcrypt comparison, inside
-		// the one admission slot every password route takes (B4-4): a refused
+		// the one admission slot every password route takes: a refused
 		// attempt ran no compare and counts as no failure.
 		failKey := auth.Key("pw_confirm_fail", user.ID)
 		matched, admitted := limiter.Admission().CheckPassword(user.PasswordHash, req.OldPassword)
@@ -537,7 +537,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 		}
 
 		// The response carries the flags as they were; this listing is the
-		// acknowledgement (B4-7), except for the caller's own session. An
+		// acknowledgement, except for the caller's own session. An
 		// API-token principal has no session and acknowledges every row.
 		var callerSessionID int64
 		if sess != nil {
@@ -723,7 +723,7 @@ func handleUploadAvatar(
 }
 
 // avatarStoreAndRecord is the store-and-row stage of handleUploadAvatar:
-// admit the bytes (B5-2 — an avatar is an attachment and counts against its
+// admit the bytes (an avatar is an attachment and counts against its
 // uploader's quota), write them, and record the row that commits the charge.
 // It writes its own error response and reports ok=false. Split out to keep
 // the handler under the funlen limit; the steps and their order are

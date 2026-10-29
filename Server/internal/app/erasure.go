@@ -29,7 +29,7 @@ const erasureKeyRelPath = "erasure.key"
 // openMarkers loads the erasure key beside totp.key, opens the marker file
 // and replays every recorded marker against the freshly opened database —
 // before the hub, the router or any listener exists, so a restored backup
-// never serves an erased account (B4-10, BPR-053). The erasure run here is
+// never serves an erased account. The erasure run here is
 // the full one: rows, audit unlinking and files, through the same runner
 // the routes use later, minus the hub (nobody is connected yet). store is the
 // one upload store (nil when it could not be opened).
@@ -52,7 +52,7 @@ func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, data
 	if err != nil {
 		return nil, fmt.Errorf("erasure markers: %w", err)
 	}
-	// Decided behaviour (B6-11 open question 1): boot, and log a startup error
+	// Decided behaviour (reviewed deliberately): boot, and log a startup error
 	// that the erasure history is absent. Refusing to boot would turn a lost
 	// 40 KB file into a total outage; booting silently would leave an operator
 	// who deleted it by mistake with no way to learn that a restore can now
@@ -87,7 +87,7 @@ func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, data
 	if report.Erased > 0 || report.Confirmed > 0 {
 		log.Warn("erasure markers replayed", "erased", report.Erased, "confirmed", report.Confirmed)
 	}
-	// The retention markers (B4-11): messages a restored backup holds past a
+	// The retention markers: messages a restored backup holds past a
 	// channel's recorded cutoff go again, before anything serves.
 	retention := service.NewRetentionService(database)
 	retention.SetMarkers(markers)
@@ -100,7 +100,7 @@ func openMarkers(ctx context.Context, log *slog.Logger, cfg *config.Config, data
 	} else if removed > 0 {
 		log.Warn("retention markers replayed", "messages_removed", removed)
 	}
-	// The WAL half of a restart (B6-11 task 5), and it goes after both replays
+	// The WAL half of a restart, and it goes after both replays
 	// rather than straight after ReplayAccounts: the replay above writes too,
 	// and its frames carry the same kind of content this pass exists to get out
 	// of the log. An erasure that committed while the process died before its

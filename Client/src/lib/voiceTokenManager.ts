@@ -17,14 +17,14 @@ export interface TokenManagerDeps {
  * Token refresh interval: 4 minutes (refresh 1 min before the server's
  * 5-minute TTL expiry — see Server/ws/livekit.go tokenTTL). Must stay
  * below that TTL or a network blip after minute 5 hands attemptAutoReconnect
- * an already-expired token and every reconnect attempt fails (OC-0014).
+ * an already-expired token and every reconnect attempt fails.
  */
 const TOKEN_REFRESH_MS = 4 * 60 * 1000;
 
 /** Server-side rate limit: 1 voice_token_refresh per 60s per user. */
 const RATE_LIMIT_MS = 60_000;
 
-/** BUG-146: Response deadline — if the server doesn't reply within this window,
+/** Response deadline — if the server doesn't reply within this window,
  *  the token is stale but the session stays alive (LiveKit keeps active
  *  connections beyond token expiry). We reschedule instead of disconnecting. */
 const REFRESH_TIMEOUT_MS = 60_000;
@@ -45,7 +45,7 @@ export class VoiceTokenManager {
     log.debug("Token refresh timer started", { refreshInMs: TOKEN_REFRESH_MS });
   }
 
-  /** OC-0429: re-arm at the retry cadence (RATE_LIMIT_MS) instead of the full
+  /** Re-arm at the retry cadence (RATE_LIMIT_MS) instead of the full
    *  periodic interval. Used after an unanswered voice_token_refresh (see
    *  onRefreshTimeout below) — re-arming at TOKEN_REFRESH_MS there would leave
    *  the stored token expired for up to another full cycle, since the server's
@@ -74,13 +74,13 @@ export class VoiceTokenManager {
   }
 
   /** Send a token refresh request, respecting the server's rate limit.
-   *  Arms a BUG-146 response-deadline timer. */
+   *  Arms a response-deadline timer. */
   requestRefresh(): void {
     if (!this.deps.getWs() || !this.deps.hasVoiceSession()) {
       log.debug("Skipping token refresh — no active session");
       return;
     }
-    // OC-0029: the server refuses more than 1 voice_token_refresh per 60s
+    // The server refuses more than 1 voice_token_refresh per 60s
     // per user (ErrCodeRateLimited). requestTokenRefresh() is called both by
     // the routine 4-minute timer and by attemptAutoReconnect's unconditional
     // post-recovery refresh, which can land only seconds after the timer's
@@ -97,7 +97,7 @@ export class VoiceTokenManager {
     // NOTE: startRefreshTimer is called from handleRefreshResponse(), not here,
     // to avoid scheduling two competing timers per cycle.
 
-    // BUG-146: Arm a 60-second response deadline. If the server never replies,
+    // Arm a 60-second response deadline. If the server never replies,
     // the token stalls silently. On timeout we log a warning and reschedule the
     // next refresh attempt rather than disconnecting — the current live session
     // is unaffected (LiveKit keeps active connections alive beyond token expiry);
@@ -121,7 +121,7 @@ export class VoiceTokenManager {
 
   /** Called when the server responds with a fresh token. */
   handleRefreshResponse(): void {
-    // BUG-146: Cancel the response-deadline timer — the server replied in time.
+    // Cancel the response-deadline timer — the server replied in time.
     if (this._timeoutTimer !== null) {
       clearTimeout(this._timeoutTimer);
       this._timeoutTimer = null;

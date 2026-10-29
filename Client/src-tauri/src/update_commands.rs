@@ -226,7 +226,7 @@ fn build_updater(app: &AppHandle, server_url: &str) -> Result<BuiltUpdater, Stri
         .map_err(|e: url::ParseError| format!("bad endpoint URL: {e}"))?;
 
     // Use TOFU-pinned certificate for self-signed servers, or system certs
-    // for CA-signed servers. Never blindly accept invalid certs (BUG-134).
+    // for CA-signed servers. Never blindly accept invalid certs.
     let tls_config = build_tls_config(app, server_url)?;
     let answered = Arc::new(AtomicBool::new(false));
     let updater = track_offers(

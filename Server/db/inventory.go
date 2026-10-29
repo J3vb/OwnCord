@@ -16,10 +16,10 @@ func inventoryByUname(_ int64, uname string) []any { return []any{uname} }
 func inventoryBothIDs(uid int64, _ string) []any   { return []any{uid, uid} }
 
 // SubjectInventory is the data-class inventory of data-lifecycle.md as
-// queries, keyed by class number. It is the generated lineage checklist B4-9
-// walks after an erasure (every count must be zero; class 21 counts audit
-// rows that still carry the id, which B4-10's unlinking takes to zero while
-// the rows themselves stay) and the before/after table the HP-4 drills
+// queries, keyed by class number. It is the generated lineage checklist
+// account erasure walks after an erasure (every count must be zero; class 21 counts audit
+// rows that still carry the id, which the audit unlinking takes to zero while
+// the rows themselves stay) and the before/after table the erasure drills
 // paste. uname is the username before erasure, for the lockout keys.
 var SubjectInventory = []InventoryClass{
 	{"1 identity row", `SELECT COUNT(*) FROM users WHERE id = ?`, inventoryByUID},
@@ -77,8 +77,8 @@ var SubjectInventory = []InventoryClass{
 	{"20 replay events", `SELECT COUNT(*) FROM events WHERE ` + EventNamesUserPredicate, inventoryByUID},
 	{"20a channel retention updated_by", `SELECT COUNT(*) FROM channel_retention WHERE updated_by = ?`, inventoryByUID},
 	{"21 audit rows", `SELECT COUNT(*) FROM audit_log WHERE actor_id = ? OR (target_type = 'user' AND target_id = ?)`, inventoryBothIDs},
-	// B5-8 report classes: 22a and 22b count the principal COLUMNS, not the
-	// rows — the rows survive erasure by design (decision 7), so the class
+	// Report classes: 22a and 22b count the principal COLUMNS, not the
+	// rows — the rows survive erasure by design, so the class
 	// goes to zero when subject_id/reporter_id are rewritten to 0, exactly
 	// like every other bare-id-plus-token class in this file.
 	{"22a reports about the subject", `SELECT COUNT(*) FROM reports WHERE subject_id = ?`, inventoryByUID},
@@ -86,16 +86,16 @@ var SubjectInventory = []InventoryClass{
 	{"22c evidence authored", `SELECT COUNT(*) FROM report_evidence WHERE author_id = ?`, inventoryByUID},
 	{"22d report notes authored", `SELECT COUNT(*) FROM report_notes WHERE author_id = ?`, inventoryByUID},
 	{"22e report assignments", `SELECT COUNT(*) FROM reports WHERE assignee_id = ?`, inventoryByUID},
-	// 22f (second Codex review): report_events is metadata, not content —
+	// 22f: report_events is metadata, not content —
 	// unlinking the actor is the whole job, the audit_log shape.
 	{"22f report events by the subject", `SELECT COUNT(*) FROM report_events WHERE actor_id = ?`, inventoryByUID},
-	// B5-9 moderation-action classes: 23a counts ROWS (they cascade-delete
+	// Moderation-action classes: 23a counts ROWS (they cascade-delete
 	// with the users row, unlike a report's outcome — S6 says a warning or
 	// timeout is deleted, not kept), 23b counts the principal COLUMN, the
 	// same bare-id-plus-token shape as every actor class above.
 	{"23a moderation actions on the subject", `SELECT COUNT(*) FROM moderation_actions WHERE target_id = ?`, inventoryByUID},
 	{"23b moderation actions by the subject", `SELECT COUNT(*) FROM moderation_actions WHERE actor_id = ? OR lifted_by = ?`, inventoryBothIDs},
-	// B5-10 appeal classes: 24a counts ROWS (appellant_id cascades with the
+	// Appeal classes: 24a counts ROWS (appellant_id cascades with the
 	// users row — S6-d says an appeal is deleted for the appellant, not
 	// kept), 24b counts the principal COLUMN, the same bare-id-plus-token
 	// shape as every actor class above.
@@ -108,7 +108,7 @@ var SubjectInventory = []InventoryClass{
 }
 
 // InventoryKeptByErasure names the classes an erasure leaves on purpose.
-// Empty since B4-10: the audit history stays, but unlinked, so no class
+// Empty now: the audit history stays, but unlinked, so no class
 // still counts the subject.
 var InventoryKeptByErasure = map[string]bool{}
 

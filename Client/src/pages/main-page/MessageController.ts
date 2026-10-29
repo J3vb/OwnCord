@@ -61,7 +61,7 @@ export function createMessageController(opts: MessageControllerOptions): Message
       log.debug("Messages already loaded", { channelId });
       return;
     }
-    // P4-01 R3: a revisit refetches the tail and reconciles it into the cached
+    // A revisit refetches the tail and reconciles it into the cached
     // window, so every cached row it keeps is revalidated — an edit made while
     // away shows, a delete made while away is gone. The page is not sized from
     // the local unread count: messages posted while the reader was in another

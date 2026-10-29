@@ -1,5 +1,5 @@
 /**
- * The eager half of send-while-uploading (WP 3A-9): one cached dynamic import,
+ * The eager half of send-while-uploading: one cached dynamic import,
  * so the queue logic, its upload strip and its copy stay out of the main-page
  * chunk until the first upload (the preload) or the first queued send.
  */

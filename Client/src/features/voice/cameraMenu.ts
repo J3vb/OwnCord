@@ -1,4 +1,4 @@
-// The camera picker behind the arrow beside Camera in the call bar (WP 1C-5).
+// The camera picker behind the arrow beside Camera in the call bar.
 // Loaded on demand, so it stays out of the eager MainPage chunk.
 import { showContextMenu } from "@lib/context-menu";
 import { createIcon } from "@lib/icons";

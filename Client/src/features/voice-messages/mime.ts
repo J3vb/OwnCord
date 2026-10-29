@@ -1,4 +1,4 @@
-/** Which container a voice clip is recorded in (WP 8.9). */
+/** Which container a voice clip is recorded in. */
 
 /** In order of preference; WebView2 gives webm/opus. No MP4: the server's type
  *  sniff does not recognise every MP4 audio brand, so an engine that records

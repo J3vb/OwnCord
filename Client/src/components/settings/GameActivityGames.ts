@@ -1,5 +1,5 @@
 /**
- * Settings > Advanced > Activity > "Your games" (WP 8.3d): every game this
+ * Settings > Advanced > Activity > "Your games": every game this
  * device has detected or the user added, with rename, "Show to others" and
  * remove, and the "Add a game" picker over the programs running now.
  *

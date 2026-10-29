@@ -55,8 +55,9 @@ These helpers stay at the top level on purpose. Moving them would change every
 import path.
 
 Other notable files at this level: `.env.example`, `Dockerfile`, `docker-compose.yml`,
-`docker-compose.otel.yml`, `prometheus.dev.yml`, `config.yaml.example`,
-`livekit.yaml.example`, `Makefile`, `sqlc.yaml` and `coverage-floor.json`.
+`config.yaml.example`, `livekit.yaml.example`, `Makefile`, `sqlc.yaml` and
+`coverage-floor.json`. The local tracing and metrics stack (`make otel-up`) lives in
+`deploy/docker/`.
 
 ## Run it
 

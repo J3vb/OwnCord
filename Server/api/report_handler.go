@@ -19,7 +19,7 @@ import (
 // BroadcastMemberBan/BroadcastChatBulkDeleted are the two transport
 // broadcasts the queue's act route (moderation_queue_handler.go) sends after
 // a report-linked ban or removal commits — the SAME calls the direct admin
-// PATCH route and the direct purge route make (P2-7, Codex review): ban and
+// PATCH route and the direct purge route make: ban and
 // removal have no live-target notifier of their own the way Warn/Timeout do
 // (ModerationService.notifyModAction), so without these two methods here,
 // acting through the queue silently dropped both broadcasts.
@@ -38,7 +38,7 @@ type fileReportRequest struct {
 }
 
 // reportSummaryResponse is one row of GET /api/v1/reports/mine. ID is the
-// PUBLIC id (P2-9) — the sequential internal id never reaches a response.
+// PUBLIC id — the sequential internal id never reaches a response.
 type reportSummaryResponse struct {
 	ID         string  `json:"id"`
 	TargetType string  `json:"target_type"`
@@ -119,7 +119,7 @@ func handleMyReports(svc *service.Services) http.HandlerFunc {
 // endpoint's wire contract names — validation as INVALID_INPUT (not the
 // generic BAD_REQUEST), duplicates as DUPLICATE_REPORT (not the generic
 // CONFLICT), and a moderator acting on their own filed report as
-// SELF_REVIEW (not the generic FORBIDDEN, P2-6) — falling through to
+// SELF_REVIEW (not the generic FORBIDDEN) — falling through to
 // writeServiceError for everything else.
 func writeReportServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {

@@ -7,7 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Forum posts and clients without the forums feature (WP 6.9d-a2). A client
+// Forum posts and clients without the forums feature. A client
 // that never declared "forums" is sent no forum (client_features.go), and so
 // must not be sent anything for a forum's posts either: not a thread_changed
 // on the forum's topic, not a chat_message on a post's topic, not the unread

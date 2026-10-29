@@ -200,7 +200,7 @@ describe("resolveVideoCodec with VP9", () => {
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
   });
 
-  it("reports the preferred codec beside the pick, for the live switch (WP M-5b)", async () => {
+  it("reports the preferred codec beside the pick, for the live switch", async () => {
     await expect(resolveCodecChoice(track(), 30, 1_700_000)).resolves.toEqual({
       preferred: "vp9",
       codec: "vp9",
@@ -227,7 +227,7 @@ describe("resolveVideoCodec with VP9", () => {
   });
 });
 
-describe("Linux native codec choice (WP LP-7c)", () => {
+describe("Linux native codec choice", () => {
   beforeEach(() => {
     isLinuxDesktop.mockReturnValue(true);
   });
@@ -270,7 +270,7 @@ describe("Linux native codec choice (WP LP-7c)", () => {
   });
 });
 
-describe("h264Offered (WP LP-7c)", () => {
+describe("h264Offered", () => {
   it("is true off Linux", async () => {
     await expect(h264Offered()).resolves.toBe(true);
   });
@@ -300,7 +300,7 @@ describe("vp9Offered", () => {
   });
 });
 
-describe("vp9Available (WP M-11b)", () => {
+describe("vp9Available", () => {
   it("is the webview's answer off Linux", async () => {
     await expect(vp9Available()).resolves.toBe(true);
     supportsVP9.mockReturnValue(false);
@@ -317,7 +317,7 @@ describe("vp9Available (WP M-11b)", () => {
   });
 });
 
-describe("Linux VP9 choice (WP M-11b)", () => {
+describe("Linux VP9 choice", () => {
   beforeEach(() => {
     isLinuxDesktop.mockReturnValue(true);
     savePref("vp9");
@@ -345,7 +345,7 @@ describe("Linux VP9 choice (WP M-11b)", () => {
   });
 });
 
-describe("h265Offered (WP M-6)", () => {
+describe("h265Offered", () => {
   it("is true with support, a non-Intel GPU and not Linux, in a release build too", () => {
     vi.stubEnv("DEV", false);
     try {
@@ -380,7 +380,7 @@ describe("h265Offered (WP M-6)", () => {
   });
 });
 
-describe("resolveVideoCodec with H.265 (WP M-6a)", () => {
+describe("resolveVideoCodec with H.265", () => {
   beforeEach(() => {
     savePref("h265");
     encodingInfo.mockResolvedValue(HARDWARE);
@@ -644,7 +644,7 @@ describe("resolveVideoCodec", () => {
     expect(encodingInfo).not.toHaveBeenCalled();
   });
 
-  describe("at 120 fps (M-2)", () => {
+  describe("at 120 fps", () => {
     it("uses Auto's hardware rule when the saved choice is VP8", async () => {
       encodingInfo.mockResolvedValue(HARDWARE);
       await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("h264");

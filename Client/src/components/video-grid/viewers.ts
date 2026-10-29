@@ -1,5 +1,5 @@
 // Who is watching a screen share: the text a tile's viewer badge shows and
-// reads out (6.6b). Pure, so the cap and the wording are testable alone.
+// reads out. Pure, so the cap and the wording are testable alone.
 import { voiceText } from "../../i18n/voice";
 
 /** Names listed before "and N more". */

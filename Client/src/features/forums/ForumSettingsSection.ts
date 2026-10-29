@@ -1,5 +1,5 @@
 /**
- * The "Forum settings" section of the Edit Channel dialog (WP 6.9d-b2): the
+ * The "Forum settings" section of the Edit Channel dialog: the
  * forum's tags (add, rename, emoji, reorder, remove), whether a new post needs
  * a tag, and the default auto-archive period. Loaded on demand by
  * EditChannelModal, for a forum only.

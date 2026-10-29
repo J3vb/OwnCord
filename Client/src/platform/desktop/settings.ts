@@ -3,7 +3,7 @@
  * contract — one versioned JSON envelope in the app's settings store
  * (`get_settings` / `save_settings`).
  *
- * Lifted from `lib/profiles.ts`'s `createTauriBackend()` (B7-4) as the read
+ * Lifted from `lib/profiles.ts`'s `createTauriBackend()` as the read
  * and the write, and nothing else: validating the stored envelope is the
  * app's business, so it lives next to the profile shape it is about
  * (`lib/profiles.ts`). This seam would otherwise be the only way for any

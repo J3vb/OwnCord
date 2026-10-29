@@ -194,7 +194,7 @@ describe("the Escape guard scan", () => {
   });
 });
 
-describe("Escape handlers respect IME composition (MX-11)", () => {
+describe("Escape handlers respect IME composition", () => {
   const found = unguardedEscapeHandlers();
   const exempt = new Set(EXEMPT.map((e) => `${e.file} :: ${e.fn}`));
 

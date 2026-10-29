@@ -106,7 +106,10 @@ test("native smokes, upgrade rehearsal, approval and downstream release remain g
   const smoke = jobs.find((j) => j.name === "smoke-server-docker").body;
   assert.match(smoke, /os: ubuntu-latest\n\s+arch: amd64/);
   assert.match(smoke, /os: ubuntu-22\.04-arm\n\s+arch: arm64/);
-  assert.match(smoke, /bash Server\/scripts\/docker-smoke\.sh owncord-smoke:candidate/);
+  assert.match(
+    smoke,
+    /bash Server\/scripts\/docker-smoke\.sh --browser-client owncord-smoke:candidate/,
+  );
   assert.match(
     jobs.find((j) => j.name === "upgrade-rehearsal").body,
     /uses: \.\/\.github\/workflows\/upgrade-rehearsal\.yml/,

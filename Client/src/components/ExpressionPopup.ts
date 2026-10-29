@@ -1,5 +1,5 @@
 // ExpressionPopup — the one popup the composer's GIF, sticker and emoji
-// buttons share (WP 8.8): a tab row (GIFs | Stickers | Emoji) over a panel
+// buttons share: a tab row (GIFs | Stickers | Emoji) over a panel
 // that holds the matching picker. Each button opens the popup on its own tab.
 //
 // The popup owns only the shell: the tablist, its keyboard, and which tab's

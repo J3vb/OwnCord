@@ -11,7 +11,7 @@ import (
 )
 
 // channelCategoryPayload is one entry of the channel_categories frame and of
-// ready's categories (WP 6.5a).
+// ready's categories.
 type channelCategoryPayload struct {
 	ID       int64  `json:"id"`
 	Name     string `json:"name"`

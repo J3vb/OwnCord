@@ -1,6 +1,6 @@
 // Launch on login, through the native autostart plugin. Lifted verbatim from
-// `settings/AdvancedTab.ts`'s "Launch on Login" row (B7-5); the row's
-// read-back race guard (OC-0141) is behaviour and stays in the tab.
+// `settings/AdvancedTab.ts`'s "Launch on Login" row; the row's
+// read-back race guard is behaviour and stays in the tab.
 //
 // The plugin stays a dynamic `import()`: it is not part of the startup chunk
 // today, and this registry is statically reachable from the entry.

@@ -76,7 +76,7 @@ export interface GlobalKeybindHandlers {
    *  `direction` is 1 for down, -1 for up. */
   readonly onScrollMessages: (direction: 1 | -1) => void;
   /** Alt+↑/↓ — step to the previous/next channel; with Shift, the previous/
-   *  next unread one (DP-35). `direction` is 1 for down/next, -1 for up. */
+   *  next unread one. `direction` is 1 for down/next, -1 for up. */
   readonly onStepChannel: (direction: 1 | -1, unreadOnly: boolean) => void;
   /** Whether an incoming-call ring is on screen. While it is, Ctrl+Enter
    *  accepts it and Escape declines it (3B-4); with none, neither key does
@@ -121,7 +121,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     // AZERTY) is plain typing, not a shortcut.
     const altGrChar = e.key.length === 1 && e.getModifierState("AltGraph");
 
-    // Alt+↑/↓ (DP-35) steps channels; Alt+Shift+↑/↓ steps unread channels.
+    // Alt+↑/↓ steps channels; Alt+Shift+↑/↓ steps unread channels.
     // Checked before the rebindable lookup and the Ctrl/Meta guard below, which
     // rejects any Alt combo. A plain Alt+Arrow is not a text-editing shortcut,
     // but AltGr arrives as ctrlKey+altKey and the composer's own Alt use must
@@ -434,7 +434,7 @@ function focusNewComposer(): void {
 }
 
 /** The message composer's textarea, where Alt+↑/↓ still steps channels. */
-/** Whether the key was pressed inside the thread side panel (WP 6.9c). */
+/** Whether the key was pressed inside the thread side panel. */
 function inThreadPanel(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(".thread-panel") !== null;
 }

@@ -19,7 +19,7 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -36,6 +36,7 @@ use crate::portal_app_id::{self, Ensured, APP_ID};
 use crate::shortcuts::{
     backend, portal_ptt_allowed, Backend, GlobalKeysStatus, Triggers, PORTAL_PTT_DENY,
 };
+use crate::sync::lock;
 use crate::text;
 
 const DESKTOP: &str = "org.freedesktop.portal.Desktop";
@@ -208,10 +209,6 @@ fn session_handle(results: &PropMap) -> Option<String> {
 
 fn sv(value: &str) -> Variant<Box<dyn RefArg>> {
     Variant(Box::new(value.to_string()))
-}
-
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 // ---------------------------------------------------------------------------

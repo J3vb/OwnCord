@@ -1,4 +1,4 @@
-// "Pinned a message" system row (WP 6.12): "<Name> pinned a message to this
+// "Pinned a message" system row: "<Name> pinned a message to this
 // channel. See all pinned messages." Drawn from `kind` + `replyTo` alone, never
 // from `content` (the server's English fallback for older clients). The pinned
 // message id rides in `replyTo`; once that message is deleted, or purged so the

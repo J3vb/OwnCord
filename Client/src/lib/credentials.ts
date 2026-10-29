@@ -1,6 +1,6 @@
 /**
  * Credential storage — the app-side half of the OS credential manager.
- * The native calls live behind `platform/desktop` (B7-4); these exports stay
+ * The native calls live behind `platform/desktop`; these exports stay
  * where their callers already import them.
  */
 
@@ -29,7 +29,7 @@ export async function saveCredential(
  * Build a `user_update` listener that refreshes a session's stored
  * credential when the local user's own profile changes (a username edit, or
  * the identity-key PATCH) — mirroring the initial saveCredential call's
- * remember-password opt-out (BUG-135) so a later profile edit can't silently
+ * remember-password opt-out so a later profile edit can't silently
  * persist a bearer token the user declined to store.
  *
  * It takes no password: `save_credential` preserves the stored one when none

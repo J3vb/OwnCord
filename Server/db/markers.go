@@ -14,8 +14,8 @@ import (
 	"strconv"
 )
 
-// MarkerStore is the durable deletion-marker file (B4-10, BPR-053; HP-4
-// decision 3): data/erasure/markers.sqlite, a second SQLite database that
+// MarkerStore is the durable deletion-marker file:
+// data/erasure/markers.sqlite, a second SQLite database that
 // lives outside the file a backup restore overwrites. Every account erasure
 // records a marker here; on every open the server replays the markers
 // against the main database and erases again whatever a restored backup
@@ -61,8 +61,8 @@ const (
 	SequenceFloorChannels = "channels"
 )
 
-// markerSchema is the marker file: deletion_markers, the HP-4
-// deletion_markers draft plus the state column the pending/recorded
+// markerSchema is the marker file: deletion_markers, the marker
+// rows plus the state column the pending/recorded
 // protocol needs; sequence_floors, the AUTOINCREMENT counters below
 // which no id may be handed out again (RaiseSequenceFloor); and
 // marker_meta, which binds the file to one erasure key (bindMarkerKey).
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS marker_meta (
 );`}
 
 // markerKeyFingerprintName is the marker_meta row that binds a marker file
-// to the erasure key its tokens were computed under (OC-0388). Nothing in
+// to the erasure key its tokens were computed under. Nothing in
 // the file is otherwise key-derived, so a regenerated or swapped key makes
 // every token miss: the replay matches nothing, reports {Erased:0} with a
 // nil error, and the account a restored backup brought back keeps serving.
@@ -123,7 +123,7 @@ func fingerprintPrefix(fp string) string { return fp[:min(12, len(fp))] }
 var ErrMarkerKeyMismatch = errors.New("marker store: the marker file was created under a different erasure key")
 
 // ErrMarkerKeyUnverified is the refusal when a marker file holds markers but
-// records no key fingerprint: a file written before OC-0388 was closed.
+// records no key fingerprint: a file written before the key binding was added.
 // Adopting whatever key is present would be the defect itself — if the key
 // was regenerated in between, the wrong one silently becomes the file's key
 // of record and every marker is voided. Only the operator can say the key is
@@ -167,7 +167,7 @@ func OpenMarkerStore(path string, key []byte) (*MarkerStore, error) {
 // more than the markers.
 const markerFileEscapeHatch = "do not delete or move markers.sqlite to get past this: it also carries sequence_floors (without them an erased account's id is handed out again and its innocent new holder is erased by the old marker) and the account markers that keep the first-run setup gate closed against a restore of a pre-owner backup"
 
-// bindMarkerKey holds the marker file to one erasure key (OC-0388). An empty
+// bindMarkerKey holds the marker file to one erasure key. An empty
 // file adopts the key it is first opened under — that is how a new
 // installation gets its fingerprint. A file that already holds markers must
 // prove the key: a recorded fingerprint must match, and a file from before
@@ -549,7 +549,7 @@ func (m *MarkerStore) MessagesToken(channelID int64) string {
 }
 
 // RecordMessagesSweep records that retention removed everything older than
-// cutoff in channelID (B4-11): one marker per channel, its cutoff only ever
+// cutoff in channelID: one marker per channel, its cutoff only ever
 // moving forward, so a restore of an older backup re-sweeps to the newest
 // cutoff the policy reached. cutoff is stored in SQLite's UTC layout. The
 // channels sequence goes down with it as a floor (channelsSeq is

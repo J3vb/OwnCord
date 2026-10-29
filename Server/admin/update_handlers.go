@@ -119,8 +119,8 @@ func extendApplyDeadlines(w http.ResponseWriter, deadline time.Time) {
 //
 // It is audited, which is why it takes a database handle it otherwise has no
 // use for. Replacing the running binary is the largest change an owner
-// credential can make — strictly larger than plugin_install, which B2-6 chose
-// to audit — and until OC-0391 it was the one owner-only mutation on this
+// credential can make — strictly larger than plugin_install, which is
+// audited — and it used to be the one owner-only mutation on this
 // router that wrote no audit row at all, on any path. Both halves are
 // recorded: update_apply when the verified binary is staged and the swap
 // becomes inevitable, update_applied or update_failed for what actually
@@ -422,7 +422,7 @@ func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, actio
 // The caller has already broadcast "restarting in 5s" to every connected
 // client before invoking this, so every failure path must correct that
 // promise — otherwise the client's restart banner counts down to a permanent
-// "Reconnecting..." over a connection that never actually dropped (OC-0226).
+// "Reconnecting..." over a connection that never actually dropped.
 // The deferred broadcast below covers all such paths (verification failure,
 // rename failure, commit failure) with one guard; it is cancelled by setting
 // committed=true once the verified binary is in place.

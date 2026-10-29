@@ -83,9 +83,7 @@ impl ActiveSession {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, SessionState> {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::sync::lock(&self.state)
     }
 
     /// One consistent view of the active host and the verified hosts.

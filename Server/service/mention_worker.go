@@ -80,7 +80,7 @@ type mentionWorker struct {
 	dropped atomic.Uint64
 
 	// notify delivers one live mention_count frame to a reader whose badge a
-	// flush raised (DP-27). Captured from MessageService.NotifyMentionCount at
+	// flush raised. Captured from MessageService.NotifyMentionCount at
 	// start-up (the hook is installed before StartMentionWorker runs); nil in
 	// a directly-constructed worker and whenever no hub is wired, in which
 	// case notification is skipped.
@@ -93,7 +93,7 @@ type mentionWorker struct {
 	// loop and a decrement committed on the delete/purge request goroutine push
 	// absolute totals from independently-scheduled emitters, so a delete inside
 	// the coalesce window could be overtaken by an older total and leave the
-	// client badge stale-low until the next ready (the ordering race DP-27
+	// client badge stale-low until the next ready (the ordering race the live badge hook
 	// introduced). StartMentionWorker points this at the MessageService's lock
 	// so the inline no-worker fallback and removal paths share it; a directly
 	// constructed worker keeps its own.
@@ -313,7 +313,7 @@ func (w *mentionWorker) flushSelected(ctx context.Context, pending []mentionJob,
 // simply had no recipients by the time the filters ran.
 //
 // After a channel's transaction commits, each reader whose badge it actually
-// raised gets one live mention_count frame (DP-27), so an unfocused channel's
+// raised gets one live mention_count frame, so an unfocused channel's
 // taskbar/tray badge updates without waiting for the next ready. The
 // notification runs outside the transaction and after it commits, so a push
 // can never outrun the write it describes.
@@ -332,7 +332,7 @@ func (w *mentionWorker) flush(ctx context.Context, jobs []mentionJob) {
 	for channelID, entries := range byChannel {
 		// Hold emitMu across the write and the frames it emits, so this
 		// increment's commit order matches its frame order against a concurrent
-		// removal-path decrement (DP-27 ordering; see emitMu).
+		// removal-path decrement (see emitMu).
 		w.emitMu.Lock()
 		bumped, err := w.st.IncrementMentionCountsBatch(ctx, channelID, entries)
 		if err != nil {
@@ -352,7 +352,7 @@ func (w *mentionWorker) notifyBumped(channelID int64, bumped map[int64]int64) {
 }
 
 // emitMentionBumped pushes one mention_count frame per reader whose badge a
-// flush raised (DP-27), in a deterministic order so a test's recorded calls do
+// flush raised, in a deterministic order so a test's recorded calls do
 // not depend on map iteration order. A nil n (no hub) is a no-op.
 func emitMentionBumped(n func(userID, channelID, count int64), channelID int64, bumped map[int64]int64) {
 	if n == nil || len(bumped) == 0 {

@@ -2,7 +2,7 @@ package ws
 
 import "context"
 
-// readyNoticePayload is one row of ready's notices slot (B5-9): an
+// readyNoticePayload is one row of ready's notices slot: an
 // unacknowledged warning. Never the actor, never the report link.
 type readyNoticePayload struct {
 	ID        int64  `json:"id"`

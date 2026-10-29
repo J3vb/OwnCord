@@ -4,7 +4,7 @@
  * Pure identity helpers only. The DOM builder and the URL-renderability check
  * that need the authenticated image fetch live one layer up, in
  * `components/message-list/avatar.ts` — an earlier version kept them here and
- * imported that UI helper, which the ARCH-06 import-direction check forbids
+ * imported that UI helper, which the import-direction check forbids
  * (`lib/` must not reach `components/`).
  */
 

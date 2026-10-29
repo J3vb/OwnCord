@@ -11,7 +11,7 @@ vi.mock("@components/GifPicker", () => ({
 
 import { createMessageInput } from "@components/MessageInput";
 
-describe("MessageInput textarea resize (CL-05)", () => {
+describe("MessageInput textarea resize", () => {
   let container: HTMLDivElement;
   let reads: number;
   let contentHeight: number;

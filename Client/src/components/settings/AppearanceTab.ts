@@ -30,6 +30,7 @@ import {
   type MemberLayout,
 } from "../../features/members/memberLayout";
 import { appZoom, ZOOM_LEVELS, zoomIndex } from "../../features/zoom";
+import { buildCustomThemeSection } from "../../features/custom-themes/customThemeSection";
 import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
@@ -129,7 +130,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   });
   // The EFFECTIVE size, not the raw slider position: Large Font can floor it
   // above where the slider sits, and a label that disagrees with the rendered
-  // text is the same "control that lies" bug in a different place (OC-0319).
+  // text is the same "control that lies" bug in a different place.
   const fontLabel = createElement(
     "span",
     { class: "slider-val" },
@@ -140,7 +141,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     () => {
       const size = Number(fontSlider.value);
       savePref("fontSize", size);
-      // Both read the pref back, so save first (OC-0319).
+      // Both read the pref back, so save first.
       applyFontSize();
       setText(fontLabel, t("appearance.fontSize.value", { size: effectiveFontSize() }));
     },
@@ -366,7 +367,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     "aria-label": t("appearance.accentAria"),
     "aria-describedby": "accent-contrast-note",
   });
-  // Owner decision Q8 (B9-2): disclose the readable-colour fallback.
+  // Disclose the readable-colour fallback.
   const accentNote = createElement(
     "p",
     { class: "setting-desc", id: "accent-contrast-note" },
@@ -435,6 +436,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   appendChildren(hexInputRow, hexPrefix, hexInput);
   appendChildren(section, accentHeader, swatchesRow, hexInputRow, accentNote);
+  section.appendChild(buildCustomThemeSection(signal));
 
   // An OS light/dark flip under "Sync with computer" changes the default
   // accent; with no stored accent the controls must follow it.

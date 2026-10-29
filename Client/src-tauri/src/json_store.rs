@@ -66,7 +66,7 @@ impl JsonStore {
     }
 
     fn lock(&self) -> MutexGuard<'_, Map<String, Value>> {
-        self.map.lock().unwrap_or_else(|p| p.into_inner())
+        crate::sync::lock(&self.map)
     }
 }
 
@@ -79,7 +79,7 @@ pub struct JsonStores(Mutex<HashMap<&'static str, Result<Arc<JsonStore>, String>
 /// Open the store `name` in the app data directory.
 pub fn open<R: Runtime>(app: &AppHandle<R>, name: &'static str) -> Result<Arc<JsonStore>, String> {
     let registry = app.state::<JsonStores>();
-    let mut stores = registry.0.lock().unwrap_or_else(|p| p.into_inner());
+    let mut stores = crate::sync::lock(&registry.0);
     if let Some(entry) = stores.get(name) {
         return entry.clone();
     }

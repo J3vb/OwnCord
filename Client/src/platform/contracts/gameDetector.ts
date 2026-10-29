@@ -1,5 +1,5 @@
 /**
- * The game running on this machine (WP 8.3), for the "Playing <game>" status.
+ * The game running on this machine, for the "Playing <game>" status.
  * The host scans its own process list and hands back only the one name; the
  * list never reaches the page (`src-tauri/src/game_activity.rs`).
  */

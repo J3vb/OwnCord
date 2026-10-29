@@ -186,7 +186,7 @@ describe("logIceConnectionInfo", () => {
   // directly on engine — see PCTransportManager.d.ts. This pins the real
   // Room shape explicitly (rather than through the `withEngine` helper) so a
   // future rewrite of that helper can't quietly resurrect the old bug.
-  it("OC-0437: reads stats from the real engine.pcManager.publisher/subscriber shape", () => {
+  it("reads stats from the real engine.pcManager.publisher/subscriber shape", () => {
     const subGetStats = vi.fn().mockResolvedValue(new Map());
     const pubGetStats = vi.fn().mockResolvedValue(new Map());
     const room = {
@@ -308,7 +308,7 @@ describe("getIceConnectionState", () => {
   });
 
   // OC-0437: same real-shape check as above, for the debug-panel summary path.
-  it("OC-0437: reports transports from the real engine.pcManager.publisher/subscriber shape", () => {
+  it("reports transports from the real engine.pcManager.publisher/subscriber shape", () => {
     const room = {
       engine: {
         pcManager: {

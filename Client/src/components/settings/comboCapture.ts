@@ -1,7 +1,7 @@
 /**
  * One rebindable in-app action in the Keybinds tab: a button that captures a
  * key combination, plus Reset and Remove, and an alert line for a refused
- * combination (WP 3E-3c). Capture goes through `comboFromEvent(e, "inApp")`,
+ * combination. Capture goes through `comboFromEvent(e, "inApp")`,
  * the one function dispatch uses too, and saving goes through `saveKeybind`.
  *
  * Mute and deafen are not built here: they keep their global Ctrl+Shift

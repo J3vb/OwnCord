@@ -1,5 +1,5 @@
 /**
- * The composer's voice-message recorder bar (WP 8.9). It swaps the input row for
+ * The composer's voice-message recorder bar. It swaps the input row for
  * a recording bar (red dot, timer, live bars, Discard, Send), uploads the clip
  * when sent and posts it as a message of its own.
  *

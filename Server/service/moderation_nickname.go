@@ -20,12 +20,12 @@ const (
 )
 
 // SetNickname sets (or, with a nil or empty name, clears) another member's
-// nickname, users.display_name (WP 6.4a). Order: a human actor, a positive
+// nickname, users.display_name. Order: a human actor, a positive
 // target that is not the actor, the name through the same pipeline as the
 // member's own edit (cleanVisibleBounded), MANAGE_NICKNAMES (Administrator
 // bypasses the bit, never the hierarchy), the target exists and is not a
 // pending account, the actor strictly outranks it, the name is not another
-// account's username (WP 6.4b), the per-actor limiter, and then the write,
+// account's username, the per-actor limiter, and then the write,
 // which re-checks bit and rank inside its transaction.
 // Authorization comes before existence so a caller without the bit sees
 // Forbidden for an unknown id, never NotFound.
@@ -88,7 +88,7 @@ func (s *ModerationService) SetNickname(ctx context.Context, actorID, targetID i
 }
 
 // checkNicknameCollision applies the self edit's username collision rule to a
-// moderator's change (WP 6.4b); an unchanged name is not re-checked.
+// moderator's change; an unchanged name is not re-checked.
 func (s *ModerationService) checkNicknameCollision(ctx context.Context, target *db.User, cleaned string) error {
 	if s.users == nil || !displayNameChanged(target.DisplayName, cleaned) {
 		return nil

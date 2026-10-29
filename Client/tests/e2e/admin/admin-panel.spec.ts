@@ -8,7 +8,7 @@ import {
   focusIndicator,
   keyboardReachable,
   textContrast,
-} from "../support/b9-accessibility";
+} from "../support/accessibility";
 
 // One atomic user journey with a fresh process/database on EVERY attempt.
 // Retries must replay setup, not silently replace the wizard with login.

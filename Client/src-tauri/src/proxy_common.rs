@@ -138,7 +138,7 @@ pub(crate) async fn connect_tls_over(
 
 /// Read the HTTP request headers from the loopback side, up to the `\r\n\r\n`
 /// terminator, under a 10s guard with a 16 KiB cap. Shared byte-identical by
-/// both proxies (BUG-151 / stalled-client guard).
+/// both proxies (the stalled-client guard).
 pub(crate) async fn read_request_headers(
     local: &mut (impl AsyncRead + Unpin),
 ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
@@ -482,7 +482,7 @@ mod tests {
         assert!(validate_remote_host("[::1]:8443").is_ok());
     }
 
-    // OC-0021: IPv6 hosts that are not in the exact `[addr]:port` shape must
+    // IPv6 hosts that are not in the exact `[addr]:port` shape must
     // still resolve to a valid ServerName and a dialable host:port target.
 
     #[test]
@@ -578,7 +578,7 @@ mod tests {
         assert_eq!(counter.load(Ordering::Relaxed), 0, "writes are not counted");
     }
 
-    // OC-0218: the data phase of a tunneled request must not be able to hang
+    // The data phase of a tunneled request must not be able to hang
     // forever. Simulate the stall with two in-memory duplex pairs where
     // neither peer ever writes or disconnects, so raw `io::copy_bidirectional`
     // would block forever.

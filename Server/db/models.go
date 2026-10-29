@@ -25,7 +25,7 @@ type User struct {
 	// against Username alone — it is the unique key.
 	DisplayName *string
 	// RegistrationStatus is 'active', 'pending' (an approval-mode
-	// application holding its username until an admin approves it — B4-1)
+	// application holding its username until an admin approves it)
 	// or 'denied' (anonymised and locked for good, since audit rows keep
 	// the id).
 	RegistrationStatus string
@@ -75,7 +75,7 @@ type Session struct {
 	CreatedAt string
 	LastUsed  string
 	ExpiresAt string
-	// Unseen is the new-login signal (B4-7): true from the login that created
+	// Unseen is the new-login signal: true from the login that created
 	// the session until the account lists its sessions from another device.
 	Unseen bool
 }
@@ -188,7 +188,7 @@ type Message struct {
 	// Kind is MessageKindUser for an ordinary message. Every other value is a
 	// row only the server writes: a call log row or a group event row.
 	Kind         int64
-	ThreadJoined []int64 // WP 6.9c: users this send newly made thread followers; send transactions only
+	ThreadJoined []int64 // users this send newly made thread followers; send transactions only
 }
 
 // MessageWithUser joins a Message with the author's public fields.
@@ -215,7 +215,7 @@ type MessageSearchResult struct {
 	Timestamp        string              `json:"timestamp"`
 	Mentions         []int64             `json:"mentions"`
 	MentionsEveryone bool                `json:"mentions_everyone"`
-	Sticker          *MessageStickerInfo `json:"sticker,omitempty"` // WP 8.8a
+	Sticker          *MessageStickerInfo `json:"sticker,omitempty"`
 }
 
 // SearchPage selects one page of full-text search results. The zero values
@@ -255,7 +255,7 @@ type MessageAPIResponse struct {
 	// MentionsEveryone reports an authorized @everyone/@here.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
-	// RoleMentions adds mention_roles (WP 6.3f-1): the roles whose @role token
+	// RoleMentions adds mention_roles: the roles whose @role token
 	// cleared the mention gate. Embedded so its json tag lives outside
 	// models.go, whose tag count is pinned.
 	RoleMentions
@@ -269,12 +269,12 @@ type MessageAPIResponse struct {
 	Call *CallInfo `json:"call,omitempty"`
 	// GroupEvent is set only on a group event row (group_add to group_icon).
 	GroupEvent *GroupEventInfo `json:"group_event,omitempty"`
-	// Forward is set only on a forwarded message (WP 6.9a). See ForwardInfo.
+	// Forward is set only on a forwarded message. See ForwardInfo.
 	Forward *ForwardInfo `json:"forward,omitempty"`
-	// Poll is set only on a poll (6.9b), Thread only on a thread starter (6.9c).
+	// Poll is set only on a poll, Thread only on a thread starter.
 	Poll   *PollInfo   `json:"poll,omitempty"`
 	Thread *ThreadInfo `json:"thread,omitempty"`
-	// Sticker is set only on a sticker message (8.8a). See MessageStickerInfo.
+	// Sticker is set only on a sticker message. See MessageStickerInfo.
 	Sticker *MessageStickerInfo `json:"sticker,omitempty"`
 }
 
@@ -348,7 +348,7 @@ type VoiceState struct {
 	ServerDeafened bool   `json:"server_deafened"`
 	JoinedAt       string `json:"-"`
 	// ServerMutedBy is the owning moderation_actions id when ServerMuted was
-	// set by a timeout (round 5, Codex review P2) — nil for a manual
+	// set by a timeout — nil for a manual
 	// moderator mute or when unmuted. Server-side only: never marshaled
 	// into a client-facing payload (GetVoiceState/GetUserVoiceState is the
 	// one read that populates it, for RestoreModFlags' own use; the bulk
@@ -402,7 +402,7 @@ type AuditEntry struct {
 	TargetID   int64  `json:"target_id"`
 	Detail     string `json:"detail"`
 	// SubjectToken is the deletion-marker token of an erased subject the row
-	// targeted (B4-10): set by the erasure on rows that lost their target id,
+	// targeted: set by the erasure on rows that lost their target id,
 	// and on the erasure's own rows. ActorToken is the same for an erased
 	// subject who acted, so a row naming two erased subjects keeps both.
 	// Both are empty on every other row.
@@ -433,7 +433,7 @@ type Emoji struct {
 // in its query (sessions.sql).
 const sessionTTL = 30 * 24 * time.Hour
 
-// Registration statuses of a users row (B4-1).
+// Registration statuses of a users row.
 const (
 	RegistrationActive  = "active"
 	RegistrationPending = "pending"

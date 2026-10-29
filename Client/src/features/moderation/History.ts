@@ -1,6 +1,6 @@
 /**
- * A report's internal notes and immutable history in the Moderation Center
- * (B9-12). Both are read-only: the server records every step and nothing here
+ * A report's internal notes and immutable history in the Moderation Center.
+ * Both are read-only: the server records every step and nothing here
  * offers to edit or remove one.
  *
  * Notes are moderator-only text and stay in their own section; the history

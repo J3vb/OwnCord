@@ -1,5 +1,5 @@
 /**
- * Music activity loop (WP 8.10): tells the server which song this device is
+ * Music activity loop: tells the server which song this device is
  * playing, so other members see "Listening to <player>".
  *
  * Every `intervalMs` it asks the platform's media detector for the song and
@@ -22,7 +22,7 @@
  *    go to the host with every read, a change of them reads at once, and a
  *    song from a player hidden meanwhile is never sent. Every player seen is
  *    added to the device's history for the Settings list.
- *  - The same admin switch covers games and music (WP 8.10a): when it goes
+ *  - The same admin switch covers games and music: when it goes
  *    off the server clears the song itself, so the loop sends nothing, not
  *    even a `null`; it stops reading, forgets what it sent, and sends the
  *    current song again when the switch comes back on. A set that arrives

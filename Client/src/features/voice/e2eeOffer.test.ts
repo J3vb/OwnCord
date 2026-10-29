@@ -198,7 +198,7 @@ describe("E2EEOffer.handleOffer", () => {
     expect(state.rejector).toBeNull();
   });
 
-  it("waits behind the announces dispatched before it (OC-0002)", async () => {
+  it("waits behind the announces dispatched before it", async () => {
     const { state, offers } = setup();
     const announce = deferred<void>();
     state.announceChain = announce.promise;

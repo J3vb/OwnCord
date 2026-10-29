@@ -287,7 +287,7 @@ describe("deriveCallView", () => {
     ).toMatchObject({ kind: "unanswered", reason: "no-answer" });
   });
 
-  it("reports an offline callee as unanswered at once (D-14)", () => {
+  it("reports an offline callee as unanswered at once", () => {
     expect(
       deriveCallView({
         ...base,
@@ -306,7 +306,7 @@ describe("deriveCallView", () => {
     expect(v).toMatchObject({ kind: "connected", inRoom: [SELF, OTTO] });
   });
 
-  it("keeps a connected view, flagged, when the only other person has left (D-11)", () => {
+  it("keeps a connected view, flagged, when the only other person has left", () => {
     const v = deriveCallView({
       ...base,
       voice: { currentChannelId: DM, voiceUsers: room(SELF) },
@@ -435,7 +435,7 @@ describe("DmCallPanel — caller side", () => {
     expect(q(root, "dcp-caption")!.textContent).toBe("Otto didn't answer");
   });
 
-  it("says an offline callee is offline, with Ring again and Leave call (D-14)", () => {
+  it("says an offline callee is offline, with Ring again and Leave call", () => {
     setVoice(DM, [vu(SELF)]);
     const { opts, root } = mount();
     panel!.setOutgoing({ channelId: DM, phase: "offline", pending: [OTTO] });
@@ -676,7 +676,7 @@ describe("DmCallPanel — connected", () => {
   });
 });
 
-describe("DmCallPanel — after the other person leaves (D-11)", () => {
+describe("DmCallPanel — after the other person leaves", () => {
   it("says who left and offers Ring again once you are alone again", () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { opts, root } = mount();
@@ -690,7 +690,7 @@ describe("DmCallPanel — after the other person leaves (D-11)", () => {
   });
 });
 
-describe("DmCallPanel — peer identity verification (D-09)", () => {
+describe("DmCallPanel — peer identity verification", () => {
   it("shows each peer's shield in the call as it resolves, and none for you", () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { root } = mount();
@@ -773,7 +773,7 @@ describe("DmCallPanel — peer identity verification (D-09)", () => {
   });
 });
 
-describe("DmCallPanel — call timer (D-10)", () => {
+describe("DmCallPanel — call timer", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -797,7 +797,7 @@ describe("DmCallPanel — call timer (D-10)", () => {
   });
 });
 
-describe("DmCallPanel — controls while the call connects (D-08)", () => {
+describe("DmCallPanel — controls while the call connects", () => {
   it("disables camera and share until the voice session is connected", () => {
     setVoice(DM, [vu(SELF)]);
     patchVoice({ voiceStatus: "joining" });
@@ -813,7 +813,7 @@ describe("DmCallPanel — controls while the call connects (D-08)", () => {
     expect(opts.onCameraToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("disables share with the reason when the grant leaves screen share out (WP 1C-3)", () => {
+  it("disables share with the reason when the grant leaves screen share out", () => {
     setVoice(DM, [vu(SELF)]);
     patchVoice({ voiceStatus: "connected", shareDenied: true });
     const { root } = mount();
@@ -961,7 +961,7 @@ describe("DmCallPanel — video in the call", () => {
     expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(true);
   });
 
-  it("[F-11] shows your own safety number on your own shield while you are in the call", () => {
+  it("shows your own safety number on your own shield while you are in the call", () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { opts, root } = mount();
     panel!.setVideoActive(true);
@@ -983,7 +983,7 @@ describe("DmCallPanel — video in the call", () => {
     expect(shield(root, SELF)).toBeNull();
   });
 
-  it("[F-11] shows no own shield when the numbers belong to another call", () => {
+  it("shows no own shield when the numbers belong to another call", () => {
     const elsewhere = 555;
     setVoice(elsewhere, [vu(SELF)], elsewhere);
     patchVoice({ localSafetyNumber: "AB12 CD34", localSessionFingerprint: "5E55 1234" });

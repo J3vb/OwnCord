@@ -140,7 +140,7 @@ func (s *MessageService) forwardSource(ctx context.Context, p ForwardParams) (*f
 	if err := permissions.CanReadContent(readSubject(ctx, s.st, s.perms, p.UserID, ch)); err != nil {
 		return nil, notFound
 	}
-	// A poll cannot be forwarded (WP 6.9b): a copy would carry only the fallback
+	// A poll cannot be forwarded: a copy would carry only the fallback
 	// text and drop the voting. After the read gate, so it leaks nothing.
 	if s.poll.store != nil {
 		meta, err := s.poll.store.GetPollMeta(ctx, msg.ID)

@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Forum posts (WP 6.9d-a2). A post is a thread under a forum with no starter
+// Forum posts. A post is a thread under a forum with no starter
 // message; its opening message is the thread's own first message, and
 // channels.thread_post_message_id points at it. The post, its message, its tags
 // and the send receipt commit in one transaction (CreateMessageDelivery).

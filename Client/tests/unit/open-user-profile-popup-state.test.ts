@@ -59,7 +59,7 @@ async function open(
   return createPopupMock.mock.calls[0]![0] as Passed;
 }
 
-describe("openUserProfilePopup availability and block (WP 3B-2)", () => {
+describe("openUserProfilePopup availability and block", () => {
   beforeEach(() => {
     resetBlocksStore();
     setConnectionStatus("connected");

@@ -26,7 +26,7 @@ export const MENTION_TOKEN_REGEX = /(^|[^\p{L}\p{N}_@])@([\p{L}\p{N}_.-]{1,64})(
 export const CHANNEL_TOKEN_REGEX = /(^|[^\p{L}\p{N}_#])#([\p{L}\p{N}_-]{1,64})/gu;
 
 /**
- * `<@123>`: a user mention by id (WP 6.3e). Group 1 is the id. Ids stay below
+ * `<@123>`: a user mention by id. Group 1 is the id. Ids stay below
  * 2^53 so `Number()` is exact; a longer digit run is not a token.
  */
 export const ID_MENTION_REGEX = /<@(\d{1,15})>/g;
@@ -45,7 +45,7 @@ export interface MentionInfo {
   /** Whether an @everyone/@here cleared the sender's MENTION_EVERYONE gate. */
   readonly mentionsEveryone?: boolean;
   /**
-   * Role IDs the server resolved and let through the sender's gate (WP 6.3f).
+   * Role IDs the server resolved and let through the sender's gate.
    * Undefined = the server did not send them, so the `<@&id>` tokens in the
    * content stand in.
    */

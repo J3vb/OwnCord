@@ -7,7 +7,7 @@
  * The higher-level lifecycle (`getOrCreateIdentityKeyPair`, the legacy-key
  * migration, `ensureIdentityKeyPublished`) is app logic built on top of these
  * five primitives, not itself part of the native seam — it stays in
- * `lib/identity.ts` and keeps calling this contract's methods after B7-4.
+ * `lib/identity.ts` and keeps calling this contract's methods after the seam is introduced.
  */
 
 /** Re-declared, structurally identical to `StoreIdentityPinResult`

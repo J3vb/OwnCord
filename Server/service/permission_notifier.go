@@ -1,6 +1,6 @@
 package service
 
-// ─── Permission-change fan-out port (WP 5.1a) ────────────────────────────────
+// ─── Permission-change fan-out port ────────────────────────────────
 //
 // A permission-bearing mutation has two side effects beyond the commit: the
 // cached permission snapshots it invalidates, and the live-client fan-out
@@ -119,7 +119,7 @@ func (s *ModerationService) SetPermissionNotifier(n PermissionChangeNotifier) {
 // clients: held channels the new role cannot read are released before the
 // call returns, then the worker re-derives the sidebar (including channels
 // the user newly gained) and announces the role name it reads at send time.
-// It does not depend on anything past the commit (OC-0045).
+// It does not depend on anything past the commit.
 func (s *ModerationService) roleAssigned(targetID int64) {
 	if s.permNotifier == nil {
 		return

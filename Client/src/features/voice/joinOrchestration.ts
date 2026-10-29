@@ -153,7 +153,7 @@ export class JoinOrchestration {
    *  session currently occupies `_state`, which now belongs to the newer
    *  attempt.
    *
-   *  OC-0006: also re-syncs the extracted modules (DeviceManager/AudioPipeline
+   *  Also re-syncs the extracted modules (DeviceManager/AudioPipeline
    *  /AudioElements) when nobody newer owns `_state`. Earlier checkpoints
    *  (1/2, the key-exchange failure, and the retry-backoff check) fire before
    *  this attempt ever reaches "connected" — if the supersession was a plain
@@ -188,11 +188,11 @@ export class JoinOrchestration {
     // entirely — meaning _e2ee.clearState() never runs, and setupKeyExchange
     // below inherits the PREVIOUS channel's residual _isKeyHolder via its
     // OR-with-server-value guard, joining the new channel as a phantom key
-    // holder the server never elected (OC-0020).
+    // holder the server never elected.
     if (this._room !== null || this._state.type === "reconnecting") {
       this.leaveVoice(false, true);
     } else if (this._state.type === "connecting") {
-      // OC-0001: the pending-join drain loop (handleVoiceToken) re-enters
+      // The pending-join drain loop (handleVoiceToken) re-enters
       // this function while `_state` is still "connecting" — there is no
       // room to disconnect and no reconnect AC to abort, so the branch above
       // never fires, but a discarded prior attempt (e.g. the e2ee_timeout /
@@ -280,7 +280,7 @@ export class JoinOrchestration {
         releaseRoom(localRoom).catch((err) =>
           log.debug("Failed to disconnect room after key exchange failure", err),
         );
-        // OC-0010: a channel switch queued during the wait (handleVoiceToken's
+        // A channel switch queued during the wait (handleVoiceToken's
         // pendingJoin branch) preserves this attempt's type/joinGeneration, so
         // the ownership check above cannot distinguish it from "no newer join
         // is coming". Treating it as a genuine failure here would send
@@ -304,7 +304,7 @@ export class JoinOrchestration {
           // block and handleVoiceToken's drain loop can run the queued join.
           // Clear this attempt's own E2EE residue (keypair/_isKeyHolder/etc.)
           // so the queued join does not inherit it — entry-point leaveVoice(false)
-          // never runs for that next call since `_room` is null here (OC-0001).
+          // never runs for that next call since `_room` is null here.
           this._e2ee.clearState({ keepHeldAnnounces: true });
         }
         // SRE-M2: the key exchange is a real failure stage (timeout / aborted
@@ -428,7 +428,7 @@ export class JoinOrchestration {
         localRoom.startAudio().catch(() => {
           log.debug("Optimistic startAudio failed — waiting for user gesture");
         });
-        // RT-6: point capture at the saved input BEFORE the mic is first
+        // Point capture at the saved input BEFORE the mic is first
         // enabled. With no mic track yet this only records the capture
         // constraint (native: the backend's capture device), so the join opens
         // the saved mic once instead of publishing on the default and then
@@ -577,7 +577,7 @@ export class JoinOrchestration {
     isKeyHolder?: boolean,
   ): Promise<void> {
     const s = this._state;
-    // OC-0015: livekit-client's own internal reconnect (network blip on the
+    // livekit-client's own internal reconnect (network blip on the
     // SFU signal socket) moves Room.state through "signalReconnecting" /
     // "reconnecting" without ever emitting RoomEvent.Disconnected — the only
     // event this session listens for — so `_state` stays "connected" the
@@ -616,7 +616,7 @@ export class JoinOrchestration {
       log.warn("handleVoiceToken: already connecting, queued latest join request", { channelId });
       return;
     }
-    // OC-0009: a voice_token can arrive after the user already left this
+    // A voice_token can arrive after the user already left this
     // channel (e.g. Disconnect fired before the voice_join/voice_token round
     // trip returned) — `_state` alone cannot tell, since a leave that landed
     // before any connectAndSetup() ever started leaves `_state` at "idle"

@@ -32,7 +32,7 @@ import (
 // Every other place that pins this version is listed in
 // TestLiveKitPinsAgreeEverywhere (Server/docker_image_test.go); bump them all
 // and run that test.
-const DefaultLiveKitVersion = "1.13.10"
+const DefaultLiveKitVersion = "1.13.11"
 
 // livekitDownloadBase is the release download URL prefix. Package variable so
 // tests can point it at a local httptest server.

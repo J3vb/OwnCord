@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** Rich-content loading, failure and media-control copy (B9-9): the typed
+/** Rich-content loading, failure and media-control copy: the typed
  *  view states a link preview, an external image and the GIF picker show once
  *  the viewer has consented. User/server data (a host, a filename) passes
  *  through parameters; provider names are attribution, not translation. */

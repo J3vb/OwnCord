@@ -1,5 +1,5 @@
 /**
- * ThreadPanel (WP 6.9c) — a thread beside the channel: its starter message on
+ * ThreadPanel — a thread beside the channel: its starter message on
  * top, the thread's own message list below it, and a composer.
  *
  * The list is an ordinary `createMessageList` keyed by the thread's id (the
@@ -95,7 +95,7 @@ interface SendDraft {
   readonly replyTo: number | null;
   readonly replyPing: boolean;
   readonly clientMessageId: string | undefined;
-  /** A sticker send (WP 8.8), kept so a retry posts the same sticker. */
+  /** A sticker send, kept so a retry posts the same sticker. */
   readonly sticker?: { readonly id: number; readonly name: string };
 }
 
@@ -126,7 +126,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     class: "thread-panel-status",
     "data-testid": "thread-panel-status",
   });
-  /** A forum post's tags (WP 6.9d); empty and hidden on any other thread. */
+  /** A forum post's tags; empty and hidden on any other thread. */
   const tagsEl = createElement("span", {
     class: "forum-tags thread-panel-tags",
     "data-testid": "thread-panel-tags",
@@ -160,7 +160,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     const t = thread();
     if (t !== undefined) update({ locked: !t.locked });
   });
-  // Follow / Following (WP 6.9c): the state comes back as thread_follow_update.
+  // Follow / Following: the state comes back as thread_follow_update.
   const followBtn = createElement("button", {
     type: "button",
     class: "thread-panel-btn thread-panel-follow",
@@ -354,7 +354,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     const t = thread();
     starterEl.replaceChildren();
     // A forum post has no starter message: its opening message is the first
-    // one in the list below, so there is nothing to state here (WP 6.9d).
+    // one in the list below, so there is nothing to state here.
     starterEl.hidden = t?.post !== undefined;
     if (t === undefined || t.post !== undefined) return;
     const msg = findStarter();

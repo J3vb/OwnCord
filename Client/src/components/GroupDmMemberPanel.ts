@@ -1,6 +1,6 @@
 /**
- * GroupDmMemberPanel -- right-side panel listing the members of a group DM
- * (WP 3B-11a): you plus everyone else, a crown on the owner, Add People in the
+ * GroupDmMemberPanel -- right-side panel listing the members of a group DM:
+ * you plus everyone else, a crown on the owner, Add People in the
  * header, and, for the owner, Remove From Group / Make Group Owner on every
  * other member (right-click, the menu key, or the ⋯ button).
  *

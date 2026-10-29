@@ -173,7 +173,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
   // Scrollable content area (holds category labels + grids). Announced as a
   // single flat listbox — the category grids are visual grouping only, and
-  // roving tabindex (DC-13) treats every .ep-emoji cell as one list.
+  // roving tabindex treats every .ep-emoji cell as one list.
   const scrollArea = createElement("div", {
     class: "ep-scroll",
     role: "listbox",

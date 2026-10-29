@@ -1,5 +1,5 @@
 /**
- * The page half of Windows per-app share audio (WP 6.7b): read the host's
+ * The page half of Windows per-app share audio: read the host's
  * loopback WebSocket of 10 ms stereo frames, play them through the app-audio
  * worklet's jitter buffer and hand back the resulting `MediaStreamTrack`.
  *

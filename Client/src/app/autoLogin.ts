@@ -1,6 +1,6 @@
 // The connect page's auto-login: the startup profile load with its skip-flag
 // consumption and quick-switch handling, the stored-token resume, and the wait
-// for a server that is still booting. Moved out of main.ts verbatim (WP 7.4g);
+// for a server that is still booting. Moved out of main.ts verbatim;
 // the only edits are that the page's collaborators arrive through
 // createAutoLogin(), the renderPage-scoped `let`s live in its closure, and the
 // startup IIFE sits in a function whose synchronous prefix still captures
@@ -51,7 +51,7 @@ export function createAutoLogin(
   ) => void,
   getProfileList: () => Parameters<ConnectPage["refreshProfiles"]>[0],
 ): readonly [() => void, () => void, (host: string) => void] {
-  // The web portal's one host (WP 6.13e); read only behind `__OWNCORD_WEB__`.
+  // The web portal's one host; read only behind `__OWNCORD_WEB__`.
   const fixedHost = __OWNCORD_WEB__ ? (desktop.serverScope.fixedHost ?? undefined) : undefined;
   let autoLoginCancelled = false;
   let serverWait: { readonly host: string; readonly scope: SessionScope } | null = null;
@@ -191,7 +191,7 @@ export function createAutoLogin(
       // isAuthenticated subscriber further down), and every connect-page
       // mount — quick-switch included — must clear it here or it survives in
       // sessionStorage and goes on to suppress a later, unrelated
-      // auto-login (OC-0028).
+      // auto-login.
       const skipAutoLogin = sessionStorage.getItem("owncord:skip-auto-login") !== null;
       sessionStorage.removeItem("owncord:skip-auto-login");
 
@@ -207,7 +207,7 @@ export function createAutoLogin(
           targetProfile?.autoConnect,
           targetProfile?.rememberPassword,
         );
-        // A quick switch keeps each server's saved sign-in (B7-13), so
+        // A quick switch keeps each server's saved sign-in, so
         // switching back resumes with the stored token exactly as auto-login
         // does. Without a stored credential the prefilled form stays up.
         if (targetProfile !== undefined && startupAttempt.isCurrent()) {

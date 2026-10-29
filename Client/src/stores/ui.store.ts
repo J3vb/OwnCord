@@ -35,7 +35,7 @@ export interface UiState {
   readonly sidebarMode: "channels" | "dms";
   readonly activeDmUserId: number | null;
   /**
-   * The B9-4 content view open in place of the chat column, or null. Written
+   * The content view open in place of the chat column, or null. Written
    * only by the page's content navigator (features/navigation/contentView.ts),
    * which also owns the view's lifetime and focus.
    */
@@ -55,7 +55,7 @@ export interface UiState {
 export type SettingsTabRequest = "Account" | "Safety" | "About" | "Notifications";
 
 /**
- * The one `ui.store` fact a protocol-epoch refusal leaves behind (Decision 2):
+ * The one `ui.store` fact a protocol-epoch refusal leaves behind:
  * the host plus the two epoch numbers, so the incompatible notice can name
  * which side updates without a second store flag.
  */
@@ -190,7 +190,7 @@ export function collapseCategories(categories: readonly string[]): void {
 }
 
 /**
- * Translate collapsed entries saved under a category NAME (before WP 6.5b) to
+ * Translate collapsed entries saved under a category NAME (before categories had ids) to
  * the category's id key, once the channel list says which name is which id, and
  * rewrite the saved list. `keysByName` maps a category name to its group key.
  * An entry that matches no known name stays untouched (the synthetic Voice

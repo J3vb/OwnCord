@@ -219,7 +219,7 @@ func (d *DB) CreateChannelIn(ctx context.Context, c NewChannel) (int64, error) {
 			return nil
 		}
 		// The channel starts as a copy of its category's template and synced
-		// to it, in this same transaction (WP 6.5d).
+		// to it, in this same transaction.
 		return copyTemplateToNewChannelTx(ctx, q, id, *catID)
 	})
 	if err != nil {

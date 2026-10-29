@@ -14,7 +14,7 @@ import (
 var ErrNotNSFW = errors.New("channel is not labelled nsfw")
 
 // NSFWService owns the per-user, per-channel acknowledgement row (migration
-// 047, B5-7, decision 13): whether a channel's labelled content may reach a
+// 047): whether a channel's labelled content may reach a
 // given reader. See docs/architecture/community-services.md section S4 for
 // the abuse cases and data-ownership rules this backs, and
 // permissions.CanReadContent for the predicate every content path resolves
@@ -41,7 +41,7 @@ func (s *NSFWService) checkVisible(ctx context.Context, userID, channelID int64)
 		return fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	if ch.IsThread() {
-		// A thread's label and consent are its parent's (6.9c): the
+		// A thread's label and consent are its parent's: the
 		// acknowledgement rows are keyed by the parent only.
 		return fmt.Errorf("acknowledge the thread's parent channel%.0w", ErrBadRequest)
 	}
@@ -58,9 +58,9 @@ func (s *NSFWService) checkVisible(ctx context.Context, userID, channelID int64)
 
 // nsfwAcknowledgeRaceHook, when non-nil, runs once per Acknowledge call
 // immediately after checkVisible succeeds and immediately before the atomic
-// insert (P2-2). Test-only (always nil in production): lets a test unlabel
-// the channel exactly in that window, reproducing the interleaving Codex
-// flagged deterministically instead of chasing a real goroutine race.
+// insert. Test-only (always nil in production): lets a test unlabel
+// the channel exactly in that window, reproducing the interleaving
+// deterministically instead of chasing a real goroutine race.
 var nsfwAcknowledgeRaceHook func()
 
 // Acknowledge records userID's consent to channelID's labelled content.
@@ -68,7 +68,7 @@ var nsfwAcknowledgeRaceHook func()
 // silently. Refuses ErrNotFound on an invisible channel and ErrNotNSFW on
 // one that is not labelled — there is nothing to acknowledge.
 //
-// P2-2 / Codex round 2 P3: the label check and the insert are ONE writer
+// The label check and the insert are ONE writer
 // transaction (db.AcknowledgeNSFW), so a relabel or unlabel landing between
 // a separate check and a separate insert can no longer make this trust
 // stale consent — and, unlike a rows-affected-only answer, "already

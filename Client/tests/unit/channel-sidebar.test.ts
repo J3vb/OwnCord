@@ -264,7 +264,7 @@ describe("ChannelSidebar", () => {
   });
 
   // ── B9-21: the channel list is a single Tab stop with arrow-key navigation ──
-  describe("keyboard navigation (B9-21)", () => {
+  describe("keyboard navigation", () => {
     it("exposes exactly one Tab stop and marks the active channel", () => {
       setChannels(testChannels);
       setActiveChannel(1);
@@ -659,7 +659,7 @@ describe("ChannelSidebar", () => {
 
   // ── WP 3D-4d: Hide Muted Channels ──
 
-  describe("Hide Muted Channels (WP 3D-4d)", () => {
+  describe("Hide Muted Channels", () => {
     const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
       id,
       name: `text-${id}`,
@@ -869,7 +869,7 @@ describe("ChannelSidebar", () => {
     });
   });
 
-  describe("collapsed category shows what matters (WP 2B-5)", () => {
+  describe("collapsed category shows what matters", () => {
     const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
       id,
       name: `text-${id}`,
@@ -1163,7 +1163,7 @@ describe("ChannelSidebar", () => {
     expect(onOpenCall).not.toHaveBeenCalled();
   });
 
-  it("a timeout disables joining voice with the server expiry, never leaving (B9-15)", () => {
+  it("a timeout disables joining voice with the server expiry, never leaving", () => {
     setChannels(testChannels);
     setActiveTimeout(new Date(Date.now() + 3_600_000).toISOString());
     sidebar.mount(container);
@@ -2295,6 +2295,8 @@ describe("ChannelSidebar", () => {
    *  by default the one the server computes with no channel override (the
    *  role's MUTE_MEMBERS, ADMINISTRATOR included). Returns the open menu
    *  element (or null). */
+  const MUTE_AND_MOVE = Permission.MUTE_MEMBERS | Permission.MOVE_MEMBERS;
+
   async function openVoiceMenuAs(
     permissions: number,
     voiceUser: Partial<VoiceStatePayload> = {},
@@ -2316,7 +2318,15 @@ describe("ChannelSidebar", () => {
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onVoiceModerate });
 
     setChannels(
-      channels.map((ch) => (verdict === null ? ch : { ...ch, can_moderate_voice: verdict })),
+      channels.map((ch) =>
+        verdict === null
+          ? ch
+          : {
+              ...ch,
+              can_moderate_voice: verdict,
+              can_move_voice: (permissions & Permission.MOVE_MEMBERS) !== 0,
+            },
+      ),
     );
     updateVoiceState({
       channel_id: 3,
@@ -2434,7 +2444,7 @@ describe("ChannelSidebar", () => {
     expect((await reopen())!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
-  it("offers only Move to to a role whose verdict is can_move_voice without can_moderate_voice (WP 8.4b)", async () => {
+  it("offers only Move to to a role whose verdict is can_move_voice without can_moderate_voice", async () => {
     const cb = voiceModCallbacks();
     const channels: ReadyChannel[] = [
       ...testChannels.map((ch) =>
@@ -2462,10 +2472,13 @@ describe("ChannelSidebar", () => {
     expect(cb.onMove).toHaveBeenCalledWith(80, 5);
   });
 
-  it("shows the full section when can_moderate_voice is true even if can_move_voice is false", async () => {
-    const channels = testChannels.map((ch) =>
+  it("shows the full section but no Move to when can_moderate_voice is true and can_move_voice is false", async () => {
+    const channels = [
+      ...testChannels,
+      { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
+    ].map((ch) =>
       ch.type === "voice" ? { ...ch, can_moderate_voice: true, can_move_voice: false } : ch,
-    );
+    ) as ReadyChannel[];
     const menu = await openVoiceMenuAs(
       Permission.MUTE_MEMBERS,
       {},
@@ -2475,6 +2488,7 @@ describe("ChannelSidebar", () => {
     );
     expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
     expect(menu!.querySelector('[data-action="voice-disconnect"]')).not.toBeNull();
+    expect(menu!.querySelector('[data-action="move-to"]')).toBeNull();
   });
 
   it("offers nothing when both verdicts are false", async () => {
@@ -2553,7 +2567,7 @@ describe("ChannelSidebar", () => {
       { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
     ];
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
-    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    const menu = await openVoiceMenuAs(MUTE_AND_MOVE, {}, cb, channels);
 
     const why = menu!.querySelector('[data-action="voice-mod-offline"]');
     expect(why!.textContent).toBe(
@@ -2573,14 +2587,14 @@ describe("ChannelSidebar", () => {
     expect(cb.onDisconnect).not.toHaveBeenCalled();
 
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "disconnected" }));
-    const offline = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    const offline = await openVoiceMenuAs(MUTE_AND_MOVE, {}, cb, channels);
     expect(offline!.querySelector('[data-action="voice-mod-offline"]')!.textContent).toBe(
       "Not connected. Voice moderation needs a connection to the server.",
     );
 
     // Back online: the rows are live again and the reason is gone.
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
-    const live = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, channels);
+    const live = await openVoiceMenuAs(MUTE_AND_MOVE, {}, cb, channels);
     expect(live!.querySelector('[data-action="voice-mod-offline"]')).toBeNull();
     const mute = live!.querySelector<HTMLButtonElement>('[data-action="server-mute"]')!;
     expect(mute.disabled).toBe(false);
@@ -2588,15 +2602,25 @@ describe("ChannelSidebar", () => {
     expect(cb.onServerMute).toHaveBeenCalledWith(3, 80, true);
   });
 
+  it("gives a MUTE_MEMBERS-only role no Move to: only MOVE_MEMBERS opens a move", async () => {
+    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, voiceModCallbacks(), [
+      ...testChannels,
+      { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
+    ]);
+    expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
+    expect(menu!.querySelector('[data-action="move-to"]')).toBeNull();
+    expect(menu!.querySelector("[data-move-channel]")).toBeNull();
+  });
+
   it("offers only the other voice channels as move targets", async () => {
     const cb = voiceModCallbacks();
-    const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb);
+    const menu = await openVoiceMenuAs(MUTE_AND_MOVE, {}, cb);
 
     const moveItems = menu!.querySelectorAll("[data-move-channel]");
     // testChannels has one voice channel (id 3) — the one the target is in.
     expect(moveItems.length).toBe(0);
 
-    const menu2 = await openVoiceMenuAs(Permission.MUTE_MEMBERS, {}, cb, [
+    const menu2 = await openVoiceMenuAs(MUTE_AND_MOVE, {}, cb, [
       ...testChannels,
       { id: 5, name: "voice-two", type: "voice", category: "Voice Channels", position: 1 },
     ]);
@@ -2643,7 +2667,7 @@ describe("ChannelSidebar", () => {
     expect(icon.title).toBe("Muted by a moderator");
   });
 
-  it("shows a locally muted participant's icon and redraws on a local Mute change (WP 1D-5)", () => {
+  it("shows a locally muted participant's icon and redraws on a local Mute change", () => {
     sidebar.destroy?.();
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
     setChannels(testChannels);
@@ -3107,7 +3131,7 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(title).toContain("not an identity");
   });
 
-  it("refreshes the badge tooltip when a peer's session fingerprint changes at an unchanged status (OC-0208)", () => {
+  it("refreshes the badge tooltip when a peer's session fingerprint changes at an unchanged status", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     setPeerVerif(10, "unverified", null, "5E55 1234 5678 9ABC");
     sidebar.mount(container);
@@ -3162,7 +3186,7 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(badge!.classList.contains("mismatch")).toBe(true);
   });
 
-  it("shows a distinct 'could not check' badge when the pin store was unreadable (DC-08)", () => {
+  it("shows a distinct 'could not check' badge when the pin store was unreadable", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     setPeerVerif(10, "unknown", null);
     sidebar.mount(container);
@@ -3402,7 +3426,7 @@ describe("ChannelSidebar voice identity badge", () => {
 // another channel, a voice peer toggling mute, the WS flipping to
 // reconnecting -- tears the open re-pin prompt down, and a re-render landing
 // during the async fingerprint compute makes the click a silent no-op.
-describe("ChannelSidebar identity-mismatch modal lifetime (OC-0281)", () => {
+describe("ChannelSidebar identity-mismatch modal lifetime", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
@@ -3880,7 +3904,7 @@ describe("ChannelSidebar channel context menu permissions", () => {
 // must still be disposed before it detaches, or the old leak returns for that
 // row. This pins both halves of the keyed contract: identity is kept for an
 // unchanged row, and the listeners of a replaced one die with it.
-describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
+describe("ChannelSidebar row listeners across re-renders", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
@@ -3979,7 +4003,7 @@ describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
 // open popover is torn down by events that have nothing to do with it -- a
 // message in another channel, a peer toggling their mic, a category
 // collapsing.
-describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () => {
+describe("ChannelSidebar popovers survive unrelated re-renders", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
@@ -4069,7 +4093,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () =>
 // kept current by one select over their stores. A row's node is kept unless
 // something it draws changed; these pin which changes keep or rebuild which
 // node, and where focus goes when its row goes.
-describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
+describe("ChannelSidebar voice rows on models", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
   let onVoiceJoin: Mock<(channelId: number) => void>;
@@ -4146,7 +4170,7 @@ describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
     mockGetUserLocalMute.mockImplementation(() => false);
   });
 
-  it("rename mid-call updates the label (OC-0333)", () => {
+  it("rename mid-call updates the label", () => {
     setChannels(testChannels);
     setMembersMap([member(10, "alice", "Alice"), member(11, "bob", "Bob")]);
     addVoiceUser(VOICE_CH, 10, "alice");
@@ -4310,7 +4334,9 @@ describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
       onOpenCall,
       onVoiceModerate: voiceModCallbacks(),
     });
-    setChannels(testChannels.map((c) => ({ ...c, can_moderate_voice: true })));
+    setChannels(
+      testChannels.map((c) => ({ ...c, can_moderate_voice: true, can_move_voice: true })),
+    );
     addVoiceUser(VOICE_CH, 10, "alice");
     addVoiceUser(VOICE_CH, 99, "Me");
     sidebar.mount(container);
@@ -4439,7 +4465,7 @@ describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
 // The text rows and category groups reconcile from models, so a row's node is
 // kept unless something it draws changed. The row's handlers are bound from
 // the model too (`access`, `orderIds`), so a role edit rebinds them.
-describe("ChannelSidebar text rows and groups on models (5.4d-1)", () => {
+describe("ChannelSidebar text rows and groups on models", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
   const VOICE_CH = 3; // "voice-lobby" in testChannels
@@ -4684,7 +4710,7 @@ describe("ChannelSidebar text rows and groups on models (5.4d-1)", () => {
   });
 });
 
-describe("ChannelSidebar on one select (5.4d-2)", () => {
+describe("ChannelSidebar on one select", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 

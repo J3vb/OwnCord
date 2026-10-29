@@ -121,8 +121,8 @@ function snapshot(): VoiceRowInputs {
     selfId: authStore.getState().user?.id ?? null,
     connectionStatus: uiStore.getState().connectionStatus,
     timeout: safetyStore.getState().timeout,
-    moderatable: Array.from(channelsStore.getState().channels.values())
-      .filter((ch) => ch.type === "voice" && ch.canModerateVoice === true)
+    movable: Array.from(channelsStore.getState().channels.values())
+      .filter((ch) => ch.type === "voice" && ch.canMoveVoice === true)
       .map((ch) => ch.id)
       .toSorted((a, b) => a - b),
     localMute: {},

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// ChatForwardCmd represents a chat_forward message (WP 6.9a): copy message
+// ChatForwardCmd represents a chat_forward message: copy message
 // MessageID into channel ChannelID. One target per frame, so each forward
 // commits whole or not at all.
 type ChatForwardCmd struct {

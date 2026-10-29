@@ -18,7 +18,7 @@ import (
 // It shares the insert's writer checkout rather than taking a second one
 // after the commit: under a burst of simultaneous sends every checkout queues
 // behind the other senders', so a second checkout put each sender back in the
-// writer queue before its acknowledgement (OC-0454).
+// writer queue before its acknowledgement.
 //
 // Best-effort, as it was as a separate statement after the commit: a failure
 // is logged and the message still commits. SQLite rolls back only the failing

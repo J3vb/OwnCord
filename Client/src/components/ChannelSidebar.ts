@@ -3,8 +3,8 @@
  * unread indicators, and collapse/expand behavior.
  * Voice channels show connected users; a click joins, or opens the call once joined.
  * The voice rows draw from row models (features/channels/voiceRow*.ts) that
- * one `select` over their stores keeps current (5.4c-2); the text rows and the
- * category groups draw from models too (features/channels/channelRow*.ts, 5.4d).
+ * one `select` over their stores keeps current; the text rows and the
+ * category groups draw from models too (features/channels/channelRow*.ts).
  */
 
 import { Disposable } from "@lib/disposable";
@@ -89,7 +89,7 @@ import {
 } from "../features/channels/voiceRowModel";
 import { PREF_CHANGE_EVENT } from "@lib/preferences";
 
-// The per-user volume menu loads on its first open (O-6b).
+// The per-user volume menu loads on its first open.
 const volumeMenuScreen = createLazyScreen(
   "user-volume-menu",
   () => import("./channel-sidebar/volume-menu"),
@@ -104,7 +104,7 @@ export interface ChannelReorderData {
   readonly previousPosition: number;
   /**
    * Present on the one entry of a drop that also moves the channel to another
-   * category (WP 6.5c): its PATCH then carries `category_id`, and a failed save
+   * category: its PATCH then carries `category_id`, and a failed save
    * rolls back the category as well as the position.
    */
   readonly category?: {
@@ -140,7 +140,7 @@ export function canModerateVoice(): boolean {
   return currentUserRoleHasPermission(Permission.MUTE_MEMBERS);
 }
 
-/** Whether the signed-in user's role holds MOVE_MEMBERS (WP 8.4a); like
+/** Whether the signed-in user's role holds MOVE_MEMBERS; like
  *  canModerateVoice, only used to explain a channel with no verdict. */
 function canMoveVoiceByRole(): boolean {
   return currentUserRoleHasPermission(Permission.MOVE_MEMBERS);
@@ -160,7 +160,7 @@ export interface ChannelSidebarOptions {
    * synthetic Voice group, whose "+" most likely means another voice channel.
    */
   readonly onCreateChannel?: (category: CategoryRef, type?: ChannelType) => void;
-  /** Category management (MANAGE_CHANNELS; WP 6.5b). The header menu hides an entry whose callback is absent. */
+  /** Category management (MANAGE_CHANNELS). The header menu hides an entry whose callback is absent. */
   readonly onCreateCategory?: () => void;
   readonly onRenameCategory?: (category: CategoryRef) => void;
   readonly onDeleteCategory?: (category: CategoryRef) => void;
@@ -173,7 +173,7 @@ export interface ChannelSidebarOptions {
   readonly onReorderChannel?: (reorders: readonly ChannelReorderData[]) => void;
   /**
    * Called when a manager drops a category header on another category's header
-   * or group: `categoryId` goes before (or after) `targetId` (WP 6.5c). The page
+   * or group: `categoryId` goes before (or after) `targetId`. The page
    * sends the new order; nothing is applied locally.
    */
   readonly onReorderCategory?: (categoryId: number, targetId: number, before: boolean) => void;
@@ -183,7 +183,7 @@ export interface ChannelSidebarOptions {
   readonly onInviteFromChannel?: (channel: Channel) => void;
   /** Called when the user clicks a voice user row to watch their stream. */
   readonly onWatchStream?: (userId: number) => void;
-  /** A followed thread's row was clicked: open its parent channel and the thread panel (WP 6.9c). */
+  /** A followed thread's row was clicked: open its parent channel and the thread panel. */
   readonly onOpenThread?: (threadId: number, parentId: number) => void;
   /** A parent's "N more" row was clicked: open its channel and the Threads list. */
   readonly onOpenThreadList?: (parentId: number) => void;
@@ -194,15 +194,16 @@ export interface ChannelSidebarOptions {
 }
 
 /** Moderation section for one participant row, from the channel's
- *  server-computed can_moderate_voice (B9-14, Q5): undefined when it is false
+ *  server-computed can_moderate_voice: undefined when it is false
  *  (which hides the section entirely), and the reason it is unavailable when
  *  the server gave no verdict to a role that holds MUTE_MEMBERS or
  *  MOVE_MEMBERS. A channel whose can_moderate_voice is false but whose
- *  can_move_voice is true (a Move Members-only role, WP 8.4b) gets a section
- *  with only Move to: mute, deafen and disconnect are left out. Read when the
+ *  can_move_voice is true (a Move Members-only role) gets a section
+ *  with only Move to: mute, deafen and disconnect are left out. Move to needs
+ *  can_move_voice: can_moderate_voice alone gets no move targets. Read when the
  *  menu opens, so a role or override change since the last render counts. Move
- *  targets are the other voice channels; the server re-checks rank, timeouts
- *  and that the TARGET may connect to the one picked. */
+ *  targets are the other voice channels; the server re-checks timeouts and
+ *  that the TARGET may connect to the one picked. */
 export function buildVoiceModOptions(
   channelId: number,
   user: VoiceUser,
@@ -222,9 +223,13 @@ export function buildVoiceModOptions(
     }
     return undefined;
   }
-  const moveTargets = Array.from(channelsStore.getState().channels.values())
-    .filter((ch) => ch.type === "voice" && ch.id !== channelId)
-    .map((ch) => ({ id: ch.id, name: ch.name }));
+  // Only MOVE_MEMBERS opens a move: a mute-only verdict gets no "Move to".
+  const moveTargets =
+    moveVerdict === true
+      ? Array.from(channelsStore.getState().channels.values())
+          .filter((ch) => ch.type === "voice" && ch.id !== channelId)
+          .map((ch) => ({ id: ch.id, name: ch.name }))
+      : [];
   // Greyed with a reason rather than hidden while the socket is down: the
   // actions are server commands, and a click would be dropped silently.
   const connectionStatus = uiStore.getState().connectionStatus;
@@ -258,8 +263,8 @@ export function buildVoiceModOptions(
 const NO_VERIFICATIONS: ReadonlyMap<number, PeerVerification> = new Map();
 
 /**
- * The voice rows' inputs from the states the sidebar's `select` hands it
- * (5.4c-2). Reads only its arguments; the optional voice fields an older
+ * The voice rows' inputs from the states the sidebar's `select` hands it.
+ * Reads only its arguments; the optional voice fields an older
  * state lacks are defaulted here, as the row builders expect.
  */
 function projectVoiceInputs(
@@ -278,10 +283,10 @@ function projectVoiceInputs(
       if (member !== undefined) voiceMembers.set(uid, member);
     }
   }
-  const moderatable: number[] = [];
+  const movable: number[] = [];
   for (const ch of channels.channels.values()) {
-    if (ch.type === "voice" && (ch.canModerateVoice === true || ch.canMoveVoice === true)) {
-      moderatable.push(ch.id);
+    if (ch.type === "voice" && ch.canMoveVoice === true) {
+      movable.push(ch.id);
     }
   }
   return {
@@ -294,14 +299,14 @@ function projectVoiceInputs(
     selfId: auth.user?.id ?? null,
     connectionStatus: ui.connectionStatus,
     timeout: safety.timeout,
-    moderatable: moderatable.toSorted((a, b) => a - b),
+    movable: movable.toSorted((a, b) => a - b),
     localMute,
   };
 }
 
 /** `===` per field, except the two the projection builds fresh: the members
  *  in voice (equal when every entry is the same object, so presence churn of
- *  anyone else never reaches the voice rows) and the moderatable ids. */
+ *  anyone else never reaches the voice rows) and the movable ids. */
 function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
   if (
     a.voiceUsers !== b.voiceUsers ||
@@ -320,10 +325,7 @@ function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
   for (const [uid, member] of a.voiceMembers) {
     if (b.voiceMembers.get(uid) !== member) return false;
   }
-  return (
-    a.moderatable.length === b.moderatable.length &&
-    a.moderatable.every((id, i) => b.moderatable[i] === id)
-  );
+  return a.movable.length === b.movable.length && a.movable.every((id, i) => b.movable[i] === id);
 }
 
 /** The voice channels with at least one participant, as one comparable key. */
@@ -335,7 +337,7 @@ function occupiedKey(inputs: VoiceRowInputs): string {
   return ids.toSorted((a, b) => a - b).join(",");
 }
 
-/** Everything the sidebar draws, from one `select` (5.4d-2): the voice rows'
+/** Everything the sidebar draws, from one `select`: the voice rows'
  *  inputs, the channel list's, and the header's server name. */
 interface SidebarInputs {
   readonly voice: VoiceRowInputs;
@@ -436,14 +438,14 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     onMarkThreadRead,
   } = options;
   const disposable = new Disposable();
-  // renderChannels() keys every row (B9-21): an unchanged row is reused and its
+  // renderChannels() keys every row: an unchanged row is reused and its
   // listeners left alone; a replaced row's listeners must be aborted before it
   // detaches. Per-row listeners (context menu, drag handlers) therefore hold
   // their own `Disposable` (ownerByEl), NOT the sidebar-lifetime
   // `disposable.signal` — addEventListener({ signal }) keeps a detached row
   // alive via that signal's own retained "abort" listener list until it fires,
   // so a row left on the sidebar signal would be retained for the sidebar's
-  // whole lifetime (OC-0229). Header/root listeners registered once in mount()
+  // whole lifetime. Header/root listeners registered once in mount()
   // still use `disposable.signal`.
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
@@ -471,7 +473,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
    *  built in the new list before the old row goes). */
   const voiceRowByUserId = new Map<number, HTMLElement>();
 
-  /** Everything the sidebar draws (5.4c-2, 5.4d-2), from the one `select`
+  /** Everything the sidebar draws, from the one `select`
    *  mount() creates. */
   let sidebarSel: Selection<SidebarInputs> | null = null;
   /** Each voice channel's live wrapper, for the refreshes that skip the full
@@ -491,7 +493,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   /**
    * Listener owners for every keyed group and row. A reused element keeps its
    * owner; a replaced or removed one has its owner aborted before it detaches,
-   * so a stale element can never outlive the render that replaced it (OC-0229)
+   * so a stale element can never outlive the render that replaced it
    * — without aborting the listeners of every UNCHANGED row, which the old
    * single per-render controller did.
    */
@@ -533,8 +535,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     const { signal } = owner;
     // Sidebar-lifetime signal for anything mounted outside this row: a menu
     // or modal on document.body must not be torn down by an unrelated
-    // re-render (OC-0281, OC-0282). Row listeners stay on the row's own
-    // signal, so they die with it (OC-0229).
+    // re-render. Row listeners stay on the row's own
+    // signal, so they die with it.
     const lifetimeSignal = disposable.signal;
     voiceRowByUserId.set(model.userId, row);
 
@@ -872,7 +874,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     }
     channelList.querySelector(".channel-list-empty")?.remove();
 
-    /** One group's rows, keyed and reused (B9-21). A collapsed category
+    /** One group's rows, keyed and reused. A collapsed category
      *  keeps only the rows `visibleRows` allows. */
     function reconcileRows(container: HTMLElement, g: ChannelGroup): void {
       const rows = visibleRows(g, list, voice, listCtx);
@@ -935,7 +937,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
             // Sidebar-lifetime signal (aborted only in destroy()) for anything
             // that owns DOM mounted outside this render's rows — a menu or
             // modal on document.body must not be torn down by an unrelated
-            // re-render (OC-0281, OC-0282).
+            // re-render.
             disposable.signal,
             // A row now outlives a channel edit, so the actions take the live
             // channel, not the one this row was built for.
@@ -1073,16 +1075,16 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   function mount(container: Element): void {
     root = createElement("div", { class: "channel-sidebar", "data-testid": "channel-sidebar" });
 
-    // Everything the sidebar draws, as one selection over its sources (5.4c-2,
-    // 5.4d-2). Created before the header and the first render, which read it
-    // (onChange cannot fire synchronously), and owned by the sidebar's
-    // lifetime signal, so destroy() releases it.
+    // Everything the sidebar draws, as one selection over its sources. Created
+    // before the header and the first render, which read it (onChange cannot
+    // fire synchronously), and owned by the sidebar's lifetime signal, so
+    // destroy() releases it.
     //
     // Rows take channelAccess(list) from these inputs (and canModerateVoice()
     // is read only when the voice menu opens). The role and the roles are
     // sources, so a self MEMBER_UPDATE or a ROLES_UPDATE alone redraws the
     // category "+", the channel menu and the voice-moderation menu; nothing
-    // can read them unsubscribed (OC-0142).
+    // can read them unsubscribed.
     // A fresh token per event: localSilenced answers may differ after it.
     const localMuteSource = eventSource(USER_LOCAL_MUTE_CHANGED, () => ({}));
     // The event is dispatched on window by the mute store, so every writer
@@ -1143,7 +1145,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     channelList = createElement("div", { class: "channel-list" });
 
     // One Tab stop for the whole list; ArrowUp/Down step, Enter/Space open the
-    // focused channel (B9-21). The listener lives on the list, which survives
+    // focused channel. The listener lives on the list, which survives
     // every keyed re-render.
     enableRovingNavigation(channelList, ".channel-item", disposable.signal, "vertical");
 

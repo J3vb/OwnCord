@@ -1,5 +1,5 @@
 /**
- * The concealed stand-in for an external item (B9-8). Kept apart from the
+ * The concealed stand-in for an external item. Kept apart from the
  * consent model, which loads with the startup closure through attachments.ts.
  */
 

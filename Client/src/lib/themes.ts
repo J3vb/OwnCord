@@ -32,7 +32,7 @@ export const THEMES = {
     "--text-normal": "#e2e4ef",
     // Refined Neon (B9 Q13): midnight used to inherit dark's input fill and
     // text roles, which were tuned for grey surfaces. Tested values; see
-    // docs/architecture/b9-ui-contract.md.
+    // docs/architecture/ui-contract.md.
     "--bg-input": "#232845",
     "--text-muted": "#a9b0c8",
     "--header-primary": "#f4f5fa",
@@ -44,7 +44,7 @@ export const THEMES = {
     "--bg-secondary": "#f2f3f5",
     "--bg-tertiary": "#e3e5e8",
     "--text-normal": "#2a2c31",
-    // OC-0043: the 4 keys above are all this theme used to set. Every other
+    // The 4 keys above are all this theme used to set. Every other
     // surface/text/border/interactive token then fell through to tokens.css's
     // dark defaults, so widgets painting --text-normal (now dark) on top of
     // e.g. --bg-input (still dark) rendered as unreadable dark-on-dark.
@@ -68,8 +68,8 @@ export const THEMES = {
     "--border-strong": "#cbccd1",
     "--scrollbar-thin-thumb": "#cdcfd4",
     "--scrollbar-auto-thumb": "#cdcfd4",
-    // B9-2: the dark defaults for these read below 4.5:1 (text) or 3:1
-    // (focus) on light surfaces. Tested values; see docs/architecture/b9-ui-contract.md.
+    // The dark defaults for these read below 4.5:1 (text) or 3:1
+    // (focus) on light surfaces. Tested values; see docs/architecture/ui-contract.md.
     "--text-link": "#00658f",
     "--text-positive": "#17703f",
     "--text-warning": "#7a5500",
@@ -215,7 +215,7 @@ export function applyThemeByName(name: string): void {
 /**
  * Apply a built-in theme's palette inline on documentElement, then hand the
  * body class and persistence to applyThemeByName. Moved here from
- * `@components/settings/helpers` (ARCH-06) so `lib/` can apply a stored theme
+ * `@components/settings/helpers` so `lib/` can apply a stored theme
  * without importing the component layer.
  */
 export function applyTheme(name: ThemeName): void {
@@ -316,7 +316,7 @@ export function readableRoleColor(color: string): string {
 }
 
 /** Re-clamp every rendered role colour against the theme now applied. */
-function reclampRoleColors(): void {
+export function reclampRoleColors(): void {
   roleTextCache.clear();
   for (const el of document.querySelectorAll<HTMLElement>("[data-role-color]")) {
     el.style.color = readableRoleColor(el.dataset["roleColor"] ?? "");
@@ -331,7 +331,7 @@ function reclampRoleColors(): void {
  * theme's surfaces. Fills take the user's colour; --on-accent, --accent-hover
  * and --accent-active are derived from it; --accent-text takes it only at 4.5:1
  * or better and --focus-ring only at 3:1 or better, otherwise each keeps the
- * theme's tested colour (B9-2, owner decision Q8 as aligned with Q1). High Contrast overrides those two
+ * theme's tested colour (see color-contrast.ts for the thresholds). High Contrast overrides those two
  * again from app/accessibility.css. An unparseable colour applies nothing.
  */
 export function applyAccent(color: string): void {

@@ -1,10 +1,10 @@
 /**
  * callChat — the call view's chat. The voice channel's own chat is the chat
- * column with that channel active; the grid sits beside it (WP 6.1b). This owns
+ * column with that channel active; the grid sits beside it. This owns
  * the two decisions around that: opening the call view selects the voice
  * channel first, and the split holds only while the active channel is the one
- * the user is in a call on. It also holds the user's "Hide chat" choice (WP
- * 6.1c): split-capable means that split condition with the grid open, and the
+ * the user is in a call on. It also holds the user's "Hide chat" choice:
+ * split-capable means that split condition with the grid open, and the
  * chat sits beside the grid only while capable and the choice is on. Its one
  * store write is navigateToChannel's; the choice is the `callChatOpen` pref.
  */

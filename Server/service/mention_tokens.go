@@ -73,7 +73,7 @@ func (p *parsedMentions) addName(token string) {
 	// COLLATE NOCASE, which folds ASCII A-Z only. A Unicode fold here
 	// (e.g. 'É' -> 'é') would desync this token from GetUserIDsByUsernames'
 	// equally ASCII-folded map key, so a username holding an uppercase
-	// non-ASCII letter could never resolve (OC-0131).
+	// non-ASCII letter could never resolve.
 	raw := db.LowerASCII(token)
 	switch raw {
 	case everyoneToken:

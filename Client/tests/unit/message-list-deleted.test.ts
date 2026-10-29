@@ -87,7 +87,7 @@ const del = (id: number): void => {
   messagesStore.flush();
 };
 
-describe("MessageList — deleted messages leave the list (WP 3A-8)", () => {
+describe("MessageList — deleted messages leave the list", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | null = null;
   let options: MessageListOptions;

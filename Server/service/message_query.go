@@ -15,7 +15,7 @@ import (
 
 // requireChannelRead resolves a channel and asserts the user may read its
 // CONTENT: DM membership for a DM, READ_MESSAGES and — for a labelled
-// channel — the caller's own acknowledgement row otherwise (B5-7,
+// channel — the caller's own acknowledgement row otherwise (see
 // permissions.CanReadContent). A DM the user is not in is reported as
 // ErrNotFound rather than ErrForbidden — its existence is not something an
 // outsider gets to learn. Backs GetMessages, GetMessagesAround,
@@ -205,7 +205,7 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, userID, channelI
 	return msgs, nil
 }
 
-// PinEventResult is the pin row a pin wrote (WP 6.12), with its author
+// PinEventResult is the pin row a pin wrote, with its author
 // resolved and, for a DM, the participants who receive it. It is nil when the
 // pin wrote no row: an unpin, a re-pin, or a pin inside the 10 minute window.
 type PinEventResult struct {
