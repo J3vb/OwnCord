@@ -21,10 +21,25 @@ export const OLD_SERVER_JOIN_CODES: ReadonlySet<string> = Object.freeze(
 );
 
 let pendingId: string | null = null;
+// Whether the join in flight carried a password the user just typed.
+let pendingPasswordRetry = false;
 
-/** Records the envelope id of the voice_join just sent; a newer join replaces an older one. */
-export function noteJoinSent(id: string | undefined): void {
+/** The refusal of the latest join, kept until the error chain has read it. */
+interface Refusal {
+  readonly id: string;
+  readonly channelId: number | null;
+  readonly passwordRetry: boolean;
+}
+let refusal: Refusal | null = null;
+
+/**
+ * Records the envelope id of the voice_join just sent; a newer join replaces an
+ * older one. `passwordRetry` marks the user's retry with a typed password.
+ */
+export function noteJoinSent(id: string | undefined, passwordRetry = false): void {
   pendingId = id ?? null;
+  pendingPasswordRetry = id !== undefined && passwordRetry;
+  refusal = null;
 }
 
 /**
@@ -32,14 +47,41 @@ export function noteJoinSent(id: string | undefined): void {
  * join (an earlier, superseded join's refusal does not count) and is consumed
  * on a match; an id-less error counts only for a join code.
  */
-export function takeJoinRefusal(code: string, id: string | undefined): boolean {
+export function takeJoinRefusal(
+  code: string,
+  id: string | undefined,
+  channelId: number | null = null,
+): boolean {
   if (id === undefined) return OLD_SERVER_JOIN_CODES.has(code);
   if (pendingId === null || id !== pendingId) return false;
+  refusal = { id, channelId, passwordRetry: pendingPasswordRetry };
   pendingId = null;
+  pendingPasswordRetry = false;
   return true;
+}
+
+/** True when the refusal of join `id` (already taken) answered a typed password. */
+export function refusalWasPasswordRetry(id: string | undefined): boolean {
+  return id !== undefined && refusal?.id === id && refusal.passwordRetry;
+}
+
+/**
+ * The channel and kind of the join whose refusal `takeJoinRefusal` accepted for
+ * `id`, once. Null for any other id: an error answering another command, or a
+ * join since superseded.
+ */
+export function takeRefusedJoin(
+  id: string | undefined,
+): { readonly channelId: number | null; readonly passwordRetry: boolean } | null {
+  if (id === undefined || refusal === null || refusal.id !== id) return null;
+  const taken = refusal;
+  refusal = null;
+  return { channelId: taken.channelId, passwordRetry: taken.passwordRetry };
 }
 
 /** Test seam: forget the pending join. */
 export function resetJoinRequest(): void {
   pendingId = null;
+  pendingPasswordRetry = false;
+  refusal = null;
 }

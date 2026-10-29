@@ -45,6 +45,7 @@ export const shards = {
     "src/lib/screenShare.ts",
     "src/lib/appAudioTrack.ts",
     "src/features/voice/joinRequest.ts",
+    "src/features/voice/passwordPrompt.ts",
     "src/lib/watchRequest.ts",
     "src/features/voice/cameraMenu.ts",
     "src/features/voice/autoPlayCameras.ts",

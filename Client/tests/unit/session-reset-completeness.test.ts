@@ -54,6 +54,7 @@ import type { Channel } from "../../src/stores/channels.store";
 import { savePref } from "../../src/lib/preferences";
 import { expectConsole } from "../helpers/console";
 import { voiceStore } from "../../src/stores/voice.store";
+import { promptForChannelPassword } from "../../src/features/voice/passwordPrompt";
 import { messagesStore } from "../../src/stores/messages.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { blocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
@@ -475,6 +476,14 @@ const PROBES: readonly Probe[] = [
     isInitial: () => !takeWatchRefusal("env-1"),
   },
   {
+    name: "voice:passwordPrompt",
+    mutate: async () => {
+      promptForChannelPassword({ send: vi.fn(), disconnect: vi.fn() }, 5, null);
+      await vi.waitFor(() => expect(passwordDialog()).not.toBeNull());
+    },
+    isInitial: () => passwordDialog() === null,
+  },
+  {
     name: "channel-mutes:host",
     mutate: () => {
       setChannelMutesHost("a.example");
@@ -639,6 +648,9 @@ function registeredNamesInSource(): Set<string> {
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
+const passwordDialog = (): Element | null =>
+  document.querySelector("[data-testid='channel-password-dialog']");
 
 const STILL_GIF_URL = "https://gifs.example/probe.gif";
 const { createObjectURL, revokeObjectURL } = URL;
