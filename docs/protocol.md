@@ -634,8 +634,9 @@ servers omit it.
 `can_move_voice` is whether the caller may move voice participants in that
 channel regardless of rank. It is `permissions.AuthorizeVoiceMover`: the base
 role must hold `MOVE_MEMBERS` and the effective permission after both override
-layers must hold `READ_MESSAGES | MOVE_MEMBERS` (Administrator bypasses the
-bits). It is independent of `can_moderate_voice`: a caller with only
+layers must hold `READ_MESSAGES | MOVE_MEMBERS`. The base role must hold
+`MOVE_MEMBERS` explicitly: `ADMINISTRATOR` does not stand in for it, though an
+Administrator that holds it ignores channel overrides as usual. It is independent of `can_moderate_voice`: a caller with only
 `MOVE_MEMBERS` gets `can_move_voice` true and `can_moderate_voice` false and may
 move but not mute, deafen or disconnect. The owner is a valid move target only
 while the owner-only setting `voice_owner_movable` is on, and each target takes
@@ -3003,24 +3004,21 @@ Rate limited: 1 per 60 seconds. Must be in a voice channel.
 
 ## Voice Moderation
 
-Four moderator commands act on another user's voice session. Mute, deafen,
-disconnect and, for a target the actor outranks, move run
-`permissions.AuthorizeVoiceModerator`; `voice_mod_move` can also be authorized
-by `MOVE_MEMBERS` through `permissions.AuthorizeVoiceMover` (see `voice_mod_move`
-below). Each runs its authorizer against the actor in the TARGET's channel:
-the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR` bypasses the bit;
-for mute, deafen and disconnect never the hierarchy, and as it also passes
-`AuthorizeVoiceMover`, an Administrator may move anyone), and the effective permission after both override layers
-must hold `READ_MESSAGES | MUTE_MEMBERS`, so a channel-level deny holds and a
-room the actor cannot see cannot be moderated. For a DM call the actor must be a
-participant. The actor must strictly outrank the target by role position, except
-for a move authorized by `MOVE_MEMBERS`. The target must currently be in a voice
-channel. Each is rate limited to 5/sec and
+Four moderator commands act on another user's voice session. Mute, deafen and
+disconnect run `permissions.AuthorizeVoiceModerator`; `voice_mod_move` runs only
+`permissions.AuthorizeVoiceMover` (see `voice_mod_move` below). Each runs its
+authorizer against the actor in the TARGET's channel. For mute, deafen and
+disconnect the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR`
+bypasses the bit, never the hierarchy), and the effective permission after both
+override layers must hold `READ_MESSAGES | MUTE_MEMBERS`, so a channel-level deny
+holds and a room the actor cannot see cannot be moderated; the actor must
+strictly outrank the target by role position. For a DM call the actor must be a
+participant. The target must currently be in a voice channel. Each is rate limited to 5/sec and
 written to the audit log (`voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
 `voice_mod_kick`, target type `user`).
 
-Failures: `FORBIDDEN` (missing bit, or a target of equal/higher rank on the
-`MUTE_MEMBERS` path),
+Failures: `FORBIDDEN` (missing bit, or a target of equal/higher rank for mute,
+deafen and disconnect),
 `VOICE_ERROR` (target not in voice, not in the named channel, or not
 connected), `BAD_REQUEST` (self-target, non-voice destination),
 `NOT_FOUND` (unknown destination channel), `CHANNEL_FULL` (destination at
@@ -3063,14 +3061,14 @@ the moderator did and restates it with `voice_deafen`.
 { "type": "voice_mod_move", "payload": { "user_id": 7, "to_channel_id": 12 } }
 ```
 
-Authorized by either of two paths. A `MUTE_MEMBERS` holder moves members they
-strictly outrank, exactly as before `MOVE_MEMBERS` existed (no owner switch, no
-per-target limit). A `MOVE_MEMBERS` holder (base role, effective in the target's
-channel) may move a member of any rank, the owner included; the owner is skipped
+Authorized only by `MOVE_MEMBERS`, held explicitly on the base role and
+effective in the target's channel. Neither `MUTE_MEMBERS` nor `ADMINISTRATOR`
+opens a move, so taking `MOVE_MEMBERS` off a role stops it moving anyone. A
+holder may move a member of any rank, the owner included; the owner is skipped
 (`FORBIDDEN`, "the owner cannot be moved") while the owner-only setting
 `voice_owner_movable` is `false` (default `true`), and a move of a member of
 equal or higher rank is further limited to 3 per 30 seconds per target (a
-move that then fails at eviction still counts). An actor holding neither bit
+move that then fails at eviction still counts). An actor without the bit
 gets the same refusal whether the target is in voice or not. On every move the
 mover must also be able to see the destination channel; one they cannot see
 answers `NOT_FOUND` ("channel not found"), the same as a missing one.

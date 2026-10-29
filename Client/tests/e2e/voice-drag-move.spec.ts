@@ -42,10 +42,11 @@ async function sentMoves(page: Page): Promise<string[]> {
   );
 }
 
-/** "Voice Chat" (10) and "Music" (11) both carry `verdict`; user 2 is in 10. */
+/** "Voice Chat" (10) and "Music" (11) both carry `verdict` as can_moderate_voice
+ *  and can_move_voice (a drag needs the move verdict); user 2 is in 10. */
 async function mockVoiceSession(page: Page, verdict: boolean): Promise<void> {
   const channels = MOCK_CHANNELS_WITH_CATEGORIES.map((ch) =>
-    ch.type === "voice" ? { ...ch, can_moderate_voice: verdict } : ch,
+    ch.type === "voice" ? { ...ch, can_moderate_voice: verdict, can_move_voice: verdict } : ch,
   );
   await page.addInitScript(
     buildTauriMockScript({
