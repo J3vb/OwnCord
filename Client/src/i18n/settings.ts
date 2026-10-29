@@ -172,6 +172,19 @@ export const settingsText = defineCatalog("settings", {
   "images.animateEmoji.desc":
     "Play animated custom emoji. When disabled, they show their first frame",
 
+  "images.chatBar.title": "Chat Bar Buttons",
+  "images.chatBar.emoji.label": "Show emoji button",
+  "images.chatBar.emoji.desc":
+    "Show the emoji button in the chat bar. Ctrl+E still opens the picker",
+  "images.chatBar.sticker.label": "Show sticker button",
+  "images.chatBar.sticker.desc": "Show the sticker button in the chat bar",
+  "images.chatBar.gif.label": "Show GIF button",
+  "images.chatBar.gif.desc": "Show the GIF button in the chat bar. Ctrl+G still opens the picker",
+  "images.chatBar.poll.label": "Show Poll button",
+  "images.chatBar.poll.desc": "Show the Poll button in the chat bar",
+  "images.chatBar.voice.label": "Show voice message button",
+  "images.chatBar.voice.desc": "Show the microphone button for voice messages in the chat bar",
+
   "keybinds.pushToTalk": "Push to Talk",
   "keybinds.clickToSet": "Click to set keybind",
   "keybinds.pttAria": "Push to Talk keybind — click to capture",

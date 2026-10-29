@@ -839,6 +839,14 @@ jobs:
       - name: Shipped migrations must not be edited
         run: node scripts/check-migrations.mjs
 
+      # Plan and ticket ids in code comments are a shrink-only count per file
+      # (docs/code-style.md, "Comments"). It reads only tracked source text.
+      - name: Self-test the comment id counter
+        run: node --test scripts/check-comment-ids.test.mjs
+
+      - name: Comment ids must not grow
+        run: node scripts/check-comment-ids.mjs
+
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
 

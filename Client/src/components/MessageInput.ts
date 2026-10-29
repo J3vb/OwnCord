@@ -53,6 +53,11 @@ const stickerPickerScreen = createLazyScreen(
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
 import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/serverCapabilities";
+import { onPrefChange } from "@lib/preferences";
+import {
+  COMPOSER_BUTTON_PREF_KEYS,
+  composerButtonShown,
+} from "../features/messaging/composerButtons";
 import { currentUserRoleHasPermission } from "@lib/permissions";
 import { Permission, type VoiceUploadMeta } from "@lib/types";
 import {
@@ -936,7 +941,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     for (const btn of controlButtons) {
       // The mic needs what "+" needs (an upload) and a server that keeps the clip's metadata.
       if (btn.classList.contains("mic-btn")) {
-        btn.hidden = uploadsOff || !voiceMessagesEnabled();
+        btn.hidden = uploadsOff || !voiceMessagesEnabled() || !composerButtonShown("voice");
         if (disabled) btn.setAttribute("disabled", "true");
         else btn.removeAttribute("disabled");
         continue;
@@ -1860,7 +1865,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       popupDismiss = null;
       closing.element.remove();
       closing.destroy();
-      if (returnFocus) tabButton(tab)?.focus();
+      if (!returnFocus) return;
+      const btn = tabButton(tab);
+      // A button the user hid in settings cannot take focus; the textarea can.
+      if (btn !== null && !btn.hidden) btn.focus();
+      else textarea?.focus();
     }
 
     function handlePopupClickOutside(e: MouseEvent): void {
@@ -2038,6 +2047,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (pollBtn !== null) inputBox.appendChild(pollBtn);
     if (micBtn !== null) inputBox.appendChild(micBtn);
     appendChildren(inputBox, charCounter, sendBtn);
+    // Settings → Text & Images can hide each of these; the switch applies live.
+    const applyButtonPrefs = (): void => {
+      emojiBtn.hidden = !composerButtonShown("emoji");
+      gifBtn.hidden = !composerButtonShown("gif");
+      if (stickerBtn !== null) stickerBtn.hidden = !composerButtonShown("sticker");
+      if (pollBtn !== null) pollBtn.hidden = !composerButtonShown("poll");
+      applyDisabledState();
+    };
+    applyButtonPrefs();
+    onPrefChange(COMPOSER_BUTTON_PREF_KEYS, applyButtonPrefs, signal);
     slowModeNoteEl = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",

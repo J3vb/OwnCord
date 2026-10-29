@@ -80,6 +80,14 @@ gates only Send (and a picked GIF), leaving the draft editable. A
 refused Send shows the reason on the composer's refusal line (linked by
 `aria-describedby`, kept current as the slow-mode countdown ticks).
 
+**Chat bar buttons (user setting).** Settings → Text & Images has one switch
+each for the emoji, sticker, GIF, Poll and voice-message buttons
+(`features/messaging/composerButtons.ts`, local prefs `composerShow*`, all on
+by default). A switch hides its button in every open composer at once through
+`onPrefChange`; it only removes the icon, so the emoji and GIF shortcuts still
+open the picker. Switching a button back on never shows one the server or host
+left out (no stickers, polls or voice messages). Send and "+" cannot be hidden.
+
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
 > `MessageService.checkSendPermission`: READ|SEND, plus MANAGE_MESSAGES for

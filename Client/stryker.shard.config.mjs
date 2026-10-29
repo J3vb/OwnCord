@@ -400,6 +400,7 @@ export const shards = {
     "src/features/members/memberLayout.ts",
     "src/features/moderation/api.ts",
     "src/features/messaging/emojiStill.ts",
+    "src/features/messaging/composerButtons.ts",
     "src/features/profiles/openUserProfilePopup.ts",
     "src/features/profiles/banner.ts",
     "src/features/profiles/userNotes.ts",
