@@ -18,7 +18,7 @@ import {
   focusIndicator,
   keyboardReachable,
   textContrast,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 const THEME_CSS =
   ":root { --bg-tertiary: #4a1030; }\n.settings-pane h3 { letter-spacing: 0.04em; }";
