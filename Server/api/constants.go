@@ -61,6 +61,11 @@ const (
 	// stays under this; it exists to bound abuse of the operator's Klipy quota.
 	gifRateLimitPerMinute = 30
 
+	// externalRateLimitPerMinute bounds the browser client's preview and
+	// image fetches per IP. A GIF picker page asks for 20 images and a busy
+	// channel a few dozen; every one is an outbound fetch, so it stays bounded.
+	externalRateLimitPerMinute = 300
+
 	// gifFavoritesRateLimitPerMinute bounds favorite list/add/remove per IP;
 	// there is no upstream call, so it is looser than the proxy's.
 	gifFavoritesRateLimitPerMinute = 300

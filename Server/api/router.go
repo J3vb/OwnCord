@@ -181,6 +181,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// so the hub can fan a bulk delete out as one chat_bulk_deleted event.
 
 	mountGIF(r, cfg, svc, limiter)
+	// Link previews and outside images for the browser client, which has no
+	// native broker of its own. Only mounted when the browser client is.
+	mountExternalContent(r, cfg, svc.Sessions, limiter)
 
 	// Web Push subscription storage (B5-4) — nothing dispatches yet.
 	// Mounted unconditionally; with push.enabled false every route answers

@@ -69,12 +69,14 @@ var EgressAllow = map[string]EgressEntry{
 	// own, and its gate is whichever caller asked. The callers' own gates are
 	// unchanged — gif.api_key (default empty = the route is not mounted) for
 	// the GIF proxy, plugins.http_allowlist (default empty = every host
-	// denied) for the plugin http capability — so the compiled defaults still
-	// reach nowhere.
-	"safefetch/policy.go": {"config", "only a destination a caller passed in, and only an address ClassifyAddr accepted", "the caller's gate: gif.api_key, or plugins.http_allowlist",
+	// denied) for the plugin http capability, server.browser_client_enabled
+	// (default false = the routes are not mounted) for the browser client's
+	// external-content broker (externalcontent/) — so the compiled defaults
+	// still reach nowhere.
+	"safefetch/policy.go": {"config", "only a destination a caller passed in, and only an address ClassifyAddr accepted", "the caller's gate: gif.api_key, plugins.http_allowlist, or server.browser_client_enabled (the browser client's link previews and images)",
 		"the shared client, transport and dialer; Fetcher.dial connects to the addresses the destination check vetted and to nothing else",
 		[]string{"New", "defaultDial"}},
-	"safefetch/fetch.go": {"config", "the same, one redirect hop at a time", "the caller's gate: gif.api_key, or plugins.http_allowlist",
+	"safefetch/fetch.go": {"config", "the same, one redirect hop at a time", "the caller's gate: gif.api_key, plugins.http_allowlist, or server.browser_client_enabled (the browser client's link previews and images)",
 		"one bounded request per hop, under the deadline, byte ceilings and content-type allowlist in docs/trust-model.md's C-09 contract",
 		[]string{"(*Fetcher).roundTrip"}},
 	"internal/app/healthcheck.go": {"loopback", "this server's /health", "the --healthcheck CLI flag",

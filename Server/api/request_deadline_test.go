@@ -393,6 +393,9 @@ var deadlineOptionalBound = map[string]bool{
 	"* /metrics/*": true,
 	"GET /":        true,
 	"* /assets/*":  true,
+	// The browser client's external-content broker mounts with the portal.
+	"GET /api/v1/external/preview": true,
+	"GET /api/v1/external/image":   true,
 }
 
 // deadlineOptionalExempt are exempt routes that mount only under a build tag
