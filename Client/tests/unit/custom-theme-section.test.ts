@@ -12,14 +12,17 @@ vi.mock("../../src/platform/desktop", () => ({
 }));
 
 import { expectConsole } from "../helpers/console";
-import { buildCustomThemeSection, themeFileName } from "@components/settings/customThemeSection";
+import {
+  buildCustomThemeSection,
+  themeFileName,
+} from "../../src/features/custom-themes/customThemeSection";
 import {
   MAX_CUSTOM_THEMES,
   getActiveCustomThemeId,
   loadCustomThemes,
   saveCustomThemes,
   setActiveCustomTheme,
-} from "@lib/customTheme";
+} from "../../src/features/custom-themes/customTheme";
 
 function q<T extends Element>(root: ParentNode, selector: string): T {
   const el = root.querySelector<T>(selector);

@@ -12,7 +12,7 @@ import {
   paintCustomTheme,
   saveCustomThemes,
   setActiveCustomTheme,
-} from "@lib/customTheme";
+} from "../../src/features/custom-themes/customTheme";
 
 const LIST_KEY = "owncord:theme:custom:list";
 const ACTIVE_KEY = "owncord:theme:custom:active";

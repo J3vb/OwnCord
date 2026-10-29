@@ -1,13 +1,13 @@
 /**
  * Appearance > Custom Themes: the saved list of the user's own CSS themes,
  * with an editor, import and export. The rules and the painting are in
- * lib/customTheme.ts; this file only keeps the list on screen in step.
+ * customTheme.ts; this file only keeps the list on screen in step.
  */
 
-import { createElement, appendChildren, setText } from "@lib/dom";
-import { copyThenToast } from "@lib/clipboard";
-import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { createElement, appendChildren, setText } from "../../lib/dom";
+import { copyThenToast } from "../../lib/clipboard";
+import { createLogger } from "../../lib/logger";
+import { showToast } from "../../lib/toast";
 import {
   MAX_CUSTOM_THEMES,
   MAX_THEME_CSS_CHARS,
@@ -22,8 +22,8 @@ import {
   setActiveCustomTheme,
   type CustomTheme,
   type ThemeCssProblem,
-} from "@lib/customTheme";
-import { createConfirmModal } from "../../features/dialogs/confirmModal";
+} from "./customTheme";
+import { createConfirmModal } from "../dialogs/confirmModal";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
 

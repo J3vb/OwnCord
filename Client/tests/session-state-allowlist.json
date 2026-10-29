@@ -308,7 +308,7 @@
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
-      "file": "lib/customTheme.ts",
+      "file": "features/custom-themes/customTheme.ts",
       "binding": "changeListeners",
       "category": "dom-owned",
       "reason": "Listeners removed by the abort signal each subscriber passes; the custom theme is per device, not per server"

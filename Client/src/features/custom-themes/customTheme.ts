@@ -9,7 +9,7 @@
  * on save and again on every paint, because localStorage is a trust boundary.
  *
  * This file is in the startup chunk (the stored theme paints before the first
- * render), so the settings UI lives in components/settings/customThemeSection.ts.
+ * render), so the settings UI lives in customThemeSection.ts.
  */
 
 import {
@@ -18,8 +18,8 @@ import {
   removeStored,
   saveStoredJson,
   writeStored,
-} from "./preferences";
-import { reclampRoleColors } from "./themes";
+} from "../../lib/preferences";
+import { reclampRoleColors, restoreAccent } from "../../lib/themes";
 
 export interface CustomTheme {
   readonly id: string;
@@ -191,6 +191,15 @@ function withImportantTokens(el: HTMLStyleElement, css: string): string | null {
 }
 
 /**
+ * Re-derive what depends on the surfaces a theme paints: a saved accent's
+ * readable text and focus colours, and the clamped role colours.
+ */
+function refreshDerivedColors(): void {
+  restoreAccent();
+  reclampRoleColors();
+}
+
+/**
  * Paint `css` as the custom theme, or remove it for null. Refused CSS paints
  * nothing and returns false.
  */
@@ -198,7 +207,7 @@ export function paintCustomTheme(css: string | null): boolean {
   const old = styleElement();
   if (css === null || checkThemeCss(css) !== null) {
     old?.remove();
-    reclampRoleColors();
+    refreshDerivedColors();
     return css === null;
   }
   const el = document.createElement("style");
@@ -209,13 +218,13 @@ export function paintCustomTheme(css: string | null): boolean {
   if (final === null || checkThemeCss(final) !== null) {
     el.remove();
     old?.remove();
-    reclampRoleColors();
+    refreshDerivedColors();
     return false;
   }
   el.textContent = final;
   el.removeAttribute("media");
   old?.remove();
-  reclampRoleColors();
+  refreshDerivedColors();
   return true;
 }
 

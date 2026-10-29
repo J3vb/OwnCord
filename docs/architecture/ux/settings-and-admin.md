@@ -188,7 +188,7 @@ changes apply **live** — `ui.setTheme` + the `owncord:pref-change` event re-sk
 open views without reload. Appearance is editable pre-login (on the connect page)
 so the app respects the user's theme before they authenticate.
 
-**Custom themes** (Appearance > Custom Themes, `lib/customTheme.ts`): a saved
+**Custom themes** (Appearance > Custom Themes, `features/custom-themes/`): a saved
 list of the user's own CSS, per device (`owncord:theme:custom:list` and
 `owncord:theme:custom:active` in localStorage), at most one active, painted as
 one `<style id="owncord-custom-theme">` after the built-in theme. Custom

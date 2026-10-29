@@ -8,7 +8,6 @@
 
 import { loadPref } from "@lib/preferences";
 import { applyThemeChoice, getActiveThemeName, restoreAccent } from "@lib/themes";
-import { applyStoredCustomTheme } from "@lib/customTheme";
 import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/os-motion";
 
 /** The Appearance slider's range, and the clamp applied to a stored value. */
@@ -90,7 +89,6 @@ export function applySaturation(): void {
 export function applyStoredAppearance(): void {
   applyThemeChoice(getActiveThemeName());
   restoreAccent();
-  applyStoredCustomTheme();
   applyFontSize();
   applySaturation();
   document.documentElement.classList.toggle(

@@ -958,25 +958,25 @@ details.disclose[open] > summary .icon {
 /* Custom themes (Appearance) */
 .custom-theme-list {
   list-style: none;
-  margin: 8px 0;
+  margin: var(--space-2) 0;
   padding: 0;
 }
 .custom-theme-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
-  margin-bottom: 6px;
+  margin-bottom: var(--space-2);
 }
 .custom-theme-row.active {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 .custom-theme-row .ac-btn {
   margin-left: 0;
-  padding: 4px 10px;
+  padding: var(--space-1) var(--space-3);
 }
 .custom-theme-name {
   flex: 1;
@@ -991,7 +991,7 @@ details.disclose[open] > summary .icon {
 }
 .custom-theme-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .custom-theme-actions .ac-btn {
   margin-left: 0;
@@ -999,8 +999,8 @@ details.disclose[open] > summary .icon {
 .custom-theme-editor {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 .custom-theme-editor[hidden] {
   display: none;
@@ -1008,7 +1008,7 @@ details.disclose[open] > summary .icon {
 .custom-theme-label {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--header-secondary);

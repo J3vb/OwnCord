@@ -30,7 +30,7 @@ import {
   type MemberLayout,
 } from "../../features/members/memberLayout";
 import { appZoom, ZOOM_LEVELS, zoomIndex } from "../../features/zoom";
-import { buildCustomThemeSection } from "./customThemeSection";
+import { buildCustomThemeSection } from "../../features/custom-themes/customThemeSection";
 import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
