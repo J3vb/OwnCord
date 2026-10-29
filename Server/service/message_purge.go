@@ -87,7 +87,7 @@ func (s *MessageService) PurgeMessages(ctx context.Context, userID, channelID in
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "message_purge", "channel", channelID,
 		fmt.Sprintf("purged %d messages, limit=%d, before=%d", len(ids), limit, before))
 
-	// OC-0275: reverse the mention_count increments of every purged message,
+	// Reverse the mention_count increments of every purged message,
 	// the same correction a single moderator delete makes in DeleteMessage.
 	// Detached from ctx for the same reason as the audit write above.
 	if mcErr := s.reverseMentionCounts(context.WithoutCancel(ctx), channelID, ids); mcErr != nil {

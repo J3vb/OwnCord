@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ─── Access explanation and override preview (RI-06) ───────────────────────
+// ─── Access explanation and override preview ───────────────────────
 //
 // Both answer from the canonical predicates (permissions.Explain) over a
 // Subject resolved live by permissions.Checker.Subject — the same resolution

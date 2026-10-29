@@ -1,6 +1,6 @@
 package ws
 
-// listening_activity.go — WP 8.10a: the song a member is listening to,
+// listening_activity.go — the song a member is listening to,
 // reported by the client with listening_update and shown on presence,
 // presence_batch and ready.listening. Like the game (game_activity.go) it is
 // memory only (livePresence.listening): no table, and a disconnect or restart

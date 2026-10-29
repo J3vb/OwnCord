@@ -112,7 +112,7 @@ func (h *Hub) BroadcastUploadPolicy() {
 	}
 }
 
-// gameActivityState is the per-server game activity switch (WP 8.3e-2): the
+// gameActivityState is the per-server game activity switch: the
 // flag and the serialiser that orders its saves.
 type gameActivityState struct {
 	// on is written only under mu, and once when the hub is built; read
@@ -185,8 +185,8 @@ func (h *Hub) ApplyGameActivityPolicy(saved bool) {
 	}
 }
 
-// clearAllGameActivity clears every connection's shown game and song (WP
-// 8.10a) through the ordinary clear path (swapActivityLocked): sequenced presence for a visible
+// clearAllGameActivity clears every connection's shown game and song
+// through the ordinary clear path (swapActivityLocked): sequenced presence for a visible
 // user, the user's own frame only for an invisible one, and a queued connect
 // entry superseded. presenceMu is held across the whole sweep so no set or
 // older presence frame lands between two clears; nothing under it does I/O.

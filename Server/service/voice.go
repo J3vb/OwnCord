@@ -19,7 +19,7 @@ var ErrVoiceChannelFull = errors.New("voice channel is full")
 // VoiceService owns the voice_states table: who is in which voice channel,
 // since when, and the self- and moderator-imposed flags on that membership.
 //
-// The B3-8 voice family moved these decisions off the hub. The hub keeps
+// These decisions were moved off the hub. The hub keeps
 // everything that is genuinely transport — the SFU round trips, the pub/sub
 // topics, key-holder election and the broadcasts — and asks this service for
 // the row. The split matters because a voice membership is written from four
@@ -36,7 +36,7 @@ var ErrVoiceChannelFull = errors.New("voice channel is full")
 type VoiceService struct {
 	st Store
 	// callLog is told about completed DM joins and voice row deletes so it can
-	// keep the call log (WP 3B-9). Set once by service.New; nil in a service
+	// keep the call log. Set once by service.New; nil in a service
 	// built on its own, where the notes do nothing.
 	callLog *CallLogService
 }
@@ -160,7 +160,7 @@ func (s *VoiceService) ReserveCamera(ctx context.Context, userID, channelID int6
 }
 
 // ReserveScreenshare is ReserveCamera for the screenshare column. Both count
-// `camera = 1 OR screenshare = 1` against the same per-channel cap (OC-0023),
+// `camera = 1 OR screenshare = 1` against the same per-channel cap,
 // so neither publish kind can slip past the limit by ignoring the other.
 func (s *VoiceService) ReserveScreenshare(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error) {
 	return s.st.EnableScreenshareIfUnderLimit(ctx, userID, channelID, maxVideo)
@@ -172,14 +172,14 @@ func (s *VoiceService) ReserveScreenshare(ctx context.Context, userID, channelID
 // channel the caller authorized against. It reports whether a row matched:
 // false means the target's membership moved off that channel between the
 // authorization and this write, and the caller must refuse rather than let
-// the write follow them (OC-0005).
+// the write follow them.
 func (s *VoiceService) SetServerMute(ctx context.Context, userID, channelID int64, muted bool) (bool, error) {
 	return s.st.SetVoiceServerMute(ctx, userID, channelID, muted)
 }
 
 // MuteForTimeoutSession is SetServerMute scoped to one exact voice session
 // (channelID, joinedAt) instead of channelID alone, stamping actionID as
-// owner atomically with the mute (round 4): the timeout voice half's
+// owner atomically with the mute: the timeout voice half's
 // authorization and its SFU mute must bind to the SAME session, not a
 // channel a separate, later read could resolve differently if the target
 // moved on in between.
@@ -189,7 +189,7 @@ func (s *VoiceService) MuteForTimeoutSession(ctx context.Context, userID, channe
 
 // ClearServerMuteOwnedBy clears the mute currently owned by any of
 // actionIDs and reports its channel/join token for the paired SFU call
-// (round 4) — see db.DB.ClearServerMuteOwnedBy.
+// — see db.DB.ClearServerMuteOwnedBy.
 func (s *VoiceService) ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error) {
 	return s.st.ClearServerMuteOwnedBy(ctx, userID, actionIDs)
 }
@@ -212,7 +212,7 @@ func (s *VoiceService) SetServerDeafen(ctx context.Context, userID, channelID in
 // the member has already been admitted to. Nothing is written when neither
 // flag is set, so an ordinary first join costs no round trips.
 //
-// serverMutedBy is the PRIOR session's owner (round 5, Codex review P2): a
+// serverMutedBy is the PRIOR session's owner: a
 // mute owned by a timeout must carry that SAME ownership onto the fresh
 // session, through the exact conditional write a timeout's own mute uses
 // (MuteForTimeoutSession) — which also refuses, leaving the fresh session
@@ -260,10 +260,10 @@ func (s *VoiceService) RestoreModFlags(ctx context.Context, userID, channelID in
 //   - a deafen (true) rolls back by CLEARING. Clearing a restriction cannot
 //     authorize anything, so the undo follows the row to whatever channel it
 //     is on now — which is the whole point, because a target switching
-//     channels is the likeliest reason the paired write missed (OC-0034).
+//     channels is the likeliest reason the paired write missed.
 //   - an undeafen (false) rolls back by RE-APPLYING. Following the row there
 //     would stamp a restriction onto a channel the actor was never authorized
-//     against (OC-0036), so it is scoped to authorizedChannelID and simply
+//     against, so it is scoped to authorizedChannelID and simply
 //     matches nothing if the target has moved.
 //
 // Detached from ctx: the cancellation that most likely caused the failure

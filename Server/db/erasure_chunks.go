@@ -12,7 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Chunked account erasure (WP 4.1a). One writer connection serves every
+// Chunked account erasure. One writer connection serves every
 // request, so a single transaction that deletes a prolific account's history
 // holds every other write behind it for as long as it runs. The erasure is
 // therefore three stages, each its own short writer transaction:
@@ -63,8 +63,8 @@ func (d *DB) erasureHook(stage string, n int) error {
 }
 
 // withErasureConn runs fn on the writer connection with PRAGMA secure_delete
-// ON, so the erased rows' bytes do not survive in freed pages (HP-4 decision
-// 2), and restores the setting afterwards. secure_delete is per connection
+// ON, so the erased rows' bytes do not survive in freed pages,
+// and restores the setting afterwards. secure_delete is per connection
 // and the writer pool is one connection, so this is the connection every
 // later write uses too.
 func (d *DB) withErasureConn(ctx context.Context, userID int64, fn func(conn *sql.Conn) error) error {

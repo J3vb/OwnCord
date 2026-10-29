@@ -35,7 +35,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	// the hub and closes its send channels, but never touches the underlying
 	// connection or signals readPump — readPump keeps calling handleMessage
 	// for every frame it reads until the write side eventually times out and
-	// closes the conn (OC-0285). isSendClosed is the same "this client has
+	// closes the conn. isSendClosed is the same "this client has
 	// been cut off" flag Subscribe already treats as canonical (pubsub.go)
 	// and that closeSend sets synchronously before kickClient returns, so
 	// checking it here — before the session recheck even runs — drops every
@@ -44,7 +44,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if c.isSendClosed() {
 		return
 	}
-	// fctx is this frame's database deadline (WP 4.1b). It is derived from the
+	// fctx is this frame's database deadline. It is derived from the
 	// connection context, so a disconnect still cancels it. Exempt types
 	// (command_deadline.go) dispatch on c.ctx below. handleMessageApply takes it
 	// only for the voice join's pre-commit work; its events and the rest of the
@@ -59,7 +59,7 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if !ok {
 		return
 	}
-	// The app-level heartbeat keeps an idle socket's session sliding (DP-05).
+	// The app-level heartbeat keeps an idle socket's session sliding.
 	if env.Type == MsgTypePing {
 		h.touchSession(fctx, c)
 	}
@@ -338,7 +338,7 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 // applySetChannelID moves c's focused channel to newChID and updates its
 // pub/sub topic subscription to match.
 //
-// OC-0024: channel_focus's handler (service/channel.go) checks READ_MESSAGES
+// channel_focus's handler (service/channel.go) checks READ_MESSAGES
 // before returning, but that check and the Subscribe below are separated by
 // two SQLite round trips (GetLatestMessageID/UpdateReadState), and the hub's
 // visibility-revoke sweeps (RefreshChannelVisibility, revokeUnreadableChannels)
@@ -369,10 +369,10 @@ func (h *Hub) applySetChannelID(c *Client, newChID int64) {
 	}
 	h.pubsub.Subscribe(c, ChannelTopic(newChID))
 	// The re-validation is permissions.CanAdmitSession — the same predicate
-	// as HandleChannelFocus's admission gate (S-12): DMs are participant-gated
+	// as HandleChannelFocus's admission gate: DMs are participant-gated
 	// (the READ role bit is deliberately waived), non-DMs need READ_MESSAGES
 	// and no archive, and a deleted channel is a denial. A transient lookup
-	// error is NOT a denial (OC-0266) — the recheck exists to catch a concrete
+	// error is NOT a denial — the recheck exists to catch a concrete
 	// revoke in the Subscribe race window, the sweeps stay authoritative, and
 	// unwinding on error would turn any DB hiccup into a silently dead
 	// message stream with no error frame sent to the client; subjectFor and

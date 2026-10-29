@@ -6,7 +6,7 @@ import (
 )
 
 // wirePermissionNotifiers installs the hub as the PermissionChangeNotifier of
-// every service that owns a permission-bearing mutation (WP 5.1a). The role,
+// every service that owns a permission-bearing mutation. The role,
 // channel-override and role-assignment services invalidate the permission cache
 // themselves and then fan out through this port, so every caller of those
 // methods (not only the admin handlers) reaches live clients. Call it before

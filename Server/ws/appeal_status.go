@@ -1,6 +1,6 @@
 package ws
 
-// appealStatusPayload is the appeal_status frame's payload (B5-10):
+// appealStatusPayload is the appeal_status frame's payload:
 // targeted at the appellant only, unsequenced, not replayed. decisionNote
 // is nil until the appeal is decided.
 type appealStatusPayload struct {

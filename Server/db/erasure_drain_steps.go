@@ -58,7 +58,7 @@ const pollVotesChunk = `SELECT message_id, user_id, answer_id FROM poll_votes WH
 		   ORDER BY message_id, user_id, answer_id LIMIT ?2`
 
 // pollVotesStep deletes a chunk of the subject's poll votes. Before it does,
-// it bumps polls.version for each poll the chunk touches (WP 6.9b), so a
+// it bumps polls.version for each poll the chunk touches, so a
 // client refetch sees counts fresher than any copy it holds.
 func pollVotesStep() drainStep {
 	bump := `UPDATE polls SET version = version + 1 WHERE message_id IN
@@ -175,7 +175,7 @@ func drainMessages(ctx context.Context, tx *sql.Tx, userID, _ int64) (drainResul
 // decrements are computed from the message ids outward, so the cost follows
 // the chunk and not the size of read_states; the guards are the same as the
 // whole-account statement's — counted per mention_receipts, undeleted, past the reader's last_message_id,
-// not from an author the reader blocked (OC-0293).
+// not from an author the reader blocked.
 func erasureReverseMentionCountsFor(ctx context.Context, tx *sql.Tx, in string, args []any) error {
 	// The placeholder list is spliced by Replace and holds "?" markers only;
 	// every id is bound below.

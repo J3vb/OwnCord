@@ -65,9 +65,9 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 	var evicted *Client
 	if old != nil {
 		// The whole voice slot moves in one step (voiceTxn.transfer): a
-		// moderator's pending mute/deafen always (OC-0302), the membership
+		// moderator's pending mute/deafen always, the membership
 		// only for a network reconnect (lastSeq > 0) whose replaced
-		// connection had a COMPLETED join (OC-0270); see transfer for why an
+		// connection had a COMPLETED join; see transfer for why an
 		// incomplete one is left behind. Fresh connections (lastSeq == 0) do
 		// NOT take the membership: stale voice cleanup (DB + broadcast +
 		// LiveKit) is owned entirely by the handshake path in serve.go, which
@@ -206,14 +206,14 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 	if replacedVoiceChID != 0 {
 		h.updateKeyHolder(replacedVoiceChID)
 	}
-	// RT-8: elections held while the membership was parked could not see it,
+	// elections held while the membership was parked could not see it,
 	// so a grace inherit re-elects the same way.
 	if inheritedVoiceChID != 0 {
 		h.updateKeyHolder(inheritedVoiceChID)
 	}
 
 	// Re-sync this connection's local E2EE peer-key map now that it is
-	// reachable (OC-0276). voice_e2ee_announce is delivered as an
+	// reachable. voice_e2ee_announce is delivered as an
 	// unsequenced pub/sub frame (sendToVoiceChannelExcept, voice_e2ee.go),
 	// bypassing deliverBroadcast/h.replayBuf entirely — so on a network
 	// reconnect (the transfer above), neither reconnect replay tier can ever
@@ -231,7 +231,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 		// Same for who-watches-what (voice_watching, also unsequenced). No
 		// self re-relay: the resumed client re-sends its own set.
 		h.sendVoicePeerWatching(c, voiceChID)
-		// Re-relay THIS client's own stored key back onto VoiceTopic (OC-0316).
+		// Re-relay THIS client's own stored key back onto VoiceTopic.
 		// voice_e2ee_offer (the room-key-bearing message) is a targeted,
 		// unsequenced send that is silently dropped if this socket was down
 		// when it went out (sendToUserIfInVoiceChannel, voice_e2ee.go) — and
@@ -250,7 +250,7 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 }
 
 // postRegisterSessionRecheck re-validates c's session token immediately
-// after registerNow makes c reachable via h.clients, closing OC-0423: a
+// after registerNow makes c reachable via h.clients, closing a gap: a
 // session revoked (sign-out-everywhere, POST /users/me/sessions/revoke-all;
 // or account recovery, RedeemRecoveryKit) while this handshake's earlier DB
 // work was still in flight is invisible to DisconnectRevokedUser: that call
@@ -277,10 +277,10 @@ func (h *Hub) registerNow(c *Client, readableChannelIDs map[int64]bool, txn *voi
 // check when c carries no token (never true for a real client) and fails
 // open on a transient DB error — a failed read says nothing about the
 // session's validity, matching handleMessageSessionRecheck's identical rule
-// (OC-0211) and sweepRevokedSessions' rule for a failed batch lookup.
+// and sweepRevokedSessions' rule for a failed batch lookup.
 //
 // It re-checks the ban the same way handleMessageSessionRecheck does. The
-// earlier ban check in refreshUserSnapshot (OC-0272) runs before registerNow,
+// earlier ban check in refreshUserSnapshot runs before registerNow,
 // so a ban committing between the two finds no client for DisconnectUser to
 // kick; the same before/after-registerNow argument as for the session row
 // above makes this read the one that catches it.
@@ -305,8 +305,8 @@ func (h *Hub) postRegisterSessionRecheck(ctx context.Context, c *Client) postReg
 		h.unregisterFailedHandshake(ctx, c)
 		return postRegisterBanned
 	}
-	// The session just proved live on a registered socket: slide its expiry
-	// (DP-05). Both handshake paths come through here.
+	// The session just proved live on a registered socket: slide its expiry.
+	// Both handshake paths come through here.
 	h.touchSession(ctx, c)
 	return postRegisterOK
 }
@@ -367,7 +367,7 @@ func (h *Hub) unregisterNow(c *Client) bool {
 // block (DB delete, audience scan). A reconnect landing during that window
 // registers a new client for the same user and is invisible to the stale
 // boolean, so the dead connection's teardown would otherwise mark the live
-// session offline (OC-0019). Re-checking h.clients at decision time closes
+// session offline. Re-checking h.clients at decision time closes
 // that gap: any entry present once c has been removed is necessarily a newer
 // connection — unregisterNow only ever deletes c's own slot, never someone
 // else's.
@@ -420,7 +420,7 @@ func (h *Hub) DisconnectUser(userID int64) {
 }
 
 // DisconnectRevokedUser drops every live connection of a user whose sessions
-// were just revoked (sign-out-everywhere, B4-7): the socket authenticated on
+// were just revoked (sign-out-everywhere): the socket authenticated on
 // a session that no longer exists, and the revoked-session sweep would only
 // notice on its next tick. No frame precedes the close — the same treatment
 // the sweep gives a revoked session — so the client's reconnect meets the
@@ -429,7 +429,7 @@ func (h *Hub) DisconnectUser(userID int64) {
 // This inspects h.clients at one instant, so a revocation landing while a
 // connection's handshake is still in flight finds nothing to kick here. That
 // window is closed on the other side instead, by postRegisterSessionRecheck
-// (hub_registry.go) — see its doc for why the pair leaves no gap (OC-0423).
+// (hub_registry.go) — see its doc for why the pair leaves no gap.
 func (h *Hub) DisconnectRevokedUser(userID int64) {
 	conns := h.clientsOf(userID)
 	if len(conns) > 0 {
@@ -450,7 +450,7 @@ func (h *Hub) onClientEvent(ev clientEvent) {
 		return
 	}
 	// No handshake permission set on this path (and no DB call on the hub
-	// goroutine, ARCH-019) — nil denies the inherited voice-channel
+	// goroutine) — nil denies the inherited voice-channel
 	// subscription. A wake refusal cannot occur here: the handshake paths
 	// refuse before queueing a Register event, and the event path never
 	// carries wakeReconnect.

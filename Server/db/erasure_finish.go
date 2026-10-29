@@ -18,7 +18,7 @@ import (
 // into db_done with the union of the files every stage collected. After the
 // commit it unlinks the audit history and truncates the WAL, once.
 //
-// subjectToken is the deletion marker's token for the subject (B4-10): the
+// subjectToken is the deletion marker's token for the subject: the
 // audit rows the subject appears in keep their action, time and order but
 // lose the id — actor_id / target_id become 0, detail is cleared — and carry
 // the token instead. An empty token unlinks the rows without one.
@@ -37,7 +37,7 @@ func (d *DB) EraseAccountFinish(ctx context.Context, userID int64, subjectToken 
 		if err := d.erasureHook("finish", 0); err != nil {
 			return err
 		}
-		// B6-11 drill 9's crash seam: the transaction has committed and the
+		// Crash seam: the transaction has committed and the
 		// checkpoint below has not run, which is the window a test needs to
 		// read the bytes as a crash leaves them. Nil in production.
 		if d.testEraseCommitHook != nil {
@@ -143,7 +143,7 @@ func eraseSubjectRows(ctx context.Context, tx *sql.Tx, userID int64, username, s
 			return nil, fmt.Errorf("EraseAccount %s: %w", s.label, err)
 		}
 	}
-	// Replay events naming the subject (HP-4 decision 1). The drain has taken
+	// Replay events naming the subject. The drain has taken
 	// every one that existed before the lock, so the sweep here is the rows
 	// written since: the job's created_at is the lock's time, and the
 	// created_at index turns the JSON predicate's table scan into a range.

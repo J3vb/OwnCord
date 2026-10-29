@@ -8,7 +8,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Emergency recovery codes (BPR-046, B4-3): a second factor of last resort
+// Emergency recovery codes: a second factor of last resort
 // for an account whose authenticator is gone. Ten codes are issued when 2FA
 // is enrolled (and on every regeneration), each usable once in place of a
 // TOTP code at the verify step. The server stores bcrypt hashes only; the

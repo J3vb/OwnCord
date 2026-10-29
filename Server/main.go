@@ -80,14 +80,14 @@ func main() {
 		os.Exit(runTokenCLI(os.Args[2:]))
 	}
 	// `server restore <file>` is the offline counterpart to the admin restore
-	// endpoint (B11-7): put a database backup back on a server that will not
+	// endpoint: put a database backup back on a server that will not
 	// boot. Handled before logging setup so it stays quiet and standalone, and
 	// it takes the database's process lock so a running server stops it.
 	if len(os.Args) > 1 && os.Args[1] == "restore" {
 		os.Exit(runRestoreCLI(config.DefaultPath, os.Args[2:]))
 	}
 	// `server config reset-overrides` drops settings saved from the admin
-	// panel while the server is stopped (WP 4.7a). Handled before logging
+	// panel while the server is stopped. Handled before logging
 	// setup for the same reason, and it takes the same process lock.
 	if len(os.Args) > 1 && os.Args[1] == "config" {
 		os.Exit(runConfigCLI(config.DefaultPath, os.Args[2:]))

@@ -8,14 +8,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Hub read seams (B3-8 channel family, part 3) ───────────────────────────
+// ─── Hub read seams (channel family, part 3) ───────────────────────────
 //
 // The hub's snapshot, visibility, member-payload and dispatch paths read
 // through these consumer-side interfaces instead of the raw handle — the
 // SettingsReader pattern, one seam per concern. Each names exactly the reads
 // its consumer may make, so the contract is visible here and the inventory's
 // per-file rows become type-only: the calls live behind the seam, and later
-// B3-8 families take their methods onto real services without touching the
+// families take their methods onto real services without touching the
 // consumers again. *db.DB satisfies every seam; the composition root wires
 // DBReaders today.
 
@@ -30,7 +30,7 @@ type VisibilityReader interface {
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
 	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
-	// HasNSFWAcknowledgement and ListNSFWAcknowledgedUserIDs back B5-7's
+	// HasNSFWAcknowledgement and ListNSFWAcknowledgedUserIDs back the NSFW
 	// content gate: the ready payload's per-channel nsfw_acknowledged field,
 	// reconnect replay's readable-set filter, and the hub's per-broadcast
 	// content audience (hub_visibility.go). Taken live, never cached, and
@@ -40,7 +40,7 @@ type VisibilityReader interface {
 	// ListBlockersOf backs the channel_activity flush (channel_activity.go):
 	// the users who blocked a message's author get no mention flag from it.
 	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
-	// IsGroupDM and IsTrustedSender back the B5-6 sender-aware DM voice
+	// IsGroupDM and IsTrustedSender back the sender-aware DM voice
 	// audience (voice_broadcast.go's filterDMAudience): a one-to-one DM's
 	// voice_state/voice_leave fan-out must not reach a recipient who does
 	// not yet trust the event's subject, same as chat/typing/reaction.
@@ -55,7 +55,7 @@ type ReadySnapshotReader interface {
 	VisibilityReader
 	ListRoles(ctx context.Context) ([]*db.Role, error)
 	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
-	// ListChannelCategories backs ready's categories (WP 6.5a), read only for
+	// ListChannelCategories backs ready's categories, read only for
 	// a MANAGE_CHANNELS holder.
 	ListChannelCategories(ctx context.Context) ([]db.ChannelCategory, error)
 	// MemberGeneration and NextMemberBanLapse decide when the shared
@@ -65,7 +65,7 @@ type ReadySnapshotReader interface {
 	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 	GetAllVoiceStates(ctx context.Context) ([]db.VoiceState, error)
-	// ListUnacknowledgedWarnings is B5-9's per-user notices slot: every
+	// ListUnacknowledgedWarnings is the per-user notices slot: every
 	// warning issued to the connecting user that they have not yet
 	// acknowledged.
 	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
@@ -134,7 +134,7 @@ func (r HubReaders) complete() bool {
 }
 
 // DBReaders backs every seam with the database handle — the composition
-// root's wiring today. Later B3-8 families narrow individual seams onto
+// root's wiring today. Later families narrow individual seams onto
 // their services without touching the hub: the voice family took
 // StaleVoiceCleaner's two methods onto VoiceService, and the connection
 // family took DisconnectMarker's onto UserService, so this bundle has only
@@ -143,7 +143,7 @@ func DBReaders(d *db.DB) HubReaders {
 	return HubReaders{Visibility: d, Ready: d, Members: d, Dispatch: d}
 }
 
-// ─── Voice membership seam (B3-8 voice family) ──────────────────────────────
+// ─── Voice membership seam (voice family) ──────────────────────────────
 
 // VoiceStore is the hub's view of the voice family: every read and write the
 // voice paths make against voice_states, plus the moderation audit row that
@@ -165,7 +165,7 @@ type VoiceStore interface {
 	// Membership.
 	Join(ctx context.Context, userID, channelID int64, maxUsers int) error
 	LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error)
-	// NoteJoinCompleted tells the DM call log that a join finished (WP 3B-9).
+	// NoteJoinCompleted tells the DM call log that a join finished.
 	NoteJoinCompleted(channelID, userID int64)
 
 	// The member's own flags.
@@ -179,19 +179,19 @@ type VoiceStore interface {
 	// Moderator flags and their compensations.
 	SetServerMute(ctx context.Context, userID, channelID int64, muted bool) (bool, error)
 	SetServerDeafen(ctx context.Context, userID, channelID int64, deafened bool) (bool, error)
-	// MuteForTimeoutSession is the timeout voice half's mute (round 4,
-	// replacing round 3's CompareAndSetServerMute): scoped to one exact
+	// MuteForTimeoutSession is the timeout voice half's mute
+	// (replacing the earlier CompareAndSetServerMute): scoped to one exact
 	// session (channelID, joinedAt), stamping actionID as owner atomically
 	// with the mute, only on a genuine unmuted->muted transition.
 	// supersededIDs transfers ownership onto actionID inside the same
-	// transaction as the mute (round 5, Codex review P2) — see
+	// transaction as the mute — see
 	// service.TimeoutVoiceMuter.MuteForTimeout's doc comment.
 	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error)
 	// ClearServerMuteOwnedBy clears the mute currently owned by any of
-	// actionIDs (round 4) — session-bound: an ended or restarted session
+	// actionIDs — session-bound: an ended or restarted session
 	// can never be cleared by a stale action id.
 	ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error)
-	// serverMutedBy (round 5, Codex review P2) carries a timeout's ownership
+	// serverMutedBy carries a timeout's ownership
 	// onto the fresh session; nil restores the old, ownerless (manual mute)
 	// way.
 	RestoreModFlags(ctx context.Context, userID, channelID int64, muted, deafened bool, serverMutedBy *int64) *db.VoiceState
@@ -199,7 +199,7 @@ type VoiceStore interface {
 	WriteModAudit(ctx context.Context, actorID int64, action string, targetID int64, detail string)
 }
 
-// ─── Connection lifecycle seam (B3-8 connection family) ─────────────────────
+// ─── Connection lifecycle seam (connection family) ─────────────────────
 
 // PresenceStamper is the pair of writes a WebSocket session makes about
 // itself: the status it comes online as, and the offline stamp when its last
@@ -215,7 +215,7 @@ type PresenceStamper interface {
 	StampDisconnect(ctx context.Context, userID int64) error
 }
 
-// ─── Handshake and session seam (B3-8 auth family) ──────────────────────────
+// ─── Handshake and session seam (auth family) ──────────────────────────
 
 // SocketAuthenticator is the hub's view of the auth family: who a bearer token
 // authenticates at the handshake, whether a live connection's session is still

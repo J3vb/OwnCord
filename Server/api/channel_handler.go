@@ -441,7 +441,7 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrNotFound):
 		writeErr(w, http.StatusNotFound, httperr.CodeNotFound, err.Error())
 	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
-		// B5-7: the response carries the code and nothing else.
+		// The response carries the code and nothing else.
 		writeErr(w, http.StatusForbidden, httperr.CodeNSFWAcknowledgementRequired, "")
 	case errors.Is(err, service.ErrTimedOut):
 		writeErr(w, http.StatusForbidden, httperr.CodeTimedOut, err.Error())

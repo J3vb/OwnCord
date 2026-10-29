@@ -90,7 +90,7 @@ func voiceMutatorCalls(f *ast.File) map[string][]token.Pos {
 	return out
 }
 
-// voiceMembershipWrites enforces WP 5.3b: voice membership has one writer.
+// voiceMembershipWrites enforces the single-writer rule: voice membership has one writer.
 // Every change to a user's voice slot and every membership row insert or
 // delete lives in ws/voice_registry*.go, behind the lock handle Hub.begin
 // returns, so a new path cannot forget the member lock, the grace entry or the

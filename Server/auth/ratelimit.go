@@ -10,8 +10,8 @@ import (
 )
 
 // entry records individual request timestamps for sliding-window limiting.
-// window is the caller's OWN window for this key (item 6, B5-10 round 3
-// review): Cleanup used to take one server-wide horizon for every key,
+// window is the caller's OWN window for this key:
+// Cleanup used to take one server-wide horizon for every key,
 // which forced an impossible choice — short enough to reclaim a 1-minute
 // login-attempt key promptly, or long enough to cover service/appeal.go's
 // 24h-per-user cap, never both. Recording each key's own window (set by
@@ -19,7 +19,7 @@ import (
 // short-window key within its own few minutes while a 24h key's history
 // survives until it is genuinely 24h stale, with no shared constant to keep
 // in sync with the longest caller. window only ever grows for a given key
-// (round 4 review, P3) — Allow ratchets it up to the largest window it has
+// — Allow ratchets it up to the largest window it has
 // ever seen for that key, never down, so a key whose configured window
 // shrinks and later grows again (message_crud.go's per-channel slow mode)
 // cannot have its history evicted by Cleanup using a since-superseded
@@ -77,7 +77,7 @@ type rateLimiterShard struct {
 type RateLimiter struct {
 	shards [rateLimiterShards]rateLimiterShard
 	store  LockoutPersister // nil = pure in-memory (tests, non-login limiters)
-	// admission is the one budget for expensive authentication work (B4-4).
+	// admission is the one budget for expensive authentication work.
 	// It lives here because the limiter is already the single instance the
 	// auth routes, the profile routes and the hub share.
 	admission *AdmissionBudget
@@ -114,8 +114,8 @@ func NewPersistentRateLimiter(store LockoutPersister) *RateLimiter {
 	return rl
 }
 
-// Admission is the process-wide budget for expensive authentication work
-// (B4-4, SEC-01): every password compare or hash on an auth route, and the
+// Admission is the process-wide budget for expensive authentication work:
+// every password compare or hash on an auth route, and the
 // recovery-code match at verify, is admitted through it, so the single
 // server-owned admission decision lives with the single shared limiter.
 func (r *RateLimiter) Admission() *AdmissionBudget { return r.admission }
@@ -177,7 +177,7 @@ func (r *RateLimiter) Allow(key string, limit int, window time.Duration) bool {
 	}
 	// Cleanup's own per-key horizon (see entry's doc comment), ratcheted to
 	// the LARGEST window ever observed for this key rather than overwritten
-	// by whichever call happens to run last (round 4 review, P3: a
+	// by whichever call happens to run last (a
 	// channel's slow-mode window, message_crud.go, is admin-configurable —
 	// the same key can be checked under a short window at one point and a
 	// much longer one later). Overwriting unconditionally let a transient
@@ -335,7 +335,7 @@ func (r *RateLimiter) Reset(ctx context.Context, key string) {
 // Cleanup evicts stale map entries to prevent unbounded memory growth.
 //
 // A windows entry is removed when every recorded timestamp is older than
-// the entry's OWN window (item 6 review) — meaning the entry could not
+// the entry's OWN window — meaning the entry could not
 // affect any future Allow call for that key, whatever its window is. A
 // key with no window recorded yet (only reachable via SeedTimestampForTest
 // with no window argument, never in production) is treated as already

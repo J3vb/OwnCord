@@ -18,8 +18,7 @@ import (
 // the structured log output on stdout). fingerprint is the served leaf
 // certificate's SHA-256 in the client's pin format, or "" when there is none
 // to print (TLS off, or ACME before its first handshake); it is the value
-// users compare out of band before accepting the client's trust prompt
-// (BPR-051).
+// users compare out of band before accepting the client's trust prompt.
 func printBanner(cfg *config.Config, ver string, tls bool, fingerprint string) {
 	scheme := "http"
 	if tls {
@@ -110,7 +109,7 @@ func wsURL(httpScheme, ip string, port int) string {
 
 // diskWarnBytes is the boot-time "getting low" tier; it only shapes startup
 // log noise. The critical tier is server.min_free_disk_mb — the same floor
-// /health degrades at and the upload path refuses at (B5-2, decision 11), so
+// /health degrades at and the upload path refuses at, so
 // the three can never disagree about what "low disk" means.
 const diskWarnBytes = 1 << 30 // 1 GiB — warn
 
@@ -136,7 +135,7 @@ func warnLowDisk(log *slog.Logger, label, path string, critical uint64) {
 // be tested against injected topologies — CI has whatever interfaces the
 // runner has, which is not a property worth asserting on.
 //
-// B6-6: this used to be "the first global-unicast IPv4", and net.IP's
+// This used to be "the first global-unicast IPv4", and net.IP's
 // IsGlobalUnicast is true for RFC1918. On a home server that printed the LAN
 // address as the server's address; on a Docker host it could print the bridge.
 // Ranking by netclass.Kind fixes both: a public address now outranks a private
@@ -194,7 +193,7 @@ func bannerLANAdminLine(scheme, lanIP, primaryIP string, port int) string {
 	return "\n    Admin (LAN) " + scheme + "://" + net.JoinHostPort(lanIP, strconv.Itoa(port)) + "/admin"
 }
 
-// bannerQualifier is the one line B6-6 adds to the banner: what kind of
+// bannerQualifier is the one line that tells the banner's reader: what kind of
 // address was printed above, and what that means for anyone outside this
 // machine trying to use it.
 //

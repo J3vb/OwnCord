@@ -254,7 +254,7 @@ func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
 // server binary on the given GOOS/GOARCH. Only the four published pairs
 // resolve; every other combination returns "" so the caller treats the update
 // as unavailable rather than installing a foreign-arch binary it cannot
-// execute (OC-0320). The pairs are matched whole — never by architecture or
+// execute. The pairs are matched whole — never by architecture or
 // OS alone — so adding an asset can never widen an unrelated one.
 func serverDownloadAssetName(goos, goarch string) string {
 	switch {

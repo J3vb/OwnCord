@@ -11,7 +11,7 @@ import (
 
 // AcknowledgeNSFWTxRaceHook runs once per AcknowledgeNSFW call when non-nil,
 // inside the writer transaction, immediately after the label check
-// and before the insert (Codex round 4, item B). Test-only (always nil in
+// and before the insert. Test-only (always nil in
 // production; exported because service's tests exercise this race through
 // NSFWService.Acknowledge, not db.AcknowledgeNSFW directly): the writer
 // connection is capped at one (d.writer.SetMaxOpenConns(1) in db.go), so
@@ -22,8 +22,8 @@ import (
 var AcknowledgeNSFWTxRaceHook func()
 
 // AcknowledgeNSFW records that userID has consented to see channelID's
-// labelled content (migration 047, B5-7). The label check and the insert run
-// inside ONE writer transaction (Codex round 2, P3) — SQLite serializes
+// labelled content (migration 047). The label check and the insert run
+// inside ONE writer transaction — SQLite serializes
 // writers, so a concurrent Revoke or relabel (both writes) cannot land
 // between this transaction's read and its write, nor between the insert and
 // answering whether there was anything to acknowledge. That closes the
@@ -127,8 +127,7 @@ func (d *DB) DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID
 // between them could leave the flag off with acknowledgements still on file
 // (a later re-label would silently trust warnings issued for a DIFFERENT
 // on/off cycle). Callers use this only when the update actually turns nsfw
-// from 1 to 0 — turning it on writes nothing extra (decision 13's own
-// comment: "flipping on writes nothing").
+// from 1 to 0 — turning it on writes nothing extra.
 func (d *DB) AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u ChannelUpdate) error {
 	if err := d.adminUpdateChannel(ctx, id, u, true); err != nil {
 		return fmt.Errorf("AdminUpdateChannelClearingNSFW: %w", err)

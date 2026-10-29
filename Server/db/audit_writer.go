@@ -39,7 +39,7 @@ type AuditWriter struct {
 	// once everything queued before it has been handed to the store.
 	flushReq chan chan struct{}
 
-	// unlinked is the erasure's rule set (B4-10): the erased subjects, by
+	// unlinked is the erasure's rule set: the erased subjects, by
 	// user id, whose entries are written unlinked — id 0, detail cleared,
 	// the deletion marker's token in place — because the erasure
 	// transaction can rewrite only the rows already persisted. Written by
@@ -116,7 +116,7 @@ func (w *AuditWriter) Enqueue(actorID int64, action, targetType string, targetID
 	w.EnqueueEntry(AuditEntry{ActorID: actorID, Action: action, TargetType: targetType, TargetID: targetID, Detail: detail})
 }
 
-// EnqueueEntry is Enqueue for a whole entry, subject token included (B4-10).
+// EnqueueEntry is Enqueue for a whole entry, subject token included.
 func (w *AuditWriter) EnqueueEntry(e AuditEntry) {
 	if w == nil {
 		return
@@ -207,7 +207,7 @@ func (w *AuditWriter) Stats() (persisted, dropped, flushes, errs uint64) {
 	return w.persisted.Load(), w.dropped.Load(), w.flushes.Load(), w.errors.Load()
 }
 
-// Unlink installs the erasure's unlinking rule for userID (B4-10): from now
+// Unlink installs the erasure's unlinking rule for userID: from now
 // on every entry the store inserts that names userID — as actor, or as a
 // user target — is written the way the erasure transaction rewrote the
 // rows already persisted (erasureUnlinkAudit): id 0, detail cleared, the
@@ -262,8 +262,8 @@ func unlinkEntry(e AuditEntry, rules map[int64]string) AuditEntry {
 }
 
 // Flush is a barrier: it returns once every entry enqueued before the call
-// has been handed to the store — the erasure's audit-writer barrier
-// (B4-10), taken before the erasure transaction so an entry queued about
+// has been handed to the store — the erasure's audit-writer barrier,
+// taken before the erasure transaction so an entry queued about
 // the subject is on disk, with its ids, for the transaction's UPDATE to
 // rewrite; a refused transaction then leaves it as it was. A writer that
 // was never started, or has stopped, has nothing in flight to wait for:
@@ -392,7 +392,7 @@ func (d *DB) SetAuditWriter(w *AuditWriter) {
 }
 
 // EnqueueAuditEntry implements AsyncEntryAuditor: WriteAudit's asynchronous
-// fast path, carrying the subject token (B4-10).
+// fast path, carrying the subject token.
 func (d *DB) EnqueueAuditEntry(e AuditEntry) bool {
 	w := d.auditWriter.Load()
 	if w == nil {
@@ -402,7 +402,7 @@ func (d *DB) EnqueueAuditEntry(e AuditEntry) bool {
 	return true
 }
 
-// FlushAudits is the erasure's audit-writer barrier (B4-10): everything
+// FlushAudits is the erasure's audit-writer barrier: everything
 // the installed writer holds is on disk when it returns, with its ids, so
 // the erasure transaction's UPDATE rewrites it and a refused transaction
 // leaves it untouched. Without a writer every audit write was synchronous

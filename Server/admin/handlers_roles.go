@@ -16,7 +16,7 @@ import (
 // stay adapters: decode, call, respond.
 //
 // Permission-cache invalidation and the live fan-out (the hub's role refresh
-// worker, WP 4.4b) belong to RoleService since WP 5.1a: a second caller of the
+// worker) belong to RoleService: a second caller of the
 // service gets the same effects, and nothing after the commit reads
 // r.Context(), so a request deadline or an aborted client cannot cut them.
 
@@ -45,7 +45,7 @@ type roleRequest struct {
 	Color       *string `json:"color"`
 	Permissions *int64  `json:"permissions"`
 	Position    *int    `json:"position"`
-	// Hoist and Mentionable (WP 6.3c): absent leaves them unchanged on PATCH
+	// Hoist and Mentionable: absent leaves them unchanged on PATCH
 	// and false on POST.
 	Hoist       *bool `json:"hoist"`
 	Mentionable *bool `json:"mentionable"`

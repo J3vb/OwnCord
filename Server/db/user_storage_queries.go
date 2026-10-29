@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// The per-user upload byte counter (migration 044, B5-2). The attachments
+// The per-user upload byte counter (migration 044). The attachments
 // rows — avatars included, they are attachments — are the truth; this table is
 // the cached aggregate the upload path admits against, charged before every
 // store write and recounted on the maintenance tick. Emoji are a deliberate,
@@ -88,7 +88,7 @@ func (d *DB) RecountUserStorage(ctx context.Context, userID int64) error {
 // Emoji (bounded, uncounted — see migration 044) are not in it.
 //
 // The sum is cached for statsCacheTTL: a scraper polling every few seconds
-// would otherwise re-aggregate the whole table each time (SV-07). A failed
+// would otherwise re-aggregate the whole table each time. A failed
 // query is not cached.
 func (d *DB) TotalAttachmentBytes(ctx context.Context) (int64, error) {
 	return d.attachmentBytesCache.Get(statsCacheTTL, func() (int64, error) {

@@ -15,7 +15,7 @@ const manageNicknamesOrAdmin = int64(8388608 | 1073741824)
 
 // SetDisplayNameAsModerator writes targetID's display_name (nil clears it) on
 // behalf of actorID and returns the value it replaced. It is the moderator
-// nickname route's one write (WP 6.4a). The authority is re-read live, in the
+// nickname route's one write. The authority is re-read live, in the
 // same write transaction, never trusted from the caller's earlier (cached)
 // check: the actor must hold MANAGE_NICKNAMES or ADMINISTRATOR in the OR of
 // every role they hold, and must strictly outrank the target by top role

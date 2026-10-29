@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// PushSubscription is one Web Push subscription (migration 045, B5-4), as
+// PushSubscription is one Web Push subscription (migration 045), as
 // listed back to its owner: no p256dh or auth, because those are the push
 // credential and the listing is a device inventory, not a credential dump.
 type PushSubscription struct {
@@ -25,7 +25,7 @@ type PushSubscription struct {
 // existing one for the same endpoint (last_seen_at bumped, credential and
 // device name replaced) rather than creating a second row — this is how a
 // client keeps a subscription alive with no dispatch failure to prompt it
-// (there is none yet; dispatch is B5-11). keyID is the VAPID key it was
+// (there is none yet; dispatch is later work). keyID is the VAPID key it was
 // created under (service.PushService.PublicKey's key_id).
 //
 // The upsert, the eviction ranking and the eviction delete run inside ONE
@@ -147,7 +147,7 @@ func (d *DB) CountPushSubscriptions(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// PushSubscriptionForDispatch is one subscription row as dispatch (B5-11)
+// PushSubscriptionForDispatch is one subscription row as dispatch
 // reads it: with the push credential (P256dh, Auth) a listing endpoint never
 // returns.
 type PushSubscriptionForDispatch struct {
@@ -188,7 +188,7 @@ func (d *DB) ListPushSubscriptionsForDispatch(ctx context.Context, userIDs []int
 }
 
 // DeletePushSubscriptionByID removes a subscription by id, unscoped by user
-// — dispatch (B5-11) uses this to prune a row a push service answered
+// — dispatch uses this to prune a row a push service answered
 // 404/410 for; it already read the id from a row it was allowed to read, and
 // nothing else calls it. Reports whether a row was deleted.
 func (d *DB) DeletePushSubscriptionByID(ctx context.Context, id int64) (bool, error) {

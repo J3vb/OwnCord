@@ -36,11 +36,11 @@ import (
 )
 
 // Runtime holds the process-level collaborators NewRouter mounts its routes
-// over. Until B3-3 NewRouter built all of them itself and returned the hub,
+// over. NewRouter used to build all of them itself and returned the hub,
 // while main.go set the hub's event persister and event store after it
 // returned — two owners of one hub. internal/app builds them now
 // (app.StartRuntime), applies every pre-Run setter from that one place, and
-// hands the result in here; B3-4 turns the required setters into validated
+// hands the result in here; a later step turns the required setters into validated
 // constructor options at the same single call site.
 type Runtime struct {
 	// Hub is already wired and running: StartRuntime starts its dispatch
@@ -60,16 +60,16 @@ type Runtime struct {
 	// SetupToken is required on the first-run setup request when non-empty
 	// (admin.SetupOptions.SetupToken). The app generates it per start.
 	SetupToken string
-	// LogLevel backs the admin panel's runtime log-level card (SRE-07). Built
+	// LogLevel backs the admin panel's runtime log-level card. Built
 	// by internal/app around the same *slog.LevelVar main's log sinks use.
 	LogLevel *admin.LogLevelController
 	// MetricsWindows is the sampled ring behind the metrics endpoint's
-	// "windows" block (WP 4.3a). StartRuntime builds it; the app starts its
+	// "windows" block. StartRuntime builds it; the app starts its
 	// sampler (App.startHub) and stops it before the hub. Nil leaves it out.
 	MetricsWindows *metrics.Windows
 	// Auth is the account service, built by StartRuntime over the hub (its
 	// AuthBroadcaster) and the totp-key stage's key, and already shared with
-	// the erasure runner (WP 5.6g). NewRouter only mounts it.
+	// the erasure runner. NewRouter only mounts it.
 	Auth *service.AuthService
 	// Storage is the one upload file store: the routes, the maintenance
 	// sweep and the erasure replay all use this instance. Nil when the store
@@ -79,7 +79,7 @@ type Runtime struct {
 	// Updater serves the admin update card and the client auto-update route.
 	Updater *updater.Updater
 	// WebClient is the browser client bundle the portal serves when
-	// server.browser_client_enabled is on (6.13a). Nil uses the one embedded
+	// server.browser_client_enabled is on. Nil uses the one embedded
 	// in this binary (webclient.Assets); tests hand in an fstest.MapFS.
 	WebClient fs.FS
 	Lifecycle // the app's job group and shutdown signal (setup_options.go)
@@ -105,7 +105,7 @@ func warnOnServerConfig(cfg *config.Config) {
 }
 
 // warnOnVoiceNodeIP reports a voice.node_ip that remote clients cannot route
-// to (B6-6).
+// to.
 //
 // The value is written into livekit.yaml as the external address LiveKit
 // advertises in its ICE candidates, and Server/ws/livekit_process.go validates
@@ -182,7 +182,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	mountGIF(r, cfg, svc, limiter)
 
-	// Web Push subscription storage (B5-4) — nothing dispatches yet.
+	// Web Push subscription storage — nothing dispatches yet.
 	// Mounted unconditionally; with push.enabled false every route answers
 	// 503 PUSH_DISABLED after authentication.
 	MountPushRoutes(r, svc.Sessions, svc.Push, cfg.Push.Enabled)
@@ -224,7 +224,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	}
 	MountProfileRoutes(r, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub, cfg)
 
-	// DM (direct message) REST routes, and the message request inbox (B5-6)
+	// DM (direct message) REST routes, and the message request inbox
 	// beside them — mounted after hub creation so real-time
 	// dm_channel_close/dm_channel_open/dm_request events reach WebSocket
 	// clients.
@@ -240,19 +240,19 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// mounted at all (a 404 the client reads as "this server has no emoji").
 	if store != nil {
 		MountEmojiRoutes(r, svc, store, limiter, hub)
-		// Custom sticker routes (WP 8.8a), on the same storage and for the
+		// Custom sticker routes, on the same storage and for the
 		// same reason. The service is nil when the store cannot hold stickers.
 		if svc.Stickers != nil {
 			MountStickerRoutes(r, svc, store, limiter, hub)
 		}
 	}
 
-	// Report intake, moderator actions and appeals (B5-8/B5-9/B5-10) —
+	// Report intake, moderator actions and appeals —
 	// mounted after hub creation so a filed report, an assignment, a
 	// decision or an action can notify connected clients.
 	routerReportRoutes(r, svc, hub)
 
-	// H-8: Connectivity diagnostics restricted to admin users only.
+	// Connectivity diagnostics restricted to admin users only.
 	// Exposes Go runtime version and LiveKit node IP which aid targeted attacks.
 	r.With(AuthMiddleware(svc.Sessions),
 		RequirePermission(permissions.Administrator),
@@ -312,7 +312,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 }
 
 // requireBuiltRuntime refuses a Runtime that StartRuntime did not build: the
-// router only mounts (WP 5.6g), so a missing collaborator is a wiring bug to
+// router only mounts, so a missing collaborator is a wiring bug to
 // fail on at start-up rather than something NewRouter quietly constructs for
 // itself. Storage is not checked — nil is the degraded "no file storage" state.
 func requireBuiltRuntime(rt Runtime) {
@@ -389,17 +389,17 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	// disabled or the otel build tag is not set, so this is safe to mount
 	// unconditionally. Mounted ahead of recoverer, which snapshots the trace
 	// id before dispatch: the span must already exist for the panic record to
-	// carry trace_id (OC-0346).
+	// carry trace_id.
 	r.Use(telemetry.HTTPMiddleware())
 	r.Use(recoverer) // slog-routing panic recovery (replaces chi's stderr-only Recoverer)
-	// SRE-11: the access log is proxy-aware, so the recommended reverse-proxy
+	// The access log is proxy-aware, so the recommended reverse-proxy
 	// deployment records the real client rather than the proxy hop. Parsed
 	// once here, never on the request path.
 	proxyNets := parseCIDRList(cfg.Server.TrustedProxies)
 	r.Use(requestLogger(proxyNets)) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPattern, bodyCapExemptPrefixes...))
-	r.Use(requestDeadlineMiddleware()) // WP 4.1c: 15 s deadline on non-streaming routes
+	r.Use(requestDeadlineMiddleware()) // 15 s deadline on non-streaming routes
 
 	// Coraza WAF — opt-in via config.
 	if cfg.Server.WAFEnabled {
@@ -419,7 +419,7 @@ func routerUploadRoutes(r chi.Router, sessions *service.SessionService, limiter 
 	}
 }
 
-// routerChannelRoutes mounts the channel/message REST surface and B5-7's NSFW
+// routerChannelRoutes mounts the channel/message REST surface and the NSFW
 // acknowledgement toggle beside it — both need the hub to fan out real-time
 // events (chat_bulk_deleted, nsfw_ack).
 func routerDMRoutes(r chi.Router, svc *service.Services, hub *ws.Hub, limiter *auth.RateLimiter, store FileStore) {
@@ -434,8 +434,8 @@ func routerChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.Rate
 }
 
 // routerReportRoutes mounts report intake, the reporter's own status view,
-// the moderation queue (B5-8), warning/timeout/notice-ack (B5-9), and
-// appeals (B5-10) beside them since all gate on the same MODERATE_MEMBERS
+// the moderation queue, warning/timeout/notice-ack, and
+// appeals beside them since all gate on the same MODERATE_MEMBERS
 // bit and all can notify a connected client — the hub is the
 // mod_queue/mod_action/appeal_status broadcaster for a filed report, an
 // assignment, a close, an action, or an appeal decision.
@@ -450,7 +450,7 @@ func routerReportRoutes(r chi.Router, svc *service.Services, hub *ws.Hub) {
 // routerVoiceRoutes mounts the LiveKit webhook, health and signalling-proxy
 // routes. voiceEnabled is internal/app's report that the LiveKit client was
 // built (StartRuntime); voice is disabled — and none of these routes are
-// mounted — when it was not. Until B3-3 this function also created the client
+// mounted — when it was not. This function used to also create the client
 // and the companion process, which is what gave the hub a second owner.
 func routerVoiceRoutes(r chi.Router, cfg *config.Config, limiter *auth.RateLimiter, hub *ws.Hub, voiceEnabled bool) {
 	if !voiceEnabled {
@@ -532,7 +532,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	perimeter := AdminIPRestrict("server.metrics_allowed_cidrs", cfg.Server.MetricsCIDRs(), cfg.Server.TrustedProxies)
 	r.With(perimeter).Get("/api/v1/metrics", handleMetrics(src))
 	// The same figures in Prometheus text format, in every build and behind the
-	// same perimeter (WP 4.3b); the OTel exporter below is the -tags otel
+	// same perimeter; the OTel exporter below is the -tags otel
 	// alternative and stays where it was.
 	r.With(perimeter).Get("/api/v1/metrics/prometheus", handlePrometheusMetrics(src))
 
@@ -579,7 +579,7 @@ type healthDeps struct {
 	freeDiskBytes func() (uint64, error)
 	// minFreeDiskBytes is the free-space floor under which health reports
 	// degraded: server.min_free_disk_mb, the same number the start-up banner
-	// and the upload path use (B5-2, decision 11). SQLite WAL growth,
+	// and the upload path use. SQLite WAL growth,
 	// uploads, and backups all share the data volume, so running dry
 	// corrupts more than one thing at once. 0 disables the check.
 	minFreeDiskBytes uint64
@@ -598,7 +598,7 @@ const (
 // mountPublicV1 registers the unauthenticated /api/v1 routes.
 //
 // Every route here is reachable without a session, so each one must also be
-// declared in publicSurface (auth_posture_test.go) and must honour C-2: no
+// declared in publicSurface (auth_posture_test.go) and must keep build identity off it: no
 // version, build or commit on an unauthenticated endpoint.
 func mountPublicV1(r chi.Router, cfg *config.Config, healthHandler http.HandlerFunc, infoDeps serverInfoDeps) {
 	r.Route("/api/v1", func(r chi.Router) {
@@ -614,7 +614,7 @@ type infoResponse struct {
 }
 
 func handleHealth(deps healthDeps) http.HandlerFunc {
-	// C-2: Version removed from unauthenticated health endpoint to prevent
+	// Version removed from unauthenticated health endpoint to prevent
 	// server fingerprinting. Version is available on the authenticated
 	// diagnostics endpoint instead.
 	var mu syncutil.Mutex
@@ -694,7 +694,7 @@ func handleInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc {
 		}
 		name := cachedName
 		mu.Unlock()
-		// C-2: Version removed from unauthenticated info endpoint.
+		// Version removed from unauthenticated info endpoint.
 		writeJSON(w, http.StatusOK, infoResponse{Name: name})
 	}
 }
@@ -805,7 +805,7 @@ func recoverer(next http.Handler) http.Handler {
 					attrs = append(attrs, "trace_id", traceID)
 				}
 				slog.Error("http handler panic recovered", attrs...)
-				// SRE-08: on Windows a nil deref or invalid address may have
+				// On Windows a nil deref or invalid address may have
 				// left the heap corrupt (golang/go#81238), so it exits for a
 				// supervisor restart rather than writing a 500 and continuing
 				// on damaged memory. Every other panic stays recovered.
@@ -826,7 +826,7 @@ func recoverer(next http.Handler) http.Handler {
 //
 // clientIPWithProxies resolves the logged client_ip through the operator's
 // trusted_proxies, so the recommended reverse-proxy deployment records the
-// real client rather than the proxy hop (SRE-11). proxyNets is parsed once at
+// real client rather than the proxy hop. proxyNets is parsed once at
 // construction, never on the request path.
 func requestLogger(proxyNets []*net.IPNet) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

@@ -123,7 +123,7 @@ func (s *PermissionService) HasChannelPerm(ctx context.Context, userID, channelI
 // HasChannelPermChecked is HasChannelPerm's error-preserving counterpart: it
 // distinguishes "the store lookup failed" (err != nil, verdict meaningless)
 // from "the store answered and the user lacks the bit" (false, nil error).
-// OC-0266: a caller like ws's applySetChannelID post-Subscribe revalidation
+// A caller like ws's applySetChannelID post-Subscribe revalidation
 // must not treat a transient DB hiccup on the role/override read as a
 // positive denial — that already-fail-closed collapse belongs to
 // HasChannelPerm and the rest of this service's callers, not to a caller that
@@ -166,8 +166,8 @@ func (s *PermissionService) Subject(ctx context.Context, userID, channelID int64
 		return permissions.Subject{}, err
 	}
 	sub := cp.grants.Subject(key)
-	// TimedOut comes from the timeout mirror, never the 30s role cache
-	// (B5-9): a stale answer would let a just-lifted timeout keep refusing,
+	// TimedOut comes from the timeout mirror, never the 30s role cache:
+	// a stale answer would let a just-lifted timeout keep refusing,
 	// or a just-issued one keep landing. The mirror is reloaded synchronously
 	// by every timeout write (ModerationService) before that write returns.
 	// Administrator is exempt, mirroring permissions.Checker.Subject's own

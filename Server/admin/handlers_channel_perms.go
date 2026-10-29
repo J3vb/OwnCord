@@ -16,14 +16,14 @@ import (
 // ListVisibleChannels, the WS ready payload, and the per-message permission
 // checks.
 //
-// Thin adapters over service.ChannelService (B3-8 channel family, part 2):
+// Thin adapters over service.ChannelService:
 // the escalation guard (clearing a deny is a grant), the hierarchy rules,
 // mask clamping, the writes and their audit rows all live in the service.
 // The handlers decode, delegate and respond; the service also invalidates
-// cached permissions and refreshes channel visibility (WP 5.1a).
+// cached permissions and refreshes channel visibility.
 
 // getPermChannel resolves the channel for an override request through the
-// one S-04 policy (service.ChannelService.ResolveGuildChannel): a DM id
+// one guild-channel policy (service.ChannelService.ResolveGuildChannel): a DM id
 // answers exactly like a missing id, so this surface no longer confirms
 // which ids are private conversations (A-2026-08-02). Returns nil when a
 // response has already been written.
@@ -48,7 +48,7 @@ type channelPermissionsResponse struct {
 	Roles     []db.ChannelRoleOverride `json:"roles"`
 	Users     []db.ChannelUserOverride `json:"users"`
 	// PermissionsSynced: the channel's overrides follow its category's
-	// template (WP 6.5d). Admin-only; not on the websocket channel payload.
+	// template. Admin-only; not on the websocket channel payload.
 	PermissionsSynced bool `json:"permissions_synced"`
 }
 

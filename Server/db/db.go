@@ -54,7 +54,7 @@ type DB struct {
 	messageDeliveryFloor atomic.Int64
 
 	// attachmentBytesCache and activeMessagesCache hold the two whole-table
-	// aggregates the metrics scrape and admin stats read (SV-07).
+	// aggregates the metrics scrape and admin stats read.
 	attachmentBytesCache syncutil.TTLCache[int64]
 	activeMessagesCache  syncutil.TTLCache[int64]
 
@@ -74,7 +74,7 @@ type DB struct {
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
 	lockRelease func()
 
-	// acceptGuardHook is a test seam (Codex P2-8): called inside
+	// acceptGuardHook is a test seam: called inside
 	// AcceptMessageRequest's transaction right after it confirms the row is
 	// still pending and before it writes anything. The transaction holds the
 	// sole writer connection (writer above) for as long as this hook blocks,
@@ -83,13 +83,13 @@ type DB struct {
 	// writer connection then guarantees that call cannot execute until this
 	// one commits, proving the guard resolves a genuine race instead of
 	// relying on goroutine-scheduling luck for the two calls to ever
-	// overlap. Nil in production. No exported setter (Codex review round 2,
-	// P2-8): only reachable from db package tests, which is where the test
+	// overlap. Nil in production. No exported setter:
+	// only reachable from db package tests, which is where the test
 	// that uses it lives.
 	acceptGuardHook func()
 
-	// afterDMParticipantsInsertHook is a test seam (Codex review round 2,
-	// P1): called inside getOrCreateDMChannel's create branch, after the
+	// afterDMParticipantsInsertHook is a test seam:
+	// called inside getOrCreateDMChannel's create branch, after the
 	// participants insert but before the recipient's visibility is decided
 	// and written, so a test can simulate a failure/cancellation in that
 	// exact window and confirm the whole transaction rolls back rather than
@@ -110,7 +110,7 @@ type DB struct {
 	// line an operator reads when a checkpoint stays blocked.
 	checkpointAttempts atomic.Int64
 
-	// testEraseCommitHook is a test seam (B6-11 drill 9): called by
+	// testEraseCommitHook is a test seam: called by
 	// eraseAccount once eraseAccountTx has committed and before the
 	// wal_checkpoint(TRUNCATE) that follows it. It is the window the drill is
 	// about — the erasure is durable, its frames are still in the WAL, and
@@ -120,7 +120,7 @@ type DB struct {
 	// so the hook must not touch this DB's pools. Nil in production, no
 	// exported setter.
 	testEraseCommitHook func()
-	// testErasureChunkHook is a test seam (WP 4.1a), see erasure_chunks.go.
+	// testErasureChunkHook is a test seam, see erasure_chunks.go.
 	testErasureChunkHook func(stage string, n int) error
 }
 

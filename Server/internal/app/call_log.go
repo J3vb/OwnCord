@@ -2,7 +2,7 @@ package app
 
 import "context"
 
-// startCallLog starts the DM call log worker (WP 3B-9). It runs after event
+// startCallLog starts the DM call log worker. It runs after event
 // persistence so the frames its start-up recovery emits are persisted for
 // replay, and before the http stage opens the listener, so nobody is connected
 // while leftover calls from the previous run are ended.

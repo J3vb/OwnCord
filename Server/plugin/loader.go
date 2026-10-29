@@ -34,7 +34,7 @@ type foundPlugin struct {
 // loadManifestFromDir resolves the manifest that governs one plugin
 // directory. Every caller that resolves a plugin manifest from a directory
 // must route through here, so the manifest a zip install validates is
-// byte-for-byte the one the next restart loads (OC-0318).
+// byte-for-byte the one the next restart loads.
 //
 // Returns an error satisfying os.IsNotExist when plugin.json is absent, so
 // callers that treat "not a plugin directory" as non-fatal
@@ -58,7 +58,7 @@ func loadManifestFromDir(dir string) (*Manifest, error) {
 // plugin that scanned cleanly. Callers that need the scan to be all-or-
 // nothing should check the returned error before using `found`; LoadAll
 // deliberately does not, so one bad plugin directory cannot disable every
-// other plugin (OC-0165).
+// other plugin.
 func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 	if dir == "" {
 		return nil, nil

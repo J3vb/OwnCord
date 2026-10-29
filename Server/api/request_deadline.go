@@ -11,7 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// WP 4.1c: a deadline on the non-streaming REST routes.
+// A deadline on the non-streaming REST routes.
 //
 // A request that waits on a stalled database writer holds its goroutine, its
 // connection and (once the 30 s WriteTimeout passes) loses its response. The
@@ -38,7 +38,7 @@ func requestDeadlineRewritable(code int) bool {
 }
 
 // restRequestDeadline bounds one non-exempt REST request. A package var, not a
-// config key, so tests can shrink it (WP 4.1c); the 30 s WriteTimeout in
+// config key, so tests can shrink it; the 30 s WriteTimeout in
 // internal/app/lifecycle.go leaves room to answer after it fires.
 var restRequestDeadline = 15 * time.Second
 

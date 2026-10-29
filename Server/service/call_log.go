@@ -65,8 +65,8 @@ type callLogPending struct {
 	lastLeave time.Time
 }
 
-// CallLogService derives one message row per DM call from voice presence
-// (WP 3B-9). Voice joins and leaves only post notes; a single worker goroutine
+// CallLogService derives one message row per DM call from voice presence.
+// Voice joins and leaves only post notes; a single worker goroutine
 // owns every write and reconciles the voice_states rows of a channel with its
 // live call row, so a missed note heals on the next pass.
 type CallLogService struct {

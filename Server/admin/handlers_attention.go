@@ -7,7 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// handleGetAttention serves the admin attention panel's state (RI-07): the
+// handleGetAttention serves the admin attention panel's state: the
 // current signals and the deduplicated warnings. It only reads what the
 // sampler already holds, so a dashboard refresh costs no measurement.
 func handleGetAttention(attention *service.AttentionService) http.HandlerFunc {

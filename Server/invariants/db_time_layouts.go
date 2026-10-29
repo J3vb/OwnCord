@@ -20,7 +20,7 @@ var dbTimeLayoutValues = map[string]bool{
 	"2006-01-02T15:04:05Z": true,
 }
 
-// dbTimeLayouts enforces MX-13: a stored timestamp layout is named through
+// dbTimeLayouts enforces the timestamp-layout rule: a stored timestamp layout is named through
 // dbtime.SQLiteLayout or dbtime.ISOLayout, and two stored forms are read
 // through dbtime.Parse. SQLite compares TEXT dates byte by byte and 'T' sorts
 // after ' ', so a value written in one layout and compared with the other is

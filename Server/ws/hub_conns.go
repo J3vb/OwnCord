@@ -177,7 +177,7 @@ func (h *Hub) topicsOfUser(userID int64) []Topic {
 
 // voiceHeldByOtherSession reports whether the call in channelID belongs to a device other
 // than c's session: a live connection of a different session holds a call, or a
-// different session's call is parked in the RT-8 grace window. The caller holds
+// different session's call is parked in the reconnect grace window. The caller holds
 // the user's voice membership lock, so the answer cannot change under it.
 func (h *Hub) voiceHeldByOtherSession(c *Client, channelID int64) bool {
 	for _, o := range h.clientsOf(c.userID) {

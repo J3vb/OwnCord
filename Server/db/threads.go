@@ -41,7 +41,7 @@ func (e *ThreadExistsError) Error() string {
 // Unwrap lets errors.Is(err, ErrThreadExists) match.
 func (e *ThreadExistsError) Unwrap() error { return ErrThreadExists }
 
-// ThreadInfo is the wire shape of a thread (WP 6.9c): the thread_changed and
+// ThreadInfo is the wire shape of a thread: the thread_changed and
 // thread_create_ok payloads, the thread on a starter message, and a row of the
 // thread list. OwnerID and StarterMessageID are null when that user or
 // message is gone. LastMessageAt is null while the thread has no message.
@@ -57,7 +57,7 @@ type ThreadInfo struct {
 	MessageCount       int64   `json:"message_count"`
 	LastMessageAt      *string `json:"last_message_at"`
 	CreatedAt          string  `json:"created_at"`
-	// Post is the forum post block (WP 6.9d), present only when the parent is
+	// Post is the forum post block, present only when the parent is
 	// a forum.
 	Post *ForumPostMeta `json:"post,omitempty"`
 }
@@ -144,7 +144,7 @@ func (d *DB) CreateThread(ctx context.Context, n NewThread) (info *ThreadInfo, c
 	if err != nil {
 		return nil, false, fmt.Errorf("CreateThread id: %w", err)
 	}
-	// The owner follows the thread they start (WP 6.9c).
+	// The owner follows the thread they start.
 	if _, err := q.JoinThread(ctx, dbgen.JoinThreadParams{ThreadID: id, UserID: n.OwnerID}); err != nil {
 		return nil, false, fmt.Errorf("CreateThread follow: %w", err)
 	}
@@ -227,7 +227,7 @@ type ThreadPatch struct {
 	Archived           *bool
 	Locked             *bool
 	AutoArchiveMinutes *int
-	// TagIDs, when set, replaces the tags of a forum post (WP 6.9d). The
+	// TagIDs, when set, replaces the tags of a forum post. The
 	// service only sets it for a post; ErrNotFound otherwise.
 	TagIDs *[]int64
 }

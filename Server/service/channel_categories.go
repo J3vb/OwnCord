@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Channel categories (WP 6.5a) ────────────────────────────────────────────
+// ─── Channel categories ────────────────────────────────────────────
 //
 // A category is a row with an id, a name and a position (migration 072).
 // Rename, reorder and delete each change the category fields of every channel
@@ -49,7 +49,7 @@ func (s *ChannelService) categoryStore() (CategoryStore, error) {
 	return s.cats, nil
 }
 
-// cleanCategoryName applies the S-03 text contract to a category name: it is
+// cleanCategoryName applies the channel metadata text contract to a category name: it is
 // sanitized, trimmed, bounded by runes and required.
 func cleanCategoryName(name string) (string, error) {
 	cleaned, err := cleanChannelField(name, MaxChannelCategoryLen, "category name")

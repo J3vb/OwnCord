@@ -12,7 +12,7 @@
 // Phase 4 is the one phase 1 cannot cover: a non-idempotent migration, a lock
 // the drain failed to release, or state only a first boot creates. That is the
 // difference between "the asset runs" and "an owner can operate it", which is
-// what B6-1 has to prove.
+// what this smoke run has to prove.
 //
 // It is a Go program rather than a shell script because the graceful stop is
 // the whole point and Windows has no SIGTERM. MSYS `kill -TERM` cannot deliver
@@ -23,7 +23,7 @@
 //
 // With -upgrade it instead rehearses the upgrade an owner actually performs —
 // install the new version over a populated install, then roll back out of it —
-// which is a different question from "does the new asset boot" (B6-8). Both
+// which is a different question from "does the new asset boot". Both
 // deployment modes share one fixture through the target seam in target.go.
 //
 // Phase 5 is what makes a release asset provably carry the browser client: the

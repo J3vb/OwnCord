@@ -12,7 +12,7 @@ import (
 )
 
 // WelcomeChannelKey is the settings key naming the channel that greets each
-// new member (WP 8.6). A missing or blank row means welcome messages are off.
+// new member. A missing or blank row means welcome messages are off.
 const WelcomeChannelKey = "welcome_channel_id"
 
 // WelcomeStore is the slice of the database the welcome writer adds to Store:
@@ -40,7 +40,7 @@ type WelcomeNotifier interface {
 }
 
 // WelcomeService writes the line that greets a new member in the channel the
-// admin picked (WP 8.6). Everything it does is best effort: a failure is
+// admin picked. Everything it does is best effort: a failure is
 // logged and never reaches the registration or approval that triggered it.
 type WelcomeService struct {
 	st       Store

@@ -56,15 +56,15 @@ type Result struct {
 	// SetActivity, if non-nil, asks the applier to swap the connection's game
 	// activity (next, nil clears it) and broadcast the presence frame that
 	// shows it, but only while the connection still holds its user's slot
-	// (activity_update, WP 8.3a). The frame is built there, not in Events,
+	// (activity_update). The frame is built there, not in Events,
 	// because only the applier sees the live status it must carry.
 	SetActivity *activityChange
-	// SetListening is SetActivity's twin for the song (listening_update, WP
-	// 8.10a): swap the connection's listening value (next, nil clears it) and
+	// SetListening is SetActivity's twin for the song (listening_update):
+	// swap the connection's listening value (next, nil clears it) and
 	// broadcast the presence frame that shows it.
 	SetListening *listeningChange
 	// SetE2EEAnnounce, if non-nil, replaces the client's stored voice E2EE
-	// announce (ECDH key, F3 TOFU signature, WP M-4 video decode list) so the
+	// announce (ECDH key, F3 TOFU signature, video decode list) so the
 	// late-joiner replay, resume and grace-window paths relay it. nil means
 	// no change.
 	SetE2EEAnnounce *e2eeAnnounce
@@ -116,7 +116,7 @@ type Event interface {
 // a content-bearing kind (contentBearingKinds, ws/nsfw_content.go) is
 // narrowed to channelContentAudience — CanReadContent over today's actual
 // topic subscribers, so a labelled channel's content withholds from an
-// unacknowledged member even though they are subscribed (B5-7).
+// unacknowledged member even though they are subscribed.
 type ChannelEvent interface {
 	Event
 	ChannelID() int64
@@ -158,7 +158,7 @@ type BroadcastAllEvent interface {
 // but delivered only to clients whose role may READ the named channel, and
 // tagged with it so reconnect replay filters it the same way. MUST be checked
 // before BroadcastAllEvent, which it would otherwise satisfy. UserID is the
-// event's subject (whose voice state changed) — B5-6's sender-aware DM
+// event's subject (whose voice state changed) — the sender-aware DM
 // audience needs it to filter a one-to-one DM voice call the same way chat
 // does; every other channel type ignores it.
 type VoiceVisibilityEvent interface {
@@ -291,7 +291,7 @@ func (e TypingChannelEvent) Payload() []byte              { return e.payload }
 // default of h.SendToUserHigh, so this ephemeral frame shares the same
 // drop-on-overflow durability as its channel sibling instead of the
 // disconnect-on-overflow behavior meant for durable targeted events like DM
-// opens and mentions (OC-0260).
+// opens and mentions.
 type TypingDMEvent struct {
 	targetUserID int64
 	payload      []byte
@@ -308,7 +308,7 @@ func (e TypingDMEvent) Payload() []byte              { return e.payload }
 //
 // bare, set only when payload carries a game or a song, is the same frame with
 // both null. emitPresence sends it when member activity was switched off after
-// the handler snapshotted them (WP 8.3e-2, 8.10a).
+// the handler snapshotted them.
 type PresenceEvent struct {
 	userID  int64
 	payload []byte
@@ -326,7 +326,7 @@ func (e PresenceEvent) Payload() []byte              { return e.payload }
 // replayable) rather than the ExcludeSenderEvent default of
 // broadcastExcludeLow, so this frame shares the same durable per-client FIFO
 // as every other source of the same user's presence instead of the
-// ephemeral, drop-on-overflow one built for typing indicators (OC-0003).
+// ephemeral, drop-on-overflow one built for typing indicators.
 type PresenceOthersEvent struct {
 	excludeUserID int64
 	payload       []byte
@@ -437,7 +437,7 @@ func (e VoiceE2EEOfferGuardedEvent) VoiceChannelID() int64        { return e.voi
 func (e VoiceE2EEOfferGuardedEvent) TargetUserID() int64          { return e.targetUserID }
 func (e VoiceE2EEOfferGuardedEvent) Payload() []byte              { return e.payload }
 
-// threadFollowEvt delivers a thread_follow_update to one user (WP 6.9c).
+// threadFollowEvt delivers a thread_follow_update to one user.
 // Unsequenced and on the low queue like mention_count: a missed frame costs
 // nothing, because ready.threads is authoritative.
 type threadFollowEvt struct {
@@ -461,7 +461,7 @@ func (e DMChannelOpenEvent) deliveryClass() deliveryClass { return classUserTarg
 func (e DMChannelOpenEvent) TargetUserID() int64          { return e.targetUserID }
 func (e DMChannelOpenEvent) Payload() []byte              { return e.payload }
 
-// DMRequestEvent announces a message request to its recipient (B5-6): sent
+// DMRequestEvent announces a message request to its recipient: sent
 // once on creation, by the sender's chat_send handler
 // (handlers_chat.go, for every id in SendMessageResult.RequestCreatedFor),
 // and again with a new state on every recipient transition

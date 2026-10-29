@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// MessageRequest is one row of message_requests (migration 046, B5-6): a
+// MessageRequest is one row of message_requests (migration 046): a
 // staged first contact between a stranger sender and a recipient who does
 // not yet trust them. See the migration's own comment for the full shape.
 type MessageRequest struct {
@@ -18,8 +18,7 @@ type MessageRequest struct {
 	RecipientID int64
 	ChannelID   int64
 	// FirstMessageID is the message this request was created for, set once
-	// at creation (Codex P1-4/P2-6 — see the migration's own deviation
-	// note). nil for a grandfathered installation's pre-existing rows,
+	// at creation. nil for a grandfathered installation's pre-existing rows,
 	// which cannot happen today since nothing grandfathers message_requests
 	// itself, only trusted_senders.
 	FirstMessageID *int64
@@ -95,11 +94,11 @@ type MessageRequestOutcome struct {
 // channelID, naming firstMessageID as the held message, and — in the SAME
 // transaction — marks senderID as a trusted sender of recipientID (source
 // "sent_first"): senderID initiated, so recipientID's eventual reply is a
-// reply, not a first-contact request back. Codex P2-6: the two writes used
+// reply, not a first-contact request back. The two writes used
 // to be separate calls, so a request insert that committed followed by a
 // failed trust write left a pending row with no reverse trust and no way to
 // repair it — a resend finds the row already there (INSERT OR IGNORE) and
-// stays silent forever (decision 5), so nothing ever retries the trust
+// stays silent forever, so nothing ever retries the trust
 // write either.
 //
 // The request insert is INSERT OR IGNORE against the UNIQUE(sender_id,
@@ -107,7 +106,7 @@ type MessageRequestOutcome struct {
 // existing in ANY state — pending, ignored, deleted, blocked, even
 // accepted, though an accepted pair is trusted and should never reach here
 // — leaves Created false and changes nothing. That is what makes a resend
-// after "ignored" silent (decision 5): there is only ever one row to have
+// after "ignored" silent: there is only ever one row to have
 // created. The trust write itself is unconditional (also INSERT OR IGNORE)
 // regardless of Created: a repeat send while the request is still pending
 // (or already ignored/deleted) just re-affirms a trust row that may already
@@ -115,9 +114,9 @@ type MessageRequestOutcome struct {
 // concurrent first messages without it. Under two concurrent first sends
 // only one request INSERT wins, so first_message_id always names the
 // winner's own message — the same one its dm_request frame carries as a
-// preview (Codex P2-6).
+// preview.
 //
-// WP 6.8e: the transaction reads recipientID's user_privacy itself, so a
+// The transaction reads recipientID's user_privacy itself, so a
 // settings change racing the send is decided by this read and by nothing the
 // caller saw earlier. With direct messages allowed and message requests off
 // the row is born "accepted" (decided_at set), recipientID trusts senderID

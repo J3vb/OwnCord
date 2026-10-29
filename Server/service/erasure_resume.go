@@ -198,7 +198,7 @@ func (s *ErasureService) confirmMarker(ctx context.Context, userID int64, token 
 // files go like any other job's. A job whose files still fail to go stays
 // for the next call.
 //
-// It also pays any WAL checkpoint an erasure owes (B6-11 task 5). That debt is
+// It also pays any WAL checkpoint an erasure owes. That debt is
 // not a job: the erasure's rows and files are gone either way, and what is
 // left is frames holding the erased bytes still sitting in the -wal because
 // the checkpoint behind the commit came back blocked. Nothing else would run

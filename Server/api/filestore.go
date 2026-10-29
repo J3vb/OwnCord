@@ -39,8 +39,8 @@ type FileStore interface {
 // compile-time proof the disk implementation satisfies the seam.
 var _ FileStore = (*storage.Storage)(nil)
 
-// saveReserved is the one production path that writes through a FileStore
-// (B5-2, decision 11): every byte the store takes has been admitted first —
+// saveReserved is the one production path that writes through a FileStore:
+// every byte the store takes has been admitted first —
 // by UploadService.Reserve, which charges the uploader's counter and checks
 // the headroom floor, or by ReserveHeadroom for the bounded emoji exclusion.
 // A failed write hands the reservation back; a successful one is the
@@ -59,7 +59,7 @@ func saveReserved(ctx context.Context, res *service.StorageReservation, store Fi
 		res.Release(ctx)
 		return 0, err
 	}
-	// B5-2: an unknown or generous declared length reserves more than the
+	// An unknown or generous declared length reserves more than the
 	// upload turns out to cost; lower the charge to what was actually
 	// written before the reservation lands. A failure here leaves the
 	// counter high — the safe side — and the next maintenance recount

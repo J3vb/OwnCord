@@ -66,7 +66,7 @@ func (h *Hub) SetEventStore(s EventStore) {
 // sequenced broadcast to subscribed plugins. Pass nil to disable. Safe to
 // call at any time, including after Run has started.
 //
-// Deliberately still a setter after B3-4: the sink consumes the built hub's
+// Deliberately still a setter: the sink consumes the built hub's
 // broadcaster (sink.SetBroadcaster(hub.BroadcastToChannel)), so it cannot
 // exist before the hub does — a genuine two-phase wire, unlike the registry,
 // which is a HubOptions field.
@@ -103,8 +103,8 @@ func (h *Hub) ReconnectTierStats() (buffer, db, full uint64) {
 // noteRingMiss counts a resume the ring just failed to serve, but only when the
 // client is behind the ring's oldest entry: the ring also returns nil for an
 // empty ring and for a client ahead of it, and the events table serves neither.
-// One atomic, no hub lock, no I/O, so it is safe outside seqMu on the handshake path
-// (WP 4.6a). The re-read of the ring can race a push, which is harmless here.
+// One atomic, no hub lock, no I/O, so it is safe outside seqMu on the handshake path.
+// The re-read of the ring can race a push, which is harmless here.
 func (h *Hub) noteRingMiss(lastSeq uint64) {
 	if oldest := h.ReplayBuffer().OldestSeq(); oldest != 0 && lastSeq <= oldest {
 		h.reconnectRingMiss.Add(1)
@@ -112,7 +112,7 @@ func (h *Hub) noteRingMiss(lastSeq uint64) {
 }
 
 // ReconnectRingMissCount returns the lifetime number of resumes that passed the
-// resync checks but fell behind the in-memory replay ring (WP 4.6a). The hit
+// resync checks but fell behind the in-memory replay ring. The hit
 // rate of the events table is ReconnectTierStats' db / this. It is a separate
 // method so ReconnectTierStats keeps its admin-interface signature.
 func (h *Hub) ReconnectRingMissCount() uint64 {
@@ -120,7 +120,7 @@ func (h *Hub) ReconnectRingMissCount() uint64 {
 }
 
 // mustFullResync reports whether a client resuming from lastSeq predates the
-// most recent channel-visibility change or content shed (SRV-03) and
+// most recent channel-visibility change or content shed and
 // therefore cannot converge via replay.
 func (h *Hub) mustFullResync(lastSeq uint64) bool {
 	if w := h.visibilityChangeSeq.Load(); w > 0 && lastSeq <= w {
@@ -155,7 +155,7 @@ func (h *Hub) bumpReplayPurgeWatermark() {
 var replayPurgeBeforeDelete func()
 
 // PurgeMessagesFromReplay takes every frame about the given messages out of
-// the replay pipeline after a retention sweep removed them (B4-11): the
+// the replay pipeline after a retention sweep removed them: the
 // dispatch loop is drained so a frame queued before the sweep is sequenced,
 // then purgeReplay installs the ids as tombstones and drops the ring's
 // copies under seqMu, and deletes the persisted rows after releasing it. A
@@ -184,7 +184,7 @@ func (h *Hub) PurgeMessagesFromReplay(ctx context.Context, ids []int64) error {
 }
 
 // PurgeUserFromReplay takes every frame naming userID out of the replay
-// pipeline after an account erasure (data-lifecycle O5, HP-4 decision 1):
+// pipeline after an account erasure:
 // the dispatch loop is drained so the member_ban the erasure broadcast is
 // sequenced, then purgeReplay, under seqMu, adds the user to the tombstones,
 // moves the replay-purge watermark to the current seq (a client resuming
@@ -207,8 +207,8 @@ func (h *Hub) PurgeUserFromReplay(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// purgeReplay runs a replay purge in the order that keeps seqMu short
-// (ARCH-007): drain the dispatch loop; take the purge lock, which keeps
+// purgeReplay runs a replay purge in the order that keeps seqMu short:
+// drain the dispatch loop; take the purge lock, which keeps
 // cold-tier reads out until the rows are gone; under seqMu, install the
 // tombstones and drop the ring's copies, so from here on no frame naming
 // them is sequenced; release seqMu; flush the persister, so every frame

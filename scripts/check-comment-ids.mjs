@@ -20,14 +20,14 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const BASELINE_PATH = path.join(ROOT, "scripts/comment-id-baseline.json");
 
 /** Ids that may remain in total. Lower it in every change that removes ids; it never rises. */
-export const TOTAL_CAP = 2030;
+export const TOTAL_CAP = 0;
 
 /** Each pattern names a kind of id. All are matched inside comment text only. */
 export const ID_PATTERNS = [
   ["work package", /\bWP[ -]?\d+[A-Za-z0-9]*(?:[.-][A-Za-z0-9]+)*/g],
   [
     "plan item",
-    /\b(?!(?:OC|UTF|SHA|AES|HTTP|FNV|ISO|CRC|ALPN|RFC|CVE|GHSA|IEEE|ECMA|ES|P|X|A|V)-)[A-Z]{1,5}\d{0,2}-\d+[a-z]?\b/g,
+    /(?<![\w-])\b(?!(?:OC|TEST|UTF|SHA|AES|HTTP|FNV|ISO|CRC|ALPN|RFC|CVE|GHSA|IEEE|ECMA|ES|P|X|A|V)-)[A-Z]{1,5}\d{0,2}-\d+[a-z]?\b/g,
   ],
   // A bare roadmap item, "(6.13c)" or "5.4d-2", without the WP prefix.
   ["roadmap item", /(?<![\w.]|WP[ -])\d{1,2}\.\d{1,2}[a-h]\d?(?:-\d+)?(?![\w.])/g],
@@ -357,9 +357,8 @@ function main(argv) {
     return 0;
   }
   if (argv.includes("--update")) {
-    // An empty baseline is the first recording; after that a row only goes down.
-    const first = Object.keys(baseline).length === 0;
-    const raised = first ? [] : Object.entries(actual).filter(([f, n]) => n > (baseline[f] ?? 0));
+    // A row only goes down; an empty baseline means none may appear.
+    const raised = Object.entries(actual).filter(([f, n]) => n > (baseline[f] ?? 0));
     if (raised.length > 0) {
       for (const [f, n] of raised)
         console.error(`${f}: ${n} > ${baseline[f] ?? 0}; the baseline never rises.`);

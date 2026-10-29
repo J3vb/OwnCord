@@ -10,7 +10,7 @@ import (
 
 // cleanVisibleBounded is cleanTextBounded for single-line text shown to other
 // people (display name, custom status, group DM name). The order is the one the
-// REST display-name path established (OC-0197): sanitize and trim first so an
+// REST display-name path established: sanitize and trim first so an
 // HTML-entity-encoded control or bidi character is the real character by the
 // time it is checked, then collapse runs of spaces, then check the characters,
 // and only then count runes, so the cap applies to what is stored.
@@ -28,7 +28,7 @@ func cleanVisibleBounded(v string, maxRunes int, fieldName string) (string, erro
 	return collapsed, nil
 }
 
-// MaxActivityNameLen bounds a game activity's name (WP 8.3a): one line under a
+// MaxActivityNameLen bounds a game activity's name: one line under a
 // member's name, the same cap as a custom status.
 const MaxActivityNameLen = 128
 
@@ -44,7 +44,7 @@ func CleanActivityName(raw string) (string, error) {
 	return cleanVisibleBounded(trimmed, MaxActivityNameLen, "activity name")
 }
 
-// Listening activity text caps (WP 8.10a): title and artist share the game
+// Listening activity text caps: title and artist share the game
 // name's cap, the player (the app's name) is shorter.
 const (
 	MaxListeningTitleLen  = MaxActivityNameLen

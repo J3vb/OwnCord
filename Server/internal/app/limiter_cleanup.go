@@ -14,7 +14,7 @@ import (
 const limiterCleanupInterval = 5 * time.Minute
 
 // startLimiterCleanup reaps the shared limiter's stale entries on an App-owned
-// context (it was a bare goroutine in api.NewRouter, WP 5.6g). The sweep also
+// context (it was a bare goroutine in api.NewRouter). The sweep also
 // deletes expired persisted lockouts, so the close step cancels and joins the
 // loop before the database closes: it registers after the "database" step.
 func (a *App) startLimiterCleanup(rl *auth.RateLimiter) {

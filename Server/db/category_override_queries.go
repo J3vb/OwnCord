@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ─── Category permission templates (WP 6.5d) ─────────────────────────────────
+// ─── Category permission templates ─────────────────────────────────
 //
 // category_overrides and category_user_overrides (migration 076) are a template
 // that channels in the category stay synced to. They are copied onto channels

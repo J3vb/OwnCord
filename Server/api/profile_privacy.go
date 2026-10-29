@@ -1,4 +1,4 @@
-// profile_privacy.go — per-user direct message privacy (migration 070, WP 6.8b).
+// profile_privacy.go — per-user direct message privacy (migration 070).
 //
 // Both routes key on the session user and there is no route that reads another
 // user's settings. Sync across devices is by REST only, so nothing here is

@@ -39,7 +39,7 @@ type Histogram struct {
 	total   atomic.Uint64
 	max     atomic.Uint64 // microseconds, lifetime
 	// sum is every observation added up, in microseconds (the Prometheus
-	// exposition's _sum, WP 4.3b). Written by Observe, read by Counts.
+	// exposition's _sum). Written by Observe, read by Counts.
 	sum atomic.Uint64
 	// intervalMax is the largest observation since the last takeIntervalMax,
 	// in microseconds. Observe raises it beside max; only the Windows sampler

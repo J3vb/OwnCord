@@ -16,22 +16,22 @@ type SendMessageParams struct {
 	// without ReplyTo and for a reply to your own message.
 	ReplyPing     bool
 	AttachmentIDs []string
-	// ForwardOf is the id of the message a forward copies (WP 6.9a), 0 for an
+	// ForwardOf is the id of the message a forward copies, 0 for an
 	// ordinary send. It only binds a retry to its receipt: Content and
 	// AttachmentIDs stay empty at hash time, so an original edited between two
 	// tries never turns the retry into a conflict.
 	ForwardOf int64
-	// Poll is the canonical JSON of the raw poll input of a poll_create (WP
-	// 6.9b), "" for every other send. Like ForwardOf it only binds a retry to
+	// Poll is the canonical JSON of the raw poll input of a poll_create,
+	// "" for every other send. Like ForwardOf it only binds a retry to
 	// its receipt: Content stays empty at hash time, so the same poll sent
 	// twice is one retry and another poll under the same id is a conflict.
 	Poll string
 	// ForumPost is the canonical JSON of a forum_post_create's title and tag
-	// ids (WP 6.9d), "" for every other send. ChannelID is the forum, and
+	// ids, "" for every other send. ChannelID is the forum, and
 	// Content and AttachmentIDs are the raw text and uploads, so the receipt
 	// hash covers the forum, the title, the tags, the text and the uploads.
 	ForumPost string
-	// StickerID is the sticker a sticker message carries (WP 8.8a), 0 for an
+	// StickerID is the sticker a sticker message carries, 0 for an
 	// ordinary send. A sticker send has no text and no attachments, and needs a
 	// ClientMessageID so the message and its sticker row commit with the
 	// receipt.
@@ -97,8 +97,8 @@ type SendMessageResult struct {
 	MentionRoles     []int64
 	RoleUserIDs      []int64
 	MentionsEveryone bool
-	// ThreadJoined lists the users this send newly made followers of its thread
-	// (WP 6.9c): the author and each direct mention who was not one already. The
+	// ThreadJoined lists the users this send newly made followers of its thread:
+	// the author and each direct mention who was not one already. The
 	// ws layer tells each of them with a thread_follow_update. Nil outside a
 	// thread and on a retry acknowledgment.
 	ThreadJoined []int64
@@ -107,16 +107,16 @@ type SendMessageResult struct {
 	// @everyone is absent). mentionEntries skips the mention-count bump
 	// for an @here reader with no live connection at send time; clients need
 	// this bit to tell that case apart from a plain @everyone, which reaches
-	// every reader regardless (OC-0271).
+	// every reader regardless.
 	MentionsHere bool
 
 	// RequestCreatedFor lists the message_requests rows freshly created by
-	// this send (B5-6 decision 4's first-contact gate,
+	// this send (the first-contact gate,
 	// service/message_request.go): one entry per untrusted one-to-one
 	// recipient who had no existing request in any state. The ws layer sends
 	// one dm_request frame per entry; RequestPreview is what every one of
 	// those frames carries. Empty for a group DM, a trusted recipient, or a
-	// resend while a request already exists (decision 5 — there is only ever
+	// resend while a request already exists (there is only ever
 	// one row to create).
 	RequestCreatedFor []*db.MessageRequest
 	// RequestPreview names this send's own message — a request can only ever

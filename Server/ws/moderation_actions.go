@@ -8,7 +8,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// modActionPayload is the mod_action frame's payload (B5-9): targeted,
+// modActionPayload is the mod_action frame's payload: targeted,
 // unsequenced, not replayed. expires_at is nil for a warning and for a
 // lifted timeout; non-nil for an active timeout.
 type modActionPayload struct {
@@ -204,33 +204,33 @@ func (h *Hub) RefreshUserChannels(userID int64) {
 // MuteForTimeout applies the voice half of a timeout on userID's current
 // voice connection, through the exact mechanism voice_mod_mute uses
 // (VoiceStore.MuteForTimeoutSession plus the SFU mute) rather than a second
-// path to the same effect (decision 6). Satisfies service.TimeoutVoiceMuter.
+// path to the same effect. Satisfies service.TimeoutVoiceMuter.
 // channelID and joinedAt are the EXACT session the caller already authorized
-// against (ModerationService.actorCanModerateVoiceFor, P1-3) — this method
+// against (ModerationService.actorCanModerateVoiceFor) — this method
 // binds its write to that session rather than re-resolving the target's
 // current voice state, which could by then be a different (unauthorized)
-// channel or a leave-and-rejoin of the same one (P1-3 PARTIAL).
+// channel or a leave-and-rejoin of the same one.
 //
 // The DB transition and the SFU call run under the per-user lock
-// (voiceMod, round 4 Part B) shared with UnmuteForTimeout and the manual
+// (voiceMod) shared with UnmuteForTimeout and the manual
 // voice-mod-mute endpoint: whichever of a late unmute (from a lift racing
 // this call) or this mute takes the lock first runs both its own steps
-// before the other can start either (Codex 12). If the SFU call fails after
+// before the other can start either. If the SFU call fails after
 // a genuine DB transition, the DB is rolled back under the SAME lock —
 // reusing UnmuteForTimeout's own clear, scoped to just this actionID — so
-// the two never disagree (Codex 14), and applied/owned both report false.
+// the two never disagree, and applied/owned both report false.
 //
 // Reports applied (the mute is genuinely in effect — already muted counts,
 // nothing new for the SFU to do — or the SFU accepted a fresh one; an SFU
-// failure is NOT applied, P3-14 PARTIAL) and owned (THIS call caused the
+// failure is NOT applied) and owned (THIS call caused the
 // unmuted->muted transition — false means the target was already
 // server-muted by someone/something else, so the caller must not treat
-// this action as responsible for later clearing it, P1-4 PARTIAL).
+// this action as responsible for later clearing it).
 //
 // supersededIDs transfers ownership from those just-superseded ledger ids
-// onto actionID (round 4, Codex review) — but now, unlike round 4, INSIDE
-// this call's own lock hold and the same DB transaction as the mute itself
-// (round 5, Codex review P2): TimeoutUser no longer transfers ownership on
+// onto actionID — INSIDE
+// this call's own lock hold and the same DB transaction as the mute itself:
+// TimeoutUser no longer transfers ownership on
 // its own, because a transfer landing between another action's DB write
 // and its SFU call (both under ITS OWN lock hold, but the transfer was
 // previously a bare DB write outside any lock) could move ownership out
@@ -263,8 +263,8 @@ func (h *Hub) MuteForTimeout(ctx context.Context, userID, channelID, actionID in
 	}
 	if err := h.MuteParticipant(ctx, channelID, userID, joinedAt, true); err != nil {
 		// An SFU failure means the client never actually hears the effect,
-		// so this is NOT applied (P3-14 PARTIAL) — roll the DB transition
-		// back under the same lock so the two do not disagree (Codex 14).
+		// so this is NOT applied — roll the DB transition
+		// back under the same lock so the two do not disagree.
 		slog.Warn("ws MuteForTimeout MuteParticipant failed, rolling back", "err", err, "user_id", userID, "channel_id", channelID)
 		if _, _, _, rbErr := h.voice.ClearServerMuteOwnedBy(ctx, userID, []int64{actionID}); rbErr != nil {
 			slog.Error("ws MuteForTimeout rollback failed", "err", rbErr, "user_id", userID, "action_id", actionID)
@@ -277,7 +277,7 @@ func (h *Hub) MuteForTimeout(ctx context.Context, userID, channelID, actionID in
 
 // UnmuteForTimeout clears the mute currently owned by any of actionIDs (a
 // lift's own action id, or its whole supersede chain) — session-bound for
-// free (round 4, fixing Codex 13): an ended session has no row to match, and
+// free: an ended session has no row to match, and
 // a rejoin starts a fresh row with server_muted_by NULL, so an old action id
 // can never clear an unrelated NEW mute. Satisfies service.TimeoutVoiceMuter.
 // Runs under the same per-user lock as MuteForTimeout and the manual

@@ -35,10 +35,10 @@ type ChannelRef struct {
 	ID       int64
 	Type     string
 	Archived bool
-	// NSFW is consulted only by CanReadContent (B5-7); every other predicate
+	// NSFW is consulted only by CanReadContent; every other predicate
 	// ignores it. Always false for a DM — DMs cannot be labelled.
 	NSFW bool
-	// AuthorityID is the parent of a thread (6.9c), whose overrides are the
+	// AuthorityID is the parent of a thread, whose overrides are the
 	// thread's; 0 means the channel is its own authority. A thread's Archived
 	// and NSFW are already its parent's (the channel queries merge them).
 	AuthorityID int64
@@ -59,7 +59,7 @@ func (c ChannelRef) OverrideKey() int64 {
 type DB interface {
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
 	GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error)
-	// HasActiveTimeout is B5-9's live, uncached lookup: Subject.TimedOut is
+	// HasActiveTimeout is the live, uncached timeout lookup: Subject.TimedOut is
 	// filled from it on every Subject call, never from a cache.
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
 }

@@ -59,7 +59,7 @@ func (s *SessionService) RecordSessionIdentityKey(ctx context.Context, tokenHash
 	return nil
 }
 
-// ─── Bearer-token resolution (B3-8 auth family, session sub-family) ─────────
+// ─── Bearer-token resolution ─────────
 //
 // Three transports authenticate the same bearer tokens: the REST middleware,
 // the admin panel's middleware, and the WebSocket handshake. Each used to walk
@@ -173,8 +173,8 @@ func (s *SessionService) SweepSessions(ctx context.Context, tokenHashes []string
 	return verdicts, nil
 }
 
-// TouchSession records that a login session was used and slides its expiry
-// (DP-05), throttled by the caller — the REST middleware and the WebSocket
+// TouchSession records that a login session was used and slides its expiry,
+// throttled by the caller — the REST middleware and the WebSocket
 // hub each call this at most once per interval per session so hot traffic
 // does not queue a write per request. With a batch installed it only queues
 // the touch; the write lands on the next flush, at most TouchFlushInterval
