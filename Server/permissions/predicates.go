@@ -395,8 +395,10 @@ func AuthorizeVoiceModerator(s Subject) error {
 // CanMoveVoice is the actor's authority to move a member out of the TARGET's
 // channel: effective MOVE_MEMBERS there (so a per-channel deny holds) and
 // READ_MESSAGES so the room is visible to the mover; a DM call additionally
-// requires the actor to be a participant. It is CanModerateVoice for the move
-// bit. Rank is deliberately not part of it: a mover may move any member.
+// requires the actor to be a participant. Rank is deliberately not part of
+// it: a mover may move any member. An Administrator ignores channel
+// overrides here as everywhere; that the base role holds the bit explicitly
+// is AuthorizeVoiceMover's VoiceMoverBase half.
 func CanMoveVoice(s Subject) error {
 	if s.Channel.Type == "dm" {
 		if err := dmMember(s); err != nil {
@@ -409,11 +411,11 @@ func CanMoveVoice(s Subject) error {
 	return nil
 }
 
-// AuthorizeVoiceMover is AuthorizeVoiceModerator for the move command: the
-// actor's BASE role must hold MOVE_MEMBERS (or Administrator) on its own, and
+// AuthorizeVoiceMover is the only authorizer of the move command: the
+// actor's BASE role must hold MOVE_MEMBERS explicitly on its own, and
 // CanMoveVoice must pass in the channel. A channel-scoped allow cannot
-// manufacture move authority the base role never held. MUTE_MEMBERS no longer
-// opens a move.
+// manufacture move authority the base role never held. Neither MUTE_MEMBERS
+// nor ADMINISTRATOR opens a move.
 func AuthorizeVoiceMover(s Subject) error {
 	if err := VoiceMoverBase(s.RolePerms); err != nil {
 		return err
@@ -422,12 +424,12 @@ func AuthorizeVoiceMover(s Subject) error {
 }
 
 // VoiceMoverBase is AuthorizeVoiceMover's base-role half on its own: the
-// actor's roles hold MOVE_MEMBERS (or Administrator). A caller that has not
-// resolved the channel yet uses it to know the move path is open; the
-// channel verdict still comes from AuthorizeVoiceMover on the resolved
-// subject, since READ_MESSAGES may come from a channel allow.
+// actor's roles hold MOVE_MEMBERS explicitly (ADMINISTRATOR is not enough).
+// A caller that has not resolved the channel yet uses it to know the move
+// path is open; the channel verdict still comes from AuthorizeVoiceMover on
+// the resolved subject, since READ_MESSAGES may come from a channel allow.
 func VoiceMoverBase(rolePerms int64) error {
-	if !HasServerPerm(rolePerms, MoveMembers) {
+	if !HasPerm(rolePerms, MoveMembers) {
 		return missing(MoveMembers)
 	}
 	return nil

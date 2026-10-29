@@ -72,7 +72,7 @@ function inputs(over: Partial<VoiceRowInputs> = {}): VoiceRowInputs {
     selfId: SELF,
     connectionStatus: "connected",
     timeout: null,
-    moderatable: [],
+    movable: [],
     localMute: {},
     ...over,
   };
@@ -230,9 +230,9 @@ describe("voiceUserModel", () => {
     expect(voiceUserModel(user(PEER, { username: "" }), 10, inputs(), ctx).name).toBe("Unknown");
   });
 
-  it("draggable needs moderation, another user, a live socket and a moderatable channel", () => {
+  it("draggable needs moderation, another user, a live socket and a movable channel", () => {
     const mod: VoiceUserContext = { ...ctx, moderation: true };
-    const ok = inputs({ moderatable: [10] });
+    const ok = inputs({ movable: [10] });
     expect(voiceUserModel(user(PEER), 10, ok, mod).draggable).toBe(true);
     expect(voiceUserModel(user(SELF), 10, ok, mod).draggable).toBe(false);
     expect(voiceUserModel(user(PEER), 10, ok, ctx).draggable).toBe(false);
@@ -313,7 +313,7 @@ describe("builders read no store", () => {
     const snap = inputs({
       peerVerifications: new Map([[PEER, verification(PEER, "verified", "1")]]),
       localSessionFingerprint: "FP",
-      moderatable: [10],
+      movable: [10],
       timeout: { expiresAt: new Date(Date.now() + 60_000).toISOString() },
     });
     assertNoStoreReads(() => {

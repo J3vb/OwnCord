@@ -158,9 +158,10 @@ func TestAuthorizeVoiceModerator(t *testing.T) {
 }
 
 // TestAuthorizeVoiceMover pins WP 8.4a's move authorizer: the actor's BASE
-// role must hold MOVE_MEMBERS (MUTE_MEMBERS no longer suffices), a channel
-// override cannot manufacture it, a channel deny still holds, and
-// Administrator passes the base gate.
+// role must hold MOVE_MEMBERS explicitly (neither MUTE_MEMBERS nor
+// ADMINISTRATOR suffices), a channel override cannot manufacture it, and a
+// channel deny still holds for everyone but an Administrator, who ignores
+// overrides (so the owner cannot be locked out of a channel).
 func TestAuthorizeVoiceMover(t *testing.T) {
 	const moverBits = memberBits | MoveMembers
 	runPredicate(t, "AuthorizeVoiceMover", AuthorizeVoiceMover, []predicateCase{
@@ -168,7 +169,9 @@ func TestAuthorizeVoiceMover(t *testing.T) {
 		{"MUTE_MEMBERS alone refused", Subject{RolePerms: modBits, Channel: voice(false)}, ErrPermissionDenied},
 		{"no bits refused", Subject{RolePerms: memberBits, Channel: voice(false)}, ErrPermissionDenied},
 		{"channel override alone cannot manufacture the base bit", Subject{RolePerms: memberBits, Override: allow(MoveMembers), Channel: voice(false)}, ErrPermissionDenied},
-		{"admin without the base bit allowed via the Administrator bypass", Subject{RolePerms: Administrator, Channel: voice(false)}, nil},
+		{"Administrator without the bit refused", Subject{RolePerms: Administrator, Channel: voice(false)}, ErrPermissionDenied},
+		{"Administrator with the bit allowed", Subject{RolePerms: Administrator | MoveMembers, Channel: voice(false)}, nil},
+		{"Administrator with the bit ignores a channel deny", Subject{RolePerms: Administrator | MoveMembers, Override: deny(MoveMembers), Channel: voice(false)}, nil},
 		{"base bit present but a channel deny still refuses", Subject{RolePerms: moverBits, Override: deny(MoveMembers), Channel: voice(false)}, ErrPermissionDenied},
 		{"base bit present but channel hidden still refuses", Subject{RolePerms: moverBits, Override: deny(ReadMessages), Channel: voice(false)}, ErrPermissionDenied},
 		{"dm non-participant refused", Subject{RolePerms: moverBits, Channel: dm()}, ErrNotDMParticipant},
@@ -431,7 +434,8 @@ func TestVoiceMoverBase(t *testing.T) {
 		ok    bool
 	}{
 		{"move bit alone", MoveMembers, true},
-		{"administrator", Administrator, true},
+		{"administrator without the bit", Administrator, false},
+		{"administrator with the bit", Administrator | MoveMembers, true},
 		{"mute only", MuteMembers | ReadMessages, false},
 		{"none", 0, false},
 	}
