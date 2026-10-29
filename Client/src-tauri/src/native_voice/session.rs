@@ -1421,7 +1421,12 @@ impl NativeSession {
             return Err(format!("screen capture {capture} is not running"));
         }
         let source = screen_audio_source();
-        self.publish_screen_audio_from(capture, source.clone(), Some(ShareAudio::start(source)))
+        let app = self
+            .screen
+            .as_ref()
+            .and_then(|s| screen::target_pid(s.capture.target()));
+        let feed = ShareAudio::start(source.clone(), app);
+        self.publish_screen_audio_from(capture, source, Some(feed))
             .await
     }
 
@@ -1584,6 +1589,10 @@ impl NativeSession {
             let mut slot = self.screen_audio.lock().unwrap();
             if let Some(audio) = slot.as_mut().filter(|a| a.capture == Some(live.id)) {
                 audio.capture = Some(next.id);
+                // A window's share sound is that app's: follow the new source.
+                if let Some(feed) = &self.share_audio {
+                    feed.set_app(screen::target_pid(next.capture.target()));
+                }
             }
         }
         // Dropping the old share joins its capture thread (and, on Wayland,

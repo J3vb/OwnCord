@@ -362,6 +362,79 @@ mod x11_refresh {
     }
 }
 
+/// The process that owns a capture target, so its share audio can be that
+/// application's sound only. X11 windows carry it as `_NET_WM_PID`; a screen,
+/// the portal (Wayland hides which app a window is) or a window without the
+/// property has none.
+pub fn target_pid(target: Target) -> Option<u32> {
+    match target {
+        Target::Window(xid) if !under_wayland() => x11_window_pid::read(xid),
+        _ => None,
+    }
+}
+
+/// `_NET_WM_PID` of an X11 window, read through Xlib loaded at runtime
+/// (`x11-dl`), like `x11_refresh`. Any failure yields `None`.
+mod x11_window_pid {
+    use std::os::raw::{c_int, c_uchar, c_ulong};
+    use std::ptr;
+
+    use x11_dl::xlib::{Atom, Xlib, XA_CARDINAL};
+
+    pub(super) fn read(xid: u64) -> Option<u32> {
+        let xlib = Xlib::open().ok()?;
+        // SAFETY: a null name opens $DISPLAY; a null result is handled.
+        let display = unsafe { (xlib.XOpenDisplay)(ptr::null()) };
+        if display.is_null() {
+            return None;
+        }
+        // SAFETY: display is live until the XCloseDisplay below; the
+        // property buffer is read within its returned length, then freed.
+        let pid = unsafe {
+            let atom = (xlib.XInternAtom)(display, c"_NET_WM_PID".as_ptr(), 1);
+            let mut actual_type: Atom = 0;
+            let mut actual_format: c_int = 0;
+            let mut items: c_ulong = 0;
+            let mut after: c_ulong = 0;
+            let mut data: *mut c_uchar = ptr::null_mut();
+            let status = if atom == 0 {
+                -1
+            } else {
+                (xlib.XGetWindowProperty)(
+                    display,
+                    xid,
+                    atom,
+                    0,
+                    1,
+                    0,
+                    XA_CARDINAL,
+                    &mut actual_type,
+                    &mut actual_format,
+                    &mut items,
+                    &mut after,
+                    &mut data,
+                )
+            };
+            // Xlib hands 32-bit properties back as C longs.
+            let pid = (status == 0
+                && actual_type == XA_CARDINAL
+                && actual_format == 32
+                && items == 1
+                && !data.is_null())
+            .then(|| *data.cast::<c_ulong>())
+            .and_then(|v| u32::try_from(v).ok())
+            .filter(|&v| v > 1);
+            if !data.is_null() {
+                (xlib.XFree)(data.cast());
+            }
+            pid
+        };
+        // SAFETY: display came from XOpenDisplay and is closed once.
+        unsafe { (xlib.XCloseDisplay)(display) };
+        pid
+    }
+}
+
 fn thumbnail(ty: DesktopCaptureSourceType, source: CaptureSource) -> Option<String> {
     let mut capturer = capturer(ty)?;
     let slot = Arc::new(Mutex::new(None));
@@ -457,6 +530,7 @@ struct Shared {
 }
 
 pub struct ScreenCapture {
+    target: Target,
     shared: Arc<Shared>,
     stop: Option<mpsc::Sender<()>>,
     thread: Option<JoinHandle<()>>,
@@ -504,12 +578,18 @@ impl ScreenCapture {
             .map_err(|e| format!("screen capture thread: {e}"))?;
         Ok((
             Self {
+                target,
                 shared,
                 stop: Some(stop),
                 thread: Some(thread),
             },
             started,
         ))
+    }
+
+    /// What this capture was started on.
+    pub fn target(&self) -> Target {
+        self.target
     }
 
     pub fn preview(&self) -> Arc<Preview> {

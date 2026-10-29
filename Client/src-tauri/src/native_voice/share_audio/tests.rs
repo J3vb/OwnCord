@@ -119,10 +119,44 @@ fn wanted_keeps_only_unmuted_foreign_inputs_on_the_default_sink() {
         input(13, 2, 1, &[]),
     ];
     assert_eq!(
-        wanted(&inputs, Some(1), &clients, &own),
+        wanted(&inputs, Some(1), &clients, &own, None),
         BTreeSet::from([10])
     );
-    assert!(wanted(&inputs, None, &clients, &own).is_empty());
+    assert!(wanted(&inputs, None, &clients, &own, None).is_empty());
+}
+
+#[test]
+fn wanted_keeps_only_the_shared_apps_tree_when_one_is_given() {
+    let own = Own::new(me(), BTreeSet::new());
+    let pid = |p: &'static str| [(c"application.process.id", p)];
+    let clients = [
+        client(1, "firefox", &pid("500")),
+        client(2, "mpv", &pid("600")),
+    ];
+    let inputs = [
+        input(10, 1, 1, &[]),
+        // The browser's audio child plays under its own pid.
+        input(11, 1, 2, &pid("501")),
+        input(12, 1, 2, &[]),
+    ];
+    let firefox = BTreeSet::from([500, 501]);
+    assert_eq!(
+        wanted(&inputs, Some(1), &clients, &own, Some(&firefox)),
+        BTreeSet::from([10, 11])
+    );
+    // An app that plays nothing records nothing, not everyone else.
+    assert!(wanted(
+        &inputs,
+        Some(1),
+        &clients,
+        &own,
+        Some(&BTreeSet::from([700]))
+    )
+    .is_empty());
+    assert_eq!(
+        wanted(&inputs, Some(1), &clients, &own, None),
+        BTreeSet::from([10, 11, 12])
+    );
 }
 
 #[test]
@@ -389,27 +423,47 @@ struct Running {
     stop: Arc<AtomicBool>,
     frames: Shared<Vec<Vec<i16>>>,
     inputs: Arc<AtomicUsize>,
+    app: Arc<AtomicU32>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Running {
     fn start(fake: &Fake, reconnect: Duration) -> Self {
+        Self::start_with(fake, reconnect, 0)
+    }
+
+    /// As `start`, recording only application `pid` (0: every one).
+    fn start_with(fake: &Fake, reconnect: Duration, pid: u32) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let frames: Shared<Vec<Vec<i16>>> = Arc::default();
         let inputs: Arc<AtomicUsize> = Arc::default();
-        let (f, s, i) = (Arc::clone(&frames), Arc::clone(&stop), Arc::clone(&inputs));
+        let app = Arc::new(AtomicU32::new(pid));
+        let (f, s, i, a) = (
+            Arc::clone(&frames),
+            Arc::clone(&stop),
+            Arc::clone(&inputs),
+            Arc::clone(&app),
+        );
         let connect = fake.connector();
         let timing = Timing {
             poll: Duration::from_millis(40),
             reconnect,
         };
         let thread = thread::spawn(move || {
-            run_with(timing, connect, move |pcm| at(&f).push(pcm.to_vec()), s, i)
+            run_with(
+                timing,
+                connect,
+                move |pcm| at(&f).push(pcm.to_vec()),
+                s,
+                i,
+                a,
+            )
         });
         Self {
             stop,
             frames,
             inputs,
+            app,
             thread: Some(thread),
         }
     }
@@ -473,6 +527,29 @@ fn own_and_off_default_streams_are_never_recorded() {
     thread::sleep(Duration::from_millis(250));
     drop(run);
     assert_eq!(*at(&fake.seen), vec![Seen::Create(11)]);
+}
+
+#[test]
+fn a_shared_app_records_only_its_streams_and_follows_a_change() {
+    let tone = Tone { hz: 440.0 };
+    let fake = Fake::new("main", vec![(1, 11, 1, tone), (1, 13, 3, tone)]);
+    {
+        let mut scene = at(&fake.scene);
+        let pid = |p: &'static str| [(c"application.process.id", p)];
+        scene.clients[0] = client(1, "firefox", &pid("4000001"));
+        scene.clients[2] = client(3, "mpv", &pid("4000002"));
+    }
+    let run = Running::start_with(&fake, Duration::from_millis(100), 4_000_001);
+    wait_for("the first create", || !at(&fake.seen).is_empty());
+    thread::sleep(Duration::from_millis(150));
+    assert_eq!(*at(&fake.seen), vec![Seen::Create(11)]);
+    // A source change to the player's window.
+    run.app.store(4_000_002, Ordering::Release);
+    wait_for("the swap", || at(&fake.seen).len() >= 3);
+    assert_eq!(
+        *at(&fake.seen),
+        vec![Seen::Create(11), Seen::Delete(1), Seen::Create(13)]
+    );
 }
 
 #[test]
@@ -547,6 +624,7 @@ fn a_hung_server_does_not_delay_a_stop() {
             move || once.take().ok_or_else(|| io::ErrorKind::NotFound.into()),
             |_| {},
             s,
+            Arc::default(),
             Arc::default(),
         )
     });

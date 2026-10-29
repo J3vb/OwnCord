@@ -124,6 +124,12 @@ says exactly what the beta does and does not claim about who can read what.
 - **On Linux, viewers hear screen-share audio in mono for now.** The app sends
   it in stereo, but the stereo signal is not passed on yet. This needs PulseAudio or
   pipewire-pulse to be running.
+- **On Wayland, sharing one window shares every app's sound.** The desktop
+  portal does not say which app owns the window, so the app sends all sound
+  except OwnCord's own. On X11 a window share sends only that app's sound, as
+  on Windows. An app running in a Flatpak or Snap sandbox may share no sound
+  on X11, because its window reports a process id the sound server does not
+  know.
 - **On Linux, some media needs extra distro packages.**
   - Video attachments and YouTube embeds that use H264/AAC play only with
     `gstreamer1.0-libav` and `gstreamer1.0-plugins-bad`.

@@ -189,6 +189,8 @@ export const voiceText = defineCatalog("voice", {
     "Audio sharing needs a PulseAudio or PipeWire sound server, and none answered; only the picture is shared.",
   "picker.shareAudio": "Share audio",
   "picker.shareAudioHint": "All sound playing on this computer, except OwnCord's own.",
+  "picker.shareAudioHintWindow":
+    "A screen shares all sound except OwnCord's own. One window shares only its app's sound.",
   "picker.shareAppAudio": "Share the app's sound",
   "picker.shareAppAudioHint": "When you share one window, its app's sound is shared too.",
   "picker.quality": "Stream quality",
