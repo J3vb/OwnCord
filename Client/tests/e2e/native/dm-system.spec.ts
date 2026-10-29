@@ -102,12 +102,15 @@ test.describe("DM System (Native)", () => {
     await expect(backHeader.locator(".dm-back-title")).toContainText("Back to");
 
     await backHeader.click();
-    await expect(nativePage.locator(".channel-item").first()).toBeVisible({ timeout: 5_000 });
+    await expect(nativePage.locator(".channel-item").filter({ visible: true }).first()).toBeVisible(
+      { timeout: 5_000 },
+    );
     await expect(backHeader).not.toBeVisible();
 
-    // The DM preview section in channel mode still lists the conversation we
-    // just left; clicking it re-enters the same DM.
-    await nativePage.locator(`.channel-item[data-testid='dm-entry']`).first().click();
+    // Home in the server rail still lists the conversation we just left;
+    // clicking it re-enters the same DM.
+    await nativePage.getByTestId("server-rail-home").click();
+    await nativePage.locator(`.dm-item[data-channel-id='${channelId}']`).click();
     await expect(backHeader).toBeVisible({ timeout: 5_000 });
     await expect(nativePage.locator(`.dm-item[data-channel-id='${channelId}']`)).toHaveClass(
       /active/,

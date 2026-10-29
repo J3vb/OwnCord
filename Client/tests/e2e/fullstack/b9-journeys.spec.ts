@@ -509,7 +509,7 @@ test.describe("B9-26 first-contact journey (real server)", () => {
       bob.on("request", onRequest);
       try {
         const inbox = bob.getByRole("region", { name: "Message Requests" });
-        await bob.locator("[data-testid='dm-requests-badge']").click();
+        await bob.getByTestId("server-rail-home").click();
         await bob.locator("[data-testid='dm-requests-entry']").click();
         await expect(inbox).toBeVisible();
         const item = inbox.locator("[data-testid='request-item']", {
@@ -582,7 +582,8 @@ test.describe("B9-26 first-contact journey (real server)", () => {
 
       // The joined cross-feature assertion: the block the member menu set is
       // the same state the DM composer reads.
-      await bob.locator("[data-testid='dm-entry']").first().click();
+      await bob.getByTestId("server-rail-home").click();
+      await bob.locator(".dm-conversation-list .dm-item").first().click();
       await expect(bob.locator("[data-testid='chat-header-name']")).toHaveText("stranger");
       await expect(composer(bob)).toBeDisabled();
       await expect(composer(bob)).toHaveAttribute(
@@ -838,7 +839,7 @@ test.describe("B9-26 integrated accessibility matrix (real server)", () => {
       // Message Requests inbox at the minimum desktop window.
       await bob.setViewportSize({ width: 940, height: 500 });
       await largeText(bob);
-      await bob.locator("[data-testid='dm-requests-badge']").click();
+      await bob.getByTestId("server-rail-home").click();
       await bob.locator("[data-testid='dm-requests-entry']").click();
       const inbox = bob.getByRole("region", { name: "Message Requests" });
       await expect(inbox).toBeVisible();

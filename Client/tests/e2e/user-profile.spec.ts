@@ -26,6 +26,7 @@ import {
   voiceJoinWithTokenHandlers,
   parkLiveKitSocket,
   connectVoiceSession,
+  openDmRow,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ const profileSidebar = (page: Page) => page.locator("[data-testid='dm-profile-si
 
 /** Open a DM from the channels-mode embedded DM list. */
 async function openDm(page: Page, index = 0): Promise<void> {
-  await page.locator("[data-testid='dm-entry']").nth(index).click();
+  await openDmRow(page, index);
   await expect(page.locator("[data-testid='call-btn']")).toBeVisible({ timeout: 5_000 });
 }
 

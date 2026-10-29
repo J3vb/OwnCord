@@ -4,8 +4,9 @@
 // teardown — before any feature view exists.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const logError = vi.hoisted(() => vi.fn());
 vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: logError }),
 }));
 
 import type { ApiClient } from "@lib/api";
@@ -561,5 +562,176 @@ describe("a whole journey through inert views", () => {
     nav = makeNavigator({ moderation: { build: moderation.build } });
     expect(uiStore.getState().activeView).toBeNull();
     expect(nav.element.childElementCount).toBe(0);
+  });
+});
+
+const attrsOf = (el: Element): Record<string, string> =>
+  Object.fromEntries(el.getAttributeNames().map((n) => [n, el.getAttribute(n) ?? ""]));
+
+describe("a view's frame", () => {
+  it("starts hidden and builds its header, tools and body with their classes", () => {
+    expect(attrsOf(nav.element)).toEqual({
+      class: "chat-area feature-view",
+      "data-testid": "feature-view",
+      style: "display:none",
+    });
+    nav.open("moderation", opener());
+    const [header, body] = [...nav.element.children];
+    expect(attrsOf(header!)).toEqual({ class: "chat-header" });
+    expect(attrsOf(body!)).toEqual({ class: "feature-view-body" });
+    const [title, tools] = [...header!.children];
+    expect(attrsOf(title!)).toEqual({
+      class: "ch-name feature-view-title",
+      id: "feature-view-title-moderation",
+      tabindex: "-1",
+    });
+    expect(attrsOf(tools!)).toEqual({ class: "ch-tools" });
+    expect(nav.element.getAttribute("aria-labelledby")).toBe("feature-view-title-moderation");
+    expect(attrsOf(tools!.firstElementChild!)).toEqual({
+      type: "button",
+      class: "feature-view-close",
+      "aria-label": "Close Moderation",
+      title: "Close Moderation",
+      "data-testid": "feature-view-close",
+    });
+  });
+
+  it("drops its label when the view closes", () => {
+    nav.open("moderation", opener());
+    nav.close();
+    expect(nav.element.hasAttribute("aria-labelledby")).toBe(false);
+    expect(nav.element.style.display).toBe("none");
+  });
+
+  it("logs which view failed to build and why", () => {
+    nav.destroy();
+    nav = makeNavigator({
+      requests: {
+        build: () => {
+          throw new Error("boom");
+        },
+        pending: { get: () => 0, subscribe: () => () => {} },
+      },
+    });
+    nav.open("requests", opener());
+    expect(logError).toHaveBeenCalledWith("Feature view failed to build", {
+      id: "requests",
+      error: "Error: boom",
+    });
+  });
+});
+
+describe("a replaced view's controls", () => {
+  it("leaves the new view alone when the old Close button is clicked", () => {
+    nav.open("moderation", opener());
+    const oldClose = nav.element.querySelector<HTMLButtonElement>(
+      "[data-testid='feature-view-close']",
+    )!;
+    nav.open("requests", opener());
+    oldClose.click();
+    expect(uiStore.getState().activeView).toBe("requests");
+  });
+
+  it("does not treat Escape as handled once no view is open", () => {
+    nav.open("moderation", opener());
+    nav.close();
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    nav.element.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(false);
+  });
+
+  it("marks the Escape it closed on as handled", () => {
+    nav.open("moderation", opener());
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    nav.element.dispatchEvent(escape);
+    expect(escape.defaultPrevented).toBe(true);
+    expect(uiStore.getState().activeView).toBeNull();
+  });
+
+  it("ignores every other key", () => {
+    nav.open("moderation", opener());
+    for (const key of ["Enter", "a", "Tab"]) {
+      const press = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      nav.element.dispatchEvent(press);
+      expect(press.defaultPrevented).toBe(false);
+    }
+    expect(uiStore.getState().activeView).toBe("moderation");
+  });
+
+  it("leaves the view open when Escape belongs to an input method", () => {
+    nav.open("moderation", opener());
+    for (const init of [{ isComposing: true }, { keyCode: 229 }]) {
+      const escape = new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      nav.element.dispatchEvent(escape);
+      expect(escape.defaultPrevented).toBe(false);
+      expect(uiStore.getState().activeView).toBe("moderation");
+    }
+  });
+});
+
+describe("what ends a view", () => {
+  it("leaves the remembered channel alone when a channel is chosen with no view open", () => {
+    returnTarget = RANDOM;
+    setActiveChannel(GENERAL);
+    flush();
+    setActiveChannel(RANDOM);
+    flush();
+    expect(returnTarget).toBe(RANDOM);
+  });
+
+  it("closes the view when the user's role changes to one without the permission", () => {
+    setRoles([
+      { id: 7, name: "Moderator", color: null, permissions: Permission.MODERATE_MEMBERS },
+      { id: 8, name: "Member", color: null, permissions: Permission.SEND_MESSAGES },
+    ]);
+    flush();
+    nav.open("moderation", opener());
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 7, username: "mod", avatar: null, role: "Member" },
+    }));
+    flush();
+    expect(uiStore.getState().activeView).toBeNull();
+  });
+
+  it("tells role lists apart by their ids, not by their digits run together", () => {
+    setRoles([
+      { id: 1, name: "A", color: null, permissions: Permission.SEND_MESSAGES },
+      { id: 23, name: "B", color: null, permissions: Permission.MODERATE_MEMBERS },
+      { id: 12, name: "C", color: null, permissions: Permission.SEND_MESSAGES },
+      { id: 3, name: "D", color: null, permissions: Permission.SEND_MESSAGES },
+    ]);
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 7, username: "mod", avatar: null, role: "A", role_ids: [1, 23] },
+    }));
+    flush();
+    nav.open("moderation", opener());
+    expect(uiStore.getState().activeView).toBe("moderation");
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 7, username: "mod", avatar: null, role: "A", role_ids: [12, 3] },
+    }));
+    flush();
+    expect(uiStore.getState().activeView).toBeNull();
+  });
+});
+
+describe("trackCurrentView on an entry that is built late", () => {
+  it("reflects the view that is already open", () => {
+    nav.open("moderation", opener());
+    flush();
+    const mine = document.createElement("button");
+    const other = document.createElement("button");
+    other.setAttribute("aria-current", "page");
+    const stops = [trackCurrentView(mine, "moderation"), trackCurrentView(other, "requests")];
+    expect(mine.getAttribute("aria-current")).toBe("page");
+    expect(other.hasAttribute("aria-current")).toBe(false);
+    for (const stop of stops) stop();
   });
 });

@@ -19,6 +19,7 @@ import {
   MOCK_MEMBERS_MULTI_ROLE,
   MOCK_VOICE_STATE,
   navigateToMainPageReady,
+  openDmRow,
 } from "./helpers";
 
 const ONE_TO_ONE_DM_ID = 100;
@@ -320,7 +321,7 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
   });
 
   test("DM menu: opens from the keyboard and Enter mutes the conversation", async ({ page }) => {
-    await page.locator("[data-testid='dm-entry']").first().click();
+    await openDmRow(page);
     const row = page.locator(`.dm-item[data-channel-id="${ONE_TO_ONE_DM_ID}"]`);
     await expect(row).toBeVisible({ timeout: 5_000 });
 

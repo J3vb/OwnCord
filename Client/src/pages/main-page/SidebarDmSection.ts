@@ -10,6 +10,7 @@ import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatti
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { totalDmUnread } from "@lib/dmUnread";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
 import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/channel-mutes";
@@ -373,15 +374,10 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       viewAllBtn.style.display = "none";
     }
 
-    // Update total unread badge on the DM header. Muted conversations are
-    // excluded: the header badge is an interrupt, and a muted DM asked not to
-    // be one. Its own row still shows its dimmed count. A mention is the one
-    // thing a mute must never swallow, so a muted channel still contributes
-    // its mentionCount (never its raw unreadCount) to the total.
-    const totalUnread = dmChannels.reduce(
-      (sum, c) => sum + (isChannelMuted(c.channelId) ? c.mentionCount : c.unreadCount),
-      0,
-    );
+    // Update total unread badge on the DM header. A muted conversation is
+    // not an interrupt, so it adds only its mentions; its own row still shows
+    // its dimmed count.
+    const totalUnread = totalDmUnread(dmChannels);
     if (totalUnread > 0) {
       // Each row's count is already capped at 100; cap the sum the same way so
       // the header reads "99+" instead of a four-digit total.

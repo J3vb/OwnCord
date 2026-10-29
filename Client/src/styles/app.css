@@ -27,6 +27,7 @@
 @import "./app/invite-manager.css";
 @import "./app/accessibility.css";
 @import "./app/quick-switch.css";
+@import "./app/server-rail.css";
 @import "./app/channel-flags.css";
 @import "./app/nsfw-gate.css";
 @import "./app/profiles-status.css";

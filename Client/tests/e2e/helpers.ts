@@ -1292,8 +1292,33 @@ export async function expectOverlayUntilReady(page: Page, timeout: number): Prom
  */
 export async function waitForWsReady(page: Page): Promise<void> {
   // The channel sidebar populates after the ready payload is processed.
-  // Wait for the first channel item as proof the WS flow completed.
-  await expect(page.locator(".channel-item").first()).toBeVisible({ timeout: 10_000 });
+  // Wait for the first visible channel item as proof the WS flow completed.
+  // At desktop width the embedded DM rows are hidden (DMs live behind the
+  // server rail's Home button), so the first .channel-item in DOM order can be
+  // a hidden DM entry.
+  await expect(page.locator(".channel-item").filter({ visible: true }).first()).toBeVisible({
+    timeout: 10_000,
+  });
+}
+
+/**
+ * Open Home (the DM list) from the server rail. At desktop width DMs live
+ * behind the rail's Home button, not in the channel sidebar.
+ */
+export async function openHome(page: Page): Promise<void> {
+  await page.getByTestId("server-rail-home").click();
+  await expect(page.locator(".dm-sidebar-header")).toBeVisible({ timeout: 5_000 });
+}
+
+/** The DM rows of the Home list. */
+export function dmRows(page: Page) {
+  return page.locator(".dm-conversation-list .dm-item");
+}
+
+/** Open the nth DM through Home, the way a desktop user reaches it. */
+export async function openDmRow(page: Page, index = 0): Promise<void> {
+  await openHome(page);
+  await dmRows(page).nth(index).click();
 }
 
 /**

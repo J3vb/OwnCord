@@ -5,20 +5,16 @@
  * cancel too.
  */
 
-import { Disposable } from "@lib/disposable";
-import { appendChildren, createElement } from "@lib/dom";
-import { createModal } from "@lib/modalFactory";
+import { createElement } from "@lib/dom";
+import { createConfirmModal, type ConfirmModalInstance } from "../features/dialogs/confirmModal";
 import { onAuthCleared } from "@stores/auth.store";
 import { messagingText } from "../i18n/messaging";
 
-/** The open dialog's live parts, so a later request can take it over. */
+/** The open dialog, so a later request can take it over. */
 interface OpenDialog {
-  title: HTMLElement;
-  body: HTMLElement;
-  confirm: HTMLElement;
-  cancel: HTMLElement;
+  readonly modal: ConfirmModalInstance;
+  readonly bodyText: HTMLElement;
   onConfirm: () => void;
-  close: () => void;
 }
 let open: OpenDialog | null = null;
 
@@ -41,65 +37,35 @@ export function confirmInviteJoin(
   const title = text.title ?? messagingText("invite.confirmTitle");
   const confirmLabel = text.confirmLabel ?? messagingText("invite.confirmButton");
   if (open !== null) {
-    open.title.textContent = title;
-    open.body.textContent = body;
-    open.confirm.textContent = confirmLabel;
+    open.modal.title.textContent = title;
+    open.bodyText.textContent = body;
+    open.modal.confirm.textContent = confirmLabel;
     open.onConfirm = onConfirm;
     // The text changed under the user: put them back on the safe choice.
-    open.cancel.focus();
+    open.modal.cancel.focus();
     return;
   }
-  const owner = new Disposable();
-  const header = createElement("div", { class: "modal-header" });
-  const titleEl = createElement("h3", { id: "invite-join-title" }, title);
-  header.appendChild(titleEl);
-  const bodyEl = createElement("div", { class: "modal-body" });
   const bodyText = createElement("p", {}, body);
-  bodyEl.appendChild(bodyText);
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": "invite-join-cancel" },
-    messagingText("invite.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    { class: "btn-primary", type: "button", "data-testid": "invite-join-confirm" },
-    confirmLabel,
-  );
-  const footer = createElement("div", { class: "modal-footer" });
-  appendChildren(footer, cancel, confirm);
-  const content = createElement("div");
-  appendChildren(content, header, bodyEl, footer);
-
-  const dialog: OpenDialog = {
-    title: titleEl,
+  let stopAuthWatch: (() => void) | null = null;
+  const modal = createConfirmModal({
+    title,
+    titleId: "invite-join-title",
     body: bodyText,
-    confirm,
-    cancel,
-    onConfirm,
-    close: () => modal.close(),
-  };
-  open = dialog;
-  // Any end of the session (logout, 401, server switch) drops the prompt.
-  const stopAuthWatch = onAuthCleared(() => modal.close());
-  const modal = createModal({
-    content,
-    ariaLabelledBy: "invite-join-title",
-    overlayAttrs: { "data-testid": "invite-join-dialog" },
+    confirmLabel,
+    cancelLabel: messagingText("invite.cancel"),
+    tone: "primary",
+    testId: "invite-join-dialog",
+    confirmTestId: "invite-join-confirm",
+    cancelTestId: "invite-join-cancel",
+    // Read at click time: a later request swaps the action.
+    onConfirm: () => dialog.onConfirm(),
     onClose: () => {
       open = null;
-      stopAuthWatch();
-      owner.destroy();
+      stopAuthWatch?.();
     },
   });
-  cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
-  confirm.addEventListener(
-    "click",
-    () => {
-      modal.close();
-      dialog.onConfirm();
-    },
-    { signal: owner.signal },
-  );
-  cancel.focus();
+  const dialog: OpenDialog = { modal, bodyText, onConfirm };
+  open = dialog;
+  // Any end of the session (logout, 401, server switch) drops the prompt.
+  stopAuthWatch = onAuthCleared(() => modal.close());
 }

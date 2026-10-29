@@ -5,9 +5,8 @@
  */
 
 import { clearChildren, createElement, setText } from "@lib/dom";
-import { Disposable } from "@lib/disposable";
 import { isServerRowKind } from "@lib/messageKind";
-import { createModal } from "@lib/modalFactory";
+import { createConfirmModal } from "../../features/dialogs/confirmModal";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
@@ -1396,30 +1395,24 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       track(pendingDeletes, id, { channelId, messageId: msgId });
     }
 
-    /** P4-12: the destructive delete confirm, modelled on DmSidebar's
-     *  openLeaveConfirm / DeleteChannelModal: Cancel first and focused, Escape
-     *  and the backdrop cancel, focus returns to the opener. Tied to the
-     *  mounted channel's signal, so a switch or destroy closes it. */
+    /** P4-12: the destructive delete confirm, on the shared confirm preset
+     *  (features/dialogs/confirmModal.ts): Cancel first and focused, Escape and the backdrop
+     *  cancel, focus returns to the opener. Tied to the mounted channel's
+     *  signal, so a switch or destroy closes it. */
     /** `onConfirm` runs just before the delete is sent. */
     function openDeleteConfirm(
       msgId: number,
       flow: { readonly onConfirm?: () => void; readonly clicked: boolean },
     ): void {
-      const promptOwner = new Disposable();
-      const titleId = `msg-delete-title-${msgId}`;
-      const content = createElement("div");
-      const header = createElement("div", { class: "modal-header" });
-      header.appendChild(createElement("h3", { id: titleId }, messagingText("delete.title")));
-      const body = createElement("div", { class: "modal-body" });
-      body.appendChild(
+      const body: Node[] = [
         createElement("p", { class: "modal-danger-text" }, messagingText("delete.body")),
-      );
+      ];
       const target = getChannelMessages(channelId).find((m) => m.id === msgId);
-      if (target !== undefined) body.appendChild(renderDeletePreview(target));
+      if (target !== undefined) body.push(renderDeletePreview(target));
       // The tip is about the Delete click, so it is left out when no click
       // opened this (an emptied edit).
       if (flow.clicked) {
-        body.appendChild(
+        body.push(
           createElement(
             "p",
             { class: "msg-delete-tip", "data-testid": "msg-delete-tip" },
@@ -1427,38 +1420,20 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           ),
         );
       }
-      const footer = createElement("div", { class: "modal-footer" });
-      const cancel = createElement(
-        "button",
-        { class: "btn-modal-cancel", type: "button", "data-testid": "msg-delete-cancel" },
-        shellText("common.cancel"),
-      );
-      const confirm = createElement(
-        "button",
-        { class: "btn-danger", type: "button", "data-testid": "msg-delete-confirm" },
-        messagingText("delete.confirm"),
-      );
-      footer.append(cancel, confirm);
-      content.append(header, body, footer);
-
-      const modal = createModal({
-        content,
-        ariaLabelledBy: titleId,
-        overlayAttrs: { "data-testid": "msg-delete-modal" },
+      createConfirmModal({
+        title: messagingText("delete.title"),
+        titleId: `msg-delete-title-${msgId}`,
+        body,
+        confirmLabel: messagingText("delete.confirm"),
+        testId: "msg-delete-modal",
+        confirmTestId: "msg-delete-confirm",
+        cancelTestId: "msg-delete-cancel",
         signal,
-        // The modal owns its own listeners; drop this prompt's with it.
-        onClose: () => promptOwner.destroy(),
-      });
-      cancel.addEventListener("click", () => modal.close(), { signal: promptOwner.signal });
-      confirm.addEventListener(
-        "click",
-        () => {
-          modal.close();
+        onConfirm: () => {
           flow.onConfirm?.();
           sendDelete(msgId);
         },
-        { signal: promptOwner.signal },
-      );
+      });
     }
 
     // Bound before any message renders so GIFs in messages get their star.

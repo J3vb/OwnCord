@@ -91,7 +91,7 @@ export async function nativeLoginAndReady(page: Page): Promise<void> {
   await nativeLogin(page);
 
   // Wait for at least one channel to appear (proof of WS ready)
-  const channel = page.locator(".channel-item").first();
+  const channel = page.locator(".channel-item").filter({ visible: true }).first();
   await expect(channel).toBeVisible({ timeout: 15_000 });
 }
 
@@ -103,7 +103,7 @@ export async function nativeLoginAndReady(page: Page): Promise<void> {
 export async function ensureLoggedIn(page: Page): Promise<void> {
   if (await isLoggedIn(page)) {
     // Already logged in — verify channels are still loaded
-    const channel = page.locator(".channel-item").first();
+    const channel = page.locator(".channel-item").filter({ visible: true }).first();
     const hasChannels = await channel.isVisible().catch(() => false);
     if (hasChannels) {
       return; // fully ready, nothing to do

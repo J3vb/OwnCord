@@ -24,7 +24,17 @@ test.describe("Unified Sidebar Header", () => {
     const header = page.locator(".unified-sidebar-header");
     await expect(header).toBeVisible();
 
+    // At desktop width the server rail carries the server icon instead.
     const icon = header.locator(".server-icon-sm");
+    await expect(icon).toBeHidden();
+    await expect(
+      page.locator("[data-testid='server-rail-server'][aria-current='true']"),
+    ).toBeVisible();
+
+    // Where the rail is not shown (800px or less), the header keeps it.
+    await page.setViewportSize({ width: 640, height: 400 });
+    await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
+    await page.locator("[data-testid='sidebar-toggle']").click();
     await expect(icon).toBeVisible();
     await expect(icon).toHaveText("OC");
   });

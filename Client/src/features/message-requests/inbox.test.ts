@@ -547,3 +547,218 @@ describe("inbox view", () => {
     },
   );
 });
+
+describe("inbox markup and redraw", () => {
+  let owner: AbortController;
+  let root: HTMLElement;
+
+  function open(): HTMLElement {
+    owner = new AbortController();
+    root = document.createElement("div");
+    renderInbox(root, owner.signal);
+    document.body.appendChild(root);
+    return root;
+  }
+  const byTestId = (id: string): HTMLElement => root.querySelector(`[data-testid='${id}']`)!;
+  const rows = (): HTMLElement[] => [...root.querySelectorAll<HTMLElement>(".requests-item")];
+  const retry = (): HTMLButtonElement => byTestId("requests-retry") as HTMLButtonElement;
+
+  const unavailable = async () => {
+    const fx = deferredApi();
+    applyReadyDmRequests(fx.api);
+    fx.calls[0]!.reject(new Error("HTTP 500"));
+    await settle();
+    open();
+    return fx;
+  };
+
+  afterEach(() => {
+    owner.abort();
+    root.remove();
+  });
+
+  it("lays out two intro lines, two status regions, Retry and the list in order", () => {
+    open();
+    expect([...root.children].map((c) => c.tagName)).toEqual(["P", "P", "P", "BUTTON", "P", "UL"]);
+    const [intro, help, status, , outcome, list] = [...root.children] as HTMLElement[];
+    expect(intro!.className).toBe("requests-intro");
+    expect(help!.className).toBe("requests-intro");
+    expect(status!.className).toBe("requests-status");
+    expect(outcome!.className).toBe("requests-status");
+    expect(outcome!.getAttribute("role")).toBe("status");
+    expect(outcome!.dataset["testid"]).toBe("requests-outcome");
+    expect(list!.className).toBe("requests-list");
+    expect(retry().getAttribute("type")).toBe("button");
+    expect(retry().className).toBe("btn-modal-cancel requests-retry");
+  });
+
+  it("builds each row with a sender heading, four decision buttons and a hidden error line", () => {
+    handleDmRequest(frame(1, "pending"));
+    open();
+    const row = rows()[0]!;
+    expect(row.dataset["testid"]).toBe("request-item");
+    expect(row.getAttribute("tabindex")).toBe("-1");
+    expect(row.querySelector(".requests-item-head")!.firstElementChild!.tagName).toBe("H3");
+    expect(row.querySelector("h3")!.className).toBe("requests-sender");
+    const err = row.querySelector<HTMLElement>("[data-testid='request-error']")!;
+    expect(err.className).toBe("requests-item-error");
+    expect(err.hidden).toBe(true);
+    const buttons = [...row.querySelectorAll("button")];
+    expect(buttons.map((b) => b.dataset["testid"])).toEqual([
+      "request-accept",
+      "request-ignore",
+      "request-delete",
+      "request-block",
+    ]);
+    expect(buttons.map((b) => b.className)).toEqual([
+      "btn-modal-save",
+      "btn-modal-cancel",
+      "btn-modal-cancel",
+      "btn-modal-cancel",
+    ]);
+    for (const b of buttons) {
+      expect(b.getAttribute("type")).toBe("button");
+      expect(b.getAttribute("aria-disabled")).toBe("false");
+    }
+    expect(row.getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("shows no @handle when the sender has no display name", () => {
+    handleDmRequest({
+      ...frame(1, "pending"),
+      sender: { id: 11, username: "solo", display_name: "", avatar: "" },
+    });
+    open();
+    expect(rows()[0]!.querySelector("h3")!.textContent).toBe("solo");
+    expect(rows()[0]!.querySelector(".requests-username")).toBeNull();
+  });
+
+  it("shows the @handle beside a different display name", () => {
+    handleDmRequest(frame(1, "pending"));
+    open();
+    expect(rows()[0]!.querySelector(".requests-username")!.textContent).toBe("@stranger1");
+  });
+
+  it("shows the sent time in a medium date and short time, and skips an unreadable one", () => {
+    handleDmRequest(frame(1, "pending"));
+    handleDmRequest({ ...frame(2, "pending"), created_at: "not a date" });
+    open();
+    const [broken, fine] = rows();
+    expect(broken!.querySelector("time")).toBeNull();
+    const time = fine!.querySelector("time")!;
+    expect(time.className).toBe("requests-time");
+    expect(time.textContent).toMatch(/^[A-Z][a-z]{2} \d{1,2}, 2026, \d{1,2}:\d{2}\s?[AP]M$/);
+  });
+
+  describe("a newer copy of a kept request", () => {
+    const sender = item(1).sender;
+    const changes: Array<[string, Partial<DmRequestPayload>, (row: HTMLElement) => string]> = [
+      [
+        "display name",
+        { sender: { ...sender, display_name: "Renamed" } },
+        (row) => row.querySelector("h3")!.textContent,
+      ],
+      [
+        "handle",
+        { sender: { ...sender, username: "newhandle" } },
+        (row) => row.querySelector(".requests-username")!.textContent,
+      ],
+      [
+        "preview text",
+        { preview: { ...item(1).preview!, content: "changed text" } },
+        (row) => row.querySelector(".requests-preview")!.textContent,
+      ],
+      [
+        "sent time",
+        { created_at: "2026-09-06 08:30:00" },
+        (row) => row.querySelector("time")!.getAttribute("datetime")!,
+      ],
+    ];
+    const expected = ["Renamed", "@newhandle", "changed text", "2026-09-06T08:30:00.000Z"];
+
+    it.each(changes.map((c, i) => [c[0], c[1], c[2], expected[i]!] as const))(
+      "redraws the row when only its %s changed",
+      (_name, patch, read, want) => {
+        handleDmRequest(frame(1, "pending"));
+        open();
+        const row = rows()[0]!;
+        handleDmRequest({ ...frame(1, "pending"), ...patch });
+        messageRequestsStore.flush();
+        expect(rows()[0]).toBe(row);
+        expect(read(row)).toBe(want);
+      },
+    );
+
+    it("keeps the very same elements when nothing it shows changed", () => {
+      handleDmRequest(frame(1, "pending"));
+      open();
+      const row = rows()[0]!;
+      const head = row.querySelector(".requests-item-head")!;
+      const preview = row.querySelector(".requests-preview")!;
+      handleDmRequest(frame(1, "pending"));
+      messageRequestsStore.flush();
+      expect(row.querySelector(".requests-item-head")).toBe(head);
+      expect(row.querySelector(".requests-preview")).toBe(preview);
+    });
+  });
+
+  it("does not rewrite the Retry label on updates that leave it unchanged", async () => {
+    const { api, calls } = deferredApi();
+    applyReadyDmRequests(api);
+    calls[0]!.reject(new Error("HTTP 500"));
+    await settle();
+    open();
+    messageRequestsStore.flush();
+    const seen: MutationRecord[] = [];
+    const observer = new MutationObserver((m) => seen.push(...m));
+    observer.observe(retry(), { childList: true, characterData: true, subtree: true });
+    handleDmRequest(frame(1, "pending"));
+    messageRequestsStore.flush();
+    await settle();
+    observer.disconnect();
+    expect(retry().textContent).toBe("Retry");
+    expect(seen).toHaveLength(0);
+  });
+
+  describe("Retry focus and teardown", () => {
+    it("leaves focus alone when Retry succeeds without having it", async () => {
+      const fx = await unavailable();
+      retry().click();
+      fx.calls[1]!.resolve([item(1)]);
+      await settle();
+      messageRequestsStore.flush();
+      expect(retry().hidden).toBe(true);
+      expect(document.activeElement).not.toBe(byTestId("requests-list"));
+    });
+
+    it("keeps focus on Retry when it fails again", async () => {
+      const fx = await unavailable();
+      retry().focus();
+      retry().click();
+      fx.calls[1]!.reject(new Error("HTTP 500"));
+      await settle();
+      messageRequestsStore.flush();
+      expect(retry().hidden).toBe(false);
+      expect(document.activeElement).toBe(retry());
+    });
+
+    it("repaints nothing when the view closes while a Retry is running", async () => {
+      const fx = await unavailable();
+      retry().click();
+      expect(retry().textContent).toBe("Retrying…");
+      owner.abort();
+      fx.calls[1]!.resolve([item(1)]);
+      await settle();
+      messageRequestsStore.flush();
+      expect(retry().textContent).toBe("Retrying…");
+      expect(retry().getAttribute("aria-disabled")).toBe("true");
+    });
+
+    it("ignores Retry clicks once the view has closed", async () => {
+      const fx = await unavailable();
+      owner.abort();
+      retry().click();
+      expect(fx.api.listDmRequests).toHaveBeenCalledTimes(1);
+    });
+  });
+});

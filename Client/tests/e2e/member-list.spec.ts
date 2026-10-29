@@ -11,6 +11,7 @@ import {
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
+  openDmRow,
 } from "./helpers";
 
 test.describe("Member List", () => {
@@ -262,7 +263,7 @@ test.describe("Member List — right column (3C-6b)", () => {
     const toggle = page.locator("[data-testid='member-list-toggle']");
     await expect(column).toBeVisible();
 
-    await page.locator("[data-testid='dm-entry']").first().click();
+    await openDmRow(page);
     await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
     await expect(toggle).toBeHidden();
     await expect(column).toBeHidden();

@@ -24,6 +24,7 @@ import {
   MOCK_MEMBERS_MULTI_ROLE,
   navigateToMainPage,
   waitForWsReady,
+  openHome,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -169,8 +170,9 @@ test.describe("@parity Group DM create + leave", () => {
   });
 
   test("member picker creates a group DM from 2+ selected members", async ({ page }) => {
-    // Entry point: the "+" button in the embedded DM section (channels mode).
-    const newDmBtn = page.locator(".sidebar-dm-section .category-add-btn");
+    // Entry point: the "+" button in the Home DM list.
+    await openHome(page);
+    const newDmBtn = page.locator(".dm-section-label .dm-add");
     await expect(newDmBtn).toBeVisible({ timeout: 5_000 });
     await newDmBtn.click();
 
@@ -208,11 +210,9 @@ test.describe("@parity Group DM create + leave", () => {
   test("a group DM in dm_channels renders stacked avatars + member count, and Leave Group fires DELETE", async ({
     page,
   }) => {
-    // Open the seeded group DM from the channels-mode preview to switch into
-    // full DM sidebar mode, where DmSidebar renders the group-specific chrome.
-    const dmEntry = page.locator("[data-testid='dm-entry']").first();
-    await expect(dmEntry).toBeVisible({ timeout: 5_000 });
-    await dmEntry.click();
+    // Home switches into full DM sidebar mode, where DmSidebar renders the
+    // group-specific chrome.
+    await openHome(page);
 
     const groupItem = page.locator(`.dm-item[data-channel-id="${GROUP_DM_CHANNEL_ID}"]`);
     await expect(groupItem).toBeVisible({ timeout: 5_000 });

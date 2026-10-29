@@ -172,6 +172,10 @@ test.describe("Server profiles — Add Server modal", () => {
 // ---------------------------------------------------------------------------
 
 test.describe("Server profiles — quick-switch add", () => {
+  // The quick switcher is the switcher where the server rail is not shown: at
+  // 800px or less (a desktop window at 200 % zoom), from the sidebar drawer.
+  test.use({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
+
   test("the quick-switch Add new server row returns to the connect page", async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
@@ -190,6 +194,8 @@ test.describe("Server profiles — quick-switch add", () => {
     await page.goto("/");
     await submitLogin(page);
     await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
+    await page.locator("[data-testid='sidebar-toggle']").click();
 
     await page.locator("button[title='Switch server']").click();
     const overlay = page.locator("[data-testid='quick-switch-overlay']");
