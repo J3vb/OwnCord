@@ -222,7 +222,7 @@ fn send_launcher_count(desktop_names: &[String], count: u32) {
     use std::sync::Mutex;
 
     static SESSION: Mutex<Option<Connection>> = Mutex::new(None);
-    let mut session = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+    let mut session = crate::sync::lock(&SESSION);
     if session.is_none() {
         match Connection::new_session() {
             Ok(conn) => *session = Some(conn),

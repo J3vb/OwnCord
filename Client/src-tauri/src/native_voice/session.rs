@@ -37,6 +37,7 @@ use super::playout::{self, Playout};
 use super::screen::{self, CaptureOptions, ScreenCapture, Started, Target};
 use super::share_audio::ShareAudio;
 use super::video::{FrameServer, Observer};
+use crate::sync::lock;
 
 /// The only key index OwnCord ever uses. livekit-client's
 /// `ExternalE2EEKeyProvider.setKey(key)` writes index 0, and rust-sdks #1280
@@ -1219,7 +1220,7 @@ impl NativeSession {
             camera.capture.set_source(Some(source));
         }
         let capture = self.camera_capture.as_ref().map(|c| c.id);
-        *self.camera.lock().unwrap() = Some(VideoPublication::of_capture(sid.clone(), capture));
+        *lock(&self.camera) = Some(VideoPublication::of_capture(sid.clone(), capture));
         Ok(sid.to_string())
     }
 
@@ -1262,7 +1263,7 @@ impl NativeSession {
         {
             // One guard for the published check and the write: a release
             // clearing the slot in between must not be written over.
-            let mut slot = self.camera.lock().unwrap();
+            let mut slot = lock(&self.camera);
             let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
                 return Err("the camera stopped during the change".into());
             };
@@ -1281,10 +1282,7 @@ impl NativeSession {
     fn camera_published(&self) -> bool {
         let live = self.camera_capture.as_ref().map(|c| c.id);
         live.is_some()
-            && self
-                .camera
-                .lock()
-                .unwrap()
+            && lock(&self.camera)
                 .as_ref()
                 .is_some_and(|p| p.capture == live)
     }
@@ -1294,12 +1292,7 @@ impl NativeSession {
     /// already replaced, is a no-op: it must not remove the newer camera. The
     /// capture keeps running for the self-view preview.
     pub async fn unpublish_camera(&mut self, sid: &str) {
-        let issued = self
-            .camera
-            .lock()
-            .unwrap()
-            .as_ref()
-            .is_some_and(|c| c.issued == sid);
+        let issued = lock(&self.camera).as_ref().is_some_and(|c| c.issued == sid);
         if issued {
             self.release_camera_publication().await;
         }
@@ -1308,7 +1301,7 @@ impl NativeSession {
     /// Unpublish the camera track without stopping the capture (the self-view
     /// stays live).
     async fn release_camera_publication(&mut self) {
-        let camera = self.camera.lock().unwrap().take();
+        let camera = lock(&self.camera).take();
         if let Some(camera) = camera {
             if let Err(e) = self
                 .room
@@ -1407,8 +1400,7 @@ impl NativeSession {
             screen.capture.set_source(Some(source));
         }
         let capture = self.screen.as_ref().map(|s| s.id);
-        *self.screen_publication.lock().unwrap() =
-            Some(VideoPublication::of_capture(sid.clone(), capture));
+        *lock(&self.screen_publication) = Some(VideoPublication::of_capture(sid.clone(), capture));
         Ok(sid.to_string())
     }
 
@@ -1459,8 +1451,7 @@ impl NativeSession {
             .map_err(|e| e.to_string())?;
         self.require_encrypted(&publication).await?;
         let sid = publication.sid();
-        *self.screen_audio.lock().unwrap() =
-            Some(VideoPublication::of_capture(sid.clone(), Some(capture)));
+        *lock(&self.screen_audio) = Some(VideoPublication::of_capture(sid.clone(), Some(capture)));
         self.share_audio = feed;
         Ok(sid.to_string())
     }
@@ -1497,10 +1488,7 @@ impl NativeSession {
     /// Unpublish screen audio `sid` if it is still the published one; a stale
     /// sid, one a later publish replaced, is a no-op.
     pub async fn unpublish_screen_audio(&mut self, sid: &str) {
-        let issued = self
-            .screen_audio
-            .lock()
-            .unwrap()
+        let issued = lock(&self.screen_audio)
             .as_ref()
             .is_some_and(|a| a.issued == sid);
         if issued {
@@ -1514,7 +1502,7 @@ impl NativeSession {
     /// path does (screenShare.ts: "Screen audio stays published"); the
     /// interop example's `--republish-screen` and stop cover both.
     async fn release_screen_audio(&mut self) {
-        let publication = self.screen_audio.lock().unwrap().take();
+        let publication = lock(&self.screen_audio).take();
         self.share_audio.take();
         if let Some(publication) = publication {
             if let Err(e) = self
@@ -1567,7 +1555,7 @@ impl NativeSession {
         {
             // One guard for the published check and the write: a release
             // clearing the slot in between must not be written over.
-            let mut slot = self.screen_publication.lock().unwrap();
+            let mut slot = lock(&self.screen_publication);
             let Some(publication) = slot.as_mut().filter(|p| p.capture == Some(live.id)) else {
                 return Err("the screen share stopped during the source change".into());
             };
@@ -1581,7 +1569,7 @@ impl NativeSession {
             // The share audio follows the capture that is live, so a
             // withdrawal ends that one. A short lock of its own, taken after
             // the video slot's guard is released.
-            let mut slot = self.screen_audio.lock().unwrap();
+            let mut slot = lock(&self.screen_audio);
             if let Some(audio) = slot.as_mut().filter(|a| a.capture == Some(live.id)) {
                 audio.capture = Some(next.id);
             }
@@ -1633,10 +1621,7 @@ impl NativeSession {
     fn screen_published(&self) -> bool {
         let live = self.screen.as_ref().map(|s| s.id);
         live.is_some()
-            && self
-                .screen_publication
-                .lock()
-                .unwrap()
+            && lock(&self.screen_publication)
                 .as_ref()
                 .is_some_and(|p| p.capture == live)
     }
@@ -1666,7 +1651,7 @@ impl NativeSession {
         if let Some(screen) = &self.screen {
             screen.capture.set_source(None);
         }
-        let publication = self.screen_publication.lock().unwrap().take();
+        let publication = lock(&self.screen_publication).take();
         if let Some(publication) = publication {
             if let Err(e) = self
                 .room
@@ -1784,9 +1769,9 @@ impl NativeSession {
 
     pub fn resources(&self) -> Resources {
         // One slot lock at a time (see the lock order at `screen_audio`).
-        let camera = usize::from(self.camera.lock().unwrap().is_some());
-        let screen = usize::from(self.screen_publication.lock().unwrap().is_some());
-        let screen_audio = usize::from(self.screen_audio.lock().unwrap().is_some());
+        let camera = usize::from(lock(&self.camera).is_some());
+        let screen = usize::from(lock(&self.screen_publication).is_some());
+        let screen_audio = usize::from(lock(&self.screen_audio).is_some());
         Resources {
             rooms: 1,
             local_tracks: usize::from(self.mic.is_some()) + camera + screen + screen_audio,
@@ -1848,12 +1833,7 @@ async fn forward_events(
                 _ => None,
             };
             let orphan = slot.and_then(|slot| {
-                apply_republish(
-                    &mut slot.lock().unwrap(),
-                    source,
-                    previous_sid,
-                    &publication.sid(),
-                )
+                apply_republish(&mut lock(slot), source, previous_sid, &publication.sid())
             });
             if let Some(sid) = orphan {
                 // The video was stopped (slot emptied) or replaced while the
@@ -1888,18 +1868,14 @@ async fn forward_events(
                         mic_withdrawn.set();
                         None
                     }
-                    TrackSource::Camera => release_slot(&mut published[0].lock().unwrap(), &sid)
+                    TrackSource::Camera => release_slot(&mut lock(&published[0]), &sid)
                         .map(|capture| Event::CameraCaptureEnded { capture }),
-                    TrackSource::Screenshare => {
-                        release_slot(&mut published[1].lock().unwrap(), &sid)
-                            .map(|capture| Event::ScreenCaptureEnded { capture })
-                    }
+                    TrackSource::Screenshare => release_slot(&mut lock(&published[1]), &sid)
+                        .map(|capture| Event::ScreenCaptureEnded { capture }),
                     // The share ends the way a stopped capture does; the
                     // webview's stop releases the capture thread.
-                    TrackSource::ScreenshareAudio => {
-                        release_slot(&mut published[2].lock().unwrap(), &sid)
-                            .map(|capture| Event::ScreenCaptureEnded { capture })
-                    }
+                    TrackSource::ScreenshareAudio => release_slot(&mut lock(&published[2]), &sid)
+                        .map(|capture| Event::ScreenCaptureEnded { capture }),
                     _ => None,
                 };
                 if let Some(ended) = ended {
@@ -2333,6 +2309,32 @@ mod tests {
     }
 
     #[test]
+    fn a_slot_poisoned_by_a_panic_still_republishes_and_releases() {
+        let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+        let slot: VideoSlot = Arc::new(Mutex::new(Some(VideoPublication::of_capture(
+            sid("TR_a"),
+            Some(7),
+        ))));
+        let held = Arc::clone(&slot);
+        let _ = std::thread::spawn(move || {
+            let _guard = lock(&held);
+            panic!("a capture thread panics while it holds the slot");
+        })
+        .join();
+        assert!(slot.is_poisoned());
+
+        let orphan = apply_republish(
+            &mut lock(&slot),
+            TrackSource::Camera,
+            &sid("TR_a"),
+            &sid("TR_b"),
+        );
+        assert_eq!(orphan, None, "the republish lands in the poisoned slot");
+        assert_eq!(release_slot(&mut lock(&slot), &sid("TR_b")), Some(7));
+        assert!(lock(&slot).is_none());
+    }
+
+    #[test]
     fn mic_allowed_when_sources_empty_or_listed() {
         assert!(mic_allowed(&permission(true, &[])));
         assert!(mic_allowed(&permission(
@@ -2395,9 +2397,7 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = seen.clone();
         let (on_gate, on_level, emitter) = capture_report_sinks(Arc::new(move |event| {
-            sink.lock()
-                .unwrap()
-                .push(serde_json::to_string(&event).unwrap());
+            lock(&sink).push(serde_json::to_string(&event).unwrap());
         }));
         on_gate(false);
         for _ in 0..CAPTURE_REPORT_QUEUE * 2 {
@@ -2405,7 +2405,7 @@ mod tests {
         }
         drop((on_gate, on_level));
         emitter.await.unwrap();
-        let seen = seen.lock().unwrap();
+        let seen = lock(&seen);
         assert_eq!(seen.len(), CAPTURE_REPORT_QUEUE, "the overflow is dropped");
         assert_eq!(seen[0], r#"{"type":"voiceGate","open":false}"#);
         assert_eq!(seen[1], r#"{"type":"inputLevel","rms":0.5,"open":false}"#);

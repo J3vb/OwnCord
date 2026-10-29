@@ -69,6 +69,7 @@ and only when it changes something a contributor or fork holder must do
 ### Under the hood
 
 - Every error code the server can send is now listed once in the protocol schema and generated into server constants and a client type. A fork that adds a code adds it there and regenerates.
+- The desktop app's Rust code locks shared state through one helper, and clippy rejects a lock taken any other way. On Linux, the native voice session no longer stops when an earlier error left the camera or screen-share slot locked.
 
 ## v2.5.0
 

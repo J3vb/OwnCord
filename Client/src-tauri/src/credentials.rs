@@ -99,9 +99,7 @@ static CREDENTIAL_LOCK: Mutex<()> = Mutex::new(());
 /// distrust) rather than propagated, so a panic inside one command cannot
 /// permanently wedge every credential operation for the rest of the process.
 fn with_credential_lock<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = CREDENTIAL_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = crate::sync::lock(&CREDENTIAL_LOCK);
     f()
 }
 

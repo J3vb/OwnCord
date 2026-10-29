@@ -631,7 +631,7 @@ impl ExternalContentState {
     /// new one drops everything the previous partition cached, which is how a
     /// renderer teardown — it moves to a fresh partition — clears this cache.
     fn enter(&self, partition: &str) -> std::sync::MutexGuard<'_, Partitioned> {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = crate::sync::lock(&self.inner);
         if inner.partition != partition {
             inner.cache.clear();
             inner.handles.clear();
@@ -644,7 +644,7 @@ impl ExternalContentState {
     /// A request that awaited the network may find a newer partition named in
     /// the meantime; it must drop its result, never switch back and evict it.
     fn current(&self, partition: &str) -> Option<std::sync::MutexGuard<'_, Partitioned>> {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = crate::sync::lock(&self.inner);
         (inner.partition == partition).then_some(inner)
     }
 

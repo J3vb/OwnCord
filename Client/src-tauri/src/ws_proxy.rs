@@ -210,8 +210,7 @@ pub async fn ws_connect<R: Runtime>(
 
     // ── TOFU check ───────────────────────────────────────────────────────
     let host = tofu::extract_host(&url);
-    let observed = captured_fp
-        .lock()
+    let observed = crate::sync::lock_checked(&captured_fp)
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
         .clone()
         .filter(|o| !o.fingerprint.is_empty())
@@ -979,14 +978,14 @@ mod tests {
             stream,
             LIVENESS_TIMEOUT,
             |_| {},
-            |e| errors.lock().unwrap().push(e),
+            |e| crate::sync::lock(&errors).push(e),
         )
         .await;
 
         assert_eq!(end, ReadEnd::Silent);
         assert_eq!(started.elapsed(), LIVENESS_TIMEOUT);
         assert_eq!(
-            errors.lock().unwrap().len(),
+            crate::sync::lock(&errors).len(),
             1,
             "the close must be logged to JS"
         );

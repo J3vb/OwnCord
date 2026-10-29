@@ -144,7 +144,7 @@ impl Prefs {
 pub fn detect_game(prefs: Option<DetectPrefs>) -> Option<DetectedGame> {
     let procs = platform_processes()?;
     let prefs = Prefs::new(&prefs.unwrap_or_default());
-    let mut state = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = crate::sync::lock(&STATE);
     detect_with(
         &procs,
         &mut state,

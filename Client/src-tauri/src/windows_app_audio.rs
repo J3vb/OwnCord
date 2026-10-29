@@ -303,11 +303,7 @@ impl Shared {
 
     /// Called by the capture thread for each finished frame.
     fn push_frame(&self, frame: Vec<u8>) {
-        let dropped = self
-            .backlog
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(frame);
+        let dropped = crate::sync::lock(&self.backlog).push(frame);
         if dropped > 0 {
             log::debug!("[app_audio] socket backed up, dropped {dropped} old frame(s)");
         }
@@ -315,14 +311,11 @@ impl Shared {
     }
 
     fn pop_frame(&self) -> Option<Vec<u8>> {
-        self.backlog.lock().unwrap_or_else(|p| p.into_inner()).pop()
+        crate::sync::lock(&self.backlog).pop()
     }
 
     fn clear(&self) {
-        self.backlog
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clear();
+        crate::sync::lock(&self.backlog).clear();
     }
 }
 
@@ -524,7 +517,7 @@ impl AppAudioState {
     }
 
     fn slot(&self) -> std::sync::MutexGuard<'_, Slot<Capture>> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner())
+        crate::sync::lock(&self.0)
     }
 }
 

@@ -53,6 +53,7 @@ mod proxy_common;
 mod ptt;
 mod secret_store;
 mod shortcuts;
+mod sync;
 mod text;
 mod tofu;
 mod tray;

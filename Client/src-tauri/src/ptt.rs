@@ -501,7 +501,7 @@ pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
             return;
         }
     }
-    let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = crate::sync::lock(&PTT_THREAD);
     if guard.is_some() {
         return; // thread already alive — Mutex is the authoritative check
     }
@@ -539,7 +539,7 @@ pub fn ptt_start<R: Runtime>(app: AppHandle<R>) {
         // thread doesn't leave the slot stuck at `Some` and block future starts
         // — without a finishing thread ever clearing a newer thread's slot (the
         // handle-slot corruption in ATOMICRACE-001).
-        let mut g = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        let mut g = crate::sync::lock(&PTT_THREAD);
         if matches!(g.as_ref(), Some((flag, _)) if Arc::ptr_eq(flag, &thread_shutdown)) {
             *g = None;
         }
@@ -574,7 +574,7 @@ pub fn ptt_stop_internal() {
     // while holding it would deadlock. Taking first (slot -> None) also lets a
     // concurrent ptt_start register a fresh generation without racing us.
     let taken = {
-        let mut guard = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = crate::sync::lock(&PTT_THREAD);
         guard.take()
     };
 
@@ -771,7 +771,7 @@ mod tests {
     fn ptt_stop_is_noop_when_not_running() {
         ptt_stop_internal();
         ptt_stop_internal(); // idempotent
-        let g = PTT_THREAD.lock().unwrap_or_else(|e| e.into_inner());
+        let g = crate::sync::lock(&PTT_THREAD);
         assert!(g.is_none(), "slot must stay empty when nothing was running");
     }
 

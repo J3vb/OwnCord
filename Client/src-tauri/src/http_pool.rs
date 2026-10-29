@@ -131,9 +131,7 @@ impl<S: AsyncRead + Unpin + Send + 'static> ConnPool<S> {
     /// A poisoned lock only means a panic mid-update of a socket list; the
     /// worst case is a dropped idle connection, never a trust decision.
     fn lock(&self) -> MutexGuard<'_, HashMap<String, Vec<IdleConn<S>>>> {
-        self.idle
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::sync::lock(&self.idle)
     }
 
     /// An idle connection to `host` verified against `pin`, the host's
