@@ -20,7 +20,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const BASELINE_PATH = path.join(ROOT, "scripts/comment-id-baseline.json");
 
 /** Ids that may remain in total. Lower it in every change that removes ids; it never rises. */
-export const TOTAL_CAP = 2031;
+export const TOTAL_CAP = 2030;
 
 /** Each pattern names a kind of id. All are matched inside comment text only. */
 export const ID_PATTERNS = [

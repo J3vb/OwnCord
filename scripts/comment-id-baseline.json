@@ -408,7 +408,7 @@
   "Server/ws/voice_leave.go": 5,
   "Server/ws/voice_media_flags.go": 1,
   "Server/ws/voice_moderation.go": 19,
-  "Server/ws/voice_moderation_authorize.go": 7,
+  "Server/ws/voice_moderation_authorize.go": 6,
   "Server/ws/voice_moderation_move.go": 2,
   "Server/ws/voice_reconcile.go": 2,
   "Server/ws/voice_registry.go": 14,

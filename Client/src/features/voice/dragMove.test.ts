@@ -156,16 +156,22 @@ function clickRow(): MouseEvent {
 }
 
 describe("canDragVoiceUser", () => {
-  it("allows a channel the server lets the user moderate or move out of", () => {
-    setChannels({ 1: { moderate: true }, 2: { move: true }, 3: { moderate: false, move: false } });
-    expect(canDragVoiceUser(1)).toBe(true);
+  it("allows only a channel the server lets the user move out of", () => {
+    setChannels({
+      1: { moderate: true },
+      2: { move: true },
+      3: { moderate: false, move: false },
+      5: { moderate: true, move: true },
+    });
+    expect(canDragVoiceUser(1)).toBe(false);
     expect(canDragVoiceUser(2)).toBe(true);
     expect(canDragVoiceUser(3)).toBe(false);
     expect(canDragVoiceUser(4)).toBe(false);
+    expect(canDragVoiceUser(5)).toBe(true);
   });
 
   it("refuses everything while the connection is not live", () => {
-    setChannels({ 1: { moderate: true } });
+    setChannels({ 1: { move: true } });
     setConnection("reconnecting");
     expect(canDragVoiceUser(1)).toBe(false);
     setConnection("disconnected");

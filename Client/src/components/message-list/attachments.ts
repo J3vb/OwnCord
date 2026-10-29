@@ -1628,6 +1628,15 @@ function renderFileChip(att: Attachment, resolvedUrl: string): HTMLDivElement {
   return wrap;
 }
 
+/** The file chip an image becomes when it cannot be shown, saying so. */
+function renderUnshownImage(att: Attachment, resolvedUrl: string): HTMLDivElement {
+  const chip = renderFileChip(att, resolvedUrl);
+  const note = createElement("div", { class: "msg-file-note", role: "status" });
+  setText(note, messageStatusText("file.imageFailed"));
+  chip.querySelector(".msg-file-meta")?.appendChild(note);
+  return chip;
+}
+
 /** Whether `att` renders as an inline image, so it belongs in its message's
  *  lightbox sequence (3A-10c). The same test `renderAttachment` applies. */
 export function isGalleryImage(att: Attachment): boolean {
@@ -1804,6 +1813,16 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
         decoding: "async",
       });
       recoverEvictedImage(img, { url: inlineUrl });
+      // Bytes that arrived but do not decode (a corrupt or unsupported file)
+      // would leave a broken-image icon: the file chip keeps it downloadable.
+      img.addEventListener(
+        "error",
+        () => {
+          if (!wrap.isConnected) return;
+          swapKeepingFocus(wrap, renderUnshownImage(att, resolvedUrl));
+        },
+        { once: true },
+      );
       attachLightbox(img);
       bindImageMenu({
         img,
@@ -1855,11 +1874,7 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
             current = img;
           } else if (isConvertedImageMime(att.mime)) {
             // No preview for this HEIC/TIFF: the file chip keeps the original downloadable.
-            const chip = renderFileChip(att, resolvedUrl);
-            const note = createElement("div", { class: "msg-file-note", role: "status" });
-            setText(note, messageStatusText("file.imageFailed"));
-            chip.querySelector(".msg-file-meta")?.appendChild(note);
-            swapKeepingFocus(wrap, chip);
+            swapKeepingFocus(wrap, renderUnshownImage(att, resolvedUrl));
           } else {
             const failure = renderFailureStatus(
               messageStatusText("file.imageFailed"),
