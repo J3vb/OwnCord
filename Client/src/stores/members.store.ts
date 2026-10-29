@@ -16,7 +16,7 @@ import type {
   UserStatus,
 } from "@lib/types";
 
-/** The game a member is playing (WP 8.3). Session state: a presence event, a
+/** The game a member is playing. Session state: a presence event, a
  *  full presence snapshot or `ready.activities` set it, and a new roster or
  *  sign-out clears it with the rest of the store. */
 export interface MemberActivity {
@@ -32,7 +32,7 @@ export function toMemberActivity(raw: GameActivity | null | undefined): MemberAc
   return { name: raw.name, startedAt: raw.started_at };
 }
 
-/** The song a member is listening to (WP 8.10). Session state, set and cleared
+/** The song a member is listening to. Session state, set and cleared
  *  the same ways as `MemberActivity`. */
 export interface MemberListening {
   readonly title: string;
@@ -65,7 +65,7 @@ export interface Member {
   readonly username: string;
   readonly avatar: string | null;
   readonly role: string;
-  /** Every role the member holds, top first (WP 6.3c). Undefined = an older
+  /** Every role the member holds, top first. Undefined = an older
    *  server that sends none, where `role` is the only role. */
   readonly roleIds?: readonly number[];
   readonly status: UserStatus;
@@ -81,7 +81,7 @@ export interface Member {
   readonly customStatusExpiresAt?: string | null;
   /** The game being played. Null or undefined = none. */
   readonly activity?: MemberActivity | null;
-  /** The song being listened to (WP 8.10). Null or undefined = none. */
+  /** The song being listened to. Null or undefined = none. */
   readonly listening?: MemberListening | null;
   /** Profile text. Null = unset, undefined = never sent (older server). */
   readonly about?: string | null;
@@ -218,7 +218,7 @@ export function removeMember(userId: number): void {
 }
 
 /** Update a member's role from a member_update event. `roleIds` is every held
- *  role (WP 6.3c); omitted by an older server, which also drops any stale list. */
+ *  role; omitted by an older server, which also drops any stale list. */
 export function updateMemberRole(userId: number, role: string, roleIds?: readonly number[]): void {
   membersStore.setState((prev) => {
     const existing = prev.members.get(userId);
@@ -461,7 +461,7 @@ export function clearTyping(channelId: number, userId: number): void {
 
 /**
  * Selector: members who read as online to everybody, including, in the
- * member list, to themselves — invisible folds into offline (OC-0348),
+ * member list, to themselves — invisible folds into offline,
  * matching MemberList's isAwayStatus/statusPriority grouping.
  */
 export function getOnlineMembers(): readonly Member[] {

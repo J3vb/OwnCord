@@ -1,4 +1,4 @@
-// The browser platform's settings store (6.13c): one JSON envelope in
+// The browser platform's settings store: one JSON envelope in
 // `localStorage`, under the key the desktop store uses. Validating what comes
 // back is the app's business (`lib/profiles.ts`), as on desktop.
 import type { SettingsSnapshot, SettingsStore } from "../contracts/settings";

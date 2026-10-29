@@ -1,5 +1,5 @@
 // The tray's presence picks: the native `status-change` event
-// (`src-tauri/src/tray.rs`). Lifted from `main.ts` (B7-5), which keeps the
+// (`src-tauri/src/tray.rs`). Lifted from `main.ts`, which keeps the
 // payload check and the legacy "offline" → "invisible" mapping. The event API
 // was already a static import of the entry, so it stays one here.
 import { listen } from "@tauri-apps/api/event";

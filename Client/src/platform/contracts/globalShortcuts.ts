@@ -1,6 +1,6 @@
 /**
  * Global voice shortcuts (U6) and, on Wayland, their setup through the
- * desktop's own shortcut service (LP-9): mute and deafen that fire while the
+ * desktop's own shortcut service: mute and deafen that fire while the
  * app is unfocused, plus the tray's Mute/Deafen items.
  *
  * The native host delivers global keys one of three ways, named by

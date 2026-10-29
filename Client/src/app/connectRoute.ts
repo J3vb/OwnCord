@@ -1,7 +1,7 @@
 // The connect route: the connect page with its login, register, recover and
 // TOTP callbacks, the profile callbacks, the update-required notifier, the
 // periodic health check and the invite hook. Moved out of main.ts's renderPage
-// connect branch verbatim (WP 7.4h). The edits: the collaborators arrive as
+// connect branch verbatim. The edits: the collaborators arrive as
 // arguments, the three route-scoped `let`s for the 2FA challenge live in the
 // renderConnect closure, and the branch's three outputs (the page handle,
 // the health refresh and the invite hook) are returned as a tuple. Nothing
@@ -57,7 +57,7 @@ export function renderConnect(
   const [getSavedProfiles, persistProfiles, mutateAutoLogin, ensureProfileExists] =
     createConnectProfiles(profileManager, pageOwner);
 
-  // The web portal is bound to the server that served it (WP 6.13e): its one
+  // The web portal is bound to the server that served it: its one
   // profile is all the page lists, so no health check probes anything else.
   // Written literally so the desktop build drops every use.
   const fixedHost = __OWNCORD_WEB__ ? (desktop.serverScope.fixedHost ?? undefined) : undefined;
@@ -166,9 +166,9 @@ export function renderConnect(
         attempt.assertCurrent();
         pageOwner.assertCurrent();
         if (result.status === "pending_approval" || result.token === undefined) {
-          // Approval mode (B4-1): no session yet — an admin decides. This is
+          // Approval mode: no session yet — an admin decides. This is
           // an expected state, not a failure, so it is an informational
-          // notice rather than a red error (DP-54).
+          // notice rather than a red error.
           connectPage.showNotice(connectText("registration.pendingApproval"));
           return;
         }

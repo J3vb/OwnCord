@@ -6,7 +6,7 @@
  * `setLiveKitServerHost`/`resolveLiveKitUrl`/`stopLiveKitProxy` mirror
  * `LiveKitUrlResolver`'s `setServerHost`/`resolve`/`stopProxy` one-for-one
  * (`lib/livekitUrlResolver.ts`). Both tunnels live in
- * `platform/desktop/nativeProxies.ts` since B7-5, which holds the LiveKit
+ * `platform/desktop/nativeProxies.ts` since the platform seam, which holds the LiveKit
  * server host the class used to; the `lib/` names stay as their callers'
  * handles.
  */

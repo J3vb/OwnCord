@@ -1,5 +1,5 @@
 /**
- * Stickers store — the server's custom-sticker set (WP 8.8).
+ * Stickers store — the server's custom-sticker set.
  *
  * Loaded once from GET /api/v1/stickers when the session goes ready (only on a
  * server that advertises the `stickers` capability), then replaced wholesale on

@@ -109,7 +109,7 @@ export interface NativeVoiceDevices {
   outputs: NativeVoiceDevice[];
 }
 
-/** One note of an app sound's tone spec (WP LP-6b): a sine whose frequency
+/** One note of an app sound's tone spec: a sine whose frequency
  *  steps at the given offsets, fading exponentially from `gain` to `endGain`
  *  over `duration`. Times are seconds, `freqs` entries are `[offset from the
  *  note's start, hertz]`. The host synthesizes it; the same table drives the
@@ -132,7 +132,7 @@ export interface NativeVoiceConnected {
   frames: string;
 }
 
-/** A video codec the native engine publishes (WP LP-7c). */
+/** A video codec the native engine publishes. */
 export type NativeVoiceVideoCodec = "vp8" | "h264" | "vp9";
 
 /** What the native engine can encode beyond VP8 (`h264`, `vp9`) and decode
@@ -355,7 +355,7 @@ export interface NativeVoiceSenderLayer {
   active: boolean;
 }
 
-/** One stats sample of a native session (LP-5). */
+/** One stats sample of a native session. */
 export interface NativeVoiceStats {
   /** Host wall clock (ms since the epoch) at collection. */
   atMs: number;
@@ -387,7 +387,7 @@ export interface NativeVoice {
    *  when this enable publishes the microphone; omitted, the host keeps its
    *  default. */
   setMicrophone(session: number, enabled: boolean, bitrate?: number): Promise<void>;
-  /** Push-to-talk's gate: closed, the open capture sends silence (DP-30). */
+  /** Push-to-talk's gate: closed, the open capture sends silence. */
   setPttGated(session: number, gated: boolean): Promise<void>;
   /** The input-sensitivity gate: the level (`vadThreshold`'s scale) the
    *  capture must reach to send, 0 for no gate. Its verdicts arrive as
@@ -402,11 +402,11 @@ export interface NativeVoice {
    *  echo canceller's reference switch to them within a few frames, muted
    *  or not. */
   setAudioProcessing(session: number, audio: NativeVoiceAudioOptions): Promise<void>;
-  /** One stats sample of `session` (LP-5); null when the host could not read
+  /** One stats sample of `session`; null when the host could not read
    *  one (stale session, timeout). Never rejects. */
   getStats(session: number): Promise<NativeVoiceStats | null>;
   setSubscribed(session: number, identity: string, sid: string, subscribed: boolean): Promise<void>;
-  /** Layer control for remote video `sid` (P3-07): stop it, or ask for
+  /** Layer control for remote video `sid`: stop it, or ask for
    *  `quality` while it is shown. */
   setVideoView(
     session: number,

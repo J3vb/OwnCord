@@ -23,7 +23,7 @@ export interface Channel {
   readonly type: ChannelType;
   readonly category: string | null;
   /**
-   * The id of the category the channel sits under, 0 when none (WP 6.5a).
+   * The id of the category the channel sits under, 0 when none.
    * Absent or 0 on an older server, which groups by `category` (the name).
    */
   readonly categoryId?: number | undefined;
@@ -73,7 +73,7 @@ export interface Channel {
   readonly slowMode: number;
   /**
    * Labelled age-restricted. The server withholds the channel's content from
-   * anyone who has not acknowledged it (B5-7); this client shows a consent
+   * anyone who has not acknowledged it; this client shows a consent
    * gate instead of the channel and marks the sidebar row.
    */
   readonly nsfw: boolean;
@@ -102,7 +102,7 @@ export interface Channel {
    * listen-only. Absent from older servers, which is read as false.
    */
   readonly afk?: boolean | undefined;
-  /** A forum's tags and settings (WP 6.9d); absent on every other type. */
+  /** A forum's tags and settings; absent on every other type. */
   readonly forum?: ForumSettings | undefined;
 }
 
@@ -350,7 +350,7 @@ export function updateChannel(update: ChannelUpdatePayload): void {
 }
 
 /**
- * Record the server-confirmed acknowledgement of a labelled channel (B5-7).
+ * Record the server-confirmed acknowledgement of a labelled channel.
  * Ignored for an unknown or unlabelled channel, which has nothing to consent to.
  */
 export function setNsfwAcknowledged(id: number, acknowledged: boolean): void {
@@ -396,7 +396,7 @@ export function removeChannel(id: number): void {
  * mention counts for the activated channel — the server's channel_focus does
  * the same server-side, so the badges must not survive the visit locally.
  *
- * `clearUnread: false` selects without zeroing the badge: UX-8's ready-time
+ * `clearUnread: false` selects without zeroing the badge: the ready-time
  * auto-select (and the last-channel restore) is not the user opening the
  * channel, so a channel they never looked at keeps its unread count until it
  * is actually mounted. The `unreadOnOpen` snapshot is taken either way, so the
@@ -464,7 +464,7 @@ export interface CategoryRef {
 /** Filed under no category. */
 export const NO_CATEGORY: CategoryRef = { id: 0, name: "" };
 
-/** The group key of a real category (WP 6.5b). Collapse state is keyed by it. */
+/** The group key of a real category. Collapse state is keyed by it. */
 export function categoryKey(categoryId: number): string {
   return `cat:${categoryId}`;
 }
@@ -666,7 +666,7 @@ export function groupChannelsByCategory(
 /**
  * Increment unread count for a channel, unless it is the active channel.
  *
- * `evenIfActive` (OC-0204) opts out of that skip: "active" normally means
+ * `evenIfActive` opts out of that skip: "active" normally means
  * "the user is watching the live tail" — the reason a badge would be
  * redundant there — but the active channel's loaded window can be detached
  * from the live tail (a jump to an old permalink/reply/search hit), in which
@@ -721,9 +721,9 @@ export function incrementMention(channelId: number, evenIfActive = false): void 
 /**
  * Record an incoming channel message: bumps unread (and mention, when
  * `isMention`) unless `messageId` is already reflected in the channel's
- * watermark — mirrors dm.store's `updateDmLastMessage` (OC-0242).
+ * watermark — mirrors dm.store's `updateDmLastMessage`.
  *
- * OC-0328: a message delivered between the server's registerNow and
+ * A message delivered between the server's registerNow and
  * buildReady is both counted in `ready`'s snapshot (unread_count/
  * last_message_id already advanced) AND redelivered as a queued
  * chat_message once the socket drains. Both counters must sit behind the
@@ -764,7 +764,7 @@ export function noteChannelMessage(
 }
 
 /**
- * Set a channel's mention count from the server's authoritative total (DP-27).
+ * Set a channel's mention count from the server's authoritative total.
  * A mention that lands in a channel the user is not viewing never reaches this
  * client through the channel topic, so the server pushes a per-user
  * `mention_count` frame with the new total instead. Replacing rather than

@@ -1,5 +1,5 @@
 // The app process. Lifted verbatim from `settings/AdvancedTab.ts`'s "Clear &
-// Restart" (B7-5).
+// Restart".
 //
 // The process plugin stays a dynamic `import()`: it is not part of the
 // startup chunk today, and this registry is statically reachable from the

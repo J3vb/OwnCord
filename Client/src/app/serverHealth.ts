@@ -21,9 +21,9 @@ export function configureServerHealth(apiClient: ApiClient): void {
 }
 
 /**
- * Last `server-info` snapshot per host, fed by `runHealthChecks`. B7-12 reads
- * it for the advisory epoch badge and the incompatible notice; B7-15 reads the
- * same snapshot for `registration_mode` and the retention notice.
+ * Last `server-info` snapshot per host, fed by `runHealthChecks`. The
+ * advisory epoch badge and the incompatible notice read it, and the same
+ * snapshot supplies `registration_mode` and the retention notice.
  */
 const serverInfoByHost = new Map<string, ServerInfoResponse>();
 /** Hosts with a `server-info` probe in flight, so a typed host is not probed twice. */
