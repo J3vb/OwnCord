@@ -69,6 +69,7 @@ and only when it changes something a contributor or fork holder must do
 ### Under the hood
 
 - Every error code the server can send is now listed once in the protocol schema and generated into server constants and a client type. A fork that adds a code adds it there and regenerates.
+- Desktop client moves to Tauri 2.12.5 and the latest patch releases of its plugins (updater, notification, dialog, opener, single-instance, deep-link).
 
 ## v2.5.0
 
