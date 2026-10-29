@@ -90,7 +90,7 @@ func MountModerationAppealRoutes(r chi.Router, svc *service.Services) {
 }
 
 // handleFileAppeal: the mod_queue "open" broadcast is issued by
-// AppealService.Submit itself (round 4 review), under the same per-appeal
+// AppealService.Submit itself, under the same per-appeal
 // lock the other three transitions already use — it used to run here,
 // after Submit returned, so it could arrive after a withdraw/assign frame
 // for the same appeal filed moments later.

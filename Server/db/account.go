@@ -11,7 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// The account-erasure transaction lives in erasure.go (EraseAccount, B4-9).
+// The account-erasure transaction lives in erasure.go (EraseAccount).
 // This file keeps the pieces it shares with the anonymising deletion it
 // replaced: the last-admin guard and the DM-channel snapshot/close steps.
 
@@ -23,7 +23,7 @@ const underErasureClause = ` AND id NOT IN (SELECT user_id FROM erasure_jobs WHE
 // remaining admin-class account, returning ErrLastAdmin.
 func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) error {
 	// An erasure already queued for the subject passed this guard when it
-	// was queued (WP 4.1a), and every other account under erasure no longer
+	// was queued, and every other account under erasure no longer
 	// counts as an administrator below, so two erasures cannot both pass.
 	var queued int
 	switch err := tx.QueryRowContext(ctx,

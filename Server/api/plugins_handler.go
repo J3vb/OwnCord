@@ -201,7 +201,7 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// writeAudit records a plugin lifecycle mutation (B2-6) against the admin
+// writeAudit records a plugin lifecycle mutation against the admin
 // principal RequireAdminAuth put on the request. A nil auditor (unit tests
 // that only exercise the HTTP surface) records nothing.
 func (h *PluginAdminHandler) writeAudit(r *http.Request, action string, pluginID int64, detail string) {

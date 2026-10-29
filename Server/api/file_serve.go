@@ -36,7 +36,7 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 	}
 }
 
-// handleServeThumb serves an image file's thumbnail (P4-08): made on the first
+// handleServeThumb serves an image file's thumbnail: made on the first
 // request, then kept beside the original and removed with it (storage.Delete).
 // An image the server does not shrink — one already inside thumbBox, a GIF,
 // a format it cannot encode, one too large to decode within
@@ -111,7 +111,7 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 }
 
 // serveConvertedPreview answers the thumbnail route for a HEIC, HEIF or TIFF
-// original (WP 8.12): always a JPEG, even for a picture already inside
+// original: always a JPEG, even for a picture already inside
 // thumbBox, because no webview shows the original. Generated once under the
 // same slot as every other thumbnail and then kept; a conversion that fails or
 // is refused is kept as an empty thumbnail and answered 404 from then on, so it
@@ -233,7 +233,7 @@ func fileModTime(f storage.File) time.Time {
 // serveFileContent writes an authorized file's bytes with the headers every
 // file route shares.
 func serveFileContent(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, mimeType string, modTime time.Time, content io.ReadSeeker, allowedOrigins []string) {
-	// SRV-05: a download longer than the server's global 30 s WriteTimeout
+	// A download longer than the server's global 30 s WriteTimeout
 	// is truncated with no error (the client sees a short body). Wrap the
 	// writer so every chunk that lands pushes the connection write deadline
 	// out; a stalled peer is abandoned after transferProgressTimeout, and
@@ -245,7 +245,7 @@ func serveFileContent(w http.ResponseWriter, r *http.Request, aa *db.AttachmentA
 
 	// Set headers before ServeContent to ensure correct MIME type.
 	w.Header().Set("Content-Type", mimeType)
-	// BUG-118: Force download for MIME types that could execute content
+	// Force download for MIME types that could execute content
 	// under the OwnCord origin (HTML, SVG, XML, PDF).
 	disposition := "inline"
 	if isUnsafeInlineMIME(mimeType) {
@@ -254,7 +254,7 @@ func serveFileContent(w http.ResponseWriter, r *http.Request, aa *db.AttachmentA
 	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": aa.Filename}))
 	// These downloads are access-controlled, so they must never be stored by
 	// shared/proxy caches (info-leak). Mark private and force revalidation.
-	// W3-4: no-cache forces revalidation on every use, so a max-age is dead
+	// No-cache forces revalidation on every use, so a max-age is dead
 	// weight alongside it — private + no-cache expresses the intent exactly.
 	w.Header().Set("Cache-Control", "private, no-cache")
 	// The Access-Control-Allow-Origin header below reflects the request
@@ -285,7 +285,7 @@ func writeFileAccessError(w http.ResponseWriter, r *http.Request, fileID string,
 	case errors.Is(err, service.ErrNotFound):
 		http.NotFound(w, r)
 	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
-		// B5-7: the response carries the code and nothing else — no detail
+		// The response carries the code and nothing else — no detail
 		// that could distinguish it from any other refusal on this route.
 		writeErr(w, http.StatusForbidden, httperr.CodeNSFWAcknowledgementRequired, "")
 	case errors.Is(err, service.ErrForbidden):

@@ -15,7 +15,7 @@ import (
 // by the per-endpoint rate limiters.
 
 // The auth rate multiplier (security.auth_rate_limit_multiplier) lives in
-// auth (auth/ratescale.go) since B3-2, so the route mounts here and the login
+// auth (auth/ratescale.go), so the route mounts here and the login
 // failure accounting in service.AuthService read one value. These wrappers
 // keep the mount sites and api/constants_test.go unchanged.
 
@@ -120,7 +120,7 @@ var bodyCapExemptPrefixes = []string{
 	// 3 MiB avatar envelope: route-scoped MaxBodySize(avatarMaxBodySize)
 	// plus the handler's re-wrap enforce it.
 	"/api/v1/users/me/avatar",
-	// 5 MiB banner envelope (WP 8.7), enforced the same way with
+	// 5 MiB banner envelope, enforced the same way with
 	// bannerMaxBodySize.
 	"/api/v1/users/me/banner",
 }
@@ -218,7 +218,7 @@ const (
 	// stickerPatchMaxBodySize bounds a rename body: a name and an emoji.
 	stickerPatchMaxBodySize = 4 << 10
 
-	// maxAvatarFileBytes is the largest avatar image accepted (2 MiB, WP 8.7).
+	// maxAvatarFileBytes is the largest avatar image accepted (2 MiB).
 	// An avatar renders at 40px in a message row and 64px in the profile
 	// popup, so a still picture never comes near it; the room is for an
 	// animated GIF or WebP, which the client uploads as-is. The cap is what
@@ -248,9 +248,9 @@ const (
 	// user_update out to every connected session and orphans the previous file.
 	avatarUploadRateLimitPerMinute = 5
 
-	// maxBannerFileBytes is the largest profile banner image accepted (4 MiB,
-	// WP 8.7), and maxBannerWidth by maxBannerHeight the largest it may
-	// measure (WP 6.11b). The client crops a still picture to 5:2 and scales
+	// maxBannerFileBytes is the largest profile banner image accepted (4 MiB),
+	// and maxBannerWidth by maxBannerHeight the largest it may
+	// measure. The client crops a still picture to 5:2 and scales
 	// it down before uploading; an animated one goes up as-is, which is what
 	// the room above the old 1 MiB is for.
 	maxBannerFileBytes = 4 << 20

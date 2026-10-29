@@ -198,7 +198,7 @@ func (d *DB) UpdateVoiceDeafen(ctx context.Context, userID int64, deafened bool)
 // moderator acted stays muted until they unmute themselves.
 //
 // Reports matched=false when the target's voice_states row is no longer in
-// channelID (OC-0005): a channel switch racing the moderator's DB round
+// channelID: a channel switch racing the moderator's DB round
 // trips must not let this write land on whatever channel the target moved
 // to, including a DM call nobody was authorized against. The row is left
 // untouched in that case, same as if the write had never happened.
@@ -216,20 +216,20 @@ func (d *DB) SetVoiceServerMute(ctx context.Context, userID, channelID int64, se
 	return n > 0, nil
 }
 
-// MuteForTimeoutSession is the timeout voice half's mute (P1-3/P1-4 PARTIAL
-// round 3; reworked round 4, Codex review, onto the session-ownership model
-// — see migration 049's comment on voice_states.server_muted_by). Matched
+// MuteForTimeoutSession is the timeout voice half's mute, built on the
+// session-ownership model (see migration 049's comment on
+// voice_states.server_muted_by). Matched
 // against the EXACT session — channelID and joinedAt, the join-instance
 // token JoinVoiceChannel mints — the caller already authorized. A single
 // conditional UPDATE (WHERE server_muted = 0) both applies the mute AND
 // stamps actionID as owner, only on a genuine unmuted->muted transition, so
 // there is no gap between "mute lands" and "ownership recorded" for a
-// concurrent lift to race (round 3's Codex 16 is now structurally
+// concurrent lift to race (that race is now structurally
 // impossible, not merely guarded against).
 //
 // matched=false covers "no such session" (the target left/switched between
-// authorization and this call, P1-3 PARTIAL) and "the incoming actionID is
-// no longer an active timeout on this target" (round 5, Codex review P2: a
+// authorization and this call) and "the incoming actionID is
+// no longer an active timeout on this target" (a
 // delayed call, reaching the SFU/DB after its own row was already lifted or
 // expired, must be refused, not treated as a fresh or reclaimed mute) —
 // disambiguated from "already muted by someone/something else" (matched=
@@ -237,8 +237,8 @@ func (d *DB) SetVoiceServerMute(ctx context.Context, userID, channelID int64, se
 // the conditional UPDATE itself affects zero rows.
 //
 // supersededIDs, when non-empty, transfers ownership from those (just-
-// superseded, round 4 Codex review) ledger ids onto actionID FIRST, inside
-// this SAME transaction (round 5, Codex review P2): TimeoutUser no longer
+// superseded) ledger ids onto actionID FIRST, inside
+// this SAME transaction: TimeoutUser no longer
 // does this transfer itself, because it must happen under the ws-layer
 // per-target lock the caller (ws.Hub.MuteForTimeout) already holds for the
 // paired SFU call, not as a bare DB write racing that lock from outside it
@@ -303,12 +303,11 @@ func (d *DB) MuteForTimeoutSession(ctx context.Context, userID, channelID, actio
 // ClearServerMuteOwnedBy clears server_muted for whichever voice_states row
 // (at most one — user_id is the table's primary key) currently names one of
 // actionIDs as server_muted_by, and reports that row's channel/join-instance
-// token for the caller's paired SFU call. Session-bound for free (round 4,
-// Codex review, fixing round 3's Codex 13): an ended session has no row to
+// token for the caller's paired SFU call. Session-bound for free: an ended session has no row to
 // match, and a rejoin starts a fresh row with server_muted_by NULL, so an
 // old action id (a lift's own id, or its whole supersede chain) can never
 // clear an unrelated NEW mute on a later session. Also LiftTimeout's
-// rollback path for an SFU failure on mute (round 4, Codex 14) — same
+// rollback path for an SFU failure on mute — same
 // statement, called with only the one action id that just failed.
 func (d *DB) ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error) {
 	if len(actionIDs) == 0 {
@@ -345,8 +344,8 @@ type OrphanedVoiceMute struct {
 }
 
 // FindOrphanedVoiceMutes lists every voice_states row whose server_muted_by
-// points at a timeout that is now lifted or expired (round 4, B5-10
-// addendum) — the maintenance-tick (and start-up) reconcile sweep's input.
+// points at a timeout that is now lifted or expired —
+// the maintenance-tick (and start-up) reconcile sweep's input.
 func (d *DB) FindOrphanedVoiceMutes(ctx context.Context) ([]OrphanedVoiceMute, error) {
 	rows, err := d.q.FindOrphanedVoiceMutes(ctx)
 	if err != nil {
@@ -454,7 +453,7 @@ func (d *DB) UpdateVoiceScreenshare(ctx context.Context, userID int64, screensha
 
 // EnableScreenshareIfUnderLimit atomically enables a user's screenshare only
 // if the channel has not yet reached maxVideo active video streams — camera
-// and screenshare draw from the same voice_max_video budget (OC-0023).
+// and screenshare draw from the same voice_max_video budget.
 // Returns true if the screenshare was enabled, false if the limit was
 // already reached.
 func (d *DB) EnableScreenshareIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error) {

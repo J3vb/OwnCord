@@ -59,7 +59,7 @@ func (d *DB) CloseSetupGate(ctx context.Context) error {
 
 // CreateOwnerIfEmpty atomically checks that no users exist and inserts the
 // first owner in a single transaction. Returns ErrConflict if any user already
-// exists, closing the TOCTOU race in the setup endpoint (BUG-119).
+// exists, closing the TOCTOU race in the setup endpoint.
 func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -127,9 +127,9 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 
 // CreateUserWithInvite atomically consumes an invite, creates the user and
 // inserts the account's first session in one transaction, so a failure at any
-// step — the session insert included (OC-0376) — leaves no half-registered
+// step — the session insert included — leaves no half-registered
 // account and does not burn the invite. sessionTokenHash must already be
-// hashed. The H-6 session cap needs no eviction here: the user has no sessions
+// hashed. The per-user session cap needs no eviction here: the user has no sessions
 // yet.
 func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
@@ -187,9 +187,9 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 }
 
 // CreateUserWithSession creates the account and its first session in one
-// transaction — open-mode registration (B4-1), where no invite is consumed.
+// transaction — open-mode registration, where no invite is consumed.
 // Like CreateUserWithInvite, a failure at any step leaves no half-registered
-// account (OC-0376). sessionTokenHash must already be hashed.
+// account. sessionTokenHash must already be hashed.
 func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -221,7 +221,7 @@ func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash s
 // the approval queue already holds maxPending rows.
 var ErrPendingQueueFull = errors.New("approval queue is full")
 
-// CreatePendingUser records an approval-mode application (B4-1): the account
+// CreatePendingUser records an approval-mode application: the account
 // row exists, holding the username, as registration_status = 'pending' with
 // no session, so it cannot sign in until ApprovePendingUser. The queue cap is
 // enforced by the insert itself (one serialized statement), so concurrent
@@ -300,7 +300,7 @@ const anonymiseNameAttempts = 4
 
 // DenyPendingUser denies an application: the row is anonymised (the username
 // is released as "[denied-{id}]", the password and profile cleared) and locked
-// as 'denied' for good — the convention the pre-B4-9 account deletion used,
+// as 'denied' for good — the convention the earlier anonymising account deletion used,
 // because audit rows reference the id. Only a still-pending row is touched;
 // an approved account never goes through here. ErrNotFound when nothing
 // pending matches.
@@ -440,18 +440,18 @@ func (d *DB) UnbanUser(ctx context.Context, id int64) error {
 
 // maxSessionsPerUser is the maximum number of concurrent sessions allowed per
 // user. When exceeded, the oldest session is evicted. This prevents unbounded
-// session accumulation from credential stuffing or token theft (H-6).
+// session accumulation from credential stuffing or token theft.
 const maxSessionsPerUser = 25
 
 // CreateSession inserts a new session and returns the session ID.
 // tokenHash must already be hashed (never store plaintext tokens).
-// H-6: Enforces a per-user session cap by evicting the oldest session when
+// Enforces a per-user session cap by evicting the oldest session when
 // the limit is reached.
 func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error) {
 	// Evict oldest sessions if at or above the cap. A failed eviction must
 	// not block the login (the DELETE trims to the cap again on the next
 	// successful CreateSession, and a persistent DB failure fails the
-	// InsertSession below anyway), but an H-6 control failing is never
+	// InsertSession below anyway), but a session-cap control failing is never
 	// allowed to be invisible.
 	if err := d.q.EvictOldestSessions(ctx, dbgen.EvictOldestSessionsParams{
 		UserID: userID,
@@ -473,8 +473,8 @@ func (d *DB) CreateFirstSession(ctx context.Context, userID int64, tokenHash, de
 
 // insertSession inserts one session row through q — d.q, or d.q.WithTx(tx)
 // when the row must commit with other writes (CreateUserWithInvite).
-// unseen marks the row as a new login the account has not acknowledged yet
-// (B4-7); a registration's first session has no other device to tell.
+// unseen marks the row as a new login the account has not acknowledged yet;
+// a registration's first session has no other device to tell.
 func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHash, device, ip string, unseen bool) (int64, error) {
 	expiresAt := time.Now().Add(sessionTTL).UTC().Format(dbtime.ISOLayout)
 	deviceCopy, ipCopy := device, ip
@@ -614,7 +614,7 @@ func (d *DB) DeleteSession(ctx context.Context, tokenHash string) error {
 
 // DeleteOtherSessions removes all sessions for the given user except the one
 // with keepSessionID. Used after password change or 2FA state change to
-// invalidate all other sessions (BUG-108).
+// invalidate all other sessions.
 func (d *DB) DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error) {
 	result, err := d.q.DeleteOtherSessions(ctx, dbgen.DeleteOtherSessionsParams{
 		UserID: userID,

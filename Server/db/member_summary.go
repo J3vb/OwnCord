@@ -45,8 +45,8 @@ type MemberSummary struct {
 	Avatar   *string `json:"avatar"`
 	Status   string  `json:"status"`
 	// MemberRoleSet carries role (the top role's lowercased name) and role_ids
-	// (every role held, top first), flat in the JSON at this position (WP
-	// 6.3c). An embedded pointer keeps MemberSummary under the range-copy size
+	// (every role held, top first), flat in the JSON at this position.
+	// An embedded pointer keeps MemberSummary under the range-copy size
 	// limit; ListMembers always sets it, and a summary built by hand needs it
 	// before .Role or .RoleIDs is read.
 	*MemberRoleSet
@@ -62,7 +62,7 @@ type MemberSummary struct {
 	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
 	CreatedAt string `json:"created_at"`
 	// MemberBanner is nil for a member with no banner, which omits both keys,
-	// so a roster of such members is no larger than before (WP 6.11b). It is an
+	// so a roster of such members is no larger than before. It is an
 	// embedded pointer to keep MemberSummary under the range-copy size limit.
 	*MemberBanner
 	// CustomStatus is the free-text status line shown under the name. Null

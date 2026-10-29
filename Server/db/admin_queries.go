@@ -35,7 +35,7 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 		return nil, fmt.Errorf("GetServerStats users: %w", err)
 	}
 	// CountActiveMessages is a full scan; the dashboard tolerates a minute of
-	// staleness (SV-07).
+	// staleness.
 	if stats.MessageCount, err = d.activeMessagesCache.Get(statsCacheTTL, func() (int64, error) {
 		return d.q.CountActiveMessages(ctx)
 	}); err != nil {
@@ -236,7 +236,7 @@ type ChannelUpdate struct {
 	VoiceMaxVideo int
 	// SyncGuard, when non-nil, asks for the channel's override rows to be
 	// replaced by the template of the category it ends up in, and for it to be
-	// marked synced (WP 6.5d). It runs in the same transaction as the update,
+	// marked synced. It runs in the same transaction as the update,
 	// so a refusal leaves the channel where it was. ErrUncategorized when the
 	// update leaves the channel with no category. Without it, a move to
 	// another category keeps the channel's rows and unsyncs it.
@@ -366,7 +366,7 @@ func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType str
 }
 
 // LogAuditEntry inserts an audit entry with every field, the tokens
-// included (B4-10); LogAudit is the token-less form the rest of the server
+// included; LogAudit is the token-less form the rest of the server
 // writes. The erasure's unlinking rules are applied under the writer
 // connection, once it is held: an entry about a subject whose erasure
 // committed while this call waited for the connection is written unlinked.

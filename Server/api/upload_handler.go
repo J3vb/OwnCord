@@ -34,7 +34,7 @@ type uploadResponse struct {
 	URL      string `json:"url"`
 	Width    *int   `json:"width,omitempty"`
 	Height   *int   `json:"height,omitempty"`
-	// DurationMs and Waveform are set only for a voice upload (WP 8.9).
+	// DurationMs and Waveform are set only for a voice upload.
 	DurationMs int    `json:"duration_ms,omitempty"`
 	Waveform   string `json:"waveform,omitempty"`
 }
@@ -156,7 +156,7 @@ func safeStorageErrorMessage(err error) string {
 // 400. Detail never crosses the HTTP boundary either way (path leakage —
 // see safeStorageErrorMessage).
 func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
-	// B5-2: the two bounds refuse with 507 and their own codes, so a client
+	// The two bounds refuse with 507 and their own codes, so a client
 	// can tell "your quota is full" from "the server is out of disk" from a
 	// filesystem failure; none of the three bodies carries a path.
 	if errors.Is(saveErr, service.ErrQuotaExceeded) {
@@ -201,7 +201,7 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	r.With(fileLinkAuth(sessions, links)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
 	// Mints the link for the caller, under the same access rule as the download.
 	r.With(AuthMiddleware(sessions)).Post("/api/v1/files/{id}/link", handleIssueFileLink(uploads, links, limiter))
-	// A bounded preview of an image file, under the same access rule (P4-08).
+	// A bounded preview of an image file, under the same access rule.
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}/thumb", handleServeThumb(uploads, store, allowedOrigins))
 }
 
@@ -241,7 +241,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		if !ok {
 			return
 		}
-		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
+		// Per-user upload rate limit to prevent disk exhaustion.
 		if !limiter.Allow(auth.Key("upload", user.ID), uploadRateLimitPerMinute, time.Minute) {
 			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "upload rate limit exceeded, try again later")
 			return
@@ -252,7 +252,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		}
 		defer slots.release(user.ID)
 
-		// WP 8.9: the voice pair is validated before any quota is reserved and
+		// The voice pair is validated before any quota is reserved and
 		// before a byte of the body is read.
 		voice, err := parseVoiceMeta(r.URL.Query())
 		if err != nil {
@@ -260,7 +260,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 
-		// SRV-05: the server's global 30 s ReadTimeout/WriteTimeout bound the
+		// The server's global 30 s ReadTimeout/WriteTimeout bound the
 		// WHOLE request, so a 25 MB upload on a slow uplink is cut mid-body
 		// (and its 201 never lands, because the write deadline elapsed long
 		// before the body finished). The route-scoped body wrapper below pushes
@@ -285,7 +285,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 
-		// B5-2: admit the bytes before reading any of them. The declared
+		// Admit the bytes before reading any of them. The declared
 		// length is untrusted and a chunked request carries none at all
 		// (-1), so the envelope is what this request may cost the volume
 		// before the true size is known: the declared length when it is

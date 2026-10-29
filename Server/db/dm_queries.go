@@ -119,7 +119,7 @@ func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (
 // branch it decides whether to open the recipient's side (does the
 // recipient already trust callerID?) and writes dm_open_state accordingly —
 // INSIDE the same transaction as the trust check, with no separate
-// CloseDM step afterward. Codex review round 2, P1: the old shape (create
+// CloseDM step afterward. The old shape (create
 // both sides open, then CloseDM the recipient's side in a later call) left
 // a window where a cancellation or a failed CloseDM left the recipient open,
 // and where a CloseDM built from a stale "not trusted" read could close a DM
@@ -242,7 +242,7 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 
 	// Decide user2ID's (the recipient's) visibility and write dm_open_state
 	// in the SAME transaction — see getOrCreateDMChannel's doc comment
-	// (Codex review round 2, P1) for why this must not be a separate step.
+	// for why this must not be a separate step.
 	recipientOpened, err := decideAndOpenRecipientDM(tx, user1ID, user2ID, channelID, gateRecipient)
 	if err != nil {
 		_ = tx.Rollback()

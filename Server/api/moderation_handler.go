@@ -30,7 +30,7 @@ type moderationActionIDResponse struct {
 }
 
 // timeoutResponse is Timeout's response body: Voice is "applied" or
-// "skipped" — decision 6, the actor lacked MUTE_MEMBERS.
+// "skipped" when the actor lacked MUTE_MEMBERS.
 type timeoutResponse struct {
 	ID    int64  `json:"id"`
 	Voice string `json:"voice"`
@@ -38,7 +38,7 @@ type timeoutResponse struct {
 
 // moderationActionResponse is one row of GET .../users/{id}/actions and the
 // queue detail's "actions taken" list. ReportID, when present, is the
-// report's PUBLIC id (P2-9) — the sequential internal id never reaches a
+// report's PUBLIC id — the sequential internal id never reaches a
 // response.
 type moderationActionResponse struct {
 	ID             int64   `json:"id"`
@@ -54,10 +54,10 @@ type moderationActionResponse struct {
 }
 
 // moderationActionResponses maps a ledger slice to the wire shape, resolving
-// each row's internal report_id to its public one (P2-9) — the sequential
+// each row's internal report_id to its public one — the sequential
 // id never reaches a response. viewerID authorizes each row's report link
-// individually through the report's own confidentiality guard (P1-5, Codex
-// review): a moderator who is the SUBJECT of a report linked from their own
+// individually through the report's own confidentiality guard:
+// a moderator who is the SUBJECT of a report linked from their own
 // action ledger must not have that report's id surface here just because
 // they still hold MODERATE_MEMBERS — the id is simply omitted (the rest of
 // the row still renders) rather than the whole read failing.

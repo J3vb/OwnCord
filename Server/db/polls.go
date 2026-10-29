@@ -16,7 +16,7 @@ type PollAnswerInput struct {
 	Emoji *string
 }
 
-// PollInput is the validated poll of a send (WP 6.9b), as an input to
+// PollInput is the validated poll of a send, as an input to
 // CreateMessageDelivery. The service has already sanitised and bounded every
 // field. It has no json tags: the wire shape is PollInfo.
 type PollInput struct {

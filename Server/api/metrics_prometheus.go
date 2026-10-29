@@ -7,7 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// The Prometheus exposition of GET /api/v1/metrics/prometheus (WP 4.3b). It is
+// The Prometheus exposition of GET /api/v1/metrics/prometheus. It is
 // hand-written (metrics.PromText) so the default build, which no release or
 // image compiles with -tags otel, carries no prometheus client library. The
 // figures come from the same collectMetrics call as the JSON, converted to base

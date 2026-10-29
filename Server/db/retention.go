@@ -18,8 +18,8 @@ import (
 const RetentionDaysKey = "retention_days"
 
 // RetentionMaxDays is the largest window ServerRetentionDays and the
-// per-channel override read back before treating the row as malformed
-// (OC-0393): converted into the sweep's cutoff (-time.Duration(days) *
+// per-channel override read back before treating the row as malformed:
+// converted into the sweep's cutoff (-time.Duration(days) *
 // 24 * time.Hour, service/retention.go), a day count past this overflows
 // the multiplication and the cutoff wraps into the future, matching every
 // unpinned message as "old" instead of none. service.RetentionMaxDays is
@@ -30,8 +30,8 @@ const RetentionDaysKey = "retention_days"
 // silently truncate a legitimately larger window an admin just set.
 const RetentionMaxDays = 3650
 
-// ChannelRetention is a per-channel retention policy (B4-11, owner decision
-// 4): days overrides the server window in either direction, 0 meaning keep
+// ChannelRetention is a per-channel retention policy:
+// days overrides the server window in either direction, 0 meaning keep
 // forever.
 type ChannelRetention struct {
 	ChannelID int64  `json:"channel_id"`
@@ -127,9 +127,8 @@ func (d *DB) DeleteChannelRetention(ctx context.Context, channelID int64) (bool,
 
 // RetentionWindows returns the effective policy of every non-DM channel that
 // has one: the channel override where present (a thread's being its
-// parent's, 6.9c), else the server window;
-// channels with an effective 0 are omitted. DMs are never in scope (owner
-// decision 4).
+// parent's), else the server window;
+// channels with an effective 0 are omitted. DMs are never in scope.
 func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 	serverDays, err := d.ServerRetentionDays(ctx)
 	if err != nil {
@@ -176,7 +175,7 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 // retentionCandidates is the WHERE clause of everything retention may
 // remove in a channel: older than the cutoff (messages.timestamp is UTC
 // 'YYYY-MM-DD HH:MM:SS', compared bytewise, so the cutoff is formatted the
-// same way), never a pinned message (owner decision 4), tombstones included.
+// same way), never a pinned message, tombstones included.
 const retentionCandidates = `channel_id = ? AND pinned = 0 AND timestamp < ?`
 
 // CountRetentionCandidates is the preview: how many messages a sweep of
@@ -192,7 +191,7 @@ func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cuto
 
 // SweepRetention hard-deletes up to limit of the oldest messages in
 // channelID older than cutoff (pinned exempt) in one transaction: the
-// mention counts those messages raised are reversed first (OC-0294), their
+// mention counts those messages raised are reversed first, their
 // attachment rows go and the stored_as names come back for the caller's
 // file journal, and the messages_ad trigger drops the FTS entries. Returns
 // the ids of the messages removed — the caller takes their frames out of
@@ -465,7 +464,7 @@ const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_m
 	   OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.ids') AS named WHERE named.value IN (SELECT value FROM json_each(?1)))))`
 
 // DeleteEventsForMessages removes every persisted replay event about the
-// given messages — the retention sweep's persisted tier (B4-11): a swept
+// given messages — the retention sweep's persisted tier: a swept
 // message's chat_message frame would otherwise stay replayable, content
 // included, until the events pruner reached it. Returns rows deleted.
 func (d *DB) DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error) {
