@@ -357,3 +357,199 @@ describe("reduceApplyServerMessage", () => {
     expect(reduceApplyServerMessage(optimistic, { ...response, id: 0 })).toBe(optimistic);
   });
 });
+
+describe("reduceAddMessage twin handling", () => {
+  it("leaves an optimistic twin alone when the live frame carries no client id", () => {
+    const history = row({ id: 5 });
+    const twin = row({ status: "pending", correlationId: "c-1", content: "hi" });
+    const prev = state([history, twin], { pendingSends });
+    const next = reduceAddMessage(prev, row({ id: 5 }));
+    expect(next.messagesByChannel.get(1)?.map((m) => m.id)).toEqual([5, 0]);
+    expect(next.pendingSends.has("c-1")).toBe(true);
+  });
+
+  it("only consumes the twin whose client id the frame names", () => {
+    const history = row({ id: 5 });
+    const other = row({ status: "pending", correlationId: "c-2", clientMessageId: "m-2" });
+    const twin = row({ status: "pending", correlationId: "c-1", clientMessageId: "m-1" });
+    const prev = state([history, other, twin], {
+      pendingSends: new Map([
+        ["c-1", 1],
+        ["c-2", 1],
+      ]),
+    });
+    const next = reduceAddMessage(prev, row({ id: 5, clientMessageId: "m-1" }));
+    expect(next.messagesByChannel.get(1)?.map((m) => m.correlationId)).toEqual([null, "c-2"]);
+    expect([...next.pendingSends.keys()]).toEqual(["c-2"]);
+  });
+
+  it("consumes a twin that has no correlation id without touching the pending map", () => {
+    const history = row({ id: 5 });
+    const twin = row({ status: "pending", correlationId: null, clientMessageId: "m-1" });
+    const prev = state([history, twin], { pendingSends });
+    const next = reduceAddMessage(prev, row({ id: 5, clientMessageId: "m-1" }));
+    expect(next.messagesByChannel.get(1)?.map((m) => m.id)).toEqual([5]);
+    expect(next.pendingSends.has("c-1")).toBe(true);
+  });
+});
+
+/** Two channels: the same correlation id is on a row in each. */
+function twoChannels(rows1: readonly Message[], rows2: readonly Message[], registered?: number) {
+  return {
+    ...INITIAL_STATE,
+    messagesByChannel: new Map([
+      [1, rows1],
+      [2, rows2],
+    ]),
+    pendingSends: registered === undefined ? new Map() : new Map([["c-1", registered]]),
+  };
+}
+
+describe("send bookkeeping across channels", () => {
+  const inOne = row({ channelId: 1, status: "pending", correlationId: "c-1", content: "one" });
+  const inTwo = row({ channelId: 2, status: "pending", correlationId: "c-1", content: "two" });
+
+  it("marks a failure in the channel the send was registered under", () => {
+    const next = reduceMarkSendFailed(twoChannels([inOne], [inTwo], 2), "c-1", "FORBIDDEN");
+    expect(next.messagesByChannel.get(2)?.[0]?.status).toBe("failed");
+    expect(next.messagesByChannel.get(1)?.[0]?.status).toBe("pending");
+  });
+
+  it("finds a failed row among other rows by scanning", () => {
+    const failed = row({ status: "failed", correlationId: "c-1", errorCode: "OFFLINE" });
+    const prev = state([row({ id: 3, correlationId: "x" }), failed, row({ id: 4 })]);
+    const next = reduceMarkSendFailed(prev, "c-1", "FORBIDDEN");
+    expect(next.messagesByChannel.get(1)?.map((m) => m.errorCode)).toEqual([
+      null,
+      "FORBIDDEN",
+      null,
+    ]);
+  });
+
+  it("removes a registered row from its own channel only", () => {
+    const next = reduceRemoveOptimistic(twoChannels([inOne], [inTwo], 2), "c-1");
+    expect(next.messagesByChannel.get(2)).toEqual([]);
+    expect(next.messagesByChannel.get(1)).toEqual([inOne]);
+  });
+
+  it("removes a failed row found among other rows by scanning", () => {
+    const failed = row({ status: "failed", correlationId: "c-1" });
+    const prev = state([row({ id: 3 }), failed, row({ id: 4 })]);
+    const next = reduceRemoveOptimistic(prev, "c-1");
+    expect(next.messagesByChannel.get(1)?.map((m) => m.id)).toEqual([3, 4]);
+  });
+
+  it("confirms a send in the channel it was registered under", () => {
+    const next = reduceConfirmSend(twoChannels([inOne], [inTwo], 2), "c-1", 42, "T2");
+    expect(next.messagesByChannel.get(2)?.[0]?.id).toBe(42);
+    expect(next.messagesByChannel.get(1)?.[0]?.status).toBe("pending");
+  });
+
+  it("reports the registered channel before looking at any rows", () => {
+    expect(findSendChannel(twoChannels([inOne], [inTwo], 2), "c-1")).toBe(2);
+    expect(findSendChannel(twoChannels([inOne], [inTwo]), "c-1")).toBe(1);
+  });
+});
+
+describe("matching an unregistered send", () => {
+  const delivered = row({ id: 5, status: "sent", correlationId: "c-1", clientMessageId: "m-1" });
+  const unsent = row({ status: "pending", correlationId: "c-9", clientMessageId: "m-9" });
+
+  it("a confirmed row that kept its correlation id is not matched again", () => {
+    const prev = twoChannels([delivered], [unsent]);
+    const next = reduceConfirmSend(prev, "c-1", 77, "T9", "m-1");
+    expect(next.messagesByChannel).toBe(prev.messagesByChannel);
+    expect(findSendChannel(prev, "c-1", "m-1")).toBeUndefined();
+  });
+
+  it("another send's row is never taken for this one", () => {
+    const prev = state([unsent]);
+    const next = reduceConfirmSend(prev, "c-1", 77, "T9");
+    expect(next.messagesByChannel).toBe(prev.messagesByChannel);
+    expect(findSendChannel(prev, "c-1")).toBeUndefined();
+  });
+
+  it("a different client id does not match when the correlation id differs", () => {
+    const prev = state([unsent]);
+    const next = reduceConfirmSend(prev, "c-1", 77, "T9", "m-1");
+    expect(next.messagesByChannel).toBe(prev.messagesByChannel);
+    expect(findSendChannel(prev, "c-1", "m-1")).toBeUndefined();
+  });
+
+  it("a row without a client id does not match a send that has none either", () => {
+    const bare = row({ status: "pending", correlationId: "c-9" });
+    const prev = state([bare]);
+    expect(reduceConfirmSend(prev, "c-1", 77, "T9").messagesByChannel).toBe(prev.messagesByChannel);
+    expect(findSendChannel(prev, "c-1")).toBeUndefined();
+  });
+
+  it("a registered send does not rewrite a delivered row that kept its correlation id", () => {
+    const kept = row({ id: 5, status: "sent", correlationId: "c-1" });
+    const next = reduceConfirmSend(state([kept], { pendingSends }), "c-1", 42, "T2");
+    expect(next.messagesByChannel.get(1)).toEqual([kept]);
+    expect(next.pendingSends.size).toBe(0);
+  });
+
+  it("an ack naming one client id leaves the other unsent rows alone", () => {
+    const mine = row({ status: "pending", correlationId: "c-1", clientMessageId: "m-1" });
+    const other = row({ status: "pending", correlationId: "c-9", clientMessageId: "m-9" });
+    const prev = state([mine, other], {
+      pendingSends: new Map([
+        ["c-1", 1],
+        ["c-9", 1],
+      ]),
+    });
+    const next = reduceConfirmSend(prev, "c-1", 42, "T2", "m-1");
+    expect(next.messagesByChannel.get(1)?.map((m) => [m.id, m.correlationId])).toEqual([
+      [42, "c-1"],
+      [0, "c-9"],
+    ]);
+    expect([...next.pendingSends.keys()]).toEqual(["c-9"]);
+  });
+
+  it("stamps only the matching row among several unsent ones", () => {
+    const a = row({ status: "pending", correlationId: "c-1", content: "a" });
+    const b = row({ status: "pending", correlationId: "c-2", content: "b" });
+    const prev = state([row({ id: 3 }), a, b], {
+      pendingSends: new Map([
+        ["c-1", 1],
+        ["c-2", 1],
+      ]),
+    });
+    const next = reduceConfirmSend(prev, "c-1", 42, "T2");
+    expect(next.messagesByChannel.get(1)?.map((m) => [m.id, m.status])).toEqual([
+      [3, "sent"],
+      [42, "sent"],
+      [0, "pending"],
+    ]);
+    expect([...next.pendingSends.keys()]).toEqual(["c-2"]);
+  });
+
+  it("an unrelated delivered row does not make the ack a duplicate", () => {
+    const prev = state([row({ id: 3 }), pending], { pendingSends });
+    const next = reduceConfirmSend(prev, "c-1", 42, "T2");
+    expect(next.messagesByChannel.get(1)?.map((m) => m.id)).toEqual([3, 42]);
+  });
+
+  it("a delivered row with the acked id is the only copy kept, whatever else is unsent", () => {
+    const history = row({ id: 42, content: "sanitized" });
+    const prev = state([history, pending, row({ status: "pending", correlationId: "c-2" })], {
+      pendingSends: new Map([
+        ["c-1", 1],
+        ["c-2", 1],
+      ]),
+    });
+    const next = reduceConfirmSend(prev, "c-1", 42, "T2");
+    expect(next.messagesByChannel.get(1)?.map((m) => [m.id, m.correlationId])).toEqual([
+      [42, null],
+      [0, "c-2"],
+    ]);
+  });
+
+  it("finds an unsent row in a list that also holds delivered rows", () => {
+    expect(findSendChannel(state([row({ id: 3 }), pending, row({ id: 4 })], {}, 8), "c-1")).toBe(8);
+    const prev = state([row({ id: 3 }), pending, row({ id: 4 })], {}, 8);
+    const next = reduceConfirmSend(prev, "c-1", 42, "T2");
+    expect(next.messagesByChannel.get(8)?.map((m) => m.id)).toEqual([3, 42, 4]);
+  });
+});

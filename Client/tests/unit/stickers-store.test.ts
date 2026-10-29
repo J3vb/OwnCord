@@ -41,6 +41,26 @@ describe("stickers store", () => {
     expect(listStickers().map((s) => s.name)).toEqual(["Wave"]);
   });
 
+  it("skips an entry whose id is not a number or whose url is missing", () => {
+    setStickers([
+      { ...wave, id: "1" as never },
+      { ...wave, id: 3, name: "NoUrl", url: undefined as never },
+      { ...wave, id: 4, name: 7 as never },
+      party,
+    ]);
+    stickersStore.flush();
+    expect(listStickers().map((s) => s.name)).toEqual(["Party"]);
+  });
+
+  it("keeps a stated emoji and turns a missing one into null", () => {
+    setStickers([
+      { ...wave, emoji: "\u{1F44B}" },
+      { ...party, emoji: undefined as never },
+    ]);
+    stickersStore.flush();
+    expect(listStickers().map((s) => s.emoji)).toEqual(["\u{1F44B}", null]);
+  });
+
   it("normalises an empty emoji to null", () => {
     setStickers([{ ...wave, emoji: "" }]);
     stickersStore.flush();
