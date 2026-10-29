@@ -239,7 +239,7 @@ export function serverErrorCopy(code: string, message: string): string | null {
       return PERMISSION_REFUSAL.test(message) ? connectText("error.forbidden") : null;
     case RestErrorCode.NOT_FOUND:
       return connectText("error.notFound");
-    // The server's per-frame deadline (WP 4.1b); nothing was applied.
+    // The server's per-frame deadline; nothing was applied.
     case WsErrorCode.REQUEST_TIMEOUT:
       return messageStatusText("send.requestTimeout");
     case WsErrorCode.BANNED:
@@ -336,7 +336,7 @@ export interface SessionInfo {
   readonly unseen: boolean;
 }
 
-/** The caller's direct message privacy settings (WP 6.8b). Both are always sent. */
+/** The caller's direct message privacy settings. Both are always sent. */
 export interface DmPrivacy {
   readonly allow_member_dms: boolean;
   readonly message_requests: boolean;
@@ -437,7 +437,7 @@ export interface OwnReportSummary {
 /** GET /moderation/queue's `state` filter: "" is open and assigned together. */
 export type ModerationQueueFilter = "" | "open" | "assigned" | "closed";
 
-/** One row of GET /moderation/queue (B5-8), for MODERATE_MEMBERS holders
+/** One row of GET /moderation/queue, for MODERATE_MEMBERS holders
  *  only. `id` is the opaque public id. Mirrors
  *  Server/api/moderation_queue_handler.go's moderationQueueRowResponse. */
 export interface ModerationQueueRow {
@@ -456,8 +456,8 @@ export interface ModerationQueueRow {
   readonly closed_at?: string;
 }
 
-/** GET /moderation/queue/{id}: the fields the Moderation Center reads (B9-11,
- *  B9-12). Mirrors Server/api/moderation_queue_handler.go's
+/** GET /moderation/queue/{id}: the fields the Moderation Center reads.
+ *  Mirrors Server/api/moderation_queue_handler.go's
  *  moderationReportDetailResponse. */
 export interface ModerationReportDetail {
   readonly id: string;
@@ -514,12 +514,12 @@ export interface ModerationReportDetail {
   }[];
 }
 
-/** POST /moderation/queue/{id}/act: the report-linked actions B9-13 sends. A
+/** POST /moderation/queue/{id}/act: the report-linked actions the Moderation Center sends. A
  *  timeout's duration is 60 to 2,419,200 seconds (Server/service/moderation.go). */
 export type ModerationActRequest =
   | { readonly kind: "warning"; readonly reason: string }
   | { readonly kind: "timeout"; readonly reason: string; readonly duration_seconds: number }
-  /** B9-14: removal acts on the reported message; kick is a force-logout. */
+  /** Removal acts on the reported message; kick is a force-logout. */
   | { readonly kind: "removal" | "kick" | "ban"; readonly reason: string };
 
 /** POST /moderation/queue/{id}/close outcomes (Server/service/report.go). */
@@ -529,7 +529,7 @@ export type ModerationOutcome = "actioned" | "no_action" | "duplicate";
  *  "decided" is upheld and overturned. */
 export type ModerationAppealFilter = "" | "open" | "assigned" | "decided";
 
-/** One row of GET /moderation/appeals (B5-10), for MODERATE_MEMBERS holders
+/** One row of GET /moderation/appeals, for MODERATE_MEMBERS holders
  *  only; never the caller's own appeal. Mirrors Server/api/appeal_handler.go's
  *  appealQueueRowResponse. */
 export interface ModerationAppealRow {
@@ -589,7 +589,7 @@ function refusal(): ApiClientError {
 }
 
 /**
- * A content read from one channel, admitted only with NSFW consent (B9-7):
+ * A content read from one channel, admitted only with NSFW consent:
  * refused locally, with the server's own error, before any request while
  * the channel is gated, and discarded if consent was withdrawn while it was
  * in flight — so nothing from a labelled channel is fetched or delivered
@@ -697,7 +697,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       } catch (fetchErr) {
         owner.assertCurrent();
         // The raw detail stays in the log; the caller gets a typed error so
-        // display copy can be friendly (DP-54).
+        // display copy can be friendly.
         log.error(`${label} fetch failed`, { method, path, error: String(fetchErr) });
         throw new TransportError(fetchErr instanceof Error ? fetchErr.message : String(fetchErr), {
           cause: fetchErr,
@@ -909,7 +909,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         /** Omit to leave unchanged; "" clears the field. */
         display_name?: string;
         about?: string;
-        /** `#rgb` / `#rrggbb`; omit to leave unchanged, "" clears (WP 6.11b). */
+        /** `#rgb` / `#rrggbb`; omit to leave unchanged, "" clears. */
         banner_color?: string;
       },
       signal?: AbortSignal,
@@ -982,7 +982,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       signal?: AbortSignal,
     ): Promise<PartialSuccessResponse | undefined> {
       // 204 on full success; 200 with a warning body when the password
-      // changed but the other sessions could not be revoked (OC-0314).
+      // changed but the other sessions could not be revoked.
       return request<PartialSuccessResponse | undefined>(
         "PUT",
         "/users/me/password",
@@ -1083,7 +1083,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<OwnReportSummary[]>("GET", "/reports/mine", undefined, signal);
     },
 
-    /** The moderator queue (B9-11). 403 without MODERATE_MEMBERS. */
+    /** The moderator queue. 403 without MODERATE_MEMBERS. */
     getModerationQueue(
       state: ModerationQueueFilter,
       signal?: AbortSignal,
@@ -1092,7 +1092,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<ModerationQueueRow[]>("GET", `/moderation/queue${query}`, undefined, signal);
     },
 
-    /** One report with its evidence (B9-11). 404 for a report about the caller. */
+    /** One report with its evidence. 404 for a report about the caller. */
     getModerationReport(id: string, signal?: AbortSignal): Promise<ModerationReportDetail> {
       return request<ModerationReportDetail>(
         "GET",
@@ -1102,7 +1102,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
-    /** Take a report (B9-12): 409 when another moderator already holds it or it closed. */
+    /** Take a report: 409 when another moderator already holds it or it closed. */
     assignModerationReport(id: string, signal?: AbortSignal): Promise<void> {
       return request<void>(
         "POST",
@@ -1136,7 +1136,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       );
     },
 
-    /** Warn or time out a report's subject, linked to the report (B9-13). A
+    /** Warn or time out a report's subject, linked to the report. A
      *  timeout answers with its voice half, "applied" or "skipped"; a warning
      *  answers nothing. 403 below MODERATE_MEMBERS or the subject's rank. */
     actOnModerationReport(
@@ -1190,7 +1190,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<void>("POST", `/moderation/users/${userId}/untimeout`, undefined, signal);
     },
 
-    /** The moderator appeal queue (B9-17). 403 without MODERATE_MEMBERS. */
+    /** The moderator appeal queue. 403 without MODERATE_MEMBERS. */
     getModerationAppeals(
       state: ModerationAppealFilter,
       signal?: AbortSignal,
@@ -1378,7 +1378,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     /**
-     * A text channel's threads (WP 6.9c): `query` is the list route's query
+     * A text channel's threads: `query` is the list route's query
      * string (`archived`, `before`, `limit`), which the Threads popover builds.
      */
     listThreads(
@@ -1433,12 +1433,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return options?.channelId === undefined ? send() : channelContent(options.channelId, send);
     },
 
-    /** Acknowledge a labelled channel for this account, on every device (B5-7). */
+    /** Acknowledge a labelled channel for this account, on every device. */
     acknowledgeNsfw(channelId: number, signal?: AbortSignal): Promise<void> {
       return request<void>("PUT", `/channels/${channelId}/nsfw-acknowledgement`, undefined, signal);
     },
 
-    /** Withdraw this account's acknowledgement of a labelled channel (B5-7). */
+    /** Withdraw this account's acknowledgement of a labelled channel. */
     revokeNsfw(channelId: number, signal?: AbortSignal): Promise<void> {
       return request<void>(
         "DELETE",
@@ -1510,7 +1510,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     ): Promise<UploadResponse> {
       const formData = new FormData();
       formData.append("file", file);
-      // A voice message declares its length and waveform in the query (WP 8.9):
+      // A voice message declares its length and waveform in the query:
       // both or neither, which one optional object guarantees.
       const query =
         voice === undefined
@@ -1572,7 +1572,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<void>("DELETE", `/emoji/${emojiId}`, undefined, signal);
     },
 
-    // ── Custom stickers (WP 8.8) ──────────────────────────
+    // ── Custom stickers ──────────────────────────
     //
     // Reading is open to any member. Upload, rename and delete are the admin
     // panel's (Server/admin/static/js/stickers.js), which calls them itself.
@@ -1614,7 +1614,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     /**
-     * Add people to a group DM (WP 3B-10). Any member may; the group holds at
+     * Add people to a group DM. Any member may; the group holds at
      * most 10. 200 carries the summary; 204 means the summary read failed after
      * the commit, and the dm_channel_open that follows carries the state.
      */
@@ -1632,7 +1632,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     /**
-     * Set a group DM's icon (WP 3B-11b): multipart `file`, PNG/JPEG/WebP, max
+     * Set a group DM's icon: multipart `file`, PNG/JPEG/WebP, max
      * 1 MB and 1024x1024, any member. 200 carries the summary; 204 means the
      * summary read failed after the commit and the dm_channel_open that follows
      * carries the state.
@@ -1699,12 +1699,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return request<BlockedUsersResponse>("GET", "/blocks", undefined, signal);
     },
 
-    /** The pending Message Requests inbox (B5-6). */
+    /** The pending Message Requests inbox. */
     listDmRequests(signal?: AbortSignal): Promise<DmRequestListResponse> {
       return request<DmRequestListResponse>("GET", "/dm-requests", undefined, signal);
     },
 
-    /** Decide a pending Message Request (B5-6). 409: no longer pending; 404: not the caller's. */
+    /** Decide a pending Message Request. 409: no longer pending; 404: not the caller's. */
     decideDmRequest(
       id: number,
       decision: DmRequestDecision,
@@ -1781,8 +1781,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       signal?: AbortSignal,
     ): Promise<ServerInfoResponse> {
       // Same explicit-host shape as getHealth: the connect page probes every
-      // saved profile independently of the signed-in server. B7-15 reads
-      // through this method rather than inventing a second transport.
+      // saved profile independently of the signed-in server. Registration
+      // checks read through this method rather than inventing a second transport.
       const targetHost = host ?? config.host;
       const owner =
         host === undefined
@@ -1823,8 +1823,8 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         name: string;
         type: ChannelType;
         /**
-         * The category's id, 0 for none (WP 6.5a). It wins over `category`
-         * when both are sent; a server from before 6.5a ignores it.
+         * The category's id, 0 for none. It wins over `category`
+         * when both are sent; a server without channel categories ignores it.
          */
         category_id?: number;
         /** The category name (legacy): matched ignoring case, created when new, "" = none. */
@@ -1852,7 +1852,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         archived?: boolean;
         /**
          * Age-restriction label. The server withholds a labelled channel's
-         * content from anyone who has not acknowledged it (B5-7); clearing
+         * content from anyone who has not acknowledged it; clearing
          * the label drops every acknowledgement.
          */
         nsfw?: boolean;
@@ -1870,7 +1870,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     /**
-     * Replace a forum's tags and settings (WP 6.9d): the whole list, tags with
+     * Replace a forum's tags and settings: the whole list, tags with
      * their ids so a rename keeps a tag on its posts. The server answers with
      * the channel and broadcasts `channel_update`, which is how the app learns.
      */
@@ -1886,7 +1886,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return channelRequest<void>("DELETE", `/${id}`, undefined, signal);
     },
 
-    // ── Admin: Channel categories (WP 6.5a) ──────────────────
+    // ── Admin: Channel categories ──────────────────
     // The list itself arrives over the socket (ready.categories and the
     // channel_categories event), so there is no GET here.
 
@@ -1972,7 +1972,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     },
 
     /**
-     * Give a member one more role (WP 6.3c, a server that advertises
+     * Give a member one more role (a server that advertises
      * `multi_role`). Same checks as `adminChangeRole`: MANAGE_ROLES, the actor's
      * top role outranks the member's, and the role sits below the actor's.
      * Answers 204; the roster changes on the `member_update` echo.

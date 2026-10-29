@@ -77,7 +77,7 @@ export class E2EEManager {
   private set _roomKey(value: Uint8Array | null) {
     this._epoch.roomKey = value;
   }
-  /** Highest offer epoch applied per sender (OC-0001). */
+  /** Highest offer epoch applied per sender. */
   private get _peerOfferEpochs(): Map<number, number> {
     return this._epoch.peerOfferEpochs;
   }
@@ -116,7 +116,7 @@ export class E2EEManager {
   private get _peerGenerations(): Map<number, number> {
     return this._peers.peerGenerations;
   }
-  /** Keys a peer has been moved off this session (replay guard, OC-0011). */
+  /** Keys a peer has been moved off this session (replay guard). */
   private get _retiredPeerKeys(): Map<number, Set<string>> {
     return this._peers.retiredPeerKeys;
   }
@@ -127,7 +127,7 @@ export class E2EEManager {
   private set _pendingAnnounces(value: PendingAnnounce[]) {
     this._peers.pendingAnnounces = value;
   }
-  /** Announces blocked on a TOFU pin mismatch, replayed by a re-pin (OC-0212). */
+  /** Announces blocked on a TOFU pin mismatch, replayed by a re-pin. */
   private get _blockedAnnounces(): Map<
     number,
     { publicKeyBase64: string; signatureBase64?: string; identityKeyBase64?: string }
@@ -343,7 +343,7 @@ export class E2EEManager {
       // c.send queue), so the send order here is the delivery order there.
       // Announcing AFTER the drain (the old order) meant every existing
       // participant's handleOfferInner discarded our offer as "unknown
-      // peer" and never recovered short of the 5-minute rotation (OC-0098).
+      // peer" and never recovered short of the 5-minute rotation.
       this.deps.getWs()?.send({ type: "voice_e2ee_announce", payload: announcePayload });
       markJoinMilestone("e2ee announce sent");
     }
@@ -510,7 +510,7 @@ export class E2EEManager {
     // non-blocking check: if nothing has replaced this room key by the time
     // it fires, log it (there was previously no observable signal at all)
     // and retry the announce once — a real bound short of the 5-minute
-    // periodic rotation (OC-0007). Holders don't need this: their own key
+    // periodic rotation. Holders don't need this: their own key
     // IS the current one.
     this.clearReconnectConfirmTimer();
     const roomKeyAtReconnect = this._roomKey;
@@ -590,7 +590,7 @@ export class E2EEManager {
       return false;
     }
     // Replay the announce verifyPeerAnnounce buffered when it blocked this
-    // peer as a mismatch (OC-0212). Without this, the pin write above is a
+    // peer as a mismatch. Without this, the pin write above is a
     // no-op for the live call: nothing else re-runs the peer's announce, so
     // they never (re-)enter _peerPublicKeys — staying out of every offer and
     // rotation for the rest of the call — and clearPeerVerification below
@@ -721,7 +721,7 @@ export class E2EEManager {
       return;
     }
     // Reject a replay of a key we've already retired for this peer BEFORE
-    // verifyPeerAnnounce runs (OC-0209). verifyPeerAnnounce writes the peer's
+    // verifyPeerAnnounce runs. verifyPeerAnnounce writes the peer's
     // displayed verification (status + sessionFingerprint, computed from
     // THIS announce's key) on every branch it can take, including its
     // success branches — so if the replay guard ran only after verification
@@ -770,7 +770,7 @@ export class E2EEManager {
           isDuplicate = true;
           log.debug("E2EE: duplicate announce — will re-send offer if key holder", { userId });
         } else {
-          // The replay-of-a-retired-key check now runs up front (OC-0209),
+          // The replay-of-a-retired-key check now runs up front,
           // before verifyPeerAnnounce — see the comment there (was
           // previously duplicated in both branches here).
           retiredKey = existingB64;
@@ -784,7 +784,7 @@ export class E2EEManager {
       // landing during either one must not have this stale continuation write
       // a torn-down session's peer key into the map a NEW session now owns —
       // the generation guard above only covers the window up to verification,
-      // not this later await (OC-0010).
+      // not this later await.
       if (!isCurrent()) {
         log.info("E2EE: discarding stale announce (session torn down during key import)", {
           userId,
@@ -803,7 +803,7 @@ export class E2EEManager {
       // clearState() runs concurrently.
       const keypair = this._ecdhKeyPair;
       const currentRoomKey = this._roomKey;
-      // OC-0257: key-holder election is server-authoritative — lowest
+      // Key-holder election is server-authoritative — lowest
       // connected user id (Server/ws/voice_e2ee.go) — and is re-run on every
       // join, but the server has no demotion message and
       // handleVoiceTokenRefresh discards the corrected is_key_holder it gets
@@ -849,7 +849,7 @@ export class E2EEManager {
           });
           return;
         }
-        // Routed through the shared sendOfferPaced budget (OC-0167) rather
+        // Routed through the shared sendOfferPaced budget rather
         // than sent directly — setupKeyExchange's queued-announce drain can
         // call this once per existing participant in an uninterrupted loop
         // (a key holder joining a large ongoing call), and those sends must
@@ -899,7 +899,7 @@ export class E2EEManager {
     this._peerGenerations.set(userId, (this._peerGenerations.get(userId) ?? 0) + 1);
     const isCurrent = this._peers.peerAttemptIsCurrent(userId);
     // peerAttemptIsCurrent() goes false for two unrelated reasons; only one of
-    // them is survivable here, so keep the session half separately (OC-0442).
+    // them is survivable here, so keep the session half separately.
     const entrySessionGeneration = this._sessionGeneration;
     this._pendingAnnounces = this._pendingAnnounces.filter((entry) => entry.userId !== userId);
     this._peers.dropStagedAnnounce(userId);
@@ -915,7 +915,7 @@ export class E2EEManager {
     const state = voiceStore.getState();
     const channelUsers = channelId ? state.voiceUsers.get(channelId) : undefined;
 
-    // Retire the departing peer's key (OC-0020): _retiredPeerKeys is the only
+    // Retire the departing peer's key: _retiredPeerKeys is the only
     // defense against replay of a validly-signed announce (the signed
     // message carries no channel/epoch/nonce, F3) and handleAnnounceInner
     // only records a retirement on an in-session key CHANGE. Without this, a
@@ -930,7 +930,7 @@ export class E2EEManager {
     // voice_e2ee_announce is published straight into the recipient's send
     // queue from the sender's read-pump (Server/ws/hub_broadcast.go documents
     // this as a reordering hazard) — a peer's rejoin announce can overtake
-    // the stale voice_leave for the join instance it superseded (OC-0213).
+    // the stale voice_leave for the join instance it superseded.
     // If the local roster (voice_state, kept current by the server) still
     // lists this peer as present in the channel, this IS that stale case:
     // retiring their (in that case, still-live) key would have every later,
@@ -944,17 +944,17 @@ export class E2EEManager {
     // caller (dispatcher.ts) deletes the user from the voice-user roster
     // BEFORE calling this method, so `channelUsers?.has(userId)` is always
     // false by the time we get here in production — this guard only ever
-    // protects the OC-0213 case for a caller that reads the roster itself
-    // without that prior mutation (as tests do). OC-0239 tried to plug that
+    // protects the stale-leave case for a caller that reads the roster itself
+    // without that prior mutation (as tests do). An earlier attempt to plug that
     // production gap by having the caller pass a PRE-mutation roster
     // snapshot (`stillInRoster`) instead, but that snapshot cannot tell the
-    // two cases apart either (OC-0283): the roster still lists a departing
+    // two cases apart either: the roster still lists a departing
     // peer as present right up until this very event is what removes them,
     // so the snapshot reads "still present" on every genuine departure too,
     // not just the stale-leave case it was meant to isolate. Gating on it
     // made retirement never run in production, silently killing this replay
     // defense — worse than the gap it was meant to close. A real fix for the
-    // OC-0213 race needs a discriminator the roster does not carry (e.g. the
+    // stale-leave race needs a discriminator the roster does not carry (e.g. the
     // server stamping a join/epoch id on voice_leave so a stale leave for a
     // superseded join can be dropped outright), not a roster read taken at
     // any point during this call.
@@ -964,14 +964,14 @@ export class E2EEManager {
       // channelUsers above describe a room this manager has already torn
       // down, and the election below would set _isKeyHolder / rotate
       // _roomKey off them, corrupting whatever room is joined next. Abandon
-      // the whole invocation, as this method did before OC-0416 (OC-0442).
+      // the whole invocation, as this method did before the rekey below.
       if (this._sessionGeneration !== entrySessionGeneration) return;
       // A duplicate handleParticipantLeft for the same peer is the other way
       // isCurrent() goes false, and it is survivable: it bumps only this
       // peer's generation, while this invocation's own hadPeerKey and the
       // wasKeyHolder read below stay correct. Scope that bail-out to the
       // now-redundant retirement write — returning would drop the
-      // membership-forward-secrecy rekey a few lines down (OC-0416).
+      // membership-forward-secrecy rekey a few lines down.
       if (isCurrent()) this._peers.retirePeerKey(userId, departingKeyBase64);
     }
 
@@ -986,7 +986,7 @@ export class E2EEManager {
     // own broadcast is still queued behind theirs on the hub). Seed the
     // roster with our own id unconditionally so that race can't leave the
     // channel's roster entry empty/missing and silently skip election
-    // (OC-0004) — the join that provoked it would otherwise time out 15s
+    // — the join that provoked it would otherwise time out 15s
     // later with no recovery.
     let lowestUserId = myUserId !== 0 ? myUserId : Infinity;
     if (channelUsers) {

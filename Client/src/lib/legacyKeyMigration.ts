@@ -3,8 +3,8 @@
 //
 // The client is multi-server on one localStorage and user ids are only unique
 // per server, so a value saved before keys were host-scoped may reach the
-// FIRST host that misses at its scoped key and no other (OC-0313, OC-0329;
-// the shape channel-mutes.ts fixed for OC-0288). The legacy key is removed
+// FIRST host that misses at its scoped key and no other (the
+// shape channel-mutes.ts fixed for the same leak). The legacy key is removed
 // before the scoped copy is written — its bytes are then free for the copy
 // and the key is closed to every later host. When the copy still fails
 // (storage full to within the scoped key's extra length), the value goes back

@@ -12,7 +12,7 @@
  * believe they have a free token when the server has exactly one, so the
  * second frame the server actually receives gets silently dropped
  * (ErrRateLimited, no DB write, no broadcast) with nothing left to correct
- * it (OC-0210). Callers MUST share one `PresenceSender` — built from one
+ * it. Callers MUST share one `PresenceSender` — built from one
  * `RateLimiter` instance — for the lifetime of a session, the same way
  * MainPage.ts's `limiters` are already shared across its chat/typing/
  * reaction/voice producers.
@@ -64,7 +64,7 @@ export interface PresenceSender {
  * client's send, while the client limiter measures from its own send — so a
  * retry scheduled at exactly `getRemainingMs()` lands just before the
  * server's window reopens, is answered RATE_LIMITED and, without the
- * rejection handler below, is never retried (OC-0451): the client shows and
+ * rejection handler below, is never retried: the client shows and
  * saves the new status while users.status and every other member keep the
  * old one.
  */
@@ -81,8 +81,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
   // The custom_status a still-queued retry carries. A plain status change
   // (customStatus === undefined) landing while that retry is pending does
   // not mean "clear the custom status" — it means the caller simply didn't
-  // mention it — so send() below falls back to this instead of dropping it
-  // (OC-0156).
+  // mention it — so send() below falls back to this instead of dropping it.
   let pendingCustom: string | undefined;
   // The "clear after" that travels with pendingCustom, so a retry (or a plain
   // status change coalescing onto it) keeps the expiry the user chose.
@@ -297,7 +296,7 @@ let activeSender: PresenceSender | null = null;
  * is registered at module load, long before a login — can still route
  * through the same shared limiter/retry/optimistic-update instead of
  * sending `presence_update` raw and opening a second budget the server does
- * not know about (OC-0176). MainPage.ts calls this right after constructing
+ * not know about. MainPage.ts calls this right after constructing
  * its `PresenceSender`, and again with `null` in its teardown.
  */
 export function setActivePresenceSender(sender: PresenceSender | null): void {

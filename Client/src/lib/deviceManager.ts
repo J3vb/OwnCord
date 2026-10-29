@@ -191,7 +191,7 @@ export class DeviceManager {
         delete this.fallbackFrom.audioinput;
         restored.add("audioinput");
         try {
-          // While muted this only records the device (OC-0474).
+          // While muted this only records the device.
           await room.switchActiveDevice("audioinput", savedInput);
           if (this.room !== room) return;
           this.setupPipelineAfterSwitch();
@@ -313,7 +313,7 @@ export class DeviceManager {
 
   /** Move capture to the system default while the saved input is unusable.
    *  The pref keeps the user's pick so the device is restored when it is
-   *  listed again (DP-31). */
+   *  listed again. */
   private async fallBackToDefaultInput(room: Room): Promise<void> {
     try {
       await this.cycleMicForDeviceSwitch(room);

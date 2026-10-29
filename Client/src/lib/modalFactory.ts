@@ -3,7 +3,7 @@
  * Creates a modal with backdrop, optional click-outside and Escape key
  * dismissal, and clean lifecycle management via Disposable.
  *
- * Every factory modal carries the dialog accessibility contract (DC-13):
+ * Every factory modal carries the dialog accessibility contract:
  * role="dialog" + aria-modal on the container, focus moved into the dialog on
  * open and restored on close, and a Tab-cycling focus trap (lib/a11y.ts).
  *

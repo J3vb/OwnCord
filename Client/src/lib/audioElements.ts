@@ -62,7 +62,7 @@ const VOLUME_NOT_SET = -1;
 
 /** Per-user and output volume sliders go to 200%. Above 100% a voice track
  *  needs its gain node: LiveKit's web setVolume writes HTMLMediaElement.volume,
- *  which throws above 1 and failed voice joins (#2192). */
+ *  which throws above 1 and failed voice joins. */
 const MAX_VOLUME_PERCENT = 200;
 
 /** Per-user volume times output volume never plays louder than double. */
@@ -99,8 +99,8 @@ function hasNativePlayout(room: Room | null): boolean {
  *  it under the scoped key of the FIRST host that misses and no other. User
  *  ids are per-server autoincrement integers: a legacy value left readable
  *  would let every later brand-new host miss its own scoped key, read
- *  through to it and silence the unrelated user N there too (OC-0313) — the
- *  shape channel-mutes.ts fixed for OC-0288. */
+ *  through to it and silence the unrelated user N there too — the
+ *  shape channel-mutes.ts fixed for the same leak. */
 function getSavedUserVolume(userId: number): number {
   return clampPercent(readSavedUserVolume(userId));
 }
@@ -639,7 +639,7 @@ export class AudioElements {
   /** Remove all remote audio elements from the DOM and clear tracking maps.
    *  Preserves screenshare mute state so reconnecting tracks inherit user intent. */
   cleanupAllAudioElements(): void {
-    // BUG-107: Fully release audio elements — pause, clear srcObject, then remove.
+    // Fully release audio elements — pause, clear srcObject, then remove.
     for (const el of this.remoteMicAudioElements.values()) {
       el.pause();
       el.srcObject = null;

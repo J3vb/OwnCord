@@ -27,7 +27,7 @@ import { authStore } from "@stores/auth.store";
 const log = createLogger("identity");
 
 // The five primitives below are the `IdentityStore` contract, implemented in
-// `platform/desktop/identity.ts` (B7-4). Their names and signatures stay here
+// `platform/desktop/identity.ts`. Their names and signatures stay here
 // because their callers import them from this module.
 export type { StoreIdentityPinResult };
 
@@ -127,8 +127,7 @@ export async function storeIdentityPin(
 /**
  * Look up the keys pinned for a peer (see `IdentityPinLookup`).
  *
- * A store read error is returned as "unavailable", NOT "unpinned" (DC-08,
- * F3 follow-up 3): collapsing the two let a transient keyring error send a
+ * A store read error is returned as "unavailable", NOT "unpinned": collapsing the two let a transient keyring error send a
  * pinned peer down the first-sight path — silently verifying against, and
  * then re-pinning, whatever key the server delivered. Callers must fail
  * closed on "unavailable". A stored value this code cannot interpret is also
@@ -178,7 +177,7 @@ export async function getDeviceIdentityPublicKey(host: string): Promise<string |
 /**
  * One identity keypair per host+user, shared by every caller in this process.
  *
- * Scoped by BOTH host and user id (B3-3), not host alone: two different
+ * Scoped by BOTH host and user id, not host alone: two different
  * accounts signed into the same host — including two people sharing one OS
  * profile/keyring, or one client used to log into several accounts on the
  * same server without a restart — must never share a voice-E2EE identity
@@ -209,10 +208,10 @@ const identityKeyPairCache = new Map<string, Promise<CryptoKeyPair>>();
  *  scope is folded into that one field rather than requiring a Rust-side
  *  change.
  *
- *  `userId` goes BEFORE `host`, joined with `@` rather than `:` (OC-0118):
+ *  `userId` goes BEFORE `host`, joined with `@` rather than `:`:
  *  `isValidHost` (api.ts) forbids '@' in any host — DNS name, IPv4, or
  *  bracketed/bare IPv6 literal — so a scoped key can never collide with a
- *  legacy host-only account (`identity:{host}`, pre-B3-3) OR with another
+ *  legacy host-only account (`identity:{host}`, before keys were scoped by user id) OR with another
  *  host's literal "host:port" string. The old `${host}:${userId}` format
  *  had neither guarantee: `identityScopeKey("chat.example", 8443)` produced
  *  the same string, "chat.example:8443", as the legacy host-only account of
@@ -251,7 +250,7 @@ export function resetIdentityKeyPairCache(): void {
 }
 
 /**
- * One-time migration for pre-B3-3 installs (see `identityKeyPairCache` above):
+ * One-time migration for installs from before keys were scoped by user id (see `identityKeyPairCache` above):
  * before that fix, the identity keypair lived under the host-only keyring
  * account (`identity:{host}`, passed here as plain `host`) instead of the
  * scoped `identity:{host}:{uid}`. Without this, every existing install finds
@@ -262,7 +261,7 @@ export function resetIdentityKeyPairCache(): void {
  *
  * Only called when the scoped account is empty, so a genuine first login (or
  * a second account on a host whose legacy key the first already adopted)
- * still gets its own fresh keypair — that distinctness is the point of B3-3.
+ * still gets its own fresh keypair — that distinctness is the point of scoping by user id.
  * On a host that really did have two accounts sharing one key, whichever logs
  * in first adopts it and the other mints fresh: the legacy account records no
  * user id, so there is nothing to match on. That leaves the old shared-key
@@ -387,7 +386,7 @@ export async function publishIdentityKey(
  * The user id is read from `authStore` rather than taken as a parameter: this
  * is called from the ready hook, by which point auth state is populated, and
  * keeping the signature unchanged avoids threading the id through every call
- * site just to scope the keyring lookup (B3-3).
+ * site just to scope the keyring lookup.
  *
  * If auth state is NOT yet populated (no user id), this returns false
  * without touching the keyring at all — it must never substitute a

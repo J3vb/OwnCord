@@ -3,7 +3,7 @@
 // at runtime (required because OwnCord is self-hosted).
 //
 // The install itself — its native commands, the app-wide install state and
-// the install guard — is `platform/desktop/updater.ts` (B7-5); these exports
+// the install guard — is `platform/desktop/updater.ts`; these exports
 // stay where their callers already import them.
 
 import { desktop } from "../platform/desktop";

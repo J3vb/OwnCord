@@ -402,7 +402,7 @@ export interface CameraTrackState extends GenerationGuarded {
   announced?: LocalVideoTrack | NativeCameraTrack;
   /** The live camera's quality, for a republish with the same options. */
   quality?: StreamQuality;
-  /** The codec the settings asked for, before peers were considered (WP M-5b). */
+  /** The codec the settings asked for, before peers were considered. */
   preferred?: PublishCodec;
   /** The codec the camera is published with now. */
   published?: PublishCodec;
@@ -598,7 +598,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       log.warn("Superseded camera enable failed — leaving newer attempt's state alone", err);
       return;
     }
-    // BUG-100: Stop the created track to release the camera if publish failed.
+    // Stop the created track to release the camera if publish failed.
     if (state.manualCameraTrack !== null) {
       state.manualCameraTrack.stop();
       state.manualCameraTrack = null;
@@ -657,12 +657,12 @@ export interface ScreenTrackState extends GenerationGuarded {
   changing?: boolean;
   /** The share's video track the server was last told is on. */
   announced?: LocalTrack;
-  /** The codec the settings asked for, before peers were considered (WP M-5b). */
+  /** The codec the settings asked for, before peers were considered. */
   preferred?: PublishCodec;
   /** The codec the share's video is published with now. */
   published?: PublishCodec;
   /** The picker's "Share the app's sound" switch was on for this share
-   *  (Windows web path, WP 6.7b). Change source reads it for the new window. */
+   *  (Windows web path). Change source reads it for the new window. */
   appAudioOn?: boolean;
   /** The app's sound going out as this share's audio, until the share stops. */
   appAudio?: AppAudioRelease;
@@ -768,7 +768,7 @@ export function stopManualScreenTracks(state: ScreenTrackState, room: Room | nul
   }
 }
 
-/** The web path's quality step before the OS picker (WP 1C-2): the saved
+/** The web path's quality step before the OS picker: the saved
  *  defaults, overridden for this share by the dialog. Null when it was closed. */
 async function pickWebShareQuality(
   showPicker: ScreenSourcePicker,
@@ -910,7 +910,7 @@ export async function enableScreenshare(
       !isLinuxDesktop() &&
       !screenTracks.some((t) => t.kind === Track.Kind.Audio)
     ) {
-      // Windows web path (WP 6.7b): a shared window gets its app's sound. A
+      // Windows web path: a shared window gets its app's sound. A
       // stop or newer share meanwhile has released everything it made.
       const outcome = await import("./appAudioShare")
         .then((m) =>
@@ -968,7 +968,7 @@ export async function enableScreenshare(
       log.warn("Superseded screenshare enable failed — leaving newer attempt's state alone", err);
       return;
     }
-    // BUG-100 (+ partial-publish-failure hardening): release every created
+    // Release every created
     // track, not just stop() it — a track already published before a later
     // one in the batch fails (all quality presets request audio alongside
     // video) needs unpublishing too, or it stays orphaned in the room:
@@ -1017,7 +1017,7 @@ export async function disableScreenshare(
 }
 
 // ---------------------------------------------------------------------------
-// Live codec switch (WP M-5b)
+// Live codec switch
 // ---------------------------------------------------------------------------
 
 /** Publish the live camera or share video again with `codec`, on the same
@@ -1220,7 +1220,7 @@ export function getLocalScreenshareStream(room: Room | null): MediaStream | null
 }
 
 /** What your screen share is sending and why it falls short (its own tile's
- *  readout, M-1), or null where the track has no sender stats (the Linux
+ *  readout), or null where the track has no sender stats (the Linux
  *  native track publishes in the backend) or nothing is shared. */
 export function getLocalScreenshareStats(room: Room | null): Promise<ShareSenderSample | null> {
   const track = room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track as

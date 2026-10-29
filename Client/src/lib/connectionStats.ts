@@ -20,8 +20,7 @@ export interface ConnectionStats {
   /** Worst recent audio packet loss, percent, in either direction: what we
    *  receive (inbound-rtp) or what the far end receives from us
    *  (remote-inbound-rtp), over the recent history window. A low-RTT link that
-   *  drops packets is not excellent, so quality weighs this alongside RTT
-   *  (DP-41). */
+   *  drops packets is not excellent, so quality weighs this alongside RTT. */
   readonly loss: number;
   /** Worst interarrival jitter, milliseconds, among audio streams in either
    *  direction that carried packets since the last poll. */
@@ -31,7 +30,7 @@ export interface ConnectionStats {
    *  connected, a failed read, no transports) the widget must render "not
    *  available" rather than its hardcoded initial "4 green bars, —"
    *  (voice #7). On Linux, `NativeRoom.engine.pcManager` serves the host's
-   *  stats in the same W3C shape (WP LP-5). */
+   *  stats in the same W3C shape. */
   readonly available: boolean;
 }
 
@@ -82,7 +81,7 @@ function levelFromJitter(jitter: number): QualityLevel {
 const QUALITY_ORDER: readonly QualityLevel[] = ["excellent", "fair", "poor", "bad"];
 
 /** Connection quality is the worst of RTT, packet loss and jitter, so a lossy
- *  or jittery link can never read "excellent" on a good round trip (DP-41). */
+ *  or jittery link can never read "excellent" on a good round trip. */
 export function qualityFromSignals(rtt: number, loss: number, jitter: number): QualityLevel {
   const signals = [levelFromRtt(rtt), levelFromLoss(loss), levelFromJitter(jitter)];
   return signals.reduce((worst, level) =>

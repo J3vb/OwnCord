@@ -1,5 +1,5 @@
 /**
- * WCAG 2.x colour contrast math and the custom-accent derivation (B9-2).
+ * WCAG 2.x colour contrast math and the custom-accent derivation.
  *
  * The owner's Q8 decision (docs/archive/plans/b9-unified-experience-accessibility-polish.prd.md):
  * a custom accent is honoured for fills; `--on-accent`, `--accent-hover` and

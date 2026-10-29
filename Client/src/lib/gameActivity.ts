@@ -1,5 +1,5 @@
 /**
- * Game activity loop (WP 8.3c): tells the server which game this device is
+ * Game activity loop: tells the server which game this device is
  * running, so other members see "Playing <game>".
  *
  * Every `intervalMs` it asks the platform's detector for the running game and
@@ -14,13 +14,13 @@
  *    sent again. Each connection is an epoch: a detection that began under an
  *    earlier one is dropped when it answers, never sent on the new socket (the
  *    per-attempt ownership `ws.ts` keeps with its generation counter).
- *  - The user's own choices (WP 8.3d, `gameActivityPrefs`) apply here: manual
+ *  - The user's own choices (`gameActivityPrefs`) apply here: manual
  *    programs and hidden names go to the detector with every scan, a rename is
  *    applied to the name before it is sent, and any change scans at once, so
  *    hiding the game being shown sends the next game or `null` in one frame
  *    (never the hidden name again). Every detected name is added to the device's history for the
  *    Settings list.
- *  - An admin can turn game activity off for the whole server (WP 8.3e-2). The
+ *  - An admin can turn game activity off for the whole server. The
  *    server clears every shown game itself, so the loop sends nothing, not even
  *    a `null`: it stops scanning, forgets what it sent, and sends the current
  *    game again at once when the switch comes back on. A set that arrives
@@ -67,7 +67,7 @@ const RETRYABLE_REFUSALS: ReadonlySet<string> = new Set([
   WsErrorCode.RATE_LIMITED,
   WsErrorCode.TIMED_OUT,
   WsErrorCode.REQUEST_TIMEOUT,
-  // The switch is off (WP 8.3e-2) but this client missed the off frame: the
+  // The switch is off but this client missed the off frame: the
   // next poll asks again, so the game shows once the switch is back on. It is
   // not taken as the policy itself, since a refusal can arrive after a newer
   // game_activity_policy true.
@@ -255,7 +255,7 @@ export function startGameActivity(options: GameActivityOptions): GameActivityLoo
     void poll();
   });
 
-  // An admin turned game activity off or on for the server (WP 8.3e-2). Off:
+  // An admin turned game activity off or on for the server. Off:
   // the server already cleared the game, so nothing is sent, not even a null;
   // `supported` reads false and the loop stops scanning. Either way the server
   // holds nothing for this connection, so the shown game is forgotten and, on

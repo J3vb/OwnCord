@@ -3,7 +3,7 @@
  * a voice session, as a pair of leaf flags.
  *
  * `lib/notificationSound.ts` is in the startup closure and must know to stay
- * silent while deafened (DP-40), but importing `stores/voice.store` there would
+ * silent while deafened, but importing `stores/voice.store` there would
  * drag auth/members/ui/desktop into that closure. Instead the voice store, which
  * loads lazily, mirrors its `localDeafened` and its channel membership here on
  * every edge, and the sound module reads this leaf.

@@ -1,5 +1,5 @@
 /**
- * Windows per-app share audio (WP 6.7b): the start step shared by a new share
+ * Windows per-app share audio: the start step shared by a new share
  * and Change source. Loaded on first use by `screenShare.ts` and
  * `features/voice/screenshareChange.ts`, so it stays out of the share chunk.
  *
