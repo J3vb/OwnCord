@@ -365,73 +365,214 @@ mod x11_refresh {
 /// The process that owns a capture target, so its share audio can be that
 /// application's sound only. X11 windows carry it as `_NET_WM_PID`; a screen,
 /// the portal (Wayland hides which app a window is) or a window without the
-/// property has none.
+/// property has none. So does a pid that is not one of our own processes:
+/// a sandboxed (Flatpak, Snap) or remote app reports a pid from another
+/// namespace or host, which here names an unrelated process.
 pub fn target_pid(target: Target) -> Option<u32> {
     match target {
-        Target::Window(xid) if !under_wayland() => x11_window_pid::read(xid),
+        Target::Window(xid) if !under_wayland() => {
+            x11_window_pid::read(xid).filter(|&pid| owned_by_us(pid))
+        }
         _ => None,
     }
 }
 
-/// `_NET_WM_PID` of an X11 window, read through Xlib loaded at runtime
-/// (`x11-dl`), like `x11_refresh`. Any failure yields `None`.
+/// Whether `/proc/<pid>` exists and belongs to our user.
+fn owned_by_us(pid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    std::fs::metadata(format!("/proc/{pid}")).is_ok_and(|m| m.uid() == uid)
+}
+
+/// `_NET_WM_PID` of an X11 window, read over its own XCB connection. Not
+/// Xlib: an Xlib error (the window closed since the picker listed it) goes
+/// to the process-wide error handler, which hands an unknown display's error
+/// to Xlib's default, and that exits. XCB returns errors as values. libxcb is
+/// loaded at runtime, like the Xlib in `x11_refresh`; any failure is `None`.
 mod x11_window_pid {
-    use std::os::raw::{c_int, c_uchar, c_ulong};
+    use std::ffi::c_void;
+    use std::os::raw::{c_char, c_int, c_uint};
     use std::ptr;
 
-    use x11_dl::xlib::{Atom, Xlib, XA_CARDINAL};
+    const XA_CARDINAL: u32 = 6;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Cookie {
+        sequence: c_uint,
+    }
+
+    // The reply layouts mirror libxcb's; only some fields are read.
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct InternAtomReply {
+        response_type: u8,
+        pad0: u8,
+        sequence: u16,
+        length: u32,
+        atom: u32,
+    }
+
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct GetPropertyReply {
+        response_type: u8,
+        format: u8,
+        sequence: u16,
+        length: u32,
+        kind: u32,
+        bytes_after: u32,
+        value_len: u32,
+        pad0: [u8; 12],
+    }
+
+    type Connect = unsafe extern "C" fn(*const c_char, *mut c_int) -> *mut c_void;
+    type HasError = unsafe extern "C" fn(*mut c_void) -> c_int;
+    type Disconnect = unsafe extern "C" fn(*mut c_void);
+    type InternAtom = unsafe extern "C" fn(*mut c_void, u8, u16, *const c_char) -> Cookie;
+    type InternAtomReplyFn =
+        unsafe extern "C" fn(*mut c_void, Cookie, *mut *mut c_void) -> *mut InternAtomReply;
+    type GetProperty = unsafe extern "C" fn(*mut c_void, u8, u32, u32, u32, u32, u32) -> Cookie;
+    type GetPropertyReplyFn =
+        unsafe extern "C" fn(*mut c_void, Cookie, *mut *mut c_void) -> *mut GetPropertyReply;
+    type GetPropertyValue = unsafe extern "C" fn(*const GetPropertyReply) -> *mut c_void;
+
+    struct Xcb {
+        lib: *mut c_void,
+        connect: Connect,
+        has_error: HasError,
+        disconnect: Disconnect,
+        intern_atom: InternAtom,
+        intern_atom_reply: InternAtomReplyFn,
+        get_property: GetProperty,
+        get_property_reply: GetPropertyReplyFn,
+        get_property_value: GetPropertyValue,
+    }
+
+    impl Xcb {
+        fn open() -> Option<Self> {
+            // SAFETY: dlopen with a NUL-terminated name.
+            let lib =
+                unsafe { libc::dlopen(c"libxcb.so.1".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+            if lib.is_null() {
+                return None;
+            }
+            // SAFETY: lib came from dlopen just above.
+            let loaded = unsafe { Self::load(lib) };
+            if loaded.is_none() {
+                // SAFETY: lib came from dlopen and nothing from it is kept.
+                unsafe { libc::dlclose(lib) };
+            }
+            loaded
+        }
+
+        /// # Safety
+        /// `lib` must be a live handle from `dlopen` of libxcb.
+        unsafe fn load(lib: *mut c_void) -> Option<Self> {
+            let sym = |name: &std::ffi::CStr| {
+                // SAFETY: the caller guarantees lib; name is NUL-terminated.
+                let f = unsafe { libc::dlsym(lib, name.as_ptr()) };
+                (!f.is_null()).then_some(f)
+            };
+            // SAFETY: each symbol is libxcb's public function with the
+            // signature declared above.
+            unsafe {
+                Some(Self {
+                    lib,
+                    connect: std::mem::transmute::<*mut c_void, Connect>(sym(c"xcb_connect")?),
+                    has_error: std::mem::transmute::<*mut c_void, HasError>(sym(
+                        c"xcb_connection_has_error",
+                    )?),
+                    disconnect: std::mem::transmute::<*mut c_void, Disconnect>(sym(
+                        c"xcb_disconnect",
+                    )?),
+                    intern_atom: std::mem::transmute::<*mut c_void, InternAtom>(sym(
+                        c"xcb_intern_atom",
+                    )?),
+                    intern_atom_reply: std::mem::transmute::<*mut c_void, InternAtomReplyFn>(sym(
+                        c"xcb_intern_atom_reply",
+                    )?),
+                    get_property: std::mem::transmute::<*mut c_void, GetProperty>(sym(
+                        c"xcb_get_property",
+                    )?),
+                    get_property_reply: std::mem::transmute::<*mut c_void, GetPropertyReplyFn>(
+                        sym(c"xcb_get_property_reply")?,
+                    ),
+                    get_property_value: std::mem::transmute::<*mut c_void, GetPropertyValue>(sym(
+                        c"xcb_get_property_value",
+                    )?),
+                })
+            }
+        }
+    }
+
+    impl Drop for Xcb {
+        fn drop(&mut self) {
+            // SAFETY: lib came from dlopen and nothing from it outlives self.
+            unsafe { libc::dlclose(self.lib) };
+        }
+    }
 
     pub(super) fn read(xid: u64) -> Option<u32> {
-        let xlib = Xlib::open().ok()?;
-        // SAFETY: a null name opens $DISPLAY; a null result is handled.
-        let display = unsafe { (xlib.XOpenDisplay)(ptr::null()) };
-        if display.is_null() {
+        let window = u32::try_from(xid).ok()?;
+        let xcb = Xcb::open()?;
+        // SAFETY: a null name connects to $DISPLAY. The connection is only
+        // used until the disconnect below, even when it reports an error.
+        let conn = unsafe { (xcb.connect)(ptr::null(), ptr::null_mut()) };
+        if conn.is_null() {
             return None;
         }
-        // SAFETY: display is live until the XCloseDisplay below; the
-        // property buffer is read within its returned length, then freed.
+        // SAFETY: conn is live; every reply and error is freed with free(),
+        // as libxcb requires; the value is read within the reply's length.
         let pid = unsafe {
-            let atom = (xlib.XInternAtom)(display, c"_NET_WM_PID".as_ptr(), 1);
-            let mut actual_type: Atom = 0;
-            let mut actual_format: c_int = 0;
-            let mut items: c_ulong = 0;
-            let mut after: c_ulong = 0;
-            let mut data: *mut c_uchar = ptr::null_mut();
-            let status = if atom == 0 {
-                -1
+            if (xcb.has_error)(conn) != 0 {
+                None
             } else {
-                (xlib.XGetWindowProperty)(
-                    display,
-                    xid,
-                    atom,
-                    0,
-                    1,
-                    0,
-                    XA_CARDINAL,
-                    &mut actual_type,
-                    &mut actual_format,
-                    &mut items,
-                    &mut after,
-                    &mut data,
-                )
-            };
-            // Xlib hands 32-bit properties back as C longs.
-            let pid = (status == 0
-                && actual_type == XA_CARDINAL
-                && actual_format == 32
-                && items == 1
-                && !data.is_null())
-            .then(|| *data.cast::<c_ulong>())
-            .and_then(|v| u32::try_from(v).ok())
-            .filter(|&v| v > 1);
-            if !data.is_null() {
-                (xlib.XFree)(data.cast());
+                read_pid(&xcb, conn, window)
             }
-            pid
         };
-        // SAFETY: display came from XOpenDisplay and is closed once.
-        unsafe { (xlib.XCloseDisplay)(display) };
+        // SAFETY: conn came from xcb_connect and is disconnected once.
+        unsafe { (xcb.disconnect)(conn) };
         pid
+    }
+
+    /// # Safety
+    /// `conn` must be a live connection from `xcb`.
+    unsafe fn read_pid(xcb: &Xcb, conn: *mut c_void, window: u32) -> Option<u32> {
+        let name = c"_NET_WM_PID";
+        let len = u16::try_from(name.to_bytes().len()).ok()?;
+        // SAFETY: the caller guarantees conn; replies and errors are freed.
+        unsafe {
+            let mut err: *mut c_void = ptr::null_mut();
+            let cookie = (xcb.intern_atom)(conn, 1, len, name.as_ptr());
+            let reply = (xcb.intern_atom_reply)(conn, cookie, &mut err);
+            libc::free(err);
+            if reply.is_null() {
+                return None;
+            }
+            let atom = (*reply).atom;
+            libc::free(reply.cast());
+            if atom == 0 {
+                return None;
+            }
+            let mut err: *mut c_void = ptr::null_mut();
+            let cookie = (xcb.get_property)(conn, 0, window, atom, XA_CARDINAL, 0, 1);
+            let reply = (xcb.get_property_reply)(conn, cookie, &mut err);
+            // A closed window answers BadWindow here, as a value.
+            libc::free(err);
+            if reply.is_null() {
+                return None;
+            }
+            let r = &*reply;
+            let pid = (r.kind == XA_CARDINAL && r.format == 32 && r.value_len == 1)
+                .then(|| (xcb.get_property_value)(reply).cast::<u32>())
+                .filter(|v| !v.is_null())
+                .map(|v| v.read_unaligned())
+                .filter(|&v| v > 1);
+            libc::free(reply.cast());
+            pid
+        }
     }
 }
 

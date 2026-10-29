@@ -1582,6 +1582,8 @@ impl NativeSession {
             next.capture.take_over(&live.capture);
             publication.capture = Some(next.id);
         }
+        // Asked before the lock below: it is a round trip to the X server.
+        let app = screen::target_pid(next.capture.target());
         {
             // The share audio follows the capture that is live, so a
             // withdrawal ends that one. A short lock of its own, taken after
@@ -1591,7 +1593,7 @@ impl NativeSession {
                 audio.capture = Some(next.id);
                 // A window's share sound is that app's: follow the new source.
                 if let Some(feed) = &self.share_audio {
-                    feed.set_app(screen::target_pid(next.capture.target()));
+                    feed.set_app(app);
                 }
             }
         }
