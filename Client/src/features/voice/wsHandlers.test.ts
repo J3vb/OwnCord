@@ -530,7 +530,7 @@ describe("handleVoiceMoved toast", () => {
     expect(showToast).toHaveBeenCalledOnce();
   });
 
-  it("names the moderator who moved you, at once (WP 8.4b)", async () => {
+  it("names the moderator who moved you, at once", async () => {
     membersStore.setState((prev) => ({
       ...prev,
       members: new Map([
@@ -614,7 +614,7 @@ const frame = (user_id: number, user_ids: number[]) =>
 
 const err = (code: string) => ({ code, message: "m" }) as Payload<"error">;
 
-describe("handleVoiceWatching (6.6b)", () => {
+describe("handleVoiceWatching", () => {
   const clock = { voiceRejoinChannelId: null } as ReconnectClock;
 
   beforeEach(() => {

@@ -368,7 +368,7 @@ describe("main.ts beforeunload", () => {
   });
 });
 
-describe("main.ts tray status-change listener (OC-0037)", () => {
+describe("main.ts tray status-change listener", () => {
   it("persists a tray-selected status through saveUserStatus, not just the wire", async () => {
     expect(eventHandlers.has("status-change")).toBe(true);
 
@@ -462,7 +462,7 @@ describe("main.ts clears the per-server notification scope on logout (F13)", () 
   });
 });
 
-describe("main.ts tray status-change routes through the shared PresenceSender (OC-0176)", () => {
+describe("main.ts tray status-change routes through the shared PresenceSender", () => {
   afterEach(() => {
     setActivePresenceSender(null);
   });
@@ -493,7 +493,7 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
   });
 });
 
-describe("main.ts MainPage prefetch (CL-04)", () => {
+describe("main.ts MainPage prefetch", () => {
   it("starts the MainPage chunk load when the login is accepted, before the socket connects", async () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
     mockPrefetchMainPage.mockClear();
@@ -810,7 +810,7 @@ describe("main.ts native certificate-dialog decline", () => {
   });
 });
 
-describe("main.ts connected overlay (OC-0063)", () => {
+describe("main.ts connected overlay", () => {
   it("shows the auth_ok payload's server_name and motd, not the pre-handshake authStore snapshot", async () => {
     await loginAndReachAuthOk("192.168.1.10:8443", "alex", {
       user: { id: 1, username: "alex", avatar: null, role: "member" },
@@ -835,7 +835,7 @@ describe("main.ts connected overlay (OC-0063)", () => {
   });
 });
 
-describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
+describe("main.ts remember-password opt-out delete", () => {
   afterEach(() => {
     vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
     vi.mocked(deleteCredential).mockReset().mockResolvedValue(false);
@@ -866,7 +866,7 @@ describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
   });
 });
 
-describe("main.ts stay-signed-in storage split (WP 2B-4)", () => {
+describe("main.ts stay-signed-in storage split", () => {
   const host = "split.example:8443";
   const authOk = {
     user: { id: 9, username: "alice", avatar: null, role: "member" },
@@ -923,7 +923,7 @@ describe("main.ts stay-signed-in storage split (WP 2B-4)", () => {
   });
 });
 
-describe("main.ts drops an orphaned stay-signed-in token (WP 2B-4)", () => {
+describe("main.ts drops an orphaned stay-signed-in token", () => {
   type P = {
     id: string;
     name: string;
@@ -992,7 +992,7 @@ describe("main.ts drops an orphaned stay-signed-in token (WP 2B-4)", () => {
   });
 });
 
-describe("main.ts startup resume of the stored token (WP 2B-4)", () => {
+describe("main.ts startup resume of the stored token", () => {
   const host = "resume.example:8443";
   const autoProfile = {
     id: "p-r",
@@ -1113,7 +1113,7 @@ describe("main.ts profile deletion clears the saved credential (F11)", () => {
   });
 });
 
-describe("main.ts connected overlay teardown on mid-handshake session end (OC-0157)", () => {
+describe("main.ts connected overlay teardown on mid-handshake session end", () => {
   it('destroys the connected overlay when auth clears before the router leaves "connect"', async () => {
     await loginAndReachAuthOk("mid-handshake.example:8443", "casey", {
       user: { id: 7, username: "casey", avatar: null, role: "member" },
@@ -1144,7 +1144,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
     expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
   });
 
-  it("cancels the overlay's armed onReady hand-off when the session ends right after `ready` (OC-0107)", async () => {
+  it("cancels the overlay's armed onReady hand-off when the session ends right after `ready`", async () => {
     const mainPageCallsBefore = vi.mocked(createMainPage).mock.calls.length;
 
     await loginAndReachAuthOk("wide-window.example:8443", "riley", {
@@ -1176,7 +1176,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
   });
 });
 
-describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
+describe("main.ts connect-page skip-auto-login flag", () => {
   afterEach(() => {
     sessionStorage.clear();
     mockApiState.host = "";
@@ -1662,7 +1662,7 @@ describe("main.ts render failure recovery (4.12)", () => {
   });
 });
 
-describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
+describe("main.ts connect page after a protocol-epoch refusal", () => {
   it("mounts the update notifier on the connect page so a refused client can update in place", async () => {
     await loginAndReachAuthOk("server-a.example:8443", "alex", {
       user: { id: 1, username: "alex", avatar: null, role: "member" },
@@ -1806,7 +1806,7 @@ describe("main.ts session ownership", () => {
     }
   });
 
-  it("reads the registration mode from the per-host server-info snapshot (B7-15a)", async () => {
+  it("reads the registration mode from the per-host server-info snapshot", async () => {
     // The startup health/health-check path fills serverInfoByHost; the connect
     // page's getRegistrationMode callback reads it. An unavailable snapshot
     // (fetch failed / older server) must yield null, never a widened mode.
@@ -1953,7 +1953,7 @@ describe("main.ts session ownership", () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  it("signs a recovered session in exactly as a login does (B7-15b)", async () => {
+  it("signs a recovered session in exactly as a login does", async () => {
     const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
       typeof createApiClient
     >;
@@ -1968,7 +1968,7 @@ describe("main.ts session ownership", () => {
     clearAuth();
   });
 
-  it("keeps the partial token across a wrong emergency recovery code (B7-15b)", async () => {
+  it("keeps the partial token across a wrong emergency recovery code", async () => {
     mockLogin.mockResolvedValueOnce({ partial_token: "partial-1", requires_2fa: true });
     await capturedConnectCallbacks.onLogin!("totp.example", "alice", "hunter22");
     mockVerifyTotp
@@ -2009,7 +2009,7 @@ describe("main.ts session ownership", () => {
   });
 });
 
-describe("main.ts pending-approval notice (DP-54)", () => {
+describe("main.ts pending-approval notice", () => {
   it("shows registration pending approval as an info notice, not a red error", async () => {
     mockRegister.mockResolvedValueOnce({
       user: { id: 3, username: "newbie" },

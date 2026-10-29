@@ -1,7 +1,7 @@
-// push_handler.go — Web Push subscription STORAGE endpoints (B5-4).
+// push_handler.go — Web Push subscription STORAGE endpoints.
 //
-// Nothing here dispatches a push notification anywhere; that is B5-11,
-// behind HP-5. This file only lets a signed-in user register, list and
+// Nothing here dispatches a push notification anywhere; that is separate, later
+// work. This file only lets a signed-in user register, list and
 // revoke their own subscriptions, and hands back the server's VAPID public
 // key so the client can create one in the first place.
 //

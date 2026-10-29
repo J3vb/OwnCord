@@ -74,9 +74,7 @@ test.describe("Typing Indicator — WebSocket", () => {
     await expect(typingBar).toContainText("otheruser");
   });
 
-  test("typing indicator clears the moment the sender's message lands (DP-15)", async ({
-    page,
-  }) => {
+  test("typing indicator clears the moment the sender's message lands", async ({ page }) => {
     const typingBar = page.locator(".typing-bar");
 
     // Positive control: the sender's typing renders first.

@@ -66,7 +66,7 @@ type Hub struct {
 	timeoutView    timeoutViewState             // member_timeouts delivery; lock order in member_timeouts_delivery.go
 	replayBuf      *EventRingBuffer             // recent broadcast events for reconnection replay
 	broadcastDrops atomic.Uint64                // counts messages dropped due to full broadcast channel
-	queueDrops     queueDropState               // SRV-03 (hub_stats.go)
+	queueDrops     queueDropState               // frames the full broadcast queue dropped (hub_stats.go)
 
 	// latency is the shipped in-process metrics surface (SRE-M1): broadcast
 	// and dispatch-lag histograms, the max seqMu hold, the chat-ack histogram
@@ -81,11 +81,11 @@ type Hub struct {
 	eventStore     atomic.Pointer[EventStore] // read path for cold-tier replay
 
 	// Phase C Step 9 — plugin wiring.
-	pluginRegistry *plugin.Registry                 // slash-command dispatch; nil = no plugins; HubOptions field (B3-4)
+	pluginRegistry *plugin.Registry                 // slash-command dispatch; nil = no plugins; HubOptions field
 	pluginSink     atomic.Pointer[plugin.EventSink] // hub→plugin event fan-out; nil = no plugins
 
 	// running flips when Run starts. The pre-Run setters that used to check
-	// it died in B3-4 (their fields are HubOptions now); tests still read it
+	// it died (their fields are HubOptions now); tests still read it
 	// via RunningForTest to wait for the dispatch loop.
 	running atomic.Bool
 
@@ -102,13 +102,13 @@ type Hub struct {
 	// on the struct-literal hubs internal tests build.
 	runDone chan struct{}
 
-	// life is cancelled by closeStop; sweeps and background (ARCH-034: voice-leave
+	// life is cancelled by closeStop; sweeps and background (voice-leave
 	// cleanup, joined by JoinBackground, mutex a leaf) run under it. Made by NewHub.
 	life       context.Context
 	stopLife   context.CancelFunc
 	sweeps     sync.WaitGroup
 	background *syncutil.Group
-	gates      contentGates // B5-7 gate reads parked off the dispatch goroutine (hub_content_gate.go)
+	gates      contentGates // NSFW content gate reads parked off the dispatch goroutine (hub_content_gate.go)
 
 	// fatalFn runs when the panic breaker trips (3 panics/60s). A hub that
 	// panicked three times in a minute has unknown state, so production exits
@@ -126,7 +126,7 @@ type Hub struct {
 	connRejects atomic.Uint64 // upgrades refused by the max_ws_connections guardrail (ServeWS)
 	readyGate   chan struct{} // one slot per concurrent fresh-connect ready build (admitReady)
 
-	// coldReplayLimit caps persisted-event replay per reconnect; 0 = maxColdReplay (HubOptions.ReplayColdLimit, B3-4).
+	// coldReplayLimit caps persisted-event replay per reconnect; 0 = maxColdReplay (HubOptions.ReplayColdLimit).
 	coldReplayLimit int
 
 	// In-flight guards for the DB-heavy sweeps Run kicks off in their own
@@ -135,7 +135,7 @@ type Hub struct {
 	sessionSweepInFlight                                         atomic.Bool
 	voiceSweepInFlight, voiceReconcileInFlight, afkSweepInFlight atomic.Bool
 
-	voiceReconcile voiceReconcileState // RT-3 (voice_reconcile.go)
+	voiceReconcile voiceReconcileState // polling reconciler (voice_reconcile.go)
 	voiceReg       voiceRegistry       // voice membership lock and grace window (voice_registry.go)
 
 	voiceRejoinBlocks voiceRejoinBlockState // voice_rejoin_block.go
@@ -144,10 +144,10 @@ type Hub struct {
 	reconnectTierBuf  atomic.Uint64
 	reconnectTierDB   atomic.Uint64
 	reconnectTierFull atomic.Uint64
-	reconnectRingMiss atomic.Uint64 // WP 4.6a: resumes behind the ring (see noteRingMiss); usually ends in db or full
+	reconnectRingMiss atomic.Uint64 // resumes behind the ring (see noteRingMiss); usually ends in db or full
 
-	// Sequence watermark of the last channel-visibility change or content shed
-	// (SRV-03): neither reaches a client via replay, so one resuming from a seq
+	// Sequence watermark of the last channel-visibility change or content shed:
+	// neither reaches a client via replay, so one resuming from a seq
 	// at or before it takes the full-ready path. Reset on restart — a fresh
 	// connection always gets a correctly filtered ready payload anyway.
 	visibilityChangeSeq atomic.Uint64
@@ -166,7 +166,7 @@ type Hub struct {
 
 	// Settings cache — avoids per-connection DB queries for server_name/motd.
 	// settings is the read seam the cache below refreshes through —
-	// the B3-8 settings family owns the underlying reads.
+	// the settings family owns the underlying reads.
 	settings SettingsReader
 
 	// readers are the hub's remaining read seams (readers.go): snapshot,
@@ -186,8 +186,8 @@ type Hub struct {
 	// and the connect audit row. Required.
 	authn SocketAuthenticator
 
-	// trustedProxyNets is server.trusted_proxies parsed once at construction
-	// (SRE-11): the handshake resolves the client address for its log line and
+	// trustedProxyNets is server.trusted_proxies parsed once at construction:
+	// the handshake resolves the client address for its log line and
 	// the ws_connect audit row through it, so the recommended reverse-proxy
 	// deployment records the client rather than the proxy hop. Empty means
 	// RemoteAddr is used and a client-supplied header is ignored.
@@ -202,15 +202,14 @@ type Hub struct {
 
 	// defaultVoiceQuality is the operator-configured voice.quality
 	// (HubOptions.VoiceQuality), used by voiceJoinComplete as the fallback
-	// when a channel has no per-channel voice_quality override (OC-0439).
+	// when a channel has no per-channel voice_quality override.
 	// Always one of voiceQualities' keys — NewHub normalizes it. Set once and
 	// never mutated (voice.quality is startup-only), so no mutex guards it.
 	defaultVoiceQuality string
 	uploadFileTypes     UploadFileTypes // HubOptions.UploadFileTypes; may be nil
 
 	// voiceMod is the per-target-user lock serializing a voice-moderation
-	// DB transition with its paired LiveKit call (round 4, Codex review
-	// Part B) — see user_locks.go. Always non-nil (initialized in
+	// DB transition with its paired LiveKit call — see user_locks.go. Always non-nil (initialized in
 	// NewHub, never a setter): a hub built without it would let the
 	// timeout path and the manual voice-mute endpoint interleave.
 	voiceMod *userLocks[lockRankVoiceMod]
@@ -221,7 +220,7 @@ type Hub struct {
 	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
 	settingsLastUpdate time.Time
 	uploadPolicyMu     syncutil.Ranked[lockRankSerialiser] // orders BroadcastUploadPolicy's saves (hub_settings.go)
-	gameActivity       gameActivityState                   // the WP 8.3e-2 game activity switch (hub_settings.go)
+	gameActivity       gameActivityState                   // the game activity switch (hub_settings.go)
 	// voiceKeyHolders maps channelID → userID of the current key holder, the connected
 	// participant with the lowest userID in the channel. Protected by keyHolderMu.
 	keyHolderMu     syncutil.RankedRW[lockRankHubCache]
@@ -276,7 +275,7 @@ func (h *Hub) Run() {
 						"panic_count", panicCount,
 						"stack", stackutil.Capture())
 
-					// SRE-08: a Windows hardware fault (a nil deref or an
+					// a Windows hardware fault (a nil deref or an
 					// invalid address) may have left the heap corrupt
 					// (golang/go#81238), so it exits at once rather than
 					// being recovered onto damaged memory. Software panics
@@ -318,7 +317,7 @@ func (h *Hub) Run() {
 					h.startSweep(&h.sessionSweepInFlight, h.sweepRevokedSessions)
 				case <-voiceSweepTicker.C:
 					h.startSweep(&h.voiceSweepInFlight, h.sweepStaleVoiceStates)
-					// RT-3 and WP 6.10b (AFK moves) each have their own guard: a slow
+					// The polling reconciler and the AFK moves each have their own guard: a slow
 					// ListParticipants or move never suppresses the ghost sweep.
 					h.startSweep(&h.voiceReconcileInFlight, h.reconcileVoiceMembership)
 					h.startSweep(&h.afkSweepInFlight, h.sweepAFK)
@@ -387,7 +386,7 @@ func (h *Hub) GracefulStopContext(ctx context.Context, reason RestartReason) {
 		// Close all remaining client connections.
 		h.closeClientsForStop()
 
-		// RT-8 grace timers stop; a late readPump park arms none.
+		// Voice reconnect grace timers stop; a late readPump park arms none.
 		h.voiceReg.close()
 
 		// Stop LiveKit after the sockets, so clients see a close rather than a

@@ -15,7 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// runRestoreCLI implements `server restore <file>` (B11-7, OP-10): put a
+// runRestoreCLI implements `server restore <file>`: put a
 // database backup back on a server that will not boot, without the admin
 // panel. It is the offline counterpart to POST /admin/api/backups/{name}/restore.
 //
@@ -306,7 +306,7 @@ func checkRestoreSource(source, dbPath string) error {
 		return fmt.Errorf("%s is not a readable database backup: %w", source, err)
 	}
 	// A backup a newer server wrote would leave this binary refusing to boot
-	// on a schema it has never seen (REL-02), exactly as the admin path refuses.
+	// on a schema it has never seen, exactly as the admin path refuses.
 	ahead, err := db.CheckBackupSchemaAhead(context.Background(), source)
 	if err != nil {
 		return fmt.Errorf("could not read the schema version of %s: %w", source, err)

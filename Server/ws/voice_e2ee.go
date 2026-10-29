@@ -141,7 +141,7 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 		}
 	}
 
-	// video_decode (WP M-4) is optional and never fatal: a malformed list is
+	// video_decode is optional and never fatal: a malformed list is
 	// dropped and the announce (the key) is still accepted.
 	// The device key the announce itself names wins: unlike the auth frame it
 	// can be sent on the first connection of an app start, when the user id that
@@ -275,7 +275,7 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceE2EEOfferRateLimit, voiceE2EEWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
 	}
-	// Inner budget keeps the W1-2 per-victim cap: an offer can force the target
+	// Inner budget keeps the per-victim cap: an offer can force the target
 	// to re-key or disconnect, so repeated offers at one peer stay capped even
 	// though a full rotation across many peers passes.
 	targetKey := auth.Key(ratKey, targetUserID)
@@ -390,7 +390,7 @@ func (h *Hub) voiceChannelPeerUserIDs(channelID, excludeUserID int64) []int64 {
 // resumed permanently lost every peer key (or mid-call key rotation)
 // announced while its socket was down — its voice roster (voice_state,
 // which IS sequenced and replayed) stayed correct while its E2EE peer-key
-// map silently desynced from it (OC-0276). See registerNow
+// map silently desynced from it. See registerNow
 // (hub.go), which calls this for every WS (re)registration that leaves the
 // client in a voice channel.
 func (h *Hub) sendVoicePeerKeys(c *Client, channelID int64) {

@@ -5,7 +5,7 @@
 import { cascadedDeclaration, hasRule } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
-describe("DP-15 typing bar keeps its height when empty", () => {
+describe("typing bar keeps its height when empty", () => {
   it("reserves the 24px row on .typing-bar", () => {
     const height = cascadedDeclaration(".typing-bar", "height")?.value.value;
     expect(height).toMatchObject({

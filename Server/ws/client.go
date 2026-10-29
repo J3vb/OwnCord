@@ -30,7 +30,7 @@ type Client struct {
 	userID    int64
 	user      *db.User
 	channelID int64 // currently viewed channel for channel-scoped broadcasts
-	// threadID is the second subscription slot (WP 6.9c thread_focus): the
+	// threadID is the second subscription slot (thread_focus): the
 	// thread open beside the focused channel, 0 for none. It is a channel id
 	// like channelID, so its topic is ChannelTopic(threadID). Guarded by mu.
 	threadID int64
@@ -182,7 +182,7 @@ type livePresence struct {
 	// that expired is cleared.
 	customStatusExpiresAt string
 	// idleSince is when status last became "idle" on this connection, the zero
-	// time while it is anything else (WP 6.10b). It is kept while the status
+	// time while it is anything else. It is kept while the status
 	// stays idle, across a custom-status change and its expiry, so the AFK sweep
 	// measures one unbroken idle stretch. A reconnect re-stamps it at connect.
 	idleSince time.Time
@@ -190,12 +190,12 @@ type livePresence struct {
 	// connections of one user each hold a presence; the user's is the status of
 	// the most recent setter (mergeLivePresence).
 	setAt time.Time
-	// activity is the game this connection reports (WP 8.3a), nil when none.
+	// activity is the game this connection reports, nil when none.
 	// It is memory only and belongs to the connection: a replacement connection
 	// starts without one. The value is immutable; a change swaps in a new
 	// livePresence, so every writer of livePresence must carry it over.
 	activity *gameActivity
-	// listening is the song this connection reports (WP 8.10a), nil when none.
+	// listening is the song this connection reports, nil when none.
 	// Same rules as activity: memory only, owned by the connection, immutable,
 	// and carried over by every writer of livePresence.
 	listening *listeningActivity
@@ -252,7 +252,7 @@ func (c *Client) setLivePresence(status string, customStatus *string, expiresAt 
 
 // sendMsg queues a normal-priority message (chat messages, reactions, channel events).
 // If the buffer is full, the client is disconnected to force a reconnect
-// with replay recovery instead of silently losing messages (BUG-124).
+// with replay recovery instead of silently losing messages.
 func (c *Client) sendMsg(msg []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -359,7 +359,7 @@ func (c *Client) sendLowMsg(msg []byte) {
 
 // trySendMsg queues a normal-priority message and returns true if it was
 // accepted, false if the buffer is full or the channel is closed.
-// On buffer overflow, the client is disconnected to force a reconnect (BUG-124).
+// On buffer overflow, the client is disconnected to force a reconnect.
 func (c *Client) trySendMsg(msg []byte) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

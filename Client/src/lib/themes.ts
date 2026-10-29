@@ -32,7 +32,7 @@ export const THEMES = {
     "--text-normal": "#e2e4ef",
     // Refined Neon (B9 Q13): midnight used to inherit dark's input fill and
     // text roles, which were tuned for grey surfaces. Tested values; see
-    // docs/architecture/b9-ui-contract.md.
+    // docs/architecture/ui-contract.md.
     "--bg-input": "#232845",
     "--text-muted": "#a9b0c8",
     "--header-primary": "#f4f5fa",
@@ -69,7 +69,7 @@ export const THEMES = {
     "--scrollbar-thin-thumb": "#cdcfd4",
     "--scrollbar-auto-thumb": "#cdcfd4",
     // The dark defaults for these read below 4.5:1 (text) or 3:1
-    // (focus) on light surfaces. Tested values; see docs/architecture/b9-ui-contract.md.
+    // (focus) on light surfaces. Tested values; see docs/architecture/ui-contract.md.
     "--text-link": "#00658f",
     "--text-positive": "#17703f",
     "--text-warning": "#7a5500",
@@ -316,7 +316,7 @@ export function readableRoleColor(color: string): string {
 }
 
 /** Re-clamp every rendered role colour against the theme now applied. */
-function reclampRoleColors(): void {
+export function reclampRoleColors(): void {
   roleTextCache.clear();
   for (const el of document.querySelectorAll<HTMLElement>("[data-role-color]")) {
     el.style.color = readableRoleColor(el.dataset["roleColor"] ?? "");

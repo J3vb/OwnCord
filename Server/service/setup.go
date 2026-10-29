@@ -23,7 +23,7 @@ var ErrSetupAlreadyDone = errors.New("setup has already been completed")
 // in this order. CreateOwnerIfEmpty is the atomic gate — it checks "no users"
 // and inserts in one statement, closing the TOCTOU window a separate
 // UserCount-then-insert leaves open. And once that row commits, EVERY
-// remaining step is best-effort (OC-0253): the endpoint's gate is "no users
+// remaining step is best-effort: the endpoint's gate is "no users
 // exist", so a failure reported as an error after the account is created would
 // leave it permanently orphaned — every retry would hit the gate and be
 // refused forever, with no session, no channels and no invite. Those steps
@@ -58,7 +58,7 @@ const (
 // will own the issued session.
 //
 // RecoveryKit asks the server to generate the owner's recovery kit as part of
-// the first run (B11-8): the wizard offers it because a lockout with no kit is
+// the first run: the wizard offers it because a lockout with no kit is
 // the one failure an owner cannot fix from inside the server. The kit is shown
 // once in BootstrapResult; only its verifier is stored.
 type BootstrapInput struct {
@@ -76,7 +76,7 @@ type BootstrapInput struct {
 //
 // RecoveryKitSecret is the owner's recovery kit, present only when the input
 // asked for one and it was issued. It is shown once, on the finish step: the
-// server stores only the verifier (B4-5, B11-8).
+// server stores only the verifier.
 type BootstrapResult struct {
 	OwnerID           int64
 	Token             string
@@ -136,7 +136,7 @@ func (s *SetupService) Bootstrap(ctx context.Context, in BootstrapInput) (*Boots
 		return nil, err
 	}
 
-	// Atomic check-and-create (BUG-119): a UserCount followed by an insert
+	// Atomic check-and-create: a UserCount followed by an insert
 	// leaves a window in which two concurrent setup requests both see zero.
 	uid, err := s.st.CreateOwnerIfEmpty(ctx, in.Username, hash, ownerRoleID)
 	if errors.Is(err, db.ErrConflict) {
@@ -178,7 +178,7 @@ func (s *SetupService) hashPassword(ctx context.Context, password string) (strin
 
 // issueRecoveryKitAtSetup generates the owner's recovery kit and stores its
 // verifier, returning the secret shown once. It is best-effort like the other
-// post-account steps (OC-0253): the account exists regardless, so a failure is
+// post-account steps: the account exists regardless, so a failure is
 // a warning the owner can act on by enrolling from the client later.
 func (s *SetupService) issueRecoveryKitAtSetup(ctx context.Context, uid int64, warnings *[]string) string {
 	shown, canonical, err := auth.GenerateRecoveryKitSecret()

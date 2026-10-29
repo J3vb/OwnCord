@@ -6,7 +6,7 @@ import "time"
 // fan-out that walks a snapshot of connected users outside seqMu. While one is
 // in flight mustFullResyncAtRegister forces every reconnect onto a full ready:
 // the reconnect may have been skipped by the loop, and its last_seq can be
-// above the leading watermark bump (codex-oc-1732). Both take seqMu, the lock
+// above the leading watermark bump. Both take seqMu, the lock
 // reconnectRegister holds across its check-then-register, so a reconnect
 // either registers before begin (and is in the snapshot), sees the counter, or
 // checks after end against a watermark covering every seq allocated during the

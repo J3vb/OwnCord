@@ -1,30 +1,30 @@
 package ws
 
-// voice_registry.go — WP 5.3a: the in-memory voice membership in one place.
+// voice_registry.go — the in-memory voice membership in one place.
 //
 // A user's voice membership has an in-memory half and a durable half. The
-// in-memory half is the per-user membership lock and the RT-8 grace window,
+// in-memory half is the per-user membership lock and the reconnect grace window,
 // held by voiceRegistry (Hub.voiceReg), and the per-connection slot, held by
 // voiceSlot (Client.voice). The durable half is the voice_states row, written
 // through VoiceStore.
 //
 // Writes go only through the lock handle Hub.begin returns (voice_registry_txn.go):
-// 5.3b routed every membership write through it, 5.3c moves the whole slot on a
+// every membership write is routed through it, it moves the whole slot on a
 // hand-off (voiceTxn.transfer), owns the grace window (park, inherit,
-// takeParked) and stops it at shutdown (voiceRegistry.close), and 5.3d dropped
-// the Client delegators. Callers read the slot with c.voice.channel() and
+// takeParked) and stops it at shutdown (voiceRegistry.close), and the Client
+// has no delegators. Callers read the slot with c.voice.channel() and
 // c.voice.state().
 //
 // Lock order: see lock_order.go, the one written order for the package.
 // voiceSlot.voiceMu is the old Client.voiceMu.
 //
-// voiceMember (WP 1D-10) serializes every change to a user's voice
+// voiceMember serializes every change to a user's voice
 // membership: the voice_states row, the slot's channel and join token, and
 // the grace entry. (The one exception: the leave retry goroutine's deleteJoinRow
 // drops only its own exact (channel, token) grace entry after the lock is
 // released, which is a no-op because the first attempt already took it.) Each
-// top-level path takes it once through Hub.begin (WP
-// 5.3b, voice_registry_txn.go); the helpers they call never do. It may span
+// top-level path takes it once through Hub.begin
+// (voice_registry_txn.go); the helpers they call never do. It may span
 // DB I/O and broadcasts but never a LiveKit RPC: SFU removals are scoped by identity and join token, so they
 // run after unlock or on removeLiveKitParticipantAsync. A goroutine holds at
 // most one user's voiceMember lock and never takes it while holding any lock
@@ -40,7 +40,7 @@ import "github.com/J3vb/OwnCord/Server/syncutil"
 // to use, so a Hub literal in a test needs no constructor.
 type voiceRegistry struct {
 	voiceMember userLocks[lockRankVoiceMember] // per-user voice membership lock (Hub.begin)
-	voiceGrace  voiceGraceState                // RT-8 grace window (voice_grace.go)
+	voiceGrace  voiceGraceState                // reconnect grace window (voice_grace.go)
 }
 
 // close ends the registry's life at shutdown: it stops every grace timer and
@@ -83,7 +83,7 @@ type voiceSlot struct {
 	// has passed for the current (voiceChID, voiceJoinToken) pair — i.e. the
 	// join actually reached the SFU handoff (token sent, voice topic
 	// subscribed, voice_state broadcast). It starts false the moment
-	// voiceJoinPersist calls setState (BUG-088, immediately after the DB
+	// voiceJoinPersist calls setState (immediately after the DB
 	// row commits but well before completion) and is reset to false by every
 	// state change, so it is true only while a real, deliverable membership
 	// is live. registerNow reads it (via clearState) to decide whether a
@@ -91,7 +91,7 @@ type voiceSlot struct {
 	// off, or only a persisted-but-not-yet-delivered one still racing its own
 	// supersession guards in voice_join.go — transferring the latter makes
 	// those guards misread the transfer as an eviction and abandon the join
-	// while its voice_states row stays behind for nothing to reap (OC-0270).
+	// while its voice_states row stays behind for nothing to reap.
 	voiceJoinCompleted bool
 	e2ee               e2eeAnnounce // the last voice_e2ee_announce (key, signature, video decode list)
 	watching           []int64      // users whose screen share this member watches (voice_watch); sorted, replaced and never changed in place
@@ -101,8 +101,8 @@ type voiceSlot struct {
 	// own re-join can read them back. See stashModFlags/takeModFlags.
 	pendingModServerMuted    bool
 	pendingModServerDeafened bool
-	// pendingModServerMutedBy is the stashed mute's owner (round 5, Codex
-	// review P2) — nil for a manual mute; carried the same way as the two
+	// pendingModServerMutedBy is the stashed mute's owner
+	// — nil for a manual mute; carried the same way as the two
 	// booleans above so the re-join's restore can tell a timeout-owned mute
 	// from a manual one.
 	pendingModServerMutedBy *int64
@@ -128,7 +128,7 @@ func (s *voiceSlot) setState(chID int64, joinToken string) {
 	defer s.voiceMu.Unlock()
 	s.voiceChID = chID
 	s.voiceJoinToken = joinToken
-	// A new join instance starts (BUG-088 sets this before the token round
+	// A new join instance starts (set before the token round
 	// trip and completion guard even run); only voiceJoinComplete may mark it
 	// done, via markCompletedIfMatch.
 	s.voiceJoinCompleted = false
@@ -181,8 +181,7 @@ func (s *voiceSlot) resetLocked() {
 
 // clearState clears the membership and returns the old channel ID, join token
 // and whether that join had completed (see voiceJoinCompleted) — the last is
-// what registerNow consults before handing a resuming connection this state
-// (OC-0270).
+// what registerNow consults before handing a resuming connection this state.
 func (s *voiceSlot) clearState() (int64, string, bool) {
 	snap := s.clearSnap()
 	return snap.chID, snap.joinToken, snap.completed

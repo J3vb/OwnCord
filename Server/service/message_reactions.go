@@ -185,7 +185,7 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 		return nil, false, err
 	}
 
-	// permissions.CanAddReaction (B5-9) is the one predicate every reaction
+	// permissions.CanAddReaction is the one predicate every reaction
 	// gate — DM and non-DM alike — routes through now, so a timeout's
 	// restriction applies here the same way it applies to a send.
 	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, true)

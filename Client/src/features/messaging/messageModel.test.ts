@@ -84,7 +84,7 @@ describe("messageResponseToMessage", () => {
   });
 });
 
-describe("group_event (WP 3B-11a)", () => {
+describe("group_event", () => {
   it("carries a group row's kind and group_event from a live broadcast and from history", () => {
     const base: ChatMessagePayload = {
       id: 9,
@@ -248,7 +248,7 @@ describe("reply snippet (referenced_message)", () => {
   });
 });
 
-describe("call log rows (WP 3B-9c)", () => {
+describe("call log rows", () => {
   const call = { started_at: "2026-03-15 10:00:00", ended_at: null, participants: [2] };
 
   it("carries kind and call from a live chat_message", () => {

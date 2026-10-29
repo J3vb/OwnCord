@@ -45,7 +45,7 @@ var _ dmVisibilityMarker = (*ws.Hub)(nil)
 // never gets it redelivered by the ordinary seq-replay path — mirroring why
 // the WS emitter of the same event (ws/emit.go DMChannelOpenEvent) forces
 // this bump unconditionally, regardless of whether the send itself
-// succeeded. Also called by nsfw_handler.go (P2-8): nsfw_ack is the same
+// succeeded. Also called by nsfw_handler.go: nsfw_ack is the same
 // shape of unsequenced, targeted event.
 func markDMVisibilityChanged(broadcaster DMBroadcaster) {
 	if vm, ok := broadcaster.(dmVisibilityMarker); ok {
@@ -157,7 +157,7 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 		// the caller only touches the caller's own dm_open_state row, which
 		// the caller obviously already knows about.
 		// RecipientOpened is false when the recipient does not yet trust the
-		// caller (B5-6): GetOrCreateDMChannelGated decides the recipient's
+		// caller: GetOrCreateDMChannelGated decides the recipient's
 		// side inside its own transaction and opens only the caller's, so no
 		// dm_channel_open goes out — the request frame from the first
 		// message is their only signal until they accept.
@@ -180,7 +180,7 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 		// PresentableStatus applies the live-status rule ws/serve_ready.go's
 		// presentableMembers documents — StatusForViewer on the row alone
 		// would ship a disconnected recipient's saved idle/dnd verbatim
-		// (OC-0304) or a connected one's not-yet-flushed "offline".
+		// or a connected one's not-yet-flushed "offline".
 		dmUser := db.DMUser{
 			ID:          result.Recipient.ID,
 			Username:    result.Recipient.Username,
@@ -419,7 +419,7 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 
 // evictBlockedUserFromVoice evicts targetID from the pair's shared 1:1 DM
 // voice call, if any — the post-block step both PUT /api/v1/blocks/{id} and
-// POST /api/v1/dm-requests/{id}/block (B5-6, Codex P1-3) owe once BlockUser
+// POST /api/v1/dm-requests/{id}/block owe once BlockUser
 // itself has committed. Callers pass a context detached from the request
 // (context.WithoutCancel): the block has already committed by the time this
 // runs, so a client disconnecting mid-handler must not silently skip it.

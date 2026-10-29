@@ -875,7 +875,7 @@ describe("SidebarMemberSection", () => {
     });
   });
 
-  describe("user report (B9-10)", () => {
+  describe("user report", () => {
     it("opens the report for that user with the live member list for focus fallback", async () => {
       const section = createSidebarMemberSection(defaultOpts());
       container.appendChild(section.element);

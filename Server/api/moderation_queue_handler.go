@@ -12,7 +12,7 @@ import (
 )
 
 // moderationQueueRowResponse is one row of GET /api/v1/moderation/queue. ID
-// is the PUBLIC id (P2-9) — the sequential internal id never reaches a
+// is the PUBLIC id — the sequential internal id never reaches a
 // response, a route parameter or the mod_queue frame.
 type moderationQueueRowResponse struct {
 	ID           string  `json:"id"`
@@ -47,7 +47,7 @@ type moderationNoteResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// moderationEventResponse is one row of report_events (second Codex review):
+// moderationEventResponse is one row of report_events:
 // this feature's own immutable history, never the shared audit_log.
 type moderationEventResponse struct {
 	ActorID   int64  `json:"actor_id"`
@@ -57,7 +57,7 @@ type moderationEventResponse struct {
 }
 
 // moderationReportDetailResponse is GET /api/v1/moderation/queue/{id}. ID is
-// the PUBLIC id (P2-9).
+// the PUBLIC id.
 type moderationReportDetailResponse struct {
 	ID         string                       `json:"id"`
 	ReporterID int64                        `json:"reporter_id"`
@@ -81,7 +81,7 @@ type moderationReportDetailResponse struct {
 	Notes            []moderationNoteResponse  `json:"notes"`
 	Events           []moderationEventResponse `json:"events"`
 	// Actions is the immutable history of moderator actions taken against
-	// this report (plan item 7).
+	// this report.
 	Actions []moderationActionResponse `json:"actions"`
 }
 
@@ -93,8 +93,8 @@ type closeReportRequest struct {
 	Outcome string `json:"outcome"`
 }
 
-// actOnReportRequest is POST /api/v1/moderation/queue/{id}/act's body (plan
-// item 7). MessageID is required for kind="removal" unless the report's own
+// actOnReportRequest is POST /api/v1/moderation/queue/{id}/act's body.
+// MessageID is required for kind="removal" unless the report's own
 // target is a message, in which case it defaults to that message.
 type actOnReportRequest struct {
 	Kind            string `json:"kind"`
@@ -105,8 +105,8 @@ type actOnReportRequest struct {
 
 // actOnReportResponse is POST .../act's success body for kind="timeout"
 // only (every other kind answers 204, unchanged): Voice is "applied" or
-// "skipped", mirroring the direct timeout route's own response (P2-7,
-// Codex review — this outcome used to be dropped entirely here).
+// "skipped", mirroring the direct timeout route's own response (this outcome used to be
+// dropped entirely here).
 type actOnReportResponse struct {
 	Voice string `json:"voice"`
 }
@@ -114,7 +114,7 @@ type actOnReportResponse struct {
 // MountModerationQueueRoutes registers the moderator queue: read, assign,
 // note, close. Authorization is enforced inside ReportService (CanModerate,
 // the canonical predicate) so these handlers carry no permission check of
-// their own. The {id} route parameter is the PUBLIC id (P2-9); every
+// their own. The {id} route parameter is the PUBLIC id; every
 // handler resolves it to the internal id via ResolveReportID before calling
 // into ReportService.
 func MountModerationQueueRoutes(r chi.Router, svc *service.Services, hub ModQueueBroadcaster) {
@@ -140,7 +140,7 @@ func currentUserID(r *http.Request) (int64, bool) {
 // resolveReportIDParam reads the {id} route parameter (the report's PUBLIC
 // id) and resolves it to the internal id ReportService's methods take.
 // Writes the response and returns ok=false on any failure. Callers MUST run
-// requireModerateOrWrite first (P1, Codex review): resolving a route
+// requireModerateOrWrite first: resolving a route
 // parameter before checking authorization turns "unknown id" (404) and
 // "real id, no permission" (403) into an existence oracle through the
 // handler's own order of operations, even though every ReportService method
@@ -328,8 +328,8 @@ func handleModerationQueueClose(svc *service.Services, hub ModQueueBroadcaster) 
 }
 
 // handleModerationQueueAct performs a moderator action against a report's
-// subject (or its reported message, for removal), with report_id set (plan
-// item 7). svc.Reports.Get both authorizes the read (MODERATE_MEMBERS,
+// subject (or its reported message, for removal), with report_id set.
+// svc.Reports.Get both authorizes the read (MODERATE_MEMBERS,
 // confidentiality, self-review) and resolves the subject/target this
 // dispatches against.
 func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) http.HandlerFunc {
@@ -358,8 +358,8 @@ func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) ht
 		}
 		// Get allows the report's own REPORTER to read it (it is their own
 		// filing, already visible via Mine()), but acting on it is the same
-		// conflict of interest Assign/Note/Close already refuse (P2-6, Codex
-		// review): without this a moderator could act on a report they
+		// conflict of interest Assign/Note/Close already refuse:
+		// without this a moderator could act on a report they
 		// themselves filed.
 		if err := service.GuardSelfReviewFor(actorID, &detail.Report); err != nil {
 			writeReportServiceError(r.Context(), w, err)
@@ -387,7 +387,7 @@ func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) ht
 			return
 		}
 		// Dispatch the SAME transport broadcasts the direct routes send after
-		// their own commit (P2-7, Codex review: this used to be a bare 204,
+		// their own commit (this used to be a bare 204,
 		// silently dropping chat_deleted for removal and member_ban/disconnect
 		// for ban — only Warn/Timeout's own ModActionNotifier reaches a live
 		// target through this path, since ModerationService owns that one).

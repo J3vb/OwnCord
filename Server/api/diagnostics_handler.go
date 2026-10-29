@@ -18,8 +18,8 @@ type diagnosticsResponse struct {
 	Voice  voiceDiag  `json:"voice"`
 	Client clientDiag `json:"client"`
 
-	// Reachability is nil unless server.reachability_report_enabled is set
-	// (B6-6). A pointer with omitempty rather than a value, so the key is
+	// Reachability is nil unless server.reachability_report_enabled is set.
+	// A pointer with omitempty rather than a value, so the key is
 	// absent when the owner has not opted in — an empty object would read as
 	// "nothing to report" rather than "not switched on".
 	Reachability *netclass.Report `json:"reachability,omitempty"`
@@ -45,7 +45,7 @@ type clientDiag struct {
 	IsPrivateNet bool   `json:"is_private_network"`
 	// AddressClass names the range RemoteAddr falls in. IsPrivateNet alone
 	// cannot distinguish a tailnet peer from a LAN host from a carrier-NAT
-	// client, and B6-6 is precisely about not conflating those.
+	// client, and telling those apart is the point of the report.
 	AddressClass netclass.Kind `json:"address_class"`
 }
 
@@ -54,7 +54,7 @@ func handleDiagnosticsConnectivity(
 	ver string,
 	hub *ws.Hub,
 ) http.HandlerFunc {
-	proxyNets := parseCIDRList(cfg.Server.TrustedProxies) // OC-0305: parse once at construction
+	proxyNets := parseCIDRList(cfg.Server.TrustedProxies) // parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
 		clientAddr := clientIPWithProxies(r, proxyNets)
 
@@ -92,7 +92,7 @@ func handleDiagnosticsConnectivity(
 			},
 		}
 
-		// B6-6: owner opt-in. Building the report opens no socket and
+		// Owner opt-in. Building the report opens no socket and
 		// resolves no name — see the netclass package comment for why there
 		// is no probe — so it adds no latency budget to this handler beyond
 		// the LiveKit health check above, which carries its own 3s timeout.
@@ -128,7 +128,7 @@ func classifyIP(ip string) netclass.Kind {
 // hands out — docs/tailscale.md:19-24), 169.254.0.0/16 and fe80::/10
 // (link-local), and any IPv4-mapped form such as ::ffff:192.168.1.1. A
 // tailnet peer was reported as a public-internet client, which is exactly the
-// confusion B6-6 exists to remove.
+// confusion the reachability report exists to remove.
 //
 // The documentation and benchmarking ranges stay false, as they always were:
 // they are not private, they are simply not allocated to anyone.

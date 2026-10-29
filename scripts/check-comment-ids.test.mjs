@@ -12,6 +12,8 @@ import {
   countTree,
   idsIn,
   scopeFiles,
+  testFiles,
+  titleIdsIn,
 } from "./check-comment-ids.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -71,7 +73,7 @@ test("phase-letter work packages count whole, and a UI action named Owner call d
 
 test("technical names that look like ids are not counted", () => {
   const src =
-    "// UTF-8, SHA-256, AES-128, P-256, RFC-6455 and HTTP-2 are not plan ids; #fff is a colour";
+    "// UTF-8, SHA-256, AES-128, P-256, RFC-6455, TEST-NET-1 and HTTP-2 are not plan ids; #fff is a colour";
   assert.deepEqual(ids(src, "go"), []);
 });
 
@@ -80,6 +82,35 @@ test("comment text keeps its line numbers across block comments", () => {
   assert.deepEqual(
     got.map((c) => c.line),
     [2, 3, 4],
+  );
+});
+
+test("test titles are checked, the test body is not", () => {
+  const src = [
+    'describe("channel categories (WP 6.5a)", () => {',
+    "  it(`restores the last channel (UX-8)`, () => {",
+    '    expect(x).toBe("OC-0001"); // B5-7',
+    "  });",
+    '  it.each([1])("drops %s (B9-14)", () => {});',
+    "});",
+  ].join("\n");
+  assert.deepEqual(
+    titleIdsIn(src).map((h) => [h.line, h.id]),
+    [
+      [1, "WP 6.5a"],
+      [2, "UX-8"],
+      [5, "B9-14"],
+    ],
+  );
+  assert.deepEqual(
+    testFiles([
+      "Client/tests/unit/a.test.ts",
+      "Client/src/b.test.ts",
+      "Client/tests/e2e/c.spec.ts",
+      "Client/src/d.ts",
+      "Server/e_test.go",
+    ]),
+    ["Client/tests/unit/a.test.ts", "Client/src/b.test.ts", "Client/tests/e2e/c.spec.ts"],
   );
 });
 
@@ -113,10 +144,14 @@ test("a file may not gain ids, a file that lost some must be lowered, and the ca
 });
 
 test("the tree matches the committed baseline", () => {
-  const files = execFileSync("git", ["ls-files", "Client/src", "Client/src-tauri/src", "Server"], {
-    cwd: ROOT,
-    encoding: "utf8",
-  })
+  const files = execFileSync(
+    "git",
+    ["ls-files", "Client/src", "Client/src-tauri/src", "Client/tests", "Server"],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+    },
+  )
     .split("\n")
     .filter(Boolean);
   const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));

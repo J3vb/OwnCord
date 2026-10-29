@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// Thread follows (WP 6.9c, migration 079). A follow is a notification and
+// Thread follows (migration 079). A follow is a notification and
 // sidebar preference kept on the server, never permission: no gate here reads
 // it, and every read that hands a follow to a user is joined with what the
 // parent lets them see.

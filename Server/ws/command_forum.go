@@ -8,7 +8,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ForumPostCreateCmd represents a forum_post_create message (WP 6.9d): a post
+// ForumPostCreateCmd represents a forum_post_create message: a post
 // titled Name with its opening message, in forum ChannelID.
 type ForumPostCreateCmd struct {
 	userID          int64

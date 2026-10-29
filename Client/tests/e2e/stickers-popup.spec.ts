@@ -10,7 +10,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, navigateToMainPageReady } from "./helpers";
-import { Q1, findUnnamedControls, focusIndicator } from "./support/b9-accessibility";
+import { Q1, findUnnamedControls, focusIndicator } from "./support/accessibility";
 
 /** A 1x1 transparent PNG, as the sticker image bytes. */
 const PNG_1X1 = [
@@ -73,7 +73,7 @@ async function start(page: Page): Promise<void> {
   await navigateToMainPageReady(page);
 }
 
-test.describe("WP 8.8 stickers and the expression popup", () => {
+test.describe("stickers and the expression popup", () => {
   test.beforeEach(async ({ page }) => {
     await start(page);
   });

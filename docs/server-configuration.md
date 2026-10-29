@@ -222,7 +222,7 @@ Controls the OpenTelemetry SDK. Requires building with `-tags otel` (see [Contri
 | `telemetry.otlp_insecure` | bool   | `false`            | Disable TLS for the OTLP gRPC connection. Only set `true` in development / private-network deployments. |
 | `telemetry.service_name`  | string | `"owncord-server"` | OTel `service.name` resource attribute                                                                  |
 
-> **Local development:** Run `make otel-up` (from `Server/`) to start Jaeger + Prometheus via Docker.
+> **Local development:** Run `make otel-up` (from `Server/`) to start Jaeger + Prometheus via Docker (compose file in `deploy/docker/`).
 > Jaeger UI: `http://localhost:16686` — Prometheus UI: `http://localhost:9090`
 
 ### Plugins (`plugins`)

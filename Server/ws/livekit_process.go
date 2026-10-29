@@ -387,7 +387,7 @@ func newLiveKitCmd(ctx context.Context, cfgPath, binPath string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, binPath, "--config", cfgPath) //nolint:gosec // G204: binary path from trusted server config or verified download
 	// Route the companion's stdout and stderr into slog rather than the
 	// server's own stdout, so LiveKit's ICE, port and key errors reach the
-	// ring buffer, the admin live log and the support bundle (SRE-05). One
+	// ring buffer, the admin live log and the support bundle. One
 	// writer each: livekit-server uses separate goroutines for the two.
 	cmd.Stdout = &liveKitLogWriter{}
 	cmd.Stderr = &liveKitLogWriter{}

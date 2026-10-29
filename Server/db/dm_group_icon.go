@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Group DM icon (WP 3B-10c). The icon is an unlinked attachment that
+// Group DM icon. The icon is an unlinked attachment that
 // channels.dm_icon names. It is served to the group's members while it is the
 // live icon, and is reclaimed by the orphan sweep once replaced or cleared.
 

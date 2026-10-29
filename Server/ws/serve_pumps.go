@@ -210,7 +210,7 @@ func writePump(ctx context.Context, conn *websocket.Conn, c *Client) {
 }
 
 // pingInterval is how often the server sends a WebSocket protocol Ping, and
-// how long it waits for the matching Pong (CLI-01). The peer's WebSocket stack
+// how long it waits for the matching Pong. The peer's WebSocket stack
 // answers a protocol Ping itself, so liveness no longer rests on the client's
 // app-level ping — a webview timer a minimised window may throttle. A live
 // peer refreshes its activity every interval; a silent (half-open) one is
@@ -258,7 +258,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		// Snapshot voice state BEFORE unregister to avoid TOCTOU with
 		// replacement connections. The voice lock spans snapshot to park, so
 		// a reconnect's transfer (voiceTxn.inherit) runs wholly before or
-		// after this teardown (WP 1D-10).
+		// after this teardown.
 		txn := hub.begin(c.userID)
 		voiceChID := c.voice.channel()
 		replaced := hub.unregisterNow(c)
@@ -269,7 +269,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 		// cleaning here would delete the replacement's DB row whenever
 		// teardown snapshots voiceChID before the transfer zeroes it.
 		//
-		// RT-8: a completed membership is parked in the grace window
+		// a completed membership is parked in the grace window
 		// (voice_grace.go) instead of torn down at once, so a resuming
 		// socket can inherit the call. disconnectVoice runs the
 		// immediate teardown for an incomplete join or a disabled window.
@@ -310,7 +310,7 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 			// which can block for seconds, so a reconnect landing during that
 			// window would otherwise be invisible here and this dead
 			// connection's teardown would mark the live session's user
-			// offline (OC-0019).
+			// offline.
 			if hub.shouldMarkOffline(c, replaced) {
 				// A real disconnect is offline for everyone, the user
 				// included, so this path needs no invisible mapping. The row,

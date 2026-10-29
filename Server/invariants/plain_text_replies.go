@@ -8,7 +8,7 @@ import (
 // plainTextRepliesID is the rule's stable id.
 const plainTextRepliesID = "plain-text-replies"
 
-// plainTextReplies enforces MX-7 part 3: no handler answers an error with
+// plainTextReplies enforces the reply-helper rule for plain text: no handler answers an error with
 // http.Error, which writes text/plain, so a client reading the JSON envelope
 // gets no code. api and admin answer through writeErr; every other package
 // (the plugin asset server, the LiveKit webhook, the WebSocket upgrade)

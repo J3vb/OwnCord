@@ -76,7 +76,7 @@ test.describe("Channel Switch — Messages", () => {
     ).not.toBeVisible();
   });
 
-  test("relaunch restores the last channel (UX-8)", async ({ page }) => {
+  test("relaunch restores the last channel", async ({ page }) => {
     await expect(page.locator(".message").first()).toBeVisible({ timeout: 10_000 });
 
     // The first launch auto-selects the first text channel.

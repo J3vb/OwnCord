@@ -1,7 +1,7 @@
 package admin
 
 // support_event_codes_forums.go - the event codes for the forum post
-// feature's Warn/Error literals (WP 6.9d-a2).
+// feature's Warn/Error literals.
 
 import "maps"
 

@@ -23,7 +23,7 @@ const AUTH_OK = JSON.stringify({
   },
 });
 
-describe("client liveness deadline (CLI-01)", () => {
+describe("client liveness deadline", () => {
   let client: ReturnType<typeof createWsClient>;
 
   beforeEach(() => {

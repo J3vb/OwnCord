@@ -30,7 +30,7 @@ const (
 // db can implement it without importing this package back (auth imports
 // db). With a persister the database is the store: every read goes to it,
 // so a restart keeps an in-flight login challenge, a pending enrolment and
-// the replay window (S-13, B4-3), and one process never trusts a copy
+// the replay window, and one process never trusts a copy
 // another process has already spent. Rows never carry a secret in the
 // clear: the partial-auth token and the used code arrive as SHA-256 digests
 // (HashToken), and the pending enrolment secret arrives as AES-GCM
@@ -203,7 +203,7 @@ func (s *PartialAuthStore) Consume(ctx context.Context, token string) (PartialAu
 
 // Restore puts a challenge Consume returned back under its original token —
 // the recovery path for a caller that claimed the challenge and then could
-// not finish the login (OC-0378). The entry keeps its expiry and failure
+// not finish the login. The entry keeps its expiry and failure
 // count, so a challenge that expired meanwhile is dropped by the next Lookup.
 func (s *PartialAuthStore) Restore(ctx context.Context, token string, challenge PartialAuthChallenge) {
 	if s.persist != nil {

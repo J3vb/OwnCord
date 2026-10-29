@@ -35,7 +35,7 @@ type HubBroadcaster interface {
 	BroadcastChannelDelete(channelID int64)
 	// BroadcastChannelCategories sends the full category list to the connected
 	// clients that hold MANAGE_CHANNELS (permission evaluated at send time),
-	// and to nobody else, after a category mutation (WP 6.5a).
+	// and to nobody else, after a category mutation.
 	BroadcastChannelCategories(cats []db.ChannelCategory)
 	BroadcastMemberBan(userID int64)
 	// BroadcastChatBulkDeleted tells a channel's subscribers that messageIDs
@@ -62,7 +62,7 @@ type HubBroadcaster interface {
 // ─── PermissionInvalidator ───────────────────────────────────────────────────
 
 // PermissionInvalidator was how admin handlers invalidated the permission cache
-// when roles or permissions changed. Since WP 5.1a the services do that
+// when roles or permissions changed. The services now do that
 // themselves (service.PermissionChangeNotifier's callers invalidate first), so
 // the admin constructors accept the value but no longer use it; it is kept so
 // their signatures, and every caller, stay unchanged. Satisfied by

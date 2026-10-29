@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// The per-signal evaluators behind AttentionService.Evaluate (RI-07). Each
+// The per-signal evaluators behind AttentionService.Evaluate. Each
 // runs under the service's lock and ends in settle.
 
 // attentionLevel commits the first measured level immediately, so a reading
@@ -237,8 +237,8 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
-// evalVoice reports the LiveKit voice path's health and restart state
-// (SRE-04). A managed companion that is not running — a crash loop that gave
+// evalVoice reports the LiveKit voice path's health and restart state.
+// A managed companion that is not running — a crash loop that gave
 // up, or a start that never succeeded — is the failure class users report
 // most, so it warns, and a companion whose restarts exhausted the backoff is
 // critical. An externally managed LiveKit is health-probed and warns when it
@@ -350,7 +350,7 @@ func (s *AttentionService) evalCertificate(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
-// evalBootStatus reports how the previous run ended (SRE-08): a marker left
+// evalBootStatus reports how the previous run ended: a marker left
 // behind by a kill, a crash or a hardware exit is a warning, a clean shutdown
 // is ok, and a first start with no marker is unknown.
 func (s *AttentionService) evalBootStatus(now time.Time) {
@@ -376,8 +376,8 @@ func (s *AttentionService) evalBootStatus(now time.Time) {
 	s.settle(sig, title, action)
 }
 
-// evalRestoreOutcome reports the staged backup restore this start handled
-// (WP 5.5): ok when it was applied, a warning when it was rolled back or
+// evalRestoreOutcome reports the staged backup restore this start handled:
+// ok when it was applied, a warning when it was rolled back or
 // refused and the previous database is still in use. Without a restore there
 // is no signal.
 func (s *AttentionService) evalRestoreOutcome(now time.Time) {

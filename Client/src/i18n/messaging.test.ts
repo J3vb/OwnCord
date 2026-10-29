@@ -6,7 +6,7 @@ import { messageStatusText } from "./messageStatus";
 import { messagingText } from "./messaging";
 import { requestsText } from "./requests";
 
-describe("B9-19 catalogs", () => {
+describe("messaging catalogs", () => {
   it("keeps the message list's English states", () => {
     expect(messagingText("welcome.channel", { channel: "general" })).toBe("Welcome to #general!");
     expect(messagingText("welcome.channelIntro", { channel: "general" })).toBe(

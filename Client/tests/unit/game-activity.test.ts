@@ -300,7 +300,7 @@ describe("game activity loop", () => {
     expect(fake.sent.map((s) => s.activity?.name)).toEqual(["Factorio", "Factorio"]);
   });
 
-  describe("the per-server switch (WP 8.3e-2)", () => {
+  describe("the per-server switch", () => {
     afterEach(() => resetServerCapabilities());
 
     it("sends nothing, not even a null, when the switch goes off, and stops scanning", async () => {
@@ -459,7 +459,7 @@ describe("game activity loop", () => {
   });
 });
 
-describe("game activity loop: the user's own game choices (WP 8.3d)", () => {
+describe("game activity loop: the user's own game choices", () => {
   let loop: GameActivityLoop | null = null;
   let current: DetectedGame | null;
   const detect = vi.fn(async (_prefs: unknown) => current);

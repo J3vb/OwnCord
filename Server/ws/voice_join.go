@@ -37,7 +37,7 @@ func validVoiceQuality(q string) bool {
 // GenerateToken succeeds and before the minted token is checked for
 // supersession / handed to the client. Test-only (always nil in production):
 // GenerateToken is a local JWT mint with no I/O, so the window it pins (a
-// concurrent eviction landing between token generation and delivery, OC-0008)
+// concurrent eviction landing between token generation and delivery)
 // is too narrow to land reliably by staggering real goroutines. Mirrors
 // cleanupVoiceRaceClearHook (hub_sweep.go), used the same way for the
 // analogous CleanupVoiceForChannel race.
@@ -57,7 +57,7 @@ var voiceJoinPostTokenRaceHook func(*Client)
 // reqID is the joining frame's client-supplied request id (envelope.id), logged
 // on the "voice join" line so an operator can correlate a token with the arrival
 // that produced it (SRE-M2). Empty when the frame carried none.
-// fctx is the frame deadline (WP 4.1b): it bounds the database
+// fctx is the frame deadline: it bounds the database
 // reads and the membership insert up to the commit point, and a failure caused
 // by it is answered REQUEST_TIMEOUT (voiceJoinFail). ctx
 // is the connection context for everything that must not be cut short: the
@@ -82,7 +82,7 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 
 	state, ok := h.voiceJoinPersist(fctx, ctx, txn, c, capacity, channelID, reqID)
 	if !ok {
-		// OC-0420: voiceJoinLeaveCurrent already took the moderator
+		// voiceJoinLeaveCurrent already took the moderator
 		// mute/deafen stash off the client (or read it off the row it just
 		// deleted) with nothing yet written for voiceJoinRestoreModFlags to
 		// have applied — put it back so it survives for a retried join, or
@@ -95,7 +95,7 @@ func (h *Hub) handleVoiceJoinFrame(fctx, ctx context.Context, c *Client, payload
 	persistDone := time.Now()
 
 	if !h.voiceJoinGrantToken(ctx, txn, c, channelID, ch.AFK, state, reqID) {
-		// OC-0420: voiceJoinRestoreModFlags above just wrote these flags into
+		// voiceJoinRestoreModFlags above just wrote these flags into
 		// the row voiceJoinGrantToken's own failure path is about to roll
 		// back (rollbackVoiceJoin deletes it) — re-stash for the same reason
 		// as the persist branch above.
@@ -229,7 +229,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	// Guard: with no supervised companion, LiveKit is externally managed, so
 	// the process check above no-ops. Probe reachability before minting a
 	// token: a minted credential for an SFU nobody can reach is the
-	// disguised-success shape B6-6 forbids (cmd/smoke's stepSExternalAbsent
+	// disguised-success shape the smoke test forbids (cmd/smoke's stepSExternalAbsent
 	// records exactly this) — the client would connect, fail confusingly, and
 	// get no server-side explanation. ListRooms bounds itself at 3s.
 	if h.lkProcess == nil {
@@ -304,7 +304,7 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 	if currentChID > 0 {
 		h.handleVoiceLeave(ctx, txn, c, voiceLeaveReasonSwitch)
 
-		// BUG-088: Verify old voice state is actually cleared before joining
+		// Verify old voice state is actually cleared before joining
 		// the new channel. If the DB delete failed (retry still running in
 		// background), the old row persists and JoinVoiceChannelIfCapacity's
 		// COUNT(*) may produce an incorrect result. Fail the switch so the
@@ -319,7 +319,7 @@ func (h *Hub) voiceJoinLeaveCurrent(fctx, ctx context.Context, txn *voiceTxn, c 
 		if vs != nil {
 			slog.Warn("handleVoiceJoin: stale voice state persists after leave, aborting switch",
 				"user_id", c.userID, "stale_channel", vs.ChannelID, "target_channel", channelID)
-			// OC-0034: do NOT restore the client's local voice state here.
+			// do NOT restore the client's local voice state here.
 			// handleVoiceLeave above already broadcast voice_leave for the old
 			// channel to every client that can see it — including this one,
 			// since finishVoiceLeave always adds the leaver to the audience —
@@ -348,7 +348,7 @@ func (h *Hub) voiceJoinPersist(fctx, ctx context.Context, txn *voiceTxn, c *Clie
 	// The service picks the capacity-checked insert or the plain one from
 	// capacity, so only voiceJoinPrecheck's moderator decision can select the
 	// unchecked insert for a capped channel. persistJoin sets the client's
-	// voice channel as soon as the row is confirmed (BUG-088), before the
+	// voice channel as soon as the row is confirmed, before the
 	// permission checks and LiveKit token mint below; a failure further down
 	// unwinds it via rollbackVoiceJoin.
 	state, err := txn.persistJoin(fctx, c, channelID, capacity)
@@ -390,8 +390,8 @@ func (h *Hub) voiceJoinRestoreModFlags(ctx context.Context, c *Client, channelID
 }
 
 // voiceJoinPublishPerms derives the SFU publish permissions from role —
-// prevents SFU-level bypass when the client connects directly via direct_url
-// (BUG-128). With a PermissionService the three bits come from the per-user
+// prevents SFU-level bypass when the client connects directly via direct_url.
+// With a PermissionService the three bits come from the per-user
 // cache; the bare-hub fallback answers them from one role fetch + one
 // overrides fetch via HasChannelPermBatch instead of re-fetching the role
 // and overrides once per bit. Both branches fail closed: an unresolved role or override map
@@ -441,7 +441,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 	// Generate LiveKit token if LiveKit client is available.
 	// Token generation failure is fatal — without a token the client cannot
 	// connect to the SFU, so we must roll back the DB join.
-	// NOTE: the joiner's own state was already set above (BUG-088), but
+	// NOTE: the joiner's own state was already set above, but
 	// nobody else has been told about the join yet — rollbackVoiceJoin below
 	// is still called with broadcast=false, so a failure here does not
 	// broadcast a spurious voice_leave for a join no other client ever saw.
@@ -462,10 +462,10 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 			voiceJoinPostTokenRaceHook(c)
 		}
 
-		// OC-0008: a concurrent eviction (voice_mod_kick/move via
+		// a concurrent eviction (voice_mod_kick/move via
 		// DisconnectFromVoiceInChannel, the voice permission revocation sweep, or
 		// CleanupVoiceForChannel) can land anywhere between c.setVoiceState
-		// (BUG-088, above) and here — all of them delete the voice_states row
+		// (above) and here — all of them delete the voice_states row
 		// and clear the client's in-memory state, then call RemoveParticipant,
 		// which no-ops because this join has never reached the SFU yet
 		// (GenerateToken is a local JWT mint, no LiveKit round trip). The tail
@@ -490,7 +490,7 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 		// to the /livekit proxy otherwise.
 		// NOTE: E2EE keys are no longer server-generated. Clients exchange
 		// keys via ECDH (voice_e2ee_announce / voice_e2ee_offer messages).
-		// C-2: Include is_key_holder so the client knows whether to initiate
+		// Include is_key_holder so the client knows whether to initiate
 		// key distribution after connecting to the SFU.
 		isKeyHolder := h.computeIsKeyHolder(channelID, c.userID)
 		c.sendMsg(buildVoiceToken(channelID, token, "/livekit", h.livekit.URL(), isKeyHolder))
@@ -504,11 +504,11 @@ func (h *Hub) voiceJoinGrantToken(ctx context.Context, txn *voiceTxn, c *Client,
 // existing participants' states and E2EE keys, and voice_config. Returns false
 // when the join was superseded or rolled back instead of completing.
 func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, ch *db.Channel, channelID int64, state *db.VoiceState, reqID string) bool {
-	// Voice channel state itself was already set above (BUG-088), immediately
+	// Voice channel state itself was already set above, immediately
 	// after the DB row committed — which also means a concurrent eviction (the
 	// revocation sweep, a participant_left webhook, a moderator kick/move) can
 	// now land on THIS join instance while the token round trip above is in
-	// flight. The check inside the h.livekit block above (OC-0008) already
+	// flight. The check inside the h.livekit block above already
 	// withholds the token itself in that case; this is the tail guard for
 	// everything downstream of it (voice topic subscription, the joiner's own
 	// voice_state broadcast) when no token round trip ran at all (h.livekit ==
@@ -525,11 +525,11 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	// would leave between confirming the match and marking it, which a
 	// concurrent eviction landing in between could otherwise turn into a
 	// completed flag surviving a state that was cleared out from under it.
-	// registerNow (OC-0270) relies on this flag being set only for a join
+	// registerNow relies on this flag being set only for a join
 	// that genuinely reached this point: a network reconnect transfers a
 	// replaced connection's voice state onto the resuming client solely when
 	// this is true, so that an in-flight join still racing its own
-	// supersession guards (the OC-0008 check above, and this one) is never
+	// supersession guards (the eviction check above, and this one) is never
 	// handed off — doing so would make those guards misread the transfer
 	// itself as an eviction and abandon the join while its voice_states row
 	// stays behind for nothing to reap.
@@ -547,7 +547,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 
 	// Broadcast the joiner's state to the clients allowed to see this channel.
 	//
-	// OC-0349: sent synchronously (sendVoiceEventSync), not via the async
+	// sent synchronously (sendVoiceEventSync), not via the async
 	// broadcastVoiceEvent queue, so it lands in program order on the joiner's
 	// own socket among the four other direct sends below it (voice_token
 	// above, existing states, peer keys, voice_config) — the async queue gave
@@ -557,7 +557,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 
 	// Send existing channel voice states to the joiner.
 	//
-	// OC-0172: this is the ONLY place a brand-new voice_join relays an
+	// this is the ONLY place a brand-new voice_join relays an
 	// existing participant's stored ECDH public key (voice_e2ee_announce) to
 	// a joiner — mid-call peers never counter-announce, they only answer an
 	// offer. A swallowed error here used to just `return`, leaving the
@@ -585,7 +585,7 @@ func (h *Hub) voiceJoinComplete(ctx context.Context, txn *voiceTxn, c *Client, c
 	// exchange. Factored into sendVoicePeerKeys (voice_e2ee.go) so the WS
 	// resume path (registerNow, hub.go) can reuse the exact same relay for a
 	// reconnecting client — voice_e2ee_announce itself is an unsequenced
-	// pub/sub frame that no reconnect replay tier can ever recover (OC-0276).
+	// pub/sub frame that no reconnect replay tier can ever recover.
 	h.sendVoicePeerKeys(c, channelID)
 	h.sendVoicePeerWatching(c, channelID)
 
@@ -642,13 +642,13 @@ func voiceMicrophoneAllowed(canSpeak bool, state *db.VoiceState) bool {
 // delete is skipped unless it still names channelID.
 // txn is the caller's Hub.begin(c.userID) handle.
 func (h *Hub) rollbackVoiceJoin(ctx context.Context, txn *voiceTxn, c *Client, channelID int64, joinedAt string, broadcast bool) {
-	// OC-0219: the rollback must clear via voiceTxn.clear, not merely drop
+	// the rollback must clear via voiceTxn.clear, not merely drop
 	// the in-memory voiceChID: a join that already reached markCompleted's
 	// Subscribe would otherwise keep its VoiceTopic subscription alive.
 	// Unsubscribe is a documented no-op when the client was never subscribed
 	// to that topic (pubsub.go), as when this fires before markCompleted.
 	txn.clear(c)
-	// The client's voice state is now set before token generation (BUG-088),
+	// The client's voice state is now set before token generation,
 	// so a concurrent join/leave in the same channel can have elected this
 	// half-joined client key holder. Re-run the election after taking it back
 	// out, or the map keeps naming a user who never reached the SFU and the

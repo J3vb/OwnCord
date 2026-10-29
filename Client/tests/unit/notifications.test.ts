@@ -2149,7 +2149,7 @@ describe("notifyIncomingMessage", () => {
     );
   });
 
-  describe("notifyMention (WP 2B-1)", () => {
+  describe("notifyMention", () => {
     async function spies() {
       const { invoke } = await import("@tauri-apps/api/core");
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -2293,7 +2293,7 @@ describe("notifyIncomingMessage", () => {
     });
   });
 
-  describe("notifyChannelActivity (WP 2B-2)", () => {
+  describe("notifyChannelActivity", () => {
     function entry(
       flags: Partial<{
         message_id: number;
@@ -2433,7 +2433,7 @@ describe("notifyIncomingMessage", () => {
       expect(invoke).toHaveBeenCalledTimes(1);
     });
 
-    describe("a followed thread (WP 6.9c-c2)", () => {
+    describe("a followed thread", () => {
       const thread = { parentId: 1, name: "Release plan", watching: false };
       beforeEach(() => setChannelMutesHost("thread.test"));
       afterEach(() => unmuteChannel(1));
@@ -2675,7 +2675,7 @@ describe("notifyIncomingMessage", () => {
     });
   });
 
-  describe("per-channel level (WP 3D-3b)", () => {
+  describe("per-channel level", () => {
     const HOST = "level.example";
     const mention = { content: "hey @Me", mentions: [1], mentions_everyone: false };
 

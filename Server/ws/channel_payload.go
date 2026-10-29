@@ -7,7 +7,7 @@ type channelPayload struct {
 	Name     string `json:"name"`
 	Type     string `json:"type"`
 	Category string `json:"category"`
-	// CategoryID / CategoryPosition (WP 6.5a) identify the category object the
+	// CategoryID / CategoryPosition identify the category object the
 	// name above belongs to: 0 and 0 for an uncategorized channel. Always
 	// sent, and identical for every recipient, so the shared channel_update
 	// frame stays shared.
@@ -52,7 +52,7 @@ type channelPayload struct {
 	// Q5), the same value the ready payload ships per channel. Same
 	// per-recipient, targeted-only, absent-means-unchanged rules as CanSend.
 	CanModerateVoice *bool `json:"can_moderate_voice,omitempty"`
-	// CanMoveVoice is the per-recipient move affordance (WP 8.4b): the verdict
+	// CanMoveVoice is the per-recipient move affordance: the verdict
 	// of permissions.AuthorizeVoiceMover, independent of CanModerateVoice. Same
 	// per-recipient, targeted-only, absent-means-unchanged rules as CanSend.
 	CanMoveVoice *bool `json:"can_move_voice,omitempty"`
@@ -63,7 +63,7 @@ type channelPayload struct {
 	CanDeleteOthers *bool `json:"can_delete_others,omitempty"`
 	CanPin          *bool `json:"can_pin,omitempty"`
 	CanReact        *bool `json:"can_react,omitempty"`
-	// Forum carries a forum channel's settings and tags (WP 6.9d). Present on
+	// Forum carries a forum channel's settings and tags. Present on
 	// a type 'forum' row only, and identical for every recipient, so the shared
 	// channel_update frame stays shared. Whether the frame is sent to a socket
 	// at all is client_features.go's concern, not this field's.

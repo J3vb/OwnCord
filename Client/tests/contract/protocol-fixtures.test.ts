@@ -246,7 +246,7 @@ function resetStores(): void {
   uiStore.setState((prev) => ({ ...prev, transientError: null }));
 }
 
-describe("contract: epoch-1 fixtures through the client dispatcher (ARCH-02)", () => {
+describe("contract: epoch-1 fixtures through the client dispatcher", () => {
   let cleanup: (() => void) | null = null;
   let ws: ReturnType<typeof createMockWsClient>;
 

@@ -14,7 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// MountNSFWRoutes registers the per-user NSFW acknowledgement toggle (B5-7)
+// MountNSFWRoutes registers the per-user NSFW acknowledgement toggle
 // under /api/v1/channels/{id}/nsfw-acknowledgement. broadcaster sends the
 // caller's OTHER live sockets an nsfw_ack frame so a second device converges
 // without a reconnect — the same DMBroadcaster seam MountDMRoutes uses.
@@ -28,7 +28,7 @@ func MountNSFWRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcas
 
 // nsfwPostBumpPreNotifyHook, when non-nil, runs once per acknowledge/revoke
 // immediately after the visibility watermark bumps and before the
-// best-effort notify send (Codex round 2, P2). Test-only (always nil in
+// best-effort notify send. Test-only (always nil in
 // production): lets a test observe the exact point at which a concurrently
 // registering socket is already guaranteed to see the fresh state,
 // regardless of whether the notify frame itself ever arrives.
@@ -44,7 +44,7 @@ func handleNSFWAcknowledge(svc *service.Services, broadcaster DMBroadcaster) htt
 			writeNSFWError(r.Context(), w, err)
 			return
 		}
-		// P2-8 / Codex round 2 P2: bump BEFORE the notify send, same ordering
+		// Bump BEFORE the notify send, same ordering
 		// broadcastDMOpen uses relative to its SendToUser calls. nsfw_ack is
 		// unsequenced and not replayed (protocol/schema.json's own note), so
 		// the bump — not the frame — is what makes a resume safe; a socket
@@ -70,7 +70,7 @@ func handleNSFWRevoke(svc *service.Services, broadcaster DMBroadcaster) http.Han
 			writeNSFWError(r.Context(), w, err)
 			return
 		}
-		// P2-8 / Codex round 2 P2: see the matching comment in handleNSFWAcknowledge.
+		// See the matching comment in handleNSFWAcknowledge.
 		markDMVisibilityChanged(broadcaster)
 		if nsfwPostBumpPreNotifyHook != nil {
 			nsfwPostBumpPreNotifyHook()

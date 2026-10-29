@@ -1,6 +1,6 @@
 package ws
 
-// game_activity.go — WP 8.3a: the game a member is playing, reported by the
+// game_activity.go — the game a member is playing, reported by the
 // client with activity_update and shown on presence, presence_batch and
 // ready.activities. It is memory only (Client.presence.activity): no table,
 // and a disconnect or restart clears it.
@@ -130,7 +130,7 @@ func handleActivityUpdateV2(ctx context.Context, cmd Command, info ClientInfo, d
 		return Result{SetActivity: &activityChange{}}
 	}
 
-	// An admin turned game activity off for the server (WP 8.3e-2). Refused
+	// An admin turned game activity off for the server. Refused
 	// before the limiter so the refusal costs no budget; the authoritative
 	// check is applyActivity's, under presenceMu.
 	if d.GameActivityEnabled != nil && !d.GameActivityEnabled() {

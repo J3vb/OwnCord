@@ -77,7 +77,7 @@ func (rb *EventRingBuffer) EventsSinceFiltered(afterSeq uint64, allowedChannelID
 	return rb.EventsSinceFilteredContent(afterSeq, allowedChannelIDs, allowedChannelIDs)
 }
 
-// EventsSinceFilteredContent is EventsSinceFiltered plus B5-7's content gate:
+// EventsSinceFilteredContent is EventsSinceFiltered plus the NSFW content gate:
 // a buffered event whose channelID is allowed is included as before UNLESS
 // it is a content-bearing kind (contentBearingKinds) for a channel that is
 // NOT in readableChannelIDs, in which case it is silently dropped — a

@@ -6,7 +6,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Role mutations with their side effects (WP 5.1a) ────────────────────────
+// ─── Role mutations with their side effects ────────────────────────
 //
 // Each exported mutation here runs the locked write (role.go), then, AFTER the
 // commit and OUTSIDE RoleService.mu, invalidates the cached permissions it

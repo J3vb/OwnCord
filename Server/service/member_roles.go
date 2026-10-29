@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Several roles per member (WP 6.3c) ──────────────────────────────────────
+// ─── Several roles per member ──────────────────────────────────────
 
 // ErrLastRole is returned by RemoveUserRole when the role is the member's
 // only one: a member always keeps at least one role. It is a conflict (409).

@@ -17,7 +17,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
-// HubOptions carries everything a Hub needs before Run starts (S-11 / B3-4).
+// HubOptions carries everything a Hub needs before Run starts.
 // The four pre-Run setters this struct replaced (SetLiveKit,
 // SetLiveKitProcess, SetPluginRegistry, ConfigureReplay) were all guarded by
 // rejectIfRunning — construction-phase wiring pretending to be mutable state.
@@ -39,7 +39,7 @@ type HubOptions struct {
 
 	// Settings is required: the hub's settings cache (server name and MOTD
 	// on every auth_ok) reads through it instead of the raw handle — the
-	// B3-8 settings family owns those reads. Production passes
+	// settings family owns those reads. Production passes
 	// Services.Settings; test helpers default it over the test database.
 	Settings SettingsReader
 
@@ -107,7 +107,7 @@ type HubOptions struct {
 
 	// TrustedProxies is server.trusted_proxies: the proxy hop(s) whose
 	// X-Forwarded-For/X-Real-IP may be trusted when resolving the client
-	// address for the handshake log and the ws_connect audit row (SRE-11).
+	// address for the handshake log and the ws_connect audit row.
 	// Parsed once at construction; nil/empty means RemoteAddr is used and a
 	// client-supplied header is ignored.
 	TrustedProxies []string
@@ -137,7 +137,7 @@ type UploadFileTypes interface {
 }
 
 // NewHub creates a Hub ready to be started with Run, validating that the
-// required collaborators are present — before B3-4, construction always
+// required collaborators are present — construction used to always
 // succeeded and a missing collaborator surfaced as a later panic or a
 // silently refused setter call. It also initializes the settings cache from
 // the database. If opts.Services is non-nil, V2 handlers receive service
@@ -186,7 +186,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	reg := NewHandlerRegistry()
 
 	// Normalize once here rather than propagating an unset or invalid
-	// configured value into every voice_config this hub sends (OC-0439).
+	// configured value into every voice_config this hub sends.
 	defaultVoiceQuality := "medium"
 	if validVoiceQuality(opts.VoiceQuality) {
 		defaultVoiceQuality = opts.VoiceQuality
@@ -254,18 +254,18 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		// So every DM payload DMService builds (GET/POST /dms, POST
 		// /dms/group, PATCH /dms/{id}, and every broadcastDMOpen refresh)
 		// applies the same live-connection rule instead of only the ready
-		// payload's presentableDMChannels doing so (OC-0304).
+		// payload's presentableDMChannels doing so.
 		svc.DMs.SetLiveStatusLookup(h.LiveStatus)
-		// DP-27: a mention that raises a reader's badge in a channel they are
+		// a mention that raises a reader's badge in a channel they are
 		// not viewing never reaches them through the channel topic, so the
 		// mention worker pushes them a per-user mention_count frame instead.
 		// Installed here, before the composition root starts the worker, so
 		// StartMentionWorker captures it.
 		svc.Messages.SetMentionNotifier(h)
-		// WP 3D-5c: the read_state frame MoveReadPointer sends under the same
+		// the read_state frame MoveReadPointer sends under the same
 		// lock the mention frames use.
 		svc.Messages.SetReadStateNotifier(h)
-		svc.CallLog.SetSink(h) // WP 3B-9: before the worker starts
+		svc.CallLog.SetSink(h) // before the worker starts
 	}
 
 	registerChatHandlers(reg, chatDeps)
@@ -275,7 +275,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	registerReactionHandlers(reg, reactionDeps)
 	registerCallHandlers(reg, callDeps)
 	// Phase C Step 9 — plugin slash commands. The registry closure predates
-	// B3-4 (the registry used to arrive via a post-construction setter); it
+	// HubOptions (the registry used to arrive via a post-construction setter); it
 	// stays a closure for the nil-interface reason below. MessageSvc gates
 	// broadcasts.
 	reg.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{
@@ -316,7 +316,7 @@ func (h *Hub) voiceDeps() VoiceDeps {
 }
 
 // maxColdReplayLimit returns the effective persisted-replay cap. The budget
-// arrives via HubOptions (B3-4): the dispatch loop reads replayBuf unlocked,
+// arrives via HubOptions: the dispatch loop reads replayBuf unlocked,
 // so the ring is sized exactly once, at construction.
 func (h *Hub) maxColdReplayLimit() int {
 	if h.coldReplayLimit > 0 {

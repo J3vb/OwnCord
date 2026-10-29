@@ -321,7 +321,7 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("shows a stream card while sharing: source, Change source, Quality, Stop (WP 1C-1)", async () => {
+  it("shows a stream card while sharing: source, Change source, Quality, Stop", async () => {
     setVoiceChannel(1, []);
     const onScreenshareToggle = vi.fn();
     const widget = createVoiceWidget({
@@ -358,7 +358,7 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("the stream card offers only Stop where the share cannot change (WP 1C-1)", async () => {
+  it("the stream card offers only Stop where the share cannot change", async () => {
     mockShareQuality.mockReturnValueOnce(null);
     mockCanChange.mockReturnValueOnce(false);
     setVoiceChannel(1, []);
@@ -611,7 +611,7 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("disables share with a reason when the grant leaves it out or the video limit is used up (WP 1C-3)", () => {
+  it("disables share with a reason when the grant leaves it out or the video limit is used up", () => {
     channelsStore.setState((prev) => {
       const channels = new Map(prev.channels);
       channels.set(1, {
@@ -1182,7 +1182,7 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  describe("noise suppression toggle (WP 1D-6)", () => {
+  describe("noise suppression toggle", () => {
     beforeEach(() => {
       localStorage.clear();
       mockReapplyEnhanced.mockClear();

@@ -1,10 +1,10 @@
-// The alpha-shaped profile (B3-7, roadmap workstream 12).
+// The alpha-shaped profile.
 //
 // `go run ./cmd/seed -confirm-dev -profile alpha` fills an EMPTY database with
 // a deterministic dataset shaped like a real 1.2.0-alpha.4 server after a
 // month of use. The same profile, scrubbed and vacuumed, is the committed
-// snapshot at Server/testdata/snapshots/v1.2.0-alpha.4.sqlite that B4's HP-4
-// drills, B6's upgrade rehearsal and B10's in-place upgrade consume — the
+// snapshot at Server/testdata/snapshots/v1.2.0-alpha.4.sqlite that the recovery
+// drills, the upgrade rehearsal and the in-place upgrade consume — the
 // schema has not changed since the v1.2.0-alpha.4 tag (zero migrations added),
 // so a database seeded on today's migrations IS an alpha.4-schema database.
 //
@@ -13,10 +13,11 @@
 // row, one insert order, and `VACUUM INTO` as the byte-canonical output.
 // TestAlphaProfileByteIdentical holds it: two runs, two files, bytes.Equal.
 //
-// The numbers below are the plan's (b3-server-architecture-guardrails
-// §B3-7). A number found unrepresentative is changed HERE with the reason in
-// the B3-7 evidence block — never silently. Two constants deliberately leave
-// no rows, recorded rather than hidden:
+// The numbers below are the plan's
+// (docs/archive/plans/b3-server-architecture-guardrails-2026-08-29.md). A number
+// found unrepresentative is changed HERE with the reason in
+// the evidence block of that plan — never silently. Two constants
+// deliberately leave no rows, recorded rather than hidden:
 //
 //   - alphaVoiceSessions: voice is LiveKit-ephemeral. A finished session
 //     leaves no at-rest row in this schema (voice_states is live presence and
@@ -270,7 +271,7 @@ func writeSnapshot(database *db.DB, scrubPath, outPath string) error {
 // alphaJoinTimes computes every user's created_at once — the message and DM
 // generators consult it so nothing is authored before its author joined (a
 // fixture with time-travelling rows would poison the retention and
-// account-age rehearsals that consume it; Codex on #1469, P2). Monotonic in
+// account-age rehearsals that consume it). Monotonic in
 // the user id — the first forty accounts predate the window (an established
 // server; all staff are among them), the remaining sixty join during it in
 // id order — so "who exists at time t" is always the prefix 1..N.
@@ -550,7 +551,7 @@ func (sb *sqlBatch) flush(tx *sql.Tx, prefix string) error {
 // alphaInsertMessages writes all 20,000 messages in chronological order —
 // per-bucket second offsets are sorted before ids are assigned, so ascending
 // ids follow ascending timestamps exactly as insertion order does on a live
-// server (Codex on #1469, P2) — and returns each message's timestamp and
+// server — and returns each message's timestamp and
 // author (indexed by id-1) for the attachment rows. Authors are drawn only
 // from users who exist at the message's time: the eligible set is always the
 // prefix 1..maxUser because alphaJoinTimes is monotonic, and a DM pair
@@ -653,7 +654,7 @@ func alphaInsertAttachments(tx *sql.Tx, rng *rand.Rand, messageTimes []time.Time
 			id := fmt.Sprintf("%08x%08x%08x%08x", rng.Uint32(), rng.Uint32(), rng.Uint32(), rng.Uint32())
 			size := (c.minKB + rng.Intn(c.maxKB-c.minKB+1)) * 1024
 			// The uploader is the message's author — CreateAttachment always
-			// records one on the current schema (Codex on #1469, P2).
+			// records one on the current schema.
 			if _, err := tx.Exec(
 				`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploaded_at, uploader_id)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -52,7 +52,7 @@ type ErasureStore interface {
 	ListUserIDs(ctx context.Context) ([]int64, error)
 	ListUnfinishedErasureJobs(ctx context.Context) ([]db.ErasureJob, error)
 	// FinishOwedErasureCheckpoint finishes a wal_checkpoint(TRUNCATE) an
-	// erasure could not, when one is owed (B6-11 task 5). The tick below is
+	// erasure could not, when one is owed. The tick below is
 	// where the promise the erasure's own log line makes is kept: not by
 	// SQLite's autocheckpoint, which copies frames but never truncates the log.
 	FinishOwedErasureCheckpoint(ctx context.Context) (bool, error)
@@ -69,7 +69,7 @@ type ErasureStore interface {
 // either way, so callers report success and leave the files to the journal.
 var ErrErasureFilesPending = errors.New("erasure: files pending")
 
-// ErasureService owns account erasure end to end (B4-9, BPR-052, BG-11):
+// ErasureService owns account erasure end to end:
 // db.EraseAccount's transaction, then the removal of the files that
 // transaction journaled, resumed at startup and on each maintenance tick
 // until every job is done, plus the reconciliation pass that reclaims files
@@ -134,7 +134,7 @@ func (s *ErasureService) SetHub(h ErasureHub) {
 	s.hub = h
 }
 
-// SetMarkers installs the deletion-marker store (B4-10): every erasure
+// SetMarkers installs the deletion-marker store: every erasure
 // records a marker there, and ReplayMarkers erases again whatever a
 // restored backup brought back. Without one erasures record nothing and
 // audit rows unlink without a token.
@@ -435,8 +435,8 @@ func (s *ErasureService) finish(ctx context.Context, job *db.ErasureJob, removed
 }
 
 // Reconcile removes files from the upload directory that no database row
-// names — the stranded class the orphan sweep can produce (O3 A1, HP-4 drill
-// D5) and what a restore leaves behind (O3 A5). Only files older than cutoff
+// names — the stranded class the orphan sweep can produce
+// and what a restore leaves behind. Only files older than cutoff
 // are candidates, so an upload whose row is not written yet is left alone,
 // and at most limit files go per call, so a tick stays bounded. Returns how
 // many were removed.

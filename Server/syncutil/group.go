@@ -7,7 +7,7 @@ import (
 
 // Group owns background jobs that outlive the request or message that
 // spawned them, so a lifecycle owner can join them (or abandon them with a
-// count) before the resources they use are closed (ARCH-034).
+// count) before the resources they use are closed.
 //
 // It is the hub's "life plus WaitGroup" pattern with an admission gate: a
 // bare sync.WaitGroup fed from handler goroutines would race Add against

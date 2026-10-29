@@ -14,7 +14,7 @@ has more detail there.
 | [Server/](../Server/README.md)    | Go REST and WebSocket server over SQLite, with LiveKit voice. Has a package map.                                                                       |
 | [Client/](../Client/README.md)    | Tauri v2 desktop app: TypeScript frontend and a thin Rust backend.                                                                                     |
 | [protocol/](../protocol/)         | `schema.json`, the source of truth for WebSocket message types. Generated code comes from it.                                                          |
-| [deploy/](../deploy/)             | Deployment files: the systemd unit and the Unraid template.                                                                                            |
+| [deploy/](../deploy/)             | Deployment files: the systemd unit, the Unraid template and the local tracing and metrics stack (`docker/`).                                           |
 | [docs/](README.md)                | Guides, reference pages, architecture notes, dated audits and plans. Start at the index.                                                               |
 | [scripts/](../scripts/)           | Repository checks, the root command runner (`run.mjs`) and the CI selector.                                                                            |
 | [tools/](../tools/)               | Developer tools: the [introspection MCP server](mcp-introspect.md).                                                                                    |
@@ -59,7 +59,7 @@ a passing check.
 | Linux ARM64     | ✅     | ✅ (CI only) |
 
 - **Go 1.27** for the server. `Server/go.mod` sets `go 1.27.0` and pins the
-  toolchain to `go1.27.2`. With `GOTOOLCHAIN=auto` (Go's default), Go downloads
+  toolchain to `go1.27.3`. With `GOTOOLCHAIN=auto` (Go's default), Go downloads
   that toolchain for you.
 - **Node.js 26 and npm 11** for the client and the root scripts.
   `Client/.nvmrc` is the source of truth.

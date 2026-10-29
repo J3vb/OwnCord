@@ -56,7 +56,7 @@ func qualityBitrate(quality string) int {
 // until e2ee_timeout. Union the READ audience with the room's current
 // participants; what outsiders may observe is unchanged.
 //
-// subjectID is whose voice state this event is about (B5-6, Codex P1-2): a
+// subjectID is whose voice state this event is about: a
 // stranger's DM voice call must stay as invisible to a recipient who has not
 // accepted the message request as their chat and typing are.
 func (h *Hub) voiceEventAudience(ctx context.Context, channelID, subjectID int64) []int64 {
@@ -76,11 +76,11 @@ func (h *Hub) voiceEventAudience(ctx context.Context, channelID, subjectID int64
 	return h.filterDMAudience(ctx, channelID, subjectID, audience)
 }
 
-// filterDMAudience narrows audience to B5-6's sender-aware set when
+// filterDMAudience narrows audience to the sender-aware set when
 // channelID is a one-to-one DM: subjectID (whose voice state this event
 // describes) is always kept, every other member of audience only if they
-// trust subjectID. Non-DM channels and group DMs (decision 4 — untouched)
-// are returned as-is. Codex review round 2, P2: a channel/group lookup
+// trust subjectID. Non-DM channels and group DMs (untouched)
+// are returned as-is. A channel/group lookup
 // error fails CLOSED to subjectID alone rather than falling back to the
 // full unfiltered audience — the earlier fail-open posture leaked a
 // stranger's voice presence to everyone in the room the moment either
@@ -137,7 +137,7 @@ func (h *Hub) broadcastVoiceEvent(ctx context.Context, channelID, subjectID int6
 // sendVoiceEventSync stamps and delivers a voice_state / voice_leave for
 // voiceEventAudience(channelID, subjectID) synchronously on the caller's own
 // goroutine, instead of enqueuing it on h.broadcast for the async dispatch
-// goroutine to pick up later. OC-0349: voiceJoinComplete sends the joiner
+// goroutine to pick up later. voiceJoinComplete sends the joiner
 // four other frames (voice_token, existing participants' voice_state, E2EE
 // peer keys, voice_config) directly via c.sendMsg, in program order; a
 // joiner's own voice_state relayed through the async queue instead has no
@@ -159,7 +159,7 @@ func (h *Hub) sendVoiceEventSync(ctx context.Context, channelID, subjectID int64
 // READ_MESSAGES (a mid-call revocation, or a closed DM), so a leaver without
 // READ_MESSAGES on the channel would otherwise never learn the server already ended their call. Mirrors
 // CleanupVoiceForChannel's per-batch leaver union, for the single-leaver case.
-// leaverID also doubles as the DM-audience subject (B5-6): the leaver always
+// leaverID also doubles as the DM-audience subject: the leaver always
 // sees their own leave.
 func (h *Hub) broadcastVoiceEventWithLeaver(ctx context.Context, channelID int64, msg []byte, leaverID int64) {
 	audience := h.voiceEventAudience(ctx, channelID, leaverID)

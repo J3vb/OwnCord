@@ -33,7 +33,7 @@ func (f clientFeatures) filterChannels(chs []db.Channel) []db.Channel {
 // (readyNSFWAcknowledgements); a missing entry (an unlabelled channel never
 // gets one) reads as false, which is correct either way — nothing needs
 // acknowledging there. timedOut is the caller's current timeout verdict,
-// fed into every channel's affordances — see readyAffordances (OC-0434).
+// fed into every channel's affordances — see readyAffordances.
 func readyChannelPayloads(visibleChannels []db.Channel, grants permissions.MemberGrants, unreadMap map[int64]db.ChannelUnread, ackMap map[int64]bool, timedOut bool, privacy service.ChannelPrivacySnapshot) []map[string]any {
 	channelPayloads := make([]map[string]any, 0, len(visibleChannels))
 	for i := range visibleChannels {
@@ -42,7 +42,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, grants permissions.Membe
 			"name":     visibleChannels[i].Name,
 			"type":     visibleChannels[i].Type,
 			"category": visibleChannels[i].Category,
-			// The category object behind the name (WP 6.5a): 0/0 when the
+			// The category object behind the name: 0/0 when the
 			// channel is uncategorized. Derived from the channel's own row, so
 			// a non-manager learns only the categories of channels they see.
 			"category_id":       visibleChannels[i].CategoryID,
@@ -54,17 +54,17 @@ func readyChannelPayloads(visibleChannels []db.Channel, grants permissions.Membe
 			// with SLOW_MODE. The server still enforces.
 			"slow_mode": visibleChannels[i].SlowMode,
 			// Age-gate flag. The server enforces content behaviour on a
-			// flagged channel now (B5-7, permissions.CanReadContent); see
+			// flagged channel now (permissions.CanReadContent); see
 			// nsfw_acknowledged below for the caller's own consent state.
 			"nsfw": visibleChannels[i].NSFW,
-			// The server's one AFK voice channel (migration 068, WP 6.10a):
+			// The server's one AFK voice channel (migration 068):
 			// listen-only, and what the idle sweep moves members into.
 			"afk":     visibleChannels[i].AFK,
 			"private": privacy.PrivateOf(&visibleChannels[i]), // 3D-6, channel-level
-			// Whether THIS caller has acknowledged the label (B5-7). Always
+			// Whether THIS caller has acknowledged the label. Always
 			// present, like nsfw itself — false for an unlabelled channel,
 			// where it means nothing but must not be omitted (two different
-			// meanings for "absent" is exactly what B5-7's other always-shipped
+			// meanings for "absent" is exactly what the other always-shipped NSFW
 			// fields avoid).
 			"nsfw_acknowledged": ackMap[visibleChannels[i].ID],
 			// Voice capacity limits (0 = unlimited) — the same values the

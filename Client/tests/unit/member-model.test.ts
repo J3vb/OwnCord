@@ -227,7 +227,7 @@ describe("memberModel", () => {
   });
 });
 
-describe("memberModel with several roles (WP 6.3d)", () => {
+describe("memberModel with several roles", () => {
   const MULTI: readonly ReadyRole[] = [
     { id: 1, name: "Owner", color: "#e74c3c", permissions: 0, position: 40, hoist: true },
     { id: 2, name: "Staff", color: "#3498db", permissions: 0, position: 30, hoist: true },

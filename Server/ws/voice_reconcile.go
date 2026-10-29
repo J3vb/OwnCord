@@ -1,9 +1,9 @@
 package ws
 
-// voice_reconcile.go — RT-3: the polling reconciler.
+// voice_reconcile.go — the polling reconciler.
 //
-// No shipped configuration makes the companion LiveKit send webhooks (see
-// OC-0238), so participant_left never arrives and nothing removes a
+// No shipped configuration makes the companion LiveKit send webhooks, so
+// participant_left never arrives and nothing removes a
 // membership whose SFU participant died with the media path (a severed UDP
 // flow). The voice_states row and the client's voiceChID both still name the
 // channel, so sweepStaleVoiceStates — which compares the row against the

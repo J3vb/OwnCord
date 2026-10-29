@@ -105,7 +105,7 @@ const MIRRORED: ReadonlyArray<readonly [string, string]> = [
   ["--role-member", "--role-member"],
 ];
 
-describe("Server/admin/static — Refined Neon tokens equal the client's (AO-1)", () => {
+describe("Server/admin/static — Refined Neon tokens equal the client's", () => {
   it.each(MIRRORED)("%s equals the client's %s", (adminName, clientName) => {
     const actual = adminValue(adminName);
     expect(actual, `admin ${adminName} is missing from :root`).not.toBe("");

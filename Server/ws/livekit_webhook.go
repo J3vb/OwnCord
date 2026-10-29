@@ -144,7 +144,7 @@ func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit
 		"channel_id", channelID,
 		"room", room.Name)
 
-	// Validate that the participant has a matching voice_states row (BUG-127).
+	// Validate that the participant has a matching voice_states row.
 	// A replayed token from a previous session will not have a matching row,
 	// so we remove the rogue participant from LiveKit.
 	if h.voice != nil {
@@ -216,8 +216,8 @@ func liveKitParticipantMissing(err error) bool {
 }
 
 func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.WebhookEvent) {
-	// Detach from the triggering HTTP request before doing any cleanup work
-	// (OC-0018), mirroring every sibling teardown path (readPump's defer and
+	// Detach from the triggering HTTP request before doing any cleanup work,
+	// mirroring every sibling teardown path (readPump's defer and
 	// unregisterFailedHandshake use context.WithoutCancel in serve.go /
 	// serve_pumps.go, rollbackVoiceJoin uses it in voice_join.go, the hub
 	// sweeps use context.Background in hub_sweep.go). Without this, a webhook

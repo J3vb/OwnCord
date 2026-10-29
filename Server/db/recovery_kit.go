@@ -11,8 +11,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// RecoveryKit is the server's whole knowledge of an account's recovery kit
-// (B4-5): an argon2id verifier, when it was issued, and whether it was spent.
+// RecoveryKit is the server's whole knowledge of an account's recovery kit:
+// an argon2id verifier, when it was issued, and whether it was spent.
 type RecoveryKit struct {
 	UserID    int64
 	Verifier  string `json:"-"`
@@ -96,7 +96,7 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newP
 	}
 	tokensRevoked, _ := tokens.RowsAffected()
 	// A recovery by kit withdraws any owner-issued credential still
-	// outstanding for the account (B4-6): the situation it was issued for
+	// outstanding for the account: the situation it was issued for
 	// is over.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM recovery_assists WHERE user_id = ?`, userID); err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryKit withdraw credential: %w", err)

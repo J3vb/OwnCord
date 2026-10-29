@@ -659,7 +659,7 @@ describe("attachment cache clearing", () => {
 // already names the host, so the failures are the ones a host key cannot
 // catch: a departed server's bytes left on disk, and a second account on the
 // same host served the first account's bytes.
-describe("attachment cache profile isolation (B7-13)", () => {
+describe("attachment cache profile isolation", () => {
   function bytesResponse(bytes: number[]) {
     return {
       ok: true,
@@ -775,7 +775,7 @@ describe("attachment cache profile isolation (B7-13)", () => {
 // DP-56: the audit's channel-switch run fetched every seeded attachment twice.
 // The seeded files do not exist on disk, so each fetch was a 404 — and a
 // failure was never remembered, so the next mount asked again.
-describe("one download per attachment (DP-56)", () => {
+describe("one download per attachment", () => {
   const image = {
     id: "att-9",
     url: "https://example.com/api/v1/files/9",
@@ -857,7 +857,7 @@ describe("one download per attachment (DP-56)", () => {
 
 // DP-16: server images are blob: URLs over byte-bounded caches, not base64
 // data: URIs in a count-capped map and an unbounded IndexedDB store.
-describe("server image caches (DP-16)", () => {
+describe("server image caches", () => {
   const url = (i: number): string => `https://example.com/api/v1/files/${i}`;
   const key = (i: number): string => `example.com#1|${url(i)}`;
 

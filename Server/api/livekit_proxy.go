@@ -273,7 +273,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 const wsProxyMaxMessageSize = 256 * 1024
 
 // copyWS reads messages from src and writes them to dst until an error or
-// context cancellation. H-5: the read limit on src rejects messages over
+// context cancellation. The read limit on src rejects messages over
 // wsProxyMaxMessageSize to prevent memory exhaustion via oversized frames.
 func copyWS(ctx context.Context, dst, src *websocket.Conn) error {
 	for {

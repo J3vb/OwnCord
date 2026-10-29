@@ -152,7 +152,7 @@ afterEach(() => {
   owner.dispose();
 });
 
-describe("startup: skip flag (OC-0028)", () => {
+describe("startup: skip flag", () => {
   it("consumes the flag and does not auto-login", async () => {
     sessionStorage.setItem(SKIP, "1");
     startup();

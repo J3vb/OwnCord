@@ -32,7 +32,7 @@ beforeEach(() => {
   }));
 });
 
-describe("saved mute and deafen (WP 1D-1)", () => {
+describe("saved mute and deafen", () => {
   it("starts unmuted and undeafened when nothing was saved", () => {
     restart();
 

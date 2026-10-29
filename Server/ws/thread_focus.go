@@ -9,8 +9,8 @@ var threadFocusBeforeSubscribeHook func(c *Client, threadID int64)
 
 // applyThreadFocus moves c's thread slot (thread_focus) to newID, 0 to close
 // it, and updates the topic subscription to match. It is applySetChannelID's
-// twin for the second slot and follows the same rule for the same reason
-// (OC-0024): the handler's admission and the Subscribe are separated by
+// twin for the second slot and follows the same rule for the same reason:
+// the handler's admission and the Subscribe are separated by
 // database round trips, and a revoke that commits inside that window finds
 // nothing to undo. So once Subscribe has run the slot is re-validated live with
 // permissions.CanAdmitSession, through the thread's own channel row and so

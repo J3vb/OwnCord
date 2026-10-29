@@ -10,7 +10,7 @@ import (
 )
 
 // MountThreadRoutes registers the thread list under
-// /api/v1/channels/{id}/threads (WP 6.9c). It lives apart from MountChannelRoutes
+// /api/v1/channels/{id}/threads. It lives apart from MountChannelRoutes
 // because that file is at its size ceiling.
 func MountThreadRoutes(r chi.Router, svc *service.Services) {
 	r.With(AuthMiddleware(svc.Sessions)).Get("/api/v1/channels/{id}/threads", handleListThreads(svc))

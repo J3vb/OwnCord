@@ -1,6 +1,6 @@
 package ws
 
-// voice_moderation_move.go — WP 5.3c: a moderator move evicts and stashes in
+// voice_moderation_move.go — a moderator move evicts and stashes in
 // one membership transaction.
 
 import "context"
@@ -23,7 +23,7 @@ var _ voiceMoveEvictor = (*Hub)(nil)
 // evictForMove evicts targetID from channelID for a moderator move, carrying
 // the target's moderator flags to their own re-join, and reports false when
 // nobody was evicted (no connection on this node, or the target left the
-// checked channel). On false no stash is left behind (OC-0278).
+// checked channel). On false no stash is left behind.
 func evictForMove(ctx context.Context, mod VoiceModerator, targetID, channelID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
 	if m, ok := mod.(voiceMoveEvictor); ok {
 		return m.EvictForModeratorMove(ctx, targetID, channelID, serverMuted, serverDeafened, serverMutedBy)

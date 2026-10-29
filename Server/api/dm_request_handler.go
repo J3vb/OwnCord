@@ -13,7 +13,7 @@ import (
 )
 
 // MountDMRequestRoutes registers the message-request inbox and its four
-// recipient-only transitions (B5-6). All routes require authentication.
+// recipient-only transitions. All routes require authentication.
 // broadcaster is used to send real-time dm_channel_open (on accept) and
 // dm_request (every transition) events to the recipient's other devices —
 // the same DMBroadcaster seam MountDMRoutes uses.
@@ -129,7 +129,7 @@ func handleDMRequestTransition(svc *service.Services, broadcaster DMBroadcaster,
 			// BlockUser itself committed — see MessageRequestService.Block's
 			// doc comment. Checked below regardless of err, so a block that
 			// committed but then lost the race on its own state transition
-			// still evicts the sender from voice (Codex P1-3).
+			// still evicts the sender from voice.
 			blockedSenderID int64
 		)
 		switch action {

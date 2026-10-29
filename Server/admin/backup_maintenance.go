@@ -312,7 +312,7 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 	// check stays as defence in depth (a value hand-edited into the settings
 	// table, or written by a future path) so it disables pruning rather than
 	// failing the maintenance tick or, worse, overflowing the cutoff below
-	// into the future and unlinking every backup but the newest (OC-0393; the
+	// into the future and unlinking every backup but the newest (the
 	// message-retention window fails the same way over the identical
 	// -days*24h arithmetic).
 	days, _ := strconv.Atoi(strings.TrimSpace(retStr))

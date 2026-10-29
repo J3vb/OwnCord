@@ -2,7 +2,7 @@
 
 Condensed from the sources listed at the end, at commit `ac6ffc4e` (2026-10-13). On conflict, the source documents win.
 
-The visual rules for the desktop client: themes and tokens, typography, spacing, components, states, layout and accessibility. The binding contract is [docs/architecture/b9-ui-contract.md](../architecture/b9-ui-contract.md); token values live in `Client/src/styles/tokens.css`, `Client/src/styles/theme-neon-glow.css` and the `THEMES` map in `Client/src/lib/themes.ts`.
+The visual rules for the desktop client: themes and tokens, typography, spacing, components, states, layout and accessibility. The binding contract is [docs/architecture/ui-contract.md](../architecture/ui-contract.md); token values live in `Client/src/styles/tokens.css`, `Client/src/styles/theme-neon-glow.css` and the `THEMES` map in `Client/src/lib/themes.ts`.
 
 ## Brand direction
 
@@ -204,7 +204,7 @@ The only `@media` width breakpoints in `Client/src/styles/`:
 
 ## Accessibility
 
-The full contract is [docs/architecture/b9-ui-contract.md](../architecture/b9-ui-contract.md); this is the design-facing summary. It is a **WCAG 2.2 AA-oriented checklist, not a certification claim**: automated checks are the acceptance evidence (the manual screen-reader recordings were declined on 2026-09-24 and the OS 200 % zoom check was automated on 2026-09-25; see the contract's [checks](../architecture/b9-ui-contract.md#checks-for-a-feature-pr)).
+The full contract is [docs/architecture/ui-contract.md](../architecture/ui-contract.md); this is the design-facing summary. It is a **WCAG 2.2 AA-oriented checklist, not a certification claim**: automated checks are the acceptance evidence (the manual screen-reader recordings were declined on 2026-09-24 and the OS 200 % zoom check was automated on 2026-09-25; see the contract's [checks](../architecture/ui-contract.md#checks-for-a-feature-pr)).
 
 ### Thresholds (owner decision Q1)
 
@@ -234,7 +234,7 @@ Disabled controls are exempt from contrast. Colour is never the only signal: an 
 
 Live regions exist in the DOM before their text changes (a region inserted already filled is skipped by screen readers). An announcement never carries hidden, private or secret content.
 
-### Shared checks (`Client/tests/e2e/support/b9-accessibility.ts`)
+### Shared checks (`Client/tests/e2e/support/accessibility.ts`)
 
 Every UI PR runs these against its own journey:
 
@@ -250,14 +250,14 @@ Every UI PR runs these against its own journey:
 | `tokenHex(page, token)`           | a token as `<body>` resolves it, as `#rrggbb` (`""` if unset)                                                                  |
 | `mountSharedControls(page)`       | the shared-controls fixture (modal, form, button, toggle, status classes) in every state, including pending, error and success |
 
-`Client/tests/e2e/b9-primitives.spec.ts` demonstrates each helper, including negative controls proving each check fails when the underlying behaviour is removed.
+`Client/tests/e2e/accessibility-primitives.spec.ts` demonstrates each helper, including negative controls proving each check fails when the underlying behaviour is removed.
 
 ## Sources
 
-- [docs/architecture/b9-ui-contract.md](../architecture/b9-ui-contract.md), [docs/architecture/ux/README.md](../architecture/ux/README.md)
+- [docs/architecture/ui-contract.md](../architecture/ui-contract.md), [docs/architecture/ux/README.md](../architecture/ux/README.md)
 - [Client/src/styles/tokens.css](../../Client/src/styles/tokens.css), [Client/src/styles/theme-neon-glow.css](../../Client/src/styles/theme-neon-glow.css), [Client/src/styles/base.css](../../Client/src/styles/base.css), [Client/src/styles/login.css](../../Client/src/styles/login.css)
 - [Client/src/styles/app/accessibility.css](../../Client/src/styles/app/accessibility.css), [Client/src/styles/app/settings.css](../../Client/src/styles/app/settings.css), [Client/src/styles/app/responsive.css](../../Client/src/styles/app/responsive.css), [Client/src/styles/app/overlays.css](../../Client/src/styles/app/overlays.css), [Client/src/styles/app/composer.css](../../Client/src/styles/app/composer.css)
 - [Client/src/components/settings/helpers.ts](../../Client/src/components/settings/helpers.ts), [Client/src/lib/themes.ts](../../Client/src/lib/themes.ts), [Client/src/lib/appearance.ts](../../Client/src/lib/appearance.ts), [Client/src/lib/os-motion.ts](../../Client/src/lib/os-motion.ts), [Client/src/lib/color-contrast.ts](../../Client/src/lib/color-contrast.ts)
 - [Client/src/lib/modalFactory.ts](../../Client/src/lib/modalFactory.ts), [Client/src/lib/toast.ts](../../Client/src/lib/toast.ts), [Client/src/lib/icons.ts](../../Client/src/lib/icons.ts), [Client/src/main.ts](../../Client/src/main.ts)
-- [Client/tests/e2e/support/b9-accessibility.ts](../../Client/tests/e2e/support/b9-accessibility.ts), [Client/tests/unit/ui-strings.test.ts](../../Client/tests/unit/ui-strings.test.ts)
+- [Client/tests/e2e/support/accessibility.ts](../../Client/tests/e2e/support/accessibility.ts), [Client/tests/unit/ui-strings.test.ts](../../Client/tests/unit/ui-strings.test.ts)
 - [Client/src-tauri/tauri.conf.json](../../Client/src-tauri/tauri.conf.json), [Client/CLAUDE.md](../../Client/CLAUDE.md)

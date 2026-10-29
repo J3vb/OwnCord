@@ -1,6 +1,6 @@
 package admin
 
-// The profile banner handlers' and file-route probe's log messages (WP 6.11b),
+// The profile banner handlers' and file-route probe's log messages,
 // beside support_event_codes.go because that table is at the file-size ceiling.
 func init() {
 	supportEventCodes["failed to remove orphaned banner row"] = "failed_to_remove_orphaned_banner_row"

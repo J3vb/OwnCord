@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// routeGate is one named admin route gate (WP 8.4d): a predicate over the role
+// routeGate is one named admin route gate: a predicate over the role
 // adminAuthMiddleware resolved (the top role's identity with the OR of every
 // held role's permissions) and the 403 text a refusal carries. Every gate asks
 // a permissions predicate, so no route re-derives the rule.
@@ -91,8 +91,8 @@ type gateRegistry struct {
 }
 
 // route registers h on r behind gate and records the route. It is the ONE call
-// site for every owner-or-bit and administrator-or-bit route (WP 8.4d),
-// generalising the owner-or-MANAGE_BACKUPS gate of WP 8.4c.
+// site for every owner-or-bit and administrator-or-bit route,
+// generalising the earlier owner-or-MANAGE_BACKUPS gate.
 func (g *gateRegistry) route(r chi.Router, gate routeGate, method, pattern string, h http.Handler) {
 	g.routes = append(g.routes, GatedRoute{Method: method, Pattern: pattern, Gate: gate.name})
 	r.Method(method, pattern, gateMiddleware(gate, h))

@@ -245,7 +245,7 @@ func normaliseType(v string) string {
 // final length as well. Both are needed: this one bounds memory, that one
 // makes the limit exact.
 //
-// B5 decision 2's deferred aggregate byte budget is charged here.
+// A deferred aggregate byte budget, if one is added, is charged here.
 type limitedReader struct {
 	r         io.Reader
 	remaining int64

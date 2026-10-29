@@ -91,7 +91,7 @@ func MountAuthRoutes(r chi.Router, svc AuthService, requireAuth func(http.Handle
 		RateLimitMiddleware(limiter, "totp:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
 		Post("/api/v1/users/me/totp/recovery-codes", handleRegenerateRecoveryCodes(svc))
 
-	// The recovery kit (B4-5): enrolment and status beside the credential
+	// The recovery kit: enrolment and status beside the credential
 	// routes, redemption public and budgeted like login.
 	r.With(requireAuth,
 		RateLimitMiddleware(limiter, "kit:", scaledAuthLimit(sensitiveEndpointRateLimitPerMinute), time.Minute, trustedProxies)).
@@ -104,7 +104,7 @@ func MountAuthRoutes(r chi.Router, svc AuthService, requireAuth func(http.Handle
 
 // handleRegister processes POST /api/v1/auth/register.
 func handleRegister(svc AuthService, trustedProxies []string) http.HandlerFunc {
-	proxyNets := parseCIDRList(trustedProxies) // W3-3a: parse once at construction
+	proxyNets := parseCIDRList(trustedProxies) // parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
 		// The policy gate runs before any credential is read: a closed
 		// server refuses even a malformed body with the policy's 403.
@@ -130,7 +130,7 @@ func handleRegister(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			return
 		}
 		if res.PendingApproval {
-			// Approval mode (B4-1): the application is recorded and an admin
+			// Approval mode: the application is recorded and an admin
 			// decides; there is no session to hand out yet.
 			writeJSON(w, http.StatusAccepted, registrationPendingResponse{Status: "pending_approval"})
 			return
@@ -154,7 +154,7 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 		return req, false
 	}
 
-	// OC-0151: bound the raw field before it ever reaches the fixpoint
+	// Bound the raw field before it ever reaches the fixpoint
 	// sanitizer below. sanitizeToFixpoint's cost is quadratic in input
 	// length (nested HTML entities force roughly one extra pass per two
 	// nesting levels), so an unauthenticated caller could otherwise pin a
@@ -177,7 +177,7 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	req.InviteCode = strings.TrimSpace(req.InviteCode)
 
-	// Whether an invite is needed depends on the registration mode (B4-1),
+	// Whether an invite is needed depends on the registration mode,
 	// which the service decides; only the credentials are required here.
 	if req.Username == "" || req.Password == "" {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username and password are required")
@@ -200,7 +200,7 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 
 // handleLogin processes POST /api/v1/auth/login.
 func handleLogin(svc AuthService, trustedProxies []string) http.HandlerFunc {
-	proxyNets := parseCIDRList(trustedProxies) // W3-3a: parse once at construction
+	proxyNets := parseCIDRList(trustedProxies) // parse once at construction
 	return func(w http.ResponseWriter, r *http.Request) {
 		req, ok := loginReadRequest(w, r)
 		if !ok {
@@ -376,7 +376,7 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 	writeErr(w, status, code, err.Error())
 }
 
-// writeAuthBusy answers an admission refusal (B4-4) as 429 AUTH_BUSY, a code
+// writeAuthBusy answers an admission refusal as 429 AUTH_BUSY, a code
 // apart from the per-IP RATE_LIMITED so a client can tell the server's load
 // from its own pace. A refusal from the queue (P5-S02) carries the budget's
 // retry hint, sent as Retry-After in whole seconds.

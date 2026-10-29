@@ -1,9 +1,9 @@
 package ws
 
-// voice_registry_txn.go — WP 5.3b: every voice membership write goes through a
+// voice_registry_txn.go — every voice membership write goes through a
 // lock handle.
 //
-// Hub.begin takes a user's voice membership lock (voiceMember, WP 1D-10) and
+// Hub.begin takes a user's voice membership lock (voiceMember) and
 // returns a *voiceTxn. Holding one is the compile-time proof that a path owns
 // the lock, and the methods below are the only code that changes the slot's
 // channel/token/completed flag/E2EE key, deletes a voice_states membership
@@ -67,7 +67,7 @@ func (t *voiceTxn) end() {
 }
 
 // persistJoin inserts the voice_states row under capacity, reads the committed
-// row back and then publishes the slot's membership, in BUG-088 order: the
+// row back and then publishes the slot's membership, in this order: the
 // slot is set as soon as the row is confirmed, before the permission checks and
 // LiveKit token mint that follow. A full channel returns an error wrapping
 // service.ErrVoiceChannelFull. A row that cannot be read back returns
@@ -88,8 +88,8 @@ func (t *voiceTxn) persistJoin(ctx context.Context, c *Client, chID int64, capac
 	}
 
 	// The stale-voice sweep snapshots clients without the voice lock, so it can
-	// still see 0 here, but its delete runs under the lock and rechecks first
-	// (WP 1D-10). A failure further down unwinds this via rollbackVoiceJoin.
+	// still see 0 here, but its delete runs under the lock and rechecks first.
+	// A failure further down unwinds this via rollbackVoiceJoin.
 	if voiceJoinPostCommitRaceHook != nil {
 		voiceJoinPostCommitRaceHook(c)
 	}
@@ -101,7 +101,7 @@ func (t *voiceTxn) persistJoin(ctx context.Context, c *Client, chID int64, capac
 // voiceJoinComplete's supersession guard and, only then, subscribes c to
 // VoiceTopic(chID). The compare and the flag are one slot critical section; it
 // returns false, and subscribes nothing, when the slot has moved on. Every
-// clear below unsubscribes again, so the OC-0219 pairing cannot be forgotten.
+// clear below unsubscribes again, so the subscribe/unsubscribe pairing cannot be forgotten.
 func (t *voiceTxn) markCompleted(c *Client, chID int64, token string) bool {
 	if !c.voice.markCompletedIfMatch(chID, token) {
 		return false
@@ -210,13 +210,13 @@ func (t *voiceTxn) dropParked(chID int64) {
 // the key-holder election there. It empties old completely and moves
 // everything old held, field by field, in one critical section:
 //
-//   - the moderator's pending mute/deafen always moves (OC-0302): it lives only
+//   - the moderator's pending mute/deafen always moves: it lives only
 //     on the client between a move's eviction, which deletes the row it
 //     normally lives in, and the target's own re-join, so any replacement,
 //     resume or full resync alike, has to carry it;
 //   - the membership (channel, token, completed flag, E2EE key) moves only
 //     when resume is true, c is not already in a channel and old's join had
-//     completed (OC-0270). A join still racing its own supersession guards
+//     completed. A join still racing its own supersession guards
 //     would read the move as an eviction and abandon itself with its row left
 //     behind, so an incomplete one stays with old and is cleared, and the next
 //     sweep reaps its row.

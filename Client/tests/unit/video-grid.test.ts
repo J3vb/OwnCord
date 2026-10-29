@@ -468,7 +468,7 @@ describe("VideoGrid", () => {
       expect(mockMuteScreenshareAudio).toHaveBeenCalledWith(99, false);
     });
 
-    it("mute button toggles the user's local Mute when isScreenshare=false (WP 1D-5)", () => {
+    it("mute button toggles the user's local Mute when isScreenshare=false", () => {
       const config = makeTileConfig({ isSelf: false, audioUserId: 55, isScreenshare: false });
       grid.addStream(55, "charlie", fakeStream(), config);
 
@@ -568,7 +568,7 @@ describe("VideoGrid", () => {
       expect(mockSetUserVolume).toHaveBeenCalledWith(77, 50);
     });
 
-    it("[B3-5] seeds the mic-tile slider from the persisted per-user volume, not a hardcoded 100%", () => {
+    it("seeds the mic-tile slider from the persisted per-user volume, not a hardcoded 100%", () => {
       mockGetUserVolume.mockReturnValueOnce(30);
       const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: false });
       grid.addStream(88, "erin", fakeStream(), config);
@@ -581,7 +581,7 @@ describe("VideoGrid", () => {
       expect(muteBtn.getAttribute("aria-label")).toBe("Mute");
     });
 
-    it("[B3-5] starts a mic tile muted when the persisted per-user volume is 0", () => {
+    it("starts a mic tile muted when the persisted per-user volume is 0", () => {
       mockGetUserVolume.mockReturnValueOnce(0);
       const config = makeTileConfig({ isSelf: false, audioUserId: 89, isScreenshare: false });
       grid.addStream(89, "frank", fakeStream(), config);
@@ -662,7 +662,7 @@ describe("VideoGrid", () => {
       expect(overlay!.classList.contains("muted")).toBe(true);
     });
 
-    it("mic slider tops out at 200% (WP 1D-5)", () => {
+    it("mic slider tops out at 200%", () => {
       const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
       grid.addStream(77, "dave", fakeStream(), config);
 
@@ -1307,7 +1307,7 @@ describe("VideoGrid", () => {
       expect(cell(2).classList.contains("video-cell--speaking")).toBe(false);
     });
 
-    describe("viewer badge (6.6b)", () => {
+    describe("viewer badge", () => {
       const badge = (id: number) =>
         cell(id).querySelector<HTMLElement>("[data-testid='tile-viewers']");
 
@@ -1764,7 +1764,7 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).querySelector("video")!.hidden).toBe(false);
     });
 
-    it("an ended camera or a dropped roster watch is forgotten, not stopped (WP 1B-3)", () => {
+    it("an ended camera or a dropped roster watch is forgotten, not stopped", () => {
       const forgetStreamWatch = vi.fn();
       grid.setCallbacks({ setStreamWatched, forgetStreamWatch });
       const camera = { isSelf: false, audioUserId: 3, isScreenshare: false };
@@ -2235,7 +2235,7 @@ describe("VideoGrid", () => {
       container.remove();
     });
 
-    it("gives a camera tile no quality chip and polls no stats for it, even focused (WP 1B-4)", async () => {
+    it("gives a camera tile no quality chip and polls no stats for it, even focused", async () => {
       document.body.appendChild(container);
       vi.useFakeTimers();
       const getStreamStats = vi.fn(async () => null);
@@ -2724,7 +2724,7 @@ describe("VideoGrid", () => {
     });
   });
 
-  describe("video layers follow what each tile shows (P3-07)", () => {
+  describe("video layers follow what each tile shows", () => {
     const SCREEN = 3 + 1_000_000;
     /** Rendered tile sizes by data-user-id; an absent tile renders 0 × 0. */
     let sizes: Map<string, { width: number; height: number }>;
@@ -3057,7 +3057,7 @@ describe("VideoGrid", () => {
     });
   });
 
-  describe("call view: control bar and view toggles (WP 1B-2)", () => {
+  describe("call view: control bar and view toggles", () => {
     const person = (userId: number, label: string) => ({
       userId,
       label,
@@ -3399,7 +3399,7 @@ describe("VideoGrid", () => {
     });
   });
 
-  describe("full tile menu (WP 1B-5)", () => {
+  describe("full tile menu", () => {
     const OTTO = 2;
     const SCREEN = OTTO + 1_000_000;
     const SELF = 1;
@@ -3744,7 +3744,7 @@ describe("VideoGrid", () => {
       });
     });
   });
-  describe("stream ended cover (WP 1C-4)", () => {
+  describe("stream ended cover", () => {
     const SCREEN = 2 + 1_000_000;
     const screen: TileConfig = { isSelf: false, audioUserId: 2, isScreenshare: true, name: "Otto" };
     const cell = () =>
@@ -3830,7 +3830,7 @@ describe("VideoGrid", () => {
       expect(onStreamRemoved).not.toHaveBeenCalled();
     });
 
-    describe("a sharer republishing for another codec (WP M-5b)", () => {
+    describe("a sharer republishing for another codec", () => {
       let live: boolean;
       let cameraLive: boolean;
       beforeEach(() => {
@@ -3972,7 +3972,7 @@ describe("VideoGrid", () => {
       });
     });
 
-    it("a re-share within the cover stays watched and in focus (WP 1C-1)", () => {
+    it("a re-share within the cover stays watched and in focus", () => {
       const forgetStreamWatch = vi.fn();
       const setStreamWatched = vi.fn();
       grid.setCallbacks({ onStreamRemoved, forgetStreamWatch, setStreamWatched });
@@ -3993,7 +3993,7 @@ describe("VideoGrid", () => {
       expect(setStreamWatched).not.toHaveBeenCalledWith(SCREEN, false);
     });
 
-    it("after the cover the watch is forgotten: a later share is offered as Watch (WP 1C-1)", () => {
+    it("after the cover the watch is forgotten: a later share is offered as Watch", () => {
       const forgetStreamWatch = vi.fn();
       grid.setCallbacks({ onStreamRemoved, forgetStreamWatch });
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
@@ -4008,7 +4008,7 @@ describe("VideoGrid", () => {
       expect(cell()!.querySelector("[data-tile-control='watch']")).not.toBeNull();
     });
 
-    it("leaving the call during the cover forgets the held watch (WP 1C-1)", () => {
+    it("leaving the call during the cover forgets the held watch", () => {
       const forgetStreamWatch = vi.fn();
       grid.setCallbacks({ onStreamRemoved, forgetStreamWatch });
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen);
@@ -4027,7 +4027,7 @@ describe("VideoGrid", () => {
       expect(onStreamRemoved).not.toHaveBeenCalled();
     });
   });
-  describe("pop out the whole call (WP 1C-7)", () => {
+  describe("pop out the whole call", () => {
     const OTTO = 2;
     let popup: ReturnType<typeof fakePopup>;
     let open: ReturnType<typeof vi.fn>;

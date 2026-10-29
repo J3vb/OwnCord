@@ -15,7 +15,7 @@ import (
 // partial and the next one finishes it. Drain chunks do not checkpoint; a
 // crash mid-drain is covered by the unconditional start-up checkpoint.
 //
-// "The next one" is not left to SQLite (B6-11 task 5). The autocheckpoint
+// "The next one" is not left to SQLite. The autocheckpoint
 // that follows is PASSIVE: it copies frames into the main file and never
 // truncates the log, so the erased bytes stay in the -wal until something
 // runs TRUNCATE again — and nothing does. So a checkpoint that comes back

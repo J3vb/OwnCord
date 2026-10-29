@@ -161,10 +161,10 @@ type pendingPresence struct {
 	status       string
 	customStatus *string
 	// activity is nil from every caller today: a connect is a new connection,
-	// which starts without a game, and a disconnect ends it (WP 8.3a). An
+	// which starts without a game, and a disconnect ends it. An
 	// activity change is a live presence frame, not a coalesced entry.
 	activity  *gameActivity
-	listening *listeningActivity // nil from every caller, like activity (WP 8.10a)
+	listening *listeningActivity // nil from every caller, like activity
 	member    *memberJoinUser
 }
 
@@ -227,7 +227,7 @@ var presenceFlushRaceHook func(*Hub)
 // when a fresher presence for that user is delivered directly (the
 // presence_update handler path, via EmitEvents), so the delete and the send
 // of the fresher frame can never straddle flushPresenceQueue's own
-// snapshot-and-enqueue critical section (OC-0005).
+// snapshot-and-enqueue critical section.
 //
 // Holding presenceMu across the delete AND the broadcast — rather than just
 // the delete — is what actually closes the race: whichever of this call and
@@ -288,7 +288,7 @@ func (h *Hub) announceMember(userID int64, p pendingPresence) {
 // retried a window later. Runs on the AfterFunc timer goroutine.
 //
 // presenceMu is held across the batch's enqueue, not just the snapshot, so a
-// concurrent dropQueuedPresenceAndBroadcast serializes with it (OC-0005): the
+// concurrent dropQueuedPresenceAndBroadcast serializes with it: the
 // batch and the fresher frame reach h.broadcast in the order their critical
 // sections ran, and deliverBroadcast's single consumer sequences them so.
 func (h *Hub) flushPresenceQueue() {

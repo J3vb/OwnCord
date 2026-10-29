@@ -313,7 +313,7 @@ func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
 		return 0, err
 	}
 
-	// Refuse a schema a newer server produced (REL-02). migrateFSCount only
+	// Refuse a schema a newer server produced. migrateFSCount only
 	// looked at embedded files before, so an older binary booted silently on a
 	// newer database and could corrupt it. The manual rollback reversals each
 	// delete their own schema_versions row, so the supported path is not

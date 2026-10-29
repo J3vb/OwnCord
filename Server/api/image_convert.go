@@ -18,7 +18,7 @@ import (
 )
 
 // Formats a browser cannot show, whose original is kept as uploaded and whose
-// preview is a JPEG made by the thumbnail route (WP 8.12).
+// preview is a JPEG made by the thumbnail route.
 const (
 	mimeHEIC = "image/heic"
 	mimeHEIF = "image/heif"

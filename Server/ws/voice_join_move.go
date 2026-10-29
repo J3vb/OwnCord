@@ -76,7 +76,7 @@ func (h *Hub) voiceJoinMoveCall(fctx, ctx context.Context, txn *voiceTxn, c *Cli
 		h.finishVoiceLeaveAnnounce(ctx, txn, e.client, e.snap.chID, e.snap.joinToken, voiceLeaveReasonMoved, e.snap.chID != channelID)
 	}
 
-	// Same check as a channel switch (BUG-088): the old row must really be gone
+	// Same check as a channel switch: the old row must really be gone
 	// before the new one is inserted.
 	vs, err := h.voice.State(fctx, c.userID)
 	if err != nil {

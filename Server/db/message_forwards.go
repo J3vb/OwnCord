@@ -14,7 +14,7 @@ import (
 // from inside its transaction, so a delete that commits first always wins.
 var ErrForwardSourceGone = errors.New("forward source is gone")
 
-// ForwardRow is a forward's side row (migration 071, WP 6.9a), and as an input
+// ForwardRow is a forward's side row (migration 071), and as an input
 // to CreateMessageDelivery it also names the message the transaction re-reads.
 // It has no json tags: the wire shape is ForwardInfo.
 type ForwardRow struct {
@@ -49,7 +49,7 @@ type ForwardAttachment struct {
 	Mime          string
 	Size          int64
 	Width, Height *int
-	// DurationMs and Waveform carry a voice message across a forward (WP 8.9).
+	// DurationMs and Waveform carry a voice message across a forward.
 	DurationMs *int
 	Waveform   *string
 }

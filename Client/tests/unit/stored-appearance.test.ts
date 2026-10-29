@@ -69,7 +69,7 @@ describe("applyStoredAppearance", () => {
     expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
   });
 
-  it("follows the OS reduced-motion setting when nothing is stored (B9-2, Q1)", () => {
+  it("follows the OS reduced-motion setting when nothing is stored", () => {
     stubOsReducedMotion(true);
 
     applyStoredAppearance();

@@ -65,7 +65,7 @@ function setMessages(messages: readonly Message[]): void {
   });
 }
 
-describe("MessageList — inline editor lifecycle (WP 3A-8 review)", () => {
+describe("MessageList — inline editor lifecycle", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | null = null;
   let options: MessageListOptions;

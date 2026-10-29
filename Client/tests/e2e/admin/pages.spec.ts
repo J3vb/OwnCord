@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { seededTest as test, expect, signInAsOwner } from "./fixtures";
 import { TEST_PASSWORD } from "../support/server";
-import { Q1, findUnnamedControls, textContrast } from "../support/b9-accessibility";
+import { Q1, findUnnamedControls, textContrast } from "../support/accessibility";
 
 // ARCH-10 stage 2: one real-server journey per regrouped admin page. The lone
 // journey in admin-panel.spec.ts covers setup, the dashboard, channel CRUD,

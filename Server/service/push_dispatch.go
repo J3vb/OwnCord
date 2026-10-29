@@ -15,8 +15,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// pushActivityPayload is the ONLY payload dispatch ever sends (HP-5
-// scorecard Question 6, decision 2): no message text, channel id or name,
+// pushActivityPayload is the ONLY payload dispatch ever sends:
+// no message text, channel id or name,
 // sender, or count, and no configuration widens it. The client fetches the
 // detail from its own server after waking.
 var pushActivityPayload = []byte(`{"t":"activity"}`)
@@ -105,8 +105,8 @@ func pushPolicy() safefetch.Policy {
 	}
 }
 
-// pushFetcher is the one production Fetcher for dispatch (plan decision,
-// HP-5 scorecard Question 6 item 6): every subscriber, every message, one
+// pushFetcher is the one production Fetcher for dispatch:
+// every subscriber, every message, one
 // shared connection pool and concurrency cap.
 var pushFetcher = safefetch.MustNew(pushPolicy())
 
@@ -196,13 +196,13 @@ func (d *PushDispatcher) Notify(ctx context.Context, channelID, authorID int64, 
 	if err != nil || ch == nil {
 		return
 	}
-	// B5-7: a labelled channel still pushes -- to a recipient who has
+	// A labelled channel still pushes -- to a recipient who has
 	// acknowledged the label. eligibleFor (via coalesceAudience below, and
 	// again in stillEligible's per-attempt recheck) resolves that per
 	// candidate through permissions.CanReadContent, the same predicate every
 	// content read path uses; there is no whole-channel early return here
 	// because acknowledgement is per user, not per channel.
-	// Only one-to-one DMs are in scope (plan decision 4's Message Requests
+	// Only one-to-one DMs are in scope (the Message Requests
 	// boundary and this step's own audience rule) -- a group DM has
 	// Type == "dm" too, so it needs its own check. Fail closed: a lookup
 	// error is treated the same as "it is a group", because a push to a
@@ -414,7 +414,7 @@ func (d *PushDispatcher) trustsAuthor(ctx context.Context, ch *db.Channel, uid, 
 // the same predicate every content read path resolves, so a labelled channel
 // is decided exactly the way REST/search/socket/attachments decide it: no
 // push at all to a non-viewer, and no push to a viewer who has not
-// acknowledged the label (decision 13 -- no bit and no admin bypass skips
+// acknowledged the label (no bit and no admin bypass skips
 // this). NSFWAcknowledged is read live from the db, only when ch.NSFW is
 // set, never re-implementing the rule itself. Fails closed: any lookup
 // error is treated as unacknowledged. ch is the caller's already-resolved

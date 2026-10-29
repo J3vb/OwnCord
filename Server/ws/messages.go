@@ -35,11 +35,11 @@ type presencePayload struct {
 	// "cleared it" from "this event does not mention it", and every presence
 	// broadcast carries the current value.
 	CustomStatus *string `json:"custom_status"`
-	// Activity is the game the user is playing (WP 8.3a). Always present,
+	// Activity is the game the user is playing. Always present,
 	// null when none, like CustomStatus: every presence frame carries the
 	// current value. Blanked for everyone but the owner while invisible.
 	Activity *gameActivity `json:"activity"`
-	// Listening is the song the user is listening to (WP 8.10a). Same rules
+	// Listening is the song the user is listening to. Same rules
 	// as Activity: always present, null when none, blanked for everyone but
 	// the owner while invisible.
 	Listening *listeningActivity `json:"listening"`
@@ -70,7 +70,7 @@ type memberJoinUser struct {
 	About *string `json:"about"`
 	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
 	CreatedAt string `json:"created_at"`
-	// RoleIDs is every role the member holds, top role first (WP 6.3c); Role
+	// RoleIDs is every role the member holds, top role first; Role
 	// stays the top role's name. Omitted when the holder list was not read.
 	RoleIDs []int64 `json:"role_ids,omitempty"`
 	// Banner (the /api/v1/files/<id> path) and BannerColor are omitted when
@@ -95,7 +95,7 @@ type memberJoinPayload struct {
 type memberUpdatePayload struct {
 	UserID int64  `json:"user_id"`
 	Role   string `json:"role"`
-	// RoleIDs is every role the member holds, top role first (WP 6.3c); Role
+	// RoleIDs is every role the member holds, top role first; Role
 	// is the top role's name. Omitted when the holder list was not read.
 	RoleIDs []int64 `json:"role_ids,omitempty"`
 }
@@ -245,10 +245,10 @@ type voiceStatePayload struct {
 // through the normal voice_join path.
 type voiceMovedPayload struct {
 	ToChannelID int64 `json:"to_channel_id"`
-	// Reason says why the server moved the client; "afk" for the idle sweep
-	// (WP 6.10b). Omitted for a moderator move, so those bytes are unchanged.
+	// Reason says why the server moved the client; "afk" for the idle sweep.
+	// Omitted for a moderator move, so those bytes are unchanged.
 	Reason string `json:"reason,omitempty"`
-	// ByUserID is the moderator who made the move (WP 8.4b), so the moved
+	// ByUserID is the moderator who made the move, so the moved
 	// client can say who moved it. Omitted for the AFK sweep, which has no
 	// actor.
 	ByUserID int64 `json:"by_user_id,omitempty"`
@@ -295,8 +295,8 @@ type voiceE2EEAnnounceBroadcast struct {
 	UserID    int64  `json:"user_id"`
 	PublicKey string `json:"public_key"`
 	Signature string `json:"signature,omitempty"`
-	// VideoDecode is the sender's sanitized decodable video codec list
-	// (WP M-4), omitted when absent so legacy announces serialize unchanged.
+	// VideoDecode is the sender's sanitized decodable video codec list,
+	// omitted when absent so legacy announces serialize unchanged.
 	VideoDecode []string `json:"video_decode,omitempty"`
 	// IdentityPublicKey is the announcing connection's device identity key
 	// (key per device), omitted when that connection sent none so an announce
@@ -846,7 +846,7 @@ type dmRequestPayload struct {
 	DecidedAt *string                  `json:"decided_at"`
 }
 
-// buildDMRequest constructs a dm_request event (B5-6): sent to the
+// buildDMRequest constructs a dm_request event: sent to the
 // recipient once on creation (Preview set) and again, with a new State, on
 // every transition (Preview nil) — see DMRequestEvent's doc comment for
 // where each caller builds this.

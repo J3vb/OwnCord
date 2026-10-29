@@ -1,6 +1,6 @@
 package admin
 
-// SRE-03 (M half): the event-code table for the support bundle's events.json.
+// The event-code table for the support bundle's events.json.
 //
 // supportEventCodes maps a fixed Warn/Error log message (the constant string a
 // slog.Warn/Error call passes as its message) to a stable, lower_snake_case

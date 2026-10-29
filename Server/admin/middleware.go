@@ -122,8 +122,8 @@ func requirePerm(perm int64) func(http.Handler) http.Handler {
 // (permissions.IsOwner). It consumes the *db.Role that
 // adminAuthMiddleware resolved and stored in the request context — the same
 // contract as requirePerm, so no second role read runs and no read-fault
-// error mapping exists here at all: OC-0345's 503 branch died with the query
-// it served, and OC-0379 pins the absence (a role read fault now surfaces
+// error mapping exists here at all: an earlier 503 branch died with the query
+// it served, and a test pins the absence (a role read fault now surfaces
 // once, at the perimeter, as its 503). A request that somehow arrives without
 // the context role fails closed as unauthenticated.
 func ownerOnlyMiddleware(next http.Handler) http.Handler {
@@ -143,7 +143,7 @@ func ownerOnlyMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// gateMiddleware gates next on g (WP 8.4d). The role is the one adminAuthMiddleware stored in the
+// gateMiddleware gates next on g. The role is the one adminAuthMiddleware stored in the
 // request context, so no extra query runs; a request that arrives without one
 // fails closed as unauthenticated, like requirePerm and ownerOnlyMiddleware.
 func gateMiddleware(g routeGate, next http.Handler) http.Handler {

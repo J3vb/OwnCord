@@ -70,7 +70,7 @@ Full rules: [docs/summaries/design-system.md](docs/summaries/design-system.md).
 - Colours, spacing, radii and type sizes come from the tokens in `Client/src/styles/tokens.css`. Text on an accent fill is `var(--on-accent)`, the accent used as text is `var(--accent-text)`, and a focus indicator is `var(--focus-ring)`, never `var(--accent)`.
 - `src/styles/app.css` is an `@import` manifest over `src/styles/app/*.css`, and its import order is the cascade: add rules to the owning fragment, and never reorder imports or move rules between fragments in a visual PR.
 - User-generated content renders via `textContent`/`setText`, never `innerHTML`. URLs pass `isSafeUrl` (`src/components/message-list/attachments.ts`), which accepts only `http:` and `https:`.
-- A UI PR runs the shared accessibility checks in `Client/tests/e2e/support/b9-accessibility.ts` against its own journey.
+- A UI PR runs the shared accessibility checks in `Client/tests/e2e/support/accessibility.ts` against its own journey.
 
 ## Security rules
 

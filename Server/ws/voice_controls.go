@@ -101,7 +101,7 @@ func handleVoiceDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps
 // voiceStreamToggle parameterises the two video-stream handlers, voice_camera
 // and voice_screenshare. Like the self-toggles above they were verbatim
 // duplicates. Keeping them one function is not only tidier: camera and
-// screenshare draw from a single per-channel voice_max_video budget (OC-0023),
+// screenshare draw from a single per-channel voice_max_video budget,
 // and that bug existed precisely because the two paths had drifted apart.
 type voiceStreamToggle struct {
 	rateKey    string // auth.Key namespace, "voice_camera" / "voice_screenshare"
@@ -153,10 +153,10 @@ func voiceStreamToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, enab
 		if r := requirePerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, voiceChID, t.perm, t.permLabel); r != nil {
 			return *r
 		}
-		// Enforce the channel's shared voice_max_video budget atomically (OC-0023:
+		// Enforce the channel's shared voice_max_video budget atomically:
 		// enableVideoSlot's query counts camera = 1 OR screenshare = 1 rows, so
 		// neither kind can occupy a slot the cap meant to deny it nor hide from
-		// the other's count).
+		// the other's count.
 		if r := enableVideoSlot(ctx, d, userID, voiceChID, t.tryReserve, t.update, t.logPrefix, t.kind); r != nil {
 			return *r
 		}
@@ -216,9 +216,9 @@ func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo,
 }
 
 // enableVideoSlot enforces the channel's shared voice_max_video budget
-// before applying a camera or screenshare enable (OC-0023: camera and
+// before applying a camera or screenshare enable (camera and
 // screenshare draw from the same per-channel slot count, so neither publish
-// kind can bypass the cap by hiding from the other's count). tryReserve is
+// kind can bypass the cap by hiding from the other's count. tryReserve is
 // the atomic check-and-update for the specific field being enabled —
 // EnableCameraIfUnderLimit or EnableScreenshareIfUnderLimit, both of which
 // count `camera = 1 OR screenshare = 1` rows against the cap. unconditionalSet

@@ -17,7 +17,7 @@ import (
 // SettingsService owns the server-settings policy the admin panel writes and
 // the rest of the server reads: which keys exist, how boolean values are
 // normalized, the require_2fa preconditions, and the atomic apply. Handlers
-// are thin adapters over it (B3-8 settings/audit family); the hub reads
+// are thin adapters over it; the hub reads
 // server identity through it instead of the raw handle.
 type SettingsService struct {
 	st Store
@@ -40,21 +40,21 @@ var allowedSettingKeys = map[string]struct{}{
 	"registration_mode": {},
 	"backup_schedule":   {},
 	"backup_retention":  {},
-	// The server-wide message-retention window in days (B4-11): 0 keeps
+	// The server-wide message-retention window in days: 0 keeps
 	// everything, anything else is at least RetentionMinDays.
 	db.RetentionDaysKey: {},
 	// The upload file-type lists (upload_filetypes.go).
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
 	// How long a member must be idle before the AFK channel sweep may move
-	// them (WP 6.10). A missing row means AFKTimeoutDefaultSeconds.
+	// them. A missing row means AFKTimeoutDefaultSeconds.
 	AFKTimeoutKey: {},
-	// Whether a member holding MOVE_MEMBERS may move the owner (WP 8.4a).
+	// Whether a member holding MOVE_MEMBERS may move the owner.
 	VoiceOwnerMovableKey: {},
-	// Whether members' game activity is shown on this server (WP 8.3e-2).
+	// Whether members' game activity is shown on this server.
 	// MANAGE_SERVER may change it; it is not owner-only.
 	GameActivityEnabledKey: {},
-	// The channel that greets each new member (WP 8.6). Empty means off.
+	// The channel that greets each new member. Empty means off.
 	WelcomeChannelKey: {},
 }
 
@@ -125,7 +125,7 @@ var inertSettingKeys = map[string]struct{}{
 }
 
 // ownerOnlySettingKeys are the settings that decide the owner-only backup
-// policy (BPR-072). They stay on the read surface — the admin panel renders
+// policy. They stay on the read surface — the admin panel renders
 // them and GET /settings is MANAGE_SERVER — but a PATCH carrying either must
 // come from the Owner, because they indirectly control which of the owner's
 // backups survive: backup_retention is what the maintenance sweep prunes by,
@@ -134,11 +134,10 @@ var ownerOnlySettingKeys = map[string]struct{}{
 	"backup_schedule":  {},
 	"backup_retention": {},
 	// The upload file-type policy decides which files members can share, so
-	// it is the owner's call too.
+	// changing it is owner-only too.
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
-	// Whether Move Members holders may move the owner is the owner's call
-	// (WP 8.4a).
+	// Whether Move Members holders may move the owner is owner-only too.
 	VoiceOwnerMovableKey: {},
 }
 
@@ -264,7 +263,7 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 	for key := range normalized {
 		slog.Info("setting changed", "actor_id", actorID, "key", key)
 		// A registration-mode transition is audited by name — old and new
-		// mode — rather than as an anonymous "updated" (B4-1, BPR-041).
+		// mode — rather than as an anonymous "updated".
 		if key == registrationModeKey && previousMode != normalized[key] {
 			db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_mode_change", "setting", 0,
 				fmt.Sprintf("registration_mode %s -> %s", previousMode, normalized[key]))
@@ -401,7 +400,7 @@ func (s *SettingsService) validateRequire2FAUpdate(ctx context.Context, updates 
 
 	// Nobody can enrol before their first login, so a server that admits new
 	// accounts cannot demand 2FA of everyone: the mode must be closed — and
-	// stays closed while require_2fa is on (B4-1).
+	// stays closed while require_2fa is on.
 	mode, err := s.targetRegistrationMode(ctx, updates)
 	if err != nil {
 		return err

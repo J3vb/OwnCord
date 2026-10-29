@@ -12,7 +12,7 @@ import (
 // AdmissionBudget bounds how much deliberately expensive authentication work
 // runs at once — the bcrypt compares behind every password confirmation, the
 // bcrypt hashes behind registration, password change and recovery-code
-// issue, and the recovery-code match at verify (B4-4, SEC-01). One process
+// issue, and the recovery-code match at verify. One process
 // holds one budget (inside the shared RateLimiter), so every route that pays
 // for bcrypt takes the same server-owned admission decision: a slot is taken
 // atomically before the computation starts and given back after it. An
@@ -106,8 +106,8 @@ func (b *AdmissionBudget) TryAcquire() (release func(), ok bool) {
 // the budget is exhausted. ok is false when the queue is already full or its
 // estimated wait already exceeds maxWait, when maxWait passes, or when ctx
 // ends first: nothing was taken, release is a no-op, and retryAfter
-// estimates when a slot is likely to be free. A refusal is still the B4-4
-// refusal — no computation runs and it charges no lockout attempt.
+// estimates when a slot is likely to be free. A refusal is still an
+// admission refusal — no computation runs and it charges no lockout attempt.
 func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (release func(), retryAfter time.Duration, ok bool) {
 	b.mu.Lock()
 	if b.held < b.size && b.waiters.Len() == 0 {

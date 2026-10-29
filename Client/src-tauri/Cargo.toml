@@ -117,12 +117,11 @@ base64 = "0.22"
 # where the Tauri app never built and tauri-plugin-dialog has no AppHandle to
 # run through (Linux shows that dialog with gtk instead, see below). Already
 # in the tree via that same plugin, so this costs no extra build -- but only
-# while the versions match: the plugin pins ^0.16, and Cargo unifies features
-# only within a semver-compatible group. Moving this to 0.17 forks rfd into two
-# crates, and the copy without the plugin's backend features fails rfd 0.17's
-# build.rs on Linux. Pinned to the plugin in .github/dependabot.yml; bump both
-# together or neither.
-rfd = { version = "0.16", default-features = false }
+# while the versions match: Cargo unifies features only within a
+# semver-compatible group. The plugin needs ^0.17 since 2.8.4; a different
+# minor here forks rfd into two crates, and the copy without the plugin's
+# backend features fails rfd's build.rs on Linux. Bump both together or neither.
+rfd = { version = "0.17", default-features = false }
 
 # Desktop-only plugins (no mobile bundle target). single-instance carries the
 # "deep-link" feature so an owncord:// link fired at a running app is forwarded

@@ -8,7 +8,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// SRV-05: per-route progress deadlines for the file transfer routes.
+// Per-route progress deadlines for the file transfer routes.
 //
 // The server's global ReadTimeout/WriteTimeout (internal/app/lifecycle.go) are
 // 30 s and bound the WHOLE request: net/http sets the connection's read and
