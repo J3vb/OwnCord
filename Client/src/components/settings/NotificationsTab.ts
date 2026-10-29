@@ -154,7 +154,7 @@ function buildServerLevelRow(signal: AbortSignal): HTMLDivElement | null {
   return row;
 }
 
-/** Label and description of each per-sound switch (WP M-8). */
+/** Label and description of each per-sound switch. */
 const SOUND_SWITCH_TEXT: Readonly<
   Record<SoundSwitch, { label: () => string; desc: () => string }>
 > = {
@@ -216,7 +216,7 @@ function valueText(percent: number): string {
 }
 
 /**
- * The "App sounds volume" slider (WP M-8): scales the master gain every app
+ * The "App sounds volume" slider: scales the master gain every app
  * sound shares. 100% is today's level, 0% is silent. The value is saved on
  * every move (the player re-reads it on its next sound); letting go of the
  * thumb plays the message chime once so the level can be judged.

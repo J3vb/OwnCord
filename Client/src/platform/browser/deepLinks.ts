@@ -1,4 +1,4 @@
-// Browser deep links (6.13d): the one link a page receives is `?invite=<code>`
+// Browser deep links: the one link a page receives is `?invite=<code>`
 // on its own URL (the web form of an invite link). It is read once at `init`,
 // handed to `onInvite`, and removed from the address bar so a reload or a
 // copied URL does not replay it. Other parameters and the hash stay. The web

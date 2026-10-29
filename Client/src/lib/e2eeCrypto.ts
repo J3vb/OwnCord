@@ -214,7 +214,7 @@ export function roomKeyToBase64(key: Uint8Array): string {
 /** Wire format version byte for `encrypted_key`. v1 prepends a header of
  *  `0x01 ‖ epoch (u64 big-endian)` to the GCM ciphertext and binds that same
  *  epoch as additional data, so a peer can tell a fresh room key from a
- *  superseded one and the relay cannot alter the epoch unnoticed (OC-0001).
+ *  superseded one and the relay cannot alter the epoch unnoticed.
  *  Blobs with no header are the pre-epoch format: unwrap still accepts them
  *  for holders on the old build, reporting `epoch: null`. */
 const OFFER_FORMAT_V1 = 0x01;

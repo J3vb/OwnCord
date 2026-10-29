@@ -1,6 +1,6 @@
 // The local loopback tunnels that let the webview talk to a self-signed
 // server without ever accepting its certificate itself. Both halves are
-// lifted verbatim (B7-5): the HTTP tunnel from `lib/httpProxy.ts`, and the
+// lifted verbatim: the HTTP tunnel from `lib/httpProxy.ts`, and the
 // LiveKit tunnel from `LiveKitUrlResolver` (`lib/livekitUrlResolver.ts`),
 // whose instance fields become this module's state — the app has one LiveKit
 // session, and the class there now delegates here.

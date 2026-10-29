@@ -58,7 +58,7 @@ import { log } from "../connection/dispatchContext";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 /**
- * OC-0024: serverClockSkewMs (see createReconnectClock) starts at 0 and is only
+ * serverClockSkewMs (see createReconnectClock) starts at 0 and is only
  * ever sampled from a frame the replay check itself already accepted as
  * live — so if the channel is quiet between login and the first reconnect,
  * the skew is never sampled, and a lagging/skewed server clock then makes
@@ -72,7 +72,7 @@ import { WsErrorCode } from "@lib/protocolTypes";
  */
 const REPLAY_GATE_WINDOW_MS = 5_000;
 
-// Thread frames (WP 6.9c): the dispatcher reaches them through this module.
+// Thread frames: the dispatcher reaches them through this module.
 export {
   applyReadyThreads,
   handleThreadDeleted,
@@ -90,7 +90,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
     channelId: payload.channel_id,
     user: payload.user.username,
   });
-  // DP-15: the sender's message landing clears their "is typing…" at once.
+  // The sender's message landing clears their "is typing…" at once.
   // A no-op for an unknown typer (a reconnect replay burst carries no typing
   // state), and scoped to this channel + this sender so other typers stay.
   clearTyping(payload.channel_id, payload.user.id);
@@ -108,7 +108,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
 
   // Increment channel-level unread for non-active, non-own-message
   // channels — OR for the active channel when its loaded window is
-  // detached from the live tail (OC-0204). "Active" normally means "the
+  // detached from the live tail. "Active" normally means "the
   // user is watching the live tail", which is why it is otherwise
   // excluded here, but a jump to an old permalink/reply/search hit can
   // leave the active channel showing a detached around-window
@@ -137,7 +137,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   // readers who had a live connection at send time — a reader with none
   // never got read_states.mention_count bumped for a here-only mention.
   // The reconnect tier that delivers this replay burst never follows up
-  // with a `ready` to correct a wrongly-raised badge (OC-0271), so a
+  // with a `ready` to correct a wrongly-raised badge, so a
   // here-only mention landing inside that burst must not raise one here
   // either. A direct mention, or an @here/@everyone frame delivered live,
   // is unaffected — mentions_here is only ever set alongside
@@ -151,7 +151,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
       mentionRoles: payload.mention_roles,
     }) ||
       (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame)));
-  // P4-03: "active" only means "the reader is watching" while the window is
+  // "active" only means "the reader is watching" while the window is
   // focused (isChannelAway, lib/read-state.ts). A minimised or unfocused window
   // shows nothing, so a message landing in the active channel then must count
   // like one in any other channel (badge, taskbar, divider) — the same
@@ -163,7 +163,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
     // evenIfActive (isAway here) is a no-op for a genuinely
     // non-active channel, since its internal guard only fires when
     // channelId IS the active one. It also guards both counters behind
-    // payload.id vs. the channel's lastMessageId watermark (OC-0328), so
+    // payload.id vs. the channel's lastMessageId watermark, so
     // a message already reflected in a `ready` snapshot (delivered
     // between the server's registerNow and buildReady, then redelivered
     // as a queued chat_message) does not double-count.
@@ -175,7 +175,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
 
   // Update DM store last message if this message belongs to a DM channel.
   // Skip unread increment for own messages and the currently focused DM
-  // — unless that DM's window is detached from the live tail (OC-0204),
+  // — unless that DM's window is detached from the live tail,
   // the same exception the channel-level increment above makes.
   if (isDm) {
     const isDmActive = payload.channel_id === activeId && !isAway;
@@ -192,7 +192,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
       // by DmSidebar) — noteChannelMessage above no-ops for DM ids, which
       // are absent from channelsStore. isMention is passed through so the
       // mention bump sits behind updateDmLastMessage's own message-id
-      // guard (OC-0242) — a separate unconditional increment here would
+      // guard — a separate unconditional increment here would
       // double-count a mention redelivered between registerNow and
       // buildReady, since lastMessageId has already advanced by the time
       // any such follow-up call could check it.
@@ -371,7 +371,7 @@ export function handleReactionUpdate(payload: Payload<"reaction_update">): void 
   invalidateReactionUsers(payload.message_id);
 }
 
-/** A poll's counts after a vote or its end (WP 6.9b); the store keeps them in version order. */
+/** A poll's counts after a vote or its end; the store keeps them in version order. */
 export function handlePollUpdate(payload: Payload<"poll_update">): void {
   updatePoll(payload, authStore.getState().user?.id ?? 0);
 }
@@ -458,10 +458,10 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
       // Mark the active channel loading BEFORE invalidating: it records the
       // watermark the splice checks the page against, and a channel with no
       // rows shows the in-region spinner instead of reading as a genuinely
-      // empty channel for the whole refetch (OC-0007).
+      // empty channel for the whole refetch.
       setChannelLoading(activeAfterReady);
       invalidateLoadedMessageWindows();
-      // OC-0203: the user can switch (or the active channel can be cleared)
+      // The user can switch (or the active channel can be cleared)
       // while the fetch is in flight. Writing the page unconditionally would
       // re-add a channel the user already left to loadedChannels with a
       // pre-resync-era page — MessageController.loadMessages then
@@ -558,7 +558,7 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
       // group, so flagging it there would gate an unrelated 1:1 DM.
       if (dm !== undefined && !dm.isGroup) setUserBlockedByThem(dm.recipient.id, true);
     }
-    // OC-0476: a resent pre-restore id the server holds no receipt for is
+    // A resent pre-restore id the server holds no receipt for is
     // refused as BAD_REQUEST; say the server was restored, keeping the text.
     // The toast lives here, with the connect catalog, to keep MainPage small.
     const { pendingSends, messagesByChannel } = messagesStore.getState();

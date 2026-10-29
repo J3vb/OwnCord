@@ -48,7 +48,7 @@ export interface ReconnectClock {
   serverClockSkewMs: number;
   /** A server_restart announced a drop that no cancel has withdrawn yet. */
   restartAnnounced: boolean;
-  /** RT-12: the voice channel to re-join after a planned restart. Recorded
+  /** The voice channel to re-join after a planned restart. Recorded
    *  by the restart drop from the call the user is in at that moment, consumed
    *  once by `ready`, and cleared by any path that means the user must NOT
    *  re-join (a kick, a move, a ban or a leave). */
@@ -112,7 +112,7 @@ export function livekitSession(): Promise<typeof import("../../lib/livekitSessio
 }
 
 /**
- * RT-12: drop a pending post-restart voice rejoin. Called by every path that
+ * Drop a pending post-restart voice rejoin. Called by every path that
  * means the user must NOT be returned to the call a planned restart took them
  * out of — a moderator kick or move, a ban, or the user leaving voice. Lives
  * here, beside the clock it mutates, so both the connection and voice handler

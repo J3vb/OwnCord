@@ -66,10 +66,17 @@ and only when it changes something a contributor or fork holder must do
 - A picture in chat whose file is damaged or unreadable showed a broken-image icon; it now shows the download card.
 - Hovering a reaction squeezed the names into a narrow box and split them mid-word ("LordJ / ebus"); the box now fits the names on one line and wraps only between words.
 
+**Web client**
+
+- Clicking Join on another server's invite signed you out and failed; it now opens that server's page in a new tab and keeps you signed in.
+- Settings > About showed no version, and "What's new" never appeared; both now use the version the web client was built from.
+- Settings > Logs showed an "Open Log Folder" button that always failed; the web client keeps logs in memory, so the button is gone there.
+
 ### Under the hood
 
 - Every error code the server can send is now listed once in the protocol schema and generated into server constants and a client type. A fork that adds a code adds it there and regenerates.
 - Desktop client moves to Tauri 2.12.5 and the latest patch releases of its plugins (updater, notification, dialog, opener, single-instance, deep-link).
+- The desktop app's Rust code locks shared state through one helper, and clippy rejects a lock taken any other way. On Linux, the native voice session no longer stops when an earlier error left the camera or screen-share slot locked.
 
 ## v2.5.0
 

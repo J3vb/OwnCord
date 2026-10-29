@@ -180,7 +180,7 @@ fn mic_test_blocked(has_session: bool) -> bool {
 #[derive(Default)]
 pub struct NativeVoiceState {
     inner: Mutex<Inner>,
-    /// The app-level device watcher (LP-6a), filled once by
+    /// The app-level device watcher, filled once by
     /// `native_voice_watch_devices` and kept for the app's life. A std mutex
     /// held only to test or fill the slot, separate from `inner`, the tokio
     /// mutex held across awaits: the two are never taken together.
@@ -434,7 +434,7 @@ pub async fn native_voice_watch_devices<R: Runtime>(
     Ok(())
 }
 
-/// Play an app sound (WP LP-6b): synthesize `notes` at `gain` and play them
+/// Play an app sound: synthesize `notes` at `gain` and play them
 /// once on output `device_id` (empty or unknown: the default), in or out of a
 /// call. Resolves with an id `native_voice_stop_sound` takes; a host failure
 /// (no device, open failed) rejects and the webview falls back to Web Audio.
@@ -518,7 +518,7 @@ pub async fn native_voice_set_microphone(
         .await
 }
 
-/// Close or open push-to-talk's gate on `session`'s microphone (DP-30).
+/// Close or open push-to-talk's gate on `session`'s microphone.
 #[tauri::command]
 pub async fn native_voice_set_ptt_gated(
     state: tauri::State<'_, NativeVoiceState>,
@@ -612,7 +612,7 @@ pub async fn native_voice_camera_support() -> Result<camera::CameraSupport, Stri
         .map_err(|e| e.to_string())
 }
 
-/// Which video codecs the native engine can encode beyond VP8 (WP LP-7c).
+/// Which video codecs the native engine can encode beyond VP8.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoCodecs {
@@ -1203,7 +1203,7 @@ pub async fn native_voice_set_screenshare_volume(
     Ok(())
 }
 
-/// Native resource counts for `getSessionDebugInfo` (B7-11).
+/// Native resource counts for `getSessionDebugInfo`.
 #[tauri::command]
 pub async fn native_voice_debug_info(
     state: tauri::State<'_, NativeVoiceState>,
@@ -1222,7 +1222,7 @@ fn now_ms() -> f64 {
 }
 
 /// One stats sample for the webview's connection panel, tile chip and Go Live
-/// readout (LP-5). A stale session or a failed or slow transport read is an
+/// readout. A stale session or a failed or slow transport read is an
 /// error (ping is the core output); a failed per-track read only drops that
 /// track's sample.
 #[tauri::command]

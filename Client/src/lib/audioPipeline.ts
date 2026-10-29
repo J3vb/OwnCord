@@ -67,7 +67,7 @@ export function micProcessingOptions(): {
  * measures what the call captures. The device is `exact`, as in
  * switchActiveDevice: Chromium resolves a merely preferred device id to the
  * default device. `onDefault` swaps a saved device for the system default,
- * for a retry while that device is unplugged (the pref keeps it, DP-31).
+ * for a retry while that device is unplugged (the pref keeps it).
  */
 export function micCaptureOptions(onDefault = false): ReturnType<typeof micProcessingOptions> & {
   deviceId?: { exact: string } | string;
@@ -235,7 +235,7 @@ export function startVadDetector(
     workletNode = null;
     // Swap the handler first — the worklet's `process()` loop only observes
     // `stop` on its next audio-thread callback, so it can still post one more
-    // {type:"gate"} message after this postMessage (OC-0231).
+    // {type:"gate"} message after this postMessage.
     const done = workletStopped(node);
     // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
     node.port.postMessage({ type: "stop" });

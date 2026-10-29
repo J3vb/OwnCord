@@ -1,5 +1,5 @@
 /**
- * ThreadPanelHost (WP 6.9c) — owns the side panel's slot: which thread is open,
+ * ThreadPanelHost — owns the side panel's slot: which thread is open,
  * the `thread_focus` frames that say so, and the panel's lazy load.
  *
  * `threadsStore.focusedThreadId` is the single truth for "a panel is open", and

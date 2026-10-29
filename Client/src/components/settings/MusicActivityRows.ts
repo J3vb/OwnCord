@@ -1,5 +1,5 @@
 /**
- * Settings > Advanced > Activity > music (WP 8.10c): the "Share the music
+ * Settings > Advanced > Activity > music: the "Share the music
  * you're listening to" switch, what this device sees right now, and "Your
  * players" with a "Show to others" switch each.
  *

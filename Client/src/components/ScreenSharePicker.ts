@@ -30,7 +30,7 @@
  *
  * Registered from the UI side (`MainPage` -> `screenPickerSlot.ts`) and loaded
  * on demand; the native picker adapter is a lower layer and may not import
- * this component directly (ARCH-06).
+ * this component directly.
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
@@ -449,7 +449,7 @@ function openPicker(
         fpsSelect.value = String(selectedFps);
         syncFpsHint();
       };
-      // Windows (M-2): what 120 fps needs, while it is chosen.
+      // Windows: what 120 fps needs, while it is chosen.
       const fps120Hint =
         opts.osPicker === true
           ? createElement(

@@ -3,7 +3,7 @@
  * `PendingMessageStore` contract — the same verified encrypted store the
  * credentials use.
  *
- * Lifted verbatim from `lib/pendingMessages.ts` (B7-4): same commands, same
+ * Lifted verbatim from `lib/pendingMessages.ts`: same commands, same
  * arguments, same error handling — including the environment guard that keeps
  * a browser build's drafts in memory and never writes message text to Web
  * Storage.

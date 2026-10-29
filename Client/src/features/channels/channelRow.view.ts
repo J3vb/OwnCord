@@ -1,6 +1,6 @@
 /**
  * What a text or announcement channel row and a category group draw, from
- * plain-data models and nothing else (5.4d).
+ * plain-data models and nothing else.
  *
  * A model is the drawn values after formatting: the resolved flags and the
  * count the badge shows. `reconcileModels` derives a row's signature from its
@@ -8,7 +8,7 @@
  * imports no store and binds no handler; `channelRowModel.ts` builds the
  * models and the sidebar binds the click, context menu and drag handlers.
  *
- * The DOM is the one `ChannelSidebar.ts` drew before 5.4d, class for class and
+ * The DOM is the one `ChannelSidebar.ts` drew before the row models were split out, class for class and
  * attribute for attribute: sidebar.css, the sidebar unit suite and the channel
  * e2e specs select on it. The roving `tabindex="0"` is the navigation's, set
  * after every draw; it is never a model field.
@@ -53,7 +53,7 @@ export type TextChannelRowModel = {
 };
 
 /**
- * A followed thread under its parent's row (WP 6.9c): indented, thread glyph,
+ * A followed thread under its parent's row: indented, thread glyph,
  * the name bold when unread and a mention badge. Not draggable, and keyed by
  * the thread id apart from channel ids.
  */
@@ -90,7 +90,7 @@ export type CategoryGroupModel = {
   readonly collapsed: boolean;
   /** The header's "+" button. */
   readonly showCreate: boolean;
-  /** A real category a manager may drag to reorder (WP 6.5c): the `category-draggable` class. */
+  /** A real category a manager may drag to reorder: the `category-draggable` class. */
   readonly draggable: boolean;
 };
 
@@ -132,7 +132,7 @@ export function privateIndicator(channelId: number): HTMLSpanElement {
 }
 
 /** The mention badge: it counts the mentions, not the messages. Shared by the
- *  text row and the voice row (WP 6.1d), so both draw the same markup. */
+ *  text row and the voice row, so both draw the same markup. */
 export function mentionBadge(channelId: number, count: number): HTMLSpanElement {
   const badge = createElement(
     "span",
@@ -155,7 +155,7 @@ export function drawTextChannelRow(model: TextChannelRowModel): HTMLDivElement {
   const item = createElement("div", {
     class: classes.join(" "),
     "data-testid": `channel-${model.channelId}`,
-    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+    // Roving list item: reachable by Tab once, then arrow-stepped.
     role: "link",
     tabindex: "-1",
   });

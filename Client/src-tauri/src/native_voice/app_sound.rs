@@ -1,4 +1,4 @@
-//! App sounds on the chosen output (Linux, WP LP-6b).
+//! App sounds on the chosen output (Linux).
 //!
 //! The webview sends a tone spec (`notificationSound.ts`'s table, the one
 //! source of truth); `render` synthesizes it and each play opens its own
@@ -19,8 +19,9 @@ use std::time::Duration;
 use cpal::traits::HostTrait as _;
 use serde::Deserialize;
 
-use super::playout::{lock, open_once, output_devices, Role, WatchedHost, SAMPLE_RATE};
+use super::playout::{open_once, output_devices, Role, WatchedHost, SAMPLE_RATE};
 use super::session::{resolve_device, DeviceInfo};
+use crate::sync::lock;
 
 /// The most notes one sound may have.
 const MAX_NOTES: usize = 16;

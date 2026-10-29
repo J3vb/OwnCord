@@ -50,11 +50,11 @@ fn init_com() {
 /// The cached manager, or a new one. The lock is not held while the request
 /// runs (`get()` can stall); `detect_media` allows one read at a time anyway.
 fn manager() -> Option<Manager> {
-    if let Some(cached) = MANAGER.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+    if let Some(cached) = crate::sync::lock(&MANAGER).clone() {
         return Some(cached);
     }
     let fresh = Manager::RequestAsync().and_then(|op| op.get()).ok()?;
-    *MANAGER.lock().unwrap_or_else(|e| e.into_inner()) = Some(fresh.clone());
+    *crate::sync::lock(&MANAGER) = Some(fresh.clone());
     Some(fresh)
 }
 
@@ -67,7 +67,7 @@ pub(super) fn candidates() -> Option<Vec<Candidate>> {
         Ok(sessions) => sessions,
         Err(_) => {
             // The manager may have gone stale; ask for a new one next poll.
-            *MANAGER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            *crate::sync::lock(&MANAGER) = None;
             return None;
         }
     };

@@ -5,7 +5,7 @@
  * so every viewer must decode the one chosen here or see a black tile. VP8 and
  * H.264 are the two every shipped client decodes; VP9 and H.265 are options
  * picked only when every peer reports decoding them (H.265 also needs a
- * hardware encoder and a non-Intel GPU, WP M-6). VP8 is the default; H.264
+ * hardware encoder and a non-Intel GPU). VP8 is the default; H.264
  * lets Windows encode on the graphics card, and a saved H.264 the browser does
  * not report as hardware at the captured size publishes VP8 (the software
  * encoder is single-threaded and a large share drops to a few fps). The Linux
@@ -45,13 +45,13 @@ function canPublishVp9(): boolean {
 
 /** Whether the settings list VP9 off Linux: the webview can publish it. On
  *  Linux this is false; `vp9Available` asks the native engine. A share drops to
- *  a codec every viewer plays while one of them cannot play VP9 (WP M-5b). */
+ *  a codec every viewer plays while one of them cannot play VP9. */
 export function vp9Offered(): boolean {
   return !isLinuxDesktop() && canPublishVp9();
 }
 
 /** Whether VP9 can be published anywhere: the webview's check off Linux, and on
- *  Linux only when the native engine reports a VP9 encoder (WP M-11b). A probe
+ *  Linux only when the native engine reports a VP9 encoder. A probe
  *  that fails reads as no. */
 export async function vp9Available(): Promise<boolean> {
   return isLinuxDesktop() ? (await nativeVideoCodecs()).vp9 : canPublishVp9();
@@ -77,13 +77,13 @@ function canPublishH265(): boolean {
 /** A GPU known not to be Intel's. livekit-client 2.22.3 cannot decrypt Intel
  *  Quick Sync H.264 under E2EE (see `pickAutoCodec`), and H.265 shares its
  *  start-code path, so it is assumed to fail the same way until a two-machine
- *  test says otherwise (WP M-6b). `null` is a GPU that could not be named. */
+ *  test says otherwise. `null` is a GPU that could not be named. */
 function isKnownNonIntel(renderer: string | null): renderer is string {
   return renderer !== null && !/intel/i.test(renderer);
 }
 
 /** Whether the settings list H.265: not the Linux native engine, the webview
- *  can publish it and the GPU is not Intel's (WP M-6). Whether the encoder is a
+ *  can publish it and the GPU is not Intel's. Whether the encoder is a
  *  hardware one is probed per publish, not here. */
 export function h265Offered(): boolean {
   return !isLinuxDesktop() && canPublishH265() && isKnownNonIntel(gpuRenderer());
@@ -143,7 +143,7 @@ export function gpuRenderer(): string | null {
 }
 
 /** At this rate a saved VP8 follows Auto's rule too: software VP8 cannot
- *  encode 1080p at 120 fps and drops to about 60 (M-2). */
+ *  encode 1080p at 120 fps and drops to about 60. */
 export const HARDWARE_CODEC_FPS = 120;
 
 /** The codec for one publish: the preferred one when every channel peer
@@ -162,7 +162,7 @@ export async function resolveVideoCodec(
 
 /** What one publish resolved: the codec it goes out with, and the one the
  *  user's settings asked for before peers were considered. The live switch
- *  (M-5b) keeps both, so it can tell when `codec` is no longer the pick and
+ *  keeps both, so it can tell when `codec` is no longer the pick and
  *  never has to re-read the settings mid-share. */
 export interface CodecChoice {
   readonly preferred: PublishCodec;

@@ -34,7 +34,7 @@ export function permissionsForRoleIn(
 }
 
 /**
- * Permission mask of a member holding several roles (WP 6.3d): the OR of every
+ * Permission mask of a member holding several roles: the OR of every
  * held role's mask, so a bit any held role grants counts. `roleIds` comes from
  * the server's `role_ids`; an id the cached roster does not know is skipped.
  * With no `roleIds` (an older server), or none that resolve, the single role
@@ -222,7 +222,7 @@ export function canManageInvites(): boolean {
 
 /**
  * Whether the signed-in user's role holds MODERATE_MEMBERS. Gates the
- * Moderation Center entry (B9-4, Q2); the server re-checks the bit on every
+ * Moderation Center entry; the server re-checks the bit on every
  * queue read and action.
  */
 export function canModerateMembers(): boolean {

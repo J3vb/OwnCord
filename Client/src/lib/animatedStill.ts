@@ -1,5 +1,5 @@
 /**
- * Animated avatars and banners (WP 8.7): a GIF, animated WebP or animated PNG
+ * Animated avatars and banners: a GIF, animated WebP or animated PNG
  * shows its first frame until its row is hovered, and never plays under
  * reduced motion.
  *

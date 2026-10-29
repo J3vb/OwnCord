@@ -3,7 +3,7 @@
  * factory in `lib/profiles.ts` wraps today (`get_settings` / `save_settings`).
  * Seam: that factory is exported and already returns exactly this shape, so
  * the contract methods below have that function's exact signature — this is
- * `PersistenceBackend`'s shape, member for member (rule 4). B7-4 deletes the
+ * `PersistenceBackend`'s shape, member for member (rule 4). The seam replaces the
  * `@lib` copy and imports this contract.
  *
  * `SettingsSnapshot`/`SettingsProfile` are re-declared, structurally

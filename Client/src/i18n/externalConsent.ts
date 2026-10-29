@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** External-content consent copy (B9-8, Q3): the concealed item, the
+/** External-content consent copy: the concealed item, the
  *  per-server choice, YouTube playback and the Text & Images reset. */
 export const externalConsentText = defineCatalog("externalConsent", {
   "item.load": "Load external content from {host}",

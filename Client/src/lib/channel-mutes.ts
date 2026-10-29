@@ -165,7 +165,7 @@ function readMuted(): ReadonlyMap<number, number | null> {
   // per-server autoincrement integers, so leaving the legacy key in place
   // would let every subsequent brand-new host also miss its own scoped key,
   // read through to the same legacy list, and inherit server A's mutes as
-  // its own (OC-0288) — every host after that falls through to `new Set()`
+  // its own — every host after that falls through to `new Set()`
   // instead.
   if (keyExists(MUTED_KEY)) {
     const legacy = parseMuted(loadPref<unknown[]>(MUTED_KEY, []));

@@ -18,7 +18,7 @@
 // carries the gated output: raw or pre-gate audio never reaches the sender.
 //
 // The graph runs in its own 48 kHz AudioContext: RNNoise needs 48 kHz, and
-// the SDK's restart() call site sends no audioContext (OC-0277).
+// the SDK's restart() call site sends no audioContext.
 
 import type { Track, TrackProcessor, AudioProcessorOptions } from "livekit-client";
 import { createLogger } from "@lib/logger";
@@ -45,7 +45,7 @@ const WORKLET_STOP_TIMEOUT_MS = 1000;
  * alive until process() returns false; closing the context first ends
  * rendering before the processor sees its stop, which pins the closed
  * context for the page's lifetime. Replaces the port's handler: nothing but
- * `stopped` is acted on once a node is stopping (OC-0231).
+ * `stopped` is acted on once a node is stopping.
  */
 export function workletStopped(node: AudioWorkletNode): Promise<void> {
   return new Promise((resolve) => {

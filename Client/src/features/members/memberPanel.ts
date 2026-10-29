@@ -34,8 +34,8 @@ import {
 import { TIMEOUT_PRESETS } from "../moderation/timeoutPresets";
 
 /** The two UI-layer functions the panel needs. Injected rather than imported:
- *  `features/` is a lower layer and may not statically import `components/`
- *  (ARCH-06). The host (`pages/`) passes the real ones. */
+ *  `features/` is a lower layer and may not statically import `components/`.
+ *  The host (`pages/`) passes the real ones. */
 export interface MemberPanelUi {
   readonly createMemberList: typeof createMemberList;
   readonly buildVoiceModOptions: typeof buildVoiceModOptions;
@@ -48,7 +48,7 @@ export interface MemberPanelOptions {
   /** Start a DM with a user (profile popup's Message button). */
   readonly onMessageUser?: (userId: number) => void;
   /** Call a user: open/create the 1:1 DM and start a call in it (profile
-   *  popup's Call button, BUG-05). */
+   *  popup's Call button). */
   readonly onCallUser?: (userId: number) => void;
   /** Senders for the voice moderation rows (Server Mute, Deafen, Disconnect);
    *  without them the member menu offers none. */

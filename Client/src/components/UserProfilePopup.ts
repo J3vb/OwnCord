@@ -47,13 +47,13 @@ export interface UserProfileData {
   readonly about?: string | null;
   /** Free-text status line, shown under the name. */
   readonly customStatus?: string | null;
-  /** The game being played (WP 8.3), shown as "Playing <game> · for N min". */
+  /** The game being played, shown as "Playing <game> · for N min". */
   readonly activity?: { readonly name: string; readonly startedAt: number } | null;
-  /** The song being listened to (WP 8.10): a card under the game with a
+  /** The song being listened to: a card under the game with a
    *  progress bar that ticks while the popup is open. */
   readonly listening?: ListeningSong | null;
   readonly joinDate?: string | null;
-  /** Banner image path and colour (WP 6.11); absent or null = the gradient. */
+  /** Banner image path and colour; absent or null = the gradient. */
   readonly banner?: string | null;
   readonly banner_color?: string | null;
   readonly isDeleted?: boolean;
@@ -77,7 +77,7 @@ export interface ProfileRoleControl {
   change(role: string): Promise<void>;
 }
 
-/** One role the member holds, as a chip (WP 6.3d). */
+/** One role the member holds, as a chip. */
 export interface ProfileRoleChip {
   readonly id: number;
   readonly name: string;
@@ -116,9 +116,9 @@ export interface UserProfilePopupOptions {
   readonly onMessage?: (userId: number) => void;
   /** Called when the user clicks "Call". */
   readonly onCall?: (userId: number) => void;
-  /** Called when the user clicks "Report" (B9-10); the popup closes first. */
+  /** Called when the user clicks "Report"; the popup closes first. */
   readonly onReport?: (userId: number) => void;
-  /** Called when the user clicks Block / Unblock (WP 3B-2); the popup closes
+  /** Called when the user clicks Block / Unblock; the popup closes
    *  first. `block` is the state asked for. Omitted: no button. */
   readonly onToggleBlock?: (userId: number, block: boolean) => void;
   /** Whether the viewer has blocked this user: picks Block or Unblock. */
@@ -128,10 +128,10 @@ export interface UserProfilePopupOptions {
   readonly unavailableReason?: string;
   /** Live role and role picker. Absent: the badge shows `user.role` as given. */
   readonly roleControl?: ProfileRoleControl;
-  /** Role chips with remove and add (WP 6.3d). Set on a multi-role server; it
+  /** Role chips with remove and add. Set on a multi-role server; it
    *  replaces the single-role picker. Absent: `roleControl` as before. */
   readonly rolesControl?: ProfileRolesControl;
-  /** The viewer's private note about this member (WP 6.11c). Absent: no Note
+  /** The viewer's private note about this member. Absent: no Note
    *  section (the viewer's own card, or no session to keep a note in). */
   readonly note?: NoteBinding;
   /** Called when the popup is destroyed, before `onClose`, so an edit still
@@ -322,7 +322,7 @@ export function createUserProfilePopup(
       setText(customStatusEl, user.customStatus);
     }
 
-    // The game being played, under the custom status (WP 8.3). Empty (and
+    // The game being played, under the custom status. Empty (and
     // hidden by CSS) when there is none.
     const activityEl = createElement("div", {
       class: "upp-activity",
@@ -337,7 +337,7 @@ export function createUserProfilePopup(
       appendChildren(activityEl, icon, text);
     }
 
-    // The song being listened to, under the game (WP 8.10). Its clock stops
+    // The song being listened to, under the game. Its clock stops
     // with the popup.
     const listeningEl = createElement("div", {
       class: "upp-listening",

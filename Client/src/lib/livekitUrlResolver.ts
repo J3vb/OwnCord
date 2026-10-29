@@ -1,6 +1,6 @@
 // LiveKit URL resolver — extracted from livekitSession.ts.
 // Owns URL resolution (direct vs TLS proxy) and the Rust-side TLS proxy
-// lifecycle, through `platform/desktop`'s `nativeProxies` (B7-5), which holds
+// lifecycle, through `platform/desktop`'s `nativeProxies`, which holds
 // the server host and the tunnel. The app has one LiveKit session, so one
 // resolver.
 

@@ -135,7 +135,7 @@ export function renderDayDivider(iso: string): HTMLDivElement {
 }
 
 /**
- * The unread bar pinned to the top of the message region (P4-03 step B). The
+ * The unread bar pinned to the top of the message region. The
  * caller owns the label text and the `hidden` state; the button only reports
  * the click.
  */
@@ -191,7 +191,7 @@ export function renderNewDivider(): HTMLDivElement {
  * A stable key for the identity a row's author is drawn from — the avatar URL,
  * the displayed name, the username (the hover handle) and the role colour.
  * MessageList compares it against the last render to repaint only the rows
- * whose author actually changed (P4-02), so a role change or a rename does not
+ * whose author actually changed, so a role change or a rename does not
  * rebuild every other row.
  */
 export function authorAvatarKey(
@@ -205,7 +205,7 @@ export function authorAvatarKey(
   return `${author.avatar ?? ""}\u0000${resolveDisplayName(author)}\u0000${author.username}\u0000${roleColor}`;
 }
 
-/** Apply the connection gate to one delete button in place (CLI-08). */
+/** Apply the connection gate to one delete button in place. */
 function applyDeleteGate(
   btn: HTMLButtonElement,
   status: "connected" | "reconnecting" | "disconnected",
@@ -279,7 +279,7 @@ function renderReplyRef(
     bar.classList.add("msg-reply-ref--blocked");
     setText(bar, messagingText("blocked.message"));
   } else if (ref) {
-    // A sticker message has no text of its own: say what it is (WP 8.8).
+    // A sticker message has no text of its own: say what it is.
     const plain =
       stickerReplyText(ref.sticker, ref.content) ??
       Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
@@ -291,7 +291,7 @@ function renderReplyRef(
     const author = resolveAuthor(ref.user);
     const roleColor = userRoleColorVar(ref.user.id);
     // Tag the quoted author so a rename/role change repaints it in place,
-    // without rebuilding the row (P4-02).
+    // without rebuilding the row.
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
     const miniAvatar = createAvatarElement(author, {
       className: "rr-avatar",
@@ -341,7 +341,7 @@ function renderSystemMessage(msg: Message): HTMLDivElement {
 }
 
 /**
- * A DM call log row (WP 3B-9c), drawn from `kind` and `call` only, never from
+ * A DM call log row, drawn from `kind` and `call` only, never from
  * `content`. Live calls offer Join; an ended call reads "lasted N minutes" to
  * the author and anyone who joined, and "You missed a call" to everyone else.
  */
@@ -413,7 +413,7 @@ function renderCallRow(
 }
 
 /**
- * A group DM system row (WP 3B-11a): add, remove, leave, rename, icon. A
+ * A group DM system row: add, remove, leave, rename, icon. A
  * one-line record like a call row, drawn from `kind` + `groupEvent` alone. The
  * group name is set as text, so it is never parsed as markdown or mentions.
  */
@@ -436,7 +436,7 @@ function renderGroupRow(msg: Message, text: string): HTMLDivElement {
 }
 
 /**
- * A "pinned a message" row (WP 6.12): the same one-line record as a group row,
+ * A "pinned a message" row: the same one-line record as a group row,
  * with two links in its sentence. See pinRows.ts.
  */
 function renderPinRow(msg: Message, opts: MessageListOptions, signal: AbortSignal): HTMLDivElement {
@@ -456,7 +456,7 @@ function renderPinRow(msg: Message, opts: MessageListOptions, signal: AbortSigna
 }
 
 /**
- * A welcome row (WP 8.6): the joiner's avatar, one greeting line picked by the
+ * A welcome row: the joiner's avatar, one greeting line picked by the
  * row id, and a Wave button for everyone else who can post in the channel.
  */
 function renderWelcomeRow(
@@ -525,7 +525,7 @@ function sendErrorReason(code: string | null): string {
   }
 }
 
-/** A message that is nothing but voice messages (WP 8.9): no empty text line above the player. */
+/** A message that is nothing but voice messages: no empty text line above the player. */
 function isVoiceOnly(msg: Message): boolean {
   return (
     msg.content === "" && msg.attachments.length > 0 && msg.attachments.every(isVoiceAttachment)
@@ -589,7 +589,7 @@ export function renderMessage(
   allMessages: readonly Message[],
   opts: MessageRenderOptions,
   signal: AbortSignal,
-  /** The inline editor to host in place of the message body (WP 3A-8). */
+  /** The inline editor to host in place of the message body. */
   editor?: HTMLElement,
 ): HTMLDivElement {
   // id 0 is the reserved sentinel for server-synthesized system rows (DB
@@ -646,7 +646,7 @@ export function renderMessage(
   const author = resolveAuthor(msg.user);
   const roleColor = userRoleColorVar(msg.user.id);
   // Tag the row with the identity it was drawn from, so MessageList can repaint
-  // only the rows whose author actually changed on a roleRevision bump (P4-02).
+  // only the rows whose author actually changed on a roleRevision bump.
   el.dataset["authorKey"] = authorAvatarKey(author, roleColor);
   const avatar = createAvatarElement(author, {
     className: "msg-avatar",
@@ -727,7 +727,7 @@ export function renderMessage(
       el.appendChild(renderReactions(msg, opts, signal));
     }
   } else if (msg.sticker !== undefined) {
-    // A sticker stands alone (WP 8.8): the server's "[Sticker: name]" fallback
+    // A sticker stands alone: the server's "[Sticker: name]" fallback
     // is for clients that predate stickers. It has no files or embeds, and
     // reactions stay.
     el.appendChild(renderStickerBody(msg.sticker, signal));
@@ -737,12 +737,12 @@ export function renderMessage(
   } else {
     // Key the parse cache by the message's identity plus its edit stamp: an
     // unchanged message reuses its parse when a row is re-materialised, and an
-    // edit changes the key so the new content is parsed (P4-02). Id 0 is the
+    // edit changes the key so the new content is parsed. Id 0 is the
     // unconfirmed-optimistic sentinel shared by every pending row, so it is not
     // a unique identity — those parse uncached.
     const cacheKey = msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`;
     const body = renderMessageContent(msg.content, mentionInfo, cacheKey);
-    // A forward's text, files and embeds sit inside its "Forwarded" frame (WP 6.9a).
+    // A forward's text, files and embeds sit inside its "Forwarded" frame.
     const box = msg.forward === undefined ? el : startForwardBlock();
     if (msg.status === "uploading" && msg.correlationId !== null) {
       // A queued row's Cancel describes itself by this text (3A-9).
@@ -779,7 +779,7 @@ export function renderMessage(
       el.appendChild(box);
     }
 
-    // The thread this message started, below its body (WP 6.9c).
+    // The thread this message started, below its body.
     const thread = threadOfMessage(msg);
     if (thread !== undefined) el.appendChild(renderThreadChip(thread, opts.onOpenThread, signal));
 
@@ -830,7 +830,7 @@ export function renderMessage(
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
 
     // The lock is applied at render from the current timeout, then updated in
-    // place by refreshReactionLocks when the timeout changes (P4-02).
+    // place by refreshReactionLocks when the timeout changes.
     quickReactionEmojiForPass(QUICK_REACTIONS).forEach((emoji, index) => {
       // A new emoji on a message at the cap is left out, as in the menu.
       if (atReactionLimit(msg.reactions, emoji)) return;
@@ -915,7 +915,7 @@ export function renderMessage(
       // The listener is attached once; whether the button is disabled is read
       // at click time, so a connection flip is a class/attribute change on the
       // already-rendered button (refreshConnectionControls) rather than a row
-      // rebuild (CLI-08).
+      // rebuild.
       deleteBtn.addEventListener(
         "click",
         (e) => {

@@ -1,8 +1,8 @@
 /**
- * The Settings "Safety" tab body (B9-15): the current restriction and the
+ * The Settings "Safety" tab body: the current restriction and the
  * caller's own moderation history (GET /users/me/moderation). Shows only what
  * that member-safe read returns: never an actor, reporter, evidence or note.
- * Its Appeals section (B9-16) files, withdraws and tracks the caller's own
+ * Its Appeals section files, withdraws and tracks the caller's own
  * appeals. Loaded on first open (destinations.ts), outside the MainPage chunk.
  */
 

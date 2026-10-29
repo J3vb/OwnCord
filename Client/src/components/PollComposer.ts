@@ -1,5 +1,5 @@
 /**
- * Poll composer (WP 6.9b): the dialog behind the composer's Poll button. A
+ * Poll composer: the dialog behind the composer's Poll button. A
  * question (300 characters), two to ten answers (55 each, each with an optional
  * emoji), a duration and an "Allow multiple answers" switch, with a live
  * counter on every field. Post sends `poll_create` and waits for its reply; a

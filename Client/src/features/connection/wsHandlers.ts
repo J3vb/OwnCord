@@ -109,9 +109,9 @@ export function handleAuthError(
   clearAuth(epochRefusal ? "protocol_epoch" : "user");
 }
 
-// RT-12: a restart that may put us back in our call after it drops. The
+// A restart that may put us back in our call after it drops. The
 // shutdown reason is a stop or restart from outside the server (SIGTERM, a
-// supervisor), and D-2 gives it its own shorter window: a quick systemctl/
+// supervisor), and it gets its own shorter window: a quick systemctl/
 // docker restart is a blip, while a long maintenance stop still ends the call.
 const REJOIN_WINDOWS_MS: ReadonlyMap<ServerRestartReasonValue, number> = new Map([
   [ServerRestartReason.UPDATE, 10 * 60_000],
@@ -133,10 +133,10 @@ export function handleServerRestart(
   // same channel, and MainPage's banner counts down. A zero delay
   // (update_aborted) withdraws the announcement.
   clock.restartAnnounced = payload.delay_seconds > 0;
-  // RT-12: mark whether the coming drop may put us back in our call. The hub
+  // Mark whether the coming drop may put us back in our call. The hub
   // wipes voice_states on boot, so the resume cannot restore the membership
   // the way it restores chat; the drop records the channel and a later ready
-  // sends one voice_join. The notice carries the reason's own window (D-2): a
+  // sends one voice_join. The notice carries the reason's own window: a
   // planned restart gets 10 minutes, an outside shutdown a shorter 2 minutes.
   const windowMs = REJOIN_WINDOWS_MS.get(payload.reason);
   clock.voiceRejoinExpiresAt =
@@ -153,7 +153,7 @@ export function handleServerRestart(
 export function handleRestartDrop(clock: ReconnectClock, state: ConnectionState): void {
   if (!clock.restartAnnounced || (state !== "reconnecting" && state !== "disconnected")) return;
   clock.restartAnnounced = false;
-  // RT-12: record the call we are in now, before leaveVoiceChannel clears it,
+  // Record the call we are in now, before leaveVoiceChannel clears it,
   // so a switch, join, kick or leave during the countdown is already settled.
   const channelId = voiceStore.getState().currentChannelId;
   clock.voiceRejoinChannelId = clock.voiceRejoinExpiresAt === null ? null : channelId;
@@ -164,7 +164,7 @@ export function handleRestartDrop(clock: ReconnectClock, state: ConnectionState)
 }
 
 /**
- * RT-12: put the user back in the voice channel a planned restart took them
+ * Put the user back in the voice channel a planned restart took them
  * out of. The hub wipes voice_states on boot, so the resume cannot restore the
  * membership the way it restores chat; `handleRestartDrop` recorded the
  * channel, and this runs once from `ready`. It sends one ordinary voice_join —
@@ -219,7 +219,7 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
     // but it only runs once the router has reached "main" — during
     // login / auto-login / the connected-overlay window it hasn't, so
     // left to that subscriber alone the client redials the same banned
-    // token via scheduleReconnect() forever (OC-0107). Disconnect here
+    // token via scheduleReconnect() forever. Disconnect here
     // directly: it's idempotent with that subscriber's own
     // ws.disconnect() and covers every router state, not just "main".
     setTransientError(`${connectText("session.banned")} ${safetyText("appeals.unavailable")}`);

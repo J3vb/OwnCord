@@ -38,7 +38,7 @@ export interface SearchOverlayOptions {
   ) => Promise<SearchResponse>;
   readonly onSelectResult: (result: SearchResultItem) => void;
   readonly onClose: () => void;
-  /** The channel the overlay opened on; omitted behind the NSFW gate (B9-7). */
+  /** The channel the overlay opened on; omitted behind the NSFW gate. */
   readonly currentChannelId?: number;
 }
 
@@ -189,8 +189,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   // Whole server is the default scope (D4 option b: "Whole server by default
   // with an 'in #channel' chip"), matching Discord. The chip that narrows to
   // the current channel is only offered when the overlay opened on one, so the
-  // NSFW gate (which opens it without a channel) can never be narrowed back in
-  // (B9-7).
+  // NSFW gate (which opens it without a channel) can never be narrowed back in.
   let scopeServer = true;
   let nextBefore: number | null = null;
   // The query that produced the currently displayed results. Paging must use it
@@ -285,7 +284,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       input.setAttribute("aria-activedescendant", `search-result-option-${activeIndex}`);
       // The results box is a fixed max-height scroller, so the roving highlight
       // otherwise walks off the bottom while Enter still opens the hidden row.
-      // The sibling inline autocomplete already does this (OC-0370).
+      // The sibling inline autocomplete already does this.
       (resultsDiv.children[activeIndex] as HTMLElement | undefined)?.scrollIntoView({
         block: "nearest",
       });
@@ -496,7 +495,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       const selected = results[activeIndex];
       if (selected !== undefined) {
         // Picking a hit jumps to it without closing the panel, so a reader can
-        // walk through several hits (DP-20). Escape or the backdrop closes.
+        // walk through several hits. Escape or the backdrop closes.
         options.onSelectResult(selected);
       }
     }

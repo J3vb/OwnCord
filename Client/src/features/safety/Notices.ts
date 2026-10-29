@@ -1,5 +1,5 @@
 /**
- * Moderation notice UI (B9-15, owner decision Q4).
+ * Moderation notice UI.
  *
  * - The banner: unacknowledged warnings, oldest first, at the top of the app.
  *   Never a modal and never dismissable: the only action is Acknowledge,
@@ -180,7 +180,7 @@ const log = createLogger("safety");
 /** The mounted banner's client, for the Safety tab's appeal actions. */
 let tabApi: AppealsApi | null = null;
 
-/** B9-15's section of the Settings "Safety" tab (see buildSafetyPane). Its body loads on first open. */
+/** The notices section of the Settings "Safety" tab (see buildSafetyPane). Its body loads on first open. */
 export function buildSafetyTab(signal: AbortSignal): HTMLDivElement {
   const pane = createElement("div", { class: "settings-pane active safety-tab" });
   // A slot of its own keeps this body first, above sections added after it.

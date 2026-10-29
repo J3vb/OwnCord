@@ -1,4 +1,4 @@
-// Message Requests WebSocket handlers (B9-5) — lib/dispatcher.ts keeps the
+// Message Requests WebSocket handlers — lib/dispatcher.ts keeps the
 // socket subscriptions and calls these plain functions.
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { mapRequest } from "./api";

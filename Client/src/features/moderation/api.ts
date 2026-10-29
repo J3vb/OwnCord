@@ -1,10 +1,10 @@
 /**
- * The Moderation Center adapter (B9-11): the one place the B5-8 queue and
+ * The Moderation Center adapter: the one place the queue and
  * report wire shapes become the view's model.
  *
  * It keeps only what the view renders: an attachment keeps its name, type and
  * size but never its id, so nothing past this point can fetch the file.
- * Internal notes stay apart from the history (B9-12), which merges the
+ * Internal notes stay apart from the history, which merges the
  * report's own events and the moderator actions taken with it in time order.
  *
  * Evidence is only ever narrowed here, never widened: the server's
@@ -62,7 +62,7 @@ export interface EvidenceRow {
 
 export type Evidence =
   | { readonly kind: "shown"; readonly rows: readonly EvidenceRow[] }
-  /** Withheld until this account acknowledges `channelId` (B5-7/B9-7). */
+  /** Withheld until this account acknowledges `channelId`. */
   | { readonly kind: "consent"; readonly channelId: number }
   | { readonly kind: "unavailable" };
 
@@ -173,7 +173,7 @@ function mapEvidence(w: ModerationReportDetail): Evidence {
   };
 }
 
-/** The end of a timeout taken with this report that is still running at `now` (B9-13). */
+/** The end of a timeout taken with this report that is still running at `now`. */
 export function activeTimeoutEnd(detail: ReportDetail, now: number): string | null {
   for (const e of detail.history) {
     if (e.kind !== "action" || e.action !== "timeout" || e.liftedAt !== null) continue;
@@ -238,7 +238,7 @@ export function mapDetail(w: ModerationReportDetail): ReportDetail {
 }
 
 /**
- * A report opened by id from an appeal (B9-17), which may be outside the
+ * A report opened by id from an appeal, which may be outside the
  * current filter: its title and names come from the report itself.
  */
 export function itemFromDetail(w: ModerationReportDetail, name: (id: number) => string): QueueItem {
@@ -257,7 +257,7 @@ export function itemFromDetail(w: ModerationReportDetail, name: (id: number) => 
 }
 
 /**
- * An appeal queue row (B9-17). The appellant's statement and any decision
+ * An appeal queue row. The appellant's statement and any decision
  * note are dropped here: the list shows who, what state and when, and the
  * text is read only with the appeal it belongs to.
  */

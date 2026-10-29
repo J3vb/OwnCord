@@ -86,7 +86,7 @@ export function createSidebarMemberSection(
    * Give the section a definite height (a saved or dragged one, or `auto` when
    * collapsed), or clear it back to its flex share of the column. The `.sized`
    * class mirrors this, so the stylesheet can size the section to the height
-   * instead of flexing it to fill the space the channel list leaves (P1-01).
+   * instead of flexing it to fill the space the channel list leaves.
    */
   function applyMemberHeight(height: string | null): void {
     memberListContainer.style.height = height ?? "";

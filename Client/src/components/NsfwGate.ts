@@ -1,9 +1,9 @@
 /**
  * NsfwGate — the consent gate shown INSTEAD of a channel labelled NSFW, and
- * the bar that lets the reader withdraw that consent (B9-7).
+ * the bar that lets the reader withdraw that consent.
  *
  * The server withholds a labelled channel's content until the account has
- * acknowledged it (B5-7), so nothing is mounted or fetched under the gate:
+ * acknowledged it, so nothing is mounted or fetched under the gate:
  * accepting records the acknowledgement with the server first, and only the
  * confirmed store change makes ChannelController mount the channel.
  *

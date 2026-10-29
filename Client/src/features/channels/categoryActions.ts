@@ -1,5 +1,5 @@
 /**
- * Category management calls (WP 6.5b): create, rename, delete and move. Each is
+ * Category management calls: create, rename, delete and move. Each is
  * a REST call wrapped in try/catch at the call site that turns a failure into a
  * user-visible toast; none writes a store. The result arrives the way every
  * other category change does, as `channel_update` frames and a
@@ -130,7 +130,7 @@ export async function moveCategory(
 }
 
 /**
- * Drop a dragged category before or after another (WP 6.5c): the full id list
+ * Drop a dragged category before or after another: the full id list
  * with `id` taken out and put back next to `targetId`. A drop that leaves the
  * order as it is, or names a category the list does not hold, sends nothing.
  */

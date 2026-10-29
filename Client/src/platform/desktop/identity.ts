@@ -8,7 +8,7 @@
  *   - identity_pins.json (store/get_identity_pin, key `{host}:{userId}`):
  *     peers' pinned identity PUBLIC keys (base64), for TOFU verification.
  *
- * Lifted verbatim from `lib/identity.ts` (B7-4): same commands, same
+ * Lifted verbatim from `lib/identity.ts`: same commands, same
  * arguments, same error handling, same log lines. The tri-state results are
  * part of the contract precisely because collapsing them is a security bug —
  * see the comments below, which travel with the code.
@@ -122,8 +122,7 @@ export const identity: IdentityStore = {
   /**
    * Look up a peer's pinned identity public key.
    *
-   * A store read error is returned as "unavailable", NOT "unpinned" (DC-08,
-   * F3 follow-up 3): collapsing the two let a transient keyring error send a
+   * A store read error is returned as "unavailable", NOT "unpinned": collapsing the two let a transient keyring error send a
    * pinned peer down the first-sight path — silently verifying against, and
    * then re-pinning, whatever key the server delivered. Callers must fail
    * closed on "unavailable". In non-Tauri environments (tests, browser) there

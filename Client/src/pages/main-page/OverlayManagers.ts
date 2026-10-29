@@ -568,7 +568,7 @@ export function createPinnedPanelController(opts: {
     getRoot: opts.getRoot,
     canOpen: () => {
       channelId = opts.getCurrentChannelId();
-      // A gated NSFW channel's pins are its content (B9-7): the gate already
+      // A gated NSFW channel's pins are its content: the gate already
       // says why nothing is shown, so the panel stays shut.
       return channelId !== null && !nsfwContentBlocked(channelId);
     },
@@ -743,7 +743,7 @@ export function createSearchOverlayController(opts: {
     root: HTMLDivElement,
   ): void {
     const current = opts.getCurrentChannelId();
-    // Behind the NSFW gate only a server-wide search is offered (B9-7).
+    // Behind the NSFW gate only a server-wide search is offered.
     const channelId = current !== null && nsfwContentBlocked(current) ? null : current;
 
     instance = screen.createSearchOverlay({

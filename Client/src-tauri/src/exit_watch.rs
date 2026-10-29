@@ -108,10 +108,7 @@ pub fn start<R: Runtime>(app: &AppHandle<R>, log_dir: &Path, version: &str) {
 /// event loop's exit; later calls are no-ops.
 pub fn note_exit(how: &str) {
     let Some(watch) = WATCH.get() else { return };
-    let _writing = watch
-        .run_file_lock
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let _writing = crate::sync::lock(&watch.run_file_lock);
     if watch.exited.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -232,10 +229,7 @@ fn write_run_file(watch: &Watch) {
     } else {
         "running"
     };
-    let _writing = watch
-        .run_file_lock
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
+    let _writing = crate::sync::lock(&watch.run_file_lock);
     if watch.exited.load(Ordering::SeqCst) {
         return;
     }

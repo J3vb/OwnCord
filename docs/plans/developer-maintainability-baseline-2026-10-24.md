@@ -778,3 +778,41 @@ No existing assertion was changed.
 ### Verdict
 
 Kept. A server code the client checks for can no longer be misspelt or fall out of the server's list unnoticed, and the two drifted hand unions are gone. No saving in time or tokens is claimed.
+
+## MX-18: one lock policy for the desktop app's Rust mutexes (2026-10-29)
+
+### Counts
+
+Counted on `dev` `cb021e48` with a regex scan of `Client/src-tauri/src` that cuts off `#[cfg(test)]` modules and `tests.rs` files (multi-line calls included). Async (`tokio`) mutexes are not counted: they cannot be poisoned.
+
+| Measure                                                                                    | Before | After              |
+| ------------------------------------------------------------------------------------------ | ------ | ------------------ |
+| `lock().unwrap()` outside tests (all in `native_voice/session.rs`)                         | 20     | 0                  |
+| Inline `lock().unwrap_or_else(… into_inner)` copies outside tests                          | 60     | 0                  |
+| Files holding those copies                                                                 | 21     | 0                  |
+| Private free `lock` helpers (`playout`, `capture`, `notification_bus`, `portal_shortcuts`) | 4      | 0                  |
+| `lock().unwrap()` in tests                                                                 | 17     | 0                  |
+| Places a std `Mutex::lock` may be called (clippy `disallowed-methods`)                     | any    | 1 file (`sync.rs`) |
+
+The scout counted 46 inline copies in 20 files; the multi-line scan finds 60 in 21. Four struct accessors (`JsonStore::lock`, `ActiveSession::lock`, `HttpPool::lock`, `Apm::lock`) stay: each names its one field and now calls the shared helper.
+
+### What changed
+
+- New `Client/src-tauri/src/sync.rs` holds `lock` (takes the data back from a lock a panic poisoned, the policy most of the crate already used) and `lock_checked` (returns the poison error, for the three TLS fingerprint reads in `http_proxy.rs`, `ws_proxy.rs` and `tofu.rs`, which keep failing closed as before).
+- `clippy.toml` bans `std::sync::Mutex::lock` everywhere else, the same mechanism as the truncating-write ban. Lock scope is unchanged at every site: each call became `lock(&x)` in the same expression position.
+- Behaviour change, on Linux only: the 20 `unwrap()` calls in the native voice session (camera, screen-share and share-audio slots) recover a poisoned slot instead of panicking again. Read from code, not reproduced in the app.
+- New tests: `sync.rs` (a poisoned lock hands its data back; the checked lock reports it) and `native_voice/session.rs` (a slot poisoned by a panicking thread still takes a republish and releases).
+
+### Checks
+
+| Check                                            | Before | After                  |
+| ------------------------------------------------ | ------ | ---------------------- |
+| `cargo clippy --all-targets -- -D warnings` (CI) | pass   | see the PR's Rust jobs |
+| `cargo test` (CI, Linux)                         | pass   | see the PR's Rust jobs |
+| `cargo fmt --check`                              | pass   | pass                   |
+
+No existing assertion was changed; test code only swapped `lock().unwrap()` for the helper.
+
+### Verdict
+
+Kept if CI is green. One place holds the lock policy and the linter holds the count at 0. No saving in time or tokens is claimed.

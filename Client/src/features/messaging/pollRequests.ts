@@ -1,5 +1,5 @@
 /**
- * The envelope ids of in-flight poll frames (WP 6.9b). The dispatcher's error
+ * The envelope ids of in-flight poll frames. The dispatcher's error
  * handler asks `isPollRequest` so a refused create, vote or end is reported
  * once, on the dialog or card that sent it, and not again by the generic error
  * toast. A leaf with no imports of its own beyond the session registry: the

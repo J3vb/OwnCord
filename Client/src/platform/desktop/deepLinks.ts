@@ -1,5 +1,5 @@
 // owncord:// deep links through the native deep-link plugin. Lifted verbatim
-// from `lib/deep-link.ts`'s `initDeepLinks` (B7-5); the parsers it dispatches
+// from `lib/deep-link.ts`'s `initDeepLinks`; the parsers it dispatches
 // through are pure and stay in `lib/deep-link.ts`.
 //
 // The plugin stays a dynamic `import()`: it is not part of the startup chunk

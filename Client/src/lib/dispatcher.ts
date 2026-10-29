@@ -195,7 +195,7 @@ export function wireDispatcher(
     ws.on(S.AUTH_OK, (payload) => {
       handleAuthOk(ws, clock, payload);
       // Every connect and resume restates the game activity switch; a resume
-      // gets no ready, and the frame is not replayed (WP 8.3e-2).
+      // gets no ready, and the frame is not replayed.
       applyAuthOkGameActivityPolicy(payload);
       refreshSafetyOnResume(api, payload);
       // thread_focus is not carried across a connection: say it again, and
@@ -243,7 +243,7 @@ export function wireDispatcher(
       applyReadyStickers(api);
       applyReadySafety(api, payload);
       applyReadyMemberTimeouts(payload);
-      // RT-12: if a planned restart took us out of a voice channel, put us
+      // If a planned restart took us out of a voice channel, put us
       // back once ready confirms the post-restart world.
       rejoinVoiceAfterRestart(clock, ws, payload);
 
@@ -268,7 +268,7 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.CHAT_MESSAGE, (payload) => handleChatMessage(clock, payload)));
 
-  // ── Threads (WP 6.9c) ───────────────────────────────────
+  // ── Threads ───────────────────────────────────
 
   // thread_create_ok answers this socket's own create; thread_changed is the
   // thread's whole state, sequenced on its parent. Both replace what we hold.
@@ -315,7 +315,7 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.CHANNEL_UPDATE, handleChannelUpdate));
 
-  // channel_categories: the manager's category list, replaced wholesale (WP 6.5a).
+  // channel_categories: the manager's category list, replaced wholesale.
   unsubs.push(ws.on(S.CHANNEL_CATEGORIES, handleChannelCategories));
 
   unsubs.push(ws.on(S.CHANNEL_DELETE, handleChannelDelete));
@@ -323,10 +323,10 @@ export function wireDispatcher(
   unsubs.push(ws.on(S.NSFW_ACK, handleNsfwAck));
 
   // mention_count: a mention raised this user's badge in a channel they may not
-  // be viewing (DP-27).
+  // be viewing.
   unsubs.push(ws.on(S.MENTION_COUNT, handleMentionCount));
 
-  // read_state: this user's read pointer moved in a channel or DM (WP 3D-5).
+  // read_state: this user's read pointer moved in a channel or DM.
   unsubs.push(ws.on(S.READ_STATE, handleReadState));
   // A Mark Unread still waiting for its answer cannot get one across a change
   // of connection state; forget it rather than restore against the next.
@@ -335,7 +335,7 @@ export function wireDispatcher(
   unsubs.push(resetServerCapabilities, resetReadPointerState);
 
   // channel_activity: new messages in readable channels this user is not
-  // viewing, for their unread dot and alerts (WP 2B-2).
+  // viewing, for their unread dot and alerts.
   unsubs.push(ws.on(S.CHANNEL_ACTIVITY, handleChannelActivity));
   unsubs.push(resetChannelActivity);
 
@@ -345,11 +345,11 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.MEMBER_BAN, handleMemberBan));
 
-  // mod_action: a warning or timeout applied to this user (B9-15).
+  // mod_action: a warning or timeout applied to this user.
   unsubs.push(ws.on(S.MOD_ACTION, (payload) => handleModAction(api, payload)));
-  // appeal_status: the caller's own appeal changed state (B9-16).
+  // appeal_status: the caller's own appeal changed state.
   unsubs.push(ws.on(S.APPEAL_STATUS, (payload) => handleAppealStatus(api, payload)));
-  // mod_queue: a report changed; an open Moderation Center re-reads (B9-11).
+  // mod_queue: a report changed; an open Moderation Center re-reads.
   unsubs.push(ws.on(S.MOD_QUEUE, handleModQueue));
   // member_timeouts: the active-timeout list, replaced wholesale (3C-7c).
   unsubs.push(ws.on(S.MEMBER_TIMEOUTS, handleMemberTimeouts));
@@ -363,7 +363,7 @@ export function wireDispatcher(
 
   unsubs.push(ws.on(S.UPLOAD_POLICY, handleUploadPolicy));
 
-  // game_activity_policy: an admin turned game activity on or off (WP 8.3e-2).
+  // game_activity_policy: an admin turned game activity on or off.
   unsubs.push(ws.on(S.GAME_ACTIVITY_POLICY, handleGameActivityPolicy));
 
   unsubs.push(ws.on(S.USER_UPDATE, handleUserUpdate));
@@ -433,9 +433,9 @@ export function wireDispatcher(
       // writer for server events, so the rollback (a store write) lives here;
       // a no-op for any frame the sender did not put on the wire.
       // A BAD_REQUEST (a custom status the server's character or length rules
-      // refuse, WP 3C-9) leaves the same unaccepted optimistic value behind, so
+      // refuse) leaves the same unaccepted optimistic value behind, so
       // it takes the same rollback; the toast below carries the server's text.
-      // A REQUEST_TIMEOUT (the server's per-frame deadline, WP 4.1b) means the
+      // A REQUEST_TIMEOUT (the server's per-frame deadline) means the
       // frame was not applied, which leaves the same unaccepted value behind.
       if (
         payload.code === WsErrorCode.TIMED_OUT ||
@@ -459,7 +459,7 @@ export function wireDispatcher(
       // reader — ConnectPage's login-screen banner — so writing it here is
       // invisible for the whole time the user is in-app (MainPage never
       // subscribes) and only resurfaces, stale and out of context, next time
-      // the login screen mounts (OC-0064). Use the same in-app toast the
+      // the login screen mounts. Use the same in-app toast the
       // sibling CHANNEL_FULL/VIDEO_LIMIT branches above already use. Fire
       // synchronously, independent of the video-rollback lookup below: both
       // paths react to this exact same message, so there is nothing left to

@@ -1,4 +1,4 @@
-// Group DM member management (WP 3B-11a): the panel's view model, the gates for
+// Group DM member management: the panel's view model, the gates for
 // Add People / Remove / Make Group Owner, and the three REST actions with their
 // error texts. The panel, the picker and the page controller all go through
 // here, so the rules live in one place.

@@ -1,4 +1,4 @@
-// The browser platform's socket transport (6.13c): the page's own `WebSocket`
+// The browser platform's socket transport: the page's own `WebSocket`
 // behind the `SocketConnection` contract. `lib/ws.ts` keeps everything above
 // the seam, as on desktop: the auth frame, the state machine, the reconnect
 // policy, frame parsing and the send-failure codes.

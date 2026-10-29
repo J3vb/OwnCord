@@ -1,5 +1,5 @@
 /**
- * The voice-message player (WP 8.9): an attachment that carries a waveform and a
+ * The voice-message player: an attachment that carries a waveform and a
  * length renders as this, whatever MIME the server sniffed for its bytes.
  *
  * The bars come from the attachment's own metadata, so nothing is downloaded

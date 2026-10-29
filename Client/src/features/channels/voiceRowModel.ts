@@ -1,7 +1,7 @@
 /**
- * Pure builders for the voice row models (5.4c): a state snapshot in, the
+ * Pure builders for the voice row models: a state snapshot in, the
  * drawn values out. No builder reads a store; the sidebar's one `select`
- * hands them a `VoiceRowInputs` snapshot (5.4c-2), and
+ * hands them a `VoiceRowInputs` snapshot, and
  * `tests/unit/voice-row-model.test.ts` runs them under the store-read guard.
  *
  * Rule kept from the renderer these replace: an unverified peer is never
@@ -134,7 +134,7 @@ export function voiceChannelChrome(
   inputs: VoiceRowInputs,
 ): VoiceChannelChromeModel {
   const joined = inputs.currentChannelId === channel.id;
-  // A timeout refuses a join (TIMED_OUT) but never a leave (B9-15, Q4).
+  // A timeout refuses a join (TIMED_OUT) but never a leave.
   const timeoutReason =
     joined || inputs.timeout === null
       ? null

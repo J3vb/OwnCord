@@ -1,5 +1,5 @@
 /**
- * Local support bundle (B7-15c, PRD decision 7): a zip the user saves through
+ * Local support bundle: a zip the user saves through
  * the OS dialog. Nothing is uploaded and no server is called.
  *
  * Contents are an allowlist: the persisted log files, the voice diagnostics,

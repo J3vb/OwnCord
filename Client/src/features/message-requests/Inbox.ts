@@ -1,5 +1,5 @@
 /**
- * The Message Requests inbox view (B9-5, Q2): text only, with the B9-6
+ * The Message Requests inbox view: text only, with the
  * decisions on each request.
  *
  * A request is from someone the reader has not accepted, so opening the inbox

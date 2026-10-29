@@ -1,6 +1,6 @@
 /**
  * Ctrl/Cmd+B/I/U markdown wrapping, shared by the composer and the inline
- * message editor (WP 3A-8). Pure, so it is testable without a DOM selection.
+ * message editor. Pure, so it is testable without a DOM selection.
  */
 
 /** Ctrl/Cmd shortcut → markdown marker it wraps the selection in. */

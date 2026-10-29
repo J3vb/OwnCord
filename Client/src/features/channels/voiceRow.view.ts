@@ -1,6 +1,6 @@
 /**
  * What a voice channel row and its participant rows draw, from plain-data
- * models and nothing else (5.4c).
+ * models and nothing else.
  *
  * A model is the drawn values after formatting: the resolved name, each
  * tooltip with its fingerprint or safety number already in it, the capacity
@@ -10,7 +10,7 @@
  * models from a state snapshot and the sidebar binds the handlers.
  *
  * The DOM is the one `ChannelSidebar.ts`'s `renderVoiceChannelItem` drew
- * before 5.4c, class for class and attribute for attribute: sidebar.css, the
+ * before the row models were split out, class for class and attribute for attribute: sidebar.css, the
  * sidebar unit suite and the voice e2e specs select on it.
  */
 
@@ -163,7 +163,7 @@ export function drawVoiceUserRow(
     row.appendChild(local);
   }
 
-  // The local user's own session fingerprint (OC-0003): what a peer who sees
+  // The local user's own session fingerprint: what a peer who sees
   // us as unverified compares against.
   if (model.ownFingerprintTitle !== null) {
     const own = createElement("span", { class: "vu-verify vu-session-fp" });
@@ -247,7 +247,7 @@ export function drawVoiceChannelChrome(model: VoiceChannelChromeModel): HTMLDivE
   const item = createElement("div", {
     class: chromeClasses(model).join(" "),
     "data-testid": `channel-${model.channelId}`,
-    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+    // Roving list item: reachable by Tab once, then arrow-stepped.
     role: "button",
     tabindex: "-1",
   });

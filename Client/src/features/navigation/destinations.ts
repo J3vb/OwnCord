@@ -1,11 +1,11 @@
 /**
- * The Q2 destination map (B9-4, decided 2026-09-23): where later B9 features
+ * The destination map: where later features
  * plug into the existing shell. There is no new navigation rail.
  *
  * - Message Requests: "Message Requests (N)" at the top of DM mode.
  * - Moderation: "Moderation" beside "Audit Log", shown only with
  *   MODERATE_MEMBERS, opening in the content area (not the browser).
- * - Safety: a Settings tab, which the Q4 notice banner links to.
+ * - Safety: a Settings tab, which the notice banner links to.
  *
  * Back: close or Escape on a content view returns to the channel the user
  * came from, through the sidebar's existing channelBeforeDm path.
@@ -48,7 +48,7 @@ export interface FeatureViewContext {
 }
 
 /**
- * What a forum channel's post list needs (WP 6.9d). A forum is a channel, not a
+ * What a forum channel's post list needs. A forum is a channel, not a
  * content-area view: it is mounted by `ChannelController` in the messages slot
  * (the channel's own signal aborts it), so it carries no `close`.
  */
@@ -77,18 +77,18 @@ export interface CountSource {
 }
 
 export interface NavigationDestinations {
-  /** B9-5: the inbox. `pending` is N for the entry label and the DM header badge. */
+  /** The inbox. `pending` is N for the entry label and the DM header badge. */
   readonly requests?: { readonly build: FeatureViewBuilder; readonly pending: CountSource };
-  /** B9-11: the Moderation Center. The open-report count belongs inside the view. */
+  /** The Moderation Center. The open-report count belongs inside the view. */
   readonly moderation?: { readonly build: FeatureViewBuilder };
   /**
-   * B9-10/15/16: personal notices, restrictions, own reports and appeals.
+   * Personal notices, restrictions, own reports and appeals.
    * `signal` is the tab's lifetime; `api` reads the caller's own records.
    */
   readonly safety?: {
     readonly build: (signal: AbortSignal, api: ApiClient) => HTMLDivElement;
   };
-  /** WP 6.9d: a forum channel's post list, mounted by the channel controller. */
+  /** A forum channel's post list, mounted by the channel controller. */
   readonly forum?: { readonly build: (ctx: ForumViewContext) => HTMLElement };
 }
 

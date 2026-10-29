@@ -1,5 +1,5 @@
 /**
- * Sending a Forward (WP 6.9a): the lazy half of the picker. One `chat_forward`
+ * Sending a Forward: the lazy half of the picker. One `chat_forward`
  * per target, one after another, each with a `client_message_id` of its own and
  * held until its `chat_forward_ok` or `error` arrives (or the connection drops,
  * or the wait times out). An optional comment follows each accepted forward as

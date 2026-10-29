@@ -1,6 +1,6 @@
 /**
  * GroupMemberPanelController -- owns the group DM member panel's lifecycle in
- * the chat layout (WP 3B-11a). It mirrors how MainPage drives the 1:1 profile
+ * the chat layout. It mirrors how MainPage drives the 1:1 profile
  * panel: a lazily imported component mounted in the same right-hand slot, a
  * saved open/closed preference, a header toggle whose `aria-pressed` follows the
  * panel, and a sync that makes the panel match the active conversation without

@@ -1,5 +1,5 @@
-// Shared refusals for the inert browser platform (WP 6.13b). 6.13c/d replace
-// these members with real browser adapters one capability at a time.
+// Shared refusals for the inert browser platform. Real browser adapters
+// replace these members one capability at a time.
 import type { GlobalKeysError, GlobalKeysErrorCode } from "../contracts/globalShortcuts";
 
 /** Thrown by a capability the browser does not provide. */

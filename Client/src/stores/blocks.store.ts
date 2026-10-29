@@ -19,7 +19,7 @@ export interface BlocksState {
   readonly blockedByMe: ReadonlySet<number>;
   readonly blockedByThem: ReadonlySet<number>;
   /**
-   * Bumped by every accepted setUserBlockedByMe delta (OC-0218). Optional —
+   * Bumped by every accepted setUserBlockedByMe delta. Optional —
    * absent/undefined reads as revision 0 — so state literals that predate
    * this field (tests, a full setState replace) do not need updating.
    *
@@ -45,7 +45,7 @@ export const blocksStore = createStore<BlocksState>(INITIAL);
  *
  * `rev`, when given, must match the store's current blockedByMeRev — the
  * revision the caller observed right before starting the fetch this reply
- * answers (OC-0218). A mismatch means a fresher setUserBlockedByMe delta
+ * answers. A mismatch means a fresher setUserBlockedByMe delta
  * landed after the fetch was issued, so this reply is stale and is skipped
  * rather than reverting that delta. Omit `rev` to always apply (existing
  * direct callers, tests).
@@ -90,7 +90,7 @@ export function clearBlockedByThem(): void {
  *  unique per-server, so a previous server's block list must not carry
  *  into the next session).
  *
- *  Bumps `blockedByMeRev` rather than resetting it to 0 (OC-0366): a reset
+ *  Bumps `blockedByMeRev` rather than resetting it to 0: a reset
  *  would let a still-in-flight GET /blocks from the session being torn
  *  down match the next session's ready-time snapshot (both 0) and clobber
  *  it with the previous server's block list. */

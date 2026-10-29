@@ -81,7 +81,7 @@ export interface ServerPanelApi {
   updateHealthStatus(host: string, status: HealthStatus): void;
   /**
    * Advisory epoch-compatibility badge. It NEVER disables Connect — the
-   * WebSocket auth_error stays authoritative (Decision 1).
+   * WebSocket auth_error stays authoritative.
    */
   updateCompatibility(host: string, compatibility: Compatibility): void;
   destroy(): void;
@@ -129,7 +129,7 @@ export function createServerPanel(
   // page-lifetime `signal`, which only aborts once, at page teardown --
   // addEventListener({ signal }) keeps a detached row reachable via that
   // signal's own retained abort-listener list until it fires, so every
-  // re-render would otherwise leak the previous generation's rows (OC-0336),
+  // re-render would otherwise leak the previous generation's rows,
   // the same defect already fixed in MemberList/ChannelSidebar/MessageList.
   // renderOwner is aborted and replaced at the top of every render, so only the
   // CURRENT render's rows stay reachable.
@@ -209,7 +209,7 @@ export function createServerPanel(
       const host = createElement("span", { class: "srv-host" }, profile.host);
       const latency = createElement("span", { class: "srv-latency" });
       const onlineUsersEl = createElement("span", { class: "srv-online-users" });
-      // Advisory epoch badge (B7-12): text + modifier class set by
+      // Advisory epoch badge: text + modifier class set by
       // updateCompatibility; empty and inert until then.
       const compatEl = createElement("span", { class: "srv-compat-badge" });
       appendChildren(meta, host, latency, onlineUsersEl, compatEl);
@@ -500,7 +500,7 @@ export function createServerPanel(
     // release its own button listeners; registering them on the
     // page-lifetime `signal` instead (which only aborts once, at page
     // teardown) would keep every discarded modal subtree reachable until
-    // then (OC-0335). Chained to the page signal so an open modal is also
+    // then. Chained to the page signal so an open modal is also
     // torn down on page teardown.
     const modalOwner = new Disposable();
     signal.addEventListener("abort", () => modalOwner.destroy(), {
@@ -538,7 +538,7 @@ export function createServerPanel(
       // Validate address: must be a valid host or host:port (DNS name, IPv4,
       // bracketed/bare IPv6) — no paths, no special chars. Shared with
       // api.ts's setConfig so an address accepted here is also accepted by
-      // the actual connection path, and vice versa (OC-0187).
+      // the actual connection path, and vice versa.
       if (!isValidHost(addr)) {
         // Show inline validation error via the host input
         hostAddrInput.setCustomValidity(connectText("servers.add.invalidHost"));

@@ -1,7 +1,7 @@
 import { serverNow, serverTime } from "../features/safety/store";
 import { defineCatalog, formatDate } from "./format";
 
-/** Moderation notices and restrictions (B9-15, owner decision Q4). */
+/** Moderation notices and restrictions. */
 export const safetyText = defineCatalog("safety", {
   "banner.label": "Moderation notices",
   "notice.title": "Warning from the moderators",

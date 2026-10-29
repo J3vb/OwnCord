@@ -1,5 +1,5 @@
 /**
- * External-content consent (B9-8, Q3): nothing a message author links to is
+ * External-content consent: nothing a message author links to is
  * fetched from this machine until the viewer has agreed to it on this server.
  *
  * One choice per server profile, kept with the client preferences: "auto"

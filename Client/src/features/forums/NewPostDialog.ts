@@ -1,5 +1,5 @@
 /**
- * The New Post dialog (WP 6.9d): the forum's guidelines, a title (required,
+ * The New Post dialog: the forum's guidelines, a title (required,
  * with a counter), the tag picker (a required marker when the forum asks for a
  * tag), the opening message and its attachments. Loaded on first use, never at
  * startup.
