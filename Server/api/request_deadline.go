@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"regexp"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
 // WP 4.1c: a deadline on the non-streaming REST routes.
@@ -44,7 +46,7 @@ var restRequestDeadline = 15 * time.Second
 const requestDeadlineRetryAfter = "2"
 
 // requestDeadlineBody is the fixed 503 body.
-const requestDeadlineBody = `{"error":"SERVICE_UNAVAILABLE","message":"the server is busy; try again"}` + "\n"
+const requestDeadlineBody = `{"error":"` + string(httperr.CodeServiceUnavailable) + `","message":"the server is busy; try again"}` + "\n"
 
 // requestDeadlineExemption is one route (or family) the deadline must not
 // touch. method is "" for any method. path is matched against the request's

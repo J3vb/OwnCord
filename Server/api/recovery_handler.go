@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -93,22 +94,22 @@ func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			secret = req.Credential
 		}
 		if req.Username == "" || secret == "" || req.NewPassword == "" {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username, kit_secret (or credential) and new_password are required")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username, kit_secret (or credential) and new_password are required")
 			return
 		}
 		// Bound and normalise the username as login does: it becomes a limiter
 		// key and, on the fifth failure, a lockout row, so it must stay small.
 		if len(req.Username) > maxLoginUsernameLen*4 {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username too long")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username too long")
 			return
 		}
 		req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 		if err := auth.ValidateUsername(req.Username); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 			return
 		}
 		if err := auth.ValidatePasswordStrength(req.NewPassword); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 			return
 		}
 		res, err := svc.RecoverWithKit(r.Context(), service.RecoverInput{

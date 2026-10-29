@@ -94,8 +94,8 @@ const SERVER_READS_OUTSIDE = new Set([
   "Client/src-tauri/tauri.conf.json",
   ".superpowers/findings-ledger.json",
   // GENERATED from protocol/schema.json, but asserted from the Server side:
-  // `make protocol-verify` regenerates BOTH Server/ws/message_types.go and this
-  // file and fails on drift, so editing, deleting or renaming this path has to
+  // `make protocol-verify` regenerates Server/ws/message_types.go,
+  // Server/httperr/codes.go and this file and fails on drift, so editing, deleting or renaming this path has to
   // run the server job. The Go half needs no entry — it lives under Server/,
   // which already selects the job.
   "Client/src/lib/protocolTypes.ts",

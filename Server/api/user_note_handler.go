@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -24,7 +25,7 @@ type userNoteJSON struct {
 func parseNoteTarget(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, ok := pathID(r, "userId")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "invalid user id")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "invalid user id")
 		return 0, false
 	}
 	return id, true
@@ -43,7 +44,7 @@ func handleGetUserNote(notes *service.UserNoteService) http.HandlerFunc {
 		note, err := notes.Get(r.Context(), user.ID, target)
 		if err != nil {
 			slog.Error("get user note", "error", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not load note")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not load note")
 			return
 		}
 		writeJSON(w, http.StatusOK, userNoteJSON{UserID: target, Note: note})
@@ -68,20 +69,20 @@ func handlePutUserNote(notes *service.UserNoteService) http.HandlerFunc {
 			return
 		}
 		if in.Note == nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "invalid request body")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "invalid request body")
 			return
 		}
 		note, err := notes.Put(r.Context(), user.ID, target, *in.Note)
 		switch {
 		case errors.Is(err, service.ErrBadRequest):
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", fmt.Sprintf("note must be at most %d characters", maxUserNoteLen))
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, fmt.Sprintf("note must be at most %d characters", maxUserNoteLen))
 			return
 		case errors.Is(err, service.ErrNotFound):
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "user not found")
 			return
 		case err != nil:
 			slog.Error("put user note", "error", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not save note")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not save note")
 			return
 		}
 		writeJSON(w, http.StatusOK, userNoteJSON{UserID: target, Note: note})

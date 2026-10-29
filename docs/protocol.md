@@ -3709,6 +3709,11 @@ warm resume served by replay never waits for a permit.
 
 ### Error Codes
 
+The full list is `error_codes.ws` of `protocol/schema.json`, generated into the
+`ErrCode*` constants (`Server/ws/message_types.go`) and `WsErrorCode`
+(`Client/src/lib/protocolTypes.ts`). REST replies use their own list (see
+`docs/api.md`): the same failure is `INTERNAL` here and `INTERNAL_ERROR` there.
+
 | Code                       | Description                                                                                                                                                                                                                                   |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `BAD_REQUEST`              | Invalid payload format or field values                                                                                                                                                                                                        |

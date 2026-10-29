@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -31,7 +32,7 @@ type categoryPermissionsResponse struct {
 // write or a sync can answer: the rows changed under it, nothing was written.
 func writeCategoryPermErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrPermsChanged) {
-		writeErr(w, http.StatusConflict, "PERMISSIONS_CHANGED", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodePermissionsChanged, err.Error())
 		return
 	}
 	writeOverrideErr(w, err)
@@ -42,17 +43,17 @@ func writeCategoryPermErr(w http.ResponseWriter, err error) {
 // authenticated actor's role. ok is false when a response has been written.
 func categoryPermSetup(channels *service.ChannelService, w http.ResponseWriter, r *http.Request, param, invalidMsg string, req *putChannelPermissionRequest) (categoryID, targetID int64, actorRole *db.Role, ok bool) {
 	if channels == nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 		return 0, 0, nil, false
 	}
 	categoryID, err := pathInt64(r, "id")
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid category id")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid category id")
 		return 0, 0, nil, false
 	}
 	targetID, err = pathInt64(r, param)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", invalidMsg)
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, invalidMsg)
 		return 0, 0, nil, false
 	}
 	if req != nil {
@@ -62,7 +63,7 @@ func categoryPermSetup(channels *service.ChannelService, w http.ResponseWriter, 
 	}
 	actorRole = actorRoleFromContext(r)
 	if actorRole == nil {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 		return 0, 0, nil, false
 	}
 	return categoryID, targetID, actorRole, true
@@ -169,7 +170,7 @@ func handleSyncChannelPermissions(channels *service.ChannelService) http.Handler
 		}
 		actorRole := actorRoleFromContext(r)
 		if actorRole == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		_, err := channels.SyncChannelPermissions(r.Context(), actorFromContext(r), actorRole, ch)
@@ -179,7 +180,7 @@ func handleSyncChannelPermissions(channels *service.ChannelService) http.Handler
 		}
 		synced, err := channels.ChannelPermissionsSynced(r.Context(), ch.ID)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read channel permissions")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to read channel permissions")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"channel_id": ch.ID, "permissions_synced": synced})

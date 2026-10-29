@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -30,7 +31,7 @@ func handleGetStats(users *service.UserService, hub HubBroadcaster) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		stats, err := users.ServerStats(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get stats")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get stats")
 			return
 		}
 		if hub != nil {
@@ -59,13 +60,13 @@ func handleListUsers(users *service.UserService) http.HandlerFunc {
 			BannedOnly: r.URL.Query().Get("banned") == "1",
 		}
 		if utf8.RuneCountInString(filter.Query) > maxUserSearchLen {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "search is too long")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "search is too long")
 			return
 		}
 
 		page, err := users.ListAll(r.Context(), filter, limit, offset)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list users")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list users")
 			return
 		}
 
@@ -130,7 +131,7 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.Us
 
 	id, err := pathInt64(r, "id")
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 		return 0, req, 0, false
 	}
 
@@ -140,9 +141,9 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.Us
 
 	if _, err := users.Get(r.Context(), id); err != nil {
 		if errors.Is(err, service.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "user not found")
 		} else {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to fetch user")
 		}
 		return 0, req, 0, false
 	}
@@ -152,7 +153,7 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.Us
 	// Prevent admins from modifying their own role or ban status, which
 	// could lock them out of the admin panel with no recovery path.
 	if id == actor {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "cannot modify your own account via admin panel")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "cannot modify your own account via admin panel")
 		return 0, req, 0, false
 	}
 
@@ -169,7 +170,7 @@ func patchUserAuthorizeRole(w http.ResponseWriter, r *http.Request, mod *service
 	}
 	if mod == nil {
 		// Fail closed rather than fall back to an unchecked UPDATE.
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 		return false
 	}
 	if _, _, _, err := mod.AuthorizeRoleChange(r.Context(), actor, id, *req.RoleID); err != nil {
@@ -189,7 +190,7 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 	}
 	if mod == nil {
 		// Fail closed rather than fall back to an unchecked UPDATE.
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 		return false
 	}
 	banReason := ""
@@ -238,7 +239,7 @@ func patchUserApplyRole(w http.ResponseWriter, r *http.Request, mod *service.Mod
 	// concurrent role delete), then commits and writes the audit row.
 	if mod == nil {
 		// Fail closed rather than fall back to an unchecked UPDATE.
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 		return false
 	}
 	_, err := mod.ChangeUserRole(r.Context(), actor, id, *req.RoleID)
@@ -310,7 +311,7 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *servic
 
 		updated, roleName, err := users.GetWithRoleName(r.Context(), id)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated user")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to fetch updated user")
 			return
 		}
 		if purge != nil {
@@ -331,12 +332,12 @@ func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 			return
 		}
 		if mod == nil {
 			// Fail closed rather than cut sessions without a hierarchy check.
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 			return
 		}
 
@@ -352,7 +353,7 @@ func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 // last role answers 409 LAST_ROLE, everything else follows writeModerationErr.
 func writeMemberRoleErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrLastRole) {
-		writeErr(w, http.StatusConflict, "LAST_ROLE", "a member must keep at least one role")
+		writeErr(w, http.StatusConflict, httperr.CodeLastRole, "a member must keep at least one role")
 		return
 	}
 	writeModerationErr(w, err)
@@ -368,17 +369,17 @@ func handleMemberRole(mod *service.ModerationService, add bool) http.HandlerFunc
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 			return
 		}
 		roleID, err := pathInt64(r, "roleId")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid role id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid role id")
 			return
 		}
 		if mod == nil {
 			// Fail closed rather than write user_roles without the checks.
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 			return
 		}
 		if add {
@@ -403,12 +404,12 @@ func handleDeleteUser(mod *service.ModerationService, hub HubBroadcaster) http.H
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 			return
 		}
 		if mod == nil {
 			// Fail closed rather than erase without a hierarchy check.
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 			return
 		}
 
@@ -433,7 +434,7 @@ func handleGetMe(settings *service.SettingsService, version string) http.Handler
 		user, userOK := r.Context().Value(adminUserKey).(*db.User)
 		role, roleOK := r.Context().Value(adminRoleKey).(*db.Role)
 		if !userOK || user == nil || !roleOK || role == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		me := adminMeResponse{

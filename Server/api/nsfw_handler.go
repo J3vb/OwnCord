@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
@@ -98,7 +99,7 @@ func nsfwRequestParams(w http.ResponseWriter, r *http.Request) (*db.User, int64,
 // otherwise answer with); everything else goes through the shared mapper.
 func writeNSFWError(ctx context.Context, w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrNotNSFW) {
-		writeErr(w, http.StatusConflict, "NOT_NSFW", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeNotNSFW, err.Error())
 		return
 	}
 	writeServiceError(ctx, w, err)

@@ -292,7 +292,7 @@ test("a server change also runs the native job, which builds and drives that ser
 });
 
 test("the generated TypeScript protocol file selects the server job", () => {
-  // `make protocol-verify` regenerates Server/ws/message_types.go AND this file,
+  // `make protocol-verify` regenerates Server/ws/message_types.go, httperr/codes.go AND this file,
   // then fails on drift — so a change here has to run the server job even though
   // the path lives under Client/.
   const sel = picked("M\tClient/src/lib/protocolTypes.ts");

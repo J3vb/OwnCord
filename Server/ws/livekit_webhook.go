@@ -38,7 +38,7 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 		// allocating memory for unauthenticated requests.
 		if r.Header.Get("Authorization") == "" {
 			slog.Warn("livekit webhook: missing Authorization header")
-			httperr.Write(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
+			httperr.Write(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "unauthorized")
 			return
 		}
 
@@ -53,7 +53,7 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 		event, err := webhook.ReceiveWebhookEvent(r, provider)
 		if err != nil {
 			slog.Warn("livekit webhook: verification failed", "error", err)
-			httperr.Write(w, http.StatusUnauthorized, "UNAUTHORIZED", "unauthorized")
+			httperr.Write(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "unauthorized")
 			return
 		}
 
@@ -69,7 +69,7 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 				// LiveKit retries failed deliveries. Acknowledging a failed
 				// reconciliation loses the only record of a participant that has
 				// no voice_states row for the periodic DB sweep to discover.
-				httperr.Write(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "voice reconciliation temporarily unavailable")
+				httperr.Write(w, http.StatusServiceUnavailable, httperr.CodeServiceUnavailable, "voice reconciliation temporarily unavailable")
 				return
 			}
 		case "participant_left":

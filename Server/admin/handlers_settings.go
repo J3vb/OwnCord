@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -21,12 +22,12 @@ import (
 func handleGetSettings(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "settings service unavailable")
 			return
 		}
 		all, err := settings.List(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get settings")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get settings")
 			return
 		}
 		writeJSON(w, http.StatusOK, all)
@@ -73,7 +74,7 @@ type configFactsResponse struct {
 func handleGetConfigFacts(cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if cfg == nil {
-			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeConfigUnavailable, "running configuration unavailable")
 			return
 		}
 		resp := configFactsResponse{
@@ -134,7 +135,7 @@ type gameActivityPolicyApplier interface {
 func handlePatchSettings(settings *service.SettingsService, retention *service.RetentionService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "settings service unavailable")
 			return
 		}
 		var updates map[string]string
@@ -150,19 +151,19 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 		// would report success for a policy the caller cannot set.
 		for key := range updates {
 			if service.IsOwnerOnlySettingKey(key) && !isOwnerFromContext(r) {
-				writeErr(w, http.StatusForbidden, "FORBIDDEN", "owner role required")
+				writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "owner role required")
 				return
 			}
 		}
 
 		if value, changing := updates["retention_days"]; changing {
 			if retention == nil {
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+				writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "retention service unavailable")
 				return
 			}
 			days, err := strconv.Atoi(strings.TrimSpace(value))
 			if err != nil || len(updates) != 1 {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "preview and apply retention_days separately from other settings")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "preview and apply retention_days separately from other settings")
 				return
 			}
 			if err := retention.ApplyChange(r.Context(), actorFromContext(r), service.RetentionChange{Scope: "server", Days: &days}, r.Header.Get("X-Retention-Preview")); err != nil {
@@ -175,7 +176,7 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 
 		all, err := settings.Patch(r.Context(), actorFromContext(r), updates)
 		if errors.Is(err, service.ErrBadRequest) {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return
 		}
 		// Turning game activity off must clear the games already shown and
@@ -193,7 +194,7 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 		}
 		if err != nil {
 			slog.ErrorContext(r.Context(), "settings patch failed", "error", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to update settings")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to update settings")
 			return
 		}
 		// Composers check the file-type lists before uploading, from what

@@ -17,6 +17,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/updater"
 )
 
@@ -65,7 +66,7 @@ func guardPerimeter(w http.ResponseWriter, g guardContext) bool {
 	ip := clientip.Resolve(g.r, proxies)
 	if len(g.next.Server.AdminAllowedCIDRs) > 0 &&
 		!clientip.InNets(ip, clientip.ParseCIDRList(g.next.Server.AdminAllowedCIDRs)) {
-		writeErr(w, http.StatusConflict, "LOCKOUT",
+		writeErr(w, http.StatusConflict, httperr.CodeLockout,
 			"this change would exclude your address from the admin panel and lock you out; refusing to save it")
 		return false
 	}
@@ -81,18 +82,18 @@ func guardPort(w http.ResponseWriter, g guardContext) bool {
 	// A port-only change must still catch the acme/port-80 conflict: guardTLS
 	// does not run when the PATCH names no tls.* key.
 	if g.next.TLS.Mode == "acme" && g.next.Server.Port == 80 {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
 			"server.port 80 conflicts with tls.mode acme; the HTTPS listener would occupy the port the ACME challenge needs")
 		return false
 	}
 	if updater.RunningInContainer() {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
 			"server.port cannot be changed from the panel in a container; the published port mapping fixes it")
 		return false
 	}
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(g.next.Server.Port))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
 			"server.port "+strconv.Itoa(g.next.Server.Port)+" is not available on this host")
 		return false
 	}
@@ -120,7 +121,7 @@ func guardTLS(w http.ResponseWriter, g guardContext) bool {
 
 func guardManualTLS(w http.ResponseWriter, g guardContext) bool {
 	if err := manualTLSPairError(g.next.TLS.CertFile, g.next.TLS.KeyFile); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 		return false
 	}
 	return true
@@ -151,11 +152,11 @@ func manualTLSPairError(certFile, keyFile string) error {
 
 func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 	if g.next.TLS.Domain == "" {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.domain must be set for acme mode")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.domain must be set for acme mode")
 		return false
 	}
 	if g.next.Server.Port == 80 {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
 			"server.port must not be 80 in acme mode; the HTTPS listener would occupy the port the ACME challenge needs")
 		return false
 	}
@@ -166,7 +167,7 @@ func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {
 	}
 	ln, err := net.Listen("tcp", ":80") //nolint:gosec // G102: probes whether the ACME challenge port is free; the listener is closed immediately
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.mode acme needs port 80 free for the ACME challenge")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.mode acme needs port 80 free for the ACME challenge")
 		return false
 	}
 	_ = ln.Close()
@@ -181,17 +182,17 @@ func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
 		return false
 	}
 	if sameFile(g.next.TLS.CertFile, g.next.TLS.KeyFile) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file and tls.key_file must be different paths")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.cert_file and tls.key_file must be different paths")
 		return false
 	}
 	certInfo, certErr := os.Stat(g.next.TLS.CertFile)
 	keyInfo, keyErr := os.Stat(g.next.TLS.KeyFile)
 	if certErr == nil && !certInfo.Mode().IsRegular() {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file exists but is not a regular file")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.cert_file exists but is not a regular file")
 		return false
 	}
 	if keyErr == nil && !keyInfo.Mode().IsRegular() {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.key_file exists but is not a regular file")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.key_file exists but is not a regular file")
 		return false
 	}
 	// When only one half exists, GenerateSelfSigned truncates it in place on
@@ -202,33 +203,33 @@ func guardSelfSignedTLS(w http.ResponseWriter, g guardContext) bool {
 			existing, key = g.next.TLS.KeyFile, "tls.key_file"
 		}
 		if !fileWritable(existing) {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", key+": the existing half of the pair is not writable and cannot be regenerated")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, key+": the existing half of the pair is not writable and cannot be regenerated")
 			return false
 		}
 	}
 	if certErr == nil && keyErr == nil {
 		cert, err := tls.LoadX509KeyPair(g.next.TLS.CertFile, g.next.TLS.KeyFile)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file/tls.key_file: the existing pair does not load")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.cert_file/tls.key_file: the existing pair does not load")
 			return false
 		}
 		if len(cert.Certificate) == 0 {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file does not hold a certificate")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.cert_file does not hold a certificate")
 			return false
 		}
 		leaf, err := x509.ParseCertificate(cert.Certificate[0])
 		if err != nil || time.Now().After(leaf.NotAfter) {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file: the certificate is unreadable or expired")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.cert_file: the certificate is unreadable or expired")
 			return false
 		}
 		return true
 	}
 	if !dirWritable(filepath.Dir(g.next.TLS.CertFile)) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file: the certificate directory is not writable")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.cert_file: the certificate directory is not writable")
 		return false
 	}
 	if !dirWritable(filepath.Dir(g.next.TLS.KeyFile)) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.key_file: the key directory is not writable")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.key_file: the key directory is not writable")
 		return false
 	}
 	return true
@@ -255,11 +256,11 @@ func guardBackupDir(w http.ResponseWriter, g guardContext) bool {
 		return false
 	}
 	if !dirExists(dir) || !dirWritable(dir) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "backup.dir must be an existing writable directory")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "backup.dir must be an existing writable directory")
 		return false
 	}
 	if pathWithin(dir, g.next.Upload.StorageDir) || pathWithin(dir, g.next.Plugins.Directory) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "backup.dir must not live inside the uploads or plugins directory")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "backup.dir must not live inside the uploads or plugins directory")
 		return false
 	}
 	return true
@@ -274,11 +275,11 @@ func guardStorageDir(w http.ResponseWriter, g guardContext) bool {
 		return false
 	}
 	if !dirExists(dir) || !dirWritable(dir) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "upload.storage_dir must be an existing writable directory")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "upload.storage_dir must be an existing writable directory")
 		return false
 	}
 	if dirEmpty(dir) && !dirEmpty(g.opts.RunningCfg.Upload.StorageDir) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
 			"upload.storage_dir is empty while the current directory holds files; copy the files first or every attachment returns 404")
 		return false
 	}
@@ -294,7 +295,7 @@ func guardPluginsDir(w http.ResponseWriter, g guardContext) bool {
 		return false
 	}
 	if !dirExists(dir) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must be an existing directory")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "plugins.directory must be an existing directory")
 		return false
 	}
 	return true
@@ -310,11 +311,11 @@ func guardPluginsOverlap(w http.ResponseWriter, g guardContext) bool {
 	}
 	dir := g.next.Plugins.Directory
 	if pathWithin(dir, g.next.Upload.StorageDir) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "plugins.directory must not live inside the uploads directory")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "plugins.directory must not live inside the uploads directory")
 		return false
 	}
 	if pathWithin(g.next.Server.DataDir, dir) || pathWithin(g.next.Upload.StorageDir, dir) || pathWithin(g.next.Backup.Dir, dir) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
 			"plugins.directory must not be or contain server.data_dir, upload.storage_dir or backup.dir")
 		return false
 	}
@@ -331,19 +332,19 @@ func guardAcmeCacheDir(w http.ResponseWriter, g guardContext) bool {
 	}
 	if info, err := os.Stat(dir); err == nil {
 		if !info.IsDir() {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.acme_cache_dir exists but is not a directory")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.acme_cache_dir exists but is not a directory")
 			return false
 		}
 		if dirWritable(dir) {
 			return true
 		}
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.acme_cache_dir is not writable")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.acme_cache_dir is not writable")
 		return false
 	}
 	if dirWritable(filepath.Dir(dir)) {
 		return true
 	}
-	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.acme_cache_dir does not exist and its parent is not writable")
+	writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tls.acme_cache_dir does not exist and its parent is not writable")
 	return false
 }
 
@@ -360,20 +361,20 @@ func guardLiveKitBinary(w http.ResponseWriter, g guardContext) bool {
 	}
 	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "voice.livekit_binary must name an existing regular file")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "voice.livekit_binary must name an existing regular file")
 		return false
 	}
 	if !binaryExecutable(info) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "voice.livekit_binary is not executable")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "voice.livekit_binary is not executable")
 		return false
 	}
 	if pathWithin(path, g.next.Server.DataDir) || pathWithin(path, g.next.Upload.StorageDir) ||
 		pathWithin(path, g.next.Backup.Dir) || pathWithin(path, g.next.Plugins.Directory) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "voice.livekit_binary must not live under the data, uploads, backups or plugins directory")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "voice.livekit_binary must not live under the data, uploads, backups or plugins directory")
 		return false
 	}
 	if !binarySafeFromServerUser(path, info) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "voice.livekit_binary must not be owned or writable by the server's own user")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "voice.livekit_binary must not be owned or writable by the server's own user")
 		return false
 	}
 	return true
@@ -384,7 +385,7 @@ func guardLiveKitBinary(w http.ResponseWriter, g guardContext) bool {
 // vanish when the container is recreated.
 func containerOutsideDataDir(g guardContext, path, key string, w http.ResponseWriter) bool {
 	if updater.RunningInContainer() && !pathWithin(path, g.next.Server.DataDir) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
 			key+": in a container only server.data_dir is a persistent volume; a path outside it would vanish when the container is recreated")
 		return true
 	}

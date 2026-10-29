@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -101,7 +102,7 @@ func MountModerationRoutes(r chi.Router, svc *service.Services, broadcaster Prof
 func moderationTargetIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	targetID, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "id must be a positive integer")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "id must be a positive integer")
 		return 0, false
 	}
 	return targetID, true
@@ -111,7 +112,7 @@ func handleModerationWarn(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -136,7 +137,7 @@ func handleModerationTimeout(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -171,7 +172,7 @@ func handleModerationUntimeout(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -190,7 +191,7 @@ func handleModerationActions(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -210,12 +211,12 @@ func handleModerationAckNotice(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		actionID, ok := pathID(r, "id")
 		if !ok {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "id must be a positive integer")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "id must be a positive integer")
 			return
 		}
 		if err := svc.Moderation.AcknowledgeWarning(r.Context(), userID, actionID); err != nil {
@@ -294,7 +295,7 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -307,12 +308,12 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 			return
 		}
 		if req.DisplayName == nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name is required (a string, or null to clear)")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "display_name is required (a string, or null to clear)")
 			return
 		}
 		var name *string
 		if err := json.Unmarshal(req.DisplayName, &name); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name must be a string or null")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "display_name must be a string or null")
 			return
 		}
 		updated, err := svc.Moderation.SetNickname(r.Context(), actorID, targetID, name)
@@ -320,7 +321,7 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 			// Same code as the member's own PATCH /users/me; the message is the
 			// validator's text without the sentinel prefix.
 			msg := strings.TrimPrefix(err.Error(), service.ErrBadRequest.Error()+": ")
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", msg)
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, msg)
 			return
 		}
 		if err != nil {

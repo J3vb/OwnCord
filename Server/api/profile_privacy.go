@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -32,7 +33,7 @@ func handleGetPrivacy(privacy *service.PrivacyService) http.HandlerFunc {
 		p, err := privacy.Get(r.Context(), user.ID)
 		if err != nil {
 			slog.Error("get privacy", "error", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not load privacy settings")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not load privacy settings")
 			return
 		}
 		writeJSON(w, http.StatusOK, privacyJSON{AllowMemberDMs: p.AllowMemberDMs, MessageRequests: p.MessageRequests})
@@ -75,13 +76,13 @@ func handlePutPrivacy(privacy *service.PrivacyService, broadcaster ProfileBroadc
 			return
 		}
 		if in.AllowMemberDMs == nil || in.MessageRequests == nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "invalid request body")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "invalid request body")
 			return
 		}
 		p, err := privacy.Set(r.Context(), user.ID, service.Privacy{AllowMemberDMs: *in.AllowMemberDMs, MessageRequests: *in.MessageRequests})
 		if err != nil {
 			slog.Error("set privacy", "error", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not save privacy settings")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not save privacy settings")
 			return
 		}
 		if !p.AllowMemberDMs {

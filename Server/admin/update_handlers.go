@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -41,13 +42,13 @@ const (
 func handleCheckUpdate(u *updater.Updater) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if u == nil {
-			writeErr(w, http.StatusServiceUnavailable, "UPDATE_UNAVAILABLE", "update checking is not configured")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeUpdateUnavailable, "update checking is not configured")
 			return
 		}
 		info, err := u.CheckForUpdate(r.Context())
 		if err != nil {
 			slog.Error("update check failed", "err", err)
-			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
+			writeErr(w, http.StatusBadGateway, httperr.CodeUpdateCheckFailed, "failed to check for updates — see server logs")
 			return
 		}
 		blocked := ""
@@ -82,7 +83,7 @@ func applyCancelled(ctx context.Context, w http.ResponseWriter) bool {
 		return false
 	}
 	slog.Info("update apply cancelled: the server is shutting down", "cause", ctx.Err())
-	writeErr(w, http.StatusServiceUnavailable, "SERVER_SHUTTING_DOWN",
+	writeErr(w, http.StatusServiceUnavailable, httperr.CodeServerShuttingDown,
 		"The server is shutting down; try the update again once it is back")
 	return true
 }
@@ -132,12 +133,12 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		// the old image. Refuse before any nil/availability logic so the
 		// answer does not depend on updater configuration.
 		if updater.RunningInContainer() {
-			writeErr(w, http.StatusServiceUnavailable, "CONTAINER_DEPLOYMENT",
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeContainerDeployment,
 				"in-place self-update is disabled in container deployments — upgrade by pulling the new image")
 			return
 		}
 		if u == nil {
-			writeErr(w, http.StatusServiceUnavailable, "UPDATE_UNAVAILABLE", "update checking is not configured")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeUpdateUnavailable, "update checking is not configured")
 			return
 		}
 
@@ -154,7 +155,7 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		// failing later as a download error.
 		if err := installWritable(); err != nil {
 			slog.Info("update apply refused: install directory not writable", "err", err)
-			writeErr(w, http.StatusServiceUnavailable, "INSTALL_READ_ONLY",
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeInstallReadOnly,
 				"this server cannot replace its own program file (the install folder is read-only to the service) — install the new release by hand")
 			return
 		}
@@ -198,7 +199,7 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		// the running image; restart handoff and cleanup use this same path.
 		exePath, err := updater.ExecutablePath()
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "cannot determine executable path")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "cannot determine executable path")
 			return
 		}
 		newPath := exePath + ".new"
@@ -272,19 +273,19 @@ func checkApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Upd
 			return updater.UpdateInfo{}, false
 		}
 		slog.Error("update check failed during apply", "err", err)
-		writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates — see server logs")
+		writeErr(w, http.StatusBadGateway, httperr.CodeUpdateCheckFailed, "failed to check for updates — see server logs")
 		return updater.UpdateInfo{}, false
 	}
 	if !info.UpdateAvailable {
 		if semver.Compare(info.Current, info.Latest) < 0 && !info.RequiredAssetsPresent {
-			writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+			writeErr(w, http.StatusBadGateway, httperr.CodeMissingAssets, "release is missing required assets")
 			return updater.UpdateInfo{}, false
 		}
-		writeErr(w, http.StatusConflict, "NO_UPDATE", "server is already up to date")
+		writeErr(w, http.StatusConflict, httperr.CodeNoUpdate, "server is already up to date")
 		return updater.UpdateInfo{}, false
 	}
 	if !info.RequiredAssetsPresent {
-		writeErr(w, http.StatusBadGateway, "MISSING_ASSETS", "release is missing required assets")
+		writeErr(w, http.StatusBadGateway, httperr.CodeMissingAssets, "release is missing required assets")
 		return updater.UpdateInfo{}, false
 	}
 	return info, true
@@ -306,7 +307,7 @@ func stageApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Upd
 			return "", false
 		}
 		slog.Error("update download/verify failed", "err", err)
-		writeErr(w, http.StatusBadGateway, "DOWNLOAD_FAILED", "download or verification failed — see server logs")
+		writeErr(w, http.StatusBadGateway, httperr.CodeDownloadFailed, "download or verification failed — see server logs")
 		return "", false
 	}
 	return stagedHash, true
@@ -393,7 +394,7 @@ func (s stopSignal) waitCountdown() bool {
 
 // refuseApplyShuttingDown answers a request the shutdown arrived before.
 func refuseApplyShuttingDown(w http.ResponseWriter) {
-	writeErr(w, http.StatusServiceUnavailable, "SHUTTING_DOWN", "the server is shutting down — the update was not applied")
+	writeErr(w, http.StatusServiceUnavailable, httperr.CodeShuttingDown, "the server is shutting down — the update was not applied")
 }
 
 // updateOutcomeTimeout bounds the synchronous outcome row. The row must be

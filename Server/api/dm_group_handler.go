@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -76,7 +77,7 @@ func allowGroupMutation(w http.ResponseWriter, limiter *auth.RateLimiter, userID
 	if limiter == nil || limiter.Allow(auth.Key("dm_group", userID), dmGroupRateLimitPerMinute, time.Minute) {
 		return true
 	}
-	writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many group changes, please slow down")
+	writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many group changes, please slow down")
 	return false
 }
 

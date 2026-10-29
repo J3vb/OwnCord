@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -34,7 +35,7 @@ type voicePermissionReconciler interface {
 func handlePutAFKChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		var req afkChannelRequest
@@ -42,14 +43,14 @@ func handlePutAFKChannel(channels *service.ChannelService, hub HubBroadcaster) h
 			return
 		}
 		if len(req.ChannelID) == 0 {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "channel_id is required (a channel id, or null to clear)")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "channel_id is required (a channel id, or null to clear)")
 			return
 		}
 		var channelID *int64
 		if !bytes.Equal(bytes.TrimSpace(req.ChannelID), []byte("null")) {
 			var id int64
 			if err := json.Unmarshal(req.ChannelID, &id); err != nil {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "channel_id must be a channel id or null")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "channel_id must be a channel id or null")
 				return
 			}
 			channelID = &id

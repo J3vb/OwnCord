@@ -12,6 +12,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -74,7 +75,7 @@ func handleListChannels(svc *service.Services) http.HandlerFunc {
 		channels, err := svc.Channels.ListVisibleChannels(r.Context(), user.ID)
 		if err != nil {
 			slog.Error("handleListChannels", "err", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list channels")
 			return
 		}
 		writeJSON(w, http.StatusOK, channels)
@@ -100,7 +101,7 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 		if raw := r.URL.Query().Get("before"); raw != "" {
 			v, parseErr := strconv.ParseInt(raw, 10, 64)
 			if parseErr != nil || v < 0 {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "before must be a non-negative integer")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "before must be a non-negative integer")
 				return
 			}
 			before = v
@@ -112,12 +113,12 @@ func handleGetMessages(svc *service.Services) http.HandlerFunc {
 		after := int64(0)
 		if raw := r.URL.Query().Get("after"); raw != "" {
 			if r.URL.Query().Get("before") != "" {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "after and before cannot be combined")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "after and before cannot be combined")
 				return
 			}
 			v, parseErr := strconv.ParseInt(raw, 10, 64)
 			if parseErr != nil || v <= 0 {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "after must be a positive integer")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "after must be a positive integer")
 				return
 			}
 			after = v
@@ -281,7 +282,7 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
 		if q == "" {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "query parameter 'q' is required")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "query parameter 'q' is required")
 			return
 		}
 
@@ -294,7 +295,7 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 		if raw := r.URL.Query().Get("channel_id"); raw != "" {
 			v, parseErr := strconv.ParseInt(raw, 10, 64)
 			if parseErr != nil || v <= 0 {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "channel_id must be a positive integer")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "channel_id must be a positive integer")
 				return
 			}
 			channelID = &v
@@ -311,18 +312,18 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 		case "recent":
 			page.Recent = true
 		default:
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "sort must be 'relevance' or 'recent'")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "sort must be 'relevance' or 'recent'")
 			return
 		}
 		if raw := r.URL.Query().Get("before"); raw != "" {
 			v, parseErr := strconv.ParseInt(raw, 10, 64)
 			if parseErr != nil || v <= 0 {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "before must be a positive integer")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "before must be a positive integer")
 				return
 			}
 			// A message-id cursor only walks a newest-first list.
 			if !page.Recent {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "before requires sort=recent")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "before requires sort=recent")
 				return
 			}
 			page.Before = v
@@ -336,7 +337,7 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 		})
 		if err != nil {
 			if isInvalidSearchQueryError(err) {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid search query")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid search query")
 				return
 			}
 			writeServiceError(r.Context(), w, err)
@@ -434,38 +435,38 @@ func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned
 func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrRateLimited):
-		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+		writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, err.Error())
 	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 	case errors.Is(err, service.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+		writeErr(w, http.StatusNotFound, httperr.CodeNotFound, err.Error())
 	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
 		// B5-7: the response carries the code and nothing else.
-		writeErr(w, http.StatusForbidden, "NSFW_ACKNOWLEDGEMENT_REQUIRED", "")
+		writeErr(w, http.StatusForbidden, httperr.CodeNSFWAcknowledgementRequired, "")
 	case errors.Is(err, service.ErrTimedOut):
-		writeErr(w, http.StatusForbidden, "TIMED_OUT", err.Error())
+		writeErr(w, http.StatusForbidden, httperr.CodeTimedOut, err.Error())
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, err.Error())
 	case errors.Is(err, service.ErrDeletedMessage):
 		// The target is already gone — a state, not a failure. 404 would be
 		// wrong here: the moderation client clears the report on 404, which
 		// would hide the removal's own outcome. 409 ALREADY_DELETED is the
 		// "already in the requested end state" twin of DUPLICATE_REPORT, so
 		// the caller gets a clean typed refusal instead of a 500.
-		writeErr(w, http.StatusConflict, "ALREADY_DELETED", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeAlreadyDeleted, err.Error())
 	case errors.Is(err, service.ErrGroupDMFull):
 		// Before ErrConflict, which it wraps: the group has no room left.
-		writeErr(w, http.StatusConflict, "GROUP_DM_FULL", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeGroupDMFull, err.Error())
 	case errors.Is(err, service.ErrConflict):
-		writeErr(w, http.StatusConflict, "CONFLICT", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeConflict, err.Error())
 	case errors.Is(err, service.ErrInternal):
 		// ErrorContext so the enriching handler attaches req_id/trace_id,
 		// linking this 500 to its request log line and trace.
 		slog.ErrorContext(ctx, "service error", "error", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "an internal error occurred")
 	default:
 		slog.ErrorContext(ctx, "service error", "error", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal error")
 	}
 }
 
@@ -479,7 +480,7 @@ func parseLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 1 {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "limit must be a positive integer")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "limit must be a positive integer")
 		return 0, false
 	}
 	return min(v, maxMessageLimit), true
@@ -490,7 +491,7 @@ func parseLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 func parseIDParam(w http.ResponseWriter, r *http.Request, param string) (int64, bool) {
 	id, ok := pathID(r, param)
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", param+" must be a positive integer")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, param+" must be a positive integer")
 		return 0, false
 	}
 	return id, true

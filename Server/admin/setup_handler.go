@@ -15,6 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -74,7 +75,7 @@ func handleSetupStatus(setup *service.SetupService, settings *service.SettingsSe
 	return func(w http.ResponseWriter, r *http.Request) {
 		needsSetup, err := setup.NeedsSetup(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check user count")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to check user count")
 			return
 		}
 		resp := setupStatusResponse{NeedsSetup: needsSetup}
@@ -160,7 +161,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		})
 		switch {
 		case errors.Is(err, service.ErrSetupAlreadyDone):
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
+			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "setup has already been completed")
 			return
 		case errors.Is(err, service.ErrAuthBusy):
 			var hinted interface{ RetryAfter() time.Duration }
@@ -168,10 +169,10 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 				secs := int((hinted.RetryAfter() + time.Second - 1) / time.Second)
 				w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
 			}
-			writeErr(w, http.StatusTooManyRequests, "AUTH_BUSY", service.ErrAuthBusy.Error())
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeAuthBusy, service.ErrAuthBusy.Error())
 			return
 		case err != nil:
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create user")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to create user")
 			return
 		}
 		uid, token, inviteCode := boot.OwnerID, boot.Token, boot.InviteCode
@@ -227,7 +228,7 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	// explicitly allowlisted. Absent Origin = non-browser client (allow).
 	if origin := r.Header.Get("Origin"); origin != "" {
 		if !isSameOrigin(origin, r.Host) && !isSetupOriginAllowed(origin, allowedOrigins) {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "cross-origin setup request blocked")
+			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "cross-origin setup request blocked")
 			return req, "", false
 		}
 	}
@@ -239,7 +240,7 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	host := clientip.Resolve(r, proxyNets)
 	setupKey := "setup:" + clientip.RateKey(host)
 	if !limiter.Allow(setupKey, 5, time.Minute) {
-		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many setup attempts, try again later")
+		writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many setup attempts, try again later")
 		return req, "", false
 	}
 
@@ -250,7 +251,7 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	// Checked after the rate limit, so guesses are bounded like any other
 	// setup attempt, and before any other field is looked at.
 	if setupToken != "" && subtle.ConstantTimeCompare([]byte(req.SetupToken), []byte(setupToken)) != 1 {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN",
+		writeErr(w, http.StatusForbidden, httperr.CodeForbidden,
 			"setup token missing or incorrect — copy it from the server's start-up output")
 		return req, "", false
 	}
@@ -265,18 +266,18 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	// usernames the same way. See service.SanitizeText's doc comment.
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	if req.Username == "" || req.Password == "" {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "username and password are required")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "username and password are required")
 		return req, "", false
 	}
 
 	// Validate username format (strict rules for a name being chosen).
 	if err := auth.ValidateNewUsername(req.Username); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 		return req, "", false
 	}
 
 	if err := auth.ValidatePasswordStrength(req.Password); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 		return req, "", false
 	}
 
@@ -285,19 +286,19 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	// server behind an already-created owner.
 	if req.Wizard != nil {
 		if err := validateWizard(req.Wizard); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return req, "", false
 		}
 		// A container's published port mapping fixes the port, so a different
 		// one would leave the server unreachable. Refused here, with the
 		// other wizard validation, so no account is created for it.
 		if err := wizardPortRefusal(req.Wizard, running); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return req, "", false
 		}
 		// A TLS choice the next boot cannot serve is refused the same way.
 		if err := wizardTLSRefusal(req.Wizard, running); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return req, "", false
 		}
 	}

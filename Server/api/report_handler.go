@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -62,7 +63,7 @@ func handleFileReport(svc *service.Services, hub ModQueueBroadcaster) http.Handl
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		var req fileReportRequest
@@ -95,7 +96,7 @@ func handleMyReports(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		rows, err := svc.Reports.Mine(r.Context(), user.ID)
@@ -123,11 +124,11 @@ func handleMyReports(svc *service.Services) http.HandlerFunc {
 func writeReportServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrDuplicateReport):
-		writeErr(w, http.StatusConflict, "DUPLICATE_REPORT", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeDuplicateReport, err.Error())
 	case errors.Is(err, service.ErrSelfReview):
-		writeErr(w, http.StatusForbidden, "SELF_REVIEW", err.Error())
+		writeErr(w, http.StatusForbidden, httperr.CodeSelfReview, err.Error())
 	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 	default:
 		writeServiceError(ctx, w, err)
 	}

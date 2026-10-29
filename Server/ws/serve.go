@@ -66,7 +66,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 		reject := func() {
 			hub.connRejects.Add(1)
 			w.Header().Set("Retry-After", "30")
-			httperr.Write(w, http.StatusServiceUnavailable, ErrCodeServerBusy, "server at connection capacity")
+			httperr.Write(w, http.StatusServiceUnavailable, httperr.CodeServerBusy, "server at connection capacity")
 		}
 		// Fast-path refusal. It only ever refuses — never admits — so a stale
 		// unlocked read cannot let a connection past the ceiling; the

@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -29,7 +30,7 @@ func checkUploadFileType(ctx context.Context, w http.ResponseWriter, uploads *se
 	policy, err := uploads.FileTypePolicy(ctx)
 	if err != nil {
 		slog.Error("upload refused: reading the file-type policy failed", "error", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read the upload policy")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to read the upload policy")
 		return false
 	}
 	if err := policy.Check(filename); err != nil {

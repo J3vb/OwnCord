@@ -12,6 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/dbtime"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
@@ -232,7 +233,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	// before it runs. This is a cheap byte-length pre-check — *4 still
 	// admits any legitimate 32-rune UTF-8 username.
 	if len(req.Username) > maxLoginUsernameLen*4 {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is too long")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is too long")
 		return req, false
 	}
 
@@ -245,7 +246,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	// already canonicalizes the same way.
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	if req.Username == "" {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is required")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is required")
 		return req, false
 	}
 	// A rename is held to the strict rules; resending the name the account
@@ -257,7 +258,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		validateName = auth.ValidateUsername
 	}
 	if err := validateName(req.Username); err != nil {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 		return req, false
 	}
 
@@ -267,7 +268,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	// username, an oversized avatar was previously only caught *after*
 	// sanitizing, by validateAvatarURL's maxAvatarURLLen check.
 	if req.Avatar != nil && len(*req.Avatar) > maxAvatarURLLen*4 {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "avatar URL is too long")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "avatar URL is too long")
 		return req, false
 	}
 
@@ -280,7 +281,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	if req.Avatar != nil {
 		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
 		if err := validateAvatarURL(trimmed, selfHosts, r.Host); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 			return req, false
 		}
 		req.Avatar = &trimmed
@@ -303,12 +304,12 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	// output is stable, so that re-sanitize is a no-op here).
 	if req.DisplayName != nil {
 		if len(*req.DisplayName) > service.MaxDisplayNameLen*4 {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name is too long")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "display_name is too long")
 			return req, false
 		}
 		trimmed := auth.CollapseSpaces(strings.TrimSpace(service.SanitizeText(*req.DisplayName)))
 		if err := validateDisplayName(trimmed); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 			return req, false
 		}
 		req.DisplayName = &trimmed
@@ -317,7 +318,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	// OC-0192 again: bound the raw colour before anything looks at it. The
 	// longest valid value is 7 bytes; the service does the real validation.
 	if req.BannerColor != nil && len(*req.BannerColor) > maxBannerColorLen*4 {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "banner_color is too long")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "banner_color is too long")
 		return req, false
 	}
 
@@ -326,7 +327,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	if req.IdentityPublicKey != nil {
 		trimmed := strings.TrimSpace(*req.IdentityPublicKey)
 		if err := service.ValidateIdentityKey(trimmed); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 			return req, false
 		}
 		req.IdentityPublicKey = &trimmed
@@ -414,7 +415,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 		// BUG-111: Per-user lockout to prevent password brute-force via stolen session.
 		lockKey := auth.Key("pw_confirm_lock", user.ID)
 		if limiter.IsLockedOut(lockKey) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many failed attempts, try again later")
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many failed attempts, try again later")
 			return
 		}
 
@@ -424,7 +425,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 		}
 
 		if req.OldPassword == "" || req.NewPassword == "" {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "old_password and new_password are required")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "old_password and new_password are required")
 			return
 		}
 
@@ -441,20 +442,20 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 			if !limiter.Allow(failKey, service.PwConfirmFailureThreshold, service.PwConfirmFailureWindow) {
 				limiter.Lockout(r.Context(), lockKey, service.PwConfirmLockoutDuration)
 			}
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "incorrect password")
+			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "incorrect password")
 			return
 		}
 		limiter.Reset(r.Context(), failKey)
 
 		// Reject same old/new password.
 		if req.OldPassword == req.NewPassword {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "new password must be different from old password")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "new password must be different from old password")
 			return
 		}
 
 		// Validate new password strength.
 		if err := auth.ValidatePasswordStrength(req.NewPassword); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 			return
 		}
 
@@ -465,7 +466,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 			return
 		}
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to process password change")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to process password change")
 			return
 		}
 
@@ -598,7 +599,7 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 
 		// Per account, not per IP: the principal is authenticated.
 		if !limiter.Allow(auth.Key("revoke_all", user.ID), revokeAllSessionsRateLimitPerMinute, time.Minute) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many sign-out-everywhere requests, try again later")
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many sign-out-everywhere requests, try again later")
 			return
 		}
 
@@ -646,7 +647,7 @@ func handleUploadAvatar(
 		}
 
 		if limiter != nil && !limiter.Allow(auth.Key("avatar_upload", user.ID), avatarUploadRateLimitPerMinute, time.Minute) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "avatar upload rate limit exceeded, try again later")
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "avatar upload rate limit exceeded, try again later")
 			return
 		}
 
@@ -655,13 +656,13 @@ func handleUploadAvatar(
 		// body into heap, so the handler states its own limit.
 		r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBodySize)
 		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 			return
 		}
 
 		file, header, err := r.FormFile("file")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
 			return
 		}
 		defer file.Close() //nolint:errcheck
@@ -755,7 +756,7 @@ func avatarStoreAndRecord(ctx context.Context, w http.ResponseWriter, svc *servi
 			slog.Error("failed to clean up orphaned avatar file", "stored_as", fileID, "error", delErr)
 		}
 		slog.Error("failed to create avatar attachment record", "error", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save "+label)
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to save "+label)
 		return "", 0, false
 	}
 	return fileID, written, true

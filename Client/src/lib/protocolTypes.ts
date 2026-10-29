@@ -176,3 +176,180 @@ export const ChatMessageKind = {
 } as const;
 
 export type ChatMessageKindValue = (typeof ChatMessageKind)[keyof typeof ChatMessageKind];
+
+// ---------------------------------------------------------------------------
+// REST error codes — the error field of a JSON error reply
+// ---------------------------------------------------------------------------
+
+export const RestErrorCode = {
+  ALREADY_APPEALED: "ALREADY_APPEALED",
+  ALREADY_DELETED: "ALREADY_DELETED",
+  ARCHIVE_IN_PROGRESS: "ARCHIVE_IN_PROGRESS",
+  // The bounded queue for password checks is full, or the request gave up
+  // waiting in it.
+  AUTH_BUSY: "AUTH_BUSY",
+  BACKUP_RUNNING: "BACKUP_RUNNING",
+  BAD_GATEWAY: "BAD_GATEWAY",
+  BAD_REQUEST: "BAD_REQUEST",
+  // The diagnostics preview or download slots are full; try again shortly.
+  // AUTH_BUSY is the password-check twin.
+  BUSY: "BUSY",
+  CATEGORY_LIST_STALE: "CATEGORY_LIST_STALE",
+  CATEGORY_NAME_TAKEN: "CATEGORY_NAME_TAKEN",
+  CHANNEL_NAME_TAKEN: "CHANNEL_NAME_TAKEN",
+  CONFIG_UNAVAILABLE: "CONFIG_UNAVAILABLE",
+  CONFIRMATION_REQUIRED: "CONFIRMATION_REQUIRED",
+  CONFLICT: "CONFLICT",
+  CONTAINER_DEPLOYMENT: "CONTAINER_DEPLOYMENT",
+  DOWNLOAD_FAILED: "DOWNLOAD_FAILED",
+  DUPLICATE_REPORT: "DUPLICATE_REPORT",
+  ENV_OVERRIDDEN: "ENV_OVERRIDDEN",
+  FORBIDDEN: "FORBIDDEN",
+  GIF_DISABLED: "GIF_DISABLED",
+  GIF_FAVORITES_FULL: "GIF_FAVORITES_FULL",
+  GROUP_DM_FULL: "GROUP_DM_FULL",
+  INSTALL_FAILED: "INSTALL_FAILED",
+  INSTALL_READ_ONLY: "INSTALL_READ_ONLY",
+  // REST form of an internal failure; the WebSocket sends INTERNAL for the
+  // same thing.
+  INTERNAL_ERROR: "INTERNAL_ERROR",
+  INVALID_CREDENTIALS: "INVALID_CREDENTIALS",
+  INVALID_INPUT: "INVALID_INPUT",
+  LAST_ROLE: "LAST_ROLE",
+  LOCKOUT: "LOCKOUT",
+  MISSING_ASSETS: "MISSING_ASSETS",
+  NOT_FOUND: "NOT_FOUND",
+  NOT_NSFW: "NOT_NSFW",
+  NO_UPDATE: "NO_UPDATE",
+  NSFW_ACKNOWLEDGEMENT_REQUIRED: "NSFW_ACKNOWLEDGEMENT_REQUIRED",
+  PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
+  PERMISSIONS_CHANGED: "PERMISSIONS_CHANGED",
+  PLUGINS_DISABLED: "PLUGINS_DISABLED",
+  PREVIEW_EXPIRED: "PREVIEW_EXPIRED",
+  PUSH_DISABLED: "PUSH_DISABLED",
+  RATE_LIMITED: "RATE_LIMITED",
+  RESTART_PENDING: "RESTART_PENDING",
+  REVERSAL_FAILED: "REVERSAL_FAILED",
+  ROLE_CONFLICT: "ROLE_CONFLICT",
+  SCHEMA_TOO_NEW: "SCHEMA_TOO_NEW",
+  SELF_REVIEW: "SELF_REVIEW",
+  // The WebSocket upgrade was refused at connection capacity. Same wire value
+  // as the WS error code.
+  SERVER_BUSY: "SERVER_BUSY",
+  // An update apply cut short because the server began shutting down. Same
+  // meaning as SHUTTING_DOWN; both stay for wire compatibility.
+  SERVER_SHUTTING_DOWN: "SERVER_SHUTTING_DOWN",
+  // A dependency the route needs (session lookup, file link signing, voice
+  // reconciliation) is temporarily unavailable.
+  SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
+  // An update apply refused because shutdown had already started. Same meaning
+  // as SERVER_SHUTTING_DOWN; both stay for wire compatibility.
+  SHUTTING_DOWN: "SHUTTING_DOWN",
+  STALE_RETENTION_POLICY: "STALE_RETENTION_POLICY",
+  STORAGE_ERROR: "STORAGE_ERROR",
+  STORAGE_LOW_DISK: "STORAGE_LOW_DISK",
+  STORAGE_QUOTA_EXCEEDED: "STORAGE_QUOTA_EXCEEDED",
+  TIMED_OUT: "TIMED_OUT",
+  TOTP_ALREADY_ENABLED: "TOTP_ALREADY_ENABLED",
+  UNAUTHORIZED: "UNAUTHORIZED",
+  // Diagnostics could not be collected, or the export could not be recorded.
+  // SERVICE_UNAVAILABLE is the general form.
+  UNAVAILABLE: "UNAVAILABLE",
+  UNSUPPORTED_MEDIA_TYPE: "UNSUPPORTED_MEDIA_TYPE",
+  UPDATE_CHECK_FAILED: "UPDATE_CHECK_FAILED",
+  UPDATE_IN_PROGRESS: "UPDATE_IN_PROGRESS",
+  UPDATE_UNAVAILABLE: "UPDATE_UNAVAILABLE",
+} as const;
+
+export type RestErrorCodeValue = (typeof RestErrorCode)[keyof typeof RestErrorCode];
+
+// ---------------------------------------------------------------------------
+// WebSocket error codes — the code field of an error frame
+// ---------------------------------------------------------------------------
+
+export const WsErrorCode = {
+  BAD_REQUEST: "BAD_REQUEST",
+  INTERNAL: "INTERNAL",
+  NOT_FOUND: "NOT_FOUND",
+  FORBIDDEN: "FORBIDDEN",
+  RATE_LIMITED: "RATE_LIMITED",
+  ALREADY_JOINED: "ALREADY_JOINED",
+  CHANNEL_FULL: "CHANNEL_FULL",
+  VOICE_ERROR: "VOICE_ERROR",
+  VIDEO_LIMIT: "VIDEO_LIMIT",
+  BANNED: "BANNED",
+  INVALID_JSON: "INVALID_JSON",
+  UNKNOWN_TYPE: "UNKNOWN_TYPE",
+  SLOW_MODE: "SLOW_MODE",
+  CONFLICT: "CONFLICT",
+  // Refines BAD_REQUEST: a send with no text whose every attachment was
+  // skipped. Nothing was stored.
+  ATTACHMENTS_UNAVAILABLE: "ATTACHMENTS_UNAVAILABLE",
+  // Refines BAD_REQUEST: a new emoji on a message that already holds 20
+  // different ones. No reaction_update is sent.
+  REACTION_LIMIT: "REACTION_LIMIT",
+  // Refines BAD_REQUEST: a poll_vote or poll_end on a poll that was already
+  // ended or whose time ran out. Nothing was written and no poll_update is
+  // sent for the refused command.
+  POLL_ENDED: "POLL_ENDED",
+  // Refines NOT_FOUND: a chat_send named a sticker that does not exist, or was
+  // deleted. Nothing was stored, and the client refreshes its picker from
+  // sticker_update.
+  STICKER_NOT_FOUND: "STICKER_NOT_FOUND",
+  // The WS twin of REST's 409 ALREADY_DELETED: the same "already in the
+  // requested end state" refusal, so a client sees one code for the state
+  // rather than FORBIDDEN over WS and ALREADY_DELETED over REST (F23).
+  ALREADY_DELETED: "ALREADY_DELETED",
+  BAD_PAYLOAD: "BAD_PAYLOAD",
+  NOT_KEY_HOLDER: "NOT_KEY_HOLDER",
+  // Returned when a user tries to lift a moderator-imposed voice mute.
+  SERVER_MUTED: "SERVER_MUTED",
+  // Returned when a user tries to lift a moderator-imposed voice deafen.
+  SERVER_DEAFENED: "SERVER_DEAFENED",
+  // Returned for a send, edit, reaction, voice join, call ring or custom
+  // status refused by an active moderator timeout (B5-9).
+  TIMED_OUT: "TIMED_OUT",
+  // Answers a 1:1 call_ring whose recipient has not accepted the caller's
+  // message request. One code for every untrusted state, so it reveals nothing
+  // the caller's own request does not; the ring is never delivered (DM call
+  // review D-03).
+  CALL_REQUIRES_ACCEPTANCE: "CALL_REQUIRES_ACCEPTANCE",
+  // Sent to a connection the hub displaces because the same device session
+  // reconnected (F5, network drop, wake), or because the account is over its
+  // per-user connection cap. The client stops reconnecting on it; without it
+  // the displaced device cannot tell the close from a network drop and the two
+  // devices trade the socket forever.
+  SESSION_REPLACED: "SESSION_REPLACED",
+  // Kept for wire compatibility only: the server no longer sends it, because
+  // several device sessions of one account now stay connected at once. Older
+  // servers sent it to a wake reconnect refused while another session held the
+  // connection, and clients still handle it.
+  ANOTHER_DEVICE_ACTIVE: "ANOTHER_DEVICE_ACTIVE",
+  // Refuses a fresh connect that waited readyAdmissionWait for a ready-build
+  // permit (P5-S04). It carries retry_after_ms, and the socket closes 1013
+  // right after; the client redials no sooner.
+  SERVER_BUSY: "SERVER_BUSY",
+  // Answers a command whose database work ran past the per-frame deadline
+  // (command_deadline.go, WP 4.1b). It means "not applied": the command was
+  // cut short before its commit, so a retry is safe. It is not SERVER_BUSY,
+  // which the client treats as a refused connect and redials on.
+  REQUEST_TIMEOUT: "REQUEST_TIMEOUT",
+  // Answers a thread_create for a message that already has a thread (WP 6.9c).
+  // The payload carries thread_id, the existing thread, so the client opens it
+  // instead of failing.
+  THREAD_EXISTS: "THREAD_EXISTS",
+  // Refines FORBIDDEN: the thread is locked and only a moderator
+  // (MANAGE_MESSAGES) may post, react, pin or change it.
+  THREAD_LOCKED: "THREAD_LOCKED",
+  // Answers an activity_update that sets a game while an admin has turned game
+  // activity off for the server (WP 8.3e-2). A clear is never refused. The
+  // client claims it without a toast and does not resend until the game
+  // changes.
+  GAME_ACTIVITY_DISABLED: "GAME_ACTIVITY_DISABLED",
+  // The auth_error code (not an error frame) for a client whose wire epoch
+  // this server does not speak. Lower case, unlike the rest, because it
+  // shipped that way.
+  protocol_epoch_unsupported: "protocol_epoch_unsupported",
+} as const;
+
+export type WsErrorCodeValue = (typeof WsErrorCode)[keyof typeof WsErrorCode];

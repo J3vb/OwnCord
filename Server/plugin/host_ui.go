@@ -83,7 +83,7 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if dirErr != nil {
-			httperr.Write(w, http.StatusInternalServerError, "INTERNAL_ERROR", "plugin asset root unavailable")
+			httperr.Write(w, http.StatusInternalServerError, httperr.CodeInternalError, "plugin asset root unavailable")
 			return
 		}
 		rel := strings.TrimPrefix(req.URL.Path, "/")
@@ -102,11 +102,11 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 			return
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			httperr.Write(w, http.StatusForbidden, "FORBIDDEN", "forbidden")
+			httperr.Write(w, http.StatusForbidden, httperr.CodeForbidden, "forbidden")
 			return
 		}
 		if !info.Mode().IsRegular() {
-			httperr.Write(w, http.StatusForbidden, "FORBIDDEN", "forbidden")
+			httperr.Write(w, http.StatusForbidden, httperr.CodeForbidden, "forbidden")
 			return
 		}
 		f, openErr := os.Open(full) //nolint:gosec // not user input: full comes from the construction-time allowlist

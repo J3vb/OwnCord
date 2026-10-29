@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -27,12 +28,12 @@ import (
 // response has already been written.
 func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter, r *http.Request) *db.Channel {
 	if channels == nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 		return nil
 	}
 	id, err := pathInt64(r, "id")
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid channel id")
 		return nil
 	}
 	ch, err := channels.ResolveGuildChannel(r.Context(), id)
@@ -48,25 +49,25 @@ func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter
 // the S-03 contract's wording is the response body.
 func writeChannelErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrPermsChanged) {
-		writeErr(w, http.StatusConflict, "PERMISSIONS_CHANGED", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodePermissionsChanged, err.Error())
 		return
 	}
 	if errors.Is(err, service.ErrConflict) {
-		writeErr(w, http.StatusConflict, "CHANNEL_NAME_TAKEN", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeChannelNameTaken, err.Error())
 		return
 	}
-	writeSvcErr(w, err, "channel not found", "INVALID_INPUT", "channel action failed")
+	writeSvcErr(w, err, "channel not found", httperr.CodeInvalidInput, "channel action failed")
 }
 
 func handleListChannels(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		guildChannels, err := channels.AdminListChannelsSynced(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list channels")
 			return
 		}
 		writeJSON(w, http.StatusOK, guildChannels)
@@ -95,7 +96,7 @@ var createChannelPostCommitHook func()
 func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		var req createChannelRequest
@@ -273,7 +274,7 @@ const (
 func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "settings service unavailable")
 			return
 		}
 		limit := queryInt(r, "limit", 50, 1, 500)
@@ -287,17 +288,17 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 		action := r.URL.Query().Get("action")
 		hideSignins := r.URL.Query().Get("hide_signins") == "1"
 		if !utf8.ValidString(query) || utf8.RuneCountInString(query) > maxAuditQueryRunes {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("q must be valid text of at most %d characters", maxAuditQueryRunes))
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("q must be valid text of at most %d characters", maxAuditQueryRunes))
 			return
 		}
 		if !utf8.ValidString(action) || len(action) > maxAuditActionLen {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("action must be valid text of at most %d bytes", maxAuditActionLen))
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("action must be valid text of at most %d bytes", maxAuditActionLen))
 			return
 		}
 
 		entries, err := settings.AuditLog(r.Context(), action, query, hideSignins, limit, offset)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get audit log")
 			return
 		}
 		// The first page also names every action in the whole log, so the
@@ -306,12 +307,12 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 		if offset == 0 {
 			actions, err := settings.AuditActions(r.Context(), maxAuditActions)
 			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
+				writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get audit log")
 				return
 			}
 			names, err := json.Marshal(actions)
 			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
+				writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get audit log")
 				return
 			}
 			w.Header().Set("X-Audit-Actions", string(names))

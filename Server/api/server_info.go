@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -99,7 +100,7 @@ func handleServerInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc 
 		response, err := cached, cachedErr
 		mu.Unlock()
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal server error")
 			return
 		}
 		writeJSON(w, http.StatusOK, response)

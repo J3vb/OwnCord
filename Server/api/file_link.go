@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/go-chi/chi/v5"
@@ -197,7 +198,7 @@ func handleIssueFileLink(uploads *service.UploadService, links *fileLinks, limit
 			return
 		}
 		if !limiter.Allow(auth.Key("file_link", user.ID), fileLinkRateLimitPerMinute, time.Minute) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many file link requests, try again shortly")
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many file link requests, try again shortly")
 			return
 		}
 		if _, ok := authorizeFileRead(w, r, uploads); !ok {
@@ -212,7 +213,7 @@ func handleIssueFileLink(uploads *service.UploadService, links *fileLinks, limit
 		tok, expires, err := links.issue(fileID, auth.HashToken(token))
 		if err != nil {
 			slog.ErrorContext(r.Context(), "file link token generation failed", "error", err)
-			writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "could not create a file link")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeServiceUnavailable, "could not create a file link")
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -264,5 +265,5 @@ func fileLinkAuth(sessions *service.SessionService, links *fileLinks) func(http.
 
 // writeFileLinkRefused is the one answer to every link failure.
 func writeFileLinkRefused(w http.ResponseWriter) {
-	writeErr(w, http.StatusForbidden, "FORBIDDEN", "this file link is not valid")
+	writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "this file link is not valid")
 }

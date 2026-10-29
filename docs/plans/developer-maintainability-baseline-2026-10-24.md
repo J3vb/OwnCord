@@ -701,3 +701,44 @@ No existing assertion was changed; two existing tests gained an envelope check.
 ### Verdict
 
 Kept. Every error the server answers is now one shape, the last documented exception is gone, and the guard stops a new plain-text reply anywhere. No saving in time or tokens is claimed.
+
+## MX-16 part 1: server error codes as generated constants (2026-10-29)
+
+Plan approved by the owner with the wire codes unchanged: no code is renamed or merged, so every reply sends the same bytes as before.
+
+### Counts
+
+Counted on `dev` `47e00ecb` with a `go/ast` scan of non-test files in `api`, `admin`, `plugin`, `httperr` and `ws`.
+
+| Measure                                                                                           | Before | After |
+| ------------------------------------------------------------------------------------------------- | ------ | ----- |
+| `writeErr` / `httperr.Write` calls with a literal code                                            | 462    | 0     |
+| Other literal codes (`writeSvcErr` and `writeCategoryErr` arguments, auth helpers, `authFailure`) | 20     | 0     |
+| Hand-written codes outside the schema (the request-deadline body, `ErrCodeProtocolEpoch`)         | 2      | 0     |
+| REST codes with a constant                                                                        | 0      | 61    |
+| WebSocket codes in the schema (hand list in `ws/errors.go` before)                                | 0      | 33    |
+
+### What changed
+
+- `protocol/schema.json` gains `error_codes.rest` and `error_codes.ws`. `cmd/genprotocol` writes the REST list to `Server/httperr/codes.go` as the typed `httperr.Code`, the WebSocket list into `ws/message_types.go` under the existing `ErrCode*` names (so no WS call site changed), and both into `protocolTypes.ts` as `RestErrorCode` / `WsErrorCode` with their value unions. `ws/errors.go` is gone.
+- `writeErr` (api, admin), `httperr.Write`, `writeSvcErr`'s 400 override, `writeCategoryErr`'s stale code and `authFailure.code` take an `httperr.Code`, so a code held in a plain `string` no longer compiles.
+- Invariant `error-code-literals` (tree rule): any string literal in those packages equal to a known code is a violation, wherever it sits. It reads the code set from the two generated files, so a new code is covered without editing the rule.
+- `ws/protocol_contract_test.go` checks `ErrCode*` against `error_codes.ws` both ways, as it does for message types. That is what found `protocol_epoch_unsupported` declared by hand in `ws/messages.go`.
+- `make protocol-verify`, `scripts/run.mjs` and the pre-commit hook diff `httperr/codes.go` too.
+
+Near-duplicate codes stay as they are (`SHUTTING_DOWN`/`SERVER_SHUTTING_DOWN`, `BUSY`/`AUTH_BUSY`, `UNAVAILABLE`/`SERVICE_UNAVAILABLE`); each now carries a note in the schema saying which route sends it. `INTERNAL` (WS) and `INTERNAL_ERROR` (REST) are separate lists by design.
+
+### Checks
+
+| Check                                                                                       | Before                 | After |
+| ------------------------------------------------------------------------------------------- | ---------------------- | ----- |
+| `error-code-literals` on the tree                                                           | 484 violations         | 0     |
+| `TestProtocolSchema_ErrorCodesMatchGoConstants`                                             | 1 failure (epoch code) | pass  |
+| Rule fixtures (`error_code_literals_test.go`: literal, code variable, WS code, clean cases) | new                    | pass  |
+| `go test -tags wazero ./...`, four build-tag variants, `golangci-lint` v2.14.0              | pass                   | pass  |
+
+No existing assertion was changed.
+
+### Verdict
+
+Kept so far. A misspelt or unlisted code is now a compile error or an invariant failure instead of a reply the client silently ignores. Part 2 (the client comparing codes through the generated union) follows in its own PR. No saving in time or tokens is claimed.
