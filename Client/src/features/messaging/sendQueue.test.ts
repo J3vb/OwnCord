@@ -556,3 +556,336 @@ describe("review follow-ups", () => {
     expect(deps.fail).toHaveBeenCalledWith("UPLOAD_CANCELLED");
   });
 });
+
+describe("what a queued send hands on", () => {
+  it("leaves the file key off an attachment that has no file", async () => {
+    const { deps } = makeDeps();
+    await runQueuedSend(entryOf([settled("srv-a", "a.pdf")]), deps);
+    expect(deps.dispatch.mock.calls[0]![0]).toStrictEqual([{ id: "srv-a", filename: "a.pdf" }]);
+  });
+
+  it("takes the server's file name and the upload's own settle time for a finished upload", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    const a = held("a.pdf");
+    const renamed: DraftUpload = {
+      ...a.upload,
+      result: Promise.resolve({ id: "srv-a", filename: "renamed.pdf" }),
+      settledAt: start - 1000,
+    };
+    const { deps } = makeDeps();
+    const entry = entryOf([{ filename: "a.pdf", file: a.file, upload: renamed }]);
+    await runQueuedSend(entry, deps);
+    expect(entry.items[0]).toMatchObject({
+      id: "srv-a",
+      filename: "renamed.pdf",
+      uploadedAt: start - 1000,
+    });
+    expect(entry.items[0]!.upload).toBeUndefined();
+  });
+
+  it("marks the entry as running again while it waits, and failed once it gives up", async () => {
+    const a = held("a.pdf");
+    const { deps } = makeDeps();
+    const entry = entryOf([running(a)], { failed: true });
+    const done = runQueuedSend(entry, deps);
+    expect(entry.failed).toBe(false);
+    a.reject();
+    await done;
+    expect(entry.failed).toBe(true);
+  });
+
+  it("fails an upload whose owner was destroyed before the run began instead of waiting for it", async () => {
+    const a = held("a.pdf");
+    // A transport that never answers and a row whose owner is already gone.
+    const stuck: QueuedItem = {
+      filename: "a.pdf",
+      file: a.file,
+      upload: { ...a.upload, result: new Promise<Result>(() => {}) },
+    };
+    a.owner.destroy();
+    const { deps } = makeDeps();
+    const run = runQueuedSend(entryOf([stuck]), deps);
+    const outcome = await Promise.race([
+      run.then(() => "finished"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 200)),
+    ]);
+    expect(outcome).toBe("finished");
+    expect(deps.fail).toHaveBeenCalledWith("UPLOAD_FAILED");
+  });
+
+  it("re-uploads an item that has an upload time but no id", async () => {
+    const { deps, uploads } = makeDeps();
+    const file = new File(["x"], "a.pdf");
+    const entry = entryOf([{ filename: "a.pdf", file, uploadedAt: Date.now() }]);
+    const done = runQueuedSend(entry, deps);
+    await flush();
+    expect(deps.upload).toHaveBeenCalledTimes(1);
+    expect(uploads[0]!.file).toBe(file);
+    uploads[0]!.resolve("srv-a");
+    await done;
+    expect(deps.dispatch.mock.calls[0]![0]).toEqual([{ id: "srv-a", filename: "a.pdf", file }]);
+  });
+
+  it("does not start a re-upload for an aged id once the send was cancelled during the slow-mode wait", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout"] });
+    const start = Date.now();
+    const { deps } = makeDeps();
+    deps.slowWindow.mockReturnValue({ sentAt: start, window: 60 });
+    const entry = entryOf([
+      settled("srv-old", "old.pdf", start - ATTACHMENT_TTL_MS, new File(["x"], "old.pdf")),
+    ]);
+    const done = runQueuedSend(entry, deps);
+    await vi.advanceTimersByTimeAsync(500);
+    cancelQueuedSend(entry);
+    await vi.advanceTimersByTimeAsync(300);
+    await done;
+    expect(deps.upload).not.toHaveBeenCalled();
+    expect(deps.fail).toHaveBeenCalledWith("UPLOAD_CANCELLED");
+  });
+
+  it("fails as cancelled when Cancel lands after the re-upload step was reached", async () => {
+    const { deps } = makeDeps();
+    const items: QueuedItem[] = [settled("srv-a", "a.pdf")];
+    let reads = 0;
+    const entry = entryOf([]);
+    Object.defineProperty(entry, "items", {
+      get: () => {
+        reads += 1;
+        // The fourth read is the one that picks the ids to re-check; Cancel follows it.
+        if (reads === 3) queueMicrotask(() => cancelQueuedSend(entry));
+        return items;
+      },
+    });
+    await runQueuedSend(entry, deps);
+    expect(deps.dispatch).not.toHaveBeenCalled();
+    expect(deps.fail).toHaveBeenCalledWith("UPLOAD_CANCELLED");
+  });
+
+  it("hands the composer only the ids it lost, and nothing for an item that never had one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    const slow = held("slow.pdf");
+    const { deps } = makeDeps();
+    const entry = entryOf([
+      settled("srv-old", "old.pdf", start),
+      { filename: "never.pdf" },
+      running(slow),
+    ]);
+    const done = runQueuedSend(entry, deps);
+    vi.setSystemTime(start + ATTACHMENT_TTL_MS + 1);
+    slow.resolve("srv-slow");
+    await done;
+    expect(deps.putBack).toHaveBeenCalledTimes(1);
+    expect(deps.putBack.mock.calls[0]![0]).toStrictEqual([{ id: "srv-old", filename: "old.pdf" }]);
+    expect(entry.items.map((i) => i.filename)).toEqual(["slow.pdf"]);
+  });
+
+  it("calls putBack with an empty list when the only lost item never had an id", async () => {
+    const { deps } = makeDeps();
+    await runQueuedSend(entryOf([{ filename: "never.pdf" }, settled("srv-a", "a.pdf")]), deps);
+    expect(deps.putBack.mock.calls).toEqual([[[]]]);
+    expect(deps.dispatch.mock.calls[0]![0]).toEqual([{ id: "srv-a", filename: "a.pdf" }]);
+  });
+});
+
+describe("how long an id stays usable", () => {
+  it("keeps an id just inside the limit and re-uploads one exactly at it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const now = Date.now();
+    const fileA = new File(["x"], "a.pdf");
+    const fileB = new File(["x"], "b.pdf");
+    const { deps, uploads } = makeDeps();
+    const entry = entryOf(
+      [
+        settled("srv-a", "a.pdf", now - ATTACHMENT_TTL_MS + 1, fileA),
+        settled("srv-b", "b.pdf", now - ATTACHMENT_TTL_MS, fileB),
+      ],
+      { failed: true },
+    );
+    const done = retryQueuedSend(entry, deps);
+    expect(uploads.map((u) => u.file)).toEqual([fileB]);
+    uploads[0]!.resolve("srv-b2");
+    await done;
+    expect(deps.dispatch.mock.calls[0]![0]).toEqual([
+      { id: "srv-a", filename: "a.pdf", file: fileA },
+      { id: "srv-b2", filename: "b.pdf", file: fileB },
+    ]);
+  });
+});
+
+describe("a re-upload started by Retry", () => {
+  it("runs with the file, shows its progress and records when it settled", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { deps, uploads } = makeDeps();
+    const file = new File(["x"], "b.pdf");
+    const entry = entryOf([{ filename: "b.pdf", file }], { failed: true });
+    const done = retryQueuedSend(entry, deps);
+    const item = entry.items[0]!;
+    expect(item.id).toBeUndefined();
+    expect(item.uploadedAt).toBeUndefined();
+    expect(item.upload).toMatchObject({ filename: "b.pdf", refreshing: null });
+    expect(item.upload!.file).toBe(file);
+    expect(item.upload!.fraction).toBeNull();
+    expect(item.upload!.settledAt).toBeUndefined();
+
+    const strip = renderUploadStrip(entry, new AbortController().signal);
+    expect(strip.querySelector("progress")!.hasAttribute("value")).toBe(false);
+    uploads[0]!.onProgress(0.4);
+    expect(item.upload!.fraction).toBeCloseTo(0.4);
+    expect(strip.querySelector("progress")!.value).toBeCloseTo(0.4);
+
+    const at = Date.now();
+    uploads[0]!.resolve("srv-b2");
+    await done;
+    expect(item.uploadedAt).toBe(at);
+    expect(strip.querySelector("progress")!.value).toBe(1);
+  });
+
+  it("shows the progress of an aged id that is uploaded again while the row is on screen", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    const slow = held("slow.pdf");
+    const oldFile = new File(["x"], "old.pdf");
+    const { deps, uploads } = makeDeps();
+    const entry = entryOf([settled("srv-old", "old.pdf", start, oldFile), running(slow)]);
+    const done = runQueuedSend(entry, deps);
+    const strip = renderUploadStrip(entry, new AbortController().signal);
+    const bars = strip.querySelectorAll("progress");
+
+    vi.setSystemTime(start + ATTACHMENT_TTL_MS + 1);
+    slow.resolve("srv-slow");
+    await flush();
+    expect(uploads).toHaveLength(1);
+    uploads[0]!.onProgress(0.3);
+    expect(bars[0]!.value).toBeCloseTo(0.3);
+    uploads[0]!.resolve("srv-new");
+    await done;
+    expect(bars[0]!.value).toBe(1);
+  });
+
+  it("records progress even before any strip is watching", () => {
+    const { deps, uploads } = makeDeps();
+    const entry = entryOf([{ filename: "b.pdf", file: new File(["x"], "b.pdf") }], {
+      failed: true,
+    });
+    void retryQueuedSend(entry, deps);
+    uploads[0]!.onProgress(0.7);
+    expect(entry.items[0]!.upload!.fraction).toBeCloseTo(0.7);
+  });
+
+  it("hands a lost item back at once, without waiting for the uploads still running", () => {
+    const slow = held("slow.pdf");
+    const { deps } = makeDeps();
+    const entry = entryOf(
+      [
+        running(slow),
+        { filename: "gone.pdf", id: "srv-gone", uploadedAt: Date.now() - 2 * ATTACHMENT_TTL_MS },
+      ],
+      { failed: true },
+    );
+    void retryQueuedSend(entry, deps);
+    expect(deps.putBack).toHaveBeenCalledTimes(1);
+    expect(deps.putBack.mock.calls[0]![0]).toStrictEqual([
+      { id: "srv-gone", filename: "gone.pdf" },
+    ]);
+    expect(entry.items.map((i) => i.filename)).toEqual(["slow.pdf"]);
+  });
+
+  it("hands nothing back when every file can still be sent", () => {
+    const slow = held("slow.pdf");
+    const { deps } = makeDeps();
+    const entry = entryOf([running(slow), settled("srv-a", "a.pdf")], { failed: true });
+    void retryQueuedSend(entry, deps);
+    expect(deps.putBack).not.toHaveBeenCalled();
+  });
+
+  it("hands nothing back for an item that never had an id", async () => {
+    const { deps } = makeDeps();
+    const entry = entryOf([{ filename: "never.pdf" }, settled("srv-a", "a.pdf")]);
+    await retryQueuedSend(entry, deps);
+    expect(deps.putBack).not.toHaveBeenCalled();
+    expect(entry.items.map((i) => i.filename)).toEqual(["a.pdf"]);
+  });
+});
+
+describe("upload strip markup", () => {
+  it("labels each progress bar with its file name and gives Cancel a button type", () => {
+    const strip = renderUploadStrip(
+      entryOf([running(held("a.pdf")), running(held("b.pdf"))]),
+      new AbortController().signal,
+    );
+    const bars = [...strip.querySelectorAll("progress")];
+    expect(bars.map((b) => b.getAttribute("aria-label"))).toEqual(["a.pdf", "b.pdf"]);
+    expect(strip.querySelector(".msg-upload-cancel")!.getAttribute("type")).toBe("button");
+  });
+
+  it("stops reacting to Cancel once the row's signal has aborted", () => {
+    const a = held("a.pdf");
+    const entry = entryOf([running(a)]);
+    const rowOwner = new AbortController();
+    const strip = renderUploadStrip(entry, rowOwner.signal);
+    rowOwner.abort();
+    (strip.querySelector(".msg-upload-cancel") as HTMLButtonElement).click();
+    expect(entry.cancelled).toBeUndefined();
+    expect(a.owner.signal.aborted).toBe(false);
+  });
+});
+
+/** Cancel while its button has focus, with the failed row not rendered yet. */
+async function cancelWithFocus() {
+  const a = held("a.pdf");
+  const { deps } = makeDeps();
+  const entry = entryOf([running(a)]);
+  const strip = renderUploadStrip(entry, new AbortController().signal);
+  document.body.appendChild(strip);
+  const done = runQueuedSend(entry, deps);
+  const cancel = strip.querySelector<HTMLButtonElement>(".msg-upload-cancel")!;
+  cancel.focus();
+  cancelQueuedSend(entry);
+  await done;
+}
+
+/** The failed row's Retry button, rendered after the send failed. */
+function addRetry(): HTMLButtonElement {
+  const retry = document.createElement("button");
+  retry.dataset.testid = "msg-retry-cid-1";
+  document.body.appendChild(retry);
+  return retry;
+}
+
+describe("focus after a failed send", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("looks for Retry again on the next frame when the row has not rendered it yet", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+    await cancelWithFocus();
+    const retry = addRetry();
+    expect(document.activeElement).not.toBe(retry);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(document.activeElement).toBe(retry);
+  });
+
+  it("gives up after that one extra frame", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+    const raf = vi.spyOn(globalThis, "requestAnimationFrame");
+    await cancelWithFocus();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(raf).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not look for Retry at all when Cancel never had focus", async () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+    const raf = vi.spyOn(globalThis, "requestAnimationFrame");
+    const a = held("a.pdf");
+    const { deps } = makeDeps();
+    const entry = entryOf([running(a)]);
+    const done = runQueuedSend(entry, deps);
+    cancelQueuedSend(entry);
+    await done;
+    await vi.advanceTimersByTimeAsync(100);
+    expect(raf).not.toHaveBeenCalled();
+  });
+});

@@ -1,14 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const log = vi.hoisted(() => ({ create: vi.fn(), warn: vi.fn() }));
+
 // A fresh module graph per case must not re-run the real logger's own setup.
 vi.mock("../../lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  createLogger: (name: string) => {
+    log.create(name);
+    return { debug: vi.fn(), info: vi.fn(), warn: log.warn, error: vi.fn() };
+  },
 }));
 
 afterEach(() => {
   vi.doUnmock("./sendQueue");
   vi.resetModules();
+  log.create.mockClear();
+  log.warn.mockClear();
 });
+
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("sendQueue loader", () => {
   it("loads the module once and hands every caller the same one", async () => {
@@ -32,5 +41,35 @@ describe("sendQueue loader", () => {
     vi.doMock("./sendQueue", () => ({ runQueuedSend: vi.fn() }));
     const loaded = await loadSendQueue();
     expect(typeof loaded.runQueuedSend).toBe("function");
+  });
+
+  it("logs under the send-queue tag", async () => {
+    await import("./sendQueue-loader");
+    expect(log.create).toHaveBeenCalledExactlyOnceWith("send-queue");
+  });
+
+  it("starts the import as soon as a preload is asked for", async () => {
+    const factory = vi.fn(() => ({ runQueuedSend: vi.fn() }));
+    vi.doMock("./sendQueue", factory);
+    const { loadSendQueue, preloadSendQueue } = await import("./sendQueue-loader");
+    preloadSendQueue();
+    await settle();
+    expect(factory).toHaveBeenCalledTimes(1);
+    // The later send finds it loaded: no second import.
+    await loadSendQueue();
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("logs a failed preload with the reason instead of throwing", async () => {
+    vi.doMock("./sendQueue", () => {
+      throw new Error("chunk failed");
+    });
+    const { preloadSendQueue } = await import("./sendQueue-loader");
+    preloadSendQueue();
+    await settle();
+    expect(log.warn).toHaveBeenCalledExactlyOnceWith("Send queue preload failed", {
+      error: expect.stringContaining("Error") as unknown,
+    });
   });
 });
