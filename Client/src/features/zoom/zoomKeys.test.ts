@@ -35,6 +35,9 @@ describe("keys", () => {
     [{ key: "+", code: "NumpadAdd", ctrlKey: true }, "in"],
     [{ key: "-", ctrlKey: true }, "out"],
     [{ key: "-", code: "NumpadSubtract", ctrlKey: true }, "out"],
+    [{ key: "_", ctrlKey: true, shiftKey: true }, "out"],
+    [{ key: ")", code: "Digit0", ctrlKey: true, shiftKey: true }, "reset"],
+    [{ key: ")", ctrlKey: true, shiftKey: true }, null],
     [{ key: "0", ctrlKey: true }, "reset"],
     [{ key: "=", metaKey: true }, "in"],
     [{ key: "=" }, null],
@@ -71,6 +74,25 @@ describe("keys", () => {
     input.dispatchEvent(key({ key: "=", ctrlKey: true }));
     expect(zoom.current()).toBe(100);
     input.remove();
+  });
+
+  it("Ctrl+0 returns straight to the default from a zoomed level", async () => {
+    const setZoom = vi.fn().mockResolvedValue(true);
+    const zoom = createZoomController({ setZoom });
+    const ac = new AbortController();
+    startZoom(() => Promise.resolve(zoom), ac.signal);
+    for (let i = 0; i < 4; i++) {
+      document.dispatchEvent(key({ key: "=", ctrlKey: true }));
+      // oxlint-disable-next-line no-await-in-loop -- let each step settle in order
+      await vi.waitFor(() => expect(setZoom).toHaveBeenCalledTimes(i + 1));
+    }
+    expect(zoom.current()).toBeGreaterThan(110);
+    const reset = key({ key: "0", ctrlKey: true });
+    document.dispatchEvent(reset);
+    expect(reset.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(setZoom).toHaveBeenLastCalledWith(1));
+    expect(zoom.current()).toBe(100);
+    ac.abort();
   });
 
   it("rapid Ctrl+= presses with a pending call end at the right level", async () => {

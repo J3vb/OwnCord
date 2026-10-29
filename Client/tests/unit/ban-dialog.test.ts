@@ -441,3 +441,265 @@ describe("ban dialog", () => {
     });
   });
 });
+
+const incomplete = (): Promise<BanMemberResponse> =>
+  Promise.resolve({ purge: { deleted: 3, complete: false } });
+const escape = (): void => {
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+};
+const choose = (seconds: string): void => {
+  q<HTMLSelectElement>("ban-delete-select").value = seconds;
+};
+
+const press = (key: string): KeyboardEvent => {
+  const e = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  q("ban-reason-input").dispatchEvent(e);
+  return e;
+};
+describe("ban dialog layout and lifetime", () => {
+  const HOUR = 60 * 60 * 1000;
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+  afterEach(() => {
+    modal?.close();
+    modal = null;
+    vi.useRealTimers();
+  });
+
+  it("lays the fields out as labelled groups between a header, body and footer", () => {
+    setup(vi.fn());
+    const root = dialog()!;
+    expect(root.querySelector(".modal-header > h3")?.id).toBe("ban-dialog-title");
+    const body = root.querySelector(".modal-body")!;
+    const groups = Array.from(body.querySelectorAll(":scope > .form-group"));
+    // Reason, length, history, then the status line.
+    expect(groups).toHaveLength(4);
+    for (const group of groups.slice(0, 3)) {
+      const label = group.querySelector("label.form-label")!;
+      const control = group.querySelector("input, select")!;
+      expect(label.getAttribute("for")).toBe(control.id);
+      expect(control.className).toBe("form-input");
+    }
+    const footer = root.querySelector(".modal-footer")!;
+    expect(footer.contains(q("ban-cancel"))).toBe(true);
+    expect(footer.contains(confirm())).toBe(true);
+    expect(q("ban-cancel").className).toBe("btn-modal-cancel");
+    expect(q<HTMLButtonElement>("ban-cancel").type).toBe("button");
+    expect(confirm().type).toBe("button");
+    const reason = q<HTMLInputElement>("ban-reason-input");
+    expect(reason.type).toBe("text");
+    expect(reason.getAttribute("autocomplete")).toBe("off");
+  });
+
+  it("starts with the reason field focused and an announced, hidden status line", () => {
+    setup(vi.fn());
+    expect(document.activeElement).toBe(q("ban-reason-input"));
+    const line = q("ban-status");
+    expect(line.getAttribute("role")).toBe("alert");
+    expect(line.className).toBe("form-group");
+    expect(line.style.display).toBe("none");
+    expect(line.style.color).not.toBe("");
+  });
+
+  it("shows the error line on a failure and hides it again on the next attempt", async () => {
+    let release: (v: BanMemberResponse) => void = () => {};
+    const submit = vi
+      .fn<(r: BanRequest) => Promise<BanMemberResponse>>()
+      .mockRejectedValueOnce(new ApiClientError(403, "FORBIDDEN", "no"))
+      .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    setup(submit);
+    confirm().click();
+    await vi.waitFor(() => expect(q("ban-status").style.display).toBe("block"));
+    confirm().click();
+    expect(q("ban-status").style.display).toBe("none");
+    release({});
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+  });
+
+  it("sends at most 200 characters of the reason", async () => {
+    const submit = vi.fn(async () => ({}));
+    setup(submit);
+    q<HTMLInputElement>("ban-reason-input").value = ` ${"x".repeat(250)} `;
+    confirm().click();
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    expect(submit).toHaveBeenCalledExactlyOnceWith({
+      reason: "x".repeat(200),
+      durationHours: 0,
+      deleteMessageSeconds: 0,
+    });
+  });
+
+  it("only submits on Enter, and keeps the key from reaching the page", () => {
+    const submit = vi.fn(() => new Promise<BanMemberResponse>(() => {}));
+    setup(submit);
+    expect(press("a").defaultPrevented).toBe(false);
+    expect(press("Tab").defaultPrevented).toBe(false);
+    expect(submit).not.toHaveBeenCalled();
+    expect(press("Enter").defaultPrevented).toBe(true);
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
+  it("puts focus on Retry after an incomplete purge", async () => {
+    setup(vi.fn(incomplete));
+    choose("3600");
+    confirm().click();
+    await vi.waitFor(() => expect(confirm().textContent).toBe("Retry"));
+    expect(document.activeElement).toBe(confirm());
+  });
+
+  it("labels the button 'Retrying...' while a retry runs", async () => {
+    const submit = vi
+      .fn<(r: BanRequest) => Promise<BanMemberResponse>>()
+      .mockImplementationOnce(incomplete)
+      .mockImplementationOnce(() => new Promise(() => {}));
+    setup(submit);
+    choose("3600");
+    confirm().click();
+    await vi.waitFor(() => expect(confirm().textContent).toBe("Retry"));
+    confirm().click();
+    expect(confirm().textContent).toBe("Retrying...");
+    expect(confirm().disabled).toBe(true);
+  });
+
+  it("closes with its owner's signal, sending nothing", () => {
+    const owner = new AbortController();
+    const submit = vi.fn();
+    const notify = vi.fn();
+    modal = openBanDialog({
+      name: "Alice A.",
+      username: "alice",
+      canDeleteMessages: true,
+      submit,
+      notify,
+      signal: owner.signal,
+    });
+    expect(dialog()).not.toBeNull();
+    owner.abort();
+    expect(dialog()).toBeNull();
+    expect(submit).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("hands focus to the fallback when the opener has left the page", () => {
+    const opener = document.createElement("button");
+    const fallback = document.createElement("button");
+    document.body.append(opener, fallback);
+    opener.focus();
+    modal = openBanDialog({
+      name: "Alice A.",
+      username: "alice",
+      canDeleteMessages: true,
+      submit: vi.fn(),
+      notify: vi.fn(),
+      fallbackFocus: () => fallback,
+    });
+    opener.remove();
+    q("ban-cancel").click();
+    expect(document.activeElement).toBe(fallback);
+  });
+
+  it("says nothing when Cancel is pressed before any request", () => {
+    const { notify } = setup(vi.fn());
+    q("ban-cancel").click();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  // Edge case: the dialog is closed while its request is in flight.
+  it("reports a rejection as a toast when the dialog was closed while the request ran", async () => {
+    let fail: (e: unknown) => void = () => {};
+    const submit = vi.fn(() => new Promise<BanMemberResponse>((_, reject) => (fail = reject)));
+    const { notify } = setup(submit);
+    confirm().click();
+    escape();
+    expect(notify).not.toHaveBeenCalled();
+    fail(new ApiClientError(403, "FORBIDDEN", "no"));
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
+    expect(notify).toHaveBeenCalledWith(
+      errorText(new ApiClientError(403, "FORBIDDEN", "no"), "Failed to ban member"),
+      "error",
+    );
+    expect(dialog()).toBeNull();
+  });
+
+  it("reports the deleted count once when closed while an unfinished purge answers", async () => {
+    let release: (v: BanMemberResponse) => void = () => {};
+    const submit = vi.fn(() => new Promise<BanMemberResponse>((resolve) => (release = resolve)));
+    const { notify } = setup(submit);
+    choose("3600");
+    confirm().click();
+    escape();
+    expect(notify).not.toHaveBeenCalled();
+    release({ purge: { deleted: 9, complete: false } });
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
+    expect(notify.mock.calls[0]![1]).toBe("warning");
+    expect(notify.mock.calls[0]![0]).toContain("9 messages");
+  });
+
+  it("stays quiet on close while a retry runs, then reports the final answer", async () => {
+    let release: (v: BanMemberResponse) => void = () => {};
+    const submit = vi
+      .fn<(r: BanRequest) => Promise<BanMemberResponse>>()
+      .mockImplementationOnce(incomplete)
+      .mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    const { notify } = setup(submit);
+    choose("3600");
+    confirm().click();
+    await vi.waitFor(() => expect(confirm().textContent).toBe("Retry"));
+    confirm().click();
+    escape();
+    expect(notify).not.toHaveBeenCalled();
+    release({ purge: { deleted: 2, complete: true } });
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
+    expect(notify).toHaveBeenCalledWith("Banned alice and deleted 5 messages", "success");
+  });
+
+  // Edge case: the retry window runs out while a retry is in flight.
+  it("keeps a running retry busy when the retry window runs out underneath it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const submit = vi
+      .fn<(r: BanRequest) => Promise<BanMemberResponse>>()
+      .mockImplementationOnce(incomplete)
+      .mockImplementationOnce(() => new Promise(() => {}));
+    setup(submit);
+    choose("3600");
+    confirm().click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(confirm().textContent).toBe("Retry");
+    vi.advanceTimersByTime(HOUR - 1000);
+    confirm().click();
+    vi.advanceTimersByTime(2000);
+    expect(confirm().textContent).toBe("Retrying...");
+    expect(confirm().disabled).toBe(true);
+    expect(q("ban-status").style.display).toBe("none");
+  });
+
+  it("keeps Retry for just under an hour and drops it at the hour", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    setup(vi.fn(incomplete));
+    choose("3600");
+    confirm().click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(confirm().textContent).toBe("Retry");
+    vi.advanceTimersByTime(HOUR - 1);
+    expect(confirm().textContent).toBe("Retry");
+    expect(q<HTMLInputElement>("ban-reason-input").disabled).toBe(true);
+    expect(status()).toContain("only 3 messages");
+    vi.advanceTimersByTime(1);
+    expect(confirm().textContent).toBe("Ban");
+    expect(status()).toContain("ban again");
+    expect(q("ban-status").style.display).toBe("block");
+  });
+
+  it("leaves no retry timer running once the dialog is closed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    setup(vi.fn(incomplete));
+    choose("3600");
+    confirm().click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(confirm().textContent).toBe("Retry");
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    escape();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});

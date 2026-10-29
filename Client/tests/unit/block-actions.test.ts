@@ -81,4 +81,13 @@ describe("block actions", () => {
     expect(document.querySelector('[data-testid="block-confirm-dialog"]')).toBeNull();
     await vi.waitFor(() => expect(d.api.unblockUser).toHaveBeenCalledTimes(1));
   });
+
+  it("labels the block confirmation by its heading", () => {
+    confirmAndToggleBlock(deps(), 7, "Bob", true);
+    const modal = document.querySelector('[data-testid="block-confirm-dialog"] .modal')!;
+    const heading = document.getElementById(modal.getAttribute("aria-labelledby") ?? "");
+    expect(heading?.id).toBe("block-confirm-title");
+    expect(heading?.textContent).toContain("Bob");
+    click("block-confirm-cancel");
+  });
 });

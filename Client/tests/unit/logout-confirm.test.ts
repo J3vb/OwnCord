@@ -33,6 +33,14 @@ describe("confirmLogout", () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
+  it("labels the dialog by its heading", () => {
+    open();
+    const modal = dialog()!.querySelector(".modal")!;
+    const heading = document.getElementById(modal.getAttribute("aria-labelledby") ?? "");
+    expect(heading?.id).toBe("settings-logout-title");
+    expect(heading?.textContent).toBe("Log Out");
+  });
+
   it("confirm closes the prompt and logs out once", () => {
     open();
     click("logout-confirm");
