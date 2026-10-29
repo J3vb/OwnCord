@@ -437,3 +437,468 @@ describe("tracking appeals", () => {
     ac.abort();
   });
 });
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (v: T) => void;
+  reject: (e: unknown) => void;
+} {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const attrsOf = (el: Element): Record<string, string> =>
+  Object.fromEntries(el.getAttributeNames().map((n) => [n, el.getAttribute(n) ?? ""]));
+
+const openBtn = (pane: HTMLElement, id: number) =>
+  q<HTMLButtonElement>(pane, `[data-testid='safety-appeal-open-${id}']`);
+const cancelOf = (pane: HTMLElement) => q<HTMLButtonElement>(pane, ".safety-appeal-cancel");
+
+describe("appeals section markup", () => {
+  it("builds the section, panel and list with their classes, roles and labels", async () => {
+    const { pane, ac } = await mount([row({ id: 7 })], [appeal({ id: "O" })]);
+    const section = q(pane, "section.safety-appeals");
+    expect(attrsOf(section)).toMatchObject({
+      class: "safety-appeals",
+      "aria-labelledby": "safety-appeals-heading",
+    });
+    expect(attrsOf(q(section, "h3"))).toMatchObject({
+      class: "safety-heading",
+      id: "safety-appeals-heading",
+      tabindex: "-1",
+    });
+    const status = q(section, ":scope > p.setting-desc");
+    expect(attrsOf(status)).toEqual({ class: "setting-desc", role: "status" });
+    const retry = q(section, ":scope > button");
+    expect(attrsOf(retry)).toMatchObject({ type: "button", class: "ac-btn safety-retry" });
+    expect(attrsOf(q(section, ":scope > ul"))).toEqual({
+      class: "safety-history safety-appeals-list",
+      "aria-label": "Your appeals",
+    });
+    expect(attrsOf(q(section, ":scope > div.sr-only"))).toEqual({
+      class: "sr-only",
+      role: "status",
+    });
+
+    const panel = panelOf(pane);
+    expect(attrsOf(panel)).toMatchObject({
+      class: "safety-appeal-panel",
+      role: "group",
+      "aria-labelledby": "safety-appeal-panel-title",
+    });
+    expect(attrsOf(q(panel, "#safety-appeal-panel-title"))).toEqual({
+      class: "safety-appeal-title",
+      id: "safety-appeal-panel-title",
+    });
+    const kids = [...panel.children];
+    expect(kids[1]!.tagName).toBe("P");
+    expect(attrsOf(kids[1]!)).toEqual({ class: "setting-desc" });
+    expect(attrsOf(q(panel, "label"))).toEqual({ for: "safety-appeal-body" });
+    expect(attrsOf(bodyOf(pane))).toEqual({
+      id: "safety-appeal-body",
+      class: "form-input safety-appeal-body",
+      rows: "4",
+      maxlength: "4000",
+      "aria-describedby": "safety-appeal-body-hint safety-appeal-error",
+      "data-testid": "safety-appeal-body",
+    });
+    expect(attrsOf(q(panel, "#safety-appeal-body-hint"))).toEqual({
+      class: "setting-desc",
+      id: "safety-appeal-body-hint",
+    });
+    expect(attrsOf(q(panel, ".safety-appeal-fields"))).toMatchObject({
+      class: "safety-appeal-fields",
+    });
+    expect(attrsOf(kids[3]!)).toMatchObject({ class: "setting-desc" });
+    expect(kids[3]!.textContent).toBe("You can't appeal this action again after withdrawing.");
+    expect(attrsOf(errorOf(pane))).toEqual({
+      class: "safety-appeal-status",
+      id: "safety-appeal-error",
+      role: "alert",
+    });
+    expect(attrsOf(primaryOf(pane))).toEqual({
+      type: "button",
+      class: "ac-btn",
+      "data-testid": "safety-appeal-primary",
+    });
+    expect(attrsOf(cancelOf(pane))).toEqual({
+      type: "button",
+      class: "ac-btn safety-appeal-cancel",
+    });
+    expect(attrsOf(q(panel, ".safety-appeal-actions"))).toEqual({ class: "safety-appeal-actions" });
+
+    const rules = [...section.querySelectorAll("details p")];
+    expect(rules.map((p) => attrsOf(p))).toEqual([
+      { class: "setting-desc" },
+      { class: "setting-desc" },
+    ]);
+    expect(attrsOf(openBtn(pane, 7))).toEqual({
+      type: "button",
+      class: "ac-btn safety-appeal-open",
+      "data-focus-key": "appeal-7",
+      "aria-label": "Appeal Timeout, Sep 1, 2026, 10:00 AM",
+      "data-testid": "safety-appeal-open-7",
+    });
+    expect(attrsOf(q(pane, "[data-testid='safety-appeal-O'] .safety-appeal-withdraw"))).toEqual({
+      type: "button",
+      class: "ac-btn safety-appeal-withdraw",
+      "data-focus-key": "withdraw-O",
+      "aria-label": "Withdraw appeal (Timeout, Sep 1, 2026, 10:00 AM)",
+    });
+    ac.abort();
+  });
+
+  it("shows a row's action, status line, decision and the note's own styling", async () => {
+    const { pane, ac } = await mount(
+      [],
+      [
+        appeal({ id: "A", state: "assigned" }),
+        appeal({
+          id: "D",
+          state: "overturned",
+          action_kind: "removal",
+          decision_note: "my mistake",
+          decided_at: "2026-09-04T00:00:00Z",
+        }),
+        appeal({ id: "T", state: "overturned", decision_note: null }),
+        appeal({ id: "U", state: "upheld", action_kind: "removal" }),
+        appeal({ id: "E", action_kind: "", action_reason: "", action_created_at: "" }),
+      ],
+    );
+    const li = (id: string) => q(pane, `[data-testid='safety-appeal-${id}']`);
+    expect(attrsOf(li("A"))).toEqual({
+      class: "safety-history-row",
+      "data-testid": "safety-appeal-A",
+    });
+    const [head, reason, parts] = [...li("A").children];
+    expect(attrsOf(head!)).toEqual({ class: "safety-history-head" });
+    expect(head!.textContent).toBe("Timeout · Sep 1, 2026, 10:00 AM");
+    expect(attrsOf(reason!)).toEqual({ class: "safety-history-reason" });
+    expect(reason!.textContent).toBe("Reason: flood");
+    expect(attrsOf(parts!)).toEqual({ class: "setting-desc" });
+    expect(parts!.textContent).toBe("Status: under review · Filed Sep 2, 2026, 10:00 AM");
+
+    expect([...li("D").children][2]!.textContent).toBe(
+      "Status: overturned · Filed Sep 2, 2026, 10:00 AM · Decided Sep 4, 2026, 12:00 AM",
+    );
+    const note = [...li("D").children][3]!;
+    expect(attrsOf(note)).toEqual({ class: "setting-desc" });
+    expect(note.textContent).toBe("Moderator's note: my mistake");
+    const overturned = [...li("D").children][4]!;
+    expect(attrsOf(overturned)).toEqual({ class: "setting-desc" });
+    expect(overturned.textContent).toContain("doesn't restore the removed message");
+
+    // The removal notice needs both an overturned appeal and a removal.
+    expect(li("T").textContent).not.toContain("doesn't restore");
+    expect(li("U").textContent).not.toContain("doesn't restore");
+
+    // A deleted action shows no date beside its kind.
+    expect([...li("E").children][0]!.textContent).toBe("Deleted action");
+    ac.abort();
+  });
+
+  it("says no reason was given for a sanction without one, and quotes a given one", async () => {
+    const { pane, ac } = await mount([row({ id: 1, reason: "" }), row({ id: 2, reason: "spam" })]);
+    openBtn(pane, 1).click();
+    expect(panelOf(pane).textContent).toContain("No reason was given.");
+    expect(panelOf(pane).textContent).not.toContain("Reason: ");
+    cancelOf(pane).click();
+    openBtn(pane, 2).click();
+    expect(panelOf(pane).textContent).toContain("Reason: spam");
+    expect(panelOf(pane).textContent).not.toContain("No reason was given.");
+    ac.abort();
+  });
+
+  it("lists the appeals already in the store when it is first built", () => {
+    safetyStore.setState((s) => ({ ...s, appeals: [appeal({ id: "P" })] }));
+    safetyStore.flush();
+    const ac = new AbortController();
+    const pane = document.createElement("div");
+    document.body.appendChild(pane);
+    renderSafetyTab(pane, ac.signal, null);
+    expect(pane.querySelector("[data-testid='safety-appeal-P']")).not.toBeNull();
+    // Listed appeals leave the status line empty.
+    expect(q(pane, "section.safety-appeals > p[role='status']").textContent).toBe("");
+    ac.abort();
+  });
+
+  it("keeps its rows when something unrelated to appeals changes", async () => {
+    const { pane, ac } = await mount([], [appeal({ id: "O" })]);
+    const before = q(pane, "[data-testid='safety-appeal-O']");
+    safetyStore.setState((s) => ({ ...s, historyFailed: !s.historyFailed }));
+    safetyStore.flush();
+    expect(q(pane, "[data-testid='safety-appeal-O']")).toBe(before);
+    ac.abort();
+  });
+
+  it("stops following the store and ignores clicks once its signal aborts", async () => {
+    const { pane, ac, api } = await mount(
+      [row({ id: 7 }), row({ id: 8, kind: "ban" })],
+      [appeal({ id: "O" })],
+    );
+    const withdrawBtn = q<HTMLButtonElement>(pane, ".safety-appeal-withdraw");
+    const retry = q<HTMLButtonElement>(pane, "section.safety-appeals > button");
+    openBtn(pane, 7).click();
+    ac.abort();
+
+    safetyStore.setState((s) => ({ ...s, appeals: [] }));
+    safetyStore.flush();
+    expect(pane.querySelector("[data-testid='safety-appeal-O']")).not.toBeNull();
+
+    api.getOwnModeration.mockClear();
+    retry.click();
+    expect(api.getOwnModeration).not.toHaveBeenCalled();
+    cancelOf(pane).click();
+    expect(panelOf(pane).hidden).toBe(false);
+    primaryOf(pane).click();
+    expect(api.fileAppeal).not.toHaveBeenCalled();
+    withdrawBtn.click();
+    expect(panelOf(pane).textContent).toContain("Appeal: Timeout");
+    openBtn(pane, 8).click();
+    expect(panelOf(pane).textContent).toContain("Appeal: Timeout");
+    expect(panelOf(pane).textContent).not.toContain("Ban");
+  });
+
+  it("returns focus to the Appeal that was used, not the first one", async () => {
+    const { pane, ac } = await mount([row({ id: 7 }), row({ id: 8 })]);
+    openBtn(pane, 8).click();
+    cancelOf(pane).click();
+    expect(document.activeElement).toBe(openBtn(pane, 8));
+    ac.abort();
+  });
+});
+
+describe("appeal form while a request is in flight", () => {
+  it("labels and locks both buttons, clears an old error, and unlocks after a failure", async () => {
+    const { pane, ac, api } = await mount([row({ id: 7 })]);
+    api.fileAppeal.mockRejectedValueOnce(new TypeError("offline"));
+    openBtn(pane, 7).click();
+    expect(primaryOf(pane).textContent).toBe("Send appeal");
+    expect(cancelOf(pane).textContent).toBe("Cancel");
+    expect(primaryOf(pane).hasAttribute("aria-disabled")).toBe(false);
+    primaryOf(pane).click();
+    await flush();
+    expect(errorOf(pane).classList.contains("form-error")).toBe(true);
+    expect(bodyOf(pane).hasAttribute("aria-invalid")).toBe(false);
+
+    const gate = deferred<{ id: string }>();
+    api.fileAppeal.mockReturnValueOnce(gate.promise);
+    primaryOf(pane).click();
+    expect(errorOf(pane).textContent).toBe("");
+    expect(errorOf(pane).classList.contains("form-error")).toBe(false);
+    expect(primaryOf(pane).textContent).toBe("Sending…");
+    expect(primaryOf(pane).getAttribute("aria-busy")).toBe("true");
+    expect(primaryOf(pane).getAttribute("aria-disabled")).toBe("true");
+    expect(cancelOf(pane).getAttribute("aria-disabled")).toBe("true");
+
+    // Cancel and the other controls do nothing until the request ends.
+    cancelOf(pane).click();
+    expect(panelOf(pane).hidden).toBe(false);
+    gate.reject(new TypeError("offline"));
+    await flush();
+    expect(primaryOf(pane).textContent).toBe("Send appeal");
+    expect(primaryOf(pane).hasAttribute("aria-busy")).toBe(false);
+    expect(primaryOf(pane).hasAttribute("aria-disabled")).toBe(false);
+    expect(cancelOf(pane).hasAttribute("aria-disabled")).toBe(false);
+    ac.abort();
+  });
+
+  it("ignores Appeal and Withdraw clicks while a send is pending", async () => {
+    const { pane, ac, api } = await mount([row({ id: 7 }), row({ id: 8 })], [appeal({ id: "O" })]);
+    const gate = deferred<{ id: string }>();
+    api.fileAppeal.mockReturnValueOnce(gate.promise);
+    openBtn(pane, 7).click();
+    bodyOf(pane).value = "my draft";
+    primaryOf(pane).click();
+    openBtn(pane, 8).click();
+    q<HTMLButtonElement>(pane, ".safety-appeal-withdraw").click();
+    expect(panelOf(pane).textContent).toContain("Appeal: Timeout");
+    expect(bodyOf(pane).value).toBe("my draft");
+    expect(primaryOf(pane).textContent).toBe("Sending…");
+    gate.resolve({ id: "x" });
+    await flush();
+    ac.abort();
+  });
+
+  it("clears the invalid mark when a later failure is not about the text", async () => {
+    const { pane, ac, api } = await mount([row({ id: 7 })]);
+    api.fileAppeal
+      .mockRejectedValueOnce(new ApiClientError(400, "BAD_REQUEST", "bad body"))
+      .mockRejectedValueOnce(new ApiClientError(429, "RATE_LIMITED", "x"));
+    openBtn(pane, 7).click();
+    primaryOf(pane).click();
+    await flush();
+    expect(bodyOf(pane).getAttribute("aria-invalid")).toBe("true");
+    primaryOf(pane).focus();
+    primaryOf(pane).click();
+    await flush();
+    expect(errorOf(pane).textContent).toContain("filed 3 appeals");
+    expect(bodyOf(pane).hasAttribute("aria-invalid")).toBe(false);
+    expect(document.activeElement).toBe(primaryOf(pane));
+    ac.abort();
+  });
+
+  it("opens fresh: no old error, no invalid mark, and the text cleared for a new form", async () => {
+    const { pane, ac, api } = await mount([row({ id: 7 })], [appeal({ id: "O" })]);
+    api.fileAppeal.mockRejectedValueOnce(new ApiClientError(400, "BAD_REQUEST", "bad body"));
+    openBtn(pane, 7).click();
+    bodyOf(pane).value = "draft";
+    primaryOf(pane).click();
+    await flush();
+    cancelOf(pane).click();
+
+    q<HTMLButtonElement>(pane, ".safety-appeal-withdraw").click();
+    expect(errorOf(pane).textContent).toBe("");
+    expect(errorOf(pane).classList.contains("form-error")).toBe(false);
+    expect(bodyOf(pane).hasAttribute("aria-invalid")).toBe(false);
+    // The confirmation leaves the form's text as it was.
+    expect(bodyOf(pane).value).toBe("draft");
+    cancelOf(pane).click();
+
+    openBtn(pane, 7).click();
+    expect(bodyOf(pane).value).toBe("");
+    expect(errorOf(pane).textContent).toBe("");
+    ac.abort();
+  });
+
+  it("drops the outcome of a request whose section was closed meanwhile", async () => {
+    const { pane, ac, api } = await mount([row({ id: 7 })]);
+    const gate = deferred<{ id: string }>();
+    api.fileAppeal.mockReturnValueOnce(gate.promise);
+    openBtn(pane, 7).click();
+    primaryOf(pane).click();
+    ac.abort();
+    api.getOwnModeration.mockClear();
+    gate.resolve({ id: "x" });
+    await flush();
+    expect(panelOf(pane).hidden).toBe(false);
+    expect(pane.textContent).not.toContain("Appeal sent.");
+    expect(api.getOwnModeration).not.toHaveBeenCalled();
+  });
+
+  it("drops a failure that lands after the section was closed", async () => {
+    const { pane, ac, api } = await mount([row({ id: 7 })]);
+    const gate = deferred<{ id: string }>();
+    api.fileAppeal.mockReturnValueOnce(gate.promise);
+    openBtn(pane, 7).click();
+    primaryOf(pane).click();
+    ac.abort();
+    api.getOwnModeration.mockClear();
+    gate.reject(new ApiClientError(404, "NOT_FOUND", "x"));
+    await flush();
+    expect(errorOf(pane).textContent).toBe("");
+    expect(primaryOf(pane).getAttribute("aria-busy")).toBe("true");
+    expect(api.getOwnModeration).not.toHaveBeenCalled();
+  });
+});
+
+describe("withdraw confirmation while a request is in flight", () => {
+  it("labels the confirmation, locks it, and unlocks after a failure", async () => {
+    const { pane, ac, api } = await mount([], [appeal({ id: "O" })]);
+    api.withdrawAppeal.mockRejectedValueOnce(new ApiClientError(500, "INTERNAL", "x"));
+    q<HTMLButtonElement>(pane, ".safety-appeal-withdraw").click();
+    expect(primaryOf(pane).textContent).toBe("Withdraw appeal");
+    expect(cancelOf(pane).textContent).toBe("Keep appeal");
+    primaryOf(pane).click();
+    await flush();
+    expect(errorOf(pane).textContent).toBe("Your appeal wasn't withdrawn. Try again.");
+    expect(errorOf(pane).classList.contains("form-error")).toBe(true);
+    expect(primaryOf(pane).textContent).toBe("Withdraw appeal");
+
+    const gate = deferred<undefined>();
+    api.withdrawAppeal.mockReturnValueOnce(gate.promise);
+    api.getMyAppeals.mockClear();
+    primaryOf(pane).click();
+    expect(errorOf(pane).textContent).toBe("");
+    expect(primaryOf(pane).textContent).toBe("Withdrawing…");
+    expect(primaryOf(pane).getAttribute("aria-busy")).toBe("true");
+    cancelOf(pane).click();
+    expect(panelOf(pane).hidden).toBe(false);
+    gate.reject(new Error("offline"));
+    await flush();
+    expect(errorOf(pane).textContent).toBe("Your appeal wasn't withdrawn. Try again.");
+    expect(primaryOf(pane).hasAttribute("aria-busy")).toBe(false);
+    expect(primaryOf(pane).textContent).toBe("Withdraw appeal");
+    // An unexplained failure is not a reason to re-read.
+    expect(api.getMyAppeals).not.toHaveBeenCalled();
+    ac.abort();
+  });
+
+  it("names a missing appeal, and re-reads for it but not for other refusals", async () => {
+    const { pane, ac, api } = await mount([], [appeal({ id: "O" })]);
+    q<HTMLButtonElement>(pane, ".safety-appeal-withdraw").click();
+    api.withdrawAppeal.mockRejectedValueOnce(new ApiClientError(404, "NOT_FOUND", "x"));
+    api.getMyAppeals.mockClear();
+    primaryOf(pane).click();
+    await flush();
+    expect(errorOf(pane).textContent).toBe("This appeal no longer exists.");
+    expect(api.getMyAppeals).toHaveBeenCalledTimes(1);
+
+    api.withdrawAppeal.mockRejectedValueOnce(new ApiClientError(500, "INTERNAL", "x"));
+    api.getMyAppeals.mockClear();
+    primaryOf(pane).click();
+    await flush();
+    expect(errorOf(pane).textContent).toBe("Your appeal wasn't withdrawn. Try again.");
+    expect(api.getMyAppeals).not.toHaveBeenCalled();
+    ac.abort();
+  });
+
+  it("drops the outcome of a withdrawal whose section was closed meanwhile", async () => {
+    const { pane, ac, api } = await mount([], [appeal({ id: "O" }), appeal({ id: "P" })]);
+    const gate = deferred<undefined>();
+    api.withdrawAppeal.mockReturnValueOnce(gate.promise);
+    q<HTMLButtonElement>(pane, ".safety-appeal-withdraw").click();
+    primaryOf(pane).click();
+    ac.abort();
+    api.getMyAppeals.mockClear();
+    gate.resolve(undefined);
+    await flush();
+    expect(panelOf(pane).hidden).toBe(false);
+    expect(pane.textContent).not.toContain("Appeal withdrawn.");
+    expect(api.getMyAppeals).not.toHaveBeenCalled();
+  });
+
+  it("drops a withdrawal failure that lands after the section was closed", async () => {
+    const { pane, ac, api } = await mount([], [appeal({ id: "O" })]);
+    const gate = deferred<undefined>();
+    api.withdrawAppeal.mockReturnValueOnce(gate.promise);
+    q<HTMLButtonElement>(pane, ".safety-appeal-withdraw").click();
+    primaryOf(pane).click();
+    ac.abort();
+    api.getMyAppeals.mockClear();
+    gate.reject(new ApiClientError(404, "NOT_FOUND", "x"));
+    await flush();
+    expect(errorOf(pane).textContent).toBe("");
+    expect(api.getMyAppeals).not.toHaveBeenCalled();
+  });
+});
+
+describe("fitsAppealLimit at the boundary", () => {
+  it("accepts a request of exactly the limit and refuses one byte more", () => {
+    const base = new TextEncoder().encode(JSON.stringify({ action_id: 7, body: "" })).length;
+    expect(fitsAppealLimit(7, "a".repeat(8192 - base))).toBe(true);
+    expect(fitsAppealLimit(7, "a".repeat(8193 - base))).toBe(false);
+  });
+});
+
+describe("refusals to file", () => {
+  it("shows the generic failure for a server error and for a bad request without text", async () => {
+    const { pane, ac, api } = await mount([row({ id: 7 })]);
+    openBtn(pane, 7).click();
+    api.fileAppeal.mockRejectedValueOnce(new ApiClientError(500, "BAD_REQUEST", "something odd"));
+    primaryOf(pane).click();
+    await flush();
+    expect(errorOf(pane).textContent).toBe("Your appeal wasn't sent. Try again.");
+
+    api.fileAppeal.mockRejectedValueOnce(new ApiClientError(400, "INTERNAL", ""));
+    primaryOf(pane).click();
+    await flush();
+    expect(errorOf(pane).textContent).toBe("Your appeal wasn't sent. Try again.");
+    ac.abort();
+  });
+});
