@@ -952,10 +952,19 @@ One DiscordChatExporter export becomes one new text channel. The import
 Every read that hands channels to clients, permission checks, unread counts,
 retention, search scope or the channel statistic skips a pending channel, so
 nobody can see or address it. When the last chunk is in, one transaction clears
-the flag, sets every active member's `read_states` for the channel past the last
+the flag, sets every non-system account's `read_states` for the channel past the last
 imported message with `mention_count` 0, and marks the job `done`. Then one
 channel-created event goes out. There are no per-message events and no
 notifications.
+
+Retention: an imported channel is exempt from the server-wide window, since its
+messages keep the dates they were sent on. A window set on that channel itself
+still applies, by the original dates. Date bounds in search and in the ban purge
+find native messages as before: the id probe skips imported rows, and an
+imported row is judged by its timestamp alone. Publishing renames the channel
+with " (imported)", then " (imported 2)" and so on if a visible text channel in
+the same category already has the name. A file in a pending channel is not
+readable by anyone.
 
 Imported messages belong to the hidden `system` account (see `users` above).
 `message_import_authors` holds the Discord display name (nickname, else account
@@ -976,7 +985,7 @@ segment, a drive letter or a symlink, and for more entries or uncompressed bytes
 than its cap.
 
 One import runs at a time: the unique index on `status = 'running'` refuses a
-second job. A job that fails or is cancelled deletes its channel (messages,
+second job. A job that fails or is cancelled deletes its channel (a shutdown ends it failed, an administrator's cancel ends it cancelled; a chunk is written early once its copied files pass 64 MB or have waited 10 minutes, so the orphan sweep cannot take them first) (messages,
 author rows and read states cascade) and ends `failed` or `cancelled` with the
 reason. Files already copied stay as attachment rows with no message, which the
 orphan attachment sweep reclaims after its grace period. At boot, any job still

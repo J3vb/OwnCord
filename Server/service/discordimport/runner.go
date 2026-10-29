@@ -83,7 +83,23 @@ type Config struct {
 	Group *syncutil.Group
 	// ChunkSize is messages per transaction; DefaultChunkSize when zero.
 	ChunkSize int
+	// ChunkBytes and ChunkAge write a chunk early once the files copied for it
+	// pass that many bytes or have been waiting that long. Those files are
+	// unlinked attachment rows until the chunk commits, and the orphan sweep
+	// reclaims unlinked rows after an hour. Zero takes the defaults.
+	ChunkBytes int64
+	ChunkAge   time.Duration
 }
+
+// Defaults for Config.ChunkBytes and Config.ChunkAge.
+const (
+	DefaultChunkBytes = 64 << 20
+	DefaultChunkAge   = 10 * time.Minute
+)
+
+// abandon attempts: the clean-up of a dead import is retried this often, with a
+// doubling wait, before the job is left for the next start to take over.
+const abandonAttempts = 4
 
 // Runner runs imports. Only one import can run at a time, server-wide: the
 // database refuses a second running job, whichever Runner starts it.
@@ -92,6 +108,8 @@ type Runner struct {
 
 	// afterChunk, when set by a test, runs after each committed chunk.
 	afterChunk func(ctx context.Context, chunk int)
+	// retryDelay is the first wait between clean-up attempts.
+	retryDelay time.Duration
 }
 
 // NewRunner returns a Runner.
@@ -99,7 +117,13 @@ func NewRunner(cfg Config) *Runner {
 	if cfg.ChunkSize <= 0 {
 		cfg.ChunkSize = DefaultChunkSize
 	}
-	return &Runner{cfg: cfg}
+	if cfg.ChunkBytes == 0 {
+		cfg.ChunkBytes = DefaultChunkBytes
+	}
+	if cfg.ChunkAge == 0 {
+		cfg.ChunkAge = DefaultChunkAge
+	}
+	return &Runner{cfg: cfg, retryDelay: 500 * time.Millisecond}
 }
 
 // Request is one import.
@@ -159,7 +183,10 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	if err != nil {
 		return nil, fmt.Errorf("import account: %w", err)
 	}
+	live.startMu.Lock()
 	channelID, jobID, err := r.cfg.Store.StartImport(ctx, db.StartImportParams{
+		AdoptStale:       true,
+		LiveJobIDs:       liveJobIDs(),
 		Name:             cleanText(header.Channel.Name, maxChannelNameRunes, "imported-channel"),
 		Topic:            cleanText(header.Channel.Topic, maxTopicRunes, ""),
 		CategoryID:       req.CategoryID,
@@ -167,6 +194,10 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 		SourceName:       cleanText(req.SourceName, maxChannelNameRunes, ""),
 		DiscordChannelID: header.Channel.ID,
 	})
+	if err == nil {
+		setLive(jobID, true)
+	}
+	live.startMu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +208,8 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	job := &Job{ID: jobID, ChannelID: channelID, cancel: stop, done: make(chan struct{})}
 	admitted := r.cfg.Group.Go(ctx, func(groupCtx context.Context) {
 		defer close(job.done)
+		defer setLive(jobID, false)
+		defer stop()
 		runCtx, cancel := context.WithCancel(groupCtx)
 		defer cancel()
 		defer context.AfterFunc(stopCtx, cancel)()
@@ -184,11 +217,8 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	})
 	if !admitted {
 		stop()
-		endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishTimeout)
-		defer cancel()
-		if abErr := r.cfg.Store.AbandonImport(endCtx, jobID, channelID, db.ImportFailed, ErrShuttingDown.Error(), db.ImportProgress{}); abErr != nil {
-			slog.Error("discord import clean-up failed", "job_id", jobID, "error", abErr)
-		}
+		setLive(jobID, false)
+		r.abandon(context.WithoutCancel(ctx), jobID, channelID, db.ImportFailed, ErrShuttingDown.Error(), db.ImportProgress{})
 		return nil, ErrShuttingDown
 	}
 	return job, nil
@@ -238,8 +268,12 @@ type runState struct {
 	chunks         int
 	lastID         int64
 	prog           db.ImportProgress
-	policy         storage.FileTypePolicy
-	maxFile        int64
+	// chunkBytes is the size of the files copied for the open chunk, and
+	// chunkSince when the first of them landed.
+	chunkBytes int64
+	chunkSince time.Time
+	policy     storage.FileTypePolicy
+	maxFile    int64
 }
 
 func (r *Runner) run(ctx, stop context.Context, ex Export, account, channelID, jobID int64, discordChannel string) Result {
@@ -249,15 +283,16 @@ func (r *Runner) run(ctx, stop context.Context, ex Export, account, channelID, j
 		return Result{Status: db.ImportDone, Imported: st.prog.Imported, Skipped: st.prog.Skipped, SkippedAttachments: st.prog.SkippedAttachments}
 	}
 	status, reason := db.ImportFailed, cleanText(err.Error(), maxErrorRunes, "import failed")
-	if errors.Is(err, context.Canceled) {
+	switch {
+	case st.stop.Err() != nil:
+		// An administrator asked for this.
 		status, reason = db.ImportCancelled, "cancelled"
+	case errors.Is(err, context.Canceled):
+		// Nobody asked: the server is stopping.
+		reason = ErrServerStopped.Error()
 	}
 	// The channel is removed even when ctx is what ended the job.
-	endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishTimeout)
-	defer cancel()
-	if abErr := r.cfg.Store.AbandonImport(endCtx, jobID, channelID, status, reason, st.prog); abErr != nil {
-		slog.Error("discord import clean-up failed", "job_id", jobID, "error", abErr)
-	}
+	r.abandon(context.WithoutCancel(ctx), jobID, channelID, status, reason, st.prog)
 	if status == db.ImportFailed {
 		slog.Warn("discord import failed", "job_id", jobID, "error", err)
 	}
@@ -368,7 +403,7 @@ func (r *Runner) addMessage(ctx context.Context, ex Export, st *runState, m *Mes
 		return nil
 	}
 	st.chunk = append(st.chunk, im)
-	if len(st.chunk) >= r.cfg.ChunkSize {
+	if len(st.chunk) >= r.cfg.ChunkSize || r.chunkOverdue(st) {
 		return r.flush(ctx, st)
 	}
 	return nil
@@ -408,6 +443,7 @@ func (r *Runner) flush(ctx context.Context, st *runState) error {
 	}
 	st.prog = pr
 	st.chunk = st.chunk[:0]
+	st.chunkBytes, st.chunkSince = 0, time.Time{}
 	st.chunks++
 	if r.afterChunk != nil {
 		r.afterChunk(ctx, st.chunks)

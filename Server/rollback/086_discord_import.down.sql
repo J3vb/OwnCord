@@ -3,9 +3,9 @@
 -- Cost: every import job record and every imported message's Discord author name
 -- is lost. Imported messages and channels stay, owned by the hidden import
 -- account, which keeps its registration_status of 'system' (an older binary
--- lists it as an ordinary member, so delete the account's messages first if you
--- do not want it shown). A channel still being built (import_pending = 1) is
--- deleted, since an older binary would show it half finished.
+-- already lists only 'active' members, so the account stays out of sight). A
+-- channel still being built (import_pending = 1) is deleted, since an older
+-- binary would show it half finished.
 DELETE FROM channels WHERE import_pending = 1;
 DROP INDEX IF EXISTS idx_users_system_account;
 DROP TABLE IF EXISTS message_import_authors;

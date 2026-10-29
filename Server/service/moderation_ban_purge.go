@@ -64,7 +64,7 @@ func (s *ModerationService) authorizeBanPurge(ctx context.Context, actorID, targ
 		return nil, err
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
+	if err != nil || target == nil || target.IsSystemAccount() {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranks(ctx, actorID, targetID); err != nil {

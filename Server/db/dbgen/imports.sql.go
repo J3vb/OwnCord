@@ -10,6 +10,29 @@ import (
 	"database/sql"
 )
 
+const countVisibleChannelsNamed = `-- name: CountVisibleChannelsNamed :one
+SELECT COUNT(*) FROM channels
+WHERE id <> ?1 AND import_pending = 0 AND type = 'text'
+  AND parent_channel_id IS NULL
+  AND COALESCE(category_id, 0) = ?2
+  AND name = ?3 COLLATE NOCASE
+`
+
+type CountVisibleChannelsNamedParams struct {
+	SelfID     int64  `json:"selfId"`
+	CategoryID *int64 `json:"categoryId"`
+	Name       string `json:"name"`
+}
+
+// Visible text channels in one category (0 = none) that already use the name,
+// ignoring case, other than the channel itself.
+func (q *Queries) CountVisibleChannelsNamed(ctx context.Context, arg CountVisibleChannelsNamedParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countVisibleChannelsNamed, arg.SelfID, arg.CategoryID, arg.Name)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createImportAccount = `-- name: CreateImportAccount :execresult
 INSERT INTO users (username, password, role_id, registration_status)
 VALUES (?, '!', (SELECT r.id FROM roles r WHERE r.is_default = 1 ORDER BY r.id ASC), 'system')
@@ -103,6 +126,22 @@ func (q *Queries) GetImportAccountID(ctx context.Context) (int64, error) {
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const getImportChannelPlacement = `-- name: GetImportChannelPlacement :one
+SELECT name, category_id FROM channels WHERE id = ?
+`
+
+type GetImportChannelPlacementRow struct {
+	Name       string `json:"name"`
+	CategoryID *int64 `json:"categoryId"`
+}
+
+func (q *Queries) GetImportChannelPlacement(ctx context.Context, id int64) (GetImportChannelPlacementRow, error) {
+	row := q.db.QueryRowContext(ctx, getImportChannelPlacement, id)
+	var i GetImportChannelPlacementRow
+	err := row.Scan(&i.Name, &i.CategoryID)
+	return i, err
 }
 
 const getImportJob = `-- name: GetImportJob :one
@@ -289,7 +328,7 @@ func (q *Queries) ListRunningImportJobs(ctx context.Context) ([]ListRunningImpor
 const markImportChannelRead = `-- name: MarkImportChannelRead :exec
 INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count)
 SELECT u.id, ?1, ?2, 0
-FROM users u WHERE u.registration_status = 'active'
+FROM users u WHERE u.registration_status <> 'system'
 ON CONFLICT(user_id, channel_id) DO UPDATE SET
     last_message_id = excluded.last_message_id,
     mention_count = 0
@@ -300,8 +339,8 @@ type MarkImportChannelReadParams struct {
 	LastMessageID int64 `json:"lastMessageId"`
 }
 
-// Every active member's read pointer goes past the last imported message, so
-// an import raises no unread badge. The hidden import account is not active.
+// Every non-system account's read pointer (an applicant still waiting for approval included) goes past the last imported message, so
+// an import raises no unread badge. The hidden import account has no read states.
 func (q *Queries) MarkImportChannelRead(ctx context.Context, arg MarkImportChannelReadParams) error {
 	_, err := q.db.ExecContext(ctx, markImportChannelRead, arg.ChannelID, arg.LastMessageID)
 	return err
@@ -317,6 +356,20 @@ func (q *Queries) PublishImportChannel(ctx context.Context, id int64) (int64, er
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const renameImportChannel = `-- name: RenameImportChannel :exec
+UPDATE channels SET name = ? WHERE id = ?
+`
+
+type RenameImportChannelParams struct {
+	Name string `json:"name"`
+	ID   int64  `json:"id"`
+}
+
+func (q *Queries) RenameImportChannel(ctx context.Context, arg RenameImportChannelParams) error {
+	_, err := q.db.ExecContext(ctx, renameImportChannel, arg.Name, arg.ID)
+	return err
 }
 
 const updateImportJobProgress = `-- name: UpdateImportJobProgress :execrows

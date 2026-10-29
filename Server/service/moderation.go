@@ -155,7 +155,7 @@ func (s *ModerationService) EraseUser(ctx context.Context, actorID, targetID int
 		return fmt.Errorf("%w: missing %s permission", ErrForbidden, permissions.Name(permissions.EraseAccounts))
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
+	if err != nil || target == nil || target.IsSystemAccount() {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
@@ -282,7 +282,7 @@ func (s *ModerationService) Warn(ctx context.Context, actorID, targetID int64, r
 		return 0, err
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
+	if err != nil || target == nil || target.IsSystemAccount() {
 		return 0, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
@@ -345,7 +345,7 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 		return nil, err
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
+	if err != nil || target == nil || target.IsSystemAccount() {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
@@ -467,7 +467,7 @@ func (s *ModerationService) LiftTimeout(ctx context.Context, actorID, targetID i
 		return err
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
+	if err != nil || target == nil || target.IsSystemAccount() {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
@@ -669,7 +669,7 @@ func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64
 		return err
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
+	if err != nil || target == nil || target.IsSystemAccount() {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranks(ctx, actorID, targetID); err != nil {
@@ -710,7 +710,7 @@ func (s *ModerationService) authorizeRoleAssignment(ctx context.Context, actorID
 		return nil, nil, nil, err
 	}
 	target, err = s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
+	if err != nil || target == nil || target.IsSystemAccount() {
 		return nil, nil, nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
@@ -800,7 +800,7 @@ func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID i
 		return err
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
+	if err != nil || target == nil || target.IsSystemAccount() {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
@@ -844,7 +844,7 @@ func (s *ModerationService) UnbanUser(ctx context.Context, actorID, targetID int
 		return err
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil {
+	if err != nil || target == nil || target.IsSystemAccount() {
 		return fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranks(ctx, actorID, targetID); err != nil {

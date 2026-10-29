@@ -18,6 +18,11 @@ import (
 // import_pending = 1, which every client-facing channel read skips, filled
 // chunk by chunk, and published in one transaction.
 
+// ErrImportNameTaken is returned by EnsureImportAccount when an ordinary
+// account already holds the name the hidden import account needs. The name is
+// reserved at registration, so only a row older than the reservation can.
+var ErrImportNameTaken = errors.New("an existing account holds the name reserved for the import account")
+
 // ErrImportRunning is returned by StartImport when another import is still
 // running. One import runs at a time.
 var ErrImportRunning = errors.New("another import is already running")
@@ -32,6 +37,10 @@ const (
 
 // ImportInterruptedMessage is the error recorded on a job a restart cut short.
 const ImportInterruptedMessage = "the server restarted before the import finished"
+
+// ImportAbandonedMessage is the error recorded on a job whose importer was
+// gone when a new import started.
+const ImportAbandonedMessage = "the import stopped without finishing and was cleared"
 
 // importAccountName is the username of the hidden import account. The
 // "[imported" prefix is reserved at registration (auth.ValidateUsername).
@@ -74,6 +83,11 @@ type StartImportParams struct {
 	CreatedBy        int64
 	SourceName       string
 	DiscordChannelID string
+	// AdoptStale lets the start take over a running job that none of
+	// LiveJobIDs names: the importer that owned it is gone (its cleanup
+	// failed), so the job is failed and its channel deleted first.
+	AdoptStale bool
+	LiveJobIDs []int64
 }
 
 // EnsureImportAccount returns the id of the hidden import account, creating it
@@ -111,6 +125,7 @@ func (d *DB) EnsureImportAccount(ctx context.Context) (int64, error) {
 		if existing, getErr := d.q.GetImportAccountID(ctx); getErr == nil {
 			return existing, nil
 		}
+		return 0, fmt.Errorf("EnsureImportAccount: %w", ErrImportNameTaken)
 	}
 	return 0, fmt.Errorf("EnsureImportAccount: %w", err)
 }
@@ -119,6 +134,11 @@ func (d *DB) EnsureImportAccount(ctx context.Context) (int64, error) {
 // transaction. It returns ErrImportRunning when a job is already running.
 func (d *DB) StartImport(ctx context.Context, p StartImportParams) (channelID, jobID int64, err error) {
 	err = d.inWriteTx(ctx, "StartImport", func(q *dbgen.Queries) error {
+		if p.AdoptStale {
+			if adoptErr := failStaleImports(ctx, q, p.LiveJobIDs); adoptErr != nil {
+				return adoptErr
+			}
+		}
 		catID, _, catErr := resolveCategoryTx(ctx, q, p.CategoryID, "", false)
 		if catErr != nil {
 			return catErr
@@ -300,6 +320,9 @@ func (d *DB) PublishImport(ctx context.Context, jobID, channelID, lastMessageID 
 		if n != 1 {
 			return ErrNotFound
 		}
+		if err := uniquifyImportChannelName(ctx, q, channelID); err != nil {
+			return err
+		}
 		if err := q.MarkImportChannelRead(ctx, dbgen.MarkImportChannelReadParams{
 			ChannelID: channelID, LastMessageID: lastMessageID,
 		}); err != nil {
@@ -325,32 +348,6 @@ func finishImportJob(ctx context.Context, q *dbgen.Queries, jobID int64, status,
 		return ErrNotFound
 	}
 	return nil
-}
-
-// AbandonImport ends a job that did not finish: it deletes the pending channel
-// (its messages go with it) and marks the job failed or cancelled with the
-// reason. The files already copied stay as unlinked attachment rows, which the
-// orphan sweep reclaims.
-func (d *DB) AbandonImport(ctx context.Context, jobID, channelID int64, status, reason string, pr ImportProgress) error {
-	if status != ImportFailed && status != ImportCancelled {
-		return fmt.Errorf("AbandonImport: status %q is not an ending for an unfinished import", status)
-	}
-	err := d.inWriteTx(ctx, "AbandonImport", func(q *dbgen.Queries) error {
-		return abandonImportTx(ctx, q, jobID, channelID, status, reason, pr)
-	})
-	if err != nil {
-		return fmt.Errorf("AbandonImport: %w", err)
-	}
-	return nil
-}
-
-// abandonImportTx deletes the channel only while it is still pending, so a
-// published channel is never removed by a late abandon.
-func abandonImportTx(ctx context.Context, q *dbgen.Queries, jobID, channelID int64, status, reason string, pr ImportProgress) error {
-	if err := q.DeletePendingImportChannel(ctx, channelID); err != nil {
-		return err
-	}
-	return finishImportJob(ctx, q, jobID, status, reason, pr)
 }
 
 // FailInterruptedImports runs at boot. A job still marked running belongs to a

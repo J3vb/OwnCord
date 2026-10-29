@@ -33,7 +33,7 @@ func (s *UserService) setDisplayNameAsModerator(ctx context.Context, actorID, ta
 	defer unlock()
 
 	current, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || current == nil {
+	if err != nil || current == nil || current.IsSystemAccount() {
 		return nil, fmt.Errorf("%w: user not found", db.ErrNotFound)
 	}
 	ns, ok := s.st.(NicknameStore)

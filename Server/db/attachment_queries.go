@@ -33,6 +33,9 @@ type AttachmentAccess struct {
 	ChannelID   *int64
 	ChannelType string
 	ChannelNSFW bool
+	// ChannelPending is true while a Discord import is still building the
+	// channel the attachment's message sits in.
+	ChannelPending bool
 }
 
 // CreateAttachment inserts a new attachment record (initially unlinked to any message).
@@ -121,17 +124,18 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 		return nil, fmt.Errorf("GetAttachmentWithChannel: %w", err)
 	}
 	return &AttachmentAccess{
-		ID:          r.ID,
-		MessageID:   r.MessageID,
-		Filename:    r.Filename,
-		StoredAs:    r.StoredAs,
-		MimeType:    r.MimeType,
-		Size:        r.Size,
-		UploadedAt:  r.UploadedAt,
-		UploaderID:  r.UploaderID,
-		ChannelID:   r.ChannelID,
-		ChannelType: derefString(r.Type),
-		ChannelNSFW: (r.Nsfw != nil && *r.Nsfw != 0) || (r.ParentNsfw != nil && *r.ParentNsfw != 0),
+		ID:             r.ID,
+		MessageID:      r.MessageID,
+		Filename:       r.Filename,
+		StoredAs:       r.StoredAs,
+		MimeType:       r.MimeType,
+		Size:           r.Size,
+		UploadedAt:     r.UploadedAt,
+		UploaderID:     r.UploaderID,
+		ChannelID:      r.ChannelID,
+		ChannelType:    derefString(r.Type),
+		ChannelPending: r.ImportPending != nil && *r.ImportPending != 0,
+		ChannelNSFW:    (r.Nsfw != nil && *r.Nsfw != 0) || (r.ParentNsfw != nil && *r.ParentNsfw != 0),
 	}, nil
 }
 

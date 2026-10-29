@@ -207,6 +207,11 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 		}
 	}
 
+	// A channel a Discord import is still building does not exist for anyone yet.
+	if aa.ChannelPending {
+		return errFileForbidden()
+	}
+
 	isAdmin := role != nil && permissions.HasAdmin(role.Permissions)
 
 	// Ordinary channel visibility runs BEFORE the NSFW consent check

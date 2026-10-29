@@ -129,7 +129,7 @@ func proposedRetentionWindows(ctx context.Context, tx *sql.Tx, p *RetentionPolic
 		overrides[change.ChannelID] = *change.Days
 	}
 	// A thread takes its parent's override, as RetentionWindows does.
-	rows, err := tx.QueryContext(ctx, `SELECT id, name, COALESCE(parent_channel_id, id) FROM channels WHERE type <> 'dm' AND is_group = 0 AND import_pending = 0 ORDER BY id`)
+	rows, err := tx.QueryContext(ctx, `SELECT id, name, COALESCE(parent_channel_id, id), `+importedChannelBare+` FROM channels WHERE type <> 'dm' AND is_group = 0 AND import_pending = 0 ORDER BY id`) //nolint:gosec // G202: importedChannelBare is a constant
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,8 @@ func proposedRetentionWindows(ctx context.Context, tx *sql.Tx, p *RetentionPolic
 	for rows.Next() {
 		w := RetentionWindow{Days: p.ServerDays, Source: "server"}
 		var authority int64
-		if err := rows.Scan(&w.ChannelID, &w.ChannelName, &authority); err != nil {
+		var imported bool
+		if err := rows.Scan(&w.ChannelID, &w.ChannelName, &authority, &imported); err != nil {
 			return nil, err
 		}
 		if days, ok := overrides[authority]; ok {
@@ -146,6 +147,8 @@ func proposedRetentionWindows(ctx context.Context, tx *sql.Tx, p *RetentionPolic
 			if days < 0 || days > RetentionMaxDays {
 				w.Days = 0 // same fail-safe as RetentionWindows
 			}
+		} else if imported {
+			w.Days = 0 // an imported channel is exempt from the server window
 		}
 		windows = append(windows, w)
 	}

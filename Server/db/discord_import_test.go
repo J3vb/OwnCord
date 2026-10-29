@@ -11,9 +11,9 @@ import (
 )
 
 // startTestImport creates a pending channel and a running job.
-func startTestImport(t *testing.T, database *db.DB, name string) (channelID, jobID int64) {
+func startTestImport(ctx context.Context, t *testing.T, database *db.DB, name string) (channelID, jobID int64) {
 	t.Helper()
-	ch, job, err := database.StartImport(context.Background(), db.StartImportParams{
+	ch, job, err := database.StartImport(ctx, db.StartImportParams{
 		Name: name, SourceName: "export.json", DiscordChannelID: "111",
 	})
 	if err != nil {
@@ -171,7 +171,7 @@ func TestPendingChannel_HiddenFromClientReads(t *testing.T) {
 	database := openMigratedMemory(t)
 	member := seedUser(t, database, "alice")
 	visible := seedChannel(t, database, "general")
-	pending, _ := startTestImport(t, database, "history")
+	pending, _ := startTestImport(ctx, t, database, "history")
 
 	list, err := database.ListChannels(ctx)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestPendingChannel_HiddenFromClientReads(t *testing.T) {
 func TestStartImport_SecondStartIsRefusedWhileRunning(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemory(t)
-	ch, job := startTestImport(t, database, "one")
+	ch, job := startTestImport(ctx, t, database, "one")
 
 	_, _, err := database.StartImport(ctx, db.StartImportParams{Name: "two"})
 	if !errors.Is(err, db.ErrImportRunning) {
@@ -249,7 +249,7 @@ func TestImportChunk_MapsRepliesAndPublishMarksRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ch, job := startTestImport(t, database, "history")
+	ch, job := startTestImport(ctx, t, database, "history")
 
 	msgs := importMessages(3, "m")
 	msgs[1].ReplyKey = "ma" // earlier in the same chunk
@@ -334,7 +334,7 @@ func TestFailInterruptedImports_RestartAfterChunkTwoOfFive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ch, job := startTestImport(t, database, "history")
+	ch, job := startTestImport(ctx, t, database, "history")
 
 	known := map[string]int64{}
 	for chunk := range 2 {
@@ -410,7 +410,7 @@ func TestFailInterruptedImports_LeavesPublishedChannelAlone(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, _ := database.EnsureImportAccount(ctx)
-	ch, job := startTestImport(t, database, "history")
+	ch, job := startTestImport(ctx, t, database, "history")
 	ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
 		JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(1, "m"),
 		Progress: db.ImportProgress{Imported: 1},
@@ -460,5 +460,254 @@ func TestImportAccount_DoesNotCountAsAUserForSetup(t *testing.T) {
 	}
 	if n, err := database.UserCount(ctx); err != nil || n != 0 {
 		t.Errorf("UserCount = %d, %v; want 0", n, err)
+	}
+}
+
+// An import writes old timestamps under new ids. Date bounds probe ids against
+// timestamps, so after an import publishes they must still find native
+// messages, and the imported ones must still answer a date filter.
+func TestDateBounds_SurviveAPublishedImportOfOlderMessages(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	spammer := seedUser(t, database, "spammer")
+	native := seedChannel(t, database, "general")
+	for i, ts := range []string{"2026-06-01 10:00:00", "2026-06-02 10:00:00", "2026-06-03 10:00:00"} {
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO messages (channel_id, user_id, content, timestamp) VALUES (?, ?, ?, ?)`,
+			native, spammer, "native "+string(rune('a'+i)), ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	author, _ := database.EnsureImportAccount(ctx)
+	ch, job := startTestImport(ctx, t, database, "history")
+	ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
+		JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(3, "m"),
+		Progress: db.ImportProgress{Imported: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.PublishImport(ctx, job, ch, ids["mc"], db.ImportProgress{Imported: 3}); err != nil {
+		t.Fatal(err)
+	}
+
+	search := func(q db.SearchQuery) int {
+		t.Helper()
+		got, err := database.SearchMessagesFiltered(ctx, q, db.SearchPage{Limit: 50, Recent: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(got)
+	}
+	both := []int64{native, ch}
+	if n := search(db.SearchQuery{ChannelIDs: both, AfterTS: "2026-01-01 00:00:00"}); n != 3 {
+		t.Errorf("after: found %d messages, want the 3 native ones", n)
+	}
+	if n := search(db.SearchQuery{ChannelIDs: both, BeforeTS: "2021-01-01 00:00:00"}); n != 3 {
+		t.Errorf("before: found %d messages, want the 3 imported ones", n)
+	}
+	if n := search(db.SearchQuery{ChannelIDs: both, AfterTS: "2026-06-02 00:00:00", BeforeTS: "2026-06-03 00:00:00"}); n != 1 {
+		t.Errorf("window: found %d messages, want 1", n)
+	}
+
+	chans, err := database.ListUserMessageChannelsSince(ctx, spammer, "2026-01-01 00:00:00")
+	if err != nil || len(chans) != 1 || chans[0] != native {
+		t.Errorf("ListUserMessageChannelsSince = %v, %v; want the native channel", chans, err)
+	}
+	purged, err := database.PurgeUserChannelMessagesSince(ctx, native, spammer, "2026-06-02 00:00:00", 50)
+	if err != nil || len(purged) != 2 {
+		t.Errorf("PurgeUserChannelMessagesSince = %v, %v; want 2", purged, err)
+	}
+}
+
+// Imported history is old on purpose. The server-wide window must not sweep it
+// away, but a window set on the imported channel itself still applies.
+func TestRetention_ImportedChannelIsExemptFromTheServerWindowOnly(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	admin := seedUser(t, database, "admin")
+	native := seedChannel(t, database, "general")
+	author, _ := database.EnsureImportAccount(ctx)
+	ch, job := startTestImport(ctx, t, database, "history")
+	ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
+		JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(2, "m"),
+		Progress: db.ImportProgress{Imported: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.PublishImport(ctx, job, ch, ids["mb"], db.ImportProgress{Imported: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetSetting(ctx, db.RetentionDaysKey, "30"); err != nil {
+		t.Fatal(err)
+	}
+
+	windowFor := func() map[int64]db.RetentionWindow {
+		t.Helper()
+		ws, err := database.RetentionWindows(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[int64]db.RetentionWindow{}
+		for _, w := range ws {
+			out[w.ChannelID] = w
+		}
+		return out
+	}
+	if w := windowFor(); len(w) != 1 || w[native].Days != 30 {
+		t.Errorf("windows under the server policy = %+v, want only the native channel", w)
+	}
+
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	p, err := database.RetentionPolicySnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := database.PreviewRetentionChange(ctx, db.RetentionChange{Scope: "server", Days: new(30)}, p.Revision, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range preview.Channels {
+		if e.ChannelID == ch && (e.WouldDelete != 0 || e.Days != 0) {
+			t.Errorf("preview would delete %d imported messages under the server window", e.WouldDelete)
+		}
+	}
+
+	if err := database.SetChannelRetention(ctx, ch, 365, admin); err != nil {
+		t.Fatal(err)
+	}
+	if w := windowFor(); w[ch].Days != 365 || w[ch].Source != "channel" {
+		t.Errorf("channel window on the imported channel = %+v, want 365 days from the channel", w[ch])
+	}
+	p, _ = database.RetentionPolicySnapshot(ctx)
+	preview, err = database.PreviewRetentionChange(ctx, db.RetentionChange{Scope: "server", Days: new(30)}, p.Revision, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range preview.Channels {
+		if e.ChannelID == ch && e.WouldDelete != 2 {
+			t.Errorf("preview with a channel window would delete %d, want 2", e.WouldDelete)
+		}
+	}
+}
+
+// A reopened setup whose only user is the import account is still an empty
+// server: the owner must be able to claim it.
+func TestCreateOwnerIfEmpty_IgnoresTheImportAccount(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	if _, err := database.EnsureImportAccount(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetSetting(ctx, db.SetupCompletedKey, db.SetupOpen); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.CreateOwnerIfEmpty(ctx, "the-owner", "hash", 1); err != nil {
+		t.Fatalf("CreateOwnerIfEmpty with only the import account: %v", err)
+	}
+	if _, err := database.CreateOwnerIfEmpty(ctx, "second", "hash", 1); !errors.Is(err, db.ErrConflict) {
+		t.Errorf("second owner err = %v, want ErrConflict", err)
+	}
+}
+
+// An applicant approved later must not find the whole import unread.
+func TestPublishImport_MarksReadForPendingApplicantsToo(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	author, _ := database.EnsureImportAccount(ctx)
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO users (username, password, role_id, registration_status) VALUES ('applicant', 'x', 4, 'pending')`); err != nil {
+		t.Fatal(err)
+	}
+	ch, job := startTestImport(ctx, t, database, "history")
+	ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
+		JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(1, "m"), Progress: db.ImportProgress{Imported: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM read_states WHERE channel_id = ? AND last_message_id = ?`, ch, ids["ma"]).Scan(&n); err != nil || n != 1 {
+		t.Errorf("read states past the import = %d (%v), want the applicant's 1", n, err)
+	}
+}
+
+func TestEnsureImportAccount_ReservedNameAlreadyHeldIsAClearError(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	seedUser(t, database, "[imported]") // a row from before the name was reserved
+	if _, err := database.EnsureImportAccount(ctx); !errors.Is(err, db.ErrImportNameTaken) {
+		t.Fatalf("err = %v, want ErrImportNameTaken", err)
+	}
+}
+
+// Two channels in one category must not share a name once the import shows up.
+func TestPublishImport_DuplicateNamesGetAnImportedSuffix(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	author, _ := database.EnsureImportAccount(ctx)
+	seedChannel(t, database, "general")
+	publish := func() string {
+		t.Helper()
+		ch, job := startTestImport(ctx, t, database, "General")
+		ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
+			JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(1, "m"), Progress: db.ImportProgress{Imported: 1},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := database.GetChannel(ctx, ch)
+		return got.Name
+	}
+	if got := publish(); got != "General (imported)" {
+		t.Errorf("first duplicate = %q", got)
+	}
+	if got := publish(); got != "General (imported 2)" {
+		t.Errorf("second duplicate = %q", got)
+	}
+	// A free name is left alone.
+	ch, job := startTestImport(ctx, t, database, "elsewhere")
+	ids, _ := database.ImportChunk(ctx, db.ImportChunkParams{
+		JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(1, "m"), Progress: db.ImportProgress{Imported: 1},
+	})
+	if err := database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := database.GetChannel(ctx, ch); got.Name != "elsewhere" {
+		t.Errorf("free name changed to %q", got.Name)
+	}
+}
+
+// A job no live importer owns (its cleanup failed) must not block imports until
+// the next boot.
+func TestStartImport_AdoptStaleTakesOverAnOrphanedRunningJob(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	oldCh, oldJob := startTestImport(ctx, t, database, "orphan")
+
+	if _, _, err := database.StartImport(ctx, db.StartImportParams{Name: "x"}); !errors.Is(err, db.ErrImportRunning) {
+		t.Fatalf("without adoption err = %v, want ErrImportRunning", err)
+	}
+	if _, _, err := database.StartImport(ctx, db.StartImportParams{Name: "x", AdoptStale: true, LiveJobIDs: []int64{oldJob}}); !errors.Is(err, db.ErrImportRunning) {
+		t.Fatalf("a live job was taken over: %v", err)
+	}
+	if _, _, err := database.StartImport(ctx, db.StartImportParams{Name: "next", AdoptStale: true}); err != nil {
+		t.Fatalf("adopting a stale job: %v", err)
+	}
+	j, _ := database.GetImportJob(ctx, oldJob)
+	if j.Status != db.ImportFailed {
+		t.Errorf("orphaned job status = %q, want failed", j.Status)
+	}
+	var n int
+	_ = database.QueryRowContext(ctx, `SELECT COUNT(*) FROM channels WHERE id = ?`, oldCh).Scan(&n)
+	if n != 0 {
+		t.Error("the orphaned job's channel was left behind")
 	}
 }

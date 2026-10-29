@@ -206,6 +206,12 @@ CREATE TABLE IF NOT EXISTS messages (
     pinned_at  TEXT,
     kind       INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS message_import_authors (
+    message_id      INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    discord_user_id TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    color           TEXT
+);
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     mentioned_user_id INTEGER NOT NULL REFERENCES users(id)    ON DELETE CASCADE,

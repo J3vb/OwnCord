@@ -159,7 +159,7 @@ func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (str
 		if err != nil {
 			return "", nil, err
 		}
-		sb.WriteString(" AND " + idCol + " >= ? AND m.timestamp >= ?")
+		sb.WriteString(" AND (" + idCol + " >= ? OR " + importedRow + ") AND m.timestamp >= ?")
 		args = append(args, lo, q.AfterTS)
 	}
 	if q.BeforeTS != "" {
@@ -167,7 +167,7 @@ func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (str
 		if err != nil {
 			return "", nil, err
 		}
-		sb.WriteString(" AND " + idCol + " < ? AND m.timestamp < ?")
+		sb.WriteString(" AND (" + idCol + " < ? OR " + importedRow + ") AND m.timestamp < ?")
 		args = append(args, hi, q.BeforeTS)
 	}
 	extra, extraArgs, err := searchExtraFilters(q)
@@ -199,17 +199,26 @@ func (d *DB) rankCutoff(ctx context.Context, match, filter string, filterArgs []
 	return cutoff, true, nil
 }
 
+// importedRow is true for a message a Discord import wrote. Such a row has an
+// id from the day of the import and a timestamp from the day it was sent, so it
+// breaks the id-follows-time assumption: the probe below skips these rows, and
+// a date bound lets them past the id range and judges them by timestamp alone.
+const importedRow = `EXISTS (SELECT 1 FROM message_import_authors ia WHERE ia.message_id = m.id)`
+
+// notImportedRow is the probe's form of the same test, over the bare table.
+const notImportedRow = `NOT EXISTS (SELECT 1 FROM message_import_authors ia WHERE ia.message_id = messages.id)`
+
 // firstIDAtOrAfter returns a message id b such that every message with id < b
 // has a timestamp before ts and every message with id >= b may qualify. It
-// binary-searches messages.id (monotonic with timestamp on every insert path)
-// in about 2x20 rowid probes, so a date bound becomes an id range scan with no
+// binary-searches messages.id (monotonic with timestamp on every native insert
+// path; imported rows are skipped, see importedRow) in about 2x20 rowid probes, so a date bound becomes an id range scan with no
 // timestamp index. The caller still applies the exact timestamp predicate, so
 // there are no false positives; a backward clock step can hide rows near a
 // bound (accepted in the 3A-14 design, D7). Hard-deleted id gaps are
 // skipped by probing for the first existing id at or above each midpoint.
 func (d *DB) firstIDAtOrAfter(ctx context.Context, ts string) (int64, error) {
 	var minID, maxID sql.NullInt64
-	if err := d.reader.QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM messages`).Scan(&minID, &maxID); err != nil {
+	if err := d.reader.QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM messages WHERE `+notImportedRow).Scan(&minID, &maxID); err != nil {
 		return 0, fmt.Errorf("firstIDAtOrAfter bounds: %w", err)
 	}
 	if !minID.Valid || !maxID.Valid {
@@ -221,7 +230,7 @@ func (d *DB) firstIDAtOrAfter(ctx context.Context, ts string) (int64, error) {
 		var id int64
 		var rowTS string
 		err := d.reader.QueryRowContext(ctx,
-			`SELECT id, timestamp FROM messages WHERE id >= ? ORDER BY id LIMIT 1`, mid).Scan(&id, &rowTS)
+			`SELECT id, timestamp FROM messages WHERE id >= ? AND `+notImportedRow+` ORDER BY id LIMIT 1`, mid).Scan(&id, &rowTS)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			hi = mid

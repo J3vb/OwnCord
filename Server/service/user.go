@@ -511,7 +511,7 @@ func (s *UserService) Get(ctx context.Context, id int64) (*db.User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch user: %w", ErrInternal, err)
 	}
-	if user == nil {
+	if user == nil || user.IsSystemAccount() {
 		return nil, fmt.Errorf("user not found%.0w", ErrNotFound)
 	}
 	return user, nil
