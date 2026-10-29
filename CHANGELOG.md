@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+**Desktop UI**
+
+- Custom themes: Settings > Appearance > Custom Themes keeps a list of your own CSS themes, painted on top of the built-in theme. Write one, import or export a `.css` file, copy it to share. A theme cannot load anything from outside (`url()`, `@import`, fonts are refused), and Ctrl+Shift+Backspace turns a custom theme off.
+
 ### Changed
 
 **Server (operators)**

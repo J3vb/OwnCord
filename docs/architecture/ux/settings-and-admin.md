@@ -188,6 +188,19 @@ changes apply **live** — `ui.setTheme` + the `owncord:pref-change` event re-sk
 open views without reload. Appearance is editable pre-login (on the connect page)
 so the app respects the user's theme before they authenticate.
 
+**Custom themes** (Appearance > Custom Themes, `lib/customTheme.ts`): a saved
+list of the user's own CSS, per device (`owncord:theme:custom:list` and
+`owncord:theme:custom:active` in localStorage), at most one active, painted as
+one `<style id="owncord-custom-theme">` after the built-in theme. Custom
+properties are marked `!important` and a `:root`/`html` rule also targets
+`body`, so a theme's tokens beat the built-in theme's inline and `body.theme-*`
+ones. A theme may never load a file: after decoding CSS escapes, `url(`,
+`image(`, `image-set(`, `cross-fade(`, `element(`, `src(`, `@import`,
+`@font-face` and `@namespace` are refused on save, on import and again on every
+paint; the CSP (`img-src`/`font-src 'self'`) stays behind it. Ctrl+Shift+Backspace
+turns the active theme off (Backspace is not a bindable key, so no keybind can
+claim it).
+
 ---
 
 ## 5. Updater

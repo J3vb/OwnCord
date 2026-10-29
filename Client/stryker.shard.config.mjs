@@ -211,6 +211,7 @@ export const shards = {
     "src/lib/appearance.ts",
     "src/lib/color-contrast.ts",
     "src/lib/constants.ts",
+    "src/lib/customTheme.ts",
     "src/lib/deep-link.ts",
     "src/lib/hostNormalize.ts",
     "src/lib/invite-navigation.ts",

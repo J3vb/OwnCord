@@ -77,6 +77,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.memberLayout.desc"),
     s("appearance.accentColor"),
     s("appearance.accentNote"),
+    s("appearance.customThemes"),
+    s("appearance.customThemes.desc"),
   ],
   Accessibility: () => [
     s("accessibility.group.motion"),

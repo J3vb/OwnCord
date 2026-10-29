@@ -308,6 +308,12 @@
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
+      "file": "lib/customTheme.ts",
+      "binding": "changeListeners",
+      "category": "dom-owned",
+      "reason": "Listeners removed by the abort signal each subscriber passes; the custom theme is per device, not per server"
+    },
+    {
       "file": "lib/voiceJoinTrace.ts",
       "binding": "lastJoins",
       "category": "app-lifetime",
