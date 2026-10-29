@@ -293,6 +293,11 @@ jobs:
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev
 
+      # H.264/AAC playback and PipeWire cameras for the AppImage; the script
+      # says which plugins and why.
+      - name: Choose the AppImage's GStreamer plugins
+        run: bash Client/scripts/appimage-gst-plugins.sh
+
       # clang >= 21 plus the prebuilt libwebrtc the Linux client links against
       # (livekit -> webrtc-sys). Deliberately NO actions/cache restore here:
       # this workflow publishes runtime artifacts and is tag-triggered, so a
@@ -664,6 +669,11 @@ jobs:
             xdg-utils \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev
+
+      # H.264/AAC playback and PipeWire cameras for the AppImage; the script
+      # says which plugins and why.
+      - name: Choose the AppImage's GStreamer plugins
+        run: bash Client/scripts/appimage-gst-plugins.sh
 
       # Same prerequisite and same no-cache rule as the x86_64 job — see the
       # comment there: clang-21 from the same GPG-signed apt.llvm.org channel,

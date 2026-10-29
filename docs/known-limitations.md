@@ -140,10 +140,11 @@ says exactly what the beta does and does not claim about who can read what.
   not if you use `--no-install-recommends`. To add them by hand, see
   [Recommended extras](linux-install.md#recommended-extras).
 
-  The AppImage only uses the host's fonts. It uses its own bundled GStreamer
-  plugins, so installing GStreamer packages on the host does not help it.
-  H264/AAC playback and PipeWire cameras do not work in the AppImage until the
-  release build bundles them.
+  The AppImage only uses the host's fonts. It bundles its own GStreamer
+  plugins, H264/AAC playback and PipeWire cameras included, so installing
+  GStreamer packages on the host changes nothing for it. Its PipeWire camera
+  support needs the host's `libpipewire`, and its H264/AAC playback the
+  host's `libva` and `libvdpau`; most desktops have all three.
 
 - **On Linux, updating and removing depend on how you installed.** The AppImage
   and the `.deb` update differently; see
