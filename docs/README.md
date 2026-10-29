@@ -57,18 +57,18 @@ Knowing the kind tells you how far to trust a page:
 These pages describe contracts the code implements. If one disagrees with the
 code, the code is right and the page has a bug.
 
-| Document                                           | What it covers                                              |
-| -------------------------------------------------- | ----------------------------------------------------------- |
-| [api.md](api.md)                                   | The REST API under `/api/v1`.                               |
-| [protocol.md](protocol.md)                         | The WebSocket protocol: frames, sequencing and reconnect.   |
-| [schema.md](schema.md)                             | The SQLite schema and migrations.                           |
-| [server-configuration.md](server-configuration.md) | Every server configuration option.                          |
-| [credential-storage.md](credential-storage.md)     | What the desktop app saves, and where.                      |
-| [../protocol/schema.json](../protocol/schema.json) | The source of truth for WebSocket message types. See below. |
+| Document                                           | What it covers                                                    |
+| -------------------------------------------------- | ----------------------------------------------------------------- |
+| [api.md](api.md)                                   | The REST API under `/api/v1`.                                     |
+| [protocol.md](protocol.md)                         | The WebSocket protocol: frames, sequencing and reconnect.         |
+| [schema.md](schema.md)                             | The SQLite schema and migrations.                                 |
+| [server-configuration.md](server-configuration.md) | Every server configuration option.                                |
+| [credential-storage.md](credential-storage.md)     | What the desktop app saves, and where.                            |
+| [../protocol/schema.json](../protocol/schema.json) | The source of truth for message types and error codes. See below. |
 
 `protocol/schema.json` sits at the repository root because neither the server
-nor the client owns it. `Server/ws/message_types.go` and
-`Client/src/lib/protocolTypes.ts` are generated from it. Never edit either by
+nor the client owns it. `Server/ws/message_types.go`, `Server/httperr/codes.go`
+and `Client/src/lib/protocolTypes.ts` are generated from it. Never edit them by
 hand. See [../protocol/README.md](../protocol/README.md).
 
 ## Architecture
