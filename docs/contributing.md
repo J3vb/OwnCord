@@ -59,7 +59,7 @@ a passing check.
 | Linux ARM64     | ✅     | ✅ (CI only) |
 
 - **Go 1.27** for the server. `Server/go.mod` sets `go 1.27.0` and pins the
-  toolchain to `go1.27.2`. With `GOTOOLCHAIN=auto` (Go's default), Go downloads
+  toolchain to `go1.27.3`. With `GOTOOLCHAIN=auto` (Go's default), Go downloads
   that toolchain for you.
 - **Node.js 26 and npm 11** for the client and the root scripts.
   `Client/.nvmrc` is the source of truth.
