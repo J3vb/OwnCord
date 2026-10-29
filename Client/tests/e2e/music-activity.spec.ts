@@ -26,7 +26,7 @@ import {
   keyboardReachable,
   setAppearance,
   textContrast,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 const THEMES = ["light", "dark"] as const;
 

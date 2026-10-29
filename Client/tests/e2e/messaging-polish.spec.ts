@@ -20,7 +20,7 @@ import {
   MOCK_PINNED_MESSAGES,
   navigateToMainPageReady,
 } from "./helpers";
-import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/b9-accessibility";
+import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
 
 /** A long channel history so the virtualizer materializes a subrange. */
 function longMessages(count: number): unknown {

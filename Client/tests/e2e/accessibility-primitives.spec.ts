@@ -16,12 +16,12 @@ import {
   tokenContrasts,
   tokenHex,
   type AppearancePrefs,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 import { contrastRatio, parseColor } from "../../src/lib/color-contrast";
 
 // ---------------------------------------------------------------------------
 // B9-2: shared accessibility primitives and tokens against the owner's Q1
-// thresholds and Q8 accent policy (docs/architecture/b9-ui-contract.md).
+// thresholds and Q8 accent policy (docs/architecture/ui-contract.md).
 //
 // Every measurement reads the running app after its real startup path
 // applied the stored theme, accent and accessibility preferences, so this

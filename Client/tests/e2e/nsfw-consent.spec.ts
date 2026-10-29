@@ -26,7 +26,7 @@ import {
   focusIndicator,
   setAppearance,
   textContrast,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 /** #general (id 1, the default active channel) is labelled; #random is not. */
 const CHANNELS = [

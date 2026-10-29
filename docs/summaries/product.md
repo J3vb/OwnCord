@@ -65,7 +65,7 @@ The behavioural specs (states, transitions, event → reaction maps) live in [do
 
 **Settings & admin** ([settings-and-admin.md](../architecture/ux/settings-and-admin.md)): a settings overlay (Account, Safety, Appearance, Notifications, Text & Images, Accessibility, Voice & Audio, Keybinds, Advanced, Diagnostics & logs) covers account operations (password, TOTP, recovery kit, sessions, deletion disclosure), a local support-bundle export in the Diagnostics & logs tab, appearance and theming, the client's inline admin surface (ban/kick/roles, channel CRUD, invites) for permitted users, the desktop auto-updater, and system-tray behaviour.
 
-**Beta additions (B9).** These flows are specified in the B9 PRD's owner decisions Q2–Q4 and Q10 and in [docs/architecture/b9-ui-contract.md](../architecture/b9-ui-contract.md); `docs/architecture/ux/` predates them.
+**Beta additions (B9).** These flows are specified in the B9 PRD's owner decisions Q2–Q4 and Q10 and in [docs/architecture/ui-contract.md](../architecture/ui-contract.md); `docs/architecture/ux/` predates them.
 
 - **Message Requests:** a "Message Requests (N)" section at the top of DM mode. Request messages never add to unread or mention counts and never notify before acceptance.
 - **External-content consent:** one choice per server profile ("Load automatically on this server" or "Ask each time"), revocable in Text & Images. NSFW channels keep their own server-backed acknowledgement.
@@ -180,6 +180,6 @@ Named by individual phase PRDs:
 
 - [docs/plans/beta-product-requirements-2026-08-23.md](../plans/beta-product-requirements-2026-08-23.md), [docs/plans/README.md](../plans/README.md), [README.md](../../README.md)
 - [docs/archive/plans/b6-server-deployment-operations-capacity.prd.md](../archive/plans/b6-server-deployment-operations-capacity.prd.md), [docs/archive/plans/b7-shared-client-platform-desktop-parity.prd.md](../archive/plans/b7-shared-client-platform-desktop-parity.prd.md), [docs/archive/plans/b9-unified-experience-accessibility-polish.prd.md](../archive/plans/b9-unified-experience-accessibility-polish.prd.md)
-- [docs/capacity.md](../capacity.md), [docs/deployment.md](../deployment.md), [docs/trust-model.md](../trust-model.md), [docs/architecture/b9-ui-contract.md](../architecture/b9-ui-contract.md)
+- [docs/capacity.md](../capacity.md), [docs/deployment.md](../deployment.md), [docs/trust-model.md](../trust-model.md), [docs/architecture/ui-contract.md](../architecture/ui-contract.md)
 - [docs/architecture/ux/README.md](../architecture/ux/README.md), [connection-and-auth.md](../architecture/ux/connection-and-auth.md), [messaging.md](../architecture/ux/messaging.md), [channels-members-dms.md](../architecture/ux/channels-members-dms.md), [voice-and-e2ee.md](../architecture/ux/voice-and-e2ee.md), [settings-and-admin.md](../architecture/ux/settings-and-admin.md)
 - [Client/src/pages/connect-page/LoginForm.ts](../../Client/src/pages/connect-page/LoginForm.ts), [Client/src/components/SettingsOverlay.ts](../../Client/src/components/SettingsOverlay.ts), [Client/src-tauri/src/tofu.rs](../../Client/src-tauri/src/tofu.rs)

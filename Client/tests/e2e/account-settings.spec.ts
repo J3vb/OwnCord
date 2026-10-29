@@ -31,7 +31,7 @@ import {
   openSettings,
   switchSettingsTab,
 } from "./helpers";
-import { findUnnamedControls, focusIndicator, textContrast, Q1 } from "./support/b9-accessibility";
+import { findUnnamedControls, focusIndicator, textContrast, Q1 } from "./support/accessibility";
 
 const ROUTE_HEALTH = {
   pattern: "/api/v1/health",

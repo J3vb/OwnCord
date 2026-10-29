@@ -1,7 +1,7 @@
 /**
  * B9-5: the Message Requests inbox in the real shell (Q2), and the B9-6
  * decisions on it (keyboard, focus, contrast and reflow; the real-server
- * transitions are fullstack/b9-message-requests.spec.ts).
+ * transitions are fullstack/message-requests.spec.ts).
  *
  * Journey: open a first-contact request, read the sender and the plain text,
  * leave, and reconnect, without accepting it or fetching anything on the
@@ -28,7 +28,7 @@ import {
   Q1,
   setAppearance,
   textContrast,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 const HOSTILE = [
   "hey, check this out https://evil.example/cat.gif",

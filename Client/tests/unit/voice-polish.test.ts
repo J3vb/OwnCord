@@ -7,7 +7,7 @@
 // unreachable), the tile audio overlay revealed only on hover, and a tile
 // rebuild/removal dropped keyboard focus to <body>. jsdom never applies
 // app.css, so the CSS-only facts (the focus-within reveal) are asserted in
-// b9-voice-polish-css.test.ts.
+// voice-polish-css.test.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@lib/livekitSession", () => ({

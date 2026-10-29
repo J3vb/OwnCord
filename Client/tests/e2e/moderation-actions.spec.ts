@@ -8,7 +8,7 @@ import {
   setAppearance,
   textContrast,
   type AppearancePrefs,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 // ---------------------------------------------------------------------------
 // B9-13: a report's warning, timeout and lift-timeout actions against the
@@ -20,7 +20,7 @@ import {
 // every action is on screen. The mock answers a timeout with its voice half
 // applied, the outcome a real server gives only with a live voice session;
 // skipped voice, refusals and role loss run against the real server in
-// tests/e2e/fullstack/b9-moderation-actions.spec.ts. Synthetic content only.
+// tests/e2e/fullstack/moderation-actions.spec.ts. Synthetic content only.
 //
 // B9-14 adds removal, kick (force logout) and ban, each confirmed first. The
 // mocked moderator's role holds ADMINISTRATOR, so all three are offered; which

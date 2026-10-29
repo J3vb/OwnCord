@@ -4,7 +4,7 @@
  * invocation is recorded (`window.__invokeLog`), so "nothing is fetched before
  * consent" is observed. The Q1 checks run on the concealed item and the
  * consent dialog. The native broker traffic proof is
- * tests/e2e/native/b9-content-consent.spec.ts; NVDA/Orca recordings are
+ * tests/e2e/native/content-consent.spec.ts; NVDA/Orca recordings are
  * owner-run and not claimed here.
  */
 import type { Locator, Page } from "@playwright/test";
@@ -23,7 +23,7 @@ import {
   focusIndicator,
   setAppearance,
   textContrast,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 const LINK = "https://news.example/story";
 const IMAGE = "https://cdn.example/cat.png";

@@ -22,7 +22,7 @@ import {
   openSettings,
   switchSettingsTab,
 } from "./helpers";
-import { findUnnamedControls, keyboardReachable } from "./support/b9-accessibility";
+import { findUnnamedControls, keyboardReachable } from "./support/accessibility";
 
 const banner = (page: Page) => page.locator(".reconnecting-banner");
 const bannerLive = (page: Page) => page.locator("[data-testid='banner-announce']");

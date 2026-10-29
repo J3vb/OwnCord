@@ -102,7 +102,7 @@ Inventories and design records:
   content and moderation services, with abuse cases and data ownership
 - [rich-content-inventory.md](architecture/rich-content-inventory.md): every
   place OwnCord fetches outside content, and its limits
-- [b9-ui-contract.md](architecture/b9-ui-contract.md): the shared UI rules
+- [ui-contract.md](architecture/ui-contract.md): the shared UI rules
   (colours, focus, keyboard, announcements, motion)
 
 Target state, not shipped behaviour:

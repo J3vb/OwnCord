@@ -6,14 +6,14 @@
  * width. Every entry point that lives only in that sidebar (channels and DMs,
  * the requests inbox, the Moderation Center, Settings and My reports) then
  * becomes unreachable. This spec runs at the effective 200 % zoom viewport
- * (640x400, the same model as `support/b9-zoom.ts`) and proves the header menu
+ * (640x400, the same model as `support/zoom-reflow.ts`) and proves the header menu
  * button opens the sidebar as a drawer and that each destination is reachable
  * from it: keyboard-only for Settings, the Moderation Center, a DM and the
  * requests inbox, plus one pointer path for opening and outside-click closing.
  * It also pins that the open drawer paints its channel and conversation lists
  * (not just focusable rows) and that a dialog opened from it paints above it.
  *
- * The zoom lane's own spec (b9-zoom.spec.ts) audits the reflow of the screens
+ * The zoom lane's own spec (zoom-reflow.spec.ts) audits the reflow of the screens
  * reached through the drawer; this is the behavioural counterpart, not a copy
  * of it.
  */

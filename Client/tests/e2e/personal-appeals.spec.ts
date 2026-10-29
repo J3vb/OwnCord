@@ -2,7 +2,7 @@
  * B9-16: filing, withdrawing and tracking an own appeal in the real shell,
  * against the mocked transport. The real server's side (duplicate and rate
  * refusals, live status, reconnect, a lapsed ban) is in
- * fullstack/b9-personal-appeals.spec.ts.
+ * fullstack/personal-appeals.spec.ts.
  *
  * Accessibility evidence for the journey (Q1): accessible names, keyboard
  * operation, focus indicator and its location through the async send and
@@ -27,7 +27,7 @@ import {
   setAppearance,
   textContrast,
   type AppearancePrefs,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 const HISTORY = [
   {

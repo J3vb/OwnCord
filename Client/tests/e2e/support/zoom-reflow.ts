@@ -7,7 +7,7 @@
  * exactly what a zoomed user sees. `deviceScaleFactor: 2` alone changes only
  * the physical pixel ratio and leaves the CSS viewport at its full size, so it
  * does not exercise reflow; that is why this helper does not use it. The model
- * and its reason are recorded in `docs/architecture/b9-ui-contract.md` (Q1:
+ * and its reason are recorded in `docs/architecture/ui-contract.md` (Q1:
  * "OS zoom 200 %, the 940×500 minimum window — nothing clipped or
  * unreachable").
  *

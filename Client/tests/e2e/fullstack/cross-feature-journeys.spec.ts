@@ -49,7 +49,7 @@ import type { Locator, Page, Request } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
 import { installRealTransport } from "../support/real-transport";
 import { TEST_PASSWORD, type TestServer } from "../support/server";
-import { Q1, textContrast } from "../support/b9-accessibility";
+import { Q1, textContrast } from "../support/accessibility";
 
 type Frame = { type: string; id?: string; payload?: Record<string, unknown> };
 

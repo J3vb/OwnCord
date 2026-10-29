@@ -13,7 +13,7 @@ import {
   keyboardReachable,
   setAppearance,
   textContrast,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 const rail = (page: Page) => page.getByRole("navigation", { name: "Servers" });
 const home = (page: Page) => page.getByTestId("server-rail-home");

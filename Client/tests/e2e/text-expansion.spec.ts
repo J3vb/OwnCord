@@ -8,7 +8,7 @@ import {
   openSettings,
   switchSettingsTab,
 } from "./helpers";
-import { findUnnamedControls } from "./support/b9-accessibility";
+import { findUnnamedControls } from "./support/accessibility";
 
 // ---------------------------------------------------------------------------
 // B9-3: catalog text in English and through the expansion-only test catalog.

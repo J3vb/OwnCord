@@ -3,8 +3,8 @@
  *
  * Message Requests (B9-5), the Safety tab (B9-15 and B9-10) and the
  * Moderation Center (B9-11) ship in this build; their journeys are
- * b9-message-requests.spec.ts, b9-moderation-notices.spec.ts, b9-reports.spec.ts
- * and fullstack/b9-moderation-queue.spec.ts. What this spec pins is the owner's
+ * message-requests.spec.ts, moderation-notices.spec.ts, reports.spec.ts
+ * and fullstack/moderation-queue.spec.ts. What this spec pins is the owner's
  * Q2 placement, and the familiar channel, DM and settings routes unchanged
  * with the content-view column in place. The
  * transitions through a destination (open, Close/Escape back to the channel,
@@ -22,7 +22,7 @@ import {
   waitForWsReady,
   openDmRow,
 } from "./helpers";
-import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/b9-accessibility";
+import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/accessibility";
 
 const DM_CHANNELS = [
   {

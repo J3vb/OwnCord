@@ -25,7 +25,7 @@ import {
   focusIndicator,
   keyboardReachable,
   textContrast,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,

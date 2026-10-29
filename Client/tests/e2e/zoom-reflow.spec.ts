@@ -7,7 +7,7 @@
  * accessibility evidence (owner decision 2026-09-24, BPR-091 amended).
  *
  * Every test runs at the effective 200 % zoom size from the start (640x400 CSS
- * px — see `support/b9-zoom.ts` for the model and why) and reaches its screen
+ * px — see `support/zoom-reflow.ts` for the model and why) and reaches its screen
  * through the entry point a zoomed user actually has. Each screen is audited:
  * no horizontal page scroll, no two-dimensional scroll area, no text or control
  * clipped without an intended scroll area, no control painted over, every
@@ -35,7 +35,7 @@ import {
   auditReflow,
   expectScreenReflows,
   type ZoomScreen,
-} from "./support/b9-zoom";
+} from "./support/zoom-reflow";
 
 test.use({ viewport: ZOOM_VIEWPORT, deviceScaleFactor: 1 });
 
