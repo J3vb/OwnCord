@@ -417,7 +417,7 @@ describe("setScreenshareQuality", () => {
     });
   });
 
-  it("a quality change on a 120 fps share keeps balanced degradation (M-2)", async () => {
+  it("a quality change on a 120 fps share keeps balanced degradation", async () => {
     const rig = setup(false);
     rig.state.fps = 120;
     rig.video.publishOptions = { ...rig.video.publishOptions, degradationPreference: "balanced" };

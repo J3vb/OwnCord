@@ -8,7 +8,7 @@ import { buildAccessibilityTab } from "../../src/components/settings/Accessibili
  * so turning "Reduce Motion" OFF while "Sync with OS" is ON and the OS still
  * asks for reduced motion silently disables reduced motion app-wide.
  */
-describe("AccessibilityTab — reduced-motion arbitration (OC-0232)", () => {
+describe("AccessibilityTab — reduced-motion arbitration", () => {
   let container: HTMLDivElement;
   let controller: AbortController;
   let matchMediaListeners: Map<string, Function>;

@@ -104,7 +104,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("B9-24 voice widget", () => {
+describe("voice widget", () => {
   it("makes the transport-stats toggle a real button with aria-expanded", () => {
     const container = document.createElement("div");
     const widget = mountWidget(container);
@@ -154,7 +154,7 @@ describe("B9-24 voice widget", () => {
   });
 });
 
-describe("B9-24 video grid focus stability", () => {
+describe("video grid focus stability", () => {
   function mountGrid() {
     const container = document.createElement("div");
     // jsdom only focuses elements connected to the document.

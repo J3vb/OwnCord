@@ -117,7 +117,7 @@ describe("UserProfilePopup", () => {
     popup.destroy?.();
   });
 
-  it("colors the status dot with design tokens, never a literal hex (P4-19)", () => {
+  it("colors the status dot with design tokens, never a literal hex", () => {
     const cases: Array<[UserProfileData["status"], string]> = [
       ["online", "var(--green)"],
       ["idle", "var(--yellow)"],
@@ -157,7 +157,7 @@ describe("UserProfilePopup", () => {
     popup.destroy?.();
   });
 
-  it("Report closes the popup, returns focus, then reports the user (B9-10)", () => {
+  it("Report closes the popup, returns focus, then reports the user", () => {
     const opener = document.createElement("button");
     container.appendChild(opener);
     opener.focus();
@@ -503,7 +503,7 @@ describe("UserProfilePopup profile fields", () => {
     popup.destroy?.();
   });
 
-  describe("block and availability (WP 3B-2)", () => {
+  describe("block and availability", () => {
     const mountPopup = (extra: Partial<Parameters<typeof createUserProfilePopup>[0]> = {}) => {
       const popup = createUserProfilePopup({
         user: makeUser(),
@@ -563,7 +563,7 @@ describe("UserProfilePopup profile fields", () => {
     });
   });
 
-  describe("private note (6.11c)", () => {
+  describe("private note", () => {
     const localNote = () =>
       createNoteBinding(
         { api: null, host: "a.example.com", sessionSignal: new AbortController().signal },
@@ -610,7 +610,7 @@ describe("UserProfilePopup profile fields", () => {
   });
 });
 
-describe("UserProfilePopup role chips (WP 6.3d)", () => {
+describe("UserProfilePopup role chips", () => {
   let container: HTMLDivElement;
   beforeEach(() => {
     container = document.createElement("div");

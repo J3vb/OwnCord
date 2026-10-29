@@ -104,7 +104,7 @@ const EDGES: readonly Edge[] = readdirSync(srcDir, { recursive: true, encoding: 
     });
   });
 
-describe("client import direction (ARCH-06)", () => {
+describe("client import direction", () => {
   it("a lower layer imports no UI module (static runtime import)", () => {
     const violations = EDGES.filter(
       ({ from, to }) =>

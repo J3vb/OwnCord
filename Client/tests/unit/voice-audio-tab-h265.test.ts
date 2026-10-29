@@ -115,7 +115,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("VoiceAudioTab H.265 entry (WP M-6)", () => {
+describe("VoiceAudioTab H.265 entry", () => {
   it("is shown where H.265 can be published", () => {
     expect(codecOptions()).toEqual(["vp8", "h264", "h265", "auto"]);
   });
@@ -152,7 +152,7 @@ describe("VoiceAudioTab H.265 entry (WP M-6)", () => {
   });
 });
 
-describe("VoiceAudioTab screen share fps note (WP M-3)", () => {
+describe("VoiceAudioTab screen share fps note", () => {
   it("tells Linux users that Wayland caps a share at 60 fps", () => {
     isLinuxDesktop.mockReturnValue(true);
     const ac = new AbortController();

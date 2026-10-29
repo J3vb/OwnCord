@@ -434,7 +434,7 @@ describe("GifPicker", () => {
     // only aborts once, at destroy()) would keep every discarded cell from
     // a prior search reachable — and its click handler still live — for the
     // rest of the picker's life.
-    it("does not fire onSelect for a cell discarded by a later search (OC-0365)", async () => {
+    it("does not fire onSelect for a cell discarded by a later search", async () => {
       const onSelect = vi.fn();
       const { picker } = makePicker({ onSelect });
       container.appendChild(picker.element);

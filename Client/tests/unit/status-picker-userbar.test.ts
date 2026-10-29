@@ -246,7 +246,7 @@ describe("StatusPicker wired to UserBar", () => {
     expect(loadUserStatus()).toBe("idle");
   });
 
-  it("tracks the stored status on the trigger dot with a design token, never a literal hex (P4-19)", () => {
+  it("tracks the stored status on the trigger dot with a design token, never a literal hex", () => {
     setAuthState({ username: "alice" }, true);
     saveUserStatus("idle");
     const ws = createMockWs("connected");

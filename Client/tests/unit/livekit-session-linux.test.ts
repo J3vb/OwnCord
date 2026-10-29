@@ -568,7 +568,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     }
   });
 
-  describe("a share running when the connection drops (WP 1C-6)", () => {
+  describe("a share running when the connection drops", () => {
     const toasts = { show: vi.fn(() => () => {}) };
     beforeEach(() => {
       vi.useFakeTimers();

@@ -257,7 +257,7 @@ describe("channels store", () => {
       expect(channelsStore.getState().channels.get(1)!.canSend).toBe(false);
     });
 
-    it("maps can_move_voice from ready and from a targeted channel_create (WP 8.4b)", () => {
+    it("maps can_move_voice from ready and from a targeted channel_create", () => {
       setChannels([
         {
           id: 2,

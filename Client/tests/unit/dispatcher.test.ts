@@ -905,7 +905,7 @@ describe("WS Dispatcher", () => {
   );
 
   describe.skipIf(!oc0315PinHonored)(
-    "[OC-0315] naive-UTC server timestamps vs a non-UTC viewer clock",
+    "naive-UTC server timestamps vs a non-UTC viewer clock",
     () => {
       const originalTZ = process.env.TZ;
 
@@ -1177,7 +1177,7 @@ describe("WS Dispatcher", () => {
       expect(channelsStore.getState().channels.get(5)?.mentionCount).toBe(0);
     });
 
-    it("ignores a mention_count frame for the active channel while the window is unfocused (P4-03)", () => {
+    it("ignores a mention_count frame for the active channel while the window is unfocused", () => {
       const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
       onTestFinished(() => focus.mockRestore());
       seedChannel();
@@ -1281,7 +1281,7 @@ describe("WS Dispatcher", () => {
     });
   });
 
-  describe("game activity (WP 8.3)", () => {
+  describe("game activity", () => {
     const factorio = { name: "Factorio", started_at: 1_761_206_400_000 };
     const seed = (): void => {
       membersStore.setState((prev) => {
@@ -1461,7 +1461,7 @@ describe("WS Dispatcher", () => {
       expect(dmStore.getState().channels[0]?.recipient.activity?.name).toBe("Factorio");
     });
 
-    describe("the per-server switch (WP 8.3e-2)", () => {
+    describe("the per-server switch", () => {
       const user = { id: 1, username: "alex", avatar: null, role: "admin" };
       const partner = { id: 10, username: "bob", avatar: "", status: "online" };
       afterEach(() => resetServerCapabilities());
@@ -1616,7 +1616,7 @@ describe("WS Dispatcher", () => {
     });
   });
 
-  describe("listening activity (WP 8.10)", () => {
+  describe("listening activity", () => {
     const song = {
       title: "Blue in Green",
       artist: "Miles Davis",
@@ -2087,7 +2087,7 @@ describe("WS Dispatcher", () => {
     expect(channelsStore.getState().channels.has(10)).toBe(false);
   });
 
-  it("wires nsfw_ack to the channel's consent state (B9-7)", () => {
+  it("wires nsfw_ack to the channel's consent state", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(11, {
@@ -4379,7 +4379,7 @@ describe("WS Dispatcher", () => {
   // computed as true from a pre-mutation snapshot, permanently disabling the
   // OC-0020 departed-peer key retirement in production. Assert the call
   // shape directly so a future re-introduction of such a flag is caught here.
-  it("[OC-0283] does not pass a stale-leave roster snapshot to handleParticipantLeft on a genuine departure", async () => {
+  it("does not pass a stale-leave roster snapshot to handleParticipantLeft on a genuine departure", async () => {
     vi.mocked(mockHandleParticipantLeft).mockClear();
     authStore.setState((prev) => ({
       ...prev,
@@ -4433,7 +4433,7 @@ describe("WS Dispatcher", () => {
   // reads mutates this client's own E2EE peer state (deletes the peer's key,
   // clears their verification badge, retires their key, and can trigger a
   // room-key rotation) for a call that peer was never part of.
-  it("[OC-0311] does not touch E2EE peer state for a voice_leave from a channel this client is not in", async () => {
+  it("does not touch E2EE peer state for a voice_leave from a channel this client is not in", async () => {
     vi.mocked(mockHandleParticipantLeft).mockClear();
     authStore.setState((prev) => ({
       ...prev,
@@ -4829,7 +4829,7 @@ describe("WS Dispatcher", () => {
   // voice_states on boot), so a plain reconnect leaves the user outside the
   // call. The restart drop records the channel; once ready confirms we are
   // not in it, one normal voice_join puts us back.
-  describe("RT-12: rejoin after a planned restart", () => {
+  describe("rejoin after a planned restart", () => {
     function announceRestart(reason = "update"): void {
       mock.dispatch("server_restart", { reason, delay_seconds: 5 });
       expectConsole("warn", /\[dispatcher\] Server restarting/);
@@ -4988,7 +4988,7 @@ describe("WS Dispatcher", () => {
       );
     });
 
-    it("rejoins after a shutdown restart from outside the server within its shorter window (D-2)", async () => {
+    it("rejoins after a shutdown restart from outside the server within its shorter window", async () => {
       announceRestartAndDrop("shutdown");
       await vi.runAllTimersAsync();
       // D-2: a systemctl/docker restart that is back quickly looks like a blip.
@@ -5003,7 +5003,7 @@ describe("WS Dispatcher", () => {
       expect(voiceStore.getState().currentChannelId).toBe(42);
     });
 
-    it("does not rejoin when ready arrives after a shutdown notice's 2-minute window (D-2)", async () => {
+    it("does not rejoin when ready arrives after a shutdown notice's 2-minute window", async () => {
       announceRestartAndDrop("shutdown");
       await vi.runAllTimersAsync();
       vi.setSystemTime(Date.now() + 3 * 60_000);
@@ -5065,7 +5065,7 @@ describe("WS Dispatcher", () => {
     expect(error).toBe(`You have been banned. ${safetyText("appeals.unavailable")}`);
   });
 
-  it("wires error BANNED to disconnect the ws client (OC-0107: without this the banned token reconnects forever)", () => {
+  it("wires error BANNED to disconnect the ws client (without this the banned token reconnects forever)", () => {
     authStore.setState((prev) => ({
       ...prev,
       isAuthenticated: true,
@@ -5094,7 +5094,7 @@ describe("WS Dispatcher", () => {
   // login screen, where it resurfaces stale and out of context. The
   // catch-all must use the same in-app toast the sibling CHANNEL_FULL /
   // VIDEO_LIMIT branches already use, and must leave transientError alone.
-  it("wires error RATE_LIMITED to an in-app toast with its catalog text (OC-0064)", () => {
+  it("wires error RATE_LIMITED to an in-app toast with its catalog text", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", {
       code: "RATE_LIMITED",
@@ -5106,7 +5106,7 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("lets the game activity loop claim its own refused frame without a toast (WP 8.3)", () => {
+  it("lets the game activity loop claim its own refused frame without a toast", () => {
     mockShowToast.mockClear();
     setActivityRefusalHandler((code, id) => code === "RATE_LIMITED" && id === "act-1");
     try {
@@ -5123,7 +5123,7 @@ describe("WS Dispatcher", () => {
     }
   });
 
-  it("wires error FORBIDDEN to an in-app toast with its catalog text (OC-0064)", () => {
+  it("wires error FORBIDDEN to an in-app toast with its catalog text", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", {
       code: "FORBIDDEN",
@@ -5135,7 +5135,7 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires error RATE_LIMITED with empty message to its catalog text (OC-0064)", () => {
+  it("wires error RATE_LIMITED with empty message to its catalog text", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", { code: "RATE_LIMITED", message: "" });
     expectConsole("error", /\[dispatcher\] Server error/);
@@ -5162,7 +5162,7 @@ describe("WS Dispatcher", () => {
   // seeing and saving a status nobody else has. The dispatcher is the one
   // writer for server events, so its error chain routes the rollback to the
   // active sender.
-  it("rolls back the optimistic presence status on a TIMED_OUT refusal (PR #2067 follow-up)", () => {
+  it("rolls back the optimistic presence status on a TIMED_OUT refusal", () => {
     const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
     setActivePresenceSender(presenceSender);
     try {
@@ -5203,7 +5203,7 @@ describe("WS Dispatcher", () => {
     }
   });
 
-  it("rolls back the optimistic presence status on a REQUEST_TIMEOUT refusal (WP 4.1b)", () => {
+  it("rolls back the optimistic presence status on a REQUEST_TIMEOUT refusal", () => {
     const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
     setActivePresenceSender(presenceSender);
     try {
@@ -5296,7 +5296,7 @@ describe("WS Dispatcher", () => {
     }
   });
 
-  it("wires error with an unrecognized code to the generic fallback toast (OC-0064)", () => {
+  it("wires error with an unrecognized code to the generic fallback toast", () => {
     // The final fallthrough is the one place every unmatched error code
     // lands (e.g. a rejected fire-and-forget chat_edit) — it must not be
     // silently dropped just because it isn't RATE_LIMITED/FORBIDDEN.
@@ -5313,7 +5313,7 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().transientError).toBeNull();
   });
 
-  it("wires a BAD_REQUEST error with no pending correlation (e.g. a rejected chat_edit) to an in-app toast (OC-0064)", () => {
+  it("wires a BAD_REQUEST error with no pending correlation (e.g. a rejected chat_edit) to an in-app toast", () => {
     // chat_edit is fire-and-forget: it never enters pendingSends, so a
     // rejection's envelope id matches nothing above and used to fall through
     // this handler silently, leaving the user's edited text destroyed with
@@ -7201,7 +7201,7 @@ describe("wireConnectionStatus", () => {
   });
 });
 
-describe("WS Dispatcher cleanup isolation (ARCH-012)", () => {
+describe("WS Dispatcher cleanup isolation", () => {
   it("a throwing cleanup entry still unsubscribes every other handler", () => {
     const m = createMockWs();
     const realOn = m.ws.on.bind(m.ws);

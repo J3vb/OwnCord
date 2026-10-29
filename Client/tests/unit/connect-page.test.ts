@@ -2121,7 +2121,7 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
-  it("shows friendly copy for a transport failure instead of raw fetch text (DP-54)", async () => {
+  it("shows friendly copy for a transport failure instead of raw fetch text", async () => {
     const onLogin = vi.fn().mockRejectedValue(new TransportError("Failed to fetch"));
     const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
     page.mount(container);

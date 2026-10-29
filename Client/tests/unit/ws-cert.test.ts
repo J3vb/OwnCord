@@ -577,7 +577,7 @@ describe("normalizeHostForCertCompare", () => {
     expect(normalizeHostForCertCompare("example.com:4430")).toBe("example.com:4430");
   });
 
-  it("does not truncate a bare IPv6 literal ending in hextet 443 (OC-0215 guard)", () => {
+  it("does not truncate a bare IPv6 literal ending in hextet 443 (regression guard)", () => {
     // Mirrors src-tauri/src/tofu.rs's
     // cert_store_key_does_not_truncate_bare_ipv6_ending_in_443. cert_store_key
     // only strips a trailing ":443" when what's left has no remaining colon
