@@ -13,25 +13,21 @@ import (
 	"github.com/google/uuid"
 )
 
-// validateAvatarURL checks that avatar is either empty or a valid https:// URL
-// no longer than maxAvatarURLLen characters, and that a URL on the server's own
-// host is an attachment route.
-//
+// validateAvatarURL checks that avatar is empty or an https:// URL no longer
+// than maxAvatarURLLen, and that a URL on the server's own host is an attachment
+// route.
 // A same-host URL is otherwise an amplification primitive: the client attaches
-// the session bearer token to a request whose host equals the server, so every
-// viewer that renders the user would fetch an arbitrary path on this origin
-// with their credentials. The only legitimate same-host avatar is the
-// attachment route this server writes to users.avatar (service.AvatarFileURL),
-// so anything else on this host is refused. Different hosts are unaffected —
-// they are fetched anonymously through the client's external-content broker.
-//
-// selfHosts are the hosts this server answers on, derived from configuration
-// (configuredSelfHosts), NOT from the request: the Host header is
-// client-supplied, so trusting it alone let an attacker name an arbitrary Host
-// and slip an arbitrary same-origin path past the comparison. The request's own
-// Host is still one extra candidate: that only widens what is refused, so a
-// spoofed Host can never cause an acceptance, and it covers a server with no
-// tls.domain that is reached by DNS name or behind a reverse proxy.
+// the session bearer token to requests whose host equals the server, so every
+// viewer rendering the user would fetch an arbitrary path on this origin with
+// their credentials. The only legitimate same-host avatar is the attachment
+// route this server writes (service.AvatarFileURL); other hosts are fetched
+// anonymously through the client's external-content broker.
+// selfHosts come from configuration (configuredSelfHosts), NOT the
+// client-supplied Host header: trusting it alone let an attacker name an
+// arbitrary Host and slip a same-origin path past the comparison. The request's
+// Host is still one extra candidate, which only widens what is refused, and it
+// covers a server with no tls.domain reached by DNS name or behind a reverse
+// proxy.
 func validateAvatarURL(avatar string, selfHosts []string, requestHost string) error {
 	if avatar == "" {
 		return nil

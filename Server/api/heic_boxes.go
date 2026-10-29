@@ -11,7 +11,6 @@ import (
 
 type heicExtent struct{ off, length uint64 }
 
-// heicMeta is the parsed meta box.
 type heicMeta struct {
 	primary     uint32
 	havePrimary bool
@@ -26,7 +25,6 @@ type heicMeta struct {
 	size        uint64              // the file's size
 }
 
-// byteReader reads big-endian fields from a box body; a short read sets bad.
 type byteReader struct {
 	b   []byte
 	bad bool
@@ -45,7 +43,6 @@ func (r *byteReader) uint(n int) uint64 {
 	return v
 }
 
-// id reads an item id of n (at most 4) bytes.
 func (r *byteReader) id(n int) uint32 {
 	v := r.uint(n)
 	if n > 4 || v > math.MaxUint32 {
@@ -185,7 +182,6 @@ func (m *heicMeta) parseIinf(body []byte) error {
 	return nil
 }
 
-// ilocSizes are the field sizes an iloc box declares, in bytes.
 type ilocSizes struct {
 	version                           uint64
 	offset, length, base, index, idSz int

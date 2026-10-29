@@ -13,18 +13,15 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// warnRequest is POST /api/v1/moderation/users/{id}/warn's body.
 type warnRequest struct {
 	Reason string `json:"reason"`
 }
 
-// timeoutRequest is POST /api/v1/moderation/users/{id}/timeout's body.
 type timeoutRequest struct {
 	Reason          string `json:"reason"`
 	DurationSeconds int64  `json:"duration_seconds"`
 }
 
-// moderationActionIDResponse is Warn's response body.
 type moderationActionIDResponse struct {
 	ID int64 `json:"id"`
 }
@@ -227,7 +224,6 @@ func handleModerationAckNotice(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// ownModerationAppeal is the appeal filed against an own ledger row.
 type ownModerationAppeal struct {
 	ID    string `json:"id"`
 	State string `json:"state"`
@@ -285,7 +281,6 @@ type nicknameRequest struct {
 	DisplayName json.RawMessage `json:"display_name"`
 }
 
-// nicknameResponse is the committed nickname, null when cleared.
 type nicknameResponse struct {
 	UserID      int64   `json:"user_id"`
 	DisplayName *string `json:"display_name"`

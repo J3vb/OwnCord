@@ -10,14 +10,12 @@ import (
 	"github.com/gen2brain/h265/hevc"
 )
 
-// heicBudget is what the pictures of one file may add up to.
 type heicBudget struct {
 	pixels int64  // coded pixels left over all images
 	nals   int    // NAL units left to walk
 	bytes  uint64 // item data bytes left, the file size to begin with
 }
 
-// bitReader reads the Exp-Golomb coded fields of a parameter set.
 type bitReader struct {
 	b   []byte
 	pos int
@@ -34,7 +32,6 @@ func (r *bitReader) bit() uint32 {
 	return v
 }
 
-// ue is an unsigned Exp-Golomb value of up to 32 bits.
 func (r *bitReader) ue() uint32 {
 	zeros := 0
 	for r.bit() == 0 {

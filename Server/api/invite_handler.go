@@ -11,13 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// createInviteRequest is the JSON body for POST /api/v1/invites.
 type createInviteRequest struct {
 	MaxUses        int `json:"max_uses"`
 	ExpiresInHours int `json:"expires_in_hours"`
 }
 
-// inviteResponse is the API shape for an invite.
 type inviteResponse struct {
 	ID              int64   `json:"id"`
 	Code            string  `json:"code"`
@@ -43,7 +41,6 @@ func MountInviteRoutes(r chi.Router, svc *service.Services) {
 	})
 }
 
-// handleCreateInvite processes POST /api/v1/invites.
 func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createInviteRequest
@@ -71,7 +68,6 @@ func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleListInvites processes GET /api/v1/invites.
 func handleListInvites(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		invites, err := svc.Invites.ListInvites(r.Context())
@@ -88,7 +84,6 @@ func handleListInvites(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleRevokeInvite processes DELETE /api/v1/invites/:code.
 func handleRevokeInvite(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -104,7 +99,6 @@ func handleRevokeInvite(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// inviteRedemptionResponse is the API shape for one recorded redemption (O1).
 type inviteRedemptionResponse struct {
 	// UserID is null once the redeemer's account has been erased; Username is
 	// then empty. A leaked invite can still be traced to when it was spent.
@@ -113,7 +107,6 @@ type inviteRedemptionResponse struct {
 	RedeemedAt string `json:"redeemed_at"`
 }
 
-// handleListInviteRedemptions processes GET /api/v1/invites/{code}/redemptions.
 func handleListInviteRedemptions(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		code := chi.URLParam(r, "code")
@@ -134,7 +127,6 @@ func handleListInviteRedemptions(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// toInviteResponse converts a db.Invite to the API response shape.
 func toInviteResponse(inv *db.Invite) inviteResponse {
 	var maxUses *int
 	if inv.MaxUses != nil {

@@ -34,8 +34,8 @@ func isInvalidSearchQueryError(err error) bool {
 		strings.Contains(msg, "syntax error")
 }
 
-// PurgeBroadcaster is the interface needed to fan a bulk delete out over
-// WebSocket from a REST handler. Satisfied by *ws.Hub.
+// PurgeBroadcaster fans a bulk delete out over WebSocket from a REST handler;
+// satisfied by *ws.Hub.
 type PurgeBroadcaster interface {
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
 	BroadcastMessagePinned(channelID, messageID int64, pinned bool)
@@ -64,7 +64,6 @@ func MountChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.RateL
 	).Get("/api/v1/search", handleSearch(svc))
 }
 
-// handleListChannels returns all channels the authenticated user can see.
 func handleListChannels(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -230,16 +229,12 @@ type purgeRequest struct {
 	Before int64 `json:"before"`
 }
 
-// purgeResponse reports what the purge actually deleted, which can be fewer
-// than Limit rows when the channel holds less history.
 type purgeResponse struct {
 	ChannelID int64   `json:"channel_id"`
 	IDs       []int64 `json:"ids"`
 	Count     int     `json:"count"`
 }
 
-// handlePurgeMessages bulk soft-deletes the newest messages in a channel and
-// broadcasts a single chat_bulk_deleted event.
 func handlePurgeMessages(svc *service.Services, broadcaster PurgeBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -277,7 +272,6 @@ func handlePurgeMessages(svc *service.Services, broadcaster PurgeBroadcaster) ht
 	}
 }
 
-// handleSearch performs a full-text search across messages.
 func handleSearch(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
@@ -348,10 +342,8 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 		}
 
 		type response struct {
-			Results []db.MessageSearchResult `json:"results"`
-			// NextBefore is the before= cursor for the next sort=recent page;
-			// null when there is none.
-			NextBefore *int64 `json:"next_before"`
+			Results    []db.MessageSearchResult `json:"results"`
+			NextBefore *int64                   `json:"next_before"`
 		}
 		resp := response{Results: results}
 		if nextBefore > 0 {
@@ -361,7 +353,6 @@ func handleSearch(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleGetPins returns all pinned messages for a channel.
 func handleGetPins(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -384,9 +375,9 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 			Messages []db.MessageAPIResponse `json:"messages"`
 			HasMore  bool                    `json:"has_more"`
 		}
-		// Report the real cap state rather than a hardcoded false: with more
-		// than MaxPinnedMessages pins the rest are truncated, and the caller
-		// must be able to tell (F23).
+		// Report the real cap state, not a hardcoded false: with more than
+		// MaxPinnedMessages pins the rest are truncated and the caller must be
+		// able to tell.
 		hasMore := len(msgs) > db.MaxPinnedMessages
 		if hasMore {
 			msgs = msgs[:db.MaxPinnedMessages]
@@ -399,7 +390,7 @@ func handleGetPins(svc *service.Services) http.HandlerFunc {
 }
 
 // handleSetPinned pins or unpins a message. The change is broadcast to every
-// reader so no client shows stale pins (F5); a pin may also fan out a pin row.
+// reader so no client shows stale pins; a pin may also fan out a pin row.
 func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID, ok := parseIDParam(w, r, "id")
@@ -431,7 +422,6 @@ func handleSetPinned(svc *service.Services, broadcaster PurgeBroadcaster, pinned
 	}
 }
 
-// writeServiceError maps a service-layer error to an HTTP response.
 func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrRateLimited):
@@ -448,11 +438,11 @@ func writeServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):
 		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, err.Error())
 	case errors.Is(err, service.ErrDeletedMessage):
-		// The target is already gone — a state, not a failure. 404 would be
-		// wrong here: the moderation client clears the report on 404, which
-		// would hide the removal's own outcome. 409 ALREADY_DELETED is the
-		// "already in the requested end state" twin of DUPLICATE_REPORT, so
-		// the caller gets a clean typed refusal instead of a 500.
+		// The target is already gone: a state, not a failure. 404 would be wrong
+		// because the moderation client clears the report on 404, hiding the
+		// removal's own outcome. 409 ALREADY_DELETED is the "already in the
+		// requested end state" twin of DUPLICATE_REPORT, so the caller gets a
+		// typed refusal instead of a 500.
 		writeErr(w, http.StatusConflict, httperr.CodeAlreadyDeleted, err.Error())
 	case errors.Is(err, service.ErrGroupDMFull):
 		// Before ErrConflict, which it wraps: the group has no room left.
@@ -486,8 +476,6 @@ func parseLimitParam(w http.ResponseWriter, r *http.Request) (int, bool) {
 	return min(v, maxMessageLimit), true
 }
 
-// parseIDParam extracts and validates a chi URL param as int64.
-// Writes a 400 response and returns false on failure.
 func parseIDParam(w http.ResponseWriter, r *http.Request, param string) (int64, bool) {
 	id, ok := pathID(r, param)
 	if !ok {

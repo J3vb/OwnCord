@@ -26,12 +26,10 @@ func MountNSFWRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcas
 	})
 }
 
-// nsfwPostBumpPreNotifyHook, when non-nil, runs once per acknowledge/revoke
-// immediately after the visibility watermark bumps and before the
-// best-effort notify send. Test-only (always nil in
-// production): lets a test observe the exact point at which a concurrently
-// registering socket is already guaranteed to see the fresh state,
-// regardless of whether the notify frame itself ever arrives.
+// nsfwPostBumpPreNotifyHook, when non-nil, runs after the visibility watermark
+// bumps and before the best-effort notify send. Test-only (nil in production):
+// it marks the point at which a concurrently registering socket is guaranteed to
+// see the fresh state whether or not the notify frame arrives.
 var nsfwPostBumpPreNotifyHook func()
 
 func handleNSFWAcknowledge(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
@@ -44,13 +42,10 @@ func handleNSFWAcknowledge(svc *service.Services, broadcaster DMBroadcaster) htt
 			writeNSFWError(r.Context(), w, err)
 			return
 		}
-		// Bump BEFORE the notify send, same ordering
-		// broadcastDMOpen uses relative to its SendToUser calls. nsfw_ack is
-		// unsequenced and not replayed (protocol/schema.json's own note), so
-		// the bump — not the frame — is what makes a resume safe; a socket
-		// that registers in the gap between these two calls must still land
-		// on the full-ready path, not fall through a window where neither
-		// the frame nor a forced resync can reach it.
+		// Bump BEFORE the notify send, like broadcastDMOpen: nsfw_ack is
+		// unsequenced and not replayed (protocol/schema.json), so the bump, not
+		// the frame, makes a resume safe; a socket registering between the two
+		// calls must still land on the full-ready path.
 		markDMVisibilityChanged(broadcaster)
 		if nsfwPostBumpPreNotifyHook != nil {
 			nsfwPostBumpPreNotifyHook()
@@ -80,8 +75,6 @@ func handleNSFWRevoke(svc *service.Services, broadcaster DMBroadcaster) http.Han
 	}
 }
 
-// nsfwRequestParams reads the authenticated caller and the {id} path
-// parameter shared by both routes.
 func nsfwRequestParams(w http.ResponseWriter, r *http.Request) (*db.User, int64, bool) {
 	user, ok := requireUser(w, r)
 	if !ok {
