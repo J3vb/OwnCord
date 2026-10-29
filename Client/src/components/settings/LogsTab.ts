@@ -218,7 +218,10 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       },
       { signal: buildSignal },
     );
-    appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
+    // A page has no log folder (the browser keeps logs in memory), so the web
+    // build offers only the bundle.
+    if (__OWNCORD_WEB__) appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
+    else appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
     appendChildren(helpCard, helpHead, bundleNote, bundleStatus);
     section.appendChild(helpCard);
 

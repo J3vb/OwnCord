@@ -238,6 +238,8 @@ export const messagingText = defineCatalog("messaging", {
   "invite.openBody": "You'll leave {current}.",
   "invite.openBodyInVoice": "You'll leave {current} and your call.",
   "invite.openButton": "Leave and open invite",
+  "invite.openTabFailed":
+    "Couldn't open that server's page. Allow pop-ups for this site and try again.",
   "code.copy": "Copy",
   "code.copied": "Copied!",
   "code.copyFailed": "Failed",
