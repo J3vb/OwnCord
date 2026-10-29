@@ -1,12 +1,10 @@
 /**
- * AdminActions — context menu helpers for admin operations on members and channels.
- * Provides confirmation steps for destructive actions (force logout, ban, delete).
+ * AdminActions — the member context menu and its admin operations.
+ * Provides confirmation steps for destructive actions (force logout, block).
  */
 
-import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { createMenuItem as buildMenuItem, enableMenuKeyboard } from "@lib/context-menu";
-import { appendPurgeSection } from "./purge-prompt";
+import { createMenuItem as buildMenuItem, openMenuShell, type OpenMenu } from "@lib/context-menu";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
@@ -18,6 +16,9 @@ import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 // ---------------------------------------------------------------------------
 
 export interface MemberContextMenuOptions {
+  /** Where the menu opens, in viewport pixels. */
+  x: number;
+  y: number;
   userId: number;
   username: string;
   currentRole: string;
@@ -72,27 +73,6 @@ export interface MemberContextMenuOptions {
    *  first, so the dialog returns focus to the member row. */
   onBan(): void;
   onChangeRole(newRole: string): Promise<void>;
-}
-
-const noop = (): void => {};
-
-export interface ChannelContextMenuOptions {
-  channelId: number;
-  channelName: string;
-  onEdit(): void;
-  onDelete(): Promise<void>;
-  onCreate(): void;
-  /**
-   * Bulk-delete the newest `count` messages. Omitted when the local user's
-   * role lacks MANAGE_MESSAGES — the section is then not rendered at all,
-   * mirroring the server's gate.
-   */
-  onPurge?(count: number): Promise<void>;
-}
-
-interface ContextMenuResult {
-  readonly element: HTMLDivElement;
-  destroy(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,33 +168,6 @@ function withConfirmation(
 // Member Context Menu
 // ---------------------------------------------------------------------------
 
-/** Wrap a finished menu: enable the shared keyboard model and return the
- *  result. `destroy` tears the menu and its listeners down, whether called by
- *  Escape/close or by the owner, and always restores focus to the opener. */
-function finishMenu(
-  menu: HTMLDivElement,
-  disposable: Disposable,
-  onClosed: () => void = noop,
-  restoreFocusTo?: () => HTMLElement | null,
-): ContextMenuResult {
-  let restoreFocus: () => void = noop;
-  let closed = false;
-  function destroy(): void {
-    disposable.destroy();
-    menu.remove();
-    restoreFocus();
-    if (closed) return;
-    closed = true;
-    onClosed();
-  }
-  restoreFocus = enableMenuKeyboard(menu, {
-    signal: disposable.signal,
-    onClose: destroy,
-    ...(restoreFocusTo === undefined ? {} : { restoreFocusTo }),
-  });
-  return { element: menu, destroy };
-}
-
 /** One flat menu row. `disabledReason` greys it and keeps it inert; the reason
  *  shows as its tooltip. */
 function appendRow(
@@ -276,8 +229,13 @@ function appendVoiceRows(
   signal: AbortSignal,
 ): void {
   const reason = typeof mod === "string" ? mod : mod.disabledReason;
-  const muted = typeof mod !== "string" && mod.serverMuted;
-  const deafened = typeof mod !== "string" && mod.serverDeafened;
+  const muted = typeof mod !== "string" && mod.serverMuted === true;
+  const deafened = typeof mod !== "string" && mod.serverDeafened === true;
+  // A Move Members-only verdict (WP 8.4b) carries no mute, deafen or
+  // disconnect handler, and the member menu offers no Move: show only the
+  // rows the options can run. A string (the reason) still shows all three.
+  const has = (pick: (m: VoiceModMenuOptions) => unknown): boolean =>
+    typeof mod === "string" || pick(mod) !== undefined;
   const run = (action: (m: VoiceModMenuOptions) => void) => (): void => {
     if (typeof mod === "string") return;
     action(mod);
@@ -285,36 +243,55 @@ function appendVoiceRows(
   };
   const opts = (testId: string): { testId: string; disabledReason?: string } =>
     reason === undefined ? { testId } : { testId, disabledReason: reason };
-  appendRow(
-    parent,
-    voiceText(muted ? "volume.serverUnmute" : "volume.serverMute"),
-    run((m) => m.onServerMute(!m.serverMuted)),
-    signal,
-    opts("member-menu-server-mute"),
-  );
-  appendRow(
-    parent,
-    voiceText(deafened ? "volume.serverUndeafen" : "volume.serverDeafen"),
-    run((m) => m.onServerDeafen(!m.serverDeafened)),
-    signal,
-    opts("member-menu-server-deafen"),
-  );
-  appendRow(
-    parent,
-    voiceText("volume.disconnect"),
-    run((m) => m.onDisconnect()),
-    signal,
-    opts("member-menu-disconnect"),
-  );
+  if (has((m) => m.onServerMute)) {
+    appendRow(
+      parent,
+      voiceText(muted ? "volume.serverUnmute" : "volume.serverMute"),
+      run((m) => m.onServerMute?.(!muted)),
+      signal,
+      opts("member-menu-server-mute"),
+    );
+  }
+  if (has((m) => m.onServerDeafen)) {
+    appendRow(
+      parent,
+      voiceText(deafened ? "volume.serverUndeafen" : "volume.serverDeafen"),
+      run((m) => m.onServerDeafen?.(!deafened)),
+      signal,
+      opts("member-menu-server-deafen"),
+    );
+  }
+  if (has((m) => m.onDisconnect)) {
+    appendRow(
+      parent,
+      voiceText("volume.disconnect"),
+      run((m) => m.onDisconnect?.()),
+      signal,
+      opts("member-menu-disconnect"),
+    );
+  }
 }
 
-export function createMemberContextMenu(options: MemberContextMenuOptions): ContextMenuResult {
-  const disposable = new Disposable();
-  const signal = disposable.signal;
-  const menu = createElement("div", { class: "context-menu" });
+/** Open the member menu at `x`, `y`; any other open menu closes. */
+export function createMemberContextMenu(options: MemberContextMenuOptions): OpenMenu {
+  return openMenuShell({
+    x: options.x,
+    y: options.y,
+    // Above the member list's own popouts.
+    attrs: { style: "z-index:1000" },
+    ...(options.onClosed === undefined ? {} : { onClosed: options.onClosed }),
+    ...(options.restoreFocusTo === undefined ? {} : { restoreFocusTo: options.restoreFocusTo }),
+    build: (menu, closeMenu, signal) => buildMemberMenu(menu, options, closeMenu, signal),
+  });
+}
+
+function buildMemberMenu(
+  menu: HTMLElement,
+  options: MemberContextMenuOptions,
+  closeMenu: () => void,
+  signal: AbortSignal,
+): void {
   const isSelf = options.isSelf === true;
-  let result: ContextMenuResult | null = null;
-  const closeMenu = (): void => result?.destroy();
 
   // Groups, top to bottom; a separator goes between non-empty ones.
   const top = document.createDocumentFragment();
@@ -547,9 +524,6 @@ export function createMemberContextMenu(options: MemberContextMenuOptions): Cont
     first = false;
     menu.appendChild(group);
   }
-
-  result = finishMenu(menu, disposable, options.onClosed, options.restoreFocusTo);
-  return result;
 }
 
 function buildBlockItem(options: MemberContextMenuOptions, signal: AbortSignal): HTMLElement {
@@ -587,60 +561,4 @@ function buildBlockItem(options: MemberContextMenuOptions, signal: AbortSignal):
     );
   }
   return blockItem;
-}
-
-// ---------------------------------------------------------------------------
-// Channel Context Menu
-// ---------------------------------------------------------------------------
-
-export function createChannelContextMenu(options: ChannelContextMenuOptions): ContextMenuResult {
-  const disposable = new Disposable();
-  const menu = createElement("div", { class: "context-menu" });
-
-  // Edit Channel
-  const editItem = createMenuItem(
-    shellText("channel.edit"),
-    "context-menu__item",
-    () => options.onEdit(),
-    disposable.signal,
-  );
-  menu.appendChild(editItem);
-
-  // Create Channel
-  const createItem = createMenuItem(
-    shellText("channel.create"),
-    "context-menu__item",
-    () => options.onCreate(),
-    disposable.signal,
-  );
-  menu.appendChild(createItem);
-
-  menu.appendChild(createSeparator());
-
-  // Delete Channel with confirmation
-  const deleteItem = buildMenuItem(
-    shellText("channel.delete"),
-    "context-menu__item context-menu__item--danger",
-  );
-  withConfirmation(
-    deleteItem,
-    shellText("common.areYouSure"),
-    () => options.onDelete(),
-    disposable.signal,
-    shellText("common.deleting"),
-  );
-  menu.appendChild(deleteItem);
-
-  const onPurge = options.onPurge;
-  if (onPurge !== undefined) {
-    appendPurgeSection(menu, {
-      itemClass: "context-menu__item",
-      dangerItemClass: "context-menu__item context-menu__item--danger",
-      separatorClass: "context-menu__separator",
-      onPurge: (count) => onPurge(count),
-      signal: disposable.signal,
-    });
-  }
-
-  return finishMenu(menu, disposable);
 }

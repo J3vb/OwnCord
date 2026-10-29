@@ -111,6 +111,7 @@ vi.mock("@stores/voice.store", () => ({
   clearPeerVerification: vi.fn(),
   clearPeerVerifications: vi.fn(),
   setLocalSessionFingerprint: vi.fn(),
+  setLocalSafetyNumber: vi.fn(),
   setEncryptionDegraded: vi.fn(),
 }));
 
@@ -231,7 +232,8 @@ vi.mock("../../src/features/voice/native/videoRenderer", () => ({
 }));
 
 const prefs = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/preferences")>()),
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
   savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));
@@ -310,7 +312,12 @@ describe("LiveKitSession on the Linux native backend", () => {
       ...prev,
       channels: new Map([[1, { id: 1, type: "voice" } as never]]),
     }));
-    session.setWsClient({ send: vi.fn(), on: vi.fn(), getState: () => "connected" } as never);
+    session.setWsClient({
+      send: vi.fn(),
+      on: vi.fn(),
+      getState: () => "connected",
+      ping: async () => {},
+    } as never);
     session.setServerHost("chat.example");
     // MainPage registers the screen-share dialog through the layer slot
     // (ARCH-06); mirror that here so the native share path reaches the real
@@ -571,6 +578,7 @@ describe("LiveKitSession on the Linux native backend", () => {
         send: vi.fn(() => "req-1"),
         on: vi.fn(),
         getState: () => "connected",
+        ping: async () => {},
       } as never);
     });
     afterEach(() => {

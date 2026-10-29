@@ -173,6 +173,38 @@ func TestAuditCoverage_AdminMutations(t *testing.T) {
 			}
 			return rec, nil
 		}},
+		{"backup link issued", "backup_link", func(t *testing.T) (*audittest.Recorder, []string) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "b.db"), []byte("backup"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			handler, database, token, _ := fixture(t, admin.SetupOptions{BackupDir: dir})
+			rec := audittest.Install(t, database)
+			w := doRequest(t, handler, http.MethodPost, "/backups/b.db/link", token, map[string]any{})
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			var link struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &link)
+			u, _ := url.Parse(link.Path)
+			return rec, []string{token, u.Query().Get("token")}
+		}},
+		{"archive link issued", "archive_link", func(t *testing.T) (*audittest.Recorder, []string) {
+			handler, database, token, _ := fixture(t, admin.SetupOptions{BackupDir: t.TempDir()})
+			rec := audittest.Install(t, database)
+			w := doRequest(t, handler, http.MethodPost, "/archive/link", token, map[string]any{})
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+			}
+			var link struct {
+				Path string `json:"path"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &link)
+			u, _ := url.Parse(link.Path)
+			return rec, []string{token, u.Query().Get("token")}
+		}},
 		{"backup download", "backup_download", func(t *testing.T) (*audittest.Recorder, []string) {
 			dir := t.TempDir()
 			if err := os.WriteFile(filepath.Join(dir, "b.db"), []byte("backup"), 0o600); err != nil {

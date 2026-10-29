@@ -11,7 +11,13 @@ const { openUrlMock, saveMock, writeFileMock, showToastMock } = vi.hoisted(() =>
   showToastMock: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: openUrlMock }));
+// The opener is the `open_external_url` command; `openUrlMock` records its URL.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: async (command: string, args?: { url: string }) => {
+    if (command !== "open_external_url") throw new Error(`unexpected invoke ${command}`);
+    return openUrlMock(args!.url);
+  },
+}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveMock }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
 vi.mock("@lib/logger", () => ({

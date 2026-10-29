@@ -168,6 +168,7 @@ vi.mock("@stores/voice.store", () => ({
   clearPeerVerification: vi.fn(),
   clearPeerVerifications: vi.fn(),
   setLocalSessionFingerprint: vi.fn(),
+  setLocalSafetyNumber: vi.fn(),
   setEncryptionDegraded: vi.fn(),
 }));
 
@@ -188,7 +189,8 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockSavePref: vi.fn(),
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/preferences")>()),
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));

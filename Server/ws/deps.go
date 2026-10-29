@@ -22,11 +22,24 @@ type ClientInfo struct {
 	// DisplayName is the connection's nickname, nil when unset. Carried
 	// alongside Username rather than replacing it: renderers fall back to the
 	// username, and mentions still resolve against it.
-	DisplayName    *string
-	RoleName       string
+	DisplayName *string
+	RoleName    string
+	// IdentityKey is the connection's device identity public key from its auth
+	// frame, "" when none (client.identityKey).
+	IdentityKey    string
 	ReqID          string
 	VoiceChannelID int64  // 0 if not in a voice channel
 	VoiceJoinToken string // opaque join-instance token for the current voice session
+	// Activity is the connection's live game activity when the frame was
+	// read (WP 8.3a), nil when none. Frames of one connection run one at a
+	// time, so it is current for the handlers that read it: activity_update
+	// (no-op and clear checks) and presence_update (the frame it emits
+	// carries the game).
+	Activity *gameActivity
+	// Listening is the connection's live song when the frame was read (WP
+	// 8.10a), nil when none: listening_update's no-op and clear checks, and
+	// the frame presence_update emits.
+	Listening *listeningActivity
 }
 
 // ── Per-domain dependency structs ───────────────────────────────────────────
@@ -56,6 +69,10 @@ type PresenceDeps struct {
 	// exactly like MessageService.dmAudience's own nil-messageRequests
 	// fallback for the other DM frame paths.
 	MessageSvc *service.MessageService
+	// GameActivityEnabled reports the per-server game activity switch
+	// (WP 8.3e-2): activity_update refuses a set while it is false. nil means
+	// on (a test built without a hub).
+	GameActivityEnabled func() bool
 }
 
 // ReactionDeps holds dependencies for reaction handlers.
@@ -80,8 +97,12 @@ type VoiceModerator interface {
 	// DisconnectFromVoice runs the voice-leave routine for the target's
 	// connection. Reports false when the target has no connection on this node.
 	DisconnectFromVoice(ctx context.Context, userID int64) bool
-	// SendToUser delivers one server->client frame to the target.
-	SendToUser(userID int64, msg []byte) bool
+	// SendToVoiceDevice delivers one call-related server->client frame
+	// (voice_moved, voice_disconnected) to the target's device that held the
+	// call, which is the connection the voice-leave routine just took it from.
+	// The user's other devices never see it. Reports false when there is none
+	// (the call was parked for a reconnect).
+	SendToVoiceDevice(userID int64, msg []byte) bool
 }
 
 // KeyHolderChecker reports whether a user is the E2EE key holder for a voice channel.
@@ -129,6 +150,9 @@ type VoiceDeps struct {
 	TokenGen  VoiceTokenGenerator // used by voice_token_refresh V2
 	KeyHolder KeyHolderChecker    // used by voice_token_refresh V2
 	Mod       VoiceModerator      // used by the voice moderation handlers
+	// Settings backs voice_mod_move's read of the owner-only
+	// voice_owner_movable switch. Nil fails closed (the owner is not moved).
+	Settings SettingsReader
 }
 
 // ── V2 permission helpers ───────────────────────────────────────────────────

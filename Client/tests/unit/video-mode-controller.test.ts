@@ -215,6 +215,69 @@ describe("createVideoModeController", () => {
     });
   });
 
+  describe("self camera tile after a camera switch", () => {
+    const streamOf = (id: string) => ({ getVideoTracks: () => [{ id }] }) as unknown as MediaStream;
+    const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
+    const cameraOn = () =>
+      makeVoiceState({
+        currentChannelId: 10,
+        localCamera: true,
+        voiceUsers: new Map([[10, users]]),
+      });
+
+    function start() {
+      mockVoiceStoreGetState.mockReturnValue(cameraOn());
+      mockGetLocalCameraStream.mockReturnValue(streamOf("cam-a"));
+      const vg = makeVideoGrid();
+      const ctrl = createVideoModeController({
+        slots: makeSlots(),
+        chatColumn: document.createElement("div"),
+        videoGrid: vg,
+        getCurrentUserId: () => 1,
+      });
+      ctrl.checkVideoMode();
+      return { vg, ctrl };
+    }
+
+    it("draws the tile again with the new track when the capture was replaced", () => {
+      const { vg, ctrl } = start();
+      const second = streamOf("cam-b");
+      mockGetLocalCameraStream.mockReturnValue(second);
+      ctrl.checkVideoMode();
+      expect(vg.removeStream).toHaveBeenCalledWith(1);
+      expect(vg.addStream).toHaveBeenCalledTimes(2);
+      expect(vg.addStream).toHaveBeenLastCalledWith(
+        1,
+        "me (You)",
+        second,
+        expect.objectContaining({ isSelf: true, isScreenshare: false }),
+      );
+    });
+
+    it("leaves the tile alone when nothing changed", () => {
+      const { vg, ctrl } = start();
+      mockGetLocalCameraStream.mockReturnValue(streamOf("cam-a"));
+      ctrl.checkVideoMode();
+      ctrl.checkVideoMode();
+      expect(vg.removeStream).not.toHaveBeenCalledWith(1);
+      expect(vg.addStream).toHaveBeenCalledTimes(1);
+    });
+
+    it("removes the tile when the camera goes off", () => {
+      const { vg, ctrl } = start();
+      mockVoiceStoreGetState.mockReturnValue(
+        makeVoiceState({
+          currentChannelId: 10,
+          localCamera: false,
+          voiceUsers: new Map([[10, users]]),
+        }),
+      );
+      ctrl.checkVideoMode();
+      expect(vg.removeStream).toHaveBeenCalledWith(1);
+      expect(vg.addStream).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("removes local tile when local camera is off", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
@@ -1103,7 +1166,9 @@ describe("createVideoModeController", () => {
 
     it("puts your own camera in the panel instead of over the chat", () => {
       inDmCall({ localCamera: true });
-      mockGetLocalCameraStream.mockReturnValue({} as MediaStream);
+      mockGetLocalCameraStream.mockReturnValue({
+        getVideoTracks: () => [],
+      } as unknown as MediaStream);
       const { slots } = mountedSlots();
       const { host, state } = panelHost();
       const vg = makeVideoGrid();

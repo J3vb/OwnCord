@@ -116,6 +116,7 @@ function snapshot(): VoiceRowInputs {
     currentChannelId: voice.currentChannelId,
     peerVerifications: voice.peerVerifications ?? new Map(),
     localSessionFingerprint: voice.localSessionFingerprint ?? null,
+    localSafetyNumber: voice.localSafetyNumber ?? null,
     voiceMembers,
     selfId: authStore.getState().user?.id ?? null,
     connectionStatus: uiStore.getState().connectionStatus,

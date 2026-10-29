@@ -12,7 +12,7 @@ import (
 const acceptUndecidedMessageRequest = `-- name: AcceptUndecidedMessageRequest :execrows
 UPDATE message_requests
 SET state = 'accepted', decided_at = datetime('now')
-WHERE id = ? AND recipient_id = ? AND state IN ('pending', 'ignored')
+WHERE id = ? AND recipient_id = ? AND state IN ('pending', 'ignored', 'deleted')
 `
 
 type AcceptUndecidedMessageRequestParams struct {

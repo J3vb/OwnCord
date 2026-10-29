@@ -10,6 +10,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement } from "@lib/dom";
 import { inlineEditText } from "../../i18n/inlineEdit";
 import { replaceEmojiShortcodes } from "./shortcodes";
@@ -153,7 +154,7 @@ export function createInlineEdit(o: InlineEditOptions): InlineEditSession {
       }
       if (e.key === "Enter" && !e.shiftKey) {
         // A CJK IME commits its candidate on Enter (isComposing, or keyCode 229).
-        if (e.isComposing || e.keyCode === 229) return;
+        if (isImeCommit(e)) return;
         e.preventDefault();
         save();
         return;
@@ -162,7 +163,7 @@ export function createInlineEdit(o: InlineEditOptions): InlineEditSession {
       // channel read) leaves a prevented key alone.
       if (e.key === "Escape") {
         // Escape during IME composition cancels the composition, not the edit.
-        if (e.isComposing || e.keyCode === 229) return;
+        if (isImeCommit(e)) return;
         e.preventDefault();
         o.onCancel();
       }

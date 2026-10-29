@@ -54,7 +54,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 func waitRegistered(t *testing.T, hub *ws.Hub, c *ws.Client) {
 	t.Helper()
 	waitFor(t, waitTimeout, func() bool {
-		return hub.GetClient(ws.ClientUserIDForTest(c)) == c
+		return hub.ClientForTest(ws.ClientUserIDForTest(c)) == c
 	}, "client to be registered with the hub")
 }
 

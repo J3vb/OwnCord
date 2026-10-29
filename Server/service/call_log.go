@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -430,10 +431,10 @@ func callEndedContent(d time.Duration) string {
 	return fmt.Sprintf("started a call that lasted %d minutes.", mins)
 }
 
-func formatCallTime(t time.Time) string { return t.UTC().Format(sqliteDateTimeLayout) }
+func formatCallTime(t time.Time) string { return t.UTC().Format(dbtime.SQLiteLayout) }
 
 func parseCallTime(s string) (time.Time, bool) {
-	t, err := time.Parse(sqliteDateTimeLayout, s)
+	t, err := time.Parse(dbtime.SQLiteLayout, s)
 	if err != nil {
 		return time.Time{}, false
 	}

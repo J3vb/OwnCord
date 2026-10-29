@@ -21,6 +21,8 @@ type UserService struct {
 	// (P5-S07). nil writes each at once, which is what tests and the admin
 	// panel's own instance get.
 	batch *ConnWrites
+	// welcome greets an approved applicant (WP 8.6); nil greets nobody.
+	welcome *WelcomeService
 }
 
 // NewUserService creates a UserService.
@@ -390,6 +392,8 @@ func (s *UserService) ApproveRegistration(ctx context.Context, actorID, userID i
 	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_approve", "user", userID, "application approved")
 	slog.Info("registration approved", "actor_id", actorID, "user_id", userID)
+	// The account is usable now: greet it. Best effort, never fails the approval.
+	s.welcome.Greet(ctx, userID)
 	return nil
 }
 

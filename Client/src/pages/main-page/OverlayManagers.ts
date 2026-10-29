@@ -29,6 +29,7 @@ import { resolveDisplayName } from "@lib/avatar";
 import { formatInviteLink } from "@lib/deep-link";
 import { shellText } from "../../i18n/shell";
 import { dialogOpen } from "@lib/dialogOpen";
+import { copyThenToast } from "@lib/clipboard";
 
 const log = createLogger("overlays");
 
@@ -247,6 +248,11 @@ export function createQuickSwitcherManager(
     // every other app-wide shortcut respects.
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
     if (isSuspended?.() === true) return;
+    // A held Ctrl+K acts once: auto-repeat must not close what the press opened.
+    if (e.repeat) {
+      if (pendingOpen !== null || instance !== null || !dialogOpen()) e.preventDefault();
+      return;
+    }
     if (pendingOpen !== null) {
       // Still loading: the first press already asked to open, so a second one
       // must not open twice nor cancel it.
@@ -497,10 +503,7 @@ export function createInviteManagerController(opts: {
           // No silent success: a copy the user can't see is indistinguishable
           // from a clipboard permission failure.
           const link = formatInviteLink(code, opts.api.getConfig().host);
-          void navigator.clipboard.writeText(link).then(
-            () => showToast(shellText("invite.copied"), "success"),
-            () => showToast(shellText("invite.copyFailed"), "error"),
-          );
+          copyThenToast(link, shellText("invite.copied"), shellText("invite.copyFailed"));
         },
         onClose: close,
         onError: (message: string) => {

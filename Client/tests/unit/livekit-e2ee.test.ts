@@ -72,6 +72,7 @@ vi.mock("@stores/voice.store", () => ({
   clearPeerVerification: vi.fn(),
   clearPeerVerifications: vi.fn(),
   setLocalSessionFingerprint: vi.fn(),
+  setLocalSafetyNumber: vi.fn(),
 }));
 
 vi.mock("@lib/logger", () => ({
@@ -95,6 +96,7 @@ import {
   setPeerVerification,
   clearPeerVerification,
   setLocalSessionFingerprint,
+  setLocalSafetyNumber,
 } from "@stores/voice.store";
 import {
   unwrapRoomKey,
@@ -105,6 +107,7 @@ import {
   importPublicKey,
   exportPublicKey,
   computeRawKeyFingerprint,
+  computeKeyFingerprint,
   signEphemeralKey,
   verifyEphemeralKeySignature,
 } from "@lib/e2eeCrypto";
@@ -207,6 +210,114 @@ describe("E2EEManager", () => {
     // A repeat announce after keying (dedupe path) re-sends the room-key offer.
     await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
     expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(2);
+  });
+
+  describe("announces held for a join queued behind the one in flight", () => {
+    it("replays them into the queued channel's exchange, which survives the queued join's clearState", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+        mgr.clearState({ keepHeldAnnounces: true });
+        await mgr.setupKeyExchange(true, 2);
+
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+        expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("never applies announces held for one channel to another channel's exchange", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+
+        mgr.clearState({ keepHeldAnnounces: true });
+        await mgr.setupKeyExchange(true, 1);
+
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+        expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("drops what was held for the previous channel when the queued join is retargeted", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        mgr.holdAnnouncesForQueuedJoin(3);
+        await mgr.handleAnnounce(99, "b3RoZXI=", "sig");
+
+        mgr.clearState({ keepHeldAnnounces: true });
+        await mgr.setupKeyExchange(true, 3);
+
+        expect([...mgr.peerPublicKeys.keys()]).toEqual([99]);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("forgets a held announce whose peer leaves before the exchange starts", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        await mgr.handleParticipantLeft(PEER_ID);
+
+        mgr.clearState({ keepHeldAnnounces: true });
+        await mgr.setupKeyExchange(true, 2);
+
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("drops them on a real leave, and lets live announces through once released", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.holdAnnouncesForQueuedJoin(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        mgr.clearState();
+        await mgr.setupKeyExchange(true, 2);
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
+
+        mgr.holdAnnouncesForQueuedJoin(3);
+        mgr.releaseHeldAnnounces(2);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+      } finally {
+        mgr.clearState();
+      }
+    });
+
+    it("hands what was held for the live channel to its exchange when released", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected" };
+      const mgr = createManager(ws);
+      try {
+        mgr.clearState();
+        mgr.holdAnnouncesForQueuedJoin(5);
+        await mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
+        mgr.releaseHeldAnnounces(5);
+        await mgr.setupKeyExchange(true, 5);
+
+        expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(true);
+        expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(1);
+      } finally {
+        mgr.clearState();
+      }
+    });
   });
 
   it("setupKeyExchange as non-key-holder resolves once the key holder's offer arrives", async () => {
@@ -1549,6 +1660,32 @@ describe("E2EEManager", () => {
     expect(setLocalSessionFingerprint).toHaveBeenLastCalledWith(null);
   });
 
+  it("[F-11] publishes the local user's own safety number on setup and clears it on teardown", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+
+    await mgr.setupKeyExchange(true, 1);
+    // The fingerprint of the identity key the announce was signed with: the
+    // number a peer sees on our shield.
+    expect(computeKeyFingerprint).toHaveBeenCalledWith(mockIdentityKeyPair.publicKey);
+    expect(setLocalSafetyNumber).toHaveBeenLastCalledWith("AB12 CD34 EF56 7890");
+
+    mgr.clearState();
+    expect(setLocalSafetyNumber).toHaveBeenLastCalledWith(null);
+  });
+
+  it("[F-11] an unsigned announce publishes no own safety number", async () => {
+    const ws = { send: vi.fn(), getState: () => "connected" };
+    const mgr = createManager(ws);
+    vi.mocked(signEphemeralKey).mockRejectedValueOnce(new Error("keyring down"));
+
+    await mgr.setupKeyExchange(true, 1);
+
+    // Peers see us as unverified, so there is no number for them to compare.
+    expect(setLocalSafetyNumber).toHaveBeenLastCalledWith(null);
+    expect(setLocalSafetyNumber).not.toHaveBeenCalledWith("AB12 CD34 EF56 7890");
+  });
+
   // ── Guards the suite reached but never pinned (mutation audit T-2026-08-19-47) ──
 
   it("[T-47] aborts setup when a teardown lands during the key holder's keyProvider.setKey", async () => {
@@ -1569,8 +1706,11 @@ describe("E2EEManager", () => {
     await vi.waitFor(() => expect(mockSetKey).toHaveBeenCalled());
 
     mgr.clearState();
+    vi.mocked(setLocalSafetyNumber).mockClear();
     releaseSetKey();
     await new Promise((resolve) => setTimeout(resolve, 0));
+    // Nor does the dead attempt show its safety number over the torn-down session.
+    expect(setLocalSafetyNumber).not.toHaveBeenCalled();
 
     // Publishing the keypair here would defeat handleAnnounceInner's queue
     // guard and go on to announce a dead ephemeral key over a live call.

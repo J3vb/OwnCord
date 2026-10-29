@@ -544,3 +544,31 @@ test("the direct Stryker inputs select the mutation hotspot", () => {
     assert.equal(runs(`M\t${path}`, "permissions"), true, path);
   }
 });
+
+test("the hook self-test needs workflow security but no application capability", () => {
+  const sel = picked("M\tscripts/claude-hook.test.mjs");
+  for (const cap of CAPABILITIES) assert.equal(sel[cap], cap === "workflows", cap);
+});
+
+test("the exact tooling-test exception unions with product changes", () => {
+  const sel = picked("M\tscripts/claude-hook.test.mjs\nM\tClient/src/lib/ws.ts");
+  assert.equal(sel.workflows, true);
+  assert.equal(sel.client, true);
+  assert.equal(sel.browser, true);
+  assert.equal(sel.native, true);
+  assert.equal(sel.server, false);
+});
+
+test("unknown scripts, hook implementation and renames out retain the conservative fallback", () => {
+  for (const path of [
+    "scripts/claude-hook.mjs",
+    "scripts/ci-select.mjs",
+    "scripts/run.mjs",
+    "scripts/unknown.test.mjs",
+  ]) {
+    for (const cap of CAPABILITIES)
+      assert.equal(picked(`M\t${path}`)[cap], true, `${path}: ${cap}`);
+  }
+  const renamed = picked("R100\tscripts/claude-hook.test.mjs\tscripts/other.test.mjs");
+  for (const cap of CAPABILITIES) assert.equal(renamed[cap], true, cap);
+});

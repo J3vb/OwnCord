@@ -242,6 +242,22 @@ export function inAppCtrlShiftVks(effective: EffectiveKeybinds): Set<number> {
   return vks;
 }
 
+/**
+ * Every VK a global mute/deafen binding (always Ctrl+Shift+key) may not claim:
+ * the in-app Ctrl+Shift bindings plus the fixed app keys and the keys the OS
+ * or a text field keep. Another handler acts on those too, so one press would
+ * fire two actions.
+ */
+export function globalShortcutTakenVks(effective: EffectiveKeybinds): Set<number> {
+  const vks = inAppCtrlShiftVks(effective);
+  for (let vk = 0; vk <= 0xff; vk++) {
+    if (!isBindableVk(vk)) continue;
+    const combo = ctrlShift(vk);
+    if (isReserved(combo) || FIXED_COMBO_KEYS.has(comboKey(combo))) vks.add(vk);
+  }
+  return vks;
+}
+
 // ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------

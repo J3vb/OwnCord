@@ -34,6 +34,7 @@ import {
   startSession,
 } from "../../src/app/session";
 import { connectText } from "../../src/i18n/connect";
+import { credentials } from "../../src/platform/browser/credentials";
 
 const HOST = location.host;
 const KEY = `owncord:credential:${HOST}`;
@@ -173,5 +174,38 @@ describe("portal session credential save", () => {
     await flush();
     expect(uiStore.getState().transientError).toBe(connectText("session.credentialsSaveFailed"));
     expect(hoisted.warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("browser credential save order", () => {
+  /** Make one Storage method throw for one area only, as a full or private store does. */
+  function breakArea(area: Storage, method: "setItem" | "removeItem"): void {
+    const original = Storage.prototype[method];
+    vi.spyOn(Storage.prototype, method).mockImplementation(function (
+      this: Storage,
+      ...args: [string, string]
+    ) {
+      if (this === area) throw new DOMException("quota", "QuotaExceededError");
+      return original.apply(this, args);
+    });
+  }
+
+  it("a write that throws keeps the old sign-in in the other area", async () => {
+    sessionStorage.setItem(KEY, JSON.stringify({ username: "casey", token: "old" }));
+    breakArea(localStorage, "setItem");
+    // Moving session-only to kept: the new copy cannot be written.
+    expect(await credentials.save(HOST, "casey", "new", "", false, false)).toBe(false);
+    expect(stored(sessionStorage)).toEqual({ username: "casey", token: "old" });
+    expect(await credentials.load(HOST)).toEqual(expect.objectContaining({ token: "old" }));
+  });
+
+  it("a removal that throws after a good write still reports the token saved", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ username: "casey", token: "old" }));
+    breakArea(localStorage, "removeItem");
+    // Moving kept to session-only: the new copy lands, the old one cannot go.
+    expect(await credentials.save(HOST, "casey", "new", "", false, true)).toBe(true);
+    expect(stored(sessionStorage)).toEqual({ username: "casey", token: "new" });
+    // Session is read first, so the new token is the one that loads.
+    expect(await credentials.load(HOST)).toEqual(expect.objectContaining({ token: "new" }));
   });
 });

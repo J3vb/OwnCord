@@ -53,6 +53,16 @@ type Result struct {
 	// ready or snapshot built after the presence frame was queued cannot miss
 	// the change.
 	SetPresence *livePresence
+	// SetActivity, if non-nil, asks the applier to swap the connection's game
+	// activity (next, nil clears it) and broadcast the presence frame that
+	// shows it, but only while the connection still holds its user's slot
+	// (activity_update, WP 8.3a). The frame is built there, not in Events,
+	// because only the applier sees the live status it must carry.
+	SetActivity *activityChange
+	// SetListening is SetActivity's twin for the song (listening_update, WP
+	// 8.10a): swap the connection's listening value (next, nil clears it) and
+	// broadcast the presence frame that shows it.
+	SetListening *listeningChange
 	// SetE2EEAnnounce, if non-nil, replaces the client's stored voice E2EE
 	// announce (ECDH key, F3 TOFU signature, WP M-4 video decode list) so the
 	// late-joiner replay, resume and grace-window paths relay it. nil means
@@ -295,9 +305,14 @@ func (e TypingDMEvent) Payload() []byte              { return e.payload }
 // PresenceEvent is a presence update broadcast to all connected clients.
 // userID identifies whose presence this is, so EmitEvents can invalidate any
 // stale entry the connect/disconnect coalescer still holds for that user.
+//
+// bare, set only when payload carries a game or a song, is the same frame with
+// both null. emitPresence sends it when member activity was switched off after
+// the handler snapshotted them (WP 8.3e-2, 8.10a).
 type PresenceEvent struct {
 	userID  int64
 	payload []byte
+	bare    []byte
 }
 
 func (e PresenceEvent) EventType() string            { return MsgTypePresence }
@@ -327,9 +342,13 @@ func (e PresenceOthersEvent) Payload() []byte              { return e.payload }
 // only to them. Without it a user who went invisible would be told they are
 // offline by the very broadcast that hid them, and would re-announce online on
 // the next reconnect.
+//
+// bare is PresenceEvent's: the same frame with a null game and song, or nil
+// when the frame carries neither.
 type PresenceSelfEvent struct {
 	targetUserID int64
 	payload      []byte
+	bare         []byte
 }
 
 func (e PresenceSelfEvent) EventType() string            { return MsgTypePresence }
@@ -344,10 +363,14 @@ func (e PresenceSelfEvent) Payload() []byte              { return e.payload }
 // so the broadcast excludes the owner and a second, targeted event carries
 // their real status. Every presence emitter goes through here, so no new call
 // site can leak an invisible user by forgetting the mapping.
-func presenceEvents(userID int64, status string, customStatus *string) []Event {
+func presenceEvents(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []Event {
 	public := db.BroadcastStatus(status)
 	if public == status {
-		return []Event{PresenceEvent{userID: userID, payload: buildPresenceMsg(userID, status, customStatus)}}
+		return []Event{PresenceEvent{
+			userID:  userID,
+			payload: buildPresenceMsg(userID, status, customStatus, activity, listening),
+			bare:    bareActivityFrame(userID, status, customStatus, activity, listening),
+		}}
 	}
 	return []Event{
 		PresenceOthersEvent{
@@ -359,11 +382,15 @@ func presenceEvents(userID int64, status string, customStatus *string) []Event {
 			// the connect/reconnect sibling of this same event, and
 			// db.MemberSummary.ForViewer, which blanks the same field the
 			// same way for the ready payload.
-			payload: buildPresenceMsg(userID, public, nil),
+			// activity and listening are blanked for the same reason: a game
+			// or a song on an "offline" member would give the invisible user
+			// away.
+			payload: buildPresenceMsg(userID, public, nil, nil, nil),
 		},
 		PresenceSelfEvent{
 			targetUserID: userID,
-			payload:      buildPresenceMsg(userID, status, customStatus),
+			payload:      buildPresenceMsg(userID, status, customStatus, activity, listening),
+			bare:         bareActivityFrame(userID, status, customStatus, activity, listening),
 		},
 	}
 }

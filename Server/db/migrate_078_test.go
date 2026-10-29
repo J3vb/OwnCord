@@ -41,7 +41,8 @@ func TestMigration078_GrantsUntouchedAdminAndModerator(t *testing.T) {
 	if got := rolePerms(t, database, 2); got != untouchedAdmin {
 		t.Fatalf("Admin before 078 = %d, want %d", got, untouchedAdmin)
 	}
-	if err := db.Migrate(database); err != nil {
+	// Stop after 078: later migrations (080) change these roles again.
+	if err := db.MigrateFS(database, migrationsUpTo(t, "079_")); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	for _, tc := range []struct {
@@ -79,7 +80,8 @@ func TestMigration078_CustomisedRolesUnchangedOrCleared(t *testing.T) {
 	// A role merely renamed Moderator on another id is not the default row.
 	exec(`INSERT INTO roles (id, name, permissions, position) VALUES (11, 'Mod Twin', ?, 44)`, untouchedModerator|bit23)
 
-	if err := db.Migrate(database); err != nil {
+	// Stop after 078: later migrations (080) change these roles again.
+	if err := db.MigrateFS(database, migrationsUpTo(t, "079_")); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	if got, want := rolePerms(t, database, 3), untouchedModerator&^int64(0x1); got != want {

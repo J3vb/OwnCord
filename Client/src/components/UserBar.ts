@@ -25,7 +25,11 @@ import {
 } from "@lib/userStatus";
 import { parseExpiry } from "@components/statusDefs";
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
-import { isRenderableAvatar } from "@components/message-list/avatar";
+import {
+  avatarAnimationMode,
+  isRenderableAvatar,
+  setAvatarSource,
+} from "@components/message-list/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
@@ -199,20 +203,20 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       avatarEl.style.background = "var(--accent)";
       return;
     }
-    void fetchImageAsObjectUrl(url).then((objectUrl) => {
+    void fetchImageAsObjectUrl(url).then(async (objectUrl) => {
       // The URL may have changed again (or the bar been torn down) while the
       // bytes were in flight.
-      if (objectUrl === null || avatarEl === null || renderedAvatarUrl !== url) return;
-      const img = createElement("img", {
-        class: "avatar-img",
-        src: objectUrl,
-        alt: subject.username,
-      });
+      const current = (): boolean => avatarEl !== null && renderedAvatarUrl === url;
+      if (objectUrl === null || !current()) return;
+      const img = createElement("img", { class: "avatar-img", alt: subject.username });
       recoverEvictedImage(img, { url });
+      const el = avatarEl;
+      if (el === null) return;
+      if (!(await setAvatarSource(img, objectUrl, () => avatarAnimationMode(el), current))) return;
       avatarImgEl = img;
       if (avatarTextEl !== null) avatarTextEl.style.display = "none";
-      avatarEl.style.background = "transparent";
-      avatarEl.insertBefore(img, avatarEl.firstChild);
+      el.style.background = "transparent";
+      el.insertBefore(img, el.firstChild);
     });
   }
 

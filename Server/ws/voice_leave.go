@@ -17,6 +17,9 @@ const (
 	// voiceLeaveReasonSwitch is the destructive leave a channel switch runs
 	// before joining the destination channel (voiceJoinLeaveCurrent).
 	voiceLeaveReasonSwitch = "switch"
+	// voiceLeaveReasonMoved is the leave of a call another of the user's
+	// devices took over with its own voice_join (voiceJoinMoveCall).
+	voiceLeaveReasonMoved = "moved"
 	// voiceLeaveReasonDisconnect is the readPump teardown after the socket
 	// dropped (serve_pumps.go).
 	voiceLeaveReasonDisconnect = "disconnect"
@@ -91,6 +94,14 @@ func (h *Hub) handleVoiceLeaveIfStillIn(ctx context.Context, txn *voiceTxn, c *C
 // participant removal.
 // txn is the caller's Hub.begin(c.userID) handle.
 func (h *Hub) finishVoiceLeave(ctx context.Context, txn *voiceTxn, c *Client, oldChID int64, oldJoinToken, reason string) {
+	h.finishVoiceLeaveAnnounce(ctx, txn, c, oldChID, oldJoinToken, reason, true)
+}
+
+// finishVoiceLeaveAnnounce is finishVoiceLeave with the voice_leave broadcast
+// optional. announce=false is the same-channel call move: the user stays in the
+// room (their new device is about to take the slot), so no voice_leave goes out
+// that a client would apply to the new join.
+func (h *Hub) finishVoiceLeaveAnnounce(ctx context.Context, txn *voiceTxn, c *Client, oldChID int64, oldJoinToken, reason string, announce bool) {
 	username := ""
 	if c.user != nil {
 		username = c.user.Username
@@ -112,7 +123,9 @@ func (h *Hub) finishVoiceLeave(ctx context.Context, txn *voiceTxn, c *Client, ol
 	// state, so that union can no longer see them, yet for a server-initiated
 	// eviction (revocation sweep, moderator kick/move, token-refresh refusal)
 	// this voice_leave IS their only teardown signal.
-	h.broadcastVoiceEventWithLeaver(ctx, oldChID, buildVoiceLeave(oldChID, c.userID), c.userID)
+	if announce {
+		h.broadcastVoiceEventWithLeaver(ctx, oldChID, buildVoiceLeave(oldChID, c.userID), c.userID)
+	}
 
 	// Re-elect key holder now that this user has left the channel.
 	h.updateKeyHolder(oldChID)

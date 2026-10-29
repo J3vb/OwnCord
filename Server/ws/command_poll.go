@@ -51,9 +51,9 @@ func parsePollCreate(userID int64, reqID string, raw json.RawMessage) (Command, 
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid poll_create payload: %w", err)
 	}
-	chID, err := p.ChannelID.Int64()
-	if err != nil || chID <= 0 {
-		return nil, fmt.Errorf("channel_id must be a positive integer")
+	chID, err := positiveID(p.ChannelID, "channel_id")
+	if err != nil {
+		return nil, err
 	}
 	if p.ClientMessageID == "" {
 		return nil, fmt.Errorf("client_message_id is required")
@@ -118,15 +118,6 @@ type PollEndCmd struct {
 func (c PollEndCmd) Type() string  { return MsgTypePollEnd }
 func (c PollEndCmd) UserID() int64 { return c.userID }
 
-// parsePollMessageID reads the positive message_id both commands carry.
-func parsePollMessageID(n json.Number) (int64, error) {
-	id, err := n.Int64()
-	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("message_id must be a positive integer")
-	}
-	return id, nil
-}
-
 // parsePollVote is the poll_vote entry of commandConstructors. answer_ids is
 // required (an empty list is the removal), and its length is bounded here so a
 // hostile frame cannot make the parser build a huge slice.
@@ -138,7 +129,7 @@ func parsePollVote(userID int64, _ string, raw json.RawMessage) (Command, error)
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid poll_vote payload: %w", err)
 	}
-	id, err := parsePollMessageID(p.MessageID)
+	id, err := positiveID(p.MessageID, "message_id")
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +150,7 @@ func parsePollEnd(userID int64, _ string, raw json.RawMessage) (Command, error) 
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid poll_end payload: %w", err)
 	}
-	id, err := parsePollMessageID(p.MessageID)
+	id, err := positiveID(p.MessageID, "message_id")
 	if err != nil {
 		return nil, err
 	}

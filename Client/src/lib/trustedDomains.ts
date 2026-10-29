@@ -6,6 +6,8 @@
  * value reads as "no trusted domains".
  */
 
+import { loadStoredJson, saveStoredJson } from "./preferences";
+
 // i18n-exempt: localStorage key, not display text
 const KEY = "owncord:trustedLinkDomains";
 
@@ -25,15 +27,12 @@ export function linkDomain(url: string): string | null {
 }
 
 function read(): string[] {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw === null) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((d): d is string => typeof d === "string" && d !== "");
-  } catch {
-    return [];
-  }
+  return loadStoredJson(
+    KEY,
+    (v) =>
+      Array.isArray(v) ? v.filter((d): d is string => typeof d === "string" && d !== "") : [],
+    [],
+  );
 }
 
 /** Whether the viewer asked to open links to `domain` without the warning. */
@@ -47,9 +46,6 @@ export function trustDomain(domain: string): void {
   if (normalized === "") return;
   const next = read().filter((d) => d !== normalized);
   next.push(normalized);
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next.slice(-MAX_TRUSTED_DOMAINS)));
-  } catch {
-    // Storage full or blocked: the warning simply shows again next time.
-  }
+  // Storage full or blocked: the warning simply shows again next time.
+  saveStoredJson(KEY, next.slice(-MAX_TRUSTED_DOMAINS));
 }

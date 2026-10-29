@@ -4,9 +4,11 @@
  * Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import { shellText } from "../i18n/shell";
 
@@ -43,13 +45,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
     });
 
     // Close on backdrop click (not on modal content)
-    root.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === root) options.onClose();
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(root, () => options.onClose(), disposable.signal);
 
     const modal = createElement("div", { class: "quick-switch-modal" });
     applyDialogSemantics(modal, { label: shellText("quickSwitch.label") });
@@ -177,7 +173,7 @@ export function createQuickSwitchOverlay(options: QuickSwitchOverlayOptions): Mo
     document.addEventListener(
       "keydown",
       (e) => {
-        if (e.key === "Escape") options.onClose();
+        if (e.key === "Escape" && !isImeCommit(e)) options.onClose();
       },
       { signal: disposable.signal },
     );

@@ -6,6 +6,7 @@
  */
 
 import { Disposable } from "./disposable";
+import { readStored, removeStored, writeStored } from "./preferences";
 import { deriveAccentTokens, parseColor, type Rgb } from "./color-contrast";
 
 /** Built-in theme palettes. Moved here from `@components/settings/helpers` so
@@ -155,7 +156,7 @@ export function applyThemeChoice(choice: string): void {
   const paint = (): void => {
     paintTheme(osPrefersDark(mq) ? SYSTEM_DARK_THEME : SYSTEM_LIGHT_THEME);
     // paintTheme persists the palette name; this second write puts "system" back.
-    localStorage.setItem(STORAGE_KEY_ACTIVE, SYSTEM_THEME);
+    writeStored(STORAGE_KEY_ACTIVE, SYSTEM_THEME);
   };
   paint();
   restoreAccent();
@@ -207,7 +208,7 @@ export function applyThemeByName(name: string): void {
     document.body.classList.add(`theme-${name}`);
   }
 
-  localStorage.setItem(STORAGE_KEY_ACTIVE, name);
+  writeStored(STORAGE_KEY_ACTIVE, name);
   reclampRoleColors();
 }
 
@@ -243,21 +244,21 @@ function paintTheme(name: ThemeName): void {
 
 /** Returns the stored theme choice (a palette name or "system"), defaulting to "neon-glow". */
 export function getActiveThemeName(): string {
-  const active = localStorage.getItem(STORAGE_KEY_ACTIVE);
+  const active = readStored(STORAGE_KEY_ACTIVE);
   if (active !== null && active.length > 0 && isKnownThemeName(active)) {
     return active;
   }
 
   if (active !== null) {
-    localStorage.removeItem(STORAGE_KEY_ACTIVE);
+    removeStored(STORAGE_KEY_ACTIVE);
   }
 
   try {
-    const legacyRaw = localStorage.getItem(STORAGE_KEY_LEGACY);
+    const legacyRaw = readStored(STORAGE_KEY_LEGACY);
     if (legacyRaw !== null) {
       const legacyName: unknown = JSON.parse(legacyRaw);
       if (typeof legacyName === "string" && legacyName.length > 0 && isKnownThemeName(legacyName)) {
-        localStorage.setItem(STORAGE_KEY_ACTIVE, legacyName);
+        writeStored(STORAGE_KEY_ACTIVE, legacyName);
         return legacyName;
       }
     }
@@ -368,7 +369,7 @@ export function applyAccent(color: string): void {
  */
 export function restoreAccent(): void {
   try {
-    const raw = localStorage.getItem("owncord:settings:accentColor");
+    const raw = readStored("owncord:settings:accentColor");
     if (raw !== null) {
       const accent: unknown = JSON.parse(raw);
       if (typeof accent === "string") applyAccent(accent);

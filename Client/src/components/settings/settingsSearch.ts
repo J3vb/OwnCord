@@ -18,6 +18,8 @@
 
 import { accountText } from "../../i18n/account";
 import { externalConsentText } from "../../i18n/externalConsent";
+import { gameActivityText } from "../../i18n/gameActivity";
+import { listeningDetailsText } from "../../i18n/listeningDetails";
 import { settingsText } from "../../i18n/settings";
 import { whatsNewText } from "../../i18n/whatsNew";
 
@@ -224,6 +226,18 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("advanced.minimizeToTray.desc"),
     s("advanced.startMinimized.label"),
     s("advanced.startMinimized.desc"),
+    gameActivityText("settings.title"),
+    gameActivityText("settings.share.label"),
+    gameActivityText("settings.share.desc"),
+    gameActivityText("games.title"),
+    gameActivityText("games.desc"),
+    gameActivityText("games.empty"),
+    gameActivityText("add.button"),
+    listeningDetailsText("settings.share.label"),
+    listeningDetailsText("settings.share.desc"),
+    listeningDetailsText("players.title"),
+    listeningDetailsText("players.desc"),
+    listeningDetailsText("players.empty"),
     s("advanced.debug"),
     s("advanced.devtools.label"),
     s("advanced.devtools.desc"),
@@ -246,6 +260,11 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("logs.voiceDiagnostics"),
     s("logs.filter"),
     s("logs.minLevel"),
+    s("logs.shareTesting"),
+    s("logs.shareRecord"),
+    s("logs.shareRecordDesc"),
+    s("logs.shareMode"),
+    s("logs.shareModeDesc"),
   ],
   About: () => [
     s("updates.label"),

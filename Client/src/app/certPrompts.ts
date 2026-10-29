@@ -11,11 +11,11 @@ import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createLogger } from "@lib/logger";
 import { isCertDeclined, normalizeHostForCertCompare } from "@lib/ws";
 import type { CertTofuEvent, WsClient } from "@lib/ws";
-import { clearAuth } from "@stores/auth.store";
+import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { connectText } from "../i18n/connect";
 import type { PageId } from "./context";
-import { sessionTarget } from "./session";
+import { abandonInFlight, sessionTarget } from "./session";
 
 const log = createLogger("main");
 
@@ -43,13 +43,23 @@ function withCertModals(
 // A mismatch the user never got to answer must fail closed. Only tear down the
 // live session when the mismatch is FOR that session's host — a rotated cert on
 // an unrelated saved profile must not disconnect and log out an unrelated
-// authenticated session.
-function dropSessionOnMismatch(host: string): void {
-  if (host === normalizeHostForCertCompare(sessionTarget()?.host ?? "")) {
+// authenticated session. Returns whether it told the user why.
+function dropSessionOnMismatch(host: string): boolean {
+  if (host !== normalizeHostForCertCompare(sessionTarget()?.host ?? "")) return false;
+  if (authStore.getState().isAuthenticated) {
     ws.disconnect();
     clearAuth();
     navigate("connect");
+    return false;
   }
+  // Before the first auth_ok the logout subscriber never fires (the flag was
+  // already false), so tear the attempt down here the way a cancelled
+  // auto-login does, and end its spinner with the reason.
+  clearAuth();
+  abandonInFlight();
+  setTransientError(connectText("cert.notAccepted"));
+  navigate("connect");
+  return true;
 }
 
 /**
@@ -127,10 +137,10 @@ export function installCertPrompts(
     certModalActive = true;
     withCertModals(
       ({ createCertMismatchModal }) => {
-        const reject = (): void => {
+        const reject = (): boolean => {
           modal.destroy?.();
           certModalActive = false;
-          dropSessionOnMismatch(evt.host);
+          return dropSessionOnMismatch(evt.host);
         };
 
         const modal = createCertMismatchModal({
@@ -156,8 +166,7 @@ export function installCertPrompts(
               } catch (err) {
                 if (isCertDeclined(err)) {
                   log.info("Certificate not accepted", { host: evt.host });
-                  reject();
-                  setTransientError(connectText("cert.notAccepted"));
+                  if (!reject()) setTransientError(connectText("cert.notAccepted"));
                 } else {
                   log.error("Failed to accept cert fingerprint", err);
                 }

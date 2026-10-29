@@ -277,9 +277,9 @@ func TestChannelActivity_EveryoneHereDirectBlocked(t *testing.T) {
 	for _, u := range []*db.User{online, offline, invisible, blocker} {
 		sends[u.Username] = f.connect(u, 0)
 	}
-	f.hub.GetClient(online.ID).setLivePresence("online", nil, "")
-	f.hub.GetClient(invisible.ID).setLivePresence("invisible", nil, "")
-	f.hub.GetClient(blocker.ID).setLivePresence("online", nil, "")
+	f.hub.ClientForTest(online.ID).setLivePresence("online", nil, "")
+	f.hub.ClientForTest(invisible.ID).setLivePresence("invisible", nil, "")
+	f.hub.ClientForTest(blocker.ID).setLivePresence("online", nil, "")
 
 	type flags struct{ you, everyone bool }
 	check := func(label string, want map[string]flags) {
@@ -368,7 +368,7 @@ func TestChannelActivity_UnsequencedNoLossMark(t *testing.T) {
 	full := make(chan []byte, 1)
 	full <- []byte(`{"type":"filler"}`)
 	c := NewTestClientWithUser(f.hub, reader, 0, full)
-	f.hub.clients[reader.ID] = c
+	f.hub.clients[reader.ID] = []*Client{c}
 
 	seq := atomic.LoadUint64(&f.hub.seq)
 	marks := f.hub.LossMarkCount()

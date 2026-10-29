@@ -199,6 +199,11 @@ export const settingsText = defineCatalog("settings", {
     "Your desktop manages these shortcuts. They work while OwnCord is unfocused, but your desktop keeps the keys for OwnCord in every app, so choose keys you do not need elsewhere.",
   "keybinds.portalCancelled": "Setup was cancelled. No global shortcuts were changed.",
   "keybinds.portalFailed": "Your desktop could not set up global shortcuts. Try again.",
+  "keybinds.portalRefused":
+    "Your desktop refused global shortcuts for OwnCord. Restart OwnCord. If it keeps happening, check that xdg-desktop-portal is running.",
+  "keybinds.portalUnnamed":
+    "OwnCord's shortcuts are registered, but your desktop does not say which keys run them. Assign keys in your desktop's settings. On Hyprland, add lines like these to hyprland.conf: bind = CTRL SHIFT, M, global, com.owncord.client:toggle-mute (also toggle-deafen for deafen, and push-to-talk for Push to Talk).",
+  "keybinds.portalSetInDesktop": "Set in your desktop",
   "keybinds.navigation": "Navigation",
   "keybinds.communication": "Communication",
   "keybinds.messages": "Messages",
@@ -368,8 +373,20 @@ export const settingsText = defineCatalog("settings", {
   "logs.openFolder": "Open Log Folder",
   "logs.openFolderFailed": "Could not open the log folder: {error}",
   "logs.exportFailed": "Export failed: {error}",
+  "logs.shareTesting": "Screen share testing",
+  "logs.shareRecord": "Record screen-share details",
+  "logs.shareRecordDesc":
+    "Keeps the last 3 minutes of screen-share stats on this computer. They go into the support bundle. Nothing is uploaded.",
+  "logs.shareMode": "Test mode",
+  "logs.shareModeDesc": "For testing only. Takes effect the next time you share.",
+  "logs.shareMode.legacy": "Normal (default)",
+  "logs.shareMode.detail-balanced": "Sharp text, smooth fallback",
+  "logs.shareMode.detail-framerate": "Sharp text, keep frame rate",
+  "logs.shareMode.motion-resolution": "Smooth motion, keep resolution",
+  "logs.shareMode.motion-balanced": "Smooth motion, balanced",
+  "logs.shareMode.motion-framerate": "Smooth motion, keep frame rate",
   "logs.bundleReadme":
-    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nSettings are copied from a fixed allowlist and the OS keychain is not read, so\nno password, session token, recovery kit, recovery code or 2FA secret is taken\nfrom them. The log files are NOT redacted: they are exported exactly as written\nand can contain anything the app logged. Read them before sharing this bundle,\nand share it only with someone you trust.\n",
+    "OwnCord support bundle\n\nCreated on this computer by the OwnCord desktop client. Nothing was sent to\na server. Contents:\n\n  app.json               client version, OS, webview and when this bundle\n                         was made\n  settings.json          allowlisted display and voice settings, and your saved\n                         servers (name, address, username, sign-in options)\n  voice-diagnostics.json the voice session state shown in Settings >\n                         Diagnostics & logs\n  share-diagnostics.json the recent screen-share stats (only when Record\n                         screen-share details was on and a share was recorded)\n  logs/*.jsonl           the client's log files, copied verbatim\n  logs/owncord-client*.log the native host log (startup, updates, TLS/TOFU and,\n                         on Linux, native voice), copied verbatim and\n                         tail-capped at 2 MB per file\n\nSettings are copied from a fixed allowlist and the OS keychain is not read, so\nno password, session token, recovery kit, recovery code or 2FA secret is taken\nfrom them. The log files are NOT redacted: they are exported exactly as written\nand can contain anything the app logged. Read them before sharing this bundle,\nand share it only with someone you trust.\n",
 
   "diagnostics.short.connection": "Server",
   "diagnostics.short.authentication": "Sign-in",
@@ -502,7 +519,7 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.fps.120": "120 FPS",
   "voiceAudio.videoCodec": "Video Codec",
   "voiceAudio.videoCodecDesc":
-    "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. A 120 fps screen share uses H.264 when your graphics card can encode it, whatever you choose here. H.264 falls back to VP8 when your graphics card can't encode it. Takes effect the next time you turn on your camera or start sharing.",
+    "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. H.264 falls back to VP8 when your graphics card can't encode it. Takes effect the next time you turn on your camera or start sharing.",
   "voiceAudio.videoCodec.vp8": "VP8 (default, most compatible)",
   "voiceAudio.videoCodec.vp9": "VP9 (sharper text)",
   "voiceAudio.videoCodec.h265": "H.265 (hardware only)",

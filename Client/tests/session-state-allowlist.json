@@ -122,6 +122,12 @@
       "reason": "Lookup built from the bundled unicode catalog"
     },
     {
+      "file": "lib/animatedStill.ts",
+      "binding": "stills",
+      "category": "reset-elsewhere",
+      "reason": "Keyed by image-cache blob: URLs; clearAttachmentCaches clears it with them under the attachments:caches session reset"
+    },
+    {
       "file": "features/messaging/emojiStill.ts",
       "binding": "stills",
       "category": "pure-cache",
@@ -164,12 +170,6 @@
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
-      "file": "lib/context-menu.ts",
-      "binding": "dismissOwners",
-      "category": "dom-owned",
-      "reason": "WeakMap keyed by the open menu element"
-    },
-    {
       "file": "lib/formatting.ts",
       "binding": "parsedTimestampCache",
       "category": "pure-cache",
@@ -180,6 +180,12 @@
       "binding": "identityKeyPairCache",
       "category": "host-keyed",
       "reason": "Keyed by host and user, so a second server never reads the first's pair"
+    },
+    {
+      "file": "lib/identity.ts",
+      "binding": "pinWrites",
+      "category": "host-keyed",
+      "reason": "In-flight pin writes keyed by host and user; each entry removes itself when its write settles"
     },
     {
       "file": "lib/legacyKeyMigration.ts",
@@ -210,6 +216,12 @@
       "binding": "ringbackInterval",
       "category": "transient",
       "reason": "Ringtone timer handles; stopped by their own stop functions, not session data"
+    },
+    {
+      "file": "lib/serverCapabilities.ts",
+      "binding": "gameActivityPolicyListeners",
+      "category": "reset-elsewhere",
+      "reason": "Listeners for the game activity switch; each owner (the game activity loop, the Settings pane) removes its own on teardown, and the session reset deliberately keeps them"
     },
     {
       "file": "lib/read-state.ts",
@@ -372,6 +384,42 @@
       "binding": "claimed",
       "category": "dom-owned",
       "reason": "The mounted composers' claims; each composer releases its own claim in destroy, so a session switch unmounts them and the list empties itself"
+    },
+    {
+      "file": "lib/h264Profile.ts",
+      "binding": "markedTracks",
+      "category": "dom-owned",
+      "reason": "WeakSet keyed by MediaStreamTrack objects; an entry goes with its track, and a session end unpublishes and stops every track"
+    },
+    {
+      "file": "lib/h264Profile.ts",
+      "binding": "narrowed",
+      "category": "dom-owned",
+      "reason": "WeakSet keyed by RTCRtpTransceiver objects; entries go with the closed peer connection, and an unpublished transceiver is restored and removed on the next offer"
+    },
+    {
+      "file": "lib/videoSurface.ts",
+      "binding": "surfaces",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by a native renderer's MediaStreamTrack; the entry goes with the track when its renderer is disposed"
+    },
+    {
+      "file": "lib/videoSurface.ts",
+      "binding": "shown",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by a <video> element; the entry goes with the element"
+    },
+    {
+      "file": "features/voice/shareSenderStats.ts",
+      "binding": "lastCounters",
+      "category": "pure-cache",
+      "reason": "WeakMap keyed by the share's RTCRtpSender; a new share is a new sender and a closed one is collected with its entry, so nothing outlives the session that published it"
+    },
+    {
+      "file": "lib/clipboard.ts",
+      "binding": "pendingResets",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by the copy button; a pending label reset goes with its button, and an owner's signal drops it on abort"
     }
   ]
 }

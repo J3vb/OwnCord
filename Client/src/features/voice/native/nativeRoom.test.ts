@@ -3,7 +3,7 @@ import type {
   NativeVoiceEnvelope,
   NativeVoiceStats,
 } from "../../../platform/contracts/nativeVoice";
-import type { Participant } from "livekit-client";
+import type { Participant, VideoQuality } from "livekit-client";
 
 vi.mock("livekit-client", () => ({
   RoomEvent: {
@@ -35,8 +35,18 @@ vi.mock("livekit-client", () => ({
   },
   DisconnectReason: { UNKNOWN_REASON: 0, CLIENT_INITIATED: 1 },
 }));
+const log = vi.hoisted(() => ({
+  tags: [] as string[],
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
 vi.mock("../../../lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  createLogger: (tag: string) => {
+    log.tags.push(tag);
+    return log;
+  },
 }));
 
 interface FakeMedia {
@@ -251,10 +261,12 @@ vi.mock("../../../platform/desktop", () => ({
 }));
 
 import { createNativeRoom } from "./nativeRoom";
+import { desktop } from "../../../platform/desktop";
+import { savePref } from "../../../lib/preferences";
 import { NativeScreenAudioTrack } from "./screenAudioTrack";
 import type { NativeScreenTrack } from "./screenTrack";
 import { nativeCounters } from "./counters";
-import { CameraSwitchUnavailable } from "../cameraSwitch";
+import { CameraDeviceUnusable, CameraSwitchUnavailable } from "../cameraSwitch";
 import { setEncryptionDegraded, setLocalDeafened, voiceStore } from "../../../stores/voice.store";
 import { createConnectionStatsPoller } from "../../../lib/connectionStats";
 import { readSenderSample } from "../shareSenderStats";
@@ -278,6 +290,7 @@ const track = (sid: string, source: "microphone" | "screen_share_audio") => ({
 });
 
 beforeEach(() => {
+  vi.clearAllMocks();
   host.calls.length = 0;
   host.handlers.clear();
   host.unsubscribed = 0;
@@ -1659,6 +1672,17 @@ describe("NativeRoom camera switch", () => {
     expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(cam);
   });
 
+  it("a picked device that opens but gives no frame is unusable, not a cue to restart", async () => {
+    const { room, cam } = await publishedCamera();
+    host.changeCamera = () => Promise.reject(new Error("camera capture produced no frame in time"));
+    const err = await cam.setDeviceId("/dev/video2").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CameraDeviceUnusable);
+    expect(err).not.toBeInstanceOf(CameraSwitchUnavailable);
+    expect(names()).toEqual(["changeCamera"]);
+    expect(cam).toMatchObject({ capture: 5, device: "" });
+    expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(cam);
+  });
+
   it("a stop during the switch neither retargets nor falls back", async () => {
     const { cam } = await publishedCamera();
     let resolve!: (v: unknown) => void;
@@ -2560,5 +2584,1088 @@ describe("NativeRoom screen-share audio (LP-8c)", () => {
     expect(names()).toEqual(["changeScreen"]);
     expect(audioTrack.isStopped).toBe(false);
     expect(room.localParticipant.getTrackPublication("screen_share_audio")!.track).toBe(audioTrack);
+  });
+});
+
+// --- Surface, command failures and publication bookkeeping ---
+
+const nativeVoice = desktop.nativeVoice;
+type GateCommand =
+  | "setPttGated"
+  | "setVoiceGate"
+  | "setInputGain"
+  | "setAudioProcessing"
+  | "setSubscribed"
+  | "setVideoView"
+  | "setVolume"
+  | "setScreenshareVolume";
+const rejectOnce = (command: GateCommand, err: unknown) =>
+  vi.spyOn(nativeVoice, command).mockRejectedValueOnce(err);
+const connected = async () => {
+  const room = createNativeRoom(audio);
+  await room.connect("u", "t");
+  host.calls.length = 0;
+  return room;
+};
+
+describe("NativeRoom initial surface", () => {
+  it("is nameless, plays out natively and has no signalling socket before it connects", () => {
+    const room = createNativeRoom(audio);
+    expect(room.name).toBe("");
+    expect(room.nativePlayout).toBe(true);
+    expect(room.engine.client).toStrictEqual({ ws: undefined });
+    expect(room.localParticipant.identity).toBe("");
+    expect(room.isSignalingConnected()).toBe(false);
+  });
+
+  it("refuses a second connect without touching the first session", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    await expect(room.connect("u", "t")).rejects.toThrow("native room already connected");
+    expect(host.calls.filter(([n]) => n === "connect")).toHaveLength(1);
+    expect(room.state).toBe("connected");
+    expect(nativeCounters).toMatchObject({ openRooms: 1, listeners: 1 });
+  });
+
+  it("keeps every listener registered for one event", async () => {
+    const room = createNativeRoom(audio);
+    const first = vi.fn();
+    const second = vi.fn();
+    room.on("reconnecting", first);
+    room.on("reconnecting", second);
+    await room.connect("u", "t");
+    emit({ session: 1, event: { type: "reconnecting" } });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+    room.off("reconnecting", first);
+    emit({ session: 1, event: { type: "reconnecting" } });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(2);
+  });
+
+  it("raises the lifecycle events from the backend", async () => {
+    const room = createNativeRoom(audio);
+    const seen: string[] = [];
+    room.on("connected", () => seen.push("connected"));
+    room.on("reconnecting", () => seen.push("reconnecting"));
+    room.on("reconnected", () => seen.push("reconnected"));
+    await room.connect("u", "t");
+    emit({ session: 1, event: { type: "connected", participants: [] } });
+    emit({ session: 1, event: { type: "reconnecting" } });
+    expect(room.state).toBe("reconnecting");
+    emit({ session: 1, event: { type: "reconnected" } });
+    expect(room.state).toBe("connected");
+    expect(seen).toEqual(["connected", "reconnecting", "reconnected"]);
+  });
+
+  it("maps the disconnect reason", async () => {
+    const reasons: unknown[] = [];
+    for (const reason of ["ClientInitiated", "ServerShutdown", ""]) {
+      const room = createNativeRoom(audio);
+      room.on("disconnected", (r) => reasons.push(r));
+      // oxlint-disable-next-line no-await-in-loop -- each room claims the next session
+      await room.connect("u", "t");
+      emit({ session: 1, event: { type: "disconnected", reason } });
+      expect(room.state).toBe("disconnected");
+      // oxlint-disable-next-line no-await-in-loop -- the next room needs the registry clear
+      await room.disconnect();
+    }
+    expect(reasons).toEqual([1, 0, 0]);
+  });
+
+  it("starts a reconnected session with no leftover envelope replay", async () => {
+    const room = createNativeRoom(audio);
+    const published: string[] = [];
+    room.on("trackPublished", (pub) => published.push((pub as { trackSid: string }).trackSid));
+    await room.connect("u", "t");
+    await room.disconnect();
+
+    let resolveConnect!: (v: { session: number; identity: string; frames: string }) => void;
+    host.connectResult = new Promise((r) => (resolveConnect = r));
+    const connecting = room.connect("u", "t");
+    emit({
+      session: 2,
+      event: {
+        type: "connected",
+        participants: [{ identity: "user-2", tracks: [video("TR_replayed")] }],
+      },
+    });
+    resolveConnect({ session: 2, identity: "user-1", frames: "" });
+    await connecting;
+    expect(room.remoteParticipants.get("user-2")?.trackPublications.size).toBe(1);
+    expect(published).toEqual([]);
+  });
+});
+
+describe("NativeRoom command failures are logged and swallowed", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("push-to-talk gate", async () => {
+    const room = await connected();
+    const err = new Error("gate");
+    rejectOnce("setPttGated", err);
+    room.setPttGated(true);
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("Push-to-talk could not switch the native gate", err);
+  });
+
+  it("input-sensitivity gate", async () => {
+    const room = await connected();
+    const err = new Error("gate");
+    rejectOnce("setVoiceGate", err);
+    room.setVoiceGate(40, vi.fn());
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("Voice sensitivity could not reach the native gate", err);
+  });
+
+  it("automatic sensitivity retune", async () => {
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const room = await connected();
+    await room.localParticipant.setMicrophoneEnabled(true);
+    const steps: number[] = [];
+    room.setVoiceGate("auto", vi.fn(), { seed: 0.03, onThreshold: (next) => steps.push(next) });
+    await settle();
+    const err = new Error("gate");
+    rejectOnce("setVoiceGate", err);
+    for (; now <= 1100; now += 50) {
+      emit({ session: 1, event: { type: "inputLevel", rms: 0.002, open: true } });
+    }
+    await settle();
+    expect(steps).toHaveLength(1);
+    expect(log.warn).toHaveBeenCalledWith(
+      "Automatic sensitivity could not reach the native gate",
+      err,
+    );
+  });
+
+  it("input volume", async () => {
+    const room = await connected();
+    const err = new Error("gain");
+    rejectOnce("setInputGain", err);
+    room.setInputGain(150);
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("Input volume could not reach the native capture", err);
+  });
+
+  it("audio processing", async () => {
+    const room = await connected();
+    const err = new Error("apm");
+    rejectOnce("setAudioProcessing", err);
+    room.setAudioProcessing({ ...audio, noiseSuppression: false });
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith(
+      "Audio processing could not reach the native capture",
+      err,
+    );
+  });
+
+  it("subscription changes", async () => {
+    const room = await connected();
+    emit({ session: 1, event: { type: "trackPublished", identity: "user-2", track: track2() } });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("microphone")!;
+    const err = new Error("subscribe");
+    rejectOnce("setSubscribed", err);
+    pub.setSubscribed(false);
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("native setSubscribed failed", {
+      identity: "user-2",
+      sid: "TR_a",
+      subscribed: false,
+      err,
+    });
+  });
+
+  it("video layer changes", async () => {
+    const room = await connected();
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    const err = new Error("view");
+    rejectOnce("setVideoView", err);
+    pub.setEnabled(false);
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("native setVideoView failed", {
+      identity: "user-2",
+      sid: "TR_v",
+      enabled: false,
+      err,
+    });
+  });
+
+  it("a layer change that fails does not block the next one", async () => {
+    const room = await connected();
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    rejectOnce("setVideoView", new Error("view"));
+    pub.setEnabled(false);
+    pub.setEnabled(true);
+    await settle();
+    expect(views()).toEqual([[1, "user-2", "TR_v", true, "high"]]);
+  });
+
+  it("per-user volume", async () => {
+    const room = await connected();
+    emit({ session: 1, event: { type: "trackPublished", identity: "user-2", track: track2() } });
+    host.calls.length = 0;
+    const err = new Error("volume");
+    rejectOnce("setVolume", err);
+    room.remoteParticipants.get("user-2")!.setVolume(0.5);
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("native setVolume failed", {
+      identity: "user-2",
+      volume: 0.5,
+      err,
+    });
+  });
+
+  it("screen-share audio volume", async () => {
+    const room = createNativeRoom(audio, undefined, () => 0.25);
+    await room.connect("u", "t");
+    emit({ session: 1, event: { type: "trackPublished", identity: "user-2", track: track2() } });
+    const err = new Error("volume");
+    rejectOnce("setScreenshareVolume", err);
+    room.applyScreenshareVolumes();
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("native setScreenshareVolume failed", {
+      identity: "user-2",
+      volume: 0.25,
+      err,
+    });
+  });
+});
+
+describe("NativeRoom participant model", () => {
+  it("lists only the audio publications as audio and finds a publication by its source", async () => {
+    const room = await connected();
+    emit({ session: 1, event: { type: "trackPublished", identity: "user-2", track: track2() } });
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_cam") },
+    });
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_scr", "screen_share") },
+    });
+    const peer = room.remoteParticipants.get("user-2")!;
+    expect([...peer.audioTrackPublications.keys()]).toEqual(["TR_a"]);
+    expect(peer.getTrackPublication("microphone")?.trackSid).toBe("TR_a");
+    expect(peer.getTrackPublication("camera")?.trackSid).toBe("TR_cam");
+    expect(peer.getTrackPublication("screen_share")?.trackSid).toBe("TR_scr");
+    expect(peer.getTrackPublication("screen_share_audio")).toBeUndefined();
+  });
+
+  it("a publication that is not watched yet is enabled at the top layer", async () => {
+    const room = await connected();
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_cam") },
+    });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    expect(pub.isEnabled).toBe(true);
+    expect(pub.isSubscribed).toBe(true);
+    pub.setEnabled(true);
+    await settle();
+    expect(views()).toEqual([]);
+  });
+
+  it("maps a layer request to the native quality", async () => {
+    const room = await connected();
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    pub.setVideoQuality(0);
+    pub.setVideoQuality(1);
+    // OFF has no layer of its own: it reads as the top one.
+    pub.setVideoQuality(3 as VideoQuality);
+    await settle();
+    expect(views().map((v) => v[4])).toEqual(["low", "medium", "high"]);
+  });
+
+  it("picks the smallest layer that covers the tile", async () => {
+    const room = await connected();
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    const pub = room.remoteParticipants.get("user-2")!.getTrackPublication("camera")!;
+    const sizes: Array<[number, number]> = [
+      [320, 100],
+      [100, 321],
+      [641, 360],
+      [1920, 1080],
+      [640, 360],
+      [90, 320],
+    ];
+    for (const [width, height] of sizes) pub.setVideoDimensions({ width, height });
+    await settle();
+    expect(views().map((v) => v[4])).toEqual(["low", "medium", "high", "medium", "low"]);
+  });
+});
+
+describe("NativeRoom input level reports", () => {
+  it("drops reports and a stop before the capture ever started", async () => {
+    const room = await connected();
+    const levels = vi.fn();
+    room.setInputLevelListener(levels);
+    emit({ session: 1, event: { type: "inputLevel", rms: 0.3, open: true } });
+    await room.localParticipant.setMicrophoneEnabled(false);
+    await room.disconnect();
+    expect(levels).not.toHaveBeenCalled();
+  });
+});
+
+describe("NativeRoom remote video bitrate", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("derives the bitrate from the byte deltas of distinct, advancing samples only", async () => {
+    const room = await connected();
+    const tileTrack = await tile(room);
+    const read = async (atMs: number, bytes: number) => {
+      host.getStats = () => Promise.resolve(sample({ atMs, remoteVideo: { TR_v: remote(bytes) } }));
+      await vi.advanceTimersByTimeAsync(2000);
+      await tileTrack.getReceiverStats();
+      return tileTrack.currentBitrate;
+    };
+
+    expect(await read(1000, 100_000)).toBeUndefined();
+    expect(await read(3000, 350_000)).toBe(1_000_000);
+    // The same tick served again, even with other numbers, changes nothing.
+    expect(await read(3000, 999_999)).toBe(1_000_000);
+    // A reply older than the last sample is ignored, not read as a negative span.
+    expect(await read(2500, 400_000)).toBe(1_000_000);
+    // The next delta is against the last accepted sample (3000 ms, 350000 B).
+    expect(await read(5000, 475_000)).toBe(500_000);
+    // A byte counter that went backwards (a restarted stream) has no rate.
+    expect(await read(7000, 100)).toBeUndefined();
+    // No new bytes over a later tick is a rate of zero, not an unknown one.
+    expect(await read(9000, 100)).toBe(0);
+  });
+
+  it("shares a host reply read within 1.5 s of the first, wherever the clock stands", async () => {
+    host.getStats = () => Promise.resolve(sample());
+    const room = await connected();
+    await vi.advanceTimersByTimeAsync(1000);
+    await transports(room).publisher.getStats();
+    await vi.advanceTimersByTimeAsync(1499);
+    await transports(room).subscriber.getStats();
+    expect(getStatsCalls()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await transports(room).subscriber.getStats();
+    expect(getStatsCalls()).toHaveLength(2);
+  });
+});
+
+describe("NativeRoom camera capture", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("starts the saved camera device and treats picking it again as a no-op", async () => {
+    savePref("videoInputDevice", "/dev/video4");
+    const room = await connected();
+    const cam = await startCamera(room);
+    expect(host.calls.filter(([n]) => n === "startCamera")).toEqual([
+      ["startCamera", [1, "/dev/video4", { fps: 30, maxWidth: 0, maxHeight: 0 }]],
+    ]);
+    expect(cam.device).toBe("/dev/video4");
+  });
+
+  it("ends a track whose capture ended before its start result arrived, and only that one", async () => {
+    const room = await connected();
+    host.startCamera = () => {
+      emit({ session: 1, event: { type: "cameraCaptureEnded", capture: 5 } });
+      return Promise.resolve({ capture: 5, width: 1280, height: 720 });
+    };
+    const first = await startCamera(room);
+    expect(first.mediaStreamTrack.readyState).toBe("ended");
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual(["ended"]);
+    host.startCamera = () => Promise.resolve({ capture: 6, width: 1280, height: 720 });
+    const next = await startCamera(room);
+    expect(next.mediaStreamTrack.readyState).toBe("live");
+  });
+
+  it("a capture that ended elsewhere does not end the camera switched onto a new one", async () => {
+    const { cam } = await publishedCamera();
+    let resolve!: (v: unknown) => void;
+    host.changeCamera = () => new Promise((r) => (resolve = r));
+    const switching = cam.setDeviceId("/dev/video2");
+    await vi.waitFor(() => expect(names()).toContain("changeCamera"));
+    emit({ session: 1, event: { type: "cameraCaptureEnded", capture: 99 } });
+    resolve({ capture: 7, width: 960, height: 720 });
+    await expect(switching).resolves.toBe(true);
+    expect(host.renderers[0]!.mediaStreamTrack!.events).toEqual([]);
+  });
+
+  it("refuses a device change once the camera was stopped", async () => {
+    const { cam } = await publishedCamera();
+    cam.stop();
+    host.calls.length = 0;
+    await expect(cam.setDeviceId("/dev/video2")).rejects.toThrow("camera is no longer live");
+    expect(names()).not.toContain("changeCamera");
+  });
+
+  it("says the camera ended when a stop lands during a failing or succeeding switch", async () => {
+    for (const outcome of ["fail", "succeed"]) {
+      // oxlint-disable-next-line no-await-in-loop -- each round builds its own room
+      const { room, cam } = await publishedCamera();
+      let settleSwitch!: () => void;
+      host.changeCamera = () =>
+        new Promise((resolve, reject) => {
+          settleSwitch = () =>
+            outcome === "fail"
+              ? reject(new Error("busy"))
+              : resolve({ capture: 7, width: 960, height: 720 });
+        });
+      const switching = cam.setDeviceId("/dev/video2");
+      // oxlint-disable-next-line no-await-in-loop -- the host call must be pending first
+      await vi.waitFor(() => expect(names()).toContain("changeCamera"));
+      cam.stop();
+      settleSwitch();
+      // oxlint-disable-next-line no-await-in-loop -- one outcome at a time
+      await expect(switching).rejects.toThrow("camera ended during the device change");
+      // oxlint-disable-next-line no-await-in-loop -- the next round needs the registry clear
+      await room.disconnect();
+    }
+  });
+
+  it("a room that left mid-switch does not stop the new capture on a session that is gone", async () => {
+    const { room, cam } = await publishedCamera();
+    let resolve!: (v: unknown) => void;
+    host.changeCamera = () => new Promise((r) => (resolve = r));
+    const switching = cam.setDeviceId("/dev/video2");
+    await vi.waitFor(() => expect(names()).toContain("changeCamera"));
+    await room.disconnect();
+    host.calls.length = 0;
+    resolve({ capture: 7, width: 960, height: 720 });
+    await expect(switching).rejects.toThrow("camera ended during the device change");
+    expect(host.calls).toEqual([]);
+  });
+
+  it("logs a stop the host refused, for the capture it named", async () => {
+    const { cam } = await publishedCamera();
+    const err = new Error("gone");
+    vi.spyOn(nativeVoice, "stopCamera").mockRejectedValue(err);
+    cam.stop();
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("native stopCamera failed", { capture: 5, err });
+  });
+
+  it("logs the stop of a capture that finished switching after the camera was stopped", async () => {
+    const { cam } = await publishedCamera();
+    let resolve!: (v: unknown) => void;
+    host.changeCamera = () => new Promise((r) => (resolve = r));
+    const switching = cam.setDeviceId("/dev/video2");
+    await vi.waitFor(() => expect(names()).toContain("changeCamera"));
+    const err = new Error("gone");
+    vi.spyOn(nativeVoice, "stopCamera").mockRejectedValue(err);
+    cam.stop();
+    resolve({ capture: 7, width: 960, height: 720 });
+    await switching.catch(() => undefined);
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("native stopCamera failed", { capture: 7, err });
+  });
+});
+
+describe("NativeRoom camera publication", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("names the refusals it makes", async () => {
+    const room = createNativeRoom(audio);
+    const browserTrack = { kind: "video", source: "camera", mediaStreamTrack: {} } as never;
+    await expect(room.localParticipant.publishTrack(browserTrack, cameraOptions)).rejects.toThrow(
+      "native room is not connected",
+    );
+    await room.connect("u", "t");
+    await expect(room.localParticipant.publishTrack(browserTrack, cameraOptions)).rejects.toThrow(
+      "publishing a browser camera track is not available on Linux yet",
+    );
+    await expect(room.localParticipant.setCameraEnabled(true)).rejects.toThrow(
+      "setCameraEnabled(true) is not available on Linux yet",
+    );
+  });
+
+  it("publishes a camera as unmuted video and defaults to a single layer", async () => {
+    const room = await connected();
+    const cam = await startCamera(room);
+    const publication = await room.localParticipant.publishTrack(cam, {
+      source: "camera",
+      videoEncoding: { maxBitrate: 1_700_000, maxFramerate: 30 },
+    });
+    expect(publication).toMatchObject({
+      trackSid: "TR_cam",
+      source: "camera",
+      kind: "video",
+      isMuted: false,
+      track: cam,
+    });
+    expect(host.calls.find(([n]) => n === "publishCamera")![1][2]).toMatchObject({
+      simulcast: false,
+    });
+  });
+
+  it("stops the capture and the preview when the host refuses the publish", async () => {
+    const room = await connected();
+    const cam = await startCamera(room);
+    host.calls.length = 0;
+    host.publishCamera = () => Promise.reject(new Error("no encoder"));
+    await expect(room.localParticipant.publishTrack(cam, cameraOptions)).rejects.toThrow(
+      "no encoder",
+    );
+    // The failure path stops the capture itself, then the track's own stop reports it too.
+    expect(names()).toEqual(["publishCamera", "stopCamera", "stopCamera"]);
+    expect(host.renderers[0]!.disposed).toBe(true);
+    expect(room.localParticipant.getTrackPublication("camera")).toBeUndefined();
+  });
+
+  it("keeps nothing when the room left while the host published", async () => {
+    const room = await connected();
+    const cam = await startCamera(room);
+    let finish!: () => void;
+    host.publishCamera = () => new Promise((r) => (finish = () => r("TR_late")));
+    const publishing = room.localParticipant.publishTrack(cam, cameraOptions);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    await room.disconnect();
+    finish();
+    await expect(publishing).rejects.toThrow("native room disconnected during camera publish");
+    expect(room.localParticipant.getTrackPublication("camera")).toBeUndefined();
+  });
+
+  it("turning the camera off stops the capture and forgets the publication", async () => {
+    const { room } = await publishedCamera();
+    await room.localParticipant.setCameraEnabled(false);
+    expect(names()).toEqual(["stopCamera"]);
+    expect(host.renderers[0]!.disposed).toBe(true);
+    expect(room.localParticipant.getTrackPublication("camera")).toBeUndefined();
+  });
+
+  it("a stopped camera drops its publication and its host capture", async () => {
+    const { room, cam } = await publishedCamera();
+    cam.stop();
+    expect(room.localParticipant.getTrackPublication("camera")).toBeUndefined();
+    expect(host.calls).toEqual([["stopCamera", [1, 5]]]);
+  });
+
+  it("a late stop of a camera from an earlier session leaves the current one alone", async () => {
+    const room = createNativeRoom(audio);
+    await room.connect("u", "t");
+    const stale = await startCamera(room);
+    await room.disconnect();
+    host.connectResult = Promise.resolve({ session: 2, identity: "user-1", frames: "ws://h/tok" });
+    await room.connect("u", "t");
+    host.startCamera = () => Promise.resolve({ capture: 8, width: 1280, height: 720 });
+    const current = await startCamera(room);
+    await room.localParticipant.publishTrack(current, cameraOptions);
+    host.calls.length = 0;
+
+    stale.stop();
+
+    expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(current);
+    expect(host.calls).toEqual([]);
+    // The room still treats the current camera as live.
+    await expect(current.setDeviceId("/dev/video2")).resolves.toBe(true);
+  });
+});
+
+describe("NativeRoom screen publication", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("names the refusals it makes", async () => {
+    const room = createNativeRoom(audio);
+    const browserTrack = { kind: "video", source: "screen_share", mediaStreamTrack: {} } as never;
+    await expect(room.localParticipant.publishTrack(browserTrack, screenOptions)).rejects.toThrow(
+      "native room is not connected",
+    );
+    await expect(
+      room.localParticipant.publishTrack(
+        { kind: "audio", source: "screen_share_audio", mediaStreamTrack: {} } as never,
+        audioOptions,
+      ),
+    ).rejects.toThrow("native room is not connected");
+    await room.connect("u", "t");
+    await expect(room.localParticipant.publishTrack(browserTrack, screenOptions)).rejects.toThrow(
+      "publishing a browser screen track is not available on Linux yet",
+    );
+    await expect(
+      room.localParticipant.publishTrack(
+        { kind: "audio", source: "screen_share_audio", mediaStreamTrack: {} } as never,
+        audioOptions,
+      ),
+    ).rejects.toThrow("publishing a browser screen audio track is not available on Linux yet");
+    await expect(room.localParticipant.setScreenShareEnabled(true)).rejects.toThrow(
+      "setScreenShareEnabled(true) is not available on Linux yet",
+    );
+  });
+
+  it("routes a publish by the option's source before the track's own", async () => {
+    const room = await connected();
+    const browserCamera = { kind: "video", source: "camera", mediaStreamTrack: {} } as never;
+    await expect(
+      room.localParticipant.publishTrack(browserCamera, { source: "screen_share" }),
+    ).rejects.toThrow("browser screen track");
+    await expect(
+      room.localParticipant.publishTrack(browserCamera, { simulcast: false }),
+    ).rejects.toThrow("browser camera track");
+    const orphan = new NativeScreenAudioTrack(() => {});
+    await expect(room.localParticipant.publishTrack(orphan, {})).rejects.toThrow(
+      "screen share is not running",
+    );
+  });
+
+  it("publishes a screen share as unmuted video", async () => {
+    const room = await connected();
+    const screen = await share(room);
+    const publication = await room.localParticipant.publishTrack(screen, screenOptions);
+    expect(publication).toMatchObject({
+      trackSid: "TR_screen",
+      source: "screen_share",
+      kind: "video",
+      isMuted: false,
+      track: screen,
+    });
+  });
+
+  it("keeps nothing when the room left while the host published the share", async () => {
+    const room = await connected();
+    const screen = await share(room);
+    let finish!: () => void;
+    vi.spyOn(nativeVoice, "publishScreen").mockImplementation(
+      () => new Promise((r) => (finish = () => r("TR_late"))),
+    );
+    const publishing = room.localParticipant.publishTrack(screen, screenOptions);
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    await room.disconnect();
+    finish();
+    await expect(publishing).rejects.toThrow("native room disconnected during screen publish");
+    expect(room.localParticipant.getTrackPublication("screen_share")).toBeUndefined();
+  });
+
+  it("turning the share off stops its capture and forgets the publication", async () => {
+    const room = await connected();
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    host.calls.length = 0;
+    await room.localParticipant.setScreenShareEnabled(false);
+    expect(host.calls).toEqual([["stopScreen", [1, 4]]]);
+    expect(host.renderers[0]!.disposed).toBe(true);
+    expect(room.localParticipant.getTrackPublication("screen_share")).toBeUndefined();
+  });
+
+  it("drops a leftover publication of a replaced share when the room disconnects", async () => {
+    const room = await connected();
+    const old = await share(room);
+    host.startScreen = () => Promise.resolve({ capture: 5, width: 800, height: 600 });
+    await share(room);
+    await room.localParticipant.publishTrack(old, screenOptions);
+    expect(room.localParticipant.getTrackPublication("screen_share")!.track).toBe(old);
+    await room.disconnect();
+    expect(room.localParticipant.getTrackPublication("screen_share")).toBeUndefined();
+  });
+
+  it("drops a leftover publication of a replaced camera when the room disconnects", async () => {
+    const room = await connected();
+    const old = await startCamera(room);
+    host.startCamera = () => Promise.resolve({ capture: 6, width: 1280, height: 720 });
+    await startCamera(room);
+    await room.localParticipant.publishTrack(old, cameraOptions);
+    expect(room.localParticipant.getTrackPublication("camera")!.track).toBe(old);
+    await room.disconnect();
+    expect(room.localParticipant.getTrackPublication("camera")).toBeUndefined();
+  });
+
+  it("logs a stop the host refused, for the capture it named", async () => {
+    const room = await connected();
+    const screen = await share(room);
+    const err = new Error("gone");
+    vi.spyOn(nativeVoice, "stopScreen").mockRejectedValue(err);
+    screen.stop();
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("native stopScreen failed", { capture: 4, err });
+  });
+});
+
+describe("NativeRoom screen capture", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("starts nothing when the room left during the pick", async () => {
+    const room = await connected();
+    let choose!: (pick: unknown) => void;
+    host.pick = () => new Promise((r) => (choose = r));
+    const sharing = share(room);
+    await vi.waitFor(() => expect(choose).toBeDefined());
+    await room.disconnect();
+    choose({
+      source: "screen:7",
+      capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+      maxBitrate: 1_500_000,
+      maxFramerate: 5,
+    });
+    await expect(sharing).rejects.toThrow("native room disconnected during screen pick");
+    expect(names()).not.toContain("startScreen");
+  });
+
+  it("ends a share with audio whose capture ended before its start result, and only that one", async () => {
+    (HTMLCanvasElement.prototype as unknown as { captureStream: () => unknown }).captureStream =
+      () => ({ getVideoTracks: () => [{ stop() {} }] });
+    try {
+      const room = await connected();
+      host.startScreen = () => {
+        emit({ session: 1, event: { type: "screenCaptureEnded", capture: 4 } });
+        return Promise.resolve({ capture: 4, width: 1280, height: 720 });
+      };
+      const { screen } = await shareWithAudio(room);
+      expect(screen.mediaStreamTrack.readyState).toBe("ended");
+      host.startScreen = () => Promise.resolve({ capture: 5, width: 1280, height: 720 });
+      const next = await shareWithAudio(room);
+      expect(next.screen.mediaStreamTrack.readyState).toBe("live");
+    } finally {
+      delete (HTMLCanvasElement.prototype as unknown as { captureStream?: unknown }).captureStream;
+    }
+  });
+
+  it("refuses a Change source once the share was stopped", async () => {
+    const room = await connected();
+    const screen = await share(room);
+    screen.stop();
+    host.calls.length = 0;
+    await expect(screen.changeSource()).rejects.toThrow("screen share is no longer live");
+    expect(names()).toEqual([]);
+  });
+
+  it("drops a Change source whose share was stopped during the pick", async () => {
+    const room = await connected();
+    const screen = await share(room);
+    let choose!: (source: string) => void;
+    host.pickChange = () => new Promise((r) => (choose = r));
+    const changing = screen.changeSource();
+    await vi.waitFor(() => expect(choose).toBeDefined());
+    screen.stop();
+    host.calls.length = 0;
+    choose("window:9");
+    await expect(changing).rejects.toThrow("screen share ended during the pick");
+    expect(names()).toEqual([]);
+  });
+
+  it("a capture that ends during Change source ends the track only when it is the new one", async () => {
+    for (const ended of [99, 6]) {
+      // oxlint-disable-next-line no-await-in-loop -- each round builds its own room
+      const room = await connected();
+      // oxlint-disable-next-line no-await-in-loop -- the room must be up first
+      const screen = await share(room);
+      let resolve!: (v: unknown) => void;
+      host.changeScreen = () => new Promise((r) => (resolve = r));
+      const changing = screen.changeSource();
+      // oxlint-disable-next-line no-await-in-loop -- the host call must be pending first
+      await vi.waitFor(() => expect(names()).toContain("changeScreen"));
+      emit({ session: 1, event: { type: "screenCaptureEnded", capture: ended } });
+      resolve({ capture: 6, width: 800, height: 600 });
+      // oxlint-disable-next-line no-await-in-loop -- one share at a time
+      await changing;
+      expect(host.renderers.at(-1)!.mediaStreamTrack!.events).toEqual(ended === 6 ? ["ended"] : []);
+      // oxlint-disable-next-line no-await-in-loop -- the next round needs the registry clear
+      await room.disconnect();
+    }
+  });
+
+  it("leaves a share that was stopped by a room leaving mid-change without a stop on the old session", async () => {
+    const room = await connected();
+    const screen = await share(room);
+    let resolve!: (v: unknown) => void;
+    host.changeScreen = () => new Promise((r) => (resolve = r));
+    const changing = screen.changeSource();
+    await vi.waitFor(() => expect(names()).toContain("changeScreen"));
+    await room.disconnect();
+    host.calls.length = 0;
+    resolve({ capture: 6, width: 800, height: 600 });
+    await changing;
+    expect(host.calls).toEqual([]);
+  });
+
+  it("logs the stop of a swapped-in capture the host refused", async () => {
+    const room = await connected();
+    const screen = await share(room);
+    let resolve!: (v: unknown) => void;
+    host.changeScreen = () => new Promise((r) => (resolve = r));
+    const changing = screen.changeSource();
+    await vi.waitFor(() => expect(names()).toContain("changeScreen"));
+    const err = new Error("gone");
+    vi.spyOn(nativeVoice, "stopScreen").mockRejectedValue(err);
+    screen.stop();
+    resolve({ capture: 6, width: 800, height: 600 });
+    await changing;
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("native stopScreen failed", { capture: 6, err });
+  });
+
+  it("explains a quality change refused after a Stop, or one a Stop overtook", async () => {
+    const room = await connected();
+    const stopped = await share(room);
+    stopped.stop();
+    await expect(stopped.setQuality("high", 30, "vp8")).rejects.toMatchObject({
+      stage: "refused",
+      message: "screen share is no longer live",
+    });
+
+    host.startScreen = () => Promise.resolve({ capture: 5, width: 800, height: 600 });
+    const live = await share(room);
+    let resolve!: (v: unknown) => void;
+    host.setScreenQuality = () => new Promise((r) => (resolve = r));
+    const changing = live.setQuality("high", 30, "vp8");
+    await vi.waitFor(() => expect(names()).toContain("setScreenQuality"));
+    live.stop();
+    resolve({ ok: true, sid: "TR_screen2", width: 1920, height: 1080 });
+    await expect(changing).rejects.toMatchObject({
+      stage: "refused",
+      message: "the share ended during the change",
+    });
+  });
+});
+
+describe("NativeRoom screen audio publication", () => {
+  beforeEach(() => {
+    (HTMLCanvasElement.prototype as unknown as { captureStream: () => unknown }).captureStream =
+      () => ({ getVideoTracks: () => [{ stop() {} }] });
+  });
+  afterEach(() => {
+    delete (HTMLCanvasElement.prototype as unknown as { captureStream?: unknown }).captureStream;
+    vi.restoreAllMocks();
+  });
+
+  it("publishes the share's audio as unmuted audio", async () => {
+    const room = await connected();
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    const publication = await room.localParticipant.publishTrack(audioTrack, audioOptions);
+    expect(publication).toMatchObject({
+      trackSid: "TR_audio",
+      source: "screen_share_audio",
+      kind: "audio",
+      isMuted: false,
+      track: audioTrack,
+    });
+  });
+
+  it("refuses an audio track that never belonged to the running share", async () => {
+    const room = await connected();
+    await share(room);
+    host.calls.length = 0;
+    const stranger = new NativeScreenAudioTrack(() => {});
+    await expect(room.localParticipant.publishTrack(stranger, audioOptions)).rejects.toThrow(
+      "screen audio is stale",
+    );
+    expect(names()).toEqual([]);
+  });
+
+  it("logs a sid the host would not unpublish after a stop mid-publish", async () => {
+    const room = await connected();
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    let land!: (sid: string) => void;
+    host.publishScreenAudio = () => new Promise<string>((resolve) => (land = resolve));
+    const publishing = room.localParticipant.publishTrack(audioTrack, audioOptions);
+    await vi.waitFor(() => expect(names()).toContain("publishScreenAudio"));
+    audioTrack.stop();
+    const err = new Error("gone");
+    vi.spyOn(nativeVoice, "unpublishScreenAudio").mockRejectedValue(err);
+    land("TR_late");
+    await publishing;
+    expect(log.warn).toHaveBeenCalledWith("native unpublishScreenAudio failed", {
+      sid: "TR_late",
+      err,
+    });
+  });
+
+  it("logs a stop of the audio track the host would not unpublish", async () => {
+    const room = await connected();
+    const { screen, audioTrack } = await shareWithAudio(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    await room.localParticipant.publishTrack(audioTrack, audioOptions);
+    const err = new Error("gone");
+    vi.spyOn(nativeVoice, "unpublishScreenAudio").mockRejectedValue(err);
+    audioTrack.stop();
+    await settle();
+    expect(log.warn).toHaveBeenCalledWith("native unpublishScreenAudio failed", {
+      sid: "TR_audio",
+      err,
+    });
+  });
+});
+
+const reportEncryption = (identity: string, encrypted: boolean): void =>
+  emit({ session: 1, event: { type: "encryptionStatus", identity, encrypted } });
+
+describe("NativeRoom backend events", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    setLocalDeafened(false);
+  });
+
+  it("a peer that leaves stops its decrypt reports, and an unknown leaver raises nothing", async () => {
+    const room = await connected();
+    const left = vi.fn();
+    room.on("participantDisconnected", left);
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
+    const idle = vi.getTimerCount();
+    reportEncryption("user-2", false);
+    expect(vi.getTimerCount()).toBe(idle + 1);
+    emit({ session: 1, event: { type: "participantDisconnected", identity: "user-2" } });
+    expect(vi.getTimerCount()).toBe(idle);
+    expect(left).toHaveBeenCalledTimes(1);
+    emit({ session: 1, event: { type: "participantDisconnected", identity: "nobody" } });
+    expect(left).toHaveBeenCalledTimes(1);
+  });
+
+  it("raises TrackUnpublished only for a publication it knows", async () => {
+    const room = await connected();
+    const unpublished = vi.fn();
+    room.on("trackUnpublished", unpublished);
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_v") },
+    });
+    emit({ session: 1, event: { type: "trackUnpublished", identity: "user-2", sid: "TR_other" } });
+    emit({ session: 1, event: { type: "trackUnpublished", identity: "nobody", sid: "TR_v" } });
+    expect(unpublished).not.toHaveBeenCalled();
+    emit({ session: 1, event: { type: "trackUnpublished", identity: "user-2", sid: "TR_v" } });
+    expect(unpublished).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an unprotected local session once, and a protected one never", async () => {
+    const room = await connected();
+    const failed = vi.fn();
+    room.on("encryptionError", failed);
+    reportEncryption("user-1", true);
+    expect(failed).not.toHaveBeenCalled();
+    reportEncryption("user-1", false);
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect((failed.mock.calls[0]![0] as Error).message).toBe("native E2EE not active");
+    expect(failed.mock.calls[0]).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("raises no decrypt failure for a peer it does not know, but keeps watching", async () => {
+    const room = await connected();
+    const failed = vi.fn();
+    room.on("encryptionError", failed);
+    reportEncryption("user-9", false);
+    expect(failed).not.toHaveBeenCalled();
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-9" } });
+    vi.advanceTimersByTime(1000);
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect(failed.mock.calls[0]![0]).toMatchObject({
+      message: "InvalidKey: native decrypt failure",
+    });
+  });
+
+  it("a new snapshot replaces the roster, its video and its decrypt reports", async () => {
+    const room = await connected();
+    emit({
+      session: 1,
+      event: {
+        type: "connected",
+        participants: [{ identity: "user-2", tracks: [video("TR_v")] }],
+      },
+    });
+    emit({
+      session: 1,
+      event: { type: "trackSubscribed", identity: "user-2", track: video("TR_v") },
+    });
+    reportEncryption("user-2", false);
+    const watching = vi.getTimerCount();
+    expect(watching).toBeGreaterThan(0);
+    expect(host.renderers[0]!.disposed).toBe(false);
+
+    emit({
+      session: 1,
+      event: { type: "connected", participants: [{ identity: "user-3", tracks: [] }] },
+    });
+    expect([...room.remoteParticipants.keys()]).toEqual(["user-3"]);
+    expect(host.renderers[0]!.disposed).toBe(true);
+    expect(vi.getTimerCount()).toBe(watching - 1);
+  });
+
+  it("leaving ends the decrypt reports of the session", async () => {
+    const room = await connected();
+    emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
+    reportEncryption("user-2", false);
+    const failed = vi.fn();
+    room.on("encryptionError", failed);
+    const watching = vi.getTimerCount();
+    emit({ session: 1, event: { type: "disconnected", reason: "ServerShutdown" } });
+    expect(vi.getTimerCount()).toBe(watching - 1);
+    vi.advanceTimersByTime(5000);
+    expect(failed).not.toHaveBeenCalled();
+  });
+
+  it("leaves a video publication subscribed while deafened", async () => {
+    await connected();
+    setLocalDeafened(true);
+    emit({
+      session: 1,
+      event: { type: "trackPublished", identity: "user-2", track: video("TR_v") },
+    });
+    expect(host.calls.filter(([n]) => n === "setSubscribed")).toEqual([]);
+  });
+});
+
+describe("NativeRoom bookkeeping of replaced tracks", () => {
+  it("logs under the room's own tag", () => {
+    expect(log.tags).toContain("nativeRoom");
+  });
+
+  it("turning the camera off forgets a publication whose track was replaced", async () => {
+    const room = await connected();
+    const old = await startCamera(room);
+    host.startCamera = () => Promise.resolve({ capture: 6, width: 1280, height: 720 });
+    await startCamera(room);
+    await room.localParticipant.publishTrack(old, cameraOptions);
+    await room.localParticipant.setCameraEnabled(false);
+    expect(room.localParticipant.getTrackPublication("camera")).toBeUndefined();
+  });
+
+  it("turning the share off forgets a publication whose track was replaced", async () => {
+    const room = await connected();
+    const old = await share(room);
+    host.startScreen = () => Promise.resolve({ capture: 5, width: 800, height: 600 });
+    await share(room);
+    await room.localParticipant.publishTrack(old, screenOptions);
+    await room.localParticipant.setScreenShareEnabled(false);
+    expect(room.localParticipant.getTrackPublication("screen_share")).toBeUndefined();
+  });
+
+  it("a stopped share drops its own publication and its host capture", async () => {
+    const room = await connected();
+    const screen = await share(room);
+    await room.localParticipant.publishTrack(screen, screenOptions);
+    host.calls.length = 0;
+    screen.stop();
+    expect(room.localParticipant.getTrackPublication("screen_share")).toBeUndefined();
+    expect(host.calls).toEqual([["stopScreen", [1, 4]]]);
+  });
+
+  it("stopping the current share leaves a publication that belongs to another track", async () => {
+    const room = await connected();
+    const old = await share(room);
+    host.startScreen = () => Promise.resolve({ capture: 5, width: 800, height: 600 });
+    const current = await share(room);
+    await room.localParticipant.publishTrack(old, screenOptions);
+    current.stop();
+    expect(room.localParticipant.getTrackPublication("screen_share")!.track).toBe(old);
   });
 });

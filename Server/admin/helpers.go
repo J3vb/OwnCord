@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -53,9 +54,22 @@ func writeSvcErr(w http.ResponseWriter, err error, notFound, badReqCode, fallbac
 	}
 }
 
-func pathInt64(r *http.Request, param string) (int64, error) { //nolint:unparam // kept generic for future URL params
-	raw := chi.URLParam(r, param)
-	return strconv.ParseInt(raw, 10, 64)
+// errPathID is pathInt64's error for an id that is not a positive integer.
+var errPathID = errors.New("id must be a positive integer")
+
+// pathInt64 reads a numeric id from the URL. Ids start at 1, so 0 and negative
+// values are refused here, once, rather than at every caller. Every route
+// reads its ids through it (the path-id invariant keeps a raw
+// strconv.ParseInt(chi.URLParam(...)) out of admin and api).
+func pathInt64(r *http.Request, param string) (int64, error) {
+	id, err := strconv.ParseInt(chi.URLParam(r, param), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("path id %q: %w", param, err)
+	}
+	if id <= 0 {
+		return 0, fmt.Errorf("path id %q: %w", param, errPathID)
+	}
+	return id, nil
 }
 
 // queryInt parses an integer query parameter with a minimum and maximum bound.
@@ -95,6 +109,16 @@ func ActorIDFromContext(ctx context.Context) int64 {
 		return 0
 	}
 	return user.ID
+}
+
+// actorUserFromContext returns the authenticated principal's *db.User stored in
+// the request context by adminAuthMiddleware, or nil outside that middleware.
+func actorUserFromContext(r *http.Request) *db.User {
+	user, ok := r.Context().Value(adminUserKey).(*db.User)
+	if !ok {
+		return nil
+	}
+	return user
 }
 
 // actorRoleFromContext returns the authenticated principal's *db.Role stored

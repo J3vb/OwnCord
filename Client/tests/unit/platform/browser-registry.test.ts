@@ -24,10 +24,12 @@ describe("browser platform registry", () => {
         "devTools",
         "externalContent",
         "fileSaver",
+        "gameDetector",
         "globalShortcuts",
         "http",
         "identity",
         "logFiles",
+        "mediaDetector",
         "nativeProxies",
         "nativeVoice",
         "notifier",
@@ -143,6 +145,12 @@ describe("browser platform registry", () => {
     await expect(b.appMetadata.getVersion()).rejects.toThrow();
     await expect(b.urlOpener.open("https://example.invalid/")).rejects.toThrow();
     expect(await b.systemIdle.idleMs()).toBeNull();
+    // The web build scans nothing: no game, and the setting stays hidden.
+    expect(b.gameDetector.available).toBe(false);
+    expect(await b.gameDetector.detect()).toBeNull();
+    // Nor does it read a song (WP 8.10).
+    expect(b.mediaDetector.available).toBe(false);
+    expect(await b.mediaDetector.detect({ hidden: [] })).toEqual({ state: "none" });
     expect(() => b.trayStatus.onStatusChange(() => undefined)()).not.toThrow();
 
     // The four contracts a Settings control sits on say they are unavailable.

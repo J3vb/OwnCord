@@ -49,6 +49,59 @@ var allowedSettingKeys = map[string]struct{}{
 	// How long a member must be idle before the AFK channel sweep may move
 	// them (WP 6.10). A missing row means AFKTimeoutDefaultSeconds.
 	AFKTimeoutKey: {},
+	// Whether a member holding MOVE_MEMBERS may move the owner (WP 8.4a).
+	VoiceOwnerMovableKey: {},
+	// Whether members' game activity is shown on this server (WP 8.3e-2).
+	// MANAGE_SERVER may change it; it is not owner-only.
+	GameActivityEnabledKey: {},
+	// The channel that greets each new member (WP 8.6). Empty means off.
+	WelcomeChannelKey: {},
+}
+
+// VoiceOwnerMovableKey is the settings key holding whether MOVE_MEMBERS
+// holders may move the owner between voice channels: "true" or "false". A
+// missing row means true.
+const VoiceOwnerMovableKey = "voice_owner_movable"
+
+// VoiceOwnerMovable reads a stored VoiceOwnerMovableKey value: true for an
+// unset (blank) value, the parsed boolean otherwise, and false for anything
+// unparseable so a damaged row never lets the owner be moved on a guess.
+func VoiceOwnerMovable(stored string) bool {
+	if strings.TrimSpace(stored) == "" {
+		return true
+	}
+	v, err := parseBooleanSettingValue(stored)
+	return err == nil && v
+}
+
+// GameActivityEnabledKey is the settings key holding whether game activity is
+// shown on this server: "true" or "false". A missing row means true.
+const GameActivityEnabledKey = "game_activity_enabled"
+
+// GameActivityEnabled reads a stored GameActivityEnabledKey value: true for an
+// unset (blank) value, the parsed boolean otherwise, and false for anything
+// unparseable so a damaged row never shows a game the admin may have hidden.
+func GameActivityEnabled(stored string) bool {
+	if strings.TrimSpace(stored) == "" {
+		return true
+	}
+	v, err := parseBooleanSettingValue(stored)
+	return err == nil && v
+}
+
+// GameActivityEnabledFromRead interprets the result of reading
+// GameActivityEnabledKey: a missing row (db.ErrNotFound) means on, a stored
+// value is parsed as GameActivityEnabled does, and any other error is a read
+// that failed: ok is false and the error is returned, for the caller to fail
+// closed on and log.
+func GameActivityEnabledFromRead(stored string, err error) (enabled, ok bool, readErr error) {
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return true, true, nil
+		}
+		return false, false, fmt.Errorf("read %s: %w", GameActivityEnabledKey, err)
+	}
+	return GameActivityEnabled(stored), true, nil
 }
 
 // AFKTimeoutKey is the settings key holding the AFK timeout in seconds.
@@ -84,6 +137,9 @@ var ownerOnlySettingKeys = map[string]struct{}{
 	// it is the owner's call too.
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
+	// Whether Move Members holders may move the owner is the owner's call
+	// (WP 8.4a).
+	VoiceOwnerMovableKey: {},
 }
 
 // IsOwnerOnlySettingKey reports whether a setting key changes the owner-only
@@ -161,6 +217,18 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 	normalized, err := normalizeSettingUpdates(updates)
 	if err != nil {
 		return nil, fmt.Errorf("%w%.0w", err, ErrBadRequest)
+	}
+
+	if value, ok := normalized[WelcomeChannelKey]; ok {
+		canonical, err := validateWelcomeChannel(ctx, s.st, value)
+		if err != nil {
+			// A store fault is the server's, not a bad request: let it through.
+			if errors.Is(err, ErrInternal) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%w%.0w", err, ErrBadRequest)
+		}
+		normalized[WelcomeChannelKey] = canonical
 	}
 
 	if err := s.validateRequire2FAUpdate(ctx, normalized); err != nil {

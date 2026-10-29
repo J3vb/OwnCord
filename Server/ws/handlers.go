@@ -92,11 +92,14 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	}
 	voiceChID, voiceJoinTok := c.voice.state()
 	info := ClientInfo{
+		Activity:       h.userActivity(c),
+		Listening:      h.userListening(c),
 		UserID:         c.userID,
 		Username:       username,
 		Avatar:         avatar,
 		DisplayName:    displayName,
 		RoleName:       c.roleName,
+		IdentityKey:    c.identityKey,
 		ReqID:          env.ID,
 		VoiceChannelID: voiceChID,
 		VoiceJoinToken: voiceJoinTok,
@@ -207,8 +210,7 @@ func (h *Hub) handleMessageSessionRecheck(ctx context.Context, c *Client) bool {
 			h.kickClientTerminal(c)
 			return true
 		}
-		tempUser := &db.User{Banned: result.Banned, BanExpires: result.BanExpires}
-		if auth.IsEffectivelyBanned(tempUser) {
+		if sessionUserBanned(result.Banned, result.BanExpires) {
 			slog.Info("ws user banned, closing connection", "user_id", c.userID)
 			c.sendMsg(buildErrorMsg(ErrCodeBanned, "you are banned"))
 			h.kickClientTerminal(c)
@@ -216,6 +218,12 @@ func (h *Hub) handleMessageSessionRecheck(ctx context.Context, c *Client) bool {
 		}
 	}
 	return false
+}
+
+// sessionUserBanned reports whether the user behind a session row read is
+// banned right now (a timed ban that has run out is not).
+func sessionUserBanned(banned bool, banExpires *string) bool {
+	return auth.IsEffectivelyBanned(&db.User{Banned: banned, BanExpires: banExpires})
 }
 
 // handleMessageDecode parses handleMessage's inbound frame into an envelope,
@@ -281,7 +289,13 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 		h.deferChannelFocus(c, *result.DeferChannelFocus, env.ID, !result.DeferChannelFocusNoRead)
 	}
 	if result.SetPresence != nil {
-		c.setLivePresence(result.SetPresence.status, result.SetPresence.customStatus, result.SetPresence.customStatusExpiresAt)
+		result.Events = h.applyPresenceChoice(c, result.SetPresence, result.Events)
+	}
+	if result.SetActivity != nil {
+		h.applyActivity(c, result.SetActivity.next)
+	}
+	if result.SetListening != nil {
+		h.applyListening(c, result.SetListening.next)
 	}
 	if result.SetE2EEAnnounce != nil {
 		c.setE2EEAnnounce(*result.SetE2EEAnnounce)

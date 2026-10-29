@@ -30,8 +30,9 @@ server:
   # pprof_mutex_profile_fraction: 5        # sample 1 in N contended mutex events
   #                           # when pprof is on (0 disables).
   # browser_client_enabled: false  # host the browser client from this server.
-  #                           # Owner opt-in, off by default. Builds without the
-  #                           # browser bundle answer GET / with a 404 note.
+  #                           # Owner opt-in, off by default. Release builds carry
+  #                           # the browser bundle; a build from source without it
+  #                           # answers GET / with a 404 note.
   # reachability_report_enabled: false
   #                           # add a "reachability" block to the admin-only
   #                           # GET /api/v1/diagnostics/connectivity: this host's
@@ -97,7 +98,7 @@ voice:
   auto_download_livekit: true # download and run livekit-server automatically when
                               # no livekit_binary is set (verified against the
                               # official LiveKit release checksums; stored in data/livekit/)
-  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.7")
+  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.10")
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)

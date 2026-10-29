@@ -36,6 +36,15 @@ export function anyTriggerBound(status: GlobalKeysStatus): boolean {
 }
 
 /**
+ * Whether the portal holds our shortcuts: it reports a bound trigger, or it
+ * lists all three without naming any key (xdg-desktop-portal-hyprland; the
+ * keys live in the compositor's config).
+ */
+export function portalHoldsShortcuts(status: GlobalKeysStatus): boolean {
+  return anyTriggerBound(status) || status.triggersUnnamed;
+}
+
+/**
  * The VK for `F1`..`F24` from a `KeyboardEvent.code`, else null. A portal
  * shortcut is grabbed by the desktop in every app, so push to talk is only
  * suggested on function keys (Space, Ctrl and the like would be eaten

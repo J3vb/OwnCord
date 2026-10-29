@@ -19,6 +19,7 @@ const BRIDGE = `<script>
 window.__test = {
   get state(){return state},
   openRoleModal: openRoleModal,
+  applyRolePreset: applyRolePreset,
   renderRoles: renderRoles,
   moveRole: moveRole,
   saveRole: saveRole,
@@ -44,6 +45,7 @@ interface FetchCall {
 interface Bridge {
   state: any;
   openRoleModal: (id: number | null) => void;
+  applyRolePreset: (id: string) => void;
   renderRoles: () => Promise<string>;
   moveRole: (id: number, delta: number) => Promise<void>;
   saveRole: (id: number | null) => Promise<void>;
@@ -342,7 +344,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
 
     bridge.openRoleModal(null);
     const boxes = [...doc.querySelectorAll<HTMLInputElement>("#modalInner input[data-permbit]")];
-    expect(boxes.length).toBe(21);
+    expect(boxes.length).toBe(30);
     for (const box of boxes) {
       const name = doc.getElementById(box.getAttribute("aria-labelledby")!);
       const desc = doc.getElementById(box.getAttribute("aria-describedby")!);
@@ -357,7 +359,214 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     );
     // Each group is a named fieldset.
     const legends = [...doc.querySelectorAll("#modalInner fieldset.perm-group > legend")];
-    expect(legends.map((l) => l.textContent)).toEqual(["General", "Text", "Voice", "Moderation"]);
+    expect(legends.map((l) => l.textContent)).toEqual([
+      "General",
+      "Text",
+      "Voice",
+      "Moderation",
+      "Owner powers",
+    ]);
+  });
+
+  // WP 8.4b: Move Members is owner/Administrator-only to change.
+  it("greys the Move Members box with a reason unless the viewer is the owner or an Administrator", async () => {
+    const MOVE_MEMBERS = 0x2000;
+    const move = (doc: Document) =>
+      doc.querySelector<HTMLInputElement>(`input[data-permbit="${MOVE_MEMBERS}"]`)!;
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    // A role manager who holds Move Members themself still cannot change it.
+    bridge.state.me = { id: 5, permissions: MANAGE_ROLES | MOVE_MEMBERS, role_position: 90 };
+    bridge.openRoleModal(null);
+    expect(move(doc).disabled).toBe(true);
+    expect(move(doc).title).toBe("Only the owner or an Administrator can change this");
+    expect(doc.getElementById(`permDesc${MOVE_MEMBERS}`)!.textContent).toContain(
+      "Only the owner or an Administrator can change this.",
+    );
+    // Another locked box keeps its own reason and has no such title.
+    const admin = doc.querySelector<HTMLInputElement>(`input[data-permbit="${ADMINISTRATOR}"]`)!;
+    expect(admin.title).toBe("");
+
+    // An Administrator can.
+    bridge.state.me = { id: 2, permissions: ADMINISTRATOR, role_position: 80 };
+    bridge.openRoleModal(null);
+    expect(move(doc).disabled).toBe(false);
+    expect(move(doc).title).toBe("");
+
+    // So can the owner.
+    bridge.state.me = { id: 1, permissions: MANAGE_ROLES, role_position: 100, is_owner: true };
+    bridge.openRoleModal(null);
+    expect(move(doc).disabled).toBe(false);
+  });
+
+  // WP 8.4c: Manage Backups is owner/Administrator-only to change, like Move Members.
+  it("greys the Manage Backups box unless the viewer is the owner or an Administrator", async () => {
+    const MANAGE_BACKUPS = 0x4000;
+    const box = (doc: Document) =>
+      doc.querySelector<HTMLInputElement>(`input[data-permbit="${MANAGE_BACKUPS}"]`)!;
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    bridge.state.me = { id: 5, permissions: MANAGE_ROLES | MANAGE_BACKUPS, role_position: 90 };
+    bridge.openRoleModal(null);
+    expect(box(doc).disabled).toBe(true);
+    expect(box(doc).title).toBe("Only the owner or an Administrator can change this");
+    expect(doc.getElementById(`permDesc${MANAGE_BACKUPS}`)!.textContent).toContain(
+      "only the owner can grant",
+    );
+
+    bridge.state.me = { id: 2, permissions: ADMINISTRATOR, role_position: 80 };
+    bridge.openRoleModal(null);
+    expect(box(doc).disabled).toBe(false);
+
+    bridge.state.me = { id: 1, permissions: MANAGE_ROLES, role_position: 100, is_owner: true };
+    bridge.openRoleModal(null);
+    expect(box(doc).disabled).toBe(false);
+    expect(doc.getElementById("modalInner")!.textContent).toContain(
+      "Owner powers start with nobody: the owner grants each one by hand.",
+    );
+  });
+
+  // WP 8.4d: the five owner-tier bits are the owner's alone to change; an
+  // Administrator sees them locked. View Diagnostics / Erase Accounts keep the
+  // owner-or-Administrator rule.
+  it("locks the owner-tier boxes for everyone but the owner, and the Administrator tier for non-admins", async () => {
+    const OWNER_TIER = [0x8000, 0x4, 0x8, 0x10, 0x80];
+    const ADMIN_TIER = [0x100, 0x10000000];
+    const box = (doc: Document, bit: number) =>
+      doc.querySelector<HTMLInputElement>(`input[data-permbit="${bit}"]`)!;
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+
+    bridge.state.me = { id: 2, permissions: ADMINISTRATOR, role_position: 80 };
+    bridge.openRoleModal(null);
+    for (const bit of OWNER_TIER) {
+      expect(box(doc, bit).disabled).toBe(true);
+      expect(box(doc, bit).title).toBe("Only the owner can change this");
+    }
+    for (const bit of ADMIN_TIER) expect(box(doc, bit).disabled).toBe(false);
+
+    bridge.state.me = { id: 5, permissions: MANAGE_ROLES, role_position: 90 };
+    bridge.openRoleModal(null);
+    for (const bit of [...OWNER_TIER, ...ADMIN_TIER]) expect(box(doc, bit).disabled).toBe(true);
+
+    bridge.state.me = { id: 1, permissions: MANAGE_ROLES, role_position: 100, is_owner: true };
+    bridge.openRoleModal(null);
+    for (const bit of [...OWNER_TIER, ...ADMIN_TIER]) expect(box(doc, bit).disabled).toBe(false);
+  });
+
+  const ticked = (doc: Document): number[] =>
+    [...doc.querySelectorAll<HTMLInputElement>("#modalInner input[data-permbit]")]
+      .filter((b) => b.checked)
+      .map((b) => Number(b.dataset.permbit))
+      .sort((a, b) => a - b);
+  const maskOf = (...bits: number[]): number[] => [...bits].sort((a, b) => a - b);
+  const BASE = [0x1, 0x2, 0x20, 0x40, 0x200, 0x400, 0x800, 0x1000];
+
+  it("offers four role presets that replace the ticked boxes and leave name and colour alone", async () => {
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    bridge.openRoleModal(null);
+
+    const buttons = [...doc.querySelectorAll<HTMLButtonElement>('[data-action="applyRolePreset"]')];
+    expect(buttons.map((b) => b.textContent)).toEqual([
+      "Super admin",
+      "Server manager",
+      "Moderator",
+      "Voice moderator",
+    ]);
+    type(doc, "roleName", "Night shift");
+    (doc.getElementById("roleNoColor") as HTMLInputElement).checked = false;
+    type(doc, "roleColor", "#112233");
+    const click = (label: string) => buttons.find((b) => b.textContent === label)!.click();
+
+    click("Super admin");
+    expect(ticked(doc)).toEqual(maskOf(...BASE, ADMINISTRATOR));
+    // A second preset REPLACES the first one's boxes.
+    click("Server manager");
+    expect(ticked(doc)).toEqual(
+      maskOf(...BASE, 0x2000000, 0x20000, 0x4000000, 0x8000000), // server, channels, invites, audit
+    );
+    click("Moderator");
+    expect(ticked(doc)).toEqual(
+      maskOf(...BASE, 0x10000, 0x40000, 0x80000, 0x100000, 0x400000, 0x800000, 0x8000000),
+    );
+    click("Voice moderator");
+    expect(ticked(doc)).toEqual(maskOf(...BASE, 0x100000, 0x2000));
+
+    expect((doc.getElementById("roleName") as HTMLInputElement).value).toBe("Night shift");
+    expect((doc.getElementById("roleColor") as HTMLInputElement).value).toBe("#112233");
+    expect((doc.getElementById("roleNoColor") as HTMLInputElement).checked).toBe(false);
+    expect(doc.getElementById("rolePresetNote")!.textContent).not.toContain("Not applied");
+
+    // Still editable afterwards.
+    const send = doc.querySelector<HTMLInputElement>('input[data-permbit="1"]')!;
+    send.checked = false;
+    expect(ticked(doc)).not.toContain(1);
+  });
+
+  it("keeps a locked ticked box the preset would clear and names it", async () => {
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    // Edit Moderator (0xfffff, carries Manage Backups at 0x4000) as a role
+    // manager who is not the owner: the box is locked and ticked.
+    bridge.state.me = { id: 5, permissions: MANAGE_ROLES | 0x1 | 0x2, role_position: 90 };
+    bridge.openRoleModal(3);
+    expect(ticked(doc)).toContain(0x4000);
+    bridge.applyRolePreset("voice");
+    expect(ticked(doc)).toContain(0x4000);
+    const note = doc.getElementById("rolePresetNote")!.textContent!;
+    expect(note).toContain("Kept: ");
+    expect(note).toContain("Manage Backups (only the owner can change it)");
+  });
+
+  it("leaves bits the viewer cannot grant unticked and names them", async () => {
+    const MANAGE_SERVER = 0x2000000;
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    // A role manager who holds Manage Server and Move Members but is neither
+    // the owner nor an Administrator.
+    bridge.state.me = {
+      id: 5,
+      permissions: MANAGE_ROLES | MANAGE_SERVER | 0x2000 | 0x100000 | 0x1 | 0x2,
+      role_position: 90,
+    };
+    bridge.openRoleModal(null);
+
+    bridge.applyRolePreset("voice");
+    expect(ticked(doc)).toEqual(maskOf(0x1, 0x2, 0x100000));
+    const note = doc.getElementById("rolePresetNote")!.textContent!;
+    expect(note).toContain("Not applied: ");
+    expect(note).toContain("Move Members (only the owner can grant)");
+
+    bridge.applyRolePreset("super");
+    expect(ticked(doc)).toEqual(maskOf(0x1, 0x2));
+    expect(doc.getElementById("rolePresetNote")!.textContent).toContain(
+      "Administrator (your own role does not have it)",
+    );
+  });
+
+  it("hints under Move Members that giving it to the default role locks role changes to the owner", async () => {
+    const booted = await boot([]);
+    dom = booted.dom;
+    const { bridge, doc } = booted;
+    const hint = () => doc.getElementById("permHint8192");
+
+    bridge.openRoleModal(4); // Member, the default role
+    expect(hint()?.textContent).toBe(
+      "Giving this to the default role means only the owner or an Administrator can change members' roles.",
+    );
+    bridge.openRoleModal(3); // Moderator
+    expect(hint()).toBeNull();
+    bridge.openRoleModal(null);
+    expect(hint()).toBeNull();
   });
 
   it("draws roles as a ladder split at the caller's own rank", async () => {
@@ -379,7 +588,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     expect(items[1]!.textContent).toContain("your role");
     expect(items[0]!.textContent).toContain("above you");
     expect(items[2]!.textContent).toContain("Your rank · 80");
-    expect(items[3]!.textContent).toContain("12 of 21 permissions");
+    expect(items[3]!.textContent).toContain("20 of 30 permissions");
     expect(items[0]!.textContent).toContain("Administrator: every permission");
     const moves = [...items[3]!.querySelectorAll('[data-action="moveRole"]')];
     expect(moves.map((b) => b.getAttribute("aria-label"))).toEqual([

@@ -36,6 +36,7 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		ReplyTo:         sendCmd.ReplyTo,
 		ReplyPing:       sendCmd.ReplyPing,
 		AttachmentIDs:   sendCmd.Attachments(),
+		StickerID:       sendCmd.StickerID,
 	})
 	if err != nil {
 		return serviceErrorToResult(err)
@@ -86,6 +87,7 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		ReferencedMessage: result.ReferencedMessage,
 		Forward:           result.Forward,
 		Poll:              result.Poll,
+		Sticker:           result.Sticker,
 	})
 
 	if !result.IsDM {
@@ -296,6 +298,8 @@ func serviceErrorToResult(err error) Result {
 		return Result{Error: ClientError{Code: ErrCodeReactionLimit, Message: err.Error()}}
 	case errors.Is(err, service.ErrPollEnded):
 		return Result{Error: ClientError{Code: ErrCodePollEnded, Message: err.Error()}}
+	case errors.Is(err, service.ErrStickerNotFound):
+		return Result{Error: ClientError{Code: ErrCodeStickerNotFound, Message: err.Error()}}
 	case errors.Is(err, service.ErrBadRequest):
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: err.Error()}}
 	case errors.Is(err, service.ErrNotFound):

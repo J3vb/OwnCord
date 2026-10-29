@@ -8,7 +8,7 @@ import { createIcon } from "@lib/icons";
 import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/media-visibility";
-import { loadPref } from "@lib/preferences";
+import { loadPref, onPrefChange } from "@lib/preferences";
 import {
   bindImageMenu,
   clearExternalImageCache,
@@ -68,35 +68,38 @@ let showEmbedsPref = loadPref<boolean>("showEmbeds", true);
 let inlineMediaPref = loadPref<boolean>("inlineMedia", true);
 let showLinkPreviewsPref = loadPref<boolean>("showLinkPreviews", true);
 let animateGifsPref = loadPref<boolean>("animateGifs", true);
-window.addEventListener("owncord:pref-change", ((e: CustomEvent<{ key: string }>) => {
-  switch (e.detail.key) {
-    case "showEmbeds":
-      showEmbedsPref = loadPref<boolean>("showEmbeds", true);
-      if (!showEmbedsPref) resetExternalConsent();
-      break;
-    case "inlineMedia":
-      inlineMediaPref = loadPref<boolean>("inlineMedia", true);
-      if (!inlineMediaPref) resetExternalConsent();
-      break;
-    case "showLinkPreviews":
-      showLinkPreviewsPref = loadPref<boolean>("showLinkPreviews", true);
-      if (!showLinkPreviewsPref) resetExternalConsent();
-      break;
-    case "animateGifs":
-      animateGifsPref = loadPref<boolean>("animateGifs", true);
-      break;
-    case EXTERNAL_CONSENT_PREF:
-      // Revoked (Q3: a Text & Images toggle turned off, or the reset): drop
-      // every fetched byte and late answer before re-concealing.
-      if (externalConsentChoice() === null) {
-        clearEmbedCaches();
-        clearMediaCaches();
-        clearExternalImageCache();
-      }
-      refreshExternalItems();
-      break;
-  }
-}) as EventListener);
+onPrefChange(
+  ["showEmbeds", "inlineMedia", "showLinkPreviews", "animateGifs", EXTERNAL_CONSENT_PREF],
+  (key) => {
+    switch (key) {
+      case "showEmbeds":
+        showEmbedsPref = loadPref<boolean>("showEmbeds", true);
+        if (!showEmbedsPref) resetExternalConsent();
+        break;
+      case "inlineMedia":
+        inlineMediaPref = loadPref<boolean>("inlineMedia", true);
+        if (!inlineMediaPref) resetExternalConsent();
+        break;
+      case "showLinkPreviews":
+        showLinkPreviewsPref = loadPref<boolean>("showLinkPreviews", true);
+        if (!showLinkPreviewsPref) resetExternalConsent();
+        break;
+      case "animateGifs":
+        animateGifsPref = loadPref<boolean>("animateGifs", true);
+        break;
+      case EXTERNAL_CONSENT_PREF:
+        // Revoked (Q3: a Text & Images toggle turned off, or the reset): drop
+        // every fetched byte and late answer before re-concealing.
+        if (externalConsentChoice() === null) {
+          clearEmbedCaches();
+          clearMediaCaches();
+          clearExternalImageCache();
+        }
+        refreshExternalItems();
+        break;
+    }
+  },
+);
 
 let mediaCacheGeneration = 0;
 
@@ -525,6 +528,16 @@ export function extractUrls(content: string): string[] {
   return (matches ?? []).map(stripUrlTrailingPunctuation);
 }
 
+/** True when the message is nothing but one image or GIF link that renders
+ *  inline, such as a pick from the GIF picker. The image stands in for the
+ *  link, so the row hides the address text, as Discord does. */
+export function isLoneImageEmbed(content: string): boolean {
+  const trimmed = content.trim();
+  if (!inlineMediaPref || !isDirectImageUrl(trimmed) || !isSafeUrl(trimmed)) return false;
+  const urls = extractUrls(trimmed);
+  return urls.length === 1 && urls[0] === trimmed;
+}
+
 /** One URL's embed (YouTube player, inline image, link card), or null when
  *  it gets none. Concealed until the viewer consented to it (B9-8). */
 function renderUrlEmbed(url: string): HTMLElement | null {
@@ -565,6 +578,11 @@ function refreshExternalItems(): void {
     const hadFocus = el.contains(document.activeElement);
     const next = renderUrlEmbed(url);
     if (next === null) {
+      const text = el.parentElement?.querySelector<HTMLElement>("[data-lone-image-text]");
+      if (text != null) {
+        text.hidden = false;
+        text.style.display = "contents";
+      }
       el.remove();
       continue;
     }

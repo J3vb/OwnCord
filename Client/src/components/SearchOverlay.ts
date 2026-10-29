@@ -6,7 +6,9 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import type { SearchResultItem, SearchResponse } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -459,6 +461,8 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   }
 
   function handleKeydown(e: KeyboardEvent): void {
+    // While an input method composes, Enter, arrows and Escape belong to it.
+    if (isImeCommit(e)) return;
     if (e.key === "Escape") {
       e.preventDefault();
       // Escape closes from anywhere: focus moves to the body after clicking a
@@ -495,12 +499,6 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
         // walk through several hits (DP-20). Escape or the backdrop closes.
         options.onSelectResult(selected);
       }
-    }
-  }
-
-  function handleBackdropClick(e: MouseEvent): void {
-    if (e.target === root) {
-      options.onClose();
     }
   }
 
@@ -635,7 +633,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
     // body after a result click; the input still drives arrow/Enter combobox
     // behaviour and the handler gates those on the event target.
     document.addEventListener("keydown", handleKeydown, { signal });
-    root.addEventListener("click", handleBackdropClick, { signal });
+    closeOnBackdropClick(root, () => options.onClose(), signal);
     resultsDiv.addEventListener("click", handleResultsClick, { signal });
 
     requestAnimationFrame(() => input.focus());

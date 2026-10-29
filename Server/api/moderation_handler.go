@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -100,9 +99,9 @@ func MountModerationRoutes(r chi.Router, svc *service.Services, broadcaster Prof
 }
 
 func moderationTargetIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	targetID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || targetID <= 0 {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "BAD_REQUEST", Message: "id must be a positive integer"})
+	targetID, ok := pathID(r, "id")
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "id must be a positive integer")
 		return 0, false
 	}
 	return targetID, true
@@ -112,7 +111,7 @@ func handleModerationWarn(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -121,8 +120,7 @@ func handleModerationWarn(svc *service.Services) http.HandlerFunc {
 		}
 		var req warnRequest
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		id, err := svc.Moderation.Warn(r.Context(), actorID, targetID, req.Reason, nil)
@@ -138,7 +136,7 @@ func handleModerationTimeout(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -147,8 +145,7 @@ func handleModerationTimeout(svc *service.Services) http.HandlerFunc {
 		}
 		var req timeoutRequest
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed JSON body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		duration, err := service.TimeoutDurationFromSeconds(req.DurationSeconds)
@@ -174,7 +171,7 @@ func handleModerationUntimeout(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -193,7 +190,7 @@ func handleModerationActions(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -213,12 +210,12 @@ func handleModerationAckNotice(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
-		actionID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-		if err != nil || actionID <= 0 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "BAD_REQUEST", Message: "id must be a positive integer"})
+		actionID, ok := pathID(r, "id")
+		if !ok {
+			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "id must be a positive integer")
 			return
 		}
 		if err := svc.Moderation.AcknowledgeWarning(r.Context(), userID, actionID); err != nil {
@@ -297,7 +294,7 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "UNAUTHORIZED", Message: "not authenticated"})
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -306,13 +303,16 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 		}
 		var req nicknameRequest
 		r.Body = http.MaxBytesReader(w, r.Body, 8192)
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DisplayName == nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "display_name is required (a string, or null to clear)"})
+		if !decodeJSON(w, r, &req) {
+			return
+		}
+		if req.DisplayName == nil {
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name is required (a string, or null to clear)")
 			return
 		}
 		var name *string
 		if err := json.Unmarshal(req.DisplayName, &name); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "display_name must be a string or null"})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name must be a string or null")
 			return
 		}
 		updated, err := svc.Moderation.SetNickname(r.Context(), actorID, targetID, name)
@@ -320,7 +320,7 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 			// Same code as the member's own PATCH /users/me; the message is the
 			// validator's text without the sentinel prefix.
 			msg := strings.TrimPrefix(err.Error(), service.ErrBadRequest.Error()+": ")
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: msg})
+			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", msg)
 			return
 		}
 		if err != nil {

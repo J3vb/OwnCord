@@ -38,14 +38,14 @@ var setupLimiterHook func(*auth.RateLimiter)
 // authenticated perimeter. Ban/unban and role change are authorized inside
 // ModerationService (BAN_MEMBERS / MANAGE_ROLES + hierarchy), so PATCH stays
 // perimeter-level — a moderator with only BAN_MEMBERS must reach it.
-// Force-logout is KICK_MEMBERS; account erasure by an administrator (B4-9)
-// is ADMINISTRATOR with the hierarchy re-checked in the service; recovery
-// credentials (B4-6) are owner-only.
-func mountUserRoutes(r chi.Router, owner *ownerOnlyRegistry, svc *service.Services, hub HubBroadcaster, mod *service.ModerationService) {
+// Force-logout is KICK_MEMBERS; account erasure (B4-9) is ERASE_ACCOUNTS or
+// ADMINISTRATOR with the hierarchy re-checked in the service; recovery
+// credentials (B4-6) are the owner's or an ISSUE_RECOVERY holder's, with the
+// target's rank checked in the service (WP 8.4d).
+func mountUserRoutes(r chi.Router, gates *gateRegistry, svc *service.Services, hub HubBroadcaster, mod *service.ModerationService) {
 	mountMemberActionRoutes(r, "/users", svc, hub, mod)
-	r.With(requirePerm(permissions.Administrator)).
-		Delete("/users/{id}", handleDeleteUser(mod, hub))
-	owner.ownerOnly(r, http.MethodPost, "/users/{id}/recovery-credential", handleIssueRecoveryCredential(svc.Auth))
+	gates.route(r, gateEraseAccounts, http.MethodDelete, "/users/{id}", handleDeleteUser(mod, hub))
+	gates.route(r, gateIssueRecovery, http.MethodPost, "/users/{id}/recovery-credential", handleIssueRecoveryCredential(svc.Auth))
 }
 
 // mountMemberActionRoutes registers the member-list actions the desktop client
@@ -160,12 +160,26 @@ func (o *ownerOnlyRegistry) ownerOnly(r chi.Router, method, pattern string, h ht
 	r.Method(method, pattern, ownerOnlyMiddleware(h))
 }
 
+// backupGate is the single-flight state of POST /backup (WP 8.4c) for one
+// NewAdminAPI call. Per API, not a package global, so two APIs built in one
+// process (every test does) never share a running backup.
+type backupGate struct {
+	// running is set while a manual backup is being taken; a second POST
+	// /backup while it is set is refused with 409 BACKUP_RUNNING.
+	running atomic.Bool
+	// hold is a test seam: when set it runs inside the guard, before the
+	// backup starts. Only export_test.go assigns it.
+	hold atomic.Pointer[func()]
+}
+
 // AdminAPI is the built /admin/api router together with what NewAdminAPI
 // learned while building it. It embeds the router so it stays a chi.Routes
 // when mounted: the gendocs route walk descends into it.
 type AdminAPI struct {
 	chi.Router
-	owner ownerOnlyRegistry
+	owner  ownerOnlyRegistry
+	gates  gateRegistry
+	backup backupGate
 }
 
 // ownerOnlyRoutes is a copy of the routes this API registered through
@@ -278,7 +292,8 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	// Fresh per call: the registry belongs to the API this call returns, so
 	// no other API shares its list.
 	api := &AdminAPI{Router: r}
-	owner := &api.owner
+	gates := &api.gates
+	backups := &api.backup
 
 	// The four services this mux routes to, named once. NewAdminAPI used to
 	// take them as four positional parameters; each B3-8 family that moved an
@@ -343,26 +358,26 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Use(adminAuthMiddleware(svc.Sessions))
 
 		// Log stream ticket — issues a single-use, 30s TTL ticket for SSE auth.
-		// ADMINISTRATOR-gated to match handleLogStream's own re-check: server
-		// logs are not scoped to any narrower moderation bit.
-		r.With(requirePerm(permissions.Administrator)).
-			Post("/logs/ticket", handleLogTicket(database))
+		// VIEW_DIAGNOSTICS-gated (ADMINISTRATOR implies it) to match
+		// handleLogStream's own re-check: server logs are not scoped to any
+		// narrower moderation bit.
+		gates.route(r, gateViewDiagnostics, http.MethodPost, "/logs/ticket", handleLogTicket(database))
 
 		// Runtime log level (SRE-07): read the level in force, set a timed
 		// debug boost that reverts on its own, or revert it at once.
-		// ADMINISTRATOR like the log stream it tunes.
-		r.With(requirePerm(permissions.Administrator)).Get("/logs/level", handleGetLogLevel(setupOpts.LogLevel))
-		r.With(requirePerm(permissions.Administrator)).Patch("/logs/level", handleSetLogLevel(database, setupOpts.LogLevel))
-		r.With(requirePerm(permissions.Administrator)).Delete("/logs/level", handleRevertLogLevel(database, setupOpts.LogLevel))
+		// VIEW_DIAGNOSTICS like the log stream it tunes.
+		gates.route(r, gateViewDiagnostics, http.MethodGet, "/logs/level", handleGetLogLevel(setupOpts.LogLevel))
+		gates.route(r, gateViewDiagnostics, http.MethodPatch, "/logs/level", handleSetLogLevel(database, setupOpts.LogLevel))
+		gates.route(r, gateViewDiagnostics, http.MethodDelete, "/logs/level", handleRevertLogLevel(database, setupOpts.LogLevel))
 
 		r.Get("/stats", handleGetStats(svc.Users, hub))
 		r.Get("/me", handleGetMe(settings, version))
-		r.With(requirePerm(permissions.Administrator)).Post("/support-bundles/preview", bundles.preview)
-		r.With(requirePerm(permissions.Administrator)).Post("/support-bundles/download", bundles.download)
-		// Attention panel (RI-07): server health detail, ADMINISTRATOR like
+		gates.route(r, gateViewDiagnostics, http.MethodPost, "/support-bundles/preview", http.HandlerFunc(bundles.preview))
+		gates.route(r, gateViewDiagnostics, http.MethodPost, "/support-bundles/download", http.HandlerFunc(bundles.download))
+		// Attention panel (RI-07): server health detail, VIEW_DIAGNOSTICS like
 		// the support bundle that carries the same counters.
-		r.With(requirePerm(permissions.Administrator)).Get("/attention", handleGetAttention(svc.Attention))
-		mountUserRoutes(r, owner, svc, hub, mod)
+		gates.route(r, gateViewDiagnostics, http.MethodGet, "/attention", handleGetAttention(svc.Attention))
+		mountUserRoutes(r, gates, svc, hub, mod)
 		// The approval-mode registration queue (B4-1): deciding who joins
 		// is server management, not moderation of existing members.
 		r.With(requirePerm(permissions.ManageServer)).
@@ -407,12 +422,13 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 
 		r.With(requirePerm(permissions.ViewAuditLog)).
 			Get("/audit-log", handleGetAuditLog(settings))
-		// API tokens — Owner-only. Minting a network-reachable, revocation-
-		// surviving bearer credential is gated like backups/updates.
-		owner.ownerOnly(r, http.MethodGet, "/tokens", handleListAPITokens(svc.Tokens))
-		owner.ownerOnly(r, http.MethodPost, "/tokens", handleCreateAPIToken(svc.Tokens))
-		owner.ownerOnly(r, http.MethodDelete, "/tokens/{id}", handleRevokeAPIToken(svc.Tokens))
-		registerConfigOverrideRoutes(r, owner, database, setupOpts, configPending)
+		// API tokens — the owner's or a MANAGE_TOKENS holder's (WP 8.4d), who
+		// sees and revokes only their own. Minting a network-reachable,
+		// revocation-surviving bearer credential is gated like backups/updates.
+		gates.route(r, gateManageTokens, http.MethodGet, "/tokens", handleListAPITokens(svc.Tokens))
+		gates.route(r, gateManageTokens, http.MethodPost, "/tokens", handleCreateAPIToken(svc.Tokens))
+		gates.route(r, gateManageTokens, http.MethodDelete, "/tokens/{id}", handleRevokeAPIToken(svc.Tokens))
+		registerConfigOverrideRoutes(r, gates, database, setupOpts, configPending)
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageServer))
 			r.Get("/settings", handleGetSettings(settings))
@@ -420,33 +436,38 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Put("/afk-channel", handlePutAFKChannel(channels, hub))
 			r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
 		})
-		mountBackupRoutes(r, owner, database, setupOpts, paths)
-		owner.ownerOnly(r, http.MethodGet, "/updates", handleCheckUpdate(u))
-		owner.ownerOnly(r, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version, setupOpts.Background, setupOpts.Shutdown))
+		mountBackupRoutes(r, gates, backups, database, setupOpts, paths)
+		gates.route(r, gateManageUpdates, http.MethodGet, "/updates", handleCheckUpdate(u))
+		gates.route(r, gateManageUpdates, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version, setupOpts.Background, setupOpts.Shutdown))
 	})
 
 	return api
 }
 
-// mountBackupRoutes registers the Owner-only backup, restore and archive
-// routes. They share the one backupPaths this API resolved from its
+// mountBackupRoutes registers the backup, restore and archive routes. Create
+// and link are the owner's or a MANAGE_BACKUPS holder's (WP 8.4c); list also
+// admits a RESTORE_BACKUPS holder, who must pick the backup to restore; delete,
+// restore and the full archive are the owner's or a RESTORE_BACKUPS holder's
+// (WP 8.4d). The backup schedule and retention stay Owner-only, as settings
+// keys. They share the one backupPaths this API resolved from its
 // SetupOptions, so no handler reads a directory from process-wide state.
-func mountBackupRoutes(r chi.Router, owner *ownerOnlyRegistry, database *db.DB, setupOpts SetupOptions, paths backupPaths) {
-	owner.ownerOnly(r, http.MethodPost, "/backup", handleBackup(database, paths))
-	owner.ownerOnly(r, http.MethodGet, "/backups", handleListBackups(paths))
-	owner.ownerOnly(r, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database, paths))
-	owner.ownerOnly(r, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths))
-	owner.ownerOnly(r, http.MethodPost, "/backups/{name}/link", handleBackupLink(paths))
-	owner.ownerOnly(r, http.MethodGet, "/archive", handleArchive(database, setupOpts, paths))
-	owner.ownerOnly(r, http.MethodPost, "/archive/link", handleArchiveLink())
+func mountBackupRoutes(r chi.Router, gates *gateRegistry, backups *backupGate, database *db.DB, setupOpts SetupOptions, paths backupPaths) {
+	gates.route(r, gateManageBackups, http.MethodPost, "/backup", handleBackup(database, paths, backups))
+	gates.route(r, gateListBackups, http.MethodGet, "/backups", handleListBackups(paths))
+	gates.route(r, gateRestoreBackups, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database, paths))
+	gates.route(r, gateRestoreBackups, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths))
+	gates.route(r, gateManageBackups, http.MethodPost, "/backups/{name}/link", handleBackupLink(database, paths))
+	gates.route(r, gateRestoreBackups, http.MethodGet, "/archive", handleArchive(database, setupOpts, paths))
+	gates.route(r, gateRestoreBackups, http.MethodPost, "/archive/link", handleArchiveLink(database))
 }
 
-// registerConfigOverrideRoutes mounts the Owner-only admin-panel config
-// overrides: reading and writing config-overrides.json and restarting the
-// process to apply them (or on demand). Changing a server-wide setting and
-// restarting is gated like backups and updates.
-func registerConfigOverrideRoutes(r chi.Router, owner *ownerOnlyRegistry, database *db.DB, setupOpts SetupOptions, pending *atomic.Bool) {
-	owner.ownerOnly(r, http.MethodGet, "/config/settings", handleGetConfigOverrides(setupOpts, pending))
-	owner.ownerOnly(r, http.MethodPatch, "/config/settings", handlePatchConfigOverrides(database, setupOpts, pending))
-	owner.ownerOnly(r, http.MethodPost, "/restart", handleRestartForConfig(database, setupOpts, pending))
+// registerConfigOverrideRoutes mounts the admin-panel config overrides, the
+// owner's or a MANAGE_CONFIG holder's (WP 8.4d): reading and writing
+// config-overrides.json and restarting the process to apply them (or on
+// demand). Changing a server-wide setting and restarting is gated like backups
+// and updates.
+func registerConfigOverrideRoutes(r chi.Router, gates *gateRegistry, database *db.DB, setupOpts SetupOptions, pending *atomic.Bool) {
+	gates.route(r, gateManageConfig, http.MethodGet, "/config/settings", handleGetConfigOverrides(setupOpts, pending))
+	gates.route(r, gateManageConfig, http.MethodPatch, "/config/settings", handlePatchConfigOverrides(database, setupOpts, pending))
+	gates.route(r, gateManageConfig, http.MethodPost, "/restart", handleRestartForConfig(database, setupOpts, pending))
 }

@@ -36,4 +36,11 @@ describe("call chat CSS", () => {
       expect(row, slot).toBeDefined();
     }
   });
+
+  it("sizes the chat track from the resize handle's width property", () => {
+    const cols = cascadedDeclaration(".chat-area--call-chat", "grid-template-columns");
+    expect(JSON.stringify(cols)).toContain("call-chat-width");
+    expect(hasRule(".chat-area--call-chat > .call-chat-resize")).toBe(true);
+    expect(hasRule(".chat-area--call-chat-stacked > .call-chat-resize")).toBe(true);
+  });
 });

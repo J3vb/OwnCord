@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
+import { setActivityRefusalHandler } from "../../src/lib/gameActivityBridge";
 // Vite's `?raw` suffix inlines the file's source text as a string (see
 // src/vite-env.d.ts's `vite/client` types) — used below for a structural
 // bundle-hygiene assertion, without pulling in node:fs.
@@ -25,7 +26,7 @@ import {
 import { registerReadingAnchor } from "../../src/features/messaging/readingAnchor";
 import { membersStore } from "../../src/stores/members.store";
 import { memberTimeoutsStore, setMemberTimeouts } from "../../src/features/moderation/store";
-import { voiceStore } from "../../src/stores/voice.store";
+import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 import {
@@ -35,6 +36,12 @@ import {
   listCustomEmoji,
   resolveEmoji,
 } from "../../src/stores/emoji.store";
+import {
+  stickersStore,
+  setStickers,
+  clearStickers,
+  listStickers,
+} from "../../src/stores/stickers.store";
 import { uiStore, setTransientError, setUpdateRequiredHost } from "../../src/stores/ui.store";
 import { PROTOCOL_EPOCH } from "../../src/lib/protocolTypes";
 import { safetyText } from "../../src/i18n/safety";
@@ -45,6 +52,11 @@ import {
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
 import { setMarkReadSender } from "../../src/lib/read-state";
+import {
+  resetServerCapabilities,
+  serverSupportsGameActivity,
+  serverSupportsListeningActivity,
+} from "../../src/lib/serverCapabilities";
 import { createPresenceSender, setActivePresenceSender } from "../../src/lib/presence";
 import { createPresenceLimiter } from "../../src/lib/rate-limiter";
 import { loadCustomStatus, saveCustomStatus } from "../../src/lib/userStatus";
@@ -272,6 +284,8 @@ describe("WS Dispatcher", () => {
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
     clearCustomEmoji();
     emojiStore.flush();
+    clearStickers();
+    stickersStore.flush();
 
     mock = createMockWs();
     cleanup = wireDispatcher(mock.ws);
@@ -1264,6 +1278,598 @@ describe("WS Dispatcher", () => {
       expect(members.get(2)?.customStatus).toBe("lunch");
       expect(members.get(3)?.status).toBe("offline");
       expect(members.get(3)?.customStatus).toBeNull();
+    });
+  });
+
+  describe("game activity (WP 8.3)", () => {
+    const factorio = { name: "Factorio", started_at: 1_761_206_400_000 };
+    const seed = (): void => {
+      membersStore.setState((prev) => {
+        const m = new Map(prev.members);
+        for (const [id, username] of [
+          [1, "alex"],
+          [2, "bea"],
+          [3, "cy"],
+        ] as const) {
+          m.set(id, { id, username, avatar: null, role: "member", status: "online" as const });
+        }
+        return { ...prev, members: m };
+      });
+    };
+    const activityOf = (id: number) => membersStore.getState().members.get(id)?.activity;
+
+    it("applies a presence frame's game and clears it on null", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+      expect(activityOf(1)).toEqual({ name: "Factorio", startedAt: 1_761_206_400_000 });
+      mock.dispatch("presence", { user_id: 1, status: "online", activity: null });
+      expect(activityOf(1)).toBeNull();
+    });
+
+    it("leaves the shown game alone when a presence frame carries no activity key", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+      mock.dispatch("presence", { user_id: 1, status: "idle" });
+      expect(activityOf(1)?.name).toBe("Factorio");
+    });
+
+    it("applies a window batch's games", () => {
+      seed();
+      mock.dispatch("presence_batch", {
+        updates: [
+          { user_id: 1, status: "online", custom_status: null, activity: factorio },
+          { user_id: 2, status: "online", custom_status: null, activity: null },
+        ],
+      });
+      expect(activityOf(1)?.name).toBe("Factorio");
+      expect(activityOf(2)).toBeNull();
+      expect(activityOf(3)).toBeUndefined();
+    });
+
+    it("a full snapshot replaces listed games and clears anyone it leaves out", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 3, status: "online", activity: factorio });
+      mock.dispatch("presence", { user_id: 2, status: "online", activity: factorio });
+      mock.dispatch("presence_batch", {
+        full: true,
+        updates: [
+          {
+            user_id: 1,
+            status: "online",
+            custom_status: null,
+            activity: { name: "Satisfactory", started_at: 1_761_206_500_000 },
+          },
+          { user_id: 2, status: "online", custom_status: null, activity: null },
+        ],
+      });
+      expect(activityOf(1)?.name).toBe("Satisfactory");
+      expect(activityOf(2)).toBeNull();
+      // Offline now, so playing nothing.
+      expect(activityOf(3)).toBeNull();
+    });
+
+    it("applies ready.activities to the roster and clears everyone else", () => {
+      mock.dispatch("ready", {
+        channels: [],
+        members: [
+          { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
+          { id: 2, username: "bea", avatar: null, role: "member", status: "online" },
+        ],
+        activities: [{ user_id: 2, ...factorio }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(activityOf(1)).toBeNull();
+      expect(activityOf(2)).toEqual({ name: "Factorio", startedAt: 1_761_206_400_000 });
+
+      // The next full ready restates the set: bea stopped playing meanwhile.
+      mock.dispatch("ready", {
+        channels: [],
+        members: [
+          { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
+          { id: 2, username: "bea", avatar: null, role: "member", status: "online" },
+        ],
+        activities: [],
+        voice_states: [],
+        roles: [],
+      });
+      expect(activityOf(2)).toBeNull();
+    });
+
+    it("a ready from a server without the key shows no games", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+      mock.dispatch("ready", {
+        channels: [],
+        members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(activityOf(1)).toBeNull();
+    });
+
+    it("copies a DM partner's game into the DM list from presence, batch and ready", () => {
+      const partner = { id: 10, username: "bob", avatar: "", status: "online" };
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: partner,
+            participants: [partner],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+      const shown = () => dmStore.getState().channels[0]?.recipient.activity;
+
+      mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
+      expect(shown()?.name).toBe("Factorio");
+      // A frame without the key keeps it.
+      mock.dispatch("presence", { user_id: 10, status: "idle" });
+      expect(shown()?.name).toBe("Factorio");
+      mock.dispatch("presence_batch", {
+        updates: [{ user_id: 10, status: "online", custom_status: null, activity: null }],
+      });
+      expect(shown()).toBeNull();
+      mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
+      mock.dispatch("presence_batch", { full: true, updates: [] });
+      expect(shown()).toBeNull();
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        dm_channels: [
+          {
+            channel_id: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: null,
+            last_message: "",
+            last_message_at: "",
+            unread_count: 0,
+            mention_count: 0,
+          },
+        ],
+        activities: [{ user_id: 10, ...factorio }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(shown()?.name).toBe("Factorio");
+    });
+
+    it("a DM opened after ready shows the game its partner is already playing", () => {
+      dmStore.setState(() => ({ channels: [] }));
+      mock.dispatch("ready", {
+        channels: [],
+        members: [{ id: 10, username: "bob", avatar: null, role: "member", status: "online" }],
+        activities: [{ user_id: 10, ...factorio }],
+        voice_states: [],
+        roles: [],
+      });
+      mock.dispatch("dm_channel_open", {
+        channel_id: 51,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+      expect(dmStore.getState().channels[0]?.recipient.activity?.name).toBe("Factorio");
+    });
+
+    describe("the per-server switch (WP 8.3e-2)", () => {
+      const user = { id: 1, username: "alex", avatar: null, role: "admin" };
+      const partner = { id: 10, username: "bob", avatar: "", status: "online" };
+      afterEach(() => resetServerCapabilities());
+
+      it("game_activity_policy false clears every shown game and turns the capability off", () => {
+        seed();
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          activities: [{ user_id: 1, ...factorio }],
+          voice_states: [],
+          roles: [],
+        });
+        dmStore.setState(() => ({
+          channels: [
+            {
+              channelId: 50,
+              recipient: partner,
+              participants: [partner],
+              name: "",
+              isGroup: false,
+              lastMessageId: null,
+              lastMessage: "",
+              lastMessageAt: "",
+              unreadCount: 0,
+              mentionCount: 0,
+            },
+          ],
+        }));
+        mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
+        expect(activityOf(1)?.name).toBe("Factorio");
+        expect(serverSupportsGameActivity()).toBe(true);
+
+        mock.dispatch("game_activity_policy", { enabled: false });
+        expect(activityOf(1)).toBeNull();
+        expect(dmStore.getState().channels[0]?.recipient.activity).toBeNull();
+        expect(serverSupportsGameActivity()).toBe(false);
+
+        // On again: the capability returns, the games come back with presence.
+        mock.dispatch("game_activity_policy", { enabled: true });
+        expect(serverSupportsGameActivity()).toBe(true);
+        expect(activityOf(1)).toBeNull();
+      });
+
+      it("auth_ok's game_activity_policy applies on a full connect and on a resume", () => {
+        seed();
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          activities: [{ user_id: 1, ...factorio }],
+          voice_states: [],
+          roles: [],
+        });
+        // A resume gets no ready: the policy a missed frame carried arrives here.
+        mock.dispatch("auth_ok", {
+          user,
+          server_name: "S",
+          motd: "",
+          replay_source: "buffer",
+          game_activity_policy: { enabled: false },
+        });
+        expect(serverSupportsGameActivity()).toBe(false);
+        expect(activityOf(1)).toBeNull();
+
+        mock.dispatch("auth_ok", {
+          user,
+          server_name: "S",
+          motd: "",
+          replay_source: "none",
+          game_activity_policy: { enabled: true },
+        });
+        expect(serverSupportsGameActivity()).toBe(true);
+      });
+
+      it("ignores a game on a presence frame or batch that outran the off frame", () => {
+        seed();
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          voice_states: [],
+          roles: [],
+        });
+        mock.dispatch("game_activity_policy", { enabled: false });
+        mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+        expect(activityOf(1) ?? null).toBeNull();
+        mock.dispatch("presence_batch", {
+          updates: [{ user_id: 1, status: "online", custom_status: null, activity: factorio }],
+        });
+        expect(activityOf(1) ?? null).toBeNull();
+
+        // On again: games show.
+        mock.dispatch("game_activity_policy", { enabled: true });
+        mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
+        expect(activityOf(1)?.name).toBe("Factorio");
+      });
+
+      it("still shows games from a ready and presence before any policy is stated", () => {
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          activities: [{ user_id: 1, ...factorio }],
+          voice_states: [],
+          roles: [],
+        });
+        expect(activityOf(1)?.name).toBe("Factorio");
+      });
+
+      it("a GAME_ACTIVITY_DISABLED refusal never overrides the policy the server stated", () => {
+        seed();
+        mock.dispatch("ready", {
+          channels: [],
+          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+          capabilities: { game_activity: true },
+          activities: [{ user_id: 1, ...factorio }],
+          voice_states: [],
+          roles: [],
+        });
+        // auth_ok said on; a refusal sent before a later on frame arrives after it.
+        mock.dispatch("auth_ok", {
+          user,
+          server_name: "S",
+          motd: "",
+          replay_source: "none",
+          game_activity_policy: { enabled: true },
+        });
+        expect(serverSupportsGameActivity()).toBe(true);
+
+        // The running loop claims its own refused frame (no toast).
+        setActivityRefusalHandler(() => true);
+        onTestFinished(() => setActivityRefusalHandler(null));
+        mock.dispatch("error", { code: "GAME_ACTIVITY_DISABLED", message: "off" }, "act-1");
+        expectConsole("error", /\[dispatcher\] Server error/);
+        expect(serverSupportsGameActivity()).toBe(true);
+        expect(activityOf(1)?.name).toBe("Factorio");
+      });
+
+      it("an auth_ok without the key (an older server) leaves the capability to ready", () => {
+        mock.dispatch("auth_ok", { user, server_name: "S", motd: "", replay_source: "none" });
+        mock.dispatch("ready", {
+          channels: [],
+          members: [],
+          capabilities: { game_activity: true },
+          voice_states: [],
+          roles: [],
+        });
+        expect(serverSupportsGameActivity()).toBe(true);
+      });
+    });
+  });
+
+  describe("listening activity (WP 8.10)", () => {
+    const song = {
+      title: "Blue in Green",
+      artist: "Miles Davis",
+      player: "Spotify",
+      started_at: 1_761_206_400_000,
+      duration_ms: 337_000,
+    };
+    const shownSong = {
+      title: "Blue in Green",
+      artist: "Miles Davis",
+      player: "Spotify",
+      startedAt: 1_761_206_400_000,
+      durationMs: 337_000,
+    };
+    const seed = (): void => {
+      membersStore.setState((prev) => {
+        const m = new Map(prev.members);
+        for (const [id, username] of [
+          [1, "alex"],
+          [2, "bea"],
+          [3, "cy"],
+        ] as const) {
+          m.set(id, { id, username, avatar: null, role: "member", status: "online" as const });
+        }
+        return { ...prev, members: m };
+      });
+    };
+    const listeningOf = (id: number) => membersStore.getState().members.get(id)?.listening;
+    const partner = { id: 10, username: "bob", avatar: "", status: "online" };
+    const seedDm = (): void => {
+      dmStore.setState(() => ({
+        channels: [
+          {
+            channelId: 50,
+            recipient: partner,
+            participants: [partner],
+            name: "",
+            isGroup: false,
+            lastMessageId: null,
+            lastMessage: "",
+            lastMessageAt: "",
+            unreadCount: 0,
+            mentionCount: 0,
+          },
+        ],
+      }));
+    };
+    afterEach(() => resetServerCapabilities());
+
+    it("applies a presence frame's song and clears it on null", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      expect(listeningOf(1)).toEqual(shownSong);
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: null });
+      expect(listeningOf(1)).toBeNull();
+    });
+
+    it("leaves the shown song alone when a presence frame carries no listening key", () => {
+      seed();
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      mock.dispatch("presence", { user_id: 1, status: "idle" });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+    });
+
+    it("keeps the game and the song apart", () => {
+      seed();
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        activity: { name: "Factorio", started_at: 1 },
+        listening: song,
+      });
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        activity: null,
+        listening: song,
+      });
+      const member = membersStore.getState().members.get(1);
+      expect(member?.activity).toBeNull();
+      expect(member?.listening?.player).toBe("Spotify");
+    });
+
+    it("applies a presence_batch and lets a full snapshot clear the members it leaves out", () => {
+      seed();
+      mock.dispatch("presence_batch", {
+        updates: [
+          { user_id: 1, status: "online", custom_status: null, listening: song },
+          { user_id: 2, status: "online", custom_status: null, listening: null },
+        ],
+      });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+      expect(listeningOf(2)).toBeNull();
+      expect(listeningOf(3)).toBeUndefined();
+
+      mock.dispatch("presence", { user_id: 3, status: "online", listening: song });
+      mock.dispatch("presence_batch", {
+        full: true,
+        updates: [{ user_id: 1, status: "online", custom_status: null, listening: song }],
+      });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+      expect(listeningOf(3)).toBeNull();
+    });
+
+    it("applies ready.listening to the roster and clears everyone else", () => {
+      const members = [
+        { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
+        { id: 2, username: "bea", avatar: null, role: "member", status: "online" },
+      ];
+      mock.dispatch("ready", {
+        channels: [],
+        members,
+        listening: [{ user_id: 2, ...song }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(listeningOf(1)).toBeNull();
+      expect(listeningOf(2)).toEqual(shownSong);
+
+      // The next full ready restates the set: bea stopped meanwhile.
+      mock.dispatch("ready", {
+        channels: [],
+        members,
+        listening: [],
+        voice_states: [],
+        roles: [],
+      });
+      expect(listeningOf(2)).toBeNull();
+    });
+
+    it("keeps an unknown length as 0 and drops a blank title or player", () => {
+      seed();
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        listening: { ...song, duration_ms: 0 },
+      });
+      expect(listeningOf(1)?.durationMs).toBe(0);
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        listening: { ...song, title: " " },
+      });
+      expect(listeningOf(1)).toBeNull();
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      mock.dispatch("presence", {
+        user_id: 1,
+        status: "online",
+        listening: { ...song, player: "" },
+      });
+      expect(listeningOf(1)).toBeNull();
+    });
+
+    it("copies a DM partner's song into the DM list from presence, batch and ready", () => {
+      seedDm();
+      const shown = () => dmStore.getState().channels[0]?.recipient.listening;
+
+      mock.dispatch("presence", { user_id: 10, status: "online", listening: song });
+      expect(shown()?.title).toBe("Blue in Green");
+      mock.dispatch("presence", { user_id: 10, status: "idle" });
+      expect(shown()?.title).toBe("Blue in Green");
+      mock.dispatch("presence_batch", {
+        updates: [{ user_id: 10, status: "online", custom_status: null, listening: null }],
+      });
+      expect(shown()).toBeNull();
+      mock.dispatch("presence", { user_id: 10, status: "online", listening: song });
+      mock.dispatch("presence_batch", { full: true, updates: [] });
+      expect(shown()).toBeNull();
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        dm_channels: [
+          {
+            channel_id: 50,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: null,
+            last_message: "",
+            last_message_at: "",
+            unread_count: 0,
+            mention_count: 0,
+          },
+        ],
+        listening: [{ user_id: 10, ...song }],
+        voice_states: [],
+        roles: [],
+      });
+      expect(shown()?.title).toBe("Blue in Green");
+    });
+
+    it("a DM opened after ready shows the song its partner is already playing", () => {
+      dmStore.setState(() => ({ channels: [] }));
+      mock.dispatch("ready", {
+        channels: [],
+        members: [{ id: 10, username: "bob", avatar: null, role: "member", status: "online" }],
+        listening: [{ user_id: 10, ...song }],
+        voice_states: [],
+        roles: [],
+      });
+      mock.dispatch("dm_channel_open", {
+        channel_id: 51,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        last_message_id: null,
+        last_message: "",
+        last_message_at: "",
+        unread_count: 0,
+      });
+      expect(dmStore.getState().channels[0]?.recipient.listening?.player).toBe("Spotify");
+    });
+
+    it("the per-server switch off clears every shown song and ignores a late one", () => {
+      seed();
+      mock.dispatch("ready", {
+        channels: [],
+        members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+        capabilities: { game_activity: true, listening_activity: true },
+        listening: [{ user_id: 1, ...song }],
+        voice_states: [],
+        roles: [],
+      });
+      seedDm();
+      mock.dispatch("presence", { user_id: 10, status: "online", listening: song });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+      expect(serverSupportsListeningActivity()).toBe(true);
+
+      mock.dispatch("game_activity_policy", { enabled: false });
+      expect(listeningOf(1)).toBeNull();
+      expect(dmStore.getState().channels[0]?.recipient.listening).toBeNull();
+      expect(serverSupportsListeningActivity()).toBe(false);
+
+      // A frame that outran the off frame shows nothing.
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      expect(listeningOf(1) ?? null).toBeNull();
+      mock.dispatch("presence_batch", {
+        updates: [{ user_id: 1, status: "online", custom_status: null, listening: song }],
+      });
+      expect(listeningOf(1) ?? null).toBeNull();
+
+      mock.dispatch("game_activity_policy", { enabled: true });
+      mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
+      expect(listeningOf(1)?.title).toBe("Blue in Green");
+      expect(serverSupportsListeningActivity()).toBe(true);
+    });
+
+    it("an older server (no listening_activity flag) never supports music, even with a policy", () => {
+      mock.dispatch("ready", {
+        channels: [],
+        members: [],
+        capabilities: { game_activity: true },
+        voice_states: [],
+        roles: [],
+      });
+      mock.dispatch("game_activity_policy", { enabled: true });
+      expect(serverSupportsListeningActivity()).toBe(false);
     });
   });
 
@@ -2447,6 +3053,27 @@ describe("WS Dispatcher", () => {
       expect(getChannelMessages(1)).toHaveLength(1);
     });
 
+    it("drops every cached who-reacted list on a second ready, which replays no reaction_update", async () => {
+      const fetcher = vi.fn().mockResolvedValue([{ id: 1, username: "alice", avatar: "" }]);
+      setReactionUsersFetcher(fetcher as never);
+      clearReactionUsersCache();
+      await loadReactionUsers(1, 200, "👍");
+
+      const ready = {
+        channels: [],
+        members: [],
+        voice_states: [],
+        roles: [],
+        dm_channels: [],
+      };
+      mock.dispatch("ready", ready);
+      expect(getCachedReactionUsers(200, "👍")).toHaveLength(1);
+
+      mock.dispatch("ready", ready);
+      expect(getCachedReactionUsers(200, "👍")).toBeUndefined();
+      setReactionUsersFetcher(null);
+    });
+
     it("carries a failed optimistic row through the resync invalidation", () => {
       cleanup();
       const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
@@ -3513,11 +4140,34 @@ describe("WS Dispatcher", () => {
     });
   });
 
-  it("wires voice_state and auto-joins if current user", () => {
+  it("wires voice_state to the roster only when this device holds no call", () => {
     authStore.setState((prev) => ({
       ...prev,
       user: { id: 5, username: "me", avatar: null, role: "member" },
     }));
+
+    mock.dispatch("voice_state", {
+      channel_id: 3,
+      user_id: 5,
+      username: "me",
+      muted: false,
+      deafened: false,
+      speaking: false,
+      camera: false,
+      screenshare: false,
+    });
+
+    expect(voiceStore.getState().currentChannelId).toBeNull();
+    expect(voiceStore.getState().voiceStatus).toBe("idle");
+    expect(voiceStore.getState().voiceUsers.get(3)?.has(5)).toBe(true);
+  });
+
+  it("wires voice_state and adopts the channel if current user and this device is joining", () => {
+    authStore.setState((prev) => ({
+      ...prev,
+      user: { id: 5, username: "me", avatar: null, role: "member" },
+    }));
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
 
     mock.dispatch("voice_state", {
       channel_id: 3,
@@ -3811,6 +4461,7 @@ describe("WS Dispatcher", () => {
       ...prev,
       user: { id: 5, username: "me", avatar: null, role: "member" },
     }));
+    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
 
     mock.dispatch("voice_state", {
       channel_id: 3,
@@ -3847,6 +4498,7 @@ describe("WS Dispatcher", () => {
         ...prev,
         user: { id: 5, username: "me", avatar: null, role: "member" },
       }));
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
     });
 
     function dispatchSelfVoiceState(flags: {
@@ -4454,6 +5106,23 @@ describe("WS Dispatcher", () => {
     expect(uiStore.getState().transientError).toBeNull();
   });
 
+  it("lets the game activity loop claim its own refused frame without a toast (WP 8.3)", () => {
+    mockShowToast.mockClear();
+    setActivityRefusalHandler((code, id) => code === "RATE_LIMITED" && id === "act-1");
+    try {
+      mock.dispatch("error", { code: "RATE_LIMITED", message: "slow down" }, "act-1");
+      expectConsole("error", /\[dispatcher\] Server error/);
+      expect(mockShowToast).not.toHaveBeenCalled();
+
+      // Any other frame's RATE_LIMITED still reaches the user.
+      mock.dispatch("error", { code: "RATE_LIMITED", message: "slow down" }, "chat-9");
+      expectConsole("error", /\[dispatcher\] Server error/);
+      expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
+    } finally {
+      setActivityRefusalHandler(null);
+    }
+  });
+
   it("wires error FORBIDDEN to an in-app toast with its catalog text (OC-0064)", () => {
     mockShowToast.mockClear();
     mock.dispatch("error", {
@@ -4926,6 +5595,143 @@ describe("WS Dispatcher", () => {
     await Promise.resolve();
     emojiStore.flush();
     expect(resolveEmoji("wave")?.id).toBe(4);
+  });
+
+  it("wires sticker_update to replace the custom-sticker set", () => {
+    setStickers([
+      { id: 1, name: "Wave", emoji: null, url: "/api/v1/stickers/1/image" },
+      { id: 2, name: "Gone", emoji: null, url: "/api/v1/stickers/2/image" },
+    ]);
+    stickersStore.flush();
+
+    // The deleted sticker must not survive the replace.
+    mock.dispatch("sticker_update", {
+      stickers: [
+        { id: 1, name: "Wave", emoji: "👋", url: "/api/v1/stickers/1/image" },
+        { id: 3, name: "Party", emoji: null, url: "/api/v1/stickers/3/image" },
+      ],
+    });
+    stickersStore.flush();
+
+    expect(listStickers().map((x) => x.name)).toEqual(["Wave", "Party"]);
+    expect(listStickers()[0]!.emoji).toBe("👋");
+  });
+
+  it("sticker_update turns loaded messages of a removed sticker into deleted-sticker rows", () => {
+    const msg = (id: number, sid: number): MessageResponse =>
+      ({
+        id,
+        channel_id: 1,
+        user: { id: 2, username: "bob", avatar: null },
+        content: `[Sticker: S${sid}]`,
+        reply_to: null,
+        attachments: [],
+        reactions: [],
+        pinned: false,
+        edited_at: null,
+        deleted: false,
+        timestamp: "2024-01-15T12:00:00Z",
+        sticker: { id: sid, name: `S${sid}`, url: `/api/v1/stickers/${sid}/image` },
+      }) as MessageResponse;
+    setMessages(1, [msg(10, 1), msg(11, 2)], false);
+    messagesStore.flush();
+
+    mock.dispatch("sticker_update", {
+      stickers: [{ id: 1, name: "S1", emoji: null, url: "/api/v1/stickers/1/image" }],
+    });
+    messagesStore.flush();
+
+    const stored = getChannelMessages(1);
+    expect(stored.find((m) => m.id === 10)?.sticker?.id).toBe(1);
+    expect(stored.find((m) => m.id === 11)?.sticker).toEqual({ id: null, name: "S2", url: null });
+  });
+
+  it("treats a sticker_update with no stickers field as an empty set", () => {
+    setStickers([{ id: 1, name: "Wave", emoji: null, url: "/api/v1/stickers/1/image" }]);
+    stickersStore.flush();
+    mock.dispatch("sticker_update", {} as never);
+    stickersStore.flush();
+    expect(listStickers()).toEqual([]);
+  });
+
+  it("on ready loads the stickers only when the server advertises the capability", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    const listStickersApi = vi
+      .fn()
+      .mockResolvedValue([{ id: 4, name: "Wave", emoji: null, url: "/api/v1/stickers/4/image" }]);
+    cleanup = wireDispatcher(mock.ws, { listBlocks, listStickers: listStickersApi });
+
+    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    expect(listStickersApi).not.toHaveBeenCalled();
+
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      capabilities: { stickers: true },
+    });
+    expect(listStickersApi).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    await Promise.resolve();
+    stickersStore.flush();
+    expect(listStickers().map((x) => x.id)).toEqual([4]);
+  });
+
+  it("refetches the stickers on a resumed connection, which gets no ready", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    const listStickersApi = vi.fn().mockResolvedValue([]);
+    cleanup = wireDispatcher(mock.ws, { listBlocks, listStickers: listStickersApi });
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      capabilities: { stickers: true },
+    });
+    listStickersApi.mockClear();
+
+    mock.dispatch("auth_ok", {
+      user: { id: 1, username: "alex", avatar: null, role: "admin" },
+      server_name: "TestServer",
+      motd: "",
+      replay_source: "buffer",
+    } as never);
+    expect(listStickersApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a ready-time sticker list that a fresher sticker_update overtook", async () => {
+    cleanup();
+    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
+    let resolveList: (v: unknown[]) => void = () => {};
+    const listStickersApi = vi.fn(
+      () =>
+        new Promise<unknown[]>((r) => {
+          resolveList = r;
+        }),
+    );
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks,
+      listStickers: listStickersApi as never,
+    });
+    mock.dispatch("ready", {
+      channels: [],
+      members: [],
+      voice_states: [],
+      roles: [],
+      capabilities: { stickers: true },
+    });
+    mock.dispatch("sticker_update", {
+      stickers: [{ id: 9, name: "Fresh", emoji: null, url: "/api/v1/stickers/9/image" }],
+    });
+    stickersStore.flush();
+    resolveList([{ id: 1, name: "Stale", emoji: null, url: "/api/v1/stickers/1/image" }]);
+    await Promise.resolve();
+    await Promise.resolve();
+    stickersStore.flush();
+    expect(listStickers().map((x) => x.name)).toEqual(["Fresh"]);
   });
 
   // OC-0251: the ready-time GET /emoji and an `emoji_update` broadcast can
@@ -5408,6 +6214,96 @@ describe("WS Dispatcher", () => {
       expect(dmStore.getState().channels).toHaveLength(0);
     });
 
+    describe("call roster of a closed DM", () => {
+      const dmRow = (channelId: number, isGroup: boolean) => ({
+        channelId,
+        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+        participants: [],
+        name: "",
+        isGroup,
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+        mentionCount: 0,
+      });
+      const seedCall = (channelId: number) => {
+        mock.dispatch("voice_state", {
+          channel_id: channelId,
+          user_id: 10,
+          username: "bob",
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: false,
+          screenshare: false,
+        });
+        voiceStore.flush();
+      };
+
+      it("drops the roster when a group DM is closed (left or removed)", () => {
+        dmStore.setState(() => ({ channels: [dmRow(70, true)] }));
+        seedCall(70);
+        expect(voiceStore.getState().voiceUsers.get(70)?.size).toBe(1);
+
+        mock.dispatch("dm_channel_close", { channel_id: 70 });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.has(70)).toBe(false);
+      });
+
+      it("keeps the roster when a 1:1 DM is closed", () => {
+        dmStore.setState(() => ({ channels: [dmRow(71, false)] }));
+        seedCall(71);
+
+        mock.dispatch("dm_channel_close", { channel_id: 71 });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.get(71)?.size).toBe(1);
+      });
+
+      it("leaves the roster to voice_leave while the local user is in that call", () => {
+        dmStore.setState(() => ({ channels: [dmRow(72, true)] }));
+        seedCall(72);
+        joinVoiceChannel(72);
+        voiceStore.flush();
+
+        mock.dispatch("dm_channel_close", { channel_id: 72 });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.get(72)?.size).toBe(1);
+        leaveVoiceChannel();
+        voiceStore.flush();
+      });
+
+      it("drops a roster left from an earlier membership when the group is re-added", () => {
+        dmStore.setState(() => ({ channels: [dmRow(73, true)] }));
+        seedCall(73);
+        joinVoiceChannel(73);
+        voiceStore.flush();
+        mock.dispatch("dm_channel_close", { channel_id: 73 });
+        leaveVoiceChannel();
+        voiceStore.flush();
+        expect(voiceStore.getState().voiceUsers.get(73)?.size).toBe(1);
+
+        mock.dispatch("dm_channel_open", {
+          channel_id: 73,
+          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+          name: "",
+          is_group: true,
+          owner_id: 10,
+          last_message_id: null,
+          last_message: "",
+          last_message_at: "",
+          unread_count: 0,
+        });
+        voiceStore.flush();
+
+        expect(voiceStore.getState().voiceUsers.has(73)).toBe(false);
+      });
+    });
+
     it("falls back to another open DM when the closed DM was active", () => {
       dmStore.setState(() => ({
         channels: [
@@ -5726,8 +6622,9 @@ describe("WS Dispatcher", () => {
     }).not.toThrow();
   });
 
-  it("ready sends voice_leave when user appears in voice_states but LiveKit is disconnected", () => {
-    // A fresh reload always starts with an idle voice session — the stale case.
+  it("ready leaves another device's call alone when this device is idle", () => {
+    // This device holds no call: the self row is another device's, so there is
+    // nothing to clean up and a voice_leave would end that call.
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "idle" }));
 
     // Set up auth so the current user ID is 42
@@ -5747,13 +6644,9 @@ describe("WS Dispatcher", () => {
       dm_channels: [],
     });
 
-    // The dispatcher should detect stale voice state and send voice_leave
-    expectConsole("warn", /\[dispatcher\] Stale voice state detected in ready payload/);
-    expect(mock.ws.send).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "voice_leave", payload: {} }),
-    );
-    // And clear the local voice channel
+    expect(mock.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_leave" }));
     expect(voiceStore.getState().currentChannelId).toBeNull();
+    expect(voiceStore.getState().voiceUsers.get(10)?.has(42)).toBe(true);
   });
 
   it("ready does NOT send voice_leave when LiveKit IS connected", () => {

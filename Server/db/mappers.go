@@ -97,17 +97,19 @@ func apiTokenFromGen(t dbgen.ApiToken) *APIToken {
 	}
 }
 
-// sessionFromGen maps a generated session row to the domain Session model.
-func sessionFromGen(s dbgen.Session) Session {
+// sessionFromColumns builds a Session from the columns the session queries
+// select. The per-query row types (which omit sessions.identity_public_key)
+// map through it.
+func sessionFromColumns(id, userID int64, token string, device, ip *string, createdAt, lastUsed, expiresAt string, unseen int64) Session {
 	return Session{
-		ID:        s.ID,
-		UserID:    s.UserID,
-		TokenHash: s.Token,
-		Device:    derefString(s.Device),
-		IP:        derefString(s.IpAddress),
-		CreatedAt: s.CreatedAt,
-		LastUsed:  s.LastUsed,
-		ExpiresAt: s.ExpiresAt,
-		Unseen:    s.Unseen != 0,
+		ID:        id,
+		UserID:    userID,
+		TokenHash: token,
+		Device:    derefString(device),
+		IP:        derefString(ip),
+		CreatedAt: createdAt,
+		LastUsed:  lastUsed,
+		ExpiresAt: expiresAt,
+		Unseen:    unseen != 0,
 	}
 }

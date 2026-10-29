@@ -114,6 +114,9 @@ export interface VoiceState {
   readonly pttGated?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
+  /** Bumped when the live camera's capture is replaced without the camera
+   *  going off (a device switch): the self tile redraws on the new track. */
+  readonly localCameraRev?: number;
   /** Bumped when the live share changes source or quality without stopping:
    *  its preview and the stream card redraw. */
   readonly localShareRev?: number;
@@ -157,6 +160,11 @@ export interface VoiceState {
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
   readonly localSessionFingerprint?: string | null;
+  /** The local user's own safety number (identity-key fingerprint), the
+   *  number peers see on our shield, so it can be compared out of band. Null
+   *  outside a voice session or when our announce went out unsigned. Optional
+   *  for the same fixture reason as peerVerifications. */
+  readonly localSafetyNumber?: string | null;
   /** The input-sensitivity gate's verdict (true = open = above the slider's
    *  threshold), or null when no gate runs (sensitivity 100).
    *  When set it, not LiveKit, drives the local speaking ring, so the ring,
@@ -301,7 +309,10 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
   const currentUserId = authStore.getState().user?.id ?? 0;
   let autoJoinChannel: number | null = null;
   let selfState: ReadyVoiceState | undefined;
-  if (currentUserId !== 0) {
+  // Only a device that holds the call adopts its self row: while idle, that row
+  // is another device's call and stays a roster entry (the sidebar still shows
+  // the user in the channel) without becoming this device's channel.
+  if (currentUserId !== 0 && voiceStore.getState().voiceStatus !== "idle") {
     for (const vs of states) {
       if (vs.user_id === currentUserId) {
         autoJoinChannel = vs.channel_id;
@@ -358,7 +369,8 @@ export function updateVoiceState(payload: VoiceStatePayload): void {
     });
 
     nextChannels.set(payload.channel_id, nextUsers);
-    if (payload.user_id !== currentUserId) {
+    // An idle device's own row is another device's call: roster only.
+    if (payload.user_id !== currentUserId || prev.voiceStatus === "idle") {
       return { ...prev, voiceUsers: nextChannels };
     }
     return {
@@ -414,6 +426,23 @@ export function removeVoiceUser(payload: VoiceLeavePayload): void {
     const nextWatching = new Map(watching);
     nextWatching.delete(payload.user_id);
     return { ...prev, voiceUsers: nextChannels, peerWatching: nextWatching };
+  });
+}
+
+/**
+ * Drop the whole roster of one channel. Used when the local user loses a group
+ * DM (left or removed): the server stops sending that room's voice events, so
+ * the stale participants would otherwise outlive the membership and reappear as
+ * ghosts on a later re-add. The channel the local user is in is left alone: the
+ * server's own voice_leave and the leave path handle that roster.
+ */
+export function clearChannelVoiceUsers(channelId: number): void {
+  voiceStore.setState((prev) => {
+    if (!prev.voiceUsers.has(channelId) || prev.currentChannelId === channelId) return prev;
+    voiceRosterRevision++;
+    const voiceUsers = new Map(prev.voiceUsers);
+    voiceUsers.delete(channelId);
+    return { ...prev, voiceUsers };
   });
 }
 
@@ -648,6 +677,14 @@ export function setLocalScreenshare(enabled: boolean): void {
   }));
 }
 
+/** The live camera's capture was replaced (a device switch). */
+export function bumpLocalCameraRev(): void {
+  voiceStore.setState((prev) => ({
+    ...prev,
+    localCameraRev: (prev.localCameraRev ?? 0) + 1,
+  }));
+}
+
 /** The live share changed source or quality. */
 export function bumpLocalShareRev(): void {
   voiceStore.setState((prev) => ({
@@ -768,6 +805,15 @@ export function setLocalSessionFingerprint(fingerprint: string | null): void {
     (prev.localSessionFingerprint ?? null) === fingerprint
       ? prev
       : { ...prev, localSessionFingerprint: fingerprint },
+  );
+}
+
+/** Publish (or clear, with null) the local user's own safety number. */
+export function setLocalSafetyNumber(safetyNumber: string | null): void {
+  voiceStore.setState((prev) =>
+    (prev.localSafetyNumber ?? null) === safetyNumber
+      ? prev
+      : { ...prev, localSafetyNumber: safetyNumber },
   );
 }
 

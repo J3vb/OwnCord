@@ -187,18 +187,6 @@ const R3_ALLOWLIST: readonly R3Entry[] = [
     fn: "removeToast",
     reason: "self-bounded: fallback removal after transitionend; touches only the node it removes",
   },
-  {
-    file: "components/message-list/content-parser.ts",
-    fn: "renderParsedCodeBlock",
-    reason:
-      "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
-  },
-  {
-    file: "components/message-list/content-parser.ts",
-    fn: "renderParsedCodeBlock",
-    reason:
-      "self-bounded: copy-button label reset on a node the code block owns; renderMessageContent takes no owner to clear it from",
-  },
 ];
 // R4: every `new AbortController` outside the two primitives.
 const R4_ALLOWLIST: readonly R4Entry[] = [
@@ -381,6 +369,16 @@ for (const rel of sourceFiles) {
             ]);
           }
         }
+      }
+      // `onPrefChange(keys, handler)` with no signal is a bare window listener
+      // under another name (lib/preferences.ts), so R1 counts it as one.
+      if (name === "onPrefChange" && node.arguments.length < 3) {
+        bareListeners++;
+        bareListenerFiles.add(rel);
+        r1Found.push([
+          `${rel}|window|owncord:pref-change`,
+          `${rel}:${line(node)} onPrefChange without a signal`,
+        ]);
       }
       if (name === "setTimeout" || name === "setInterval") {
         const discarded = ts.isExpressionStatement(node.parent) || ts.isVoidExpression(node.parent);

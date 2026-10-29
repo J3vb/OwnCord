@@ -56,10 +56,14 @@ const rowModel: fc.Arbitrary<MemberRowModel> = fc
     avatarName: text,
     avatarColor: fc.constantFrom("#5865f2", "#3ba55c", "#faa61a"),
     customStatus: fc.option(text, { nil: null }),
+    activity: fc.option(text, { nil: null }),
+    activityIcon: fc.constantFrom("gamepad-2" as const, "music" as const),
     colorVar: fc.constantFrom("var(--green)", "#ff0000", "#3366cc", "var(--text-micro)"),
     status: fc.constantFrom(...STATUSES),
     away: fc.boolean(),
   })
+  // The list builder never sets both: a custom status wins the second line.
+  .map((r) => (r.customStatus === null ? r : { ...r, activity: null }))
   // A loaded picture hides the letter and its colour, so the base has none
   // and the mutation of avatarUrl adds one.
   .map((r) => ({ kind: "row" as const, ...r, avatarUrl: null }));
@@ -81,6 +85,21 @@ function mutateRow(model: MemberRowModel, field: string): MemberRowModel {
       };
     case "customStatus":
       return { ...model, customStatus: model.customStatus === null ? "hi" : null };
+    case "activity":
+      // Clearing the custom status too keeps the model one the builder can make.
+      return {
+        ...model,
+        customStatus: null,
+        activity: model.activity === null ? "Playing x" : null,
+      };
+    case "activityIcon":
+      // The icon only draws beside a line, and the line needs no custom status.
+      return {
+        ...model,
+        customStatus: null,
+        activity: model.activity ?? "Listening to x",
+        activityIcon: model.activityIcon === "music" ? "gamepad-2" : "music",
+      };
     case "colorVar":
       return { ...model, colorVar: model.colorVar === "#ff0000" ? "#00ff00" : "#ff0000" };
     case "status": {

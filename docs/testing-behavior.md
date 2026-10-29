@@ -55,6 +55,36 @@ Notes on some lanes:
 - **Windows installer.** The test holds the old executable locked during the
   update. This forces the shutdown race that the installer hook must wait out.
 
+### Iterate on a focused check
+
+While fixing a failure, start with its owning package or test file. These
+examples use existing tests; substitute the package or file relevant to your
+change.
+
+| Working directory | Command                                                    | Scope                                                                                                                      |
+| ----------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `Server/`         | `go test -count=1 ./permissions/`                          | Permission package tests, without a cached result.                                                                         |
+| `Client/`         | `npm test -- tests/unit/platform-contracts-counts.test.ts` | One Vitest file. `npm test` can also select colocated `src/**/*.test.ts` files; `test:unit` is restricted to `tests/unit`. |
+| Repository root   | `node --test scripts/ci-select.test.mjs`                   | The CI selector's script tests.                                                                                            |
+| `Client/`         | `npm run test:e2e -- --list`                               | Discover tests in the mocked Playwright lane; this lists tests without running them.                                       |
+
+For another Playwright lane, use its command from the table above and its
+prerequisites. Confirm that the intended tests actually ran: a listing, an
+empty selection or an unavailable platform is not a passing test run.
+Before submitting, run the required checks for the complete change; a focused
+pass does not replace coverage, tagged builds or cross-component tests.
+See [contributing](contributing.md#available-commands) for the existing check
+commands and working directories.
+
+### Inspect a mocked-browser failure
+
+From `Client/`, `npx playwright show-report playwright-report/mock` opens
+the mocked lane's HTML report. Look there for the failing assertion and
+retained traces, screenshots and video. Open an extracted trace with
+`npx playwright show-trace <trace.zip>`, replacing `<trace.zip>` with its
+actual path. For other lanes, use the report and output directory named by
+that lane's Playwright config; they deliberately keep separate results.
+
 ### Media prerequisites
 
 For media tests, run `node tests/e2e/scripts/install-livekit.mjs`. Then set

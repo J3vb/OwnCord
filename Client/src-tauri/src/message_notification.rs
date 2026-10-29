@@ -389,13 +389,28 @@ fn is_activation(response: &NotificationResponse) -> bool {
 }
 
 /// Bring the main window to the front, un-minimizing first so a hidden window
-/// actually comes forward.
+/// actually comes forward. Only the macOS click path has no activation token.
+#[cfg(not(any(windows, target_os = "linux")))]
 pub(crate) fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
+    focus_main_window_with(app, None);
+}
+
+/// As [`focus_main_window`], with the activation token the launcher or the
+/// notification server handed us. A Wayland compositor only raises a window
+/// for a request that carries one, so on Linux the token is passed on to
+/// `window_activation`; everywhere else it is unused.
+pub(crate) fn focus_main_window_with<R: Runtime>(app: &AppHandle<R>, token: Option<String>) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        #[cfg(target_os = "linux")]
+        if let Some(token) = token {
+            crate::window_activation::activate(app, &window, token);
+        }
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = token;
 }
 
 #[cfg(test)]

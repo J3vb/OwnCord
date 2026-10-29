@@ -25,6 +25,30 @@ const createLocalVideoTrack = vi.fn();
 const createLocalScreenTracks = vi.fn();
 const loadPref = vi.fn();
 
+// 120 fps is hidden for now (lib/shareFps); the 120 fps tests turn it back on
+// so the dormant 120 handling (one layer, balanced degradation, Auto's
+// hardware rule) keeps its coverage.
+const offer120 = vi.hoisted(() => ({ value: false }));
+vi.mock("@lib/shareFps", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shareFps")>();
+  return {
+    ...actual,
+    offeredShareFps: (saved: number) =>
+      offer120.value && saved === 120 ? 120 : actual.offeredShareFps(saved),
+  };
+});
+
+const setH264GpuProfiles = vi.hoisted(() => vi.fn());
+vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+const gpuProfiles = vi.hoisted(() => ({ value: false }));
+vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/features/voice/videoCodec")>();
+  return {
+    ...actual,
+    h264GpuPublish: (codec: string) => codec === "h264" && gpuProfiles.value,
+  };
+});
+
 vi.mock("livekit-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("livekit-client")>();
   return {
@@ -157,6 +181,9 @@ function fakeDeps(
 }
 
 beforeEach(() => {
+  offer120.value = false;
+  gpuProfiles.value = false;
+  setH264GpuProfiles.mockReset();
   createLocalVideoTrack.mockReset();
   createLocalScreenTracks.mockReset();
   loadPref.mockReset().mockReturnValue("");
@@ -895,6 +922,7 @@ describe("enableScreenshare", () => {
   });
 
   it("publishes a high share at 120 fps as one layer", async () => {
+    offer120.value = true;
     loadPref.mockImplementation((key: string) =>
       key === "screenShareQuality" ? "high" : key === "screenShareFps" ? 120 : "",
     );
@@ -911,6 +939,22 @@ describe("enableScreenshare", () => {
       degradationPreference: "balanced",
     });
     expect(videoOpts).not.toHaveProperty("screenShareSimulcastLayers");
+  });
+
+  it("publishes a saved 120 share at 60 fps while 120 is hidden", async () => {
+    loadPref.mockImplementation((key: string) =>
+      key === "screenShareQuality" ? "high" : key === "screenShareFps" ? 120 : "",
+    );
+    const rig = fakeRoom();
+    createLocalScreenTracks.mockResolvedValue([fakeVideoTrack()]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    const videoOpts = rig.publishTrack.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(videoOpts).toMatchObject({
+      screenShareEncoding: { maxFramerate: 60 },
+      degradationPreference: "maintain-resolution",
+    });
   });
 
   it("publishes 30 and 60 fps shares keeping their resolution", async () => {
@@ -1428,14 +1472,30 @@ describe("stream getters", () => {
       mediaStreamTrack: { getSettings: () => ({ frameRate: 120 }) },
       sender: { getStats: async () => report },
     });
+    const layer = {
+      rid: undefined,
+      active: true,
+      width: 1920,
+      height: 1080,
+      sentFps: 61,
+      encodedFps: undefined,
+      bitrateBps: undefined,
+      encodeMsPerFrame: undefined,
+      limitation: "cpu",
+      encoder: "libvpx",
+      codec: "video/VP8",
+      powerEfficient: undefined,
+    };
     await expect(getLocalScreenshareStats(room)).resolves.toEqual({
       captureFps: 120,
+      captureFpsSource: "configured",
       sentFps: 61,
       width: 1920,
       height: 1080,
       limitation: "cpu",
       encoder: "libvpx",
       codec: "video/VP8",
+      layers: [layer],
     });
   });
 
@@ -1709,6 +1769,47 @@ describe("video codec", () => {
     }
   });
 
+  it("offers only H.264 Main/High for an H.264 share where the GPU profiles apply, before publishing", async () => {
+    prefs({ videoCodec: "h264" });
+    gpuProfiles.value = true;
+    encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
+    const rig = fakeRoom();
+    const video = fakeVideoTrack();
+    createLocalScreenTracks.mockResolvedValue([video, fakeAudioTrack()]);
+
+    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(video.mediaStreamTrack, true);
+    const publishOrder = rig.publishTrack.mock.invocationCallOrder[0]!;
+    expect(setH264GpuProfiles.mock.invocationCallOrder[0]!).toBeLessThan(publishOrder);
+  });
+
+  it("marks an H.264 camera where the GPU profiles apply", async () => {
+    prefs({ videoCodec: "h264" });
+    gpuProfiles.value = true;
+    encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
+    const rig = fakeRoom();
+    const track = fakeVideoTrack();
+    createLocalVideoTrack.mockResolvedValue(track);
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(track.mediaStreamTrack, true);
+  });
+
+  it("unmarks a camera that publishes VP8, so its offer keeps every H.264 profile", async () => {
+    prefs({ videoCodec: "vp8" });
+    gpuProfiles.value = true;
+    const rig = fakeRoom();
+    const track = fakeVideoTrack();
+    createLocalVideoTrack.mockResolvedValue(track);
+
+    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(track.mediaStreamTrack, false);
+    expect(rig.publishTrack).toHaveBeenCalled();
+  });
+
   it("publishes the screen share's video with the saved codec, audio without", async () => {
     prefs({ videoCodec: "h264" });
     const rig = fakeRoom();
@@ -1745,6 +1846,7 @@ describe("video codec", () => {
   });
 
   it("on Auto probes the screen share at its own frame rate and bitrate, separately from the camera", async () => {
+    offer120.value = true;
     prefs({ videoCodec: "auto", screenShareQuality: "high", screenShareFps: 120 });
     encodingInfo.mockResolvedValue({ supported: true, smooth: false, powerEfficient: false });
     const rig = fakeRoom();
@@ -1767,6 +1869,7 @@ describe("video codec", () => {
   });
 
   it("at 120 fps a saved VP8 follows Auto's hardware rule (M-2)", async () => {
+    offer120.value = true;
     prefs({ videoCodec: "vp8", screenShareQuality: "high", screenShareFps: 120 });
     encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
     const rig = fakeRoom();

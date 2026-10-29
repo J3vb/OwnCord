@@ -12,7 +12,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
 import { showToast } from "@lib/toast";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
@@ -315,9 +315,11 @@ export function openForwardPicker(opts: ForwardPickerOptions): void {
         owner.destroy();
         if (unsent > 0) showToast(forwardText("toast.stopped", { count: unsent }), "warning");
       },
-      // Escape and the backdrop are handled below, so they can wait out a batch.
+      // Escape and the backdrop wait out a batch.
       closeOnBackdrop: false,
-      closeOnEscape: false,
+      onEscape: () => {
+        if (!busy) modal?.destroy();
+      },
       className: "forward-picker",
       overlayAttrs: { "data-testid": "forward-picker" },
       ariaLabelledBy: "forward-title",
@@ -328,19 +330,12 @@ export function openForwardPicker(opts: ForwardPickerOptions): void {
   );
   appendChildren(modal.modal, body, footer);
 
-  document.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.key === "Escape" && !busy) modal?.destroy();
+  closeOnBackdropClick(
+    modal.overlay,
+    () => {
+      if (!busy) modal?.destroy();
     },
-    { signal },
-  );
-  modal.overlay.addEventListener(
-    "click",
-    (e) => {
-      if (e.target === modal?.overlay && !busy) modal.destroy();
-    },
-    { signal },
+    signal,
   );
   closeBtn.addEventListener("click", () => modal?.destroy(), { signal });
   cancelBtn.addEventListener("click", () => modal?.destroy(), { signal });

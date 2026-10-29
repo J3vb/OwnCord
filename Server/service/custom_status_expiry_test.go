@@ -9,6 +9,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"go.uber.org/goleak"
 )
@@ -195,7 +196,7 @@ func fastExpirer(database *db.DB) *CustomStatusExpirer {
 }
 
 func inSeconds(d time.Duration) *string {
-	s := time.Now().UTC().Add(d).Format(db.CustomStatusExpiryLayout)
+	s := time.Now().UTC().Add(d).Format(dbtime.ISOLayout)
 	return &s
 }
 
@@ -263,7 +264,7 @@ func TestCustomStatusExpirer_BootSweepClearsOfflineExpiry(t *testing.T) {
 	_, database := newExpiryChannels(t)
 	ctx := context.Background()
 	text := "left a while ago"
-	past := time.Now().UTC().Add(-time.Hour).Format(db.CustomStatusExpiryLayout)
+	past := time.Now().UTC().Add(-time.Hour).Format(dbtime.ISOLayout)
 	if err := database.UpdateUserPresence(ctx, 1, db.StatusOffline, &text, &past); err != nil {
 		t.Fatal(err)
 	}

@@ -26,6 +26,10 @@ const (
 	// that was already ended or whose time ran out. Nothing was written and no
 	// poll_update is sent for the refused command.
 	ErrCodePollEnded = "POLL_ENDED"
+	// ErrCodeStickerNotFound refines NOT_FOUND: a chat_send named a sticker
+	// that does not exist, or was deleted. Nothing was stored, and the client
+	// refreshes its picker from sticker_update.
+	ErrCodeStickerNotFound = "STICKER_NOT_FOUND"
 	// ErrCodeAlreadyDeleted is the WS twin of REST's 409 ALREADY_DELETED: the
 	// same "already in the requested end state" refusal, so a client sees one
 	// code for the state rather than FORBIDDEN over WS and ALREADY_DELETED
@@ -46,16 +50,16 @@ const (
 	// not; the ring is never delivered (DM call review D-03).
 	ErrCodeCallRequiresAcceptance = "CALL_REQUIRES_ACCEPTANCE"
 	// ErrCodeSessionReplaced is sent to a connection the hub displaces
-	// because the same user connected from another device. The client stops
+	// because the same device session reconnected (F5, network drop, wake), or
+	// because the account is over its per-user connection cap. The client stops
 	// reconnecting on it; without it the displaced device cannot tell the
 	// close from a network drop and the two devices trade the socket forever.
 	ErrCodeSessionReplaced = "SESSION_REPLACED"
-	// ErrCodeAnotherDeviceActive is returned in a plain `error` frame to a
-	// wake reconnect (auth frame `wake: true`) when a DIFFERENT session of
-	// the same account currently holds the live connection. It is not
-	// auth_error: the token is still valid. The wake is refused without
-	// displacing the live session; the client stops reconnecting and offers
-	// "Use here" so the user chooses whether to take over.
+	// ErrCodeAnotherDeviceActive is kept for wire compatibility only: the
+	// server no longer sends it, because several device sessions of one
+	// account now stay connected at once. Older servers sent it to a wake
+	// reconnect refused while another session held the connection, and
+	// clients still handle it.
 	ErrCodeAnotherDeviceActive = "ANOTHER_DEVICE_ACTIVE"
 	// ErrCodeServerBusy refuses a fresh connect that waited readyAdmissionWait
 	// for a ready-build permit (P5-S04). It carries retry_after_ms, and the
@@ -74,4 +78,9 @@ const (
 	// ErrCodeThreadLocked refines FORBIDDEN: the thread is locked and only a
 	// moderator (MANAGE_MESSAGES) may post, react, pin or change it.
 	ErrCodeThreadLocked = "THREAD_LOCKED"
+	// ErrCodeGameActivityDisabled answers an activity_update that sets a game
+	// while an admin has turned game activity off for the server (WP 8.3e-2).
+	// A clear is never refused. The client claims it without a toast and does
+	// not resend until the game changes.
+	ErrCodeGameActivityDisabled = "GAME_ACTIVITY_DISABLED"
 )

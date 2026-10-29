@@ -17,11 +17,11 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
-import { createIcon } from "@lib/icons";
+import { createIcon, type IconName } from "@lib/icons";
 import type { ModalInstance } from "@lib/modalFactory";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import type { MountableComponent } from "@lib/safe-render";
-import { isRenderableAvatar } from "./message-list/avatar";
+import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "./message-list/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
@@ -31,6 +31,7 @@ import { requestsText } from "../i18n/requests";
 import { voiceText } from "../i18n/voice";
 import { getChannelMute } from "@lib/channel-mutes";
 import { openDmContextMenu, openLeaveConfirm, type DmMenuConvo } from "./dmContextMenu";
+import { onPrefChange } from "@lib/preferences";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -49,6 +50,12 @@ export interface DmConversation {
   readonly avatar: string | null;
   readonly avatarColor?: string;
   readonly status?: "online" | "idle" | "dnd" | "offline";
+  /** The game the other party of a 1:1 DM is playing (WP 8.3), or else the
+   *  music they listen to (WP 8.10); never set for a group. Drawn as "Playing
+   *  <game>" or "Listening to <player>" under the name. */
+  readonly activity?: string | null;
+  /** The icon for `activity`; the controller when absent. */
+  readonly activityIcon?: IconName;
   /** True for a group DM: draws stacked avatars and a participant count. */
   readonly isGroup?: boolean;
   /** A group whose server reports an owner (WP 3B-10); drives the leave copy. */
@@ -127,13 +134,15 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
   el.appendChild(letter);
   if (!isRenderableAvatar(avatar)) return;
   const resolved = resolveServerUrl(avatar);
-  void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
+  void fetchImageAsObjectUrl(resolved).then(async (objectUrl) => {
     if (objectUrl === null || !el.isConnected) return;
-    const img = createElement("img", { src: objectUrl, alt: label });
+    const img = createElement("img", { alt: label });
     recoverEvictedImage(img, { url: resolved });
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.borderRadius = "50%";
+    const current = (): boolean => el.isConnected;
+    if (!(await setAvatarSource(img, objectUrl, () => avatarAnimationMode(el), current))) return;
     letter.remove();
     el.insertBefore(img, el.firstChild);
   });
@@ -281,7 +290,21 @@ function renderDmItem(
   // messages yet" fallback), so there is no time to show.
   const preview = createElement("span", { class: "dm-preview" }, convo.lastMessage);
   const body = createElement("div", { class: "dm-item-body" });
-  appendChildren(body, name, preview);
+  if (convo.activity != null && convo.isGroup !== true) {
+    const activity = createElement("span", {
+      class: "dm-activity",
+      "data-testid": `dm-activity-${convo.channelId}`,
+    });
+    const icon = createIcon(convo.activityIcon ?? "gamepad-2", 12);
+    icon.setAttribute("aria-hidden", "true");
+    icon.classList.add("dm-activity-icon");
+    const text = createElement("span", { class: "dm-activity-text" });
+    setText(text, convo.activity);
+    appendChildren(activity, icon, text);
+    appendChildren(body, name, activity, preview);
+  } else {
+    appendChildren(body, name, preview);
+  }
   const time = createElement(
     "span",
     { class: "dm-preview-time" },
@@ -449,6 +472,7 @@ function convoSignature(convo: DmConversation): string {
     convo.avatar ?? "",
     convo.avatarColor ?? "",
     convo.status ?? "",
+    convo.isGroup === true ? "" : `${convo.activityIcon ?? ""}|${convo.activity ?? ""}`,
     convo.isGroup === true ? "g" : "",
     convo.icon ?? "",
     (convo.participants ?? []).length,
@@ -604,13 +628,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
     // A row's time is "3:04 PM" today and "Sep 29" after midnight.
     atEachMidnight(disposable.signal, () => update(rendered));
     // A clock-format change relabels the row times in place.
-    window.addEventListener(
-      "owncord:pref-change",
-      ((e: CustomEvent<{ key: string }>) => {
-        if (e.detail.key === "timeFormat") update(rendered);
-      }) as EventListener,
-      { signal: disposable.signal },
-    );
+    onPrefChange(["timeFormat"], () => update(rendered), disposable.signal);
 
     // Nothing to list: say so, with the way to start (Discord's DM list does).
     emptyState = createElement("div", {

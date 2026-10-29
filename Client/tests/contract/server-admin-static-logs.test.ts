@@ -316,7 +316,7 @@ describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
     doc.getElementById("content")!.innerHTML = bridge.renderLogs();
     const toggle = doc.getElementById("logLevelToggle") as HTMLButtonElement;
     expect(toggle.disabled).toBe(true);
-    expect(doc.getElementById("logLevelDesc")!.textContent).toContain("administrator");
+    expect(doc.getElementById("logLevelDesc")!.textContent).toContain("View Diagnostics");
 
     // An administrator can raise it; the PATCH carries a positive window.
     bridge.state.me = { permissions: 0x40000000, is_owner: true };

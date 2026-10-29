@@ -231,6 +231,27 @@ describe("ForwardPicker", () => {
     expect(q("[data-testid=forward-picker]")).toBeNull();
   });
 
+  it("stays open when a drag-select ends on the backdrop, and a backdrop click still closes", () => {
+    open();
+    const overlay = q("[data-testid=forward-picker]");
+    overlay.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(q("[data-testid=forward-picker]")).not.toBeNull();
+    overlay.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(document.querySelector("[data-testid=forward-picker]")).toBeNull();
+  });
+
+  it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () => {
+    open();
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect(q("[data-testid=forward-picker]")).not.toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.querySelector("[data-testid=forward-picker]")).toBeNull();
+  });
+
   it("frees Done and Escape once a failed batch has resolved", async () => {
     open();
     pick(2);

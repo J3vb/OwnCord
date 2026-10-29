@@ -20,6 +20,10 @@ const (
 	// voice_leave broadcast out to everyone who can see the channel.
 	voiceModRateLimit = 5
 	voiceModWindow    = time.Second
+	// Extra per-target limit on a voice_mod_move that relies on the missing
+	// rank rule (the target ranks at or above the mover).
+	voiceModMoveTargetLimit  = 3
+	voiceModMoveTargetWindow = 30 * time.Second
 )
 
 // voiceQualities maps accepted voice quality presets to their target bitrate
@@ -62,9 +66,10 @@ func (h *Hub) voiceEventAudience(ctx context.Context, channelID, subjectID int64
 		seen[uid] = struct{}{}
 	}
 	h.mu.RLock()
-	for uid, c := range h.clients {
-		if _, ok := seen[uid]; !ok && c.voice.channel() == channelID {
-			audience = append(audience, uid)
+	for _, c := range h.allClientsLocked() {
+		if _, ok := seen[c.userID]; !ok && c.voice.channel() == channelID {
+			seen[c.userID] = struct{}{}
+			audience = append(audience, c.userID)
 		}
 	}
 	h.mu.RUnlock()
@@ -164,12 +169,13 @@ func (h *Hub) broadcastVoiceEventWithLeaver(ctx context.Context, channelID int64
 	h.broadcastChannelScopedTo(channelID, msg, audience, "voice event")
 }
 
-// VoiceSessionCount returns the number of clients currently in a voice channel.
+// VoiceSessionCount returns the number of connections currently in a voice
+// channel (an account is in at most one call, so also the number of users).
 func (h *Hub) VoiceSessionCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	count := 0
-	for _, c := range h.clients {
+	for _, c := range h.allClientsLocked() {
 		if c.voice.channel() != 0 {
 			count++
 		}

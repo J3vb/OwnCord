@@ -49,6 +49,9 @@ type ForwardAttachment struct {
 	Mime          string
 	Size          int64
 	Width, Height *int
+	// DurationMs and Waveform carry a voice message across a forward (WP 8.9).
+	DurationMs *int
+	Waveform   *string
 }
 
 // GetMessageForward returns the side row of messageID, or nil when it is not a
@@ -78,6 +81,7 @@ func (d *DB) ListForwardAttachments(ctx context.Context, messageID int64) ([]For
 		out = append(out, ForwardAttachment{
 			ID: r.ID, Filename: r.Filename, StoredAs: r.StoredAs, Mime: r.MimeType, Size: r.Size,
 			Width: int64PtrToInt(r.Width), Height: int64PtrToInt(r.Height),
+			DurationMs: int64PtrToInt(r.DurationMs), Waveform: r.Waveform,
 		})
 	}
 	return out, nil

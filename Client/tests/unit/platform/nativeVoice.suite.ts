@@ -156,7 +156,9 @@ export function describeNativeVoiceSuite(
     });
 
     check("lists the host's cameras and starts, publishes and stops one", async () => {
-      const cameras: NativeVoiceCameraDevice[] = [{ id: "/dev/video0", name: "HD Webcam" }];
+      const cameras: NativeVoiceCameraDevice[] = [
+        { id: "/dev/video0", name: "HD Webcam", infrared: false },
+      ];
       const capture = { fps: 30, maxWidth: 0, maxHeight: 0 };
       const publish = {
         width: 1280,

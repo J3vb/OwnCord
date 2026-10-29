@@ -35,16 +35,18 @@ type Appeal struct {
 }
 
 type Attachment struct {
-	ID         string `json:"id"`
-	MessageID  *int64 `json:"messageId"`
-	Filename   string `json:"filename"`
-	StoredAs   string `json:"storedAs"`
-	MimeType   string `json:"mimeType"`
-	Size       int64  `json:"size"`
-	UploadedAt string `json:"uploadedAt"`
-	Width      *int64 `json:"width"`
-	Height     *int64 `json:"height"`
-	UploaderID *int64 `json:"uploaderId"`
+	ID         string  `json:"id"`
+	MessageID  *int64  `json:"messageId"`
+	Filename   string  `json:"filename"`
+	StoredAs   string  `json:"storedAs"`
+	MimeType   string  `json:"mimeType"`
+	Size       int64   `json:"size"`
+	UploadedAt string  `json:"uploadedAt"`
+	Width      *int64  `json:"width"`
+	Height     *int64  `json:"height"`
+	UploaderID *int64  `json:"uploaderId"`
+	DurationMs *int64  `json:"durationMs"`
+	Waveform   *string `json:"waveform"`
 }
 
 type AuditLog struct {
@@ -307,6 +309,12 @@ type MessageRoleMention struct {
 	RoleID    int64 `json:"roleId"`
 }
 
+type MessageSticker struct {
+	MessageID int64  `json:"messageId"`
+	StickerID *int64 `json:"stickerId"`
+	Name      string `json:"name"`
+}
+
 type MessagesFt struct {
 	Content string `json:"content"`
 }
@@ -511,20 +519,31 @@ type Role struct {
 }
 
 type Session struct {
-	ID        int64   `json:"id"`
-	UserID    int64   `json:"userId"`
-	Token     string  `json:"token"`
-	Device    *string `json:"device"`
-	IpAddress *string `json:"ipAddress"`
-	CreatedAt string  `json:"createdAt"`
-	LastUsed  string  `json:"lastUsed"`
-	ExpiresAt string  `json:"expiresAt"`
-	Unseen    int64   `json:"unseen"`
+	ID                int64   `json:"id"`
+	UserID            int64   `json:"userId"`
+	Token             string  `json:"token"`
+	Device            *string `json:"device"`
+	IpAddress         *string `json:"ipAddress"`
+	CreatedAt         string  `json:"createdAt"`
+	LastUsed          string  `json:"lastUsed"`
+	ExpiresAt         string  `json:"expiresAt"`
+	Unseen            int64   `json:"unseen"`
+	IdentityPublicKey *string `json:"identityPublicKey"`
 }
 
 type Setting struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+}
+
+type Sticker struct {
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	Emoji      *string `json:"emoji"`
+	Filename   string  `json:"filename"`
+	MimeType   string  `json:"mimeType"`
+	UploadedBy int64   `json:"uploadedBy"`
+	CreatedAt  string  `json:"createdAt"`
 }
 
 type ThreadMember struct {

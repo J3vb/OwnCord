@@ -392,6 +392,68 @@ func AuthorizeVoiceModerator(s Subject) error {
 	return CanModerateVoice(s)
 }
 
+// CanMoveVoice is the actor's authority to move a member out of the TARGET's
+// channel: effective MOVE_MEMBERS there (so a per-channel deny holds) and
+// READ_MESSAGES so the room is visible to the mover; a DM call additionally
+// requires the actor to be a participant. It is CanModerateVoice for the move
+// bit. Rank is deliberately not part of it: a mover may move any member.
+func CanMoveVoice(s Subject) error {
+	if s.Channel.Type == "dm" {
+		if err := dmMember(s); err != nil {
+			return err
+		}
+	}
+	if !s.Has(ReadMessages | MoveMembers) {
+		return missing(MoveMembers)
+	}
+	return nil
+}
+
+// AuthorizeVoiceMover is AuthorizeVoiceModerator for the move command: the
+// actor's BASE role must hold MOVE_MEMBERS (or Administrator) on its own, and
+// CanMoveVoice must pass in the channel. A channel-scoped allow cannot
+// manufacture move authority the base role never held. MUTE_MEMBERS no longer
+// opens a move.
+func AuthorizeVoiceMover(s Subject) error {
+	if err := VoiceMoverBase(s.RolePerms); err != nil {
+		return err
+	}
+	return CanMoveVoice(s)
+}
+
+// VoiceMoverBase is AuthorizeVoiceMover's base-role half on its own: the
+// actor's roles hold MOVE_MEMBERS (or Administrator). A caller that has not
+// resolved the channel yet uses it to know the move path is open; the
+// channel verdict still comes from AuthorizeVoiceMover on the resolved
+// subject, since READ_MESSAGES may come from a channel allow.
+func VoiceMoverBase(rolePerms int64) error {
+	if !HasServerPerm(rolePerms, MoveMembers) {
+		return missing(MoveMembers)
+	}
+	return nil
+}
+
+// CanChangeOwnerGrantOnly reports whether a principal may add or remove the
+// bits in OwnerGrantOnly on a role, or hand them out by assigning a role that
+// carries them: the owner (by role identity, see IsOwner) or an
+// Administrator. Holding MANAGE_ROLES, or the bit itself, is not enough.
+// topRoleID and topRolePosition are the principal's top role; rolePerms is the
+// OR of every role they hold.
+func CanChangeOwnerGrantOnly(rolePerms, topRoleID int64, topRolePosition int) bool {
+	return IsOwner(topRoleID, topRolePosition) || HasAdmin(rolePerms)
+}
+
+// CanManageBackups reports whether a principal may create a backup, list
+// backups and issue a backup download link (and redeem it): the owner (by role
+// identity, see IsOwner, no bit needed) or anyone whose effective roles hold
+// MANAGE_BACKUPS (an Administrator passes like for every bit). Restore,
+// delete, the full archive, the backup policy, updates, tokens and config are
+// not part of it. topRoleID and topRolePosition are the principal's top role;
+// rolePerms is the OR of every role they hold.
+func CanManageBackups(rolePerms, topRoleID int64, topRolePosition int) bool {
+	return IsOwner(topRoleID, topRolePosition) || HasServerPerm(rolePerms, ManageBackups)
+}
+
 // CanReadContent is CanViewChannel plus B5-7's NSFW consent gate: a labelled
 // channel returns no content — message bodies and metadata that carries them
 // (history, around, pins, reaction users, search hits, live and replayed

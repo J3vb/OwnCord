@@ -8,6 +8,7 @@
 // into the startup closure, so the subscription below costs no new chunk.
 import { listen } from "@tauri-apps/api/event";
 import { createLogger } from "@lib/logger";
+import { invokeOrThrow, tryInvoke } from "./nativeInvoke";
 import type { Notifier, NotifierShowOptions, NotificationTarget } from "../contracts/notifications";
 
 const log = createLogger("notifications");
@@ -37,9 +38,10 @@ export const notifier: Notifier = {
   // activation and emits `notification-click`; on Windows it shows a
   // protocol-activation toast whose click comes back as an `owncord://message`
   // deep link instead, so this event never fires there.
+  // A refusal still rejects: `lib/notifications.ts` falls back to a Web
+  // Notification on it.
   async showMessage(title: string, body: string, target: NotificationTarget): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("notify_message", {
+    await invokeOrThrow("notify_message", {
       title,
       body,
       host: target.host,
@@ -51,8 +53,7 @@ export const notifier: Notifier = {
   // DM (`owncord://channel/…` on Windows) instead of a message. A ringing
   // call's toast is tagged by its channel so `clearCall` can withdraw it.
   async showCall(title: string, body: string, target, ringing = false): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("notify_message", {
+    await invokeOrThrow("notify_message", {
       title,
       body,
       host: target.host,
@@ -61,8 +62,7 @@ export const notifier: Notifier = {
     });
   },
   async clearCall(channelId: number): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("clear_call_notification", { channelId });
+    await invokeOrThrow("clear_call_notification", { channelId });
   },
   onMessageActivated(handler: (target: NotificationTarget) => void): () => void {
     let active = true;
@@ -91,8 +91,10 @@ export const notifier: Notifier = {
   },
   // One host command draws the overlay (Windows) or launcher count (Linux,
   // macOS) and sets the tray tooltip (src-tauri/src/unread_badge.rs).
+  // A host with no badge (an older build) leaves the count unshown; nothing
+  // for the caller to do about it.
   async setUnreadBadge(count: number): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("set_unread_badge", { count });
+    const result = await tryInvoke("set_unread_badge", { count });
+    if (!result.ok) log.debug("unread badge not shown", result.error);
   },
 };

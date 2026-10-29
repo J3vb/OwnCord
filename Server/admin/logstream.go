@@ -480,12 +480,12 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 		if auth.IsEffectivelyBanned(current) {
 			return false
 		}
-		return permissions.HasAdmin(currentRole.Permissions)
+		return permissions.CanViewDiagnostics(currentRole.Permissions)
 	}
 	if !principalStillAuthorized() {
 		errResp, _ := json.Marshal(map[string]string{
 			"error":   "FORBIDDEN",
-			"message": "administrator permission required",
+			"message": "VIEW_DIAGNOSTICS permission required",
 		})
 		http.Error(w, string(errResp), http.StatusForbidden)
 		return nil, false

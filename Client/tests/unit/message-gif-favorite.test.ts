@@ -74,9 +74,10 @@ describe("star on GIFs in messages", () => {
     const star = wrap.querySelector<HTMLButtonElement>(".msg-gif-fav")!;
     const other = renderInlineImage(URL_).querySelector<HTMLButtonElement>(".msg-gif-fav")!;
     document.body.appendChild(other.parentElement!);
+    // Focus is taken while the star is still shown; a hidden one cannot take it.
+    star.focus();
     reject(new ApiClientError(404, "NOT_FOUND", "nope"));
     await flush();
-    star.focus();
     expect(star.hidden).toBe(false);
     expect(document.activeElement).toBe(star);
     star.blur();

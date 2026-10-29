@@ -3,7 +3,7 @@
 // keyring, cached per host+user scope, used to sign ephemeral announces) and
 // holds the session's ephemeral ECDH keypair. E2EEManager decides when the
 // ephemeral keypair is published or cleared; this module is where it lives.
-import { signEphemeralKey } from "../../lib/e2eeCrypto";
+import { computeKeyFingerprint, exportPublicKey, signEphemeralKey } from "../../lib/e2eeCrypto";
 import { getOrCreateIdentityKeyPair } from "../../lib/identity";
 import { authStore } from "../../stores/auth.store";
 import { createLogger } from "../../lib/logger";
@@ -80,28 +80,61 @@ export class E2EEIdentity {
     this._identityScope = null;
   }
 
+  /** Our own safety number: the fingerprint of the identity key we sign
+   *  announces with, which is what a peer sees as our safety number. Null when
+   *  no identity key is loaded (the announce went out unsigned). */
+  async safetyNumber(): Promise<string | null> {
+    const pair = this._identityKeyPair;
+    if (pair === null) return null;
+    try {
+      return await computeKeyFingerprint(pair.publicKey);
+    } catch (err) {
+      log.warn("E2EE: could not compute own safety number", err);
+      return null;
+    }
+  }
+
   /** Build the voice_e2ee_announce payload, signing the ephemeral public key
-   *  with our identity key (F3). Signing failures degrade to an unsigned
-   *  announce rather than blocking the join. */
-  async buildAnnouncePayload(
-    ephemeralPubBase64: string,
-  ): Promise<{ public_key: string; signature?: string; video_decode: readonly string[] }> {
+   *  with our identity key (F3). The payload also carries that identity key's
+   *  public half as `identity_public_key`: the `auth` frame cannot (the user id
+   *  that scopes the key only arrives in `auth_ok`, so the first connection of
+   *  an app start goes without it), while by the time we announce the user id is
+   *  known. The server prefers this key over the auth-frame one. Signing
+   *  failures degrade to an unsigned announce rather than blocking the join. */
+  async buildAnnouncePayload(ephemeralPubBase64: string): Promise<{
+    public_key: string;
+    signature?: string;
+    identity_public_key?: string;
+    video_decode: readonly string[];
+  }> {
     // Started before the key load so the load's staleness guards see the same
     // ordering as before the decode list became async.
     const decoding = localVideoDecode();
     let signature: string | undefined;
+    let identityPublicKey: string | undefined;
     try {
       const idKeyPair = await this.ensureIdentityKeyPair();
       if (idKeyPair) {
         const myUserId = authStore.getState().user?.id ?? 0;
         const ephemeralRaw = rawFromBase64(ephemeralPubBase64);
         signature = await signEphemeralKey(idKeyPair.privateKey, myUserId, ephemeralRaw);
+        // The same key that signed: a peer verifies the signature against it.
+        identityPublicKey = await exportPublicKey(idKeyPair.publicKey);
       }
     } catch (err) {
       log.error("E2EE: failed to sign announce — sending unsigned", err);
       signature = undefined;
+      identityPublicKey = undefined;
     }
     const video_decode = await decoding;
+    if (signature !== undefined && identityPublicKey !== undefined) {
+      return {
+        public_key: ephemeralPubBase64,
+        signature,
+        identity_public_key: identityPublicKey,
+        video_decode,
+      };
+    }
     if (signature !== undefined) return { public_key: ephemeralPubBase64, signature, video_decode };
     return { public_key: ephemeralPubBase64, video_decode };
   }

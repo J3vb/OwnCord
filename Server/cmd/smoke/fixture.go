@@ -587,3 +587,21 @@ func onlyIn(kind string, before, after map[string]string) []string {
 	}
 	return names
 }
+
+// getClient fetches one path from the running server with the loopback client.
+func getClient(path string) (status int, contentType, body string, err error) {
+	req, err := http.NewRequest(http.MethodGet, defaultBaseURL+path, nil) //nolint:noctx // bounded by the client Timeout
+	if err != nil {
+		return 0, "", "", err
+	}
+	resp, err := fixtureClient.Do(req)
+	if err != nil {
+		return 0, "", "", fmt.Errorf("GET %s: %w", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxClientBody))
+	if err != nil {
+		return 0, "", "", fmt.Errorf("reading GET %s: %w", path, err)
+	}
+	return resp.StatusCode, resp.Header.Get("Content-Type"), string(data), nil
+}

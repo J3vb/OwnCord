@@ -193,7 +193,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	}
 
 	h := &Hub{
-		clients:             make(map[int64]*Client),
+		clients:             make(map[int64][]*Client),
 		db:                  database,
 		limiter:             limiter,
 		settings:            opts.Settings,
@@ -235,7 +235,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		Limiter:    h.limiter,
 		LiveStatus: h.LiveStatus,
 	}
-	presenceDeps := PresenceDeps{Limiter: h.limiter}
+	presenceDeps := PresenceDeps{Limiter: h.limiter, GameActivityEnabled: h.gameActivity.on.Load}
 	reactionDeps := ReactionDeps{}
 	callDeps := CallDeps{Limiter: h.limiter}
 	if svc != nil {
@@ -291,7 +291,17 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		MessageSvc: h.messageSvc,
 		Limiter:    h.limiter,
 	})
-	registerVoiceControlsV2(reg, VoiceDeps{
+	registerVoiceControlsV2(reg, h.voiceDeps())
+
+	h.refreshSettingsLocked(context.Background())
+	h.initGameActivityPolicy()
+	return h, nil
+}
+
+// voiceDeps is the dependency set the voice command handlers are registered
+// with.
+func (h *Hub) voiceDeps() VoiceDeps {
+	return VoiceDeps{
 		Voice:       h.voice,
 		Reader:      h.readers.Dispatch,
 		Limiter:     h.limiter,
@@ -301,10 +311,8 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		TokenGen:    h, // Hub delegates to h.livekit at call time
 		KeyHolder:   h,
 		Mod:         h,
-	})
-
-	h.refreshSettingsLocked(context.Background())
-	return h, nil
+		Settings:    h.settings,
+	}
 }
 
 // maxColdReplayLimit returns the effective persisted-replay cap. The budget

@@ -9,8 +9,8 @@ import {
   platformInvokes,
   registeredCommands,
 } from "../helpers/platform-command-inventory";
+import { repoRoot } from "../helpers/repoRoot";
 
-const repoRoot = path.resolve(__dirname, "../../..");
 const clientRoot = path.join(repoRoot, "Client");
 function sources(dir: string, extension: RegExp): string[] {
   return readdirSync(dir, { recursive: true, encoding: "utf8" })

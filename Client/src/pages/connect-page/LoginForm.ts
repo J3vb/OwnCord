@@ -2,6 +2,7 @@
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
+import { isImeCommit } from "@lib/ime";
 import { createIcon } from "@lib/icons";
 import { ApiClientError, TransportError, errorText } from "@lib/api";
 import { normaliseInviteCode } from "@lib/deep-link";
@@ -265,6 +266,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // The new-username rules, shown under the field in Register only (an
   // existing account may predate them, so Login keeps the field unbounded).
   let usernameHint: LimitHint;
+  let usernameCap = 0;
   let passwordInput: HTMLInputElement;
   let inviteGroup: HTMLDivElement;
   let inviteInput: HTMLInputElement;
@@ -410,6 +412,8 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     hostInput.addEventListener(
       "input",
       () => {
+        // A typed address is a different host, and the saved password is not its.
+        clearSavedPasswordPlaceholder();
         updateRegistrationUi();
         scheduleHostSettled();
         onHostInput?.(hostInput.value.trim());
@@ -430,10 +434,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
     usernameHint = attachLimitHint(usernameInput, {
       max: MAX_USERNAME_LEN,
+      countCharacters: true,
       hint: usernameHintText(),
       id: "username-hint",
       signal,
     });
+    usernameCap = usernameInput.maxLength;
     usernameGroup.appendChild(usernameHint.el);
     applyUsernameRules();
 
@@ -690,7 +696,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     totpInput.addEventListener(
       "keydown",
       (e) => {
-        if (e.key === "Enter") {
+        if (e.key === "Enter" && !isImeCommit(e)) {
           e.preventDefault();
           void handleTotpSubmit();
         }
@@ -1036,9 +1042,13 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // Event handlers
   // ---------------------------------------------------------------------------
 
-  /** Every write of the host goes through here: a new host ends a busy retry for the old one. */
+  /** Every write of the host goes through here: a new host ends the old one's busy retry and saved password. */
   function writeHost(host: string): void {
-    if (host !== hostInput.value.trim()) cancelAuthBusyRetry?.();
+    if (host !== hostInput.value.trim()) {
+      cancelAuthBusyRetry?.();
+      // The saved password belongs to the old host's stored credential.
+      clearSavedPasswordPlaceholder();
+    }
     hostInput.value = host;
   }
 
@@ -1064,7 +1074,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     usernameHint.reset();
     // Login lifts the cap and the hint: nothing may describe the field by it.
     toggleDescribedBy(usernameInput, usernameHint.el.id, registering);
-    if (registering) usernameInput.maxLength = MAX_USERNAME_LEN;
+    if (registering) usernameInput.maxLength = usernameCap;
     else usernameInput.removeAttribute("maxlength");
   }
 

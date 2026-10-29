@@ -7,11 +7,13 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
+import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/messageKind";
 import { groupRowIcon, groupRowText } from "./groupRows";
 import { renderPinRowText } from "./pinRows";
+import { canWaveIn, renderWaveButton, welcomeGreeting } from "./welcomeRows";
 import { endForwardBlock, startForwardBlock } from "./forwardBlock";
 import { renderPollCard } from "./pollCard";
+import { renderStickerBody, stickerReplyPreview, stickerReplyText } from "./sticker";
 import { renderThreadChip } from "./threadChip";
 import { threadOfMessage } from "@stores/threads.store";
 import { connectionLockReason, messageActionGates } from "./message-actions";
@@ -20,6 +22,7 @@ import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { messagingText } from "../../i18n/messaging";
+import { stickersText } from "../../i18n/stickers";
 import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { connectText } from "../../i18n/connect";
 import { uiStore } from "@stores/ui.store";
@@ -48,6 +51,7 @@ export {
 } from "./content-parser";
 
 export { setServerHost } from "./attachments";
+import { isVoiceAttachment } from "../../features/voice-messages/player";
 
 // -- Imports for composite functions ------------------------------------------
 
@@ -65,7 +69,7 @@ import { renderMentions, renderMessageContent } from "./content-parser";
 import { markdownToPlainText } from "@lib/markdown";
 import { highlightsCurrentUser } from "@lib/mentions";
 import { readableRoleColor } from "@lib/themes";
-import { renderUrlEmbeds } from "./media";
+import { isLoneImageEmbed, renderUrlEmbeds } from "./media";
 import {
   isGalleryImage,
   renderAttachment,
@@ -274,9 +278,12 @@ function renderReplyRef(
     bar.classList.add("msg-reply-ref--blocked");
     setText(bar, messagingText("blocked.message"));
   } else if (ref) {
-    const plain = Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
-      .slice(0, 100)
-      .join("");
+    // A sticker message has no text of its own: say what it is (WP 8.8).
+    const plain =
+      stickerReplyText(ref.sticker, ref.content) ??
+      Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
+        .slice(0, 100)
+        .join("");
     // A message that is only an attachment (or only a spoiler) has no plain
     // text; show a placeholder rather than an empty preview (F24).
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
@@ -299,7 +306,9 @@ function renderReplyRef(
     const author = resolveAuthor(referenced.user);
     const roleColor = userRoleColorVar(referenced.user.id);
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
-    const plain = markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
+    const plain =
+      stickerReplyPreview(referenced.content) ??
+      markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
     appendChildren(
       bar,
       createAvatarElement(author, {
@@ -445,6 +454,40 @@ function renderPinRow(msg: Message, opts: MessageListOptions, signal: AbortSigna
   return el;
 }
 
+/**
+ * A welcome row (WP 8.6): the joiner's avatar, one greeting line picked by the
+ * row id, and a Wave button for everyone else who can post in the channel.
+ */
+function renderWelcomeRow(
+  msg: Message,
+  opts: MessageListOptions,
+  signal: AbortSignal,
+): HTMLDivElement {
+  const author = resolveAuthor(msg.user);
+  const el = createElement("div", {
+    class: "message welcome-row",
+    "data-testid": `message-${msg.id}`,
+  });
+  const avatar = createAvatarElement(author, {
+    className: "wr-avatar",
+    background: pickAvatarColor(author.username),
+    attrs: { "data-user-id": String(msg.user.id) },
+  });
+  const text = createElement("span", { class: "wr-text" });
+  setText(text, welcomeGreeting(msg.id, resolveDisplayName(author)));
+  const time = createElement(
+    "span",
+    { class: "wr-time", title: fullDateTimeTitle(msg.timestamp) },
+    formatMessageTimestamp(msg.timestamp),
+  );
+  appendChildren(el, avatar, text);
+  if (opts.onWave !== undefined && msg.user.id !== opts.currentUserId && canWaveIn(msg.channelId)) {
+    el.appendChild(renderWaveButton(msg.id, opts.onWave, signal));
+  }
+  el.appendChild(time);
+  return el;
+}
+
 /** Map a send-failure error code to a short, user-facing reason. */
 function sendErrorReason(code: string | null): string {
   switch (code) {
@@ -468,6 +511,8 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.recovered");
     case "BAD_REQUEST":
       return messagingText("send.rejected");
+    case "STICKER_NOT_FOUND":
+      return stickersText("send.notFound");
     case "UPLOAD_FAILED":
       return messagingText("send.uploadFailed");
     case "UPLOAD_CANCELLED":
@@ -477,6 +522,13 @@ function sendErrorReason(code: string | null): string {
     default:
       return messagingText("send.failed");
   }
+}
+
+/** A message that is nothing but voice messages (WP 8.9): no empty text line above the player. */
+function isVoiceOnly(msg: Message): boolean {
+  return (
+    msg.content === "" && msg.attachments.length > 0 && msg.attachments.every(isVoiceAttachment)
+  );
 }
 
 /** Append a message's attachments. Its inline images form one lightbox
@@ -557,6 +609,7 @@ export function renderMessage(
       return renderCallRow(msg, msg.call, opts, signal);
     }
     if (isPinRowKind(msg.kind)) return renderPinRow(msg, opts, signal);
+    if (isWelcomeRowKind(msg.kind)) return renderWelcomeRow(msg, opts, signal);
     const groupText = groupRowText(msg, opts.currentUserId);
     if (groupText !== null) return renderGroupRow(msg, groupText);
     const fallback = renderSystemMessage(msg);
@@ -672,6 +725,14 @@ export function renderMessage(
     if (msg.reactions.length > 0) {
       el.appendChild(renderReactions(msg, opts, signal));
     }
+  } else if (msg.sticker !== undefined) {
+    // A sticker stands alone (WP 8.8): the server's "[Sticker: name]" fallback
+    // is for clients that predate stickers. It has no files or embeds, and
+    // reactions stay.
+    el.appendChild(renderStickerBody(msg.sticker, signal));
+    if (msg.reactions.length > 0) {
+      el.appendChild(renderReactions(msg, opts, signal));
+    }
   } else {
     // Key the parse cache by the message's identity plus its edit stamp: an
     // unchanged message reuses its parse when a row is re-materialised, and an
@@ -688,7 +749,13 @@ export function renderMessage(
       wrap.style.display = "contents";
       wrap.appendChild(body);
       box.appendChild(wrap);
-    } else box.appendChild(body);
+    } else if (isLoneImageEmbed(msg.content)) {
+      // The image stands in for its link; the text comes back if the embed goes.
+      const wrap = createElement("div", { "data-lone-image-text": "" });
+      wrap.hidden = true;
+      wrap.appendChild(body);
+      box.appendChild(wrap);
+    } else if (!isVoiceOnly(msg)) box.appendChild(body);
     if (msg.editedAt !== null) {
       box.appendChild(
         createElement(

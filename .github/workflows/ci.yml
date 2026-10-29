@@ -872,6 +872,12 @@ jobs:
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
 
+      - name: Self-test the findings-ledger merge driver
+        run: node --test scripts/merge-ledger.test.mjs
+
+      - name: Self-test the PR advisory diff
+        run: node --test scripts/osv-pr-diff.test.mjs
+
       - name: Self-test the CI cost report
         run: node --test scripts/ci-cost-report.test.mjs
 
@@ -1050,9 +1056,13 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       # Every lockfile in the repository, named rather than globbed: a new
-      # component's lockfile must be added here and to scripts/ci-select.mjs's
-      # DEPS_FILES, so it cannot be silently unscanned.
+      # component's lockfile must be added here, to scripts/ci-select.mjs's
+      # DEPS_FILES and to scripts/osv-pr-diff.mjs's LOCKFILES, so it cannot be
+      # silently unscanned. On a PR this step only warns and the next one
+      # decides; on a push it is the verdict.
       - name: Scan the dependency manifests (osv-scanner)
+        id: osv
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: |
           osv-scanner scan source --config osv-scanner.toml \
             -L Server/go.mod \
@@ -1060,6 +1070,17 @@ jobs:
             -L Client/src-tauri/Cargo.lock \
             -L tools/mcp-introspect/package-lock.json \
             -L package-lock.json
+
+      # A PR fails only on advisories its own lockfile changes bring in: one
+      # already on the base commit is dev's to fix (daily dev scan, dev's push
+      # run), not every PR's that happens to touch a lockfile.
+      - name: Fail a PR only on advisories it introduces
+        if: ${{ github.event_name == 'pull_request' && steps.osv.outcome == 'failure' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          node scripts/osv-pr-diff.mjs "$BASE_SHA"
 
       # cargo-deny reads the resolved graph through `cargo metadata`, so cargo
       # has to be on PATH. Pinned the same way rust-tests pins it.
@@ -1143,7 +1164,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    # A PR into main restores no dev Rust cache and compiles every crate cold
+    # (over 30 min); a warm dev run takes about 12.
+    timeout-minutes: 50
     defaults:
       run:
         working-directory: Client/src-tauri/
@@ -1199,7 +1222,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Rust cache
-        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: Client/src-tauri
           # webrtc-sys build.rs does not rerun on CUDA_HOME; keep a target/ built
@@ -1545,7 +1568,7 @@ jobs:
           components: clippy
 
       - name: Rust cache
-        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: Client/src-tauri
           # webrtc-sys build.rs does not rerun on CUDA_HOME; keep a target/ built
@@ -1671,6 +1694,12 @@ jobs:
         uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
       - name: Test the web portal against a real server
         run: npm run test:e2e:web
+      # The binary that run built has the web bundle embedded and is still on
+      # disk. Release smokes the shipped assets the same way, so this exercises
+      # the -browser-client path before a tag does.
+      - name: Smoke the web-embedded server binary
+        working-directory: Server/
+        run: go run ./cmd/smoke -browser-client ../Client/tests/e2e/.bin/chatserver
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
@@ -1707,7 +1736,7 @@ jobs:
       - name: Check resolved Tauri npm and Rust versions
         run: node ../scripts/check-tauri-versions.mjs
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: Client/src-tauri
           cache-on-failure: true
@@ -1828,3 +1857,63 @@ jobs:
             fi
             echo "$d refused Node 24: $(grep -m1 EBADENGINE <<<"$out")"
           done
+
+  # A failed job gets one automatic re-run (@J3vb, 2026-10-27): a test that
+  # fails once and passes on its in-job retry still fails its job
+  # (failOnFlakyTests), and a lane used to lose a cycle re-running it by hand.
+  # A run cannot re-run itself while it is still in progress, so this job only
+  # asks ci-rerun.yml to do it once the run has finished. Only the first
+  # attempt asks, so a job that fails again stays red. Only PRs from this
+  # repository and pushes to dev: a fork's or Dependabot's token cannot
+  # dispatch, and main's runs are release evidence that should show the first
+  # result. `needs` lists every other job in this file; add a new one there.
+  retry-failed:
+    name: Re-run failed jobs once
+    needs:
+      - changes
+      - server-fast-checks
+      - server-build-test
+      - client-check
+      - docs-consistency
+      - hygiene
+      - workflow-lint
+      - supply-chain
+      - client-tests
+      - rust-tests
+      - client-e2e
+      - admin-e2e
+      - client-e2e-parity
+      - server-docker-build
+      - tauri-build
+      - client-fullstack
+      - client-web
+      - client-native
+      - node-policy
+    if: >-
+      ${{ always() && github.run_attempt == 1
+      && contains(needs.*.result, 'failure')
+      && github.actor != 'dependabot[bot]'
+      && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+      || (github.event_name == 'push' && github.ref == 'refs/heads/dev')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Ask ci-rerun.yml to re-run this run's failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        # GitHub only dispatches a workflow file the default branch (main)
+        # carries, so until a release brings ci-rerun.yml to main this is a
+        # notice, not a failure.
+        run: |
+          if out=$(gh workflow run ci-rerun.yml --repo "$REPO" --ref dev -f run_id="$RUN_ID" 2>&1); then
+            echo "$out"
+          elif grep -q "not found on the default branch" <<<"$out"; then
+            echo "::notice::ci-rerun.yml is not on the default branch yet; failed jobs are not re-run automatically"
+          else
+            echo "$out"
+            exit 1
+          fi

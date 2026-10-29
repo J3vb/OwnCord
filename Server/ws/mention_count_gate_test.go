@@ -93,9 +93,9 @@ func TestNotifyMentionCount_SkipsReaderWhoLostChannelAccess(t *testing.T) {
 
 	bobSend := make(chan []byte, 16)
 	carolSend := make(chan []byte, 16)
-	hub.clients[author.ID] = NewTestClient(hub, author.ID, make(chan []byte, 16))
-	hub.clients[bob.ID] = NewTestClient(hub, bob.ID, bobSend)
-	hub.clients[carol.ID] = NewTestClient(hub, carol.ID, carolSend)
+	hub.clients[author.ID] = []*Client{NewTestClient(hub, author.ID, make(chan []byte, 16))}
+	hub.clients[bob.ID] = []*Client{NewTestClient(hub, bob.ID, bobSend)}
+	hub.clients[carol.ID] = []*Client{NewTestClient(hub, carol.ID, carolSend)}
 
 	res, err := svc.Messages.SendMessage(ctx, service.SendMessageParams{
 		ChannelID: chID, UserID: author.ID, Username: "gate-author", RoleName: "member",

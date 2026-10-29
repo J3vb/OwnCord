@@ -2,6 +2,7 @@
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { buildCustomEmojiNode } from "@components/message-list/custom-emoji";
@@ -376,7 +377,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     "keydown",
     (e) => {
       if (e.key !== "Enter") return;
-      if (e.isComposing || e.keyCode === 229) return;
+      if (isImeCommit(e)) return;
       const first = scrollArea.querySelector<HTMLElement>(".ep-emoji");
       if (first === null) return;
       e.preventDefault();
@@ -390,7 +391,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   root.addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !isImeCommit(e)) {
         e.preventDefault();
         options.onClose();
       }

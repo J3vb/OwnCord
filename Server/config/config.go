@@ -204,7 +204,7 @@ type VoiceConfig struct {
 	// default stays false so existing configs keep their behaviour.
 	AutoDownloadLiveKit bool `yaml:"auto_download_livekit"`
 	// LiveKitVersion overrides the pinned livekit-server release version used
-	// by auto-download (e.g. "1.13.7"). Empty = the built-in pin.
+	// by auto-download (e.g. "1.13.10"). Empty = the built-in pin.
 	LiveKitVersion string `yaml:"livekit_version"`
 	NodeIP         string `yaml:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
 	// AdvertiseInternalIP makes LiveKit advertise internal (LAN) host candidates
@@ -234,8 +234,9 @@ type ServerConfig struct {
 	// BrowserClientEnabled is the owner opt-in for hosting the browser
 	// client from this server (BG-01, 6.13). It is false by default, and off
 	// nothing is mounted at / or /assets/*. On, the server serves the bundle
-	// embedded in its binary (Server/webclient) with its own CSP; a build that
-	// carries only the placeholder answers GET / with a 404 note.
+	// embedded in its binary (Server/webclient) with its own CSP. Release
+	// builds carry the bundle; a plain `go build` without it carries only the
+	// placeholder and answers GET / with a 404 note.
 	// Server/api/browser_hosting_posture_test.go proves both states.
 	BrowserClientEnabled bool `yaml:"browser_client_enabled"`
 	// ReachabilityReportEnabled is the owner opt-in for the `reachability`
@@ -555,8 +556,9 @@ server:
   # pprof_mutex_profile_fraction: 5        # sample 1 in N contended mutex events
   #                           # when pprof is on (0 disables).
   # browser_client_enabled: false  # host the browser client from this server.
-  #                           # Owner opt-in, off by default. Builds without the
-  #                           # browser bundle answer GET / with a 404 note.
+  #                           # Owner opt-in, off by default. Release builds carry
+  #                           # the browser bundle; a build from source without it
+  #                           # answers GET / with a 404 note.
   # reachability_report_enabled: false
   #                           # add a "reachability" block to the admin-only
   #                           # GET /api/v1/diagnostics/connectivity: this host's
@@ -622,7 +624,7 @@ voice:
   auto_download_livekit: true # download and run livekit-server automatically when
                               # no livekit_binary is set (verified against the
                               # official LiveKit release checksums; stored in data/livekit/)
-  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.7")
+  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.10")
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)

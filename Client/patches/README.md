@@ -61,7 +61,7 @@ those tests, and the native HTTP cancellation scenario, when you upgrade the
 plugin. Remove this patch when an upstream npm release passes both without
 local changes. Update the npm and Rust lockfiles together.
 
-## `livekit-client` 2.22.3
+## `livekit-client` 2.23.0
 
 **The problem.** The E2EE worker acknowledges every `enable` message. The
 manager then looks up the participant by identity to report its encryption
@@ -77,7 +77,8 @@ as before.
 
 Only `dist/livekit-client.esm.mjs` is patched. Vite and vitest resolve the
 package's `import` condition, and the `require` entry is not bundled. The
-package is pinned to 2.22.3 for the same install check described above.
+package is pinned to 2.23.0 for the same install check described above. 2.23.0
+still throws there, so the patch was carried forward unchanged.
 
 **Regenerating.** After you edit the installed file, regenerate the patch from
 `Client/`:

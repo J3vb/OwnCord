@@ -4,10 +4,12 @@
  * copy load with the main page instead of the startup chunk.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import { buildRow } from "./CertMismatchModal";
 import { shellText } from "../i18n/shell";
@@ -99,20 +101,14 @@ export function createIdentityMismatchModal(
     appendChildren(modal, header, body, footer);
     overlay.appendChild(modal);
 
-    overlay.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === overlay) onReject();
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(overlay, () => onReject(), disposable.signal);
 
     // Escape rejects (Cancel) — the fail-closed default: dismissing the
     // prompt must never re-pin the new identity key.
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && overlay?.isConnected === true) onReject();
+        if (e.key === "Escape" && !isImeCommit(e) && overlay?.isConnected === true) onReject();
       },
       { signal: disposable.signal },
     );

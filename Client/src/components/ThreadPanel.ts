@@ -16,6 +16,7 @@
  * closure.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
@@ -68,6 +69,8 @@ import type { MessageController } from "../pages/main-page/MessageController";
 import { messagingText } from "../i18n/messaging";
 import { shellText } from "../i18n/shell";
 import { threadsText } from "../i18n/threads";
+import { stickersText } from "../i18n/stickers";
+import { findSticker } from "@stores/stickers.store";
 
 export interface ThreadPanelOptions {
   readonly ws: WsClient;
@@ -92,6 +95,8 @@ interface SendDraft {
   readonly replyTo: number | null;
   readonly replyPing: boolean;
   readonly clientMessageId: string | undefined;
+  /** A sticker send (WP 8.8), kept so a retry posts the same sticker. */
+  readonly sticker?: { readonly id: number; readonly name: string };
 }
 
 const userId = (): number => authStore.getState().user?.id ?? 0;
@@ -217,7 +222,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   renameInput.addEventListener(
     "keydown",
     (e) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !isImeCommit(e)) {
         e.stopPropagation();
         endRename();
       }
@@ -432,6 +437,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     replyTo: number | null,
     replyPing: boolean,
     existingClientMessageId?: string,
+    sticker?: { readonly id: number; readonly name: string },
   ): void {
     const user = currentUser();
     if (user === null || signal.aborted) return;
@@ -441,8 +447,24 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       (supportsMessageDeduplication(owner)
         ? newClientMessageId(pendingMessageRetryFloor(owner))
         : undefined);
+    // A sticker send commits with its receipt, so the server requires the id.
+    if (sticker !== undefined && clientMessageId === undefined) {
+      showToast(stickersText("send.unsupported"), "error");
+      return;
+    }
     const timestamp = new Date().toISOString();
-    const draft: SendDraft = { content, replyTo, replyPing, clientMessageId };
+    const draft: SendDraft = {
+      content,
+      replyTo,
+      replyPing,
+      clientMessageId,
+      ...(sticker === undefined ? {} : { sticker }),
+    };
+    const live = sticker === undefined ? null : findSticker(sticker.id);
+    const row = {
+      content: sticker === undefined ? content : `[Sticker: ${sticker.name}]`,
+      ...(live === null ? {} : { sticker: { id: live.id, name: live.name, url: live.url } }),
+    };
     if (uiStore.getState().connectionStatus !== "connected") {
       const cid = crypto.randomUUID();
       addOptimisticMessage({
@@ -450,7 +472,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
         clientMessageId,
         channelId: threadId,
         user,
-        content,
+        ...row,
         replyTo,
         timestamp,
       });
@@ -462,7 +484,8 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       type: "chat_send",
       payload: {
         channel_id: threadId,
-        content,
+        content: sticker === undefined ? content : "",
+        ...(sticker === undefined ? {} : { sticker_id: sticker.id }),
         reply_to: replyTo,
         ...(replyTo === null ? {} : { reply_ping: replyPing }),
         attachments: [],
@@ -474,7 +497,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       clientMessageId,
       channelId: threadId,
       user,
-      content,
+      ...row,
       replyTo,
       timestamp,
     });
@@ -486,7 +509,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     if (draft === undefined) return;
     drafts.delete(correlationId);
     removeOptimistic(correlationId);
-    sendText(draft.content, draft.replyTo, draft.replyPing, draft.clientMessageId);
+    sendText(draft.content, draft.replyTo, draft.replyPing, draft.clientMessageId, draft.sticker);
   }
 
   // ── Composer state ────────────────────────────────────────────────────────
@@ -637,6 +660,9 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       gifApi: api,
       onSend: (content, replyTo, _attachments, _files, replyPing) => {
         sendText(content, replyTo, replyPing);
+      },
+      onSendSticker: (sticker, replyTo, replyPing) => {
+        sendText("", replyTo, replyPing, undefined, sticker);
       },
       onTyping: () => {},
       placeholder: threadsText("composer.placeholder"),

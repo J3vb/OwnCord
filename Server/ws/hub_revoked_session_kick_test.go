@@ -40,7 +40,7 @@ func TestDisconnectIfSessionRevoked_KicksOnlyARevokedSessionsSocket(t *testing.T
 	}
 
 	// The socket rides the kept session: it stays.
-	h.clients[uid] = newClient(h, nil, &db.User{ID: uid, Username: "changer"}, "hash-kept", 0, ctx)
+	h.clients[uid] = []*Client{newClient(h, nil, &db.User{ID: uid, Username: "changer"}, "hash-kept", 0, ctx)}
 	if _, err := database.DeleteOtherSessions(ctx, uid, keep); err != nil {
 		t.Fatalf("DeleteOtherSessions: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestDisconnectIfSessionRevoked_KicksOnlyARevokedSessionsSocket(t *testing.T
 	}
 
 	// The socket rides a revoked session: it goes now, not at the next sweep.
-	h.clients[uid] = newClient(h, nil, &db.User{ID: uid, Username: "changer"}, "hash-other", 0, ctx)
+	h.clients[uid] = []*Client{newClient(h, nil, &db.User{ID: uid, Username: "changer"}, "hash-other", 0, ctx)}
 	h.DisconnectIfSessionRevoked(uid)
 	if connected() {
 		t.Fatal("the socket on a revoked session is still connected")

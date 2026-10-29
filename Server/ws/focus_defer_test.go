@@ -60,7 +60,7 @@ func newFocusHub(t *testing.T, n int) (*Hub, *Client, []int64, context.CancelFun
 }
 
 func subscribed(h *Hub, c *Client, ch int64) bool {
-	for _, tp := range h.pubsub.TopicsForClient(c.userID) {
+	for _, tp := range h.pubsub.TopicsForUser(c.userID) {
 		if tp == ChannelTopic(ch) {
 			return true
 		}

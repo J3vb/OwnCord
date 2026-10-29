@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
@@ -34,6 +33,9 @@ type uploadResponse struct {
 	URL      string `json:"url"`
 	Width    *int   `json:"width,omitempty"`
 	Height   *int   `json:"height,omitempty"`
+	// DurationMs and Waveform are set only for a voice upload (WP 8.9).
+	DurationMs int    `json:"duration_ms,omitempty"`
+	Waveform   string `json:"waveform,omitempty"`
 }
 
 // sanitizeUploadFilename cleans an upload filename: strips control and
@@ -101,12 +103,26 @@ func isUnsafeInlineMIME(mimeType string) bool {
 	return false
 }
 
-// sniffMIME is http.DetectContentType plus QuickTime, which the WHATWG sniffing
+// sniffMIME is http.DetectContentType plus QuickTime and 3GPP, which the WHATWG sniffing
 // table it follows leaves out: a .mov whose ftyp box names the "qt  " brand
 // would otherwise be stored as application/octet-stream and never play inline.
+// It also names HEIC/HEIF and TIFF, which the table does not know and which the
+// thumbnail route previews as JPEG.
 func sniffMIME(header []byte) string {
 	if len(header) >= 12 && string(header[4:12]) == "ftypqt  " {
 		return "video/quicktime"
+	}
+	// 3GPP and 3GPP2 clips carry a "3gp*" / "3g2*" major brand, which the
+	// WHATWG table does not know either.
+	if len(header) >= 12 && string(header[4:8]) == "ftyp" &&
+		(string(header[8:11]) == "3gp" || string(header[8:11]) == "3g2") {
+		return "video/3gpp"
+	}
+	if m := sniffISOBMFFImage(header); m != "" {
+		return m
+	}
+	if sniffTIFF(header) {
+		return mimeTIFF
 	}
 	return http.DetectContentType(header)
 }
@@ -178,7 +194,12 @@ func MountUploadRoutes(r chi.Router, sessions *service.SessionService, store Fil
 	// The uploader withdraws a file it staged and never sent.
 	r.With(AuthMiddleware(sessions)).Delete("/api/v1/uploads/{id}", handleDiscardUpload(uploads, store))
 	// File serving requires authentication for channel-level access control.
-	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
+	// A <video> element cannot send a header, so this one route also accepts a
+	// short-lived file link minted below (file_link.go); a thumbnail does not.
+	links := newFileLinks()
+	r.With(fileLinkAuth(sessions, links)).Get("/api/v1/files/{id}", handleServeFile(uploads, store, allowedOrigins))
+	// Mints the link for the caller, under the same access rule as the download.
+	r.With(AuthMiddleware(sessions)).Post("/api/v1/files/{id}/link", handleIssueFileLink(uploads, links, limiter))
 	// A bounded preview of an image file, under the same access rule (P4-08).
 	r.With(AuthMiddleware(sessions)).Get("/api/v1/files/{id}/thumb", handleServeThumb(uploads, store, allowedOrigins))
 }
@@ -229,6 +250,14 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 		defer slots.release(user.ID)
+
+		// WP 8.9: the voice pair is validated before any quota is reserved and
+		// before a byte of the body is read.
+		voice, err := parseVoiceMeta(r.URL.Query())
+		if err != nil {
+			writeVoiceParamError(w, err)
+			return
+		}
 
 		// SRV-05: the server's global 30 s ReadTimeout/WriteTimeout bound the
 		// WHOLE request, so a 25 MB upload on a slow uplink is cut mid-body
@@ -299,6 +328,9 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		if !ok {
 			return
 		}
+		if !voice.checkStored(w, store, stored) {
+			return
+		}
 
 		// Drain the rest of the body: the tail meets the body cap and the
 		// multipart parser too, so a padded or malformed tail refuses the
@@ -313,15 +345,8 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 
 		// Record the attachment (unlinked — message_id is NULL) and commit
 		// the reservation under the same lock.
-		if err := uploads.Record(r.Context(), service.AttachmentRecord{
-			ID:         stored.id,
-			UploaderID: user.ID,
-			Filename:   safeFilename,
-			MimeType:   stored.mime,
-			Size:       stored.size,
-			Width:      stored.width,
-			Height:     stored.height,
-		}, res); err != nil {
+		rec := voice.record(user.ID, safeFilename, stored)
+		if err := uploads.Record(r.Context(), rec, res); err != nil {
 			// Clean up stored file on DB failure; Settle returns the charge.
 			if delErr := store.Delete(stored.id); delErr != nil {
 				slog.Error("failed to clean up orphaned upload file", "stored_as", stored.id, "error", delErr)
@@ -334,13 +359,15 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		slog.Info("file uploaded", "id", stored.id, "filename", safeFilename, "size", stored.size, "mime", stored.mime)
 
 		writeJSON(w, http.StatusCreated, uploadResponse{
-			ID:       stored.id,
-			Filename: safeFilename,
-			Size:     stored.size,
-			Mime:     stored.mime,
-			URL:      "/api/v1/files/" + stored.id,
-			Width:    stored.width,
-			Height:   stored.height,
+			ID:         stored.id,
+			Filename:   safeFilename,
+			Size:       stored.size,
+			Mime:       stored.mime,
+			URL:        "/api/v1/files/" + stored.id,
+			Width:      stored.width,
+			Height:     stored.height,
+			DurationMs: voice.durationMs,
+			Waveform:   voice.waveform,
 		})
 	}
 }
@@ -443,22 +470,18 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 		return storedUpload{}, false
 	}
 
-	// Extract image dimensions if the file is an image.
-	var width, height *int
-	if strings.HasPrefix(mime, "image/") {
-		f, openErr := store.Open(fileID)
-		if openErr == nil {
-			cfg, _, decErr := image.DecodeConfig(f)
-			f.Close() //nolint:errcheck
-			if decErr == nil {
-				w2, h2 := cfg.Width, cfg.Height
-				width = &w2
-				height = &h2
-			} else {
-				slog.Warn("failed to decode image dimensions", "id", fileID, "error", decErr)
-			}
-		}
-	}
-
+	// A TIFF-structured camera RAW is a download; an image gets its upright size.
+	mime, width, height := inspectStoredImage(store, fileID, mime)
 	return storedUpload{id: fileID, mime: mime, size: writtenBytes, width: width, height: height}, true
+}
+
+// jpegSidewaysOnDisk reports whether f's EXIF orientation (5-8) turns the
+// stored image a quarter turn, so the upright size swaps width and height,
+// as the thumbnail route and browsers display it.
+func jpegSidewaysOnDisk(f io.ReadSeeker) bool {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	o, _ := jpegHeader(f)
+	return o >= 5 && o <= 8
 }

@@ -231,6 +231,44 @@ func TestForward_CopiesSnapshotAndFilesToTheForwarder(t *testing.T) {
 	}
 }
 
+// A forwarded voice message keeps its length and waveform, so the copy still
+// draws the voice player (WP 8.9).
+func TestForward_VoiceMessageKeepsDurationAndWaveform(t *testing.T) {
+	f := newForwardFixture(t, nil)
+	ctx := context.Background()
+	fileID := uuid.NewString()
+	body := "OggS-voice-bytes"
+	if _, err := f.files.Save(fileID, strings.NewReader(body)); err != nil {
+		t.Fatal(err)
+	}
+	dur, wave := 2500, "AAH_gA"
+	if err := f.database.CreateAttachmentVoice(ctx, fileID, fwdAlice, "voice-message.ogg", fileID, "application/ogg", int64(len(body)), nil, nil, &dur, &wave); err != nil {
+		t.Fatal(err)
+	}
+	src, err := f.svc.SendMessage(ctx, SendMessageParams{
+		ChannelID: fwdSrcChan, UserID: fwdAlice, Username: seedUsername(fwdAlice), AttachmentIDs: []string{fileID},
+	})
+	if err != nil {
+		t.Fatalf("seed send: %v", err)
+	}
+
+	res := mustForward(t, f, fwdDstChan, src.MessageID)
+	if len(res.Attachments) != 1 {
+		t.Fatalf("attachments = %+v, want one clone", res.Attachments)
+	}
+	got := res.Attachments[0]
+	if got.ID == fileID || got.DurationMs == nil || *got.DurationMs != dur || got.Waveform == nil || *got.Waveform != wave {
+		t.Fatalf("forwarded attachment = %+v, want a clone with duration %d and waveform %q", got, dur, wave)
+	}
+	hist, err := f.database.GetMessagesForAPI(ctx, fwdDstChan, 0, 10, fwdBob)
+	if err != nil || len(hist) != 1 || len(hist[0].Attachments) != 1 {
+		t.Fatalf("history = %+v, %v", hist, err)
+	}
+	if a := hist[0].Attachments[0]; a.DurationMs == nil || *a.DurationMs != dur || a.Waveform == nil || *a.Waveform != wave {
+		t.Fatalf("history attachment = %+v, want duration %d and waveform %q", a, dur, wave)
+	}
+}
+
 // Edge case 1: the acknowledgement is lost and the client resends. The retry
 // is answered from the receipt: one message, one clone, and it still works
 // after the world changed (the original deleted, the forwarder locked out).

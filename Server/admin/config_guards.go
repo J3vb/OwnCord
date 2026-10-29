@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -118,21 +119,34 @@ func guardTLS(w http.ResponseWriter, g guardContext) bool {
 }
 
 func guardManualTLS(w http.ResponseWriter, g guardContext) bool {
-	cert, err := tls.LoadX509KeyPair(g.next.TLS.CertFile, g.next.TLS.KeyFile)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file/tls.key_file: the pair does not load")
-		return false
-	}
-	if len(cert.Certificate) == 0 {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file does not hold a certificate")
-		return false
-	}
-	leaf, err := x509.ParseCertificate(cert.Certificate[0])
-	if err != nil || time.Now().After(leaf.NotAfter) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tls.cert_file: the certificate is unreadable or expired")
+	if err := manualTLSPairError(g.next.TLS.CertFile, g.next.TLS.KeyFile); err != nil {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return false
 	}
 	return true
+}
+
+var (
+	errManualPairNoLoad  = errors.New("tls.cert_file/tls.key_file: the pair does not load")
+	errManualPairNoCert  = errors.New("tls.cert_file does not hold a certificate")
+	errManualPairExpired = errors.New("tls.cert_file: the certificate is unreadable or expired")
+)
+
+// manualTLSPairError reports why a manual-mode pair could not serve TLS at
+// the next boot, or nil when it loads and its certificate is current.
+func manualTLSPairError(certFile, keyFile string) error {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return errManualPairNoLoad
+	}
+	if len(cert.Certificate) == 0 {
+		return errManualPairNoCert
+	}
+	leaf, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil || time.Now().After(leaf.NotAfter) {
+		return errManualPairExpired
+	}
+	return nil
 }
 
 func guardAcmeTLS(w http.ResponseWriter, g guardContext) bool {

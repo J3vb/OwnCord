@@ -66,6 +66,11 @@ type AttachmentRecord struct {
 	Size int64
 	// Width and Height are the image dimensions, nil for a non-image.
 	Width, Height *int
+	// DurationMs and Waveform are set only for a voice message (WP 8.9): the
+	// clip length in milliseconds and the canonical base64url (unpadded)
+	// encoding of its amplitude bytes. Both nil, or both set.
+	DurationMs *int
+	Waveform   *string
 }
 
 // Record inserts the attachment row for a stored file. The row is unlinked
@@ -83,8 +88,8 @@ type AttachmentRecord struct {
 func (s *UploadService) Record(ctx context.Context, rec AttachmentRecord, res *StorageReservation) error {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()
-	if err := s.st.CreateAttachment(ctx, rec.ID, rec.UploaderID, rec.Filename,
-		rec.ID, rec.MimeType, rec.Size, rec.Width, rec.Height); err != nil {
+	if err := s.st.CreateAttachmentVoice(ctx, rec.ID, rec.UploaderID, rec.Filename,
+		rec.ID, rec.MimeType, rec.Size, rec.Width, rec.Height, rec.DurationMs, rec.Waveform); err != nil {
 		return fmt.Errorf("%w: failed to save attachment: %w", ErrInternal, err)
 	}
 	if res != nil {

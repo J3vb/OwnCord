@@ -12,6 +12,7 @@ import {
   setLocalDeafened,
   setListenOnly,
   setShareDenied,
+  bumpLocalCameraRev,
 } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/audioPipeline";
@@ -19,7 +20,9 @@ import type { AudioElements } from "../../lib/audioElements";
 import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
 import { voiceText } from "../../i18n/voice";
 import { CodecSwitchController } from "./codecSwitch";
-import { CameraSwitchUnavailable } from "./cameraSwitch";
+import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
+import { setH264GpuProfiles } from "../../lib/h264Profile";
+import { h264GpuPublish } from "./videoCodec";
 import { savePref } from "../../lib/preferences";
 import {
   type VideoTrackDeps,
@@ -278,6 +281,7 @@ export class MediaControl {
         }
         setListenOnly(true);
         setLocalMuted(true);
+        this.announceFallbackMute();
         log.warn("Mic re-publish failed — falling back to listen-only/muted", err);
         this.onErrorCallback?.(voiceText("mic.unavailableMuted"));
         return;
@@ -285,8 +289,21 @@ export class MediaControl {
     }
   }
 
+  /** The unmute toggle already sent voice_mute{muted:false}; restate the
+   *  fallback's mute so the server row and every peer's roster match. */
+  private announceFallbackMute(): void {
+    const ws = this.ws;
+    if (ws === null || ws.getState() !== "connected") return;
+    if (this._currentChannelId === null) return;
+    ws.send({ type: "voice_mute", payload: { muted: true } });
+  }
+
   async enableCamera(): Promise<void> {
-    await doEnableCamera(this._cameraState, this._videoTrackDeps);
+    await this.startCamera(this._videoTrackDeps);
+  }
+
+  private async startCamera(deps: VideoTrackDeps): Promise<void> {
+    await doEnableCamera(this._cameraState, deps);
     // A viewer may have joined while the enable was in flight.
     this.codecSwitch.kick();
   }
@@ -373,13 +390,45 @@ export class MediaControl {
     // An enable that read the choice just before this pick starts on the old
     // device; picking again moves it.
     if (track === null) return;
+    // The device the live camera runs on (the native track knows it).
+    const previous = "device" in track ? track.device : null;
+    // The pick is unusable and the live camera stays: keep using its device.
+    const keepPrevious = (): void => {
+      if (previous === null || this.latestVideoDevice !== deviceId) return;
+      savePref("videoInputDevice", previous);
+      this.latestVideoDevice = previous;
+    };
     // The restart path: stop, start on the saved device, republish.
     const restartCameraOn = async (): Promise<boolean> => {
       const generation = state.generation ?? 0;
-      await this.enableCamera();
+      const failed = (): boolean =>
+        state.manualCameraTrack === null && (state.generation ?? 0) === generation;
+      if (previous === null) {
+        await this.enableCamera();
+      } else {
+        // Hold the failure message: the previous camera may still come back.
+        const held: string[] = [];
+        await this.startCamera({ ...this._videoTrackDeps, onError: (msg) => held.push(msg) });
+        if (failed()) {
+          log.warn("Camera restart on the picked device failed, starting the previous one");
+          const back = this.latestVideoDevice === deviceId;
+          const newer = this.latestVideoDevice;
+          // Start on the previous device. A pick made meanwhile stays the
+          // saved choice and its queued switch moves the camera on from here.
+          savePref("videoInputDevice", previous);
+          await this.enableCamera();
+          if (back) keepPrevious();
+          else if (newer !== null) savePref("videoInputDevice", newer);
+          if (!failed() && back) {
+            this.onErrorCallback?.(voiceText("share.cameraSwitchFailed"));
+          }
+        } else {
+          for (const msg of held) this.onErrorCallback?.(msg);
+        }
+      }
       // A failed restart already said so, but the server still has the
       // camera on: tell it the camera is off.
-      if (state.manualCameraTrack === null && (state.generation ?? 0) === generation) {
+      if (failed()) {
         await this.disableCamera();
         return false;
       }
@@ -393,21 +442,35 @@ export class MediaControl {
             log.warn("Camera restarted on another device than the one picked");
           }
         } catch (err) {
+          if (err instanceof CameraDeviceUnusable) {
+            log.warn("Picked camera gave no picture, keeping the live one", err);
+            // A newer pick queued meanwhile moves the camera on: no message.
+            if (this.latestVideoDevice !== deviceId) return;
+            keepPrevious();
+            this.onErrorCallback?.(voiceText("share.cameraSwitchFailed"));
+            return;
+          }
           if (!(err instanceof CameraSwitchUnavailable)) throw err;
           // The in-place switch could not run and the old camera still
           // publishes: restart on the new device instead.
           log.info("In-place camera switch unavailable, restarting", err);
           if (!(await restartCameraOn())) return;
+          bumpLocalCameraRev();
           log.info("Camera device switched");
           return;
         }
-        // The restart swaps the capture: unplug detection moves with it.
+        // The restart swaps the capture: unplug detection and the H.264
+        // profiles a reconnect would republish with move with it.
         const now = track.mediaStreamTrack;
+        if (now !== before) setH264GpuProfiles(now, h264GpuPublish(state.published ?? "vp8"));
         if (now !== before && state.manualCameraTrack === track && state.onCameraEnded) {
           now.addEventListener("ended", state.onCameraEnded, { once: true });
         }
-      } else if (!(await restartCameraOn())) {
-        return;
+        // The self tile holds the stopped capture: have it drawn again.
+        if (now !== before && state.manualCameraTrack === track) bumpLocalCameraRev();
+      } else {
+        if (!(await restartCameraOn())) return;
+        bumpLocalCameraRev();
       }
       log.info("Camera device switched");
     } catch (err) {

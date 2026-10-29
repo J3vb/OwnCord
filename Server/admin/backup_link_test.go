@@ -121,15 +121,17 @@ func TestBackupLink_BoundToOneFile(t *testing.T) {
 }
 
 // TestBackupLink_NonOwnerRefused: backups hold every account's password hash,
-// so a link is owner-only, the same as restore.
+// so a link is for the owner or a MANAGE_BACKUPS holder (WP 8.4c). A role with
+// the server and role powers but not that bit is refused; an Administrator
+// passes like for every bit (TestManageBackups_HolderCanCreateListAndDownload).
 func TestBackupLink_NonOwnerRefused(t *testing.T) {
 	database := openAdminTestDB(t)
 	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
-	_, adminToken := createRoleUser(t, database, 2, "Admin", permissions.Administrator, 80, "backuplinkadmin")
+	_, adminToken := createRoleUser(t, database, 2, "Admin", permissions.AllPerms&^permissions.Administrator&^permissions.ManageBackups, 80, "backuplinkadmin")
 
 	w := doRequest(t, handler, http.MethodPost, "/backups/chatserver_20260901_100000.db/link", adminToken, map[string]any{})
 	if w.Code != http.StatusForbidden {
-		t.Errorf("administrator POST backup link = %d, want 403; body: %s", w.Code, w.Body.String())
+		t.Errorf("non-owner without MANAGE_BACKUPS POST backup link = %d, want 403; body: %s", w.Code, w.Body.String())
 	}
 }
 

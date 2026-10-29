@@ -163,6 +163,7 @@ vi.mock("@stores/voice.store", () => ({
   clearPeerVerification: vi.fn(),
   clearPeerVerifications: vi.fn(),
   setLocalSessionFingerprint: vi.fn(),
+  setLocalSafetyNumber: vi.fn(),
   setEncryptionDegraded: vi.fn(),
 }));
 
@@ -183,7 +184,8 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockSavePref: vi.fn(),
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/preferences")>()),
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
@@ -392,7 +394,11 @@ describe("LiveKitSession", () => {
       channels: new Map([1, 5, 7, 9, 11].map((id) => [id, { id, type: "voice" } as any])),
     }));
     session = new LiveKitSession();
-    session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
+    session.setWsClient({
+      send: vi.fn(),
+      getState: () => "connected",
+      ping: async () => {},
+    } as any);
     // Reset mockRoom state
     mockRoom.state = "connected";
     mockRoom.remoteParticipants = new Map();
@@ -826,7 +832,7 @@ describe("LiveKitSession", () => {
       ws.send.mock.calls.filter(([m]) => m.type === "voice_watch").map(([m]) => m.payload.user_ids);
 
     it("sends the watched screen-share set when it changes, in a channel", () => {
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       (session as any)._remoteTracks.watch(9, "screenshare", true);
       (session as any)._remoteTracks.watch(4, "screenshare", true);
@@ -835,7 +841,7 @@ describe("LiveKitSession", () => {
     });
 
     it("sends nothing for a camera, or when the socket is down or no channel is joined", () => {
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       (session as any)._remoteTracks.watch(9, "camera", true);
       expect(watchFrames(ws)).toEqual([]);
@@ -850,7 +856,7 @@ describe("LiveKitSession", () => {
     });
 
     it("sends nothing when leaving clears the set (the server clears on leave)", () => {
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       (session as any)._remoteTracks.watch(9, "screenshare", true);
       ws.send.mockClear();
@@ -860,7 +866,7 @@ describe("LiveKitSession", () => {
     });
 
     it("re-sends the current set on a resume, an empty one included", () => {
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       // The server keeps the old set across a resume, so empty must be said.
       session.resendWatching();
@@ -873,7 +879,7 @@ describe("LiveKitSession", () => {
 
     it("retries once after a second when rate limited, and leaving cancels it", () => {
       vi.useFakeTimers();
-      const ws = { send: vi.fn(), getState: () => "connected" } as any;
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
       session.setWsClient(ws);
       session.retryWatching();
       session.retryWatching();
@@ -887,7 +893,11 @@ describe("LiveKitSession", () => {
     });
 
     it("an error reply to a voice_watch is recognised and dropped", () => {
-      const ws = { send: vi.fn(() => "env-1"), getState: () => "connected" } as any;
+      const ws = {
+        send: vi.fn(() => "env-1"),
+        getState: () => "connected",
+        ping: async () => {},
+      } as any;
       session.setWsClient(ws);
       (session as any)._remoteTracks.watch(9, "screenshare", true);
       expect(takeWatchRefusal("env-1")).toBe(true);
@@ -1093,27 +1103,87 @@ describe("LiveKitSession", () => {
       expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
 
       const sample = { sentFps: 61, limitation: "cpu", encoder: "libvpx" };
+      const sharePublication = {
+        track: {
+          mediaStreamTrack: {},
+          getSenderStats: async () => [
+            {
+              framesPerSecond: 61,
+              qualityLimitationReason: "cpu",
+              encoderImplementation: "libvpx",
+            },
+          ],
+        },
+      };
       mockRoom.localParticipant.getTrackPublication.mockImplementation((source: string) =>
-        source === "screenShare"
-          ? {
-              track: {
-                mediaStreamTrack: {},
-                getSenderStats: async () => [
-                  {
-                    framesPerSecond: 61,
-                    qualityLimitationReason: "cpu",
-                    encoderImplementation: "libvpx",
-                  },
-                ],
-              },
-            }
-          : undefined,
+        source === "screenShare" ? sharePublication : undefined,
       );
       // The share's tile polls; the bundle reports what the last poll read.
       await session.getLocalScreenshareStats();
       expect(session.getSessionDebugInfo().screenShareSender).toMatchObject(sample);
 
       mockRoom.localParticipant.getTrackPublication.mockReturnValue(undefined);
+      expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
+    });
+
+    it("records the share timeline while enabled and keeps it after leaving (plan 2b)", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "shareDiagnosticsV2" ? true : defaultVal,
+      );
+      try {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+        const sharePublication = {
+          track: {
+            mediaStreamTrack: {},
+            getSenderStats: async () => [{ framesPerSecond: 30, frameWidth: 1280 }],
+          },
+        };
+        mockRoom.localParticipant.getTrackPublication.mockImplementation((source: string) =>
+          source === "screenShare" ? sharePublication : undefined,
+        );
+        expect(session.getShareDiagnostics()).toBeNull();
+        await vi.advanceTimersByTimeAsync(1000);
+        const recorded = session.getShareDiagnostics();
+        expect(recorded?.samples).toHaveLength(1);
+        expect(recorded?.samples[0]?.sender).toMatchObject({ sentFps: 30, width: 1280 });
+        expect(session.getSessionDebugInfo().screenShareTimeline).toMatchObject({ samples: 1 });
+
+        session.leaveVoice(false);
+        await vi.advanceTimersByTimeAsync(3000);
+        // Polling stopped, but the timeline is still there for the bundle.
+        expect(session.getShareDiagnostics()?.samples).toHaveLength(1);
+      } finally {
+        mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+      }
+    });
+
+    it("drops a sender stats read that outlived its share", async () => {
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+
+      let resolveStats: (layers: unknown[]) => void = () => {};
+      const oldShare = {
+        track: {
+          mediaStreamTrack: {},
+          getSenderStats: () =>
+            new Promise<unknown[]>((resolve) => {
+              resolveStats = resolve;
+            }),
+        },
+      };
+      const newShare = { track: { mediaStreamTrack: {}, getSenderStats: async () => [] } };
+      let current = oldShare;
+      mockRoom.localParticipant.getTrackPublication.mockImplementation((source: string) =>
+        source === "screenShare" ? current : undefined,
+      );
+      const pending = session.getLocalScreenshareStats();
+      // The share stops and a new one starts while the old read is in flight.
+      current = newShare;
+      resolveStats([{ framesPerSecond: 5, frameWidth: 1920, active: true }]);
+      await expect(pending).resolves.toBeNull();
       expect(session.getSessionDebugInfo().screenShareSender).toBeNull();
     });
   });
@@ -1288,6 +1358,155 @@ describe("LiveKitSession", () => {
       });
       expect(mockRoom.startAudio).toHaveBeenCalledTimes(1);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledTimes(1);
+    });
+
+    describe("a channel switch while a join is still connecting", () => {
+      const B_PEER = 42;
+      const C_PEER = 43;
+      const A_PEER = 41;
+      const connectedChannel = () => {
+        const st = (session as any)._state;
+        return st.type === "connected" ? st.channelId : st.type;
+      };
+
+      /** Start a key-holder join of channel 1 and park it inside room.connect(). */
+      async function startConnectingJoinOfOne() {
+        session.setServerHost("localhost:7880");
+        session.setWsClient({ send: vi.fn() } as any);
+        const firstConnect = createDeferred<void>();
+        mockRoom.connect
+          .mockImplementationOnce(() => firstConnect.promise)
+          .mockResolvedValue(undefined);
+        const firstJoin = session.handleVoiceToken(
+          "token-1",
+          "/livekit-one",
+          1,
+          "ws://localhost:7881",
+          true,
+        );
+        // Flush the E2EE async steps so the join is parked inside room.connect().
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockRoom.connect).toHaveBeenCalledTimes(1);
+        return { firstConnect, firstJoin };
+      }
+
+      it("keeps the new channel's key announcements, so its holder's offer is accepted", async () => {
+        const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
+
+        // The user clicks channel 2 (not a key holder there): the server moves
+        // them, sends the token, then relays channel 2's peer keys.
+        mockVoiceState.currentChannelId = 2;
+        await session.handleVoiceToken("token-2", "/livekit-two", 2, "ws://localhost:7882", false);
+        await session.handleE2EEAnnounce(B_PEER, "cGVlcg==", "sig");
+
+        firstConnect.resolve(undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        // Channel 2's exchange is running: its holder answers our announce
+        // with an offer, which is dropped unless the holder's key survived.
+        await session.handleE2EEOffer(B_PEER, "enc", "iv");
+        // Past the securing timeout: a dropped offer would eject the join here.
+        await vi.advanceTimersByTimeAsync(20_000);
+        await firstJoin;
+
+        expect(mockRoom.connect).toHaveBeenCalledTimes(2);
+        expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7882", "token-2", {
+          autoSubscribe: false,
+        });
+        expect(connectedChannel()).toBe(2);
+        expect((session as any)._peerPublicKeys.has(B_PEER)).toBe(true);
+      });
+
+      it("does not apply the old channel's announcements to the new channel", async () => {
+        const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
+
+        // Channel 1's own peer announces before the switch is requested.
+        await session.handleE2EEAnnounce(A_PEER, "b2xkcGVlcg==", "sig");
+        expect((session as any)._peerPublicKeys.has(A_PEER)).toBe(true);
+
+        mockVoiceState.currentChannelId = 2;
+        await session.handleVoiceToken("token-2", "/livekit-two", 2, "ws://localhost:7882", false);
+        await session.handleE2EEAnnounce(B_PEER, "cGVlcg==", "sig");
+
+        firstConnect.resolve(undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        await session.handleE2EEOffer(B_PEER, "enc", "iv");
+        // Past the securing timeout: a dropped offer would eject the join here.
+        await vi.advanceTimersByTimeAsync(20_000);
+        await firstJoin;
+
+        expect(connectedChannel()).toBe(2);
+        expect((session as any)._peerPublicKeys.has(B_PEER)).toBe(true);
+        expect((session as any)._peerPublicKeys.has(A_PEER)).toBe(false);
+      });
+
+      it("keeps a newer queued channel's announcements when the join before it starts its exchange", async () => {
+        let resolveCalls = 0;
+        const parkedResolve = createDeferred<string>();
+        vi.spyOn(session as any, "resolveLiveKitUrl").mockImplementation(
+          async (...args: unknown[]) =>
+            resolveCalls++ === 1 ? parkedResolve.promise : String(args[1] ?? args[0]),
+        );
+        const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
+
+        mockVoiceState.currentChannelId = 2;
+        await session.handleVoiceToken("token-2", "/livekit-two", 2, "ws://localhost:7882", true);
+        firstConnect.resolve(undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        // Channel 2's attempt is parked in URL resolution, before its key exchange.
+        expect(resolveCalls).toBe(2);
+
+        mockVoiceState.currentChannelId = 3;
+        await session.handleVoiceToken(
+          "token-3",
+          "/livekit-three",
+          3,
+          "ws://localhost:7883",
+          false,
+        );
+        await session.handleE2EEAnnounce(C_PEER, "Y3BlZXI=", "sig");
+
+        parkedResolve.resolve("ws://localhost:7882");
+        await vi.advanceTimersByTimeAsync(0);
+        await session.handleE2EEOffer(C_PEER, "enc", "iv");
+        await vi.advanceTimersByTimeAsync(20_000);
+        await firstJoin;
+
+        expect(connectedChannel()).toBe(3);
+        expect((session as any)._peerPublicKeys.has(C_PEER)).toBe(true);
+      });
+
+      it("keeps only the last channel's announcements across a rapid A to B to C switch", async () => {
+        const { firstConnect, firstJoin } = await startConnectingJoinOfOne();
+
+        mockVoiceState.currentChannelId = 2;
+        await session.handleVoiceToken("token-2", "/livekit-two", 2, "ws://localhost:7882", false);
+        await session.handleE2EEAnnounce(B_PEER, "cGVlcg==", "sig");
+        mockVoiceState.currentChannelId = 3;
+        await session.handleVoiceToken(
+          "token-3",
+          "/livekit-three",
+          3,
+          "ws://localhost:7883",
+          false,
+        );
+        await session.handleE2EEAnnounce(C_PEER, "Y3BlZXI=", "sig");
+
+        firstConnect.resolve(undefined);
+        await vi.advanceTimersByTimeAsync(0);
+        await session.handleE2EEOffer(C_PEER, "enc", "iv");
+        // Past the securing timeout: a dropped offer would eject the join here.
+        await vi.advanceTimersByTimeAsync(20_000);
+        await firstJoin;
+
+        // Channel 2 was never joined: one connect for 1, one for 3.
+        expect(mockRoom.connect).toHaveBeenCalledTimes(2);
+        expect(mockRoom.connect).toHaveBeenNthCalledWith(2, "ws://localhost:7883", "token-3", {
+          autoSubscribe: false,
+        });
+        expect(connectedChannel()).toBe(3);
+        expect((session as any)._peerPublicKeys.has(C_PEER)).toBe(true);
+        expect((session as any)._peerPublicKeys.has(B_PEER)).toBe(false);
+      });
     });
 
     // v001 regression: join generations must stay monotonic across a
@@ -1888,6 +2107,7 @@ describe("LiveKitSession", () => {
               ["TR_a", publication],
               ["TR_v", camera],
             ]),
+            getTrackPublication: (source: string) => (source === "camera" ? camera : undefined),
           },
         ],
       ]);
@@ -1935,6 +2155,7 @@ describe("LiveKitSession", () => {
               ["TR_a", publication],
               ["TR_v", camera],
             ]),
+            getTrackPublication: (source: string) => (source === "camera" ? camera : undefined),
           },
         ],
       ]);
@@ -2178,7 +2399,7 @@ describe("LiveKitSession", () => {
 
     async function dropWhile(media: { camera: boolean; screenshare: boolean }): Promise<void> {
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn(), getState: () => wsState } as any);
+      session.setWsClient({ send: vi.fn(), getState: () => wsState, ping: async () => {} } as any);
       let disconnectedHandler: ((reason?: number) => void) | undefined;
       mockRoom.on.mockImplementation((event: string, handler: any) => {
         if (event === "disconnected") disconnectedHandler = handler;
@@ -2355,7 +2576,11 @@ describe("LiveKitSession", () => {
     async function drop(): Promise<void> {
       mockVoiceState.currentChannelId = 100;
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
+      session.setWsClient({
+        send: vi.fn(),
+        getState: () => "connected",
+        ping: async () => {},
+      } as any);
       let handler: ((reason?: number) => void) | undefined;
       mockRoom.on.mockImplementation((event: string, h: any) => {
         if (event === "disconnected") handler = h;
@@ -2760,7 +2985,11 @@ describe("LiveKitSession", () => {
   describe("setMuted (with active room)", () => {
     beforeEach(async () => {
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
+      session.setWsClient({
+        send: vi.fn(),
+        getState: () => "connected",
+        ping: async () => {},
+      } as any);
       await session.handleVoiceToken("tok", "/lk", 1, "ws://localhost:7880", true);
       vi.clearAllMocks();
     });
@@ -2855,6 +3084,35 @@ describe("LiveKitSession", () => {
       expect(setLocalMuted).toHaveBeenCalledWith(true);
       expect(errorCb).toHaveBeenCalled();
       expect(errorCb.mock.calls[0]?.[0]).toEqual(expect.stringMatching(/microphone/i));
+    });
+
+    // The toggle sent voice_mute{muted:false} before the re-enable failed, so
+    // the fallback has to restate the mute or peers keep seeing it unmuted.
+    it("a failed unmute tells the server the member is muted again", async () => {
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} };
+      session.setWsClient(ws as any);
+      mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(
+        new DOMException("Permission denied", "NotAllowedError"),
+      );
+
+      session.setMuted(false);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(ws.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+    });
+
+    it("a failed unmute sends nothing while the chat socket is down", async () => {
+      const ws = { send: vi.fn(), getState: () => "reconnecting" };
+      session.setWsClient(ws as any);
+      mockRoom.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(
+        new DOMException("Permission denied", "NotAllowedError"),
+      );
+
+      session.setMuted(false);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(setLocalMuted).toHaveBeenCalledWith(true);
+      expect(ws.send).not.toHaveBeenCalled();
     });
   });
 
@@ -3055,7 +3313,11 @@ describe("LiveKitSession", () => {
   describe("restoreLocalVoiceState", () => {
     beforeEach(async () => {
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn(), getState: () => "connected" } as any);
+      session.setWsClient({
+        send: vi.fn(),
+        getState: () => "connected",
+        ping: async () => {},
+      } as any);
     });
 
     it("enables the microphone on the first unmute after a muted join", async () => {
@@ -4413,7 +4675,7 @@ describe("LiveKitSession", () => {
       errorCb = vi.fn<(message: string) => void>();
       ac = new AbortController();
       session.setServerHost("localhost:7880");
-      session.setWsClient({ send: sendSpy, getState: () => wsState } as any);
+      session.setWsClient({ send: sendSpy, getState: () => wsState, ping: async () => {} } as any);
       session.setOnError(errorCb);
       channelsStore.setState((prev) => ({
         ...prev,
@@ -4587,6 +4849,49 @@ describe("LiveKitSession", () => {
       expect(errorCb).not.toHaveBeenCalled();
     });
 
+    it("reads the roster only after the returned socket's replay, not from its auth_ok", async () => {
+      sendSpy.mockImplementation((msg) => (msg.type === "voice_join" ? "rejoin-1" : undefined));
+      mockRoom.connect.mockResolvedValue(undefined);
+      // auth_ok has flipped the socket to "connected", but the roster still
+      // lists us from before the drop. The server writes the replayed self
+      // voice_leave before it answers a ping.
+      mockVoiceState.voiceUsers = new Map([[5, new Set([0])]]);
+      const ping = vi.fn(async () => {
+        mockVoiceState.voiceUsers = new Map();
+      });
+      session.setWsClient({ send: sendSpy, getState: () => wsState, ping } as any);
+
+      const loop = startLoop();
+      await vi.advanceTimersByTimeAsync(1_000);
+      wsState = "reconnecting";
+      await vi.advanceTimersByTimeAsync(90_000);
+      wsState = "connected";
+      await vi.advanceTimersByTimeAsync(15_000);
+      await loop;
+
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect(sendSpy).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 5 } });
+      expect(ping).toHaveBeenCalled();
+    });
+
+    it("waits for the next attempt when the returned socket does not answer the ping", async () => {
+      mockRoom.connect.mockResolvedValue(undefined);
+      mockVoiceState.voiceUsers = new Map([[5, new Set([0])]]);
+      const ping = vi.fn(async () => {
+        throw new Error("No heartbeat response arrived.");
+      });
+      session.setWsClient({ send: sendSpy, getState: () => wsState, ping } as any);
+
+      void startLoop();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(mockRoom.connect).not.toHaveBeenCalled();
+      expect(ping).toHaveBeenCalled();
+      expect(sendSpy.mock.calls.some(([m]) => m.type === "voice_join")).toBe(false);
+      ac.abort();
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+
     it("turns the camera back on once a rejoin after a long drop connects", async () => {
       const enableCamera = vi.spyOn(session, "enableCamera").mockResolvedValue();
       mockVoiceState.localCamera = false;
@@ -4720,7 +5025,11 @@ describe("LiveKitSession", () => {
       };
       session.setServerHost("localhost:7880");
       const sendSpy = vi.fn();
-      session.setWsClient({ send: sendSpy, getState: () => "connected" } as any);
+      session.setWsClient({
+        send: sendSpy,
+        getState: () => "connected",
+        ping: async () => {},
+      } as any);
 
       let resolveMic!: () => void;
       mockRoom.localParticipant.setMicrophoneEnabled.mockImplementationOnce(

@@ -10,7 +10,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border);
 }
 .forum-toolbar,
@@ -22,8 +22,27 @@
   gap: 8px;
 }
 .forum-toolbar {
-  justify-content: space-between;
   flex-wrap: wrap;
+}
+.forum-toolbar-spacer {
+  flex: 1;
+}
+.forum-sort {
+  gap: 2px;
+}
+.forum-layouts {
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+/* A normal button at the toolbar's end, not the login form's full-width one. */
+.btn-primary.forum-new-post {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-md);
 }
 .forum-guidelines {
   border: 1px solid var(--border);
@@ -31,18 +50,22 @@
   background: var(--bg-secondary);
 }
 .forum-guidelines-toggle {
-  width: 100%;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--header-primary);
+  font-size: var(--font-size-xs);
   font-weight: 600;
-  text-align: left;
+}
+.forum-guidelines-toggle:hover {
+  background: var(--bg-hover);
 }
 .forum-guidelines-body {
-  padding: 0 10px 10px;
+  padding: 8px 12px;
   color: var(--text-normal);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -66,7 +89,7 @@
   background: var(--accent);
   color: var(--on-fill);
 }
-.forum-sort-btn:hover,
+.forum-sort-btn:hover:not([aria-pressed="true"]),
 .forum-tag-chip:hover:not(.selected),
 .forum-more:hover {
   background: var(--bg-hover);
@@ -105,19 +128,56 @@
   padding: 0;
   list-style: none;
 }
+/* A post row. The layout class on .forum-view (grid, list, split, feed;
+   ForumView.ts) rearranges the same three parts: the author's avatar, the
+   body (title and tags, preview, meta) and the reply count. List is the base. */
 .forum-post {
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
   background: transparent;
   color: var(--text-normal);
   text-align: left;
 }
-.forum-post:hover {
+.forum-post:hover,
+.forum-post.current {
   background: var(--bg-hover);
+}
+.forum-post-avatar {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-circle);
+  color: var(--on-fill);
+  font-weight: 600;
+}
+.forum-post-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.forum-post-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.forum-post-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 2px;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .forum-post.archived {
   opacity: 0.85;
@@ -129,6 +189,7 @@
   gap: 6px;
 }
 .forum-post-title {
+  font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--header-primary);
   overflow-wrap: anywhere;
@@ -190,6 +251,112 @@
 .forum-post-error {
   margin: 0;
   color: var(--text-danger);
+}
+
+/* Cards: a grid of tiles, avatar and reply count along the bottom. */
+.forum-view--grid .forum-posts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.forum-view--grid .forum-post-item {
+  display: flex;
+}
+.forum-view--grid .forum-post,
+.forum-view--feed .forum-post {
+  border-bottom: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.forum-view--grid .forum-post:hover,
+.forum-view--feed .forum-post:hover,
+.forum-view--grid .forum-post.current,
+.forum-view--feed .forum-post.current {
+  background: var(--bg-hover);
+}
+.forum-view--grid .forum-post {
+  height: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 1fr auto;
+  grid-template-areas: "body body" "avatar stats";
+  align-items: end;
+}
+.forum-view--grid .forum-post-body {
+  grid-area: body;
+  align-self: start;
+}
+.forum-view--grid .forum-post-avatar {
+  grid-area: avatar;
+  width: 24px;
+  height: 24px;
+  font-size: var(--font-size-xs);
+}
+.forum-view--grid .forum-post-stats {
+  grid-area: stats;
+}
+.forum-view--grid .forum-post-preview {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+.forum-view--grid .forum-older-head {
+  margin-top: 20px;
+}
+
+/* Feed: one centred column of large cards with more of the opening message. */
+.forum-view--feed .forum-posts {
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.forum-view--feed .forum-post {
+  padding: 14px 16px;
+}
+.forum-view--feed .forum-post-title {
+  font-size: calc(var(--font-size-lg) * 1.125);
+}
+.forum-view--feed .forum-post-preview {
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+}
+.forum-view--feed .forum-older-head {
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+/* List and reader: compact rows; an open post fills the rest of the row. */
+.forum-view--split .forum-scroller {
+  padding-inline: 0;
+}
+.forum-view--split .forum-post {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px 16px;
+}
+.forum-view--split .forum-post-avatar {
+  display: none;
+}
+.forum-view--split .forum-post-title {
+  font-size: var(--font-size-md);
+}
+.forum-view--split .forum-post-preview {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+.app.thread-open:has(.forum-view--split) > .chat-area {
+  flex: 0 0 clamp(300px, 32%, 440px);
+  min-width: 0;
+}
+.app.thread-open:has(.forum-view--split) > .thread-panel-slot.open {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.app.thread-open:has(.forum-view--split) .thread-panel {
+  width: 100%;
+}
+.app.thread-open:has(.forum-view--split) .thread-panel-resize {
+  display: none;
 }
 
 /* An author display rule would otherwise beat the [hidden] attribute. */

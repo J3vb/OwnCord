@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // RecoveryAssist is the server's whole knowledge of an owner-issued recovery
@@ -24,7 +25,7 @@ type RecoveryAssist struct {
 
 // Live reports whether the credential can still be redeemed at now.
 func (a *RecoveryAssist) Live(now time.Time) bool {
-	exp, err := time.Parse(sessionTimeLayout, a.ExpiresAt)
+	exp, err := time.Parse(dbtime.ISOLayout, a.ExpiresAt)
 	return err == nil && now.UTC().Before(exp)
 }
 
@@ -40,8 +41,8 @@ func (d *DB) UpsertRecoveryAssist(ctx context.Context, userID int64, verifier st
 		Verifier:     verifier,
 		IssuedBy:     issuedBy,
 		Verification: verification,
-		CreatedAt:    time.Now().UTC().Format(sessionTimeLayout),
-		ExpiresAt:    expiresAt.UTC().Format(sessionTimeLayout),
+		CreatedAt:    time.Now().UTC().Format(dbtime.ISOLayout),
+		ExpiresAt:    expiresAt.UTC().Format(dbtime.ISOLayout),
 	}); err != nil {
 		return fmt.Errorf("UpsertRecoveryAssist: %w", err)
 	}
@@ -89,7 +90,7 @@ func (d *DB) RedeemRecoveryAssist(ctx context.Context, userID int64, verifier, n
 	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 
-	now := time.Now().UTC().Format(sessionTimeLayout)
+	now := time.Now().UTC().Format(dbtime.ISOLayout)
 	res, err := q.ConsumeRecoveryAssist(ctx, dbgen.ConsumeRecoveryAssistParams{UserID: userID, Verifier: verifier, ExpiresAt: now})
 	if err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryAssist consume: %w", err)

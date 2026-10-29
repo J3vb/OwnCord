@@ -257,6 +257,35 @@ describe("channels store", () => {
       expect(channelsStore.getState().channels.get(1)!.canSend).toBe(false);
     });
 
+    it("maps can_move_voice from ready and from a targeted channel_create (WP 8.4b)", () => {
+      setChannels([
+        {
+          id: 2,
+          name: "lobby",
+          type: "voice",
+          category: "Voice",
+          position: 0,
+          can_move_voice: true,
+        },
+        { id: 3, name: "other", type: "voice", category: "Voice", position: 1 },
+      ]);
+      expect(channelsStore.getState().channels.get(2)!.canMoveVoice).toBe(true);
+      expect(channelsStore.getState().channels.get(3)!.canMoveVoice).toBeUndefined();
+
+      // A channel_create without the field keeps the verdict; one with it replaces it.
+      addChannel({ id: 2, name: "lobby", type: "voice", category: "Voice", position: 0 });
+      expect(channelsStore.getState().channels.get(2)!.canMoveVoice).toBe(true);
+      addChannel({
+        id: 2,
+        name: "lobby",
+        type: "voice",
+        category: "Voice",
+        position: 0,
+        can_move_voice: false,
+      });
+      expect(channelsStore.getState().channels.get(2)!.canMoveVoice).toBe(false);
+    });
+
     it("re-grants can_send when a permission edit restores posting", () => {
       setChannels(readyChannels);
       channelsStore.setState((prev) => {

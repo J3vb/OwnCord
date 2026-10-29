@@ -215,7 +215,7 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Rust cache
-        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: Client/src-tauri
           lookup-only: true
@@ -309,7 +309,7 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Rust cache
-        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: Client/src-tauri
           # See ci.yml: CUDA_HOME gates the NVENC build and build.rs ignores it.
@@ -406,9 +406,65 @@ jobs:
           name: linux-release-assets
           path: linux-staging/
 
+  # One browser-client bundle for every server asset. The web build is
+  # platform-independent, so it is built once here and each server build (four
+  # release assets, two Docker smoke legs, the Docker push) embeds the very same
+  # bytes. Building it per job would let the smoked image and the pushed image
+  # disagree, and the reproducibility rebuild below needs identical input too.
+  build-web-client:
+    name: Build browser client bundle
+    needs: verify-versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          # zizmor cache-poisoning: a tag-triggered release must not restore a
+          # cache an attacker could poison, so no `cache: npm` here.
+          package-manager-cache: false
+
+      - name: Build the browser client
+        shell: bash
+        working-directory: Client
+        run: |
+          npm ci
+          npm run build:web
+
+      # The bundle is served to browsers by the server, so it must be a pure web
+      # build: a Tauri import that leaked in would break in every browser. Only
+      # `@tauri-apps` and the `__TAURI__` global are refused: the desktop-or-web
+      # check legitimately tests for `__TAURI_INTERNALS__` at runtime.
+      - name: Check the bundle is complete and Tauri-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f Client/dist-web/index.html ]; then
+            echo "::error::Client/dist-web/index.html is missing: build:web produced no entry page"
+            exit 1
+          fi
+          if grep -rlE '@tauri-apps|__TAURI__' Client/dist-web/; then
+            echo "::error::the files above reference Tauri (@tauri-apps or __TAURI__); the browser bundle must not"
+            exit 1
+          fi
+
+      - name: Upload browser client bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-client-dist
+          path: Client/dist-web/
+          if-no-files-found: error
+          retention-days: 7
+
   release-server:
     name: Build server (${{ matrix.asset }})
-    needs: verify-versions
+    needs: [verify-versions, build-web-client]
     strategy:
       fail-fast: false
       matrix:
@@ -440,6 +496,16 @@ jobs:
         with:
           go-version: "1.27"
           cache: false
+
+      # The browser client, built once in build-web-client. Server/webclient/
+      # .gitignore ignores everything in dist/ except PLACEHOLDER.txt, so the
+      # tree stays clean (`git status --porcelain` prints nothing) and go's
+      # vcs.modified stamp is unchanged by the bundle.
+      - name: Download browser client bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-client-dist
+          path: Server/webclient/dist/
 
       - name: Extract version from tag
         shell: bash
@@ -476,6 +542,10 @@ jobs:
           rebuild="$RUNNER_TEMP/rebuild"
           git clone --quiet --no-checkout .. "$rebuild"
           git -C "$rebuild" checkout --quiet --detach "$(git rev-parse HEAD)"
+          # The bundle is untracked, so the clone has only the placeholder. Give
+          # the rebuild the same bytes, or it would embed a different bundle and
+          # the two builds could never match.
+          cp -R webclient/dist/. "$rebuild/Server/webclient/dist/"
           (cd "$rebuild/Server" && GOCACHE="$RUNNER_TEMP/gocache-rebuild" build "$RUNNER_TEMP/$OUT")
           # Hash via stdin: on Windows $RUNNER_TEMP is a backslash path, and
           # sha256sum prefixes the line of such a filename with `\`.
@@ -497,14 +567,16 @@ jobs:
       # cold boot writes config.yaml, generates a certificate and migrates a
       # fresh database; a graceful stop must then drain to a clean exit; a
       # restart on the SAME directory must come back healthy without rewriting
-      # either. Shared with ci.yml so a regression is caught pre-merge.
-      - name: Smoke server binary (boot, migrate, drain, restart)
+      # either. Every asset carries the browser client now, so -browser-client
+      # also boots it once more with the client on and fetches the index and its
+      # first script. Shared with ci.yml so a regression is caught pre-merge.
+      - name: Smoke server binary (boot, migrate, drain, restart, browser client)
         shell: bash
         working-directory: Server
         run: |
           BIN="./chatserver"
           [ -f "./${{ matrix.asset }}" ] && BIN="./${{ matrix.asset }}"
-          go run ./cmd/smoke "$BIN"
+          go run ./cmd/smoke -browser-client "$BIN"
 
       # Module inventory of the binary that just passed the smoke. Pinned the
       # way govulncheck is in ci.yml and checked by the Go checksum database,
@@ -603,7 +675,7 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Rust cache
-        uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: Client/src-tauri
           # See ci.yml: CUDA_HOME gates the NVENC build and build.rs ignores it.
@@ -697,7 +769,7 @@ jobs:
   # the drain budget meaningless. Same runner pair as the release-server matrix.
   smoke-server-docker:
     name: Smoke Server Docker Image (linux/${{ matrix.arch }})
-    needs: verify-versions
+    needs: [verify-versions, build-web-client]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     permissions:
@@ -721,6 +793,16 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+
+      # The browser client, built once in build-web-client. Server/webclient/
+      # .gitignore ignores everything in dist/ except PLACEHOLDER.txt, so the
+      # tree stays clean (`git status --porcelain` prints nothing) and go's
+      # vcs.modified stamp is unchanged by the bundle.
+      - name: Download browser client bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-client-dist
+          path: Server/webclient/dist/
 
       # Same VERSION the push job builds with, so the layers this job smoked are
       # the layers the push job restores from cache rather than rebuilding.
@@ -860,6 +942,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+
+      # The same bundle the smoke legs embedded (build-web-client builds it once),
+      # so the pushed layers match the smoked ones. dist/ is gitignored apart
+      # from PLACEHOLDER.txt, so the checkout stays clean.
+      - name: Download browser client bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-client-dist
+          path: Server/webclient/dist/
 
       - name: Extract version from tag
         shell: bash

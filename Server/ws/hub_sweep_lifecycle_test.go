@@ -34,7 +34,7 @@ func newBlockedSweepHub(t *testing.T) (*Hub, blockingSweepAuthn) {
 	authn := blockingSweepAuthn{entered: make(chan struct{}), ended: make(chan error, 1)}
 	h := newTestHubWith(t, HubOptions{DB: newHarvestVoiceDB(t), Auth: authn})
 	c := newClient(h, nil, &db.User{ID: 1, Username: "sweep"}, "hash-sweep", 0, context.Background())
-	h.clients[c.userID] = c
+	h.clients[c.userID] = []*Client{c}
 	return h, authn
 }
 

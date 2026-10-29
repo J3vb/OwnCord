@@ -10,6 +10,7 @@ const mockReapplyEnhanced = vi.fn().mockResolvedValue(undefined);
 const mockIsLinuxDesktop = vi.fn(() => false);
 vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => mockIsLinuxDesktop(),
+  isWindowsDesktop: () => false,
 }));
 vi.mock("@lib/livekitSession", () => ({
   getLocalScreenshareStream: () => ({

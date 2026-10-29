@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { handleAuthError, handleAuthOk, handleConnectionError } from "./wsHandlers";
+import {
+  handleAuthError,
+  handleAuthOk,
+  handleConnectionError,
+  rejoinVoiceAfterRestart,
+} from "./wsHandlers";
 import { createReconnectClock } from "./dispatchContext";
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
@@ -192,5 +197,42 @@ describe("handleConnectionError", () => {
 
     expect(handleConnectionError(ws, { code: "FORBIDDEN", message: "" })).toBe(false);
     expect(ws.disconnect).not.toHaveBeenCalled();
+  });
+});
+
+function readyPayload(voiceStates: { user_id: number; channel_id: number }[]) {
+  return {
+    channels: [{ id: 5, type: "voice" }],
+    dm_channels: [],
+    voice_states: voiceStates,
+  } as never;
+}
+
+function armedClock() {
+  const clock = createReconnectClock();
+  clock.voiceRejoinChannelId = 5;
+  clock.voiceRejoinExpiresAt = Date.now() + 60_000;
+  return clock;
+}
+
+describe("rejoinVoiceAfterRestart", () => {
+  beforeEach(() => resetVoiceStore());
+
+  it("rejoins when ready has no row for this user", () => {
+    const ws = socketStub();
+    rejoinVoiceAfterRestart(armedClock(), ws, readyPayload([{ user_id: 2, channel_id: 5 }]));
+    expect(ws.send).toHaveBeenCalledWith({ type: "voice_join", payload: { channel_id: 5 } });
+  });
+
+  it("does not rejoin when this user already has a row in the channel", () => {
+    const ws = socketStub();
+    rejoinVoiceAfterRestart(armedClock(), ws, readyPayload([{ user_id: 9, channel_id: 5 }]));
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it("does not rejoin when another device holds the user's call in another channel", () => {
+    const ws = socketStub();
+    rejoinVoiceAfterRestart(armedClock(), ws, readyPayload([{ user_id: 9, channel_id: 7 }]));
+    expect(ws.send).not.toHaveBeenCalled();
   });
 });

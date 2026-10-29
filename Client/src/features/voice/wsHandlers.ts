@@ -25,6 +25,7 @@ import { takeWatchRefusal } from "../../lib/watchRequest";
 import { noteJoinSent, takeJoinRefusal } from "./joinRequest";
 import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
 import { channelsStore } from "../../stores/channels.store";
+import { membersStore, memberDisplayName } from "../../stores/members.store";
 import { livekitSession, cancelVoiceRejoin } from "../connection/dispatchContext";
 import type {
   DispatchApi,
@@ -133,27 +134,24 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
     // acknowledgement: that move was abandoned, so it earns no toast.
     clearAfkMove();
 
-    // Defense-in-depth: if the ready payload shows us in a voice channel
-    // but we have no LiveKit session (e.g. after F5 reload), send
-    // voice_leave to clean up the stale state. The server should have
-    // already cleaned this up, but this handles edge cases.
+    // A self row in `ready` while this device holds no call (voiceStatus
+    // "idle") is another device's call: one account keeps a connection per
+    // device and the server broadcasts the user's voice rows to all of them.
+    // Do not send voice_leave and do not leaveVoiceChannel() — that would end
+    // the other device's call. The server already retires this device's own
+    // stale call when it connects afresh (e.g. after an F5 reload), so no
+    // defensive leave is needed here; the row stays in the roster only.
     //
-    // livekitSession is lazily imported, so instead of the synchronous
-    // isVoiceConnected() the check reads the voice store's lifecycle
-    // status: "idle" means no live or pending LiveKit session (a fresh
-    // reload always starts idle — exactly the stale case), while any other
-    // status means livekitSession is driving a session right now.
+    // The store's lifecycle status stands in for livekitSession (lazily
+    // imported): any status but "idle" means this device is driving a
+    // session right now.
     const currentUserId = authStore.getState().user?.id ?? 0;
     const selfVoiceState =
       currentUserId !== 0
         ? payload.voice_states.find((vs) => vs.user_id === currentUserId)
         : undefined;
     const voiceSessionActive = voiceStore.getState().voiceStatus !== "idle";
-    if (selfVoiceState !== undefined && !voiceSessionActive) {
-      log.warn("Stale voice state detected in ready payload — sending voice_leave");
-      ws.send({ type: "voice_leave", payload: {} });
-      leaveVoiceChannel();
-    } else if (selfVoiceState !== undefined) {
+    if (selfVoiceState !== undefined && voiceSessionActive) {
       // A LiveKit session survived a WS drop that outlived it (nothing
       // tears voice down on a socket drop alone) — OC-0014: this full
       // resync is the only place a moderator mute/deafen issued while we
@@ -254,6 +252,10 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   const prevServerDeafened = isSelf ? (voiceStore.getState().localServerDeafened ?? false) : false;
   updateVoiceState(payload);
   if (!isSelf) return;
+  // A self row while this device holds no call is another device's call (one
+  // account, one call, one device): the roster is updated, nothing else. This
+  // device's own join moves voiceStatus off "idle" before the server's answer.
+  if (voiceStore.getState().voiceStatus === "idle") return;
   joinVoiceChannel(payload.channel_id);
   // The server's answer to the join that followed an AFK move: only now is
   // the move real, so only now does the user hear why.
@@ -275,6 +277,23 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   );
 }
 
+// Tell the member who moved them (WP 8.4b). A moderator move is final once the
+// server sends it, so unlike the AFK notice this does not wait for the join's
+// acknowledgement. The mover's name or the channel may be unknown to this
+// client; the message degrades rather than names nobody.
+function announceModeratorMove(byUserId: number, toChannelId: number): void {
+  const channel =
+    channelsStore.getState().channels.get(toChannelId)?.name ??
+    connectText("voice.movedChannelFallback");
+  const mover = membersStore.getState().members.get(byUserId);
+  showToast(
+    mover === undefined
+      ? connectText("voice.movedGeneric", { channel })
+      : connectText("voice.movedBy", { name: memberDisplayName(mover), channel }),
+    "info",
+  );
+}
+
 // A moderator moved this client: tear the media session down and re-join the
 // destination through the ordinary join path (the server already removed us
 // from the old room and broadcast voice_leave).
@@ -293,7 +312,11 @@ export function handleVoiceMoved(
   // this frame sees the move and stays silent.
   noteVoiceMoved(payload.to_channel_id);
   if (payload.reason === "afk") noteAfkMove(payload.to_channel_id);
-  else clearAfkMove();
+  else {
+    clearAfkMove();
+    if (payload.by_user_id !== undefined)
+      announceModeratorMove(payload.by_user_id, payload.to_channel_id);
+  }
   void livekitSession().then(({ leaveVoice }) => {
     void leaveVoice(false);
     leaveVoiceChannel();
@@ -442,7 +465,17 @@ export function handleVoiceE2eeAnnounce(payload: Payload<"voice_e2ee_announce">)
     log.warn("voice_e2ee_announce: could not record video_decode", err);
   }
   void livekitSession().then(({ handleE2EEAnnounce }) =>
-    handleE2EEAnnounce(payload.user_id, payload.public_key, payload.signature),
+    // The announcing device's own key rides along only when the server sent one
+    // (older servers do not); the wire is untrusted, so anything but a string
+    // reads as absent.
+    typeof payload.identity_public_key === "string" && payload.identity_public_key !== ""
+      ? handleE2EEAnnounce(
+          payload.user_id,
+          payload.public_key,
+          payload.signature,
+          payload.identity_public_key,
+        )
+      : handleE2EEAnnounce(payload.user_id, payload.public_key, payload.signature),
   );
 }
 

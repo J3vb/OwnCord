@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ApiClientError } from "../../src/lib/api";
 import {
   attachLimitHint,
+  MAX_USERNAME_LEN,
   checkNewUsername,
   collapseSpaces,
   runeCount,
@@ -201,7 +202,7 @@ describe("register form username", () => {
     expect(hint.hidden).toBe(true);
 
     (container.querySelector(".form-switch button") as HTMLElement).click();
-    expect(username.getAttribute("maxlength")).toBe("32");
+    expect(username.getAttribute("maxlength")).toBe("64"); // 2 units per character; the 32-character cap is by count
     expect(hint.hidden).toBe(false);
     expect(hint.textContent).toContain("2–32 characters");
 
@@ -220,6 +221,29 @@ describe("register form username", () => {
     expect(hint.textContent).toBe("Username must be 2–32 characters.");
     expect(username.value).toBe(long);
     expect(onRegister).not.toHaveBeenCalled();
+    page.destroy?.();
+  });
+
+  it("fits a 32-letter name outside the BMP and sends it; a 33rd letter reaches the limit", async () => {
+    const onRegister = vi.fn().mockResolvedValue(undefined);
+    const { page, username, hint, submit } = openRegister(makeCallbacks({ onRegister }));
+    const bold = "\u{1D400}".repeat(MAX_USERNAME_LEN); // 2 UTF-16 units per letter
+    expect(bold.length).toBeLessThanOrEqual(username.maxLength);
+    username.value = bold;
+    username.setSelectionRange(bold.length, bold.length);
+    username.dispatchEvent(
+      new InputEvent("beforeinput", { inputType: "insertText", data: "\u{1D400}" }),
+    );
+    expect(hint.textContent).toBe("Limit of 32 characters reached.");
+    submit(bold);
+    await vi.waitFor(() =>
+      expect(onRegister).toHaveBeenCalledWith(
+        "localhost:8443",
+        bold,
+        expect.anything(),
+        "invite-code",
+      ),
+    );
     page.destroy?.();
   });
 

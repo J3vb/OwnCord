@@ -74,6 +74,8 @@ var requestDeadlineExempt = []requestDeadlineExemption{
 		"banner upload: the same body cap and handling as the avatar upload"},
 	{http.MethodPost, regexp.MustCompile(`^/api/v1/emoji/$`),
 		"custom emoji upload: a body upload at the 1 MiB cap, grouped with the avatar upload"},
+	{http.MethodPost, regexp.MustCompile(`^/api/v1/stickers/$`),
+		"custom sticker upload: a body upload at the 1 MiB cap, grouped with the emoji upload"},
 	{http.MethodPost, regexp.MustCompile(`^/api/v1/dms/[0-9]+/icon$`),
 		"group icon upload: the transfer deadline governs it"},
 	{http.MethodGet, regexp.MustCompile(`^/api/v1/files/[^/]+(/thumb)?$`),

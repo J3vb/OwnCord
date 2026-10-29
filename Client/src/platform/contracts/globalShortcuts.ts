@@ -19,8 +19,12 @@
  *   key; the tray items still work and Settings discloses the gap.
  *
  * Callers choose their UI by `status().backend`, never by a platform check.
- * `supported()` is true once a press can actually arrive: always on
- * `polling`, and on `portal` only once both mute and deafen are bound.
+ * `start()` is called whenever the host answers; the host decides whether
+ * anything observes keys (on `portal` it arms the session, so a press the
+ * desktop was told to deliver by its own config gets through even when the
+ * portal names no keys). `supported()` is true once a press can actually
+ * arrive and the in-app handler should stand down: always on `polling`, and
+ * on `portal` only once both mute and deafen are bound.
  * `onShortcut` passes the actions to the renderer, which toggles the same
  * controls the in-app shortcuts do.
  */
@@ -42,6 +46,15 @@ export interface GlobalKeysStatus {
   triggers: GlobalKeysTriggers;
   /** Whether the portal can open its own shortcut settings (version 2+). */
   canConfigure: boolean;
+  /**
+   * The portal holds all three of our shortcuts but names none of their keys
+   * (xdg-desktop-portal-hyprland always does): the user assigns them in the
+   * desktop's own config, so `triggers` stays all `null` and does not mean
+   * "not set up".
+   */
+  triggersUnnamed: boolean;
+  /** The portal refused to open a session for us, so no shortcut can work until it does. */
+  sessionRefused: boolean;
 }
 
 /** Why a portal bind or configure failed. `bind_cancelled` is the user closing the dialog. */
@@ -60,7 +73,7 @@ export interface GlobalKeysError extends Error {
 }
 
 export interface GlobalShortcuts {
-  /** Start the native polling loop where `supported()` is true. Idempotent on the host side. */
+  /** Start the native polling loop, or arm the portal session on Wayland; a no-op where nothing can observe keys. Idempotent on the host side. */
   start(): Promise<void>;
   /** Whether a global press can arrive now: always on `polling`, only with both keys bound on `portal`. */
   supported(): Promise<boolean>;

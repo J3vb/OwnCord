@@ -308,6 +308,8 @@ describe("MessageList", () => {
       const many = Array.from({ length: 200 }, (_, i) => makeMessage({ id: i + 1 }));
       setMessages(1, many);
       msgList.mount(container);
+      // The mount's first frame (its scroll to the bottom) runs long before a jump.
+      rafs.splice(0).forEach((cb) => cb(0));
       const root = container.querySelector(".messages-container") as HTMLDivElement;
       Object.defineProperty(root, "clientHeight", { configurable: true, value: 400 });
       let height = 100;

@@ -6,6 +6,7 @@
  * commented EXEMPT list: a registration added in any module fails the
  * completeness test until it gets a probe or an exemption.
  */
+import { hasWaved, markWaved } from "@components/message-list/welcomeRows";
 import {
   claimForwardRequest,
   isForwardRequest,
@@ -28,6 +29,7 @@ vi.mock("@lib/httpProxy", () => ({
 import { listSessionResets, registerSessionReset } from "../../src/lib/sessionRegistry";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
+import { stickersStore, setStickers } from "../../src/stores/stickers.store";
 import {
   externalPartition,
   fetchMediaAsObjectUrl,
@@ -36,6 +38,10 @@ import {
 import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
 import { renderInlineImage } from "../../src/components/message-list/media";
 import { getImageBox, setImageBox } from "../../src/components/message-list/image-sizes";
+import {
+  rememberRowHeight,
+  rememberedRowHeight,
+} from "../../src/components/message-list/row-heights";
 import { discardMedia, observeMedia } from "../../src/lib/media-visibility";
 import {
   EXTERNAL_CONSENT_PREF,
@@ -126,6 +132,7 @@ let snapshotRevBefore = 0;
 const COLLAPSED_KEY = "owncord:collapsed:a.example";
 
 let emojiRevBefore = 0;
+let stickerRevBefore = 0;
 let partitionBefore = "";
 const FILE_URL = "https://chat.example/api/v1/files/1";
 const LINK_URL = "https://news.example/story";
@@ -199,6 +206,11 @@ const mentionChannel: Channel = {
 let threadsJobRan = false;
 
 const PROBES: readonly Probe[] = [
+  {
+    name: "welcomeRows:waved",
+    mutate: () => markWaved(77),
+    isInitial: () => !hasWaved(77),
+  },
   {
     name: "voice:store",
     mutate: () => voiceStore.setState((s) => ({ ...s, currentChannelId: 3, voiceStatus: "idle" })),
@@ -284,6 +296,19 @@ const PROBES: readonly Probe[] = [
       emojiStore.getState().emoji.length === 0 && (emojiStore.getState().rev ?? 0) > emojiRevBefore,
   },
   {
+    // Bumped, not reset (like emoji): a late GET /stickers from the old server
+    // must not match the next session's snapshot.
+    name: "stickers:store",
+    mutate: () => {
+      stickerRevBefore = stickersStore.getState().rev;
+      setStickers([{ id: 1, name: "Wave", emoji: null, url: "/api/v1/stickers/1/image" }]);
+    },
+    isInitial: () =>
+      stickersStore.getState().stickers.length === 0 &&
+      !stickersStore.getState().loaded &&
+      stickersStore.getState().rev > stickerRevBefore,
+  },
+  {
     name: "attachments:caches",
     mutate: async () => {
       setServerHost("chat.example");
@@ -353,6 +378,15 @@ const PROBES: readonly Probe[] = [
       expect(getImageBox("https://cdn.example/box-probe.png")).toEqual({ w: 40, h: 30 });
     },
     isInitial: () => getImageBox("https://cdn.example/box-probe.png") === undefined,
+  },
+  {
+    // Row heights measured on one server never seed the next one's lists.
+    name: "message-list:row-heights",
+    mutate: () => {
+      rememberRowHeight("row-probe", 800, 140);
+      expect(rememberedRowHeight("row-probe", 800)).toBe(140);
+    },
+    isInitial: () => rememberedRowHeight("row-probe", 800) === undefined,
   },
   {
     // A cached GIF still shows as an instant swap for the next row of that GIF.
@@ -559,6 +593,11 @@ const PROBES: readonly Probe[] = [
  * Adding to this list is a review decision: say where the behaviour is tested.
  */
 const EXEMPT: readonly string[] = [
+  // Probing it means rendering a row, whose fetch would disturb the shared
+  // fetch mock the attachments:caches probe counts. clearAttachmentCaches
+  // (probed above) calls the same reset, and attachments-text-preview.test.ts
+  // pins that a reset drops the cache and an in-flight result.
+  "attachments:text-preview",
   // main.ts is not loaded here; session-isolation.test.ts drives it and pins
   // that it runs before the domain resets.
   "main:pending-and-api",
@@ -569,6 +608,9 @@ const EXEMPT: readonly string[] = [
   // Its reset is not observable: a kept DM needs the live voice session on that
   // channel, and the voice reset that follows prunes the set anyway.
   "dm:kept-calls",
+  // Playing <audio> elements, not store state; features/voice-messages/player.test.ts
+  // ("pauses every playing clip when the session ends") runs the reset.
+  "voice-messages:player",
   // Per-subscriber names built from a counter in auth.store (onAuthCleared);
   // page-scoped callers only, each removes its own entry with its disposer.
   "auth-cleared#${authClearedSeq}",
@@ -577,7 +619,10 @@ const EXEMPT: readonly string[] = [
 /** Every `registerSessionReset("<name>"` literal under src/, by source text. */
 function registeredNamesInSource(): Set<string> {
   const names = new Set<string>();
-  const re = /registerSessionReset\(\s*[`'"]([^`'"]+)[`'"]/g;
+  // Stryker's instrumenter wraps the name literal in its mutant switch:
+  // registerSessionReset(stryMutAct_x("1") ? "" : (stryCov_x("1"), "name"), ...).
+  const re =
+    /registerSessionReset\(\s*(?:stryMutAct_\w+\("\d+"\)\s*\?\s*(?:""|``)\s*:\s*\(stryCov_\w+\("\d+"\),\s*)?[`'"]([^`'"]+)[`'"]/g;
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = join(dir, entry.name);

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -168,8 +167,7 @@ func handleSetLogLevel(database *db.DB, c *LogLevelController) http.HandlerFunc 
 			return
 		}
 		var req logLevelRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		if req.Level != "debug" || req.DurationSeconds != int(logLevelBoostWindow/time.Second) {

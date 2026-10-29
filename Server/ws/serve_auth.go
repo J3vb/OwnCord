@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/coder/websocket"
 
@@ -27,15 +28,16 @@ import (
 type resumeHint struct {
 	LastSeq   uint64
 	ChannelID int64
-	// Wake marks a reconnect the client made after the process was suspended
-	// (a laptop waking from sleep). It is the client's own guess, not a
-	// security token: registerNow uses it only to refuse displacing a
-	// DIFFERENT session's live connection (U4), never to grant anything.
-	Wake bool
 	// Features is the parsed `features` list of the auth frame (6.9d-a1). Like
 	// the rest of the hint it is UNTRUSTED, and it only narrows what the
 	// socket is sent.
 	Features clientFeatures
+	// IdentityKey is the device identity public key from the auth frame
+	// (voice E2EE, key per device), trimmed and validated; "" when the frame
+	// carried none or an invalid one. Unlike the rest of the hint it is not
+	// narrowed by anything: it is relayed to peers in this connection's voice
+	// announces, which verify it against the announce's own signature.
+	IdentityKey string
 }
 
 func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*db.User, string, resumeHint, error) {
@@ -69,12 +71,16 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		// Compatibility). Absent means 0: clients up to v1.2.0-alpha.4 predate
 		// the field.
 		Epoch int `json:"epoch"`
-		// Wake marks a reconnect after a process suspend (U4). Optional;
+		// Wake marks a reconnect after a process suspend. Accepted and ignored: several devices may be signed in at once, so no wake is refused. Optional;
 		// absent means an ordinary connect.
 		Wake bool `json:"wake"`
 		// Features declares optional client capabilities (client_features.go).
 		// Absent means none: clients before WP 6.9d predate the field.
 		Features []string `json:"features"`
+		// IdentityPublicKey is this device's E2EE identity public key (base64).
+		// Optional and never fatal: kept raw so a wrongly typed value cannot
+		// make the whole frame fail to parse, and validated below.
+		IdentityPublicKey json.RawMessage `json:"identity_public_key"`
 	}
 	if err := json.Unmarshal(env.Payload, &p); err != nil || p.Token == "" {
 		_ = conn.Write(ctx, websocket.MessageText, buildAuthError("missing token"))
@@ -112,7 +118,50 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		return nil, "", resumeHint{}, fmt.Errorf("auth: principal resolution failed: %w", err)
 	}
 
-	return user, hash, resumeHint{LastSeq: p.LastSeq, ChannelID: p.ActiveChannelID, Wake: p.Wake, Features: parseClientFeatures(p.Features)}, nil
+	return user, hash, resumeHint{
+		LastSeq:     p.LastSeq,
+		ChannelID:   p.ActiveChannelID,
+		Features:    parseClientFeatures(p.Features),
+		IdentityKey: authIdentityKey(user.ID, p.IdentityPublicKey),
+	}, nil
+}
+
+// sessionIdentityKeyTimeout bounds the session-row write of the device key, so
+// a busy database writer cannot stall the handshake behind it.
+const sessionIdentityKeyTimeout = 2 * time.Second
+
+// recordSessionIdentityKey stores the device key on the session row, bounded
+// by its own deadline: after the hijack the request context no longer ends on
+// a client disconnect, so the timeout is what keeps a busy writer from
+// stalling the handshake. Failure is log-only: the key is also held on the Client, and the
+// row is only kept for a resumed connection and future device lists.
+func (h *Hub) recordSessionIdentityKey(ctx context.Context, userID int64, tokenHash, key string) {
+	ctx, cancel := context.WithTimeout(ctx, sessionIdentityKeyTimeout)
+	defer cancel()
+	if err := h.authn.RecordSessionIdentityKey(ctx, tokenHash, key); err != nil {
+		slog.Warn("ws auth: recording the session identity key failed", "user_id", userID, "err", err)
+	}
+}
+
+// authIdentityKey returns the device identity key an auth frame carried, or ""
+// when it carried none or an invalid one. An invalid key is logged and
+// ignored, never an auth failure: a bad key must not lock a device out of its
+// account, and the announce simply goes out without a per-device key.
+func authIdentityKey(userID int64, raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var key string
+	if err := json.Unmarshal(raw, &key); err != nil {
+		slog.Info("ws auth: identity_public_key ignored, not a string", "user_id", userID)
+		return ""
+	}
+	key = strings.TrimSpace(key)
+	if err := service.ValidateIdentityKey(key); err != nil {
+		slog.Info("ws auth: identity_public_key ignored, invalid", "user_id", userID, "err", err)
+		return ""
+	}
+	return key
 }
 
 // handshakeWrite writes one handshake-phase message (auth_ok, ready, or a
@@ -152,16 +201,6 @@ func (h *Hub) handshakeWriteReady(ctx context.Context, conn *websocket.Conn, p *
 	return n, w.Close()
 }
 
-// refuseWake answers a wake reconnect (auth payload `wake: true`) refused
-// because another device holds the session (wakeBlockedLocked): an `error`
-// frame with ANOTHER_DEVICE_ACTIVE (not auth_error — the token is still
-// valid), then the close. c was never registered, so nothing else is torn down.
-func refuseWake(ctx context.Context, conn *websocket.Conn, c *Client) {
-	slog.Info("ws: wake reconnect refused while another device holds the session", "user_id", c.userID)
-	_ = handshakeWrite(ctx, conn, buildErrorMsg(ErrCodeAnotherDeviceActive, "another device is active"))
-	_ = conn.Close(websocket.StatusPolicyViolation, "another device is active")
-}
-
 func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, uint64, error) {
 	// SRE-11: resolve the real client address through trusted_proxies, so the
 	// handshake logs and the ws_connect audit row name the client and not the
@@ -179,11 +218,14 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	c.remoteAddr = clientAddr
 	// Untrusted until handleReconnect checks it against the allowed set.
 	c.authChannelID = hint.ChannelID
-	// U4: a wake reconnect must not displace another device's live session;
-	// registerNow enforces it against the live client's token hash.
-	c.wakeReconnect = hint.Wake
 	// 6.9d: what the client says it can render; forums are withheld without it.
 	c.features = hint.Features
+	// Voice E2EE key per device: set once, before registerNow makes c
+	// reachable, and never written again, so reading it needs no lock.
+	c.identityKey = hint.IdentityKey
+	if hint.IdentityKey != "" {
+		h.recordSessionIdentityKey(r.Context(), user.ID, tokenHash, hint.IdentityKey)
+	}
 
 	// Look up role name for protocol-compliant payloads and cache on client.
 	// Fail closed like the sibling lookup in handleFreshConnect (BUG-094):
@@ -247,6 +289,12 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// note in serve_pumps.go's readPump defer — that field is an
 		// auth-time snapshot, never updated, so broadcasting it here can
 		// resurrect a status the user already changed or cleared.
-		h.QueuePresence(c.userID, db.StatusOffline, nil)
+		// Re-check after the DB write: a device that registered meanwhile
+		// queues its own online presence after this point (see readPump).
+		if !h.isConnected(c.userID) {
+			h.QueuePresence(c.userID, db.StatusOffline, nil)
+		}
+	} else if !replaced {
+		h.rebroadcastAfterDeviceLeft(c)
 	}
 }

@@ -12,6 +12,7 @@ import { createElement, appendChildren, setText } from "../../lib/dom";
 import { readableRoleColor } from "../../lib/themes";
 import type { UserStatus } from "../../lib/types";
 import { statusLabel } from "../../i18n/shell";
+import { createIcon, type IconName } from "../../lib/icons";
 import type { createAvatarElement } from "../../components/message-list/avatar";
 
 /** The avatar drawer, injected: a feature reaches the UI layer only lazily. */
@@ -29,6 +30,12 @@ export type MemberRowModel = {
   readonly avatarUrl: string | null;
   /** The line under the name; null when there is none. */
   readonly customStatus: string | null;
+  /** "Playing <game>" or "Listening to <player>" for the second line; null when
+   *  there is none. Always null while a custom status is set, which wins the
+   *  line (WP 8.3); a game beats music (WP 8.10). */
+  readonly activity: string | null;
+  /** The icon that goes with `activity`: the controller or the music note. */
+  readonly activityIcon: IconName;
   readonly colorVar: string;
   /** Patch field with `away`: the dot and the dimmed row change in place. */
   readonly status: UserStatus;
@@ -115,6 +122,21 @@ function drawRow(model: MemberRowModel, createAvatar: CreateAvatar): HTMLDivElem
     setText(customEl, model.customStatus);
     nameWrap.appendChild(customEl);
     item.setAttribute("aria-describedby", `${customId} ${statusId}`);
+  } else if (model.activity !== null) {
+    const activityId = `mi-activity-${model.id}`;
+    const activityEl = createElement("span", {
+      class: "mi-activity",
+      "data-testid": `member-activity-${model.id}`,
+      id: activityId,
+    });
+    const icon = createIcon(model.activityIcon, 12);
+    icon.setAttribute("aria-hidden", "true");
+    icon.classList.add("mi-activity-icon");
+    const text = createElement("span", { class: "mi-activity-text" });
+    setText(text, model.activity);
+    appendChildren(activityEl, icon, text);
+    nameWrap.appendChild(activityEl);
+    item.setAttribute("aria-describedby", `${activityId} ${statusId}`);
   } else {
     item.setAttribute("aria-describedby", statusId);
   }

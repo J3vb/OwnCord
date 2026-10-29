@@ -1144,6 +1144,18 @@ describe("API Client", () => {
     });
   });
 
+  describe("sticker endpoints", () => {
+    const sticker = { id: 3, name: "Wave", emoji: "👋", url: "/api/v1/stickers/3/image" };
+
+    it("listStickers calls GET /stickers", async () => {
+      mockFetch.mockResolvedValue(jsonResponse([sticker]));
+      const result = await api.listStickers();
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/stickers");
+      expect(fetchCallOpts().method).toBe("GET");
+      expect(result).toEqual([sticker]);
+    });
+  });
+
   describe("DM endpoints", () => {
     it("getDmChannels calls GET /dms", async () => {
       mockFetch.mockResolvedValue(jsonResponse({ channels: [] }));

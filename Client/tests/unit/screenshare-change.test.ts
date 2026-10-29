@@ -10,6 +10,7 @@ import { Track } from "livekit-client";
 import type { LocalTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
+import { captureLogs } from "../helpers/log-capture";
 
 const createLocalScreenTracks = vi.fn();
 const savePref = vi.fn();
@@ -21,6 +22,13 @@ vi.mock("livekit-client", async (importOriginal) => {
     createLocalScreenTracks: (...args: unknown[]) => createLocalScreenTracks(...args) as unknown,
   };
 });
+
+const setH264GpuProfiles = vi.hoisted(() => vi.fn());
+vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/videoCodec")>()),
+  h264GpuPublish: (codec: string) => codec === "h264",
+}));
 
 vi.mock("@lib/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
@@ -125,6 +133,19 @@ beforeEach(() => {
 });
 
 describe("changeScreenshareSource", () => {
+  it("carries an H.264 share's GPU profiles over to the new capture", async () => {
+    const logs = captureLogs();
+    setH264GpuProfiles.mockClear();
+    const rig = setup(false);
+    rig.state.published = "h264";
+    const [freshVideo] = picked(false);
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(freshVideo!.mediaStreamTrack, true);
+    expect(logs.find("Screenshare source changed")[0]!.component).toBe("screenShare");
+  });
+
   it("swaps the capture under the same publication and tells the server nothing", async () => {
     const rig = setup(false);
     const [freshVideo] = picked(false);
@@ -518,5 +539,677 @@ describe("setScreenshareQuality on a share that changes its own quality (Linux n
 
     expect(rig.deps.onError).not.toHaveBeenCalled();
     expect(rig.wsSend).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ordering, guards and supersession of a change
+// ---------------------------------------------------------------------------
+
+/** A picker that stays open until the test answers it. */
+function openPicker(): { answer: (tracks: FakeTrack[]) => void; fail: (err: unknown) => void } {
+  let answer!: (tracks: FakeTrack[]) => void;
+  let fail!: (err: unknown) => void;
+  createLocalScreenTracks.mockReturnValueOnce(
+    new Promise<FakeTrack[]>((resolve, reject) => {
+      answer = resolve;
+      fail = reject;
+    }),
+  );
+  return { answer, fail };
+}
+
+/** `deps` whose room and ws a test can swap while a change waits. */
+function movableDeps(rig: ReturnType<typeof setup>) {
+  const current = { room: rig.deps.getRoom(), ws: rig.deps.getWs() };
+  const deps: Deps = {
+    getRoom: () => current.room,
+    getWs: () => current.ws,
+    onError: rig.deps.onError,
+    reapplyAudioPipeline: rig.deps.reapplyAudioPipeline,
+  };
+  return { deps, current };
+}
+
+describe("changeScreenshareSource: guards", () => {
+  it("does nothing while another change is running", async () => {
+    const rig = setup(false);
+    rig.state.changing = true;
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(createLocalScreenTracks).not.toHaveBeenCalled();
+    expect(rig.state.changing).toBe(true);
+  });
+
+  it("does nothing on a share with no published video", async () => {
+    const rig = setup(true);
+    rig.state.manualScreenTracks = [rig.audio as unknown as LocalTrack];
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(createLocalScreenTracks).not.toHaveBeenCalled();
+  });
+
+  it("holds the change flag while the picker is open and ignores a second request", async () => {
+    const rig = setup(false);
+    const picker = openPicker();
+
+    const first = changeScreenshareSource(rig.state, rig.deps);
+    expect(rig.state.changing).toBe(true);
+    await changeScreenshareSource(rig.state, rig.deps);
+    expect(createLocalScreenTracks).toHaveBeenCalledTimes(1);
+
+    picker.answer([track(Track.Kind.Video, "window-b")]);
+    await first;
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("swaps the video and audio by kind, whatever order the tracks are listed in", async () => {
+    const rig = setup(true);
+    rig.state.manualScreenTracks = [
+      rig.audio as unknown as LocalTrack,
+      rig.video as unknown as LocalTrack,
+    ];
+    const freshAudio = track(Track.Kind.Audio, "audio-b");
+    const freshVideo = track(Track.Kind.Video, "window-b");
+    createLocalScreenTracks.mockResolvedValueOnce([freshAudio, freshVideo]);
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(rig.video.replaceTrack).toHaveBeenCalledWith(freshVideo.mediaStreamTrack, {
+      userProvidedTrack: false,
+    });
+    expect(rig.audio.replaceTrack).toHaveBeenCalledWith(freshAudio.mediaStreamTrack, {
+      userProvidedTrack: false,
+    });
+    expect(rig.state.manualScreenTracks).toEqual([rig.video, rig.audio]);
+  });
+
+  it("drops a pick whose capture has already ended and leaves the old source going", async () => {
+    const rig = setup(false);
+    const [freshVideo] = picked(false);
+    (freshVideo!.mediaStreamTrack as { readyState: string }).readyState = "ended";
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(rig.video.replaceTrack).not.toHaveBeenCalled();
+    expect(freshVideo!.mediaStreamTrack.stop).toHaveBeenCalled();
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localScreenshare).toBe(true);
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("moves only the backup-codec senders that are still open", async () => {
+    const rig = setup(false);
+    const closedMst = mst("backup-closed");
+    const openMst = mst("backup-open");
+    const senderlessMst = mst("backup-none");
+    const closedReplace = vi.fn().mockResolvedValue(undefined);
+    const openReplace = vi.fn().mockResolvedValue(undefined);
+    rig.video.simulcastCodecs.set("vp9", {
+      mediaStreamTrack: closedMst,
+      sender: {
+        transport: { state: "closed" },
+        replaceTrack: closedReplace,
+      } as unknown as RTCRtpSender,
+    });
+    rig.video.simulcastCodecs.set("av1", { mediaStreamTrack: senderlessMst });
+    rig.video.simulcastCodecs.set("h264", {
+      mediaStreamTrack: openMst,
+      sender: {
+        transport: { state: "connected" },
+        replaceTrack: openReplace,
+      } as unknown as RTCRtpSender,
+    });
+    picked(false);
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(closedReplace).not.toHaveBeenCalled();
+    expect(closedMst.stop).not.toHaveBeenCalled();
+    expect(senderlessMst.stop).not.toHaveBeenCalled();
+    expect(openReplace).toHaveBeenCalledTimes(1);
+    expect(openMst.stop).toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "a stop",
+      (rig: ReturnType<typeof setup>) => {
+        rig.state.generation = 1;
+      },
+    ],
+    [
+      "a new set of tracks",
+      (rig: ReturnType<typeof setup>) => {
+        rig.state.manualScreenTracks = [...rig.state.manualScreenTracks];
+      },
+    ],
+  ])("drops the new capture when %s took the share while the picker was open", async (_n, act) => {
+    const rig = setup(false);
+    const picker = openPicker();
+    const changing = changeScreenshareSource(rig.state, rig.deps);
+    act(rig);
+    const fresh = track(Track.Kind.Video, "window-b");
+    picker.answer([fresh]);
+    await changing;
+
+    expect(rig.video.replaceTrack).not.toHaveBeenCalled();
+    expect(fresh.mediaStreamTrack.stop).toHaveBeenCalled();
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("drops the new capture when the room changed while the picker was open", async () => {
+    const rig = setup(false);
+    const { deps, current } = movableDeps(rig);
+    const picker = openPicker();
+    const changing = changeScreenshareSource(rig.state, deps);
+    current.room = {} as Room;
+    const fresh = track(Track.Kind.Video, "window-b");
+    picker.answer([fresh]);
+    await changing;
+
+    expect(rig.video.replaceTrack).not.toHaveBeenCalled();
+    expect(fresh.mediaStreamTrack.stop).toHaveBeenCalled();
+  });
+
+  it("drops the new capture when the connection changed while the picker was open", async () => {
+    const rig = setup(false);
+    const { deps, current } = movableDeps(rig);
+    const picker = openPicker();
+    const changing = changeScreenshareSource(rig.state, deps);
+    current.ws = { send: vi.fn() } as unknown as WsClient;
+    const fresh = track(Track.Kind.Video, "window-b");
+    picker.answer([fresh]);
+    await changing;
+
+    expect(rig.video.replaceTrack).not.toHaveBeenCalled();
+    expect(fresh.mediaStreamTrack.stop).toHaveBeenCalled();
+  });
+});
+
+describe("changeScreenshareSource: logging", () => {
+  it("logs whether the swapped share carries audio", async () => {
+    const logs = captureLogs();
+    const silent = setup(false);
+    picked(false);
+    await changeScreenshareSource(silent.state, silent.deps);
+    const withAudio = setup(true);
+    picked(true);
+    await changeScreenshareSource(withAudio.state, withAudio.deps);
+
+    expect(new Set(logs.find("Screenshare source changed").map((e) => e.component))).toEqual(
+      new Set(["screenShare"]),
+    );
+    expect(logs.find("Screenshare source changed").map((e) => e.data)).toEqual([
+      { audio: false },
+      { audio: true },
+    ]);
+  });
+});
+
+describe("changeScreenshareSource: a change that goes wrong", () => {
+  it("shows an error and keeps the old source when the picker fails for another reason", async () => {
+    const logs = captureLogs();
+    const rig = setup(false);
+    createLocalScreenTracks.mockRejectedValueOnce(new Error("no capture"));
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expectConsole("error", /\[screenShare\] Failed to open a new screenshare source/);
+    expect(logs.find("Failed to open a new screenshare source")).toHaveLength(1);
+    expect(rig.deps.onError).toHaveBeenCalledWith("Couldn't change what you're sharing");
+    expect(rig.video.replaceTrack).not.toHaveBeenCalled();
+    expect(voiceStore.getState().localScreenshare).toBe(true);
+    expect(rig.wsSend).not.toHaveBeenCalled();
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("treats a picker error that is not a refusal as a failure", async () => {
+    const rig = setup(false);
+    createLocalScreenTracks.mockRejectedValueOnce(new DOMException("none", "NotFoundError"));
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expectConsole("error", /Failed to open a new screenshare source/);
+    expect(rig.deps.onError).toHaveBeenCalledWith("Couldn't change what you're sharing");
+  });
+
+  it("ends the share cleanly and stops the new capture when the swap fails half way", async () => {
+    const logs = captureLogs();
+    const rig = setup(false);
+    const [freshVideo] = picked(false);
+    rig.video.replaceTrack.mockRejectedValueOnce(new Error("sender gone"));
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expectConsole("error", /\[screenShare\] Failed to change screenshare source/);
+    expect(logs.find("Failed to change screenshare source")).toHaveLength(1);
+    expect(rig.deps.onError).toHaveBeenCalledWith("Couldn't change what you're sharing");
+    expect(freshVideo!.mediaStreamTrack.stop).toHaveBeenCalled();
+    expect(rig.wsSend).toHaveBeenCalledWith({
+      type: "voice_screenshare",
+      payload: { enabled: false },
+    });
+    expect(voiceStore.getState().localScreenshare).toBe(false);
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("stays silent about a failure once a stop has taken the share", async () => {
+    const rig = setup(false);
+    picked(false);
+    rig.video.replaceTrack.mockImplementationOnce(() => {
+      rig.state.generation = 1;
+      return Promise.reject(new Error("sender gone"));
+    });
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+    expect(rig.wsSend).not.toHaveBeenCalled();
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("releases a newly published audio track when a stop lands during the publish", async () => {
+    const rig = setup(false);
+    const [freshVideo, freshAudio] = picked(true);
+    rig.publishTrack.mockImplementationOnce(() => {
+      rig.state.generation = 1;
+      return Promise.resolve(undefined);
+    });
+    const tracksBefore = rig.state.manualScreenTracks;
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(rig.unpublishTrack).toHaveBeenCalledExactlyOnceWith(freshAudio!.mediaStreamTrack);
+    expect(freshVideo!.mediaStreamTrack.stop).toHaveBeenCalled();
+    expect(freshAudio!.mediaStreamTrack.stop).toHaveBeenCalled();
+    expect(rig.state.manualScreenTracks).toBe(tracksBefore);
+    expect(voiceStore.getState().localShareRev).toBe(0);
+    expect(rig.deps.reapplyAudioPipeline).not.toHaveBeenCalled();
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+  });
+
+  it("unpublishes nothing of its own when a stop lands after the audio was swapped in place", async () => {
+    const rig = setup(true);
+    const [freshVideo] = picked(true);
+    rig.audio.replaceTrack.mockImplementationOnce((next: FakeMst) => {
+      rig.audio.mediaStreamTrack = next;
+      rig.state.generation = 1;
+      return Promise.resolve(rig.audio);
+    });
+    const tracksBefore = rig.state.manualScreenTracks;
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(rig.unpublishTrack).not.toHaveBeenCalled();
+    expect(freshVideo!.mediaStreamTrack.stop).toHaveBeenCalled();
+    expect(rig.state.manualScreenTracks).toBe(tracksBefore);
+    expect(voiceStore.getState().localShareRev).toBe(0);
+  });
+});
+
+describe("changeScreenshareSource on a share that swaps its own capture", () => {
+  function inPlaceRig(changeSource: () => Promise<void>) {
+    const rig = setup(false);
+    rig.state.generation = 3;
+    Object.assign(rig.video, { changeSource });
+    return rig;
+  }
+
+  it("reports the change and logs it as in place", async () => {
+    const logs = captureLogs();
+    const rig = inPlaceRig(() => Promise.resolve());
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(voiceStore.getState().localShareRev).toBe(1);
+    expect(logs.find("Screenshare source changed").map((e) => e.data)).toEqual([{ inPlace: true }]);
+  });
+
+  it("holds the change flag while the host works and ignores a second request", async () => {
+    let finish!: () => void;
+    const changeSource = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    const rig = inPlaceRig(changeSource);
+
+    const first = changeScreenshareSource(rig.state, rig.deps);
+    expect(rig.state.changing).toBe(true);
+    await changeScreenshareSource(rig.state, rig.deps);
+    expect(changeSource).toHaveBeenCalledTimes(1);
+    finish();
+    await first;
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("asks nothing of the host while a change is already running", async () => {
+    const changeSource = vi.fn().mockResolvedValue(undefined);
+    const rig = inPlaceRig(changeSource);
+    rig.state.changing = true;
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expect(changeSource).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing of the host when there is no room", async () => {
+    const changeSource = vi.fn().mockResolvedValue(undefined);
+    const rig = inPlaceRig(changeSource);
+    const { deps, current } = movableDeps(rig);
+    current.room = null;
+
+    await changeScreenshareSource(rig.state, deps);
+
+    expect(changeSource).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "a stop",
+      (rig: ReturnType<typeof setup>) => {
+        rig.state.generation = 4;
+      },
+    ],
+    [
+      "a new set of tracks",
+      (rig: ReturnType<typeof setup>) => {
+        rig.state.manualScreenTracks = [...rig.state.manualScreenTracks];
+      },
+    ],
+  ])("reports nothing when %s took the share meanwhile", async (_n, act) => {
+    let finish!: () => void;
+    const rig = inPlaceRig(() => new Promise<void>((r) => (finish = r)));
+    const changing = changeScreenshareSource(rig.state, rig.deps);
+    act(rig);
+    finish();
+    await changing;
+
+    expect(voiceStore.getState().localShareRev).toBe(0);
+  });
+
+  it("reports nothing when the room changed meanwhile", async () => {
+    let finish!: () => void;
+    const rig = inPlaceRig(() => new Promise<void>((r) => (finish = r)));
+    const { deps, current } = movableDeps(rig);
+    const changing = changeScreenshareSource(rig.state, deps);
+    current.room = {} as Room;
+    finish();
+    await changing;
+
+    expect(voiceStore.getState().localShareRev).toBe(0);
+  });
+
+  it("stays silent about a failure once a stop has taken the share", async () => {
+    let fail!: (e: Error) => void;
+    const rig = inPlaceRig(() => new Promise<void>((_, rej) => (fail = rej)));
+    const changing = changeScreenshareSource(rig.state, rig.deps);
+    rig.state.generation = 4;
+    fail(new Error("gone"));
+    await changing;
+
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+  });
+
+  it("treats a host error that is not a refusal as a failure", async () => {
+    const rig = inPlaceRig(() => Promise.reject(new DOMException("none", "NotFoundError")));
+
+    await changeScreenshareSource(rig.state, rig.deps);
+
+    expectConsole("error", /\[screenShare\] Failed to change screenshare source/);
+    expect(rig.deps.onError).toHaveBeenCalledWith("Couldn't change what you're sharing");
+  });
+});
+
+describe("setScreenshareQuality on the web", () => {
+  it("asks nothing for the quality the share already has", async () => {
+    const rig = setup(false);
+
+    await setScreenshareQuality(rig.state, rig.deps, "medium");
+
+    expect(rig.video.mediaStreamTrack.applyConstraints).not.toHaveBeenCalled();
+    expect(rig.state.changing).toBeFalsy();
+  });
+
+  it("asks nothing while another change is running, and leaves its flag alone", async () => {
+    const rig = setup(false);
+    rig.state.changing = true;
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.video.mediaStreamTrack.applyConstraints).not.toHaveBeenCalled();
+    expect(rig.state.changing).toBe(true);
+  });
+
+  it("holds the change flag while the capture is re-sized", async () => {
+    const rig = setup(false);
+    let finish!: () => void;
+    rig.video.mediaStreamTrack.applyConstraints.mockReturnValueOnce(
+      new Promise<void>((r) => (finish = r)),
+    );
+
+    const changing = setScreenshareQuality(rig.state, rig.deps, "high");
+    expect(rig.state.changing).toBe(true);
+    finish();
+    await changing;
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("re-sizes by frame rate alone for the source quality", async () => {
+    const rig = setup(false);
+
+    await setScreenshareQuality(rig.state, rig.deps, "source");
+
+    expect(rig.video.mediaStreamTrack.applyConstraints).toHaveBeenCalledExactlyOnceWith({
+      frameRate: 30,
+    });
+    expect(rig.state.quality).toBe("source");
+  });
+
+  it("sets the track again on its sender with the user's own track kept, then reports", async () => {
+    const logs = captureLogs();
+    const rig = setup(false);
+    const capture = rig.video.mediaStreamTrack;
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.video.replaceTrack).toHaveBeenCalledExactlyOnceWith(capture, {
+      userProvidedTrack: false,
+    });
+    expect(voiceStore.getState().localShareRev).toBe(1);
+    expect(logs.find("Screenshare quality changed").map((e) => e.data)).toEqual([
+      { quality: "high", fps: 30, maxBitrate: 6_000_000 },
+    ]);
+  });
+
+  it("puts the bitrate on the top layer whatever order the layers are listed in", async () => {
+    const rig = setup(false);
+    const setParameters = vi.fn().mockResolvedValue(undefined);
+    const params = {
+      encodings: [
+        { rid: "h", scaleResolutionDownBy: 1 },
+        { rid: "q", scaleResolutionDownBy: 2 },
+      ],
+    } as unknown as RTCRtpSendParameters;
+    rig.video.sender = { getParameters: () => params, setParameters };
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(params.encodings[0]).toMatchObject({ maxBitrate: 6_000_000, maxFramerate: 30 });
+    expect(params.encodings[1]).not.toHaveProperty("maxBitrate");
+  });
+
+  it("puts the bitrate on the last of the layers that share the top size", async () => {
+    const rig = setup(false);
+    const params = {
+      encodings: [
+        { rid: "a", scaleResolutionDownBy: 1 },
+        { rid: "b", scaleResolutionDownBy: 1 },
+      ],
+    } as unknown as RTCRtpSendParameters;
+    rig.video.sender = { getParameters: () => params, setParameters: vi.fn() };
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(params.encodings[0]).not.toHaveProperty("maxBitrate");
+    expect(params.encodings[1]).toMatchObject({ maxBitrate: 6_000_000 });
+  });
+
+  it("leaves everything as it was when a stop lands while the capture is re-sized", async () => {
+    const rig = setup(false);
+    let finish!: () => void;
+    rig.video.mediaStreamTrack.applyConstraints.mockReturnValueOnce(
+      new Promise<void>((r) => (finish = r)),
+    );
+
+    const changing = setScreenshareQuality(rig.state, rig.deps, "high");
+    rig.state.generation = 1;
+    finish();
+    await changing;
+
+    expect(rig.video.replaceTrack).not.toHaveBeenCalled();
+    expect(rig.video.publishOptions).toBeUndefined();
+    expect(rig.state.quality).toBe("medium");
+    expect(voiceStore.getState().localShareRev).toBe(0);
+  });
+
+  it("leaves the quality as it was when a stop lands while the track is set again", async () => {
+    const rig = setup(false);
+    rig.video.replaceTrack.mockImplementationOnce(() => {
+      rig.state.generation = 1;
+      return Promise.resolve(rig.video);
+    });
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.state.quality).toBe("medium");
+    expect(voiceStore.getState().localShareRev).toBe(0);
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+  });
+
+  it("stays silent about a refusal once a stop has taken the share", async () => {
+    const rig = setup(false);
+    rig.video.mediaStreamTrack.applyConstraints.mockImplementationOnce(() => {
+      rig.state.generation = 1;
+      return Promise.reject(new Error("over"));
+    });
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.deps.onError).not.toHaveBeenCalled();
+    expect(rig.state.changing).toBe(false);
+  });
+});
+
+describe("setScreenshareQuality on a share that changes its own quality: guards", () => {
+  function nativeRig(setQuality = vi.fn().mockResolvedValue(undefined)) {
+    const rig = setup(false);
+    rig.state.fps = 60;
+    rig.state.published = "h264";
+    Object.assign(rig.video, { quality: "medium", fps: 60, setQuality });
+    return { ...rig, setQuality };
+  }
+
+  it("logs the new quality, the frame rate and that it was done in place", async () => {
+    const logs = captureLogs();
+    const rig = nativeRig();
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(logs.find("Screenshare quality changed").map((e) => e.data)).toEqual([
+      { quality: "high", fps: 60, inPlace: true },
+    ]);
+  });
+
+  it("falls back to the track's frame rate when the share has none of its own", async () => {
+    const rig = nativeRig();
+    rig.state.fps = undefined;
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.setQuality).toHaveBeenCalledWith("high", 60, "h264");
+  });
+
+  it("holds the change flag while the host works", async () => {
+    let finish!: () => void;
+    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+
+    const changing = setScreenshareQuality(rig.state, rig.deps, "high");
+    expect(rig.state.changing).toBe(true);
+    finish();
+    await changing;
+    expect(rig.state.changing).toBe(false);
+  });
+
+  it("asks nothing before the share has a quality", async () => {
+    const rig = nativeRig();
+    rig.state.quality = undefined;
+
+    await setScreenshareQuality(rig.state, rig.deps, "high");
+
+    expect(rig.setQuality).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing without a room, or without a connection", async () => {
+    const rig = nativeRig();
+    const { deps, current } = movableDeps(rig);
+
+    current.room = null;
+    await setScreenshareQuality(rig.state, deps, "high");
+    current.room = rig.deps.getRoom()!;
+    current.ws = null;
+    await setScreenshareQuality(rig.state, deps, "high");
+
+    expect(rig.setQuality).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "a stop",
+      (rig: ReturnType<typeof setup>) => {
+        rig.state.generation = 1;
+      },
+    ],
+    [
+      "a new set of tracks",
+      (rig: ReturnType<typeof setup>) => {
+        rig.state.manualScreenTracks = [...rig.state.manualScreenTracks];
+      },
+    ],
+  ])("reports nothing when %s took the share meanwhile", async (_n, act) => {
+    let finish!: () => void;
+    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+    const changing = setScreenshareQuality(rig.state, rig.deps, "high");
+    act(rig);
+    finish();
+    await changing;
+
+    expect(rig.state.quality).toBe("medium");
+    expect(voiceStore.getState().localShareRev).toBe(0);
+  });
+
+  it("reports nothing when the room changed meanwhile", async () => {
+    let finish!: () => void;
+    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+    const { deps, current } = movableDeps(rig);
+    const changing = setScreenshareQuality(rig.state, deps, "high");
+    current.room = {} as Room;
+    finish();
+    await changing;
+
+    expect(rig.state.quality).toBe("medium");
+    expect(voiceStore.getState().localShareRev).toBe(0);
+  });
+
+  it("reports nothing when the connection changed meanwhile", async () => {
+    let finish!: () => void;
+    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+    const { deps, current } = movableDeps(rig);
+    const changing = setScreenshareQuality(rig.state, deps, "high");
+    current.ws = { send: vi.fn() } as unknown as WsClient;
+    finish();
+    await changing;
+
+    expect(rig.state.quality).toBe("medium");
+    expect(voiceStore.getState().localShareRev).toBe(0);
   });
 });

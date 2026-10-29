@@ -177,11 +177,8 @@ fn prepare_log_dir<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<std::path::P
 /// Shared by the tray item and the `open_log_folder` command, so both routes
 /// reach the same folder and report the same error.
 fn open_log_dir<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
-    use tauri_plugin_opener::OpenerExt;
     let dir = prepare_log_dir(app)?;
-    app.opener()
-        .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
+    crate::external_open::open_path(&dir)
 }
 
 /// Open the log folder from the tray, so a user whose window never came up

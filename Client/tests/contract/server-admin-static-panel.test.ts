@@ -89,7 +89,7 @@ interface Bridge {
   applyRetention: () => Promise<void>;
   navigateTo: (id: string) => void;
   enterApp: () => Promise<void>;
-  nav: { id?: string }[];
+  nav: { id?: string; label?: string; allowed?: () => boolean }[];
   wiz: { step: number };
   wizStepCount: number;
   renderWizard: () => void;
@@ -175,6 +175,12 @@ async function boot(
   const bridge = (dom.window as unknown as { __test: Bridge }).__test;
   expect(bridge).toBeTruthy();
   return { dom, bridge };
+}
+
+/** What core.js showApp does after sign-in. jsdom, like a browser, only
+ * focuses what is displayed, and boot() leaves the shell hidden. */
+function showShell(dom: JSDOM): void {
+  dom.window.document.getElementById("adminShell")!.classList.remove("hidden");
 }
 
 // Sign-in is a real <form>: submit it the way Enter or the button does, then
@@ -846,6 +852,7 @@ describe("Server/admin/static — panel behaviour", () => {
     dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
+    showShell(booted.dom);
     booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     booted.bridge.state.auditPage = 2;
@@ -1207,6 +1214,7 @@ describe("Server/admin/static — panel behaviour", () => {
     dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
+    showShell(booted.dom);
 
     const content = doc.getElementById("content") as HTMLElement;
     content.innerHTML = '<input class="filter-search">';
@@ -1483,6 +1491,30 @@ describe("Server/admin/static — panel behaviour", () => {
     await apply;
   });
 
+  // WP 8.4c: a Manage Backups holder reaches the Backups page and nothing
+  // else of the owner-only group.
+  it("opens the Backups nav item to the owner and a Manage Backups holder only", async () => {
+    const booted = await boot([], () => ({ json: {} }));
+    dom = booted.dom;
+    const { bridge } = booted;
+    const item = (id: string) => bridge.nav.find((n) => n.id === id)!;
+    const MANAGE_BACKUPS = 0x4000;
+
+    bridge.state.me = { permissions: MANAGE_BACKUPS, is_owner: false };
+    expect(item("backups").allowed!()).toBe(true);
+    expect(item("backups").label).toBe("Backups");
+    for (const id of ["updates", "tokens", "config"]) {
+      expect(item(id).allowed!(), id).toBe(false);
+    }
+
+    bridge.state.me = { permissions: 0x2000000, is_owner: false }; // Manage Server only
+    expect(item("backups").allowed!()).toBe(false);
+
+    bridge.state.me = { permissions: ADMINISTRATOR, is_owner: true };
+    expect(item("backups").allowed!()).toBe(true);
+    expect(item("backups").label).toBe("Backups & restore");
+  });
+
   // AO-3. The shell groups the same #hash routes, shows who and where in a
   // top bar, badges the nav from the routes that own the counts, and below
   // 900px turns the sidebar into a drawer that takes focus and gives it back.
@@ -1554,6 +1586,11 @@ describe("Server/admin/static — panel behaviour", () => {
     // Drawer: focus moves in, Escape closes it and restores focus.
     const toggle = doc.getElementById("navToggle") as HTMLButtonElement;
     const shell = doc.getElementById("adminShell")!;
+    // The menu button only shows below 900px, and jsdom does not evaluate
+    // @media: apply the narrow rule so the button can take focus.
+    const narrow = doc.createElement("style");
+    narrow.textContent = ".topbar-menu{display:inline-flex}";
+    doc.head.append(narrow);
     toggle.focus();
     toggle.click();
     expect(shell.classList.contains("nav-open")).toBe(true);

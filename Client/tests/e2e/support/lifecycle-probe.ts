@@ -33,6 +33,21 @@ export interface LifecycleSample {
   tracks: number;
   audioContexts: number;
   heapUsed: number;
+  /** Where the attached nodes are at this sample. Not asserted: a failing
+   *  `nodes` bar prints its diff, so the report names what moved. */
+  dom?: DomBreakdown;
+}
+
+/**
+ * The attached DOM at a sample: its node count, and the nodes under each child
+ * of `<body>` and of the app layout (keyed by tag plus test id, id or first
+ * class; the two levels overlap). `nodes - attached` is what JS retains
+ * detached, so a nodes failure says whether the page rendered more or held on
+ * to more, and where.
+ */
+export interface DomBreakdown {
+  attached: number;
+  regions: Record<string, number>;
 }
 
 const COUNT_BAR_SLOPE = 0.05;
@@ -221,6 +236,28 @@ export async function sampleLifecycle(
     counters = next;
     if (stable) break;
   }
+  const dom = await page.evaluate(() => {
+    const count = (root: Node) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ALL);
+      let n = 1;
+      while (walker.nextNode()) n++;
+      return n;
+    };
+    const key = (el: Element) => {
+      const tag = el.tagName.toLowerCase();
+      const testId = el.getAttribute("data-testid");
+      if (testId) return `${tag}[${testId}]`;
+      if (el.id) return `${tag}#${el.id}`;
+      return el.classList[0] ? `${tag}.${el.classList[0]}` : tag;
+    };
+    const regions: Record<string, number> = {};
+    const layout = document.querySelector("[data-testid='app-layout']");
+    for (const el of [...document.body.children, ...(layout?.children ?? [])]) {
+      const k = key(el);
+      regions[k] = (regions[k] ?? 0) + count(el);
+    }
+    return { attached: count(document), regions };
+  });
   const heap = await cdp.send("Runtime.getHeapUsage");
   await page.waitForTimeout(Math.max(0, firstLedgerAt + 1000 - Date.now()));
   const secondLedger = await readLedger();
@@ -262,6 +299,7 @@ export async function sampleLifecycle(
       "(c) => c.state !== 'closed'",
     ),
     heapUsed: heap.usedSize,
+    dom,
   };
 }
 
@@ -270,7 +308,7 @@ export async function sampleLifecycle(
 export type SlopeCeilings = Partial<Record<CountMetric, number>>;
 
 export interface BarResult {
-  metric: keyof Omit<LifecycleSample, "cycle" | "cycleAt">;
+  metric: keyof Omit<LifecycleSample, "cycle" | "cycleAt" | "dom">;
   warm: number | null;
   final: number;
   slope: number;
@@ -413,7 +451,11 @@ export function evaluateBars(
         : exact
           ? flat
           : withinTolerance || measuredSlope <= (withinPage ? COUNT_BAR_SLOPE : phaseCeiling);
-      if (!ok) failures.push(`${label}: ${values.join("→")}`);
+      if (!ok) {
+        const where =
+          metric === "nodes" ? describeDomDiff(group[0]!, group[group.length - 1]!) : "";
+        failures.push(`${label}: ${values.join("→")}${where}`);
+      }
     }
     const result: BarResult = {
       metric,
@@ -461,6 +503,26 @@ export function evaluateBars(
   if (heapFailures.length > 0)
     results[results.length - 1]!.bar += ` — FAIL ${heapFailures.join("; ")}`;
   return results;
+}
+
+/**
+ * What moved in the attached DOM between two samples, for a nodes failure:
+ * attached and detached totals, then every region whose count changed. Empty
+ * when either sample has no breakdown.
+ */
+export function describeDomDiff(from: LifecycleSample, to: LifecycleSample): string {
+  if (from.dom === undefined || to.dom === undefined) return "";
+  const parts = [
+    `attached ${from.dom.attached}→${to.dom.attached}`,
+    `detached ${from.nodes - from.dom.attached}→${to.nodes - to.dom.attached}`,
+  ];
+  const keys = new Set([...Object.keys(from.dom.regions), ...Object.keys(to.dom.regions)]);
+  for (const key of [...keys].toSorted()) {
+    const a = from.dom.regions[key] ?? 0;
+    const b = to.dom.regions[key] ?? 0;
+    if (a !== b) parts.push(`${key} ${a}→${b}`);
+  }
+  return ` [${parts.join(", ")}]`;
 }
 
 /** A compact one-line-per-metric report for the test output and the report JSON. */

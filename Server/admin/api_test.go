@@ -16,6 +16,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/migrations"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -379,8 +380,22 @@ func openAdminTestDB(t *testing.T) *db.DB {
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
+	// 001's seeded Admin and Moderator carry bit 14 as an unused bit; migration
+	// 081 clears it, and a real server has run it (WP 8.4c), so the fixture
+	// applies the shipped file rather than a copy of its statement.
+	manageBackups, err := migrations.FS.ReadFile("081_manage_backups.sql")
+	if err != nil {
+		t.Fatalf("read 081_manage_backups.sql: %v", err)
+	}
+	// 082 clears the seven owner-type bits (WP 8.4d) the same way.
+	ownerTypeBits, err := migrations.FS.ReadFile("082_owner_type_permissions.sql")
+	if err != nil {
+		t.Fatalf("read 082_owner_type_permissions.sql: %v", err)
+	}
 	migrFS := fstest.MapFS{
-		"001_initial_schema.sql": {Data: adminSchema},
+		"001_initial_schema.sql":         {Data: adminSchema},
+		"081_manage_backups.sql":         {Data: manageBackups},
+		"082_owner_type_permissions.sql": {Data: ownerTypeBits},
 	}
 	if err := db.MigrateFS(database, migrFS); err != nil {
 		t.Fatalf("MigrateFS: %v", err)
@@ -1800,6 +1815,8 @@ type mockHub struct {
 	onVoiceCleanup func(channelID int64)
 	// uploadPolicyBroadcasts counts BroadcastUploadPolicy calls.
 	uploadPolicyBroadcasts int
+	// gameActivityPolicies records every ApplyGameActivityPolicy call.
+	gameActivityPolicies []bool
 }
 
 type bulkDeleteCall struct {
@@ -1916,7 +1933,11 @@ func (m *mockHub) BroadcastUploadPolicy() {
 	m.uploadPolicyBroadcasts++
 }
 
-func (m *mockHub) ClientCount() int {
+func (m *mockHub) ApplyGameActivityPolicy(saved bool) {
+	m.gameActivityPolicies = append(m.gameActivityPolicies, saved)
+}
+
+func (m *mockHub) UserCount() int {
 	return m.clientCount
 }
 

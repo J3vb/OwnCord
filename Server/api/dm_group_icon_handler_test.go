@@ -240,6 +240,11 @@ func TestUploadGroupIcon_RejectsOversizeWrongTypeAndBadTargets(t *testing.T) {
 	if rr := f.upload(t, "bob", big); rr.Code != http.StatusBadRequest {
 		t.Errorf("over 1 MiB = %d, want 400", rr.Code)
 	}
+	// A group icon stays still: GIF is an avatar and banner type only (WP 8.7).
+	rr := f.upload(t, "bob", makeAnimatedGIFBytes(t, 64, 64, 0))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "must be a PNG, JPEG or WebP image") {
+		t.Errorf("gif = %d %s, want 400 naming the still types", rr.Code, rr.Body.String())
+	}
 	if rr := f.upload(t, "dave", makePNGBytes(t, 8, 8)); rr.Code != http.StatusNotFound {
 		t.Errorf("non-member = %d, want 404", rr.Code)
 	}

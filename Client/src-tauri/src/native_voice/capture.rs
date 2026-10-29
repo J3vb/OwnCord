@@ -25,7 +25,8 @@ use livekit::webrtc::native::apm::AudioProcessingModule;
 use nnnoiseless::DenoiseState;
 
 use super::playout::{
-    host_devices, pinned_listed, Mixer, Selected, WatchedHost, Watcher, FOLLOW_EVERY, LOOPBACK,
+    host_devices, pinned_listed, shared_default_host, Mixer, Role, Selected, WatchedHost, Watcher,
+    FOLLOW_EVERY, LOOPBACK,
 };
 use super::session::{resolve_device, AudioOptions, DeviceInfo};
 use super::stream_format::{pick_config, typed};
@@ -536,7 +537,7 @@ pub(super) fn input_devices(host: &cpal::Host) -> Vec<(DeviceInfo, cpal::Device)
 }
 
 pub fn list_inputs() -> Vec<DeviceInfo> {
-    input_devices(&cpal::default_host())
+    input_devices(&shared_default_host(Role::Devices))
         .into_iter()
         .map(|(i, _)| i)
         .collect()
@@ -714,7 +715,7 @@ impl Capture {
             }
         }
         let selected = lock(&self.selected).clone();
-        let listed = input_devices(&cpal::default_host());
+        let listed = input_devices(&shared_default_host(Role::Capture));
         let (resolved, fell_back) = pick(&selected, listed)?;
         if fell_back {
             log::warn!("[native_voice] capture device {selected} not found; using the default");
@@ -741,7 +742,7 @@ impl Capture {
     /// default. An unknown id selects the default and reports the fallback as
     /// an error.
     pub fn set_device(&mut self, id: &str) -> Result<(), String> {
-        let (resolved, fell_back) = pick(id, input_devices(&cpal::default_host()))?;
+        let (resolved, fell_back) = pick(id, input_devices(&shared_default_host(Role::Capture)))?;
         let moved = lock(&self.resolved).as_ref().map(|(r, _)| r) != Some(&resolved.0);
         if self.stream().is_some() && moved {
             *lock(&self.stream) = Some(self.open(&resolved.1)?);
@@ -769,7 +770,7 @@ impl Capture {
         if self.watcher.is_some() || !self.feed.ready() {
             return;
         }
-        let host = WatchedHost::new();
+        let host = WatchedHost::new(Role::Capture);
         let poll_host = host.clone();
         let selected = self.selected.clone();
         let resolved = self.resolved.clone();

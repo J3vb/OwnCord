@@ -12,11 +12,12 @@ import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/safe-render";
 import type { WsClient } from "@lib/ws";
 import { ApiClientError, type ApiClient } from "@lib/api";
-import type { ChannelType } from "@lib/types";
+import type { ChannelType, VoiceUploadMeta } from "@lib/types";
 import { createMessageList } from "@components/MessageList";
 import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
 import { setInlineImageDecorator } from "@components/message-list/media";
+import { WAVE_CONTENT } from "@components/message-list/welcomeRows";
 import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
 import type { MessageListComponent } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
@@ -28,6 +29,7 @@ import type {
   SentAttachment,
 } from "@components/MessageInput";
 import { endPoll, votePoll } from "../../features/messaging/pollSend";
+import { clearReactionUsersCache } from "../../features/messaging/reactionUsers";
 import { loadSendQueue, preloadSendQueue } from "../../features/messaging/sendQueue-loader";
 import type { SendQueueModule } from "../../features/messaging/sendQueue-loader";
 import type { QueuedSend, QueueDeps } from "../../features/messaging/sendQueue";
@@ -74,6 +76,8 @@ import type { DmChannel } from "@stores/dm.store";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
 import { buildGroupAvatarStack } from "@components/DmSidebar";
 import { canManageMessages } from "@lib/permissions";
+import { findSticker } from "@stores/stickers.store";
+import { stickersText } from "../../i18n/stickers";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
@@ -411,6 +415,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // 3A-12: the reply's @ON/@OFF, part of the retry fingerprint, so a
       // retry resends the same value.
       replyPing?: boolean;
+      // WP 8.8: a sticker send, kept so a retry posts the same sticker.
+      sticker?: { readonly id: number; readonly name: string };
       // Each file with its name (and picked File, when there is one), so a
       // file the server did not attach can go back into the composer (2A-3).
       attachments: readonly SentAttachment[];
@@ -655,6 +661,9 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // Idempotent (no-ops once the flag is already gone), so this is safe
     // alongside mountChannel's existing invalidate of previousChannelId.
     if (currentChannelId !== null) invalidateChannelMessageWindow(currentChannelId);
+    // reaction_update stops arriving too, so a cached who-reacted list could
+    // be stale by the next visit.
+    clearReactionUsersCache();
     currentChannelId = null;
   }
 
@@ -878,11 +887,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       file: File,
       uploadSignal?: AbortSignal,
       onProgress?: (fraction: number) => void,
+      voice?: VoiceUploadMeta,
     ): Promise<{ id: string; url: string; filename: string }> => {
       // The first upload loads the queue module, so a send queued while it runs finds it ready.
       preloadSendQueue();
       try {
-        const result = await api.uploadFile(file, uploadSignal, onProgress);
+        const result = await api.uploadFile(file, uploadSignal, onProgress, voice);
         return { id: result.id, url: result.url, filename: result.filename };
       } catch (err) {
         // A user-cancelled upload is not a failure — the composer already
@@ -900,8 +910,12 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       files: readonly SentAttachment[],
       existingClientMessageId?: string,
       replyPing = false,
-      sendOptions: { readonly queued?: boolean } = {},
+      sendOptions: {
+        readonly queued?: boolean;
+        readonly sticker?: { readonly id: number; readonly name: string };
+      } = {},
     ): void {
+      const sticker = sendOptions.sticker;
       const attachments = files.map((f) => f.id);
       const user = currentMessageUser();
       // A queued send (3A-9) was built by this mount but may post after the
@@ -921,7 +935,25 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           : undefined);
       // Set only for a send with a recoverable logical identity: plain text
       // with a client_message_id, no reply and no attachments.
-      const persistId = replyTo === null && attachments.length === 0 ? clientMessageId : undefined;
+      const persistId =
+        replyTo === null && attachments.length === 0 && sticker === undefined
+          ? clientMessageId
+          : undefined;
+      // A sticker send commits with its receipt, so the server requires the id.
+      if (sticker !== undefined && clientMessageId === undefined) {
+        if (owns()) showToast(stickersText("send.unsupported"), "error");
+        return;
+      }
+      // The optimistic row's text is the server's fallback for the sticker.
+      const rowContent = sticker === undefined ? content : `[Sticker: ${sticker.name}]`;
+      const live = sticker === undefined ? null : findSticker(sticker.id);
+      const rowSticker =
+        live === null ? undefined : { id: live.id, name: live.name, url: live.url };
+      const rowFields = {
+        content: rowContent,
+        ...(rowSticker === undefined ? {} : { sticker: rowSticker }),
+      };
+      const draftSticker = sticker === undefined ? {} : { sticker };
       /** Persist before handing text to the socket, so a process crash after
        *  commit but before ACK can recover the same logical identity. Resolves
        *  false when the write did not land: callers that send regardless only
@@ -950,12 +982,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           clientMessageId,
           channelId,
           user,
-          content,
+          ...rowFields,
           replyTo,
           timestamp,
         });
         draftByCorrelation.set(cid, {
           content,
+          ...draftSticker,
           replyTo,
           ...(replyTo === null ? {} : { replyPing }),
           attachments: files,
@@ -981,7 +1014,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           type: "chat_send",
           payload: {
             channel_id: channelId,
-            content,
+            content: sticker === undefined ? content : "",
+            ...(sticker === undefined ? {} : { sticker_id: sticker.id }),
             reply_to: replyTo,
             ...(replyTo === null ? {} : { reply_ping: replyPing }),
             attachments,
@@ -993,12 +1027,13 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           clientMessageId,
           channelId,
           user,
-          content,
+          ...rowFields,
           replyTo,
           timestamp,
         });
         draftByCorrelation.set(cid, {
           content,
+          ...draftSticker,
           replyTo,
           ...(replyTo === null ? {} : { replyPing }),
           attachments: files,
@@ -1088,8 +1123,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       draftByCorrelation.delete(correlationId);
       clearSendTimer(correlationId);
       removeOptimistic(correlationId);
+      const retrySticker = "sticker" in draft ? draft.sticker : undefined;
+      const stickerOpts = retrySticker === undefined ? {} : { sticker: retrySticker };
       if (refusedReply) {
-        performSend(draft.content, null, draft.attachments);
+        performSend(draft.content, null, draft.attachments, undefined, false, stickerOpts);
         return;
       }
       performSend(
@@ -1098,6 +1135,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         draft.attachments,
         draft.clientMessageId,
         draft.replyPing === true,
+        stickerOpts,
       );
     }
 
@@ -1326,9 +1364,18 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
                 slots.messagesSlot.querySelector<HTMLElement>(`[data-post-id="${threadId}"]`) ??
                 slots.messagesSlot.querySelector<HTMLElement>('[data-testid="forum-new-post"]'),
             ),
+          avatar: (subject, className) =>
+            createAvatarElement(subject, {
+              className,
+              background: pickAvatarColor(subject.username),
+              decorative: true,
+              deferUntilVisible: true,
+            }),
         }),
       );
       if (storedChannel?.nsfw === true) mountConsentBar();
+      // A followed post's sidebar row asked for this forum: open the post now.
+      settleThreadNavigation(channelId);
       return;
     }
 
@@ -1461,6 +1508,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         if (channelAbort !== null) {
           void msgCtrl.loadMessages(channelId, channelAbort.signal);
         }
+      },
+      // The Wave button of a welcome row (WP 8.6): an ordinary 👋 message sent as
+      // a reply to the join row through the normal send path.
+      onWave: (msgId: number): boolean => {
+        const target = liveReplyTo(msgId);
+        if (target === null) return false;
+        performSend(WAVE_CONTENT, target, []);
+        return true;
       },
       onReplyClick: (msgId: number) => {
         const msgs = getChannelMessages(channelId);
@@ -1648,6 +1703,10 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         const ping = reply !== null && replyPing === true;
         if (queued === undefined) performSend(content, reply, files, undefined, ping);
         else enqueueSend(content, reply, ping, queued);
+      },
+      onSendSticker: (sticker, replyTo, replyPing) => {
+        const reply = liveReplyTo(replyTo);
+        performSend("", reply, [], undefined, reply !== null && replyPing, { sticker });
       },
       onUploadFile: uploadFile,
       onDiscardUpload: async (id: string) => {
@@ -2001,8 +2060,15 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // optimistic row (pending/failed) carries id 0 until the server
           // acks it, so editing it would send chat_edit for a message that
           // does not exist yet.
-          // A server-written row (a DM call log) is never editable.
-          if (m.user.id === myId && !m.deleted && m.status === "sent" && !isServerRowKind(m.kind)) {
+          // A server-written row (a DM call log) is never editable, nor is a
+          // sticker message (WP 8.8): it has no text and the server refuses it.
+          if (
+            m.user.id === myId &&
+            !m.deleted &&
+            m.status === "sent" &&
+            !isServerRowKind(m.kind) &&
+            m.sticker === undefined
+          ) {
             messageList?.startEdit(m.id);
             break;
           }

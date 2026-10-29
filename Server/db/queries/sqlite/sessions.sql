@@ -53,7 +53,7 @@ DELETE FROM sessions WHERE expires_at < ?;
 -- expires sessionTTL after its last touch, capped at created_at + 365 days,
 -- the absolute lifetime from sign-in. expires_at > now keeps a lapsed row
 -- lapsed, so a touch racing an expiry can never revive it. Both bounds use
--- sessionTimeLayout, which keeps the sweep's index comparison in
+-- dbtime.ISOLayout, which keeps the sweep's index comparison in
 -- DeleteExpiredSessions valid. The hub batches its touches (P5-S07), so now is
 -- the flush time, at most one flush interval after the use it records. The
 -- slice stays last: sqlc numbers the named args (?1, ?2), and a slice expanded
@@ -74,3 +74,8 @@ ORDER BY created_at DESC;
 -- device acknowledges every other session's login. The caller's own row is
 -- left alone so a device never acknowledges itself.
 UPDATE sessions SET unseen = 0 WHERE user_id = ? AND id != ? AND unseen = 1;
+
+-- name: SetSessionIdentityKey :execresult
+-- The device identity public key a WebSocket auth frame carried, stored on the
+-- session it authenticated. Written on every connect, last write wins.
+UPDATE sessions SET identity_public_key = sqlc.arg(identity_public_key) WHERE token = sqlc.arg(token);

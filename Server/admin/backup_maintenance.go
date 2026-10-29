@@ -98,6 +98,27 @@ func pruneStaleBackupTemps(backupDir string) {
 	}
 }
 
+// freeBackupPath returns a path in backupDir for a backup named base (plus
+// ".db"), with a "_N" suffix when that name is taken. VACUUM INTO refuses an
+// existing destination and the timestamp only has second resolution, so two
+// backups in one second need distinct names rather than a failure.
+func freeBackupPath(backupDir, base string) (string, error) {
+	path := filepath.Join(backupDir, base+".db")
+	for i := 2; ; i++ {
+		if _, err := os.Stat(path); err != nil {
+			// ENOENT is the free-slot case. Any OTHER stat error (EACCES on
+			// the dir, an unreadable mount) cannot be fixed by trying more
+			// suffixes — stop probing and let VACUUM INTO surface the real
+			// failure with a legible error instead of spinning this loop.
+			return path, nil //nolint:nilerr // a stat error means the slot is usable or unfixable by suffixing; see above
+		}
+		if i > 100 {
+			return "", fmt.Errorf("backup: no free filename after %s (tried 100 suffixes)", base)
+		}
+		path = filepath.Join(backupDir, fmt.Sprintf("%s_%d.db", base, i))
+	}
+}
+
 // runScheduledBackup takes a backup when the newest existing one is older
 // than interval (or none exists).
 func runScheduledBackup(ctx context.Context, database *db.DB, backupDir string, interval time.Duration) error {
@@ -112,24 +133,10 @@ func runScheduledBackup(ctx context.Context, database *db.DB, backupDir string, 
 	if err := os.MkdirAll(backupDir, 0o750); err != nil {
 		return fmt.Errorf("creating backup dir: %w", err)
 	}
-	// VACUUM INTO refuses an existing destination, and the timestamp only has
-	// second resolution — suffix on collision instead of failing the tick.
 	base := "scheduled_" + time.Now().UTC().Format("20060102_150405")
-	name := base + ".db"
-	path := filepath.Join(backupDir, name)
-	for i := 2; ; i++ {
-		if _, err := os.Stat(path); err != nil {
-			// ENOENT is the free-slot case. Any OTHER stat error (EACCES on
-			// the dir, an unreadable mount) cannot be fixed by trying more
-			// suffixes — stop probing and let VACUUM INTO surface the real
-			// failure with a legible error instead of spinning this loop.
-			break
-		}
-		if i > 100 {
-			return fmt.Errorf("scheduled backup: no free filename after %s (tried 100 suffixes)", base)
-		}
-		name = fmt.Sprintf("%s_%d.db", base, i)
-		path = filepath.Join(backupDir, name)
+	path, err := freeBackupPath(backupDir, base)
+	if err != nil {
+		return err
 	}
 	if err := database.BackupToSafe(ctx, path, backupDir); err != nil {
 		return err
@@ -139,6 +146,7 @@ func runScheduledBackup(ctx context.Context, database *db.DB, backupDir string, 
 		return fmt.Errorf("scheduled backup failed verification: %w", err)
 	}
 
+	name := filepath.Base(path)
 	slog.Info("scheduled backup created", "name", name)
 	// Actor 0 = system, same audit action the manual handler writes.
 	db.WriteAudit(ctx, database, 0, "backup_create", "server", 0, "scheduled backup saved: "+name)

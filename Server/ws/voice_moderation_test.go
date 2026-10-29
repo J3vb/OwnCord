@@ -36,6 +36,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
 // newVoiceModHub mirrors newVoiceHub but on the audit-capable schema.
 func newVoiceModHub(t *testing.T) (*ws.Hub, *db.DB) {
 	t.Helper()
+	return newVoiceModHubWithLimiter(t, auth.NewRateLimiter())
+}
+
+// newVoiceModHubWithLimiter is newVoiceModHub with the caller's rate limiter,
+// for tests that pre-fill a limiter bucket.
+func newVoiceModHubWithLimiter(t *testing.T, limiter *auth.RateLimiter) (*ws.Hub, *db.DB) {
+	t.Helper()
 	database, err := db.Open(":memory:")
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
@@ -46,7 +53,6 @@ func newVoiceModHub(t *testing.T) (*ws.Hub, *db.DB) {
 		t.Fatalf("MigrateFS: %v", err)
 	}
 
-	limiter := auth.NewRateLimiter()
 	// Moderation must receive a successful SFU acknowledgement. An empty
 	// protobuf response also represents a participant with no current tracks.
 	sfu := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

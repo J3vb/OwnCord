@@ -28,6 +28,14 @@
 - Edge case 1, handled and tested:
 - Edge case 2, handled and tested:
 
+## Process
+
+<!-- One line each, so the weekly setup review can count how the work was
+     built and reviewed straight from the PRs. -->
+
+- Built by: <!-- Sonnet worker / main session / person -->
+- Review: <!-- opus-reviewer / Sonnet reviewer / fable-reviewer / skipped (low-risk, say why) -->
+
 ## Test Plan
 
 - [ ] `npm run check` passes from the repository root — the one entry point that

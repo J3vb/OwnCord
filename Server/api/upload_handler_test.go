@@ -227,7 +227,9 @@ CREATE TABLE IF NOT EXISTS attachments (
     uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
     width       INTEGER,
     height      INTEGER,
-    uploader_id INTEGER REFERENCES users(id)
+    uploader_id INTEGER REFERENCES users(id),
+    duration_ms INTEGER,
+    waveform    TEXT
 );
 -- B5-2: the upload byte counter UploadService.Reserve charges before every
 -- store write, so no upload succeeds without it. Keep in step with
@@ -361,6 +363,37 @@ func makePNGBytes(t *testing.T, width, height int) []byte {
 		t.Fatalf("png.Encode: %v", err)
 	}
 	return buf.Bytes()
+}
+
+// makeAnimatedGIFBytes encodes a two-frame GIF of the given size, padded with
+// a comment extension until it is at least minBytes long (0: no padding).
+func makeAnimatedGIFBytes(t *testing.T, width, height, minBytes int) []byte {
+	t.Helper()
+	pal := color.Palette{color.Black, color.White}
+	anim := &gif.GIF{
+		Image: []*image.Paletted{image.NewPaletted(image.Rect(0, 0, width, height), pal), image.NewPaletted(image.Rect(0, 0, width, height), pal)},
+		Delay: []int{10, 10},
+	}
+	var buf bytes.Buffer
+	if err := gif.EncodeAll(&buf, anim); err != nil {
+		t.Fatalf("gif.EncodeAll: %v", err)
+	}
+	raw := buf.Bytes()
+	if len(raw) >= minBytes {
+		return raw
+	}
+	// A comment extension (0x21 0xFE) of 255-byte sub-blocks, inserted
+	// before the trailer, keeps the file a valid GIF at any size.
+	var pad bytes.Buffer
+	pad.Write([]byte{0x21, 0xFE})
+	for pad.Len() < minBytes-len(raw)+2 {
+		pad.WriteByte(255)
+		pad.Write(make([]byte, 255))
+	}
+	pad.WriteByte(0)
+	out := append([]byte{}, raw[:len(raw)-1]...)
+	out = append(out, pad.Bytes()...)
+	return append(out, raw[len(raw)-1])
 }
 
 func doUpload(t *testing.T, router http.Handler, token, fieldName, filename string, content []byte) *httptest.ResponseRecorder {
@@ -1759,6 +1792,33 @@ func TestServeThumb_JPEGHonoursEXIFOrientation(t *testing.T) {
 	}
 	if _, _, blue, _ := thumb.At(250, 100).RGBA(); blue < 0x8000 {
 		t.Error("the photo's top (blue) is not at the thumbnail's top")
+	}
+}
+
+// A sideways-stored phone photo records its upright size, so clients
+// reserve a portrait box for it.
+func TestUpload_JPEGDimensionsHonourEXIFOrientation(t *testing.T) {
+	database := newUploadTestDB(t)
+	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+	token := uploadCreateToken(t, database, "dimsexif", 4)
+	for _, tc := range []struct {
+		orientation, wantW, wantH int
+	}{{1, 40, 30}, {3, 40, 30}, {6, 30, 40}, {8, 30, 40}} {
+		content := withEXIFOrientation(encodeJPEG(t, solidImage(40, 30)), uint16(tc.orientation))
+		rr := doUpload(t, router, token, "file", "phone.jpg", content)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("orientation %d: upload %d; body: %s", tc.orientation, rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("orientation %d: decode: %v", tc.orientation, err)
+		}
+		if resp.Width != tc.wantW || resp.Height != tc.wantH {
+			t.Errorf("orientation %d: %dx%d, want %dx%d", tc.orientation, resp.Width, resp.Height, tc.wantW, tc.wantH)
+		}
 	}
 }
 

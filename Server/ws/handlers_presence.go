@@ -30,6 +30,8 @@ const (
 func registerPresenceHandlers(r *HandlerRegistry, deps PresenceDeps) {
 	r.RegisterV2(MsgTypeTypingStart, handleTypingV2, deps)
 	r.RegisterV2(MsgTypePresenceUpdate, handlePresenceV2, deps)
+	r.RegisterV2(MsgTypeActivityUpdate, handleActivityUpdateV2, deps)
+	r.RegisterV2(MsgTypeListeningUpdate, handleListeningUpdateV2, deps)
 	r.RegisterV2(MsgTypeChannelFocus, handleChannelFocusV2, deps)
 	r.RegisterV2(MsgTypeMarkRead, handleMarkReadV2, deps)
 	r.RegisterV2(MsgTypeMarkUnread, handleMarkUnreadV2, deps)
@@ -117,7 +119,9 @@ func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	if customStatus != nil {
 		live.customStatusExpiresAt = res.ExpiresAt
 	}
-	return Result{Events: presenceEvents(userID, status, customStatus), SetPresence: live}
+	// The game and the song follow the connection, not the status: the frame
+	// carries them.
+	return Result{Events: presenceEvents(userID, status, customStatus, info.Activity, info.Listening), SetPresence: live}
 }
 
 // handleChannelFocusV2 is the V2 handler for channel_focus messages.

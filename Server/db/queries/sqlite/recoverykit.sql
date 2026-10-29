@@ -12,10 +12,11 @@ ON CONFLICT(user_id) DO UPDATE SET verifier = excluded.verifier,
 -- name: GetRecoveryKit :one
 SELECT user_id, verifier, created_at, used_at FROM recovery_kits WHERE user_id = ?;
 
--- The consume is conditional: only an unspent kit is spent, and the affected
--- row count is what tells two concurrent redemptions apart.
+-- The consume is conditional: only the unspent kit whose verifier the caller
+-- compared against is spent, so the affected row count is what tells two
+-- concurrent redemptions, and a kit replaced since the compare, apart.
 -- name: ConsumeRecoveryKit :execresult
-UPDATE recovery_kits SET used_at = ? WHERE user_id = ? AND used_at IS NULL;
+UPDATE recovery_kits SET used_at = ? WHERE user_id = ? AND verifier = ? AND used_at IS NULL;
 
 -- name: DeleteRecoveryKit :exec
 DELETE FROM recovery_kits WHERE user_id = ?;

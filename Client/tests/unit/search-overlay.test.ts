@@ -452,6 +452,17 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("stays open when a drag-select ends on the backdrop", () => {
+    const opts = makeOptions();
+    const overlay = createSearchOverlay(opts);
+    overlay.mount(container);
+    const overlayEl = container.querySelector(".search-overlay") as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(opts.onClose).not.toHaveBeenCalled();
+    overlay.destroy?.();
+  });
+
   it("does not close when clicking inside the box", () => {
     const opts = makeOptions();
     const overlay = createSearchOverlay(opts);
@@ -493,6 +504,39 @@ describe("createSearchOverlay", () => {
           .querySelector("[data-testid='search-result-1']")!
           .classList.contains("search-result-item--active"),
       ).toBe(true);
+
+      overlay.destroy?.();
+    });
+
+    it("Enter or Escape that an IME is composing with neither selects nor closes", async () => {
+      const result = makeResult({ message_id: 5 });
+      const onSearch = vi.fn().mockResolvedValue({ results: [result] });
+      const onSelectResult = vi.fn();
+      const opts = makeOptions({ onSearch, onSelectResult });
+      const overlay = createSearchOverlay(opts);
+      overlay.mount(container);
+
+      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+      input.value = "test";
+      input.dispatchEvent(new Event("input"));
+      await vi.advanceTimersByTimeAsync(300);
+
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", keyCode: 229, bubbles: true }),
+      );
+      expect(onSelectResult).not.toHaveBeenCalled();
+      expect(opts.onClose).not.toHaveBeenCalled();
+
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(onSelectResult).toHaveBeenCalledWith(result);
 
       overlay.destroy?.();
     });

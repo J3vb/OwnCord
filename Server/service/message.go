@@ -43,6 +43,10 @@ var (
 	// or whose time ran out. It is always wrapped together with ErrBadRequest,
 	// which it refines into the POLL_ENDED wire code.
 	ErrPollEnded = errors.New("poll ended")
+	// ErrStickerNotFound means a sticker send named a sticker that does not
+	// exist (or no longer does). It is always wrapped together with
+	// ErrNotFound, which it refines into the STICKER_NOT_FOUND wire code.
+	ErrStickerNotFound = errors.New("sticker not found")
 	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator
 	// timeout row (B5-9) and cannot send or edit messages, add reactions,
 	// join voice, start a new DM, create or rename a group DM, ring a DM
@@ -197,6 +201,9 @@ type MessageService struct {
 	forward forwardDeps
 	// poll backs CreatePoll (WP 6.9b); see message_poll.go.
 	poll pollDeps
+	// sticker reads a message's sticker block and a sticker's row (WP 8.8a);
+	// nil disables sticker sends.
+	sticker StickerStore
 	// threads reads a forum post's thread for a retry (WP 6.9d); nil disables
 	// forum posts. It is the ThreadStore slice, not a Store method.
 	threads ThreadStore
@@ -240,6 +247,7 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 	}
 	s.forward.store, _ = st.(ForwardStore)
 	s.poll.store, _ = st.(PollStore)
+	s.sticker, _ = st.(StickerStore)
 	s.threads, _ = st.(ThreadStore)
 	s.mentionIDs, _ = st.(MentionIDStore)
 	return s

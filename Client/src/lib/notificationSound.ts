@@ -16,7 +16,7 @@
  * DP-40.
  */
 
-import { loadPref } from "./preferences";
+import { loadPref, onPrefChange } from "./preferences";
 import { loadAppSoundsGain, soundSwitchOn } from "./soundPrefs";
 import { USER_STATUS_PREF_KEY, loadUserStatus } from "./userStatus";
 import { isVoiceDeafened } from "./voiceDeafened";
@@ -138,16 +138,7 @@ function watchRingbackInputs(): void {
   if (ringbackWatch !== null) return;
   const owner = new Disposable();
   ringbackWatch = owner;
-  window.addEventListener(
-    "owncord:pref-change",
-    (e: Event) => {
-      const key = (e as CustomEvent<{ key?: string }>).detail?.key;
-      if (key === USER_STATUS_PREF_KEY || key === "callSounds" || key === "soundRingback") {
-        syncRingback();
-      }
-    },
-    { signal: owner.signal },
-  );
+  onPrefChange([USER_STATUS_PREF_KEY, "callSounds", "soundRingback"], syncRingback, owner.signal);
 }
 
 function unwatchRingbackInputs(): void {

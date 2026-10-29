@@ -1,8 +1,10 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
+const isWindowsDesktop = vi.hoisted(() => vi.fn(() => false));
 vi.mock("./native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
+  isWindowsDesktop: () => isWindowsDesktop(),
 }));
 
 const nativeH264 = vi.hoisted(() => ({ value: false }));
@@ -22,6 +24,8 @@ vi.mock("livekit-client", () => ({
 const {
   getVideoCodecPref,
   gpuRenderer,
+  h264GpuProfiles,
+  h264GpuPublish,
   h264Offered,
   h265Offered,
   pickAutoCodec,
@@ -72,6 +76,7 @@ function savePref(value: string): void {
 beforeEach(() => {
   localStorage.clear();
   isLinuxDesktop.mockReturnValue(false);
+  isWindowsDesktop.mockReturnValue(false);
   nativeH264.value = false;
   nativeVp9.value = false;
   supportsVP9.mockReset();
@@ -454,6 +459,56 @@ describe("resolveVideoCodec with H.265 (WP M-6a)", () => {
   });
 });
 
+describe("h264GpuProfiles", () => {
+  it("is true in the Windows app on a non-Intel GPU", () => {
+    isWindowsDesktop.mockReturnValue(true);
+    expect(h264GpuProfiles()).toBe(true);
+  });
+
+  it("is false off the Windows app", () => {
+    expect(h264GpuProfiles()).toBe(false);
+  });
+
+  it("is false on Intel graphics and when the GPU cannot be named", () => {
+    isWindowsDesktop.mockReturnValue(true);
+    vi.restoreAllMocks();
+    stubGpu(INTEL);
+    expect(h264GpuProfiles()).toBe(false);
+    vi.restoreAllMocks();
+    stubGpu(null);
+    expect(h264GpuProfiles()).toBe(false);
+  });
+});
+
+describe("h264GpuProfiles on a software renderer", () => {
+  it("is false for SwiftShader, the Basic Render Driver and llvmpipe", () => {
+    isWindowsDesktop.mockReturnValue(true);
+    for (const renderer of [
+      "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+      "ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0, D3D11)",
+      "llvmpipe (LLVM 15.0.7, 256 bits)",
+    ]) {
+      vi.restoreAllMocks();
+      stubGpu(renderer);
+      expect(h264GpuProfiles()).toBe(false);
+    }
+  });
+});
+
+describe("h264GpuPublish", () => {
+  it("is true only for an H.264 publish where the GPU profiles apply", () => {
+    isWindowsDesktop.mockReturnValue(true);
+    expect(h264GpuPublish("h264")).toBe(true);
+    expect(h264GpuPublish("vp8")).toBe(false);
+    expect(h264GpuPublish("vp9")).toBe(false);
+    expect(h264GpuPublish("h265")).toBe(false);
+  });
+
+  it("is false for H.264 off the Windows app", () => {
+    expect(h264GpuPublish("h264")).toBe(false);
+  });
+});
+
 describe("resolveVideoCodec", () => {
   it("publishes VP8 by default without probing", async () => {
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
@@ -496,6 +551,22 @@ describe("resolveVideoCodec", () => {
     it("keeps H.264 where MediaCapabilities is missing", async () => {
       vi.stubGlobal("navigator", {});
       await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("h264");
+    });
+
+    it("keeps H.264 without probing in the Windows app on a non-Intel GPU", async () => {
+      isWindowsDesktop.mockReturnValue(true);
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 60, 8_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).not.toHaveBeenCalled();
+    });
+
+    it("still probes in the Windows app on Intel graphics", async () => {
+      isWindowsDesktop.mockReturnValue(true);
+      vi.restoreAllMocks();
+      stubGpu(INTEL);
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 60, 8_000_000)).resolves.toBe("vp8");
+      expect(encodingInfo).toHaveBeenCalled();
     });
   });
 
@@ -680,5 +751,49 @@ describe("resolveVideoCodec with channel peers", () => {
     savePref("h264");
     inChannel({ 2: ["vp8", "h264"] });
     await expect(resolveVideoCodec(track(), 30, 5_000_000, channelPeerDecode)).resolves.toBe("vp8");
+  });
+});
+
+describe("codec choice details", () => {
+  it("releases the WebGL context it opened to read the renderer name", () => {
+    const loseContext = vi.fn();
+    const getExtension = vi.fn((name: string) =>
+      name === "WEBGL_debug_renderer_info"
+        ? { UNMASKED_RENDERER_WEBGL: 0x9246 }
+        : name === "WEBGL_lose_context"
+          ? { loseContext }
+          : null,
+    );
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      getExtension,
+      getParameter: () => NVIDIA,
+    } as unknown as WebGLRenderingContext);
+
+    expect(gpuRenderer()).toBe(NVIDIA);
+
+    expect(getExtension).toHaveBeenCalledWith("WEBGL_lose_context");
+    expect(loseContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let the Windows GPU-profile shortcut override a saved VP8 or VP9", async () => {
+    isWindowsDesktop.mockReturnValue(true);
+    encodingInfo.mockResolvedValue(HARDWARE);
+
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+
+    savePref("vp9");
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp9");
+    expect(encodingInfo).not.toHaveBeenCalled();
+  });
+
+  it("does not open a WebGL context for Auto when the encoder probe has no answer", async () => {
+    savePref("auto");
+    encodingInfo.mockRejectedValue(new TypeError("unsupported config"));
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, "getContext");
+    getContext.mockClear();
+
+    await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
+
+    expect(getContext).not.toHaveBeenCalled();
   });
 });

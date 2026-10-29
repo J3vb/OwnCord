@@ -77,6 +77,88 @@
   font-size: var(--font-size-sm);
   color: var(--text-muted);
 }
+/* WP 8.3: the partner's game, under the status line. */
+.dps-activity {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: -10px 0 16px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.dps-activity:empty {
+  display: none;
+}
+.dps-activity-icon {
+  flex: none;
+}
+/* WP 8.10: the song being listened to, under the game. */
+.dps-listening {
+  min-width: 0;
+  margin: -6px 0 16px;
+  text-align: center;
+}
+.dps-listening:empty {
+  display: none;
+}
+.dps-listening-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.dps-listening-icon {
+  flex: none;
+}
+.dps-listening-label,
+.dps-listening-title,
+.dps-listening-artist {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dps-listening-title {
+  margin-top: 2px;
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+.dps-listening-artist {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+.dps-listening-bar {
+  height: 4px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--border-control);
+}
+.dps-listening-fill {
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 1s linear;
+}
+.dps-listening-time {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.reduced-motion .dps-listening-fill {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dps-listening-fill {
+    transition: none;
+  }
+}
 .dps-status-dot-inline {
   width: 8px;
   height: 8px;

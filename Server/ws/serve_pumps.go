@@ -328,7 +328,18 @@ func readPump(ctx context.Context, conn *websocket.Conn, hub *Hub, c *Client) {
 				// or cleared mid-session. presentableMembers applies the same
 				// rule for a fresh ready payload (serve_ready.go) — a member with
 				// no live connection shows no custom status.
-				hub.QueuePresence(c.userID, db.StatusOffline, nil)
+				// StampDisconnect is a DB write, so a device may have
+				// registered since shouldMarkOffline claimed the offline.
+				// Re-check right before the enqueue: that device's online
+				// presence is queued after it registers, so skipping here
+				// (or queueing before it) keeps offline from landing last.
+				if !hub.isConnected(c.userID) {
+					hub.QueuePresence(c.userID, db.StatusOffline, nil)
+				}
+			} else if !replaced {
+				// Another device stays: its presence is now the user's, so
+				// the game, song or status this one held must not linger.
+				hub.rebroadcastAfterDeviceLeft(c)
 			}
 		}
 	}()

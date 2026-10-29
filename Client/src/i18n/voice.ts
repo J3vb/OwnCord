@@ -20,8 +20,8 @@ export const voiceText = defineCatalog("voice", {
   "encryption.unsecuredLabel": "End-to-end encryption failed — this call may not be protected",
   "encryption.secured": "🔒 Secured",
   "encryption.securedLabel": "End-to-end encrypted",
-  "identity.keyChanged":
-    "{name}'s security key changed. The call continues. If you didn't expect this, compare safety numbers with them.",
+  "identity.newDevice":
+    "{name} is using a new device. The call continues. If you didn't expect this, compare safety numbers with them.",
 
   "widget.channelFallback": "Voice Channel",
   "widget.volume": "Volume",
@@ -89,6 +89,8 @@ export const voiceText = defineCatalog("voice", {
   "call.chooseCamera": "Choose camera",
   "call.defaultCamera": "Default",
   "call.cameraNumber": "Camera {n}",
+  "call.infraredCamera": "{name} (infrared)",
+  "call.sameNameCamera": "{name} ({n})",
 
   "tile.watch": "Watch {name}",
   "tile.live": "LIVE",
@@ -122,6 +124,8 @@ export const voiceText = defineCatalog("voice", {
   "tile.withAudio": "With audio",
   "tile.noAudio": "No audio",
   "tile.senderCapture": "Capture {fps} fps",
+  "tile.senderCaptureSet": "Capture set to {fps} fps",
+  "tile.senderLayerPaused": "{height}p paused",
   "tile.senderNotLimited": "Not limited",
   "tile.senderLimitedCpu": "Limited by CPU",
   "tile.senderLimitedBandwidth": "Limited by bandwidth",
@@ -250,6 +254,7 @@ export const voiceText = defineCatalog("voice", {
   "share.cameraDenied": "Camera permission denied",
   "share.noCamera": "No camera found",
   "share.cameraFailed": "Failed to start camera",
+  "share.cameraSwitchFailed": "Couldn't use that camera. Still using the previous one.",
   "share.gstreamerMissing":
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
   "share.screenDenied": "Screen sharing permission denied",

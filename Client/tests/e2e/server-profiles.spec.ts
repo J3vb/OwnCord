@@ -368,9 +368,7 @@ test.describe("Server profiles — audit-log entry point", () => {
       .poll(() =>
         page.evaluate(() => {
           const log = (window as unknown as { __invokeLog: InvokeEntry[] }).__invokeLog;
-          return log
-            .filter((e) => e.cmd === "plugin:opener|open_url")
-            .map((e) => e.args?.url ?? "");
+          return log.filter((e) => e.cmd === "open_external_url").map((e) => e.args?.url ?? "");
         }),
       )
       .toContain("https://localhost:8443/admin#audit");

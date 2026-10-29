@@ -32,14 +32,6 @@ reason = "qs dev-only via stryker's typed-rest-client; not shipped"
 id = "GHSA-x5fp-wj9c-mxmx"
 reason = "qs dev-only via stryker's typed-rest-client; not shipped"
 
-# braces <= 3.0.3 (GHSA-vfj7-8cjw-p6xm / CVE-2026-93687): stack overflow on
-# deeply nested patterns. Dev-only via patch-package -> find-yarn-workspace-root
-# -> micromatch -> braces, and no patched release exists yet, so there is no
-# version to bump to. Remove this entry once braces publishes a fix.
-[[IgnoredVulns]]
-id = "GHSA-vfj7-8cjw-p6xm"
-reason = "braces dev-only via patch-package's micromatch; no fixed release published"
-
 # --- Rust: the accepted advisories cargo-deny carries in
 # Client/src-tauri/deny.toml (the authoritative list with the reachability
 # argument), kept in step with it, plus glib's unsound advisory, which
@@ -96,6 +88,17 @@ reason = "zip: Windows updater extracts only signature-verified archives; build-
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0369"
 reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
+
+# block-buffer 0.10.4 comes in through digest 0.10 (sha2 for tauri-codegen, wry
+# and the secret-service crates; sha1 for tungstenite and zbus 4; md-5; hkdf).
+# Moving to the fixed 0.12.1 needs the digest 0.11 stack in every one of those,
+# so it is not a lockfile bump. The advisory needs a panic inside a hashing
+# callback that the caller catches and then keeps using the same buffer; none of
+# these callers catch panics around a hash. Drop it once digest 0.10 leaves the
+# graph (0.12.1 is already here via digest 0.11).
+[[IgnoredVulns]]
+id = "GHSA-qwgh-2vcv-g2f7"
+reason = "block-buffer 0.10 via digest 0.10: fix needs the digest 0.11 stack upstream; needs a caught panic plus buffer reuse, which no caller does"
 
 # --- Rust: Linux native voice (livekit), phase-0 build plumbing ---
 #

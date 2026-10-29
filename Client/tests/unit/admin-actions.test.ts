@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createMemberContextMenu, createChannelContextMenu } from "@components/AdminActions";
+import { createMemberContextMenu } from "@components/AdminActions";
 import { setDeveloperMode } from "../helpers/message-actions-fixtures";
-import type { MemberContextMenuOptions, ChannelContextMenuOptions } from "@components/AdminActions";
+import type { MemberContextMenuOptions } from "@components/AdminActions";
 import type { VoiceModMenuOptions } from "@components/channel-sidebar/volume-menu";
 
 describe("AdminActions", () => {
@@ -19,6 +19,8 @@ describe("AdminActions", () => {
   describe("MemberContextMenu", () => {
     function makeMenu(overrides?: Partial<MemberContextMenuOptions>) {
       const options: MemberContextMenuOptions = {
+        x: 0,
+        y: 0,
         userId: 1,
         username: "TestUser",
         currentRole: "member",
@@ -316,6 +318,8 @@ describe("AdminActions", () => {
 
     function open(showAdminActions: boolean) {
       const result = createMemberContextMenu({
+        x: 0,
+        y: 0,
         userId: 77,
         username: "u",
         currentRole: "member",
@@ -352,171 +356,6 @@ describe("AdminActions", () => {
       destroy();
     });
   });
-
-  describe("ChannelContextMenu", () => {
-    function makeMenu(overrides?: Partial<ChannelContextMenuOptions>) {
-      const options: ChannelContextMenuOptions = {
-        channelId: 1,
-        channelName: "general",
-        onEdit: overrides?.onEdit ?? vi.fn(),
-        onDelete: overrides?.onDelete ?? vi.fn(async () => {}),
-        onCreate: overrides?.onCreate ?? vi.fn(),
-        // Purge is opt-in: the section is absent unless the caller passes it.
-        ...(overrides?.onPurge !== undefined ? { onPurge: overrides.onPurge } : {}),
-      };
-      const result = createChannelContextMenu(options);
-      container.appendChild(result.element);
-      return { result, options };
-    }
-
-    it("creates element with context-menu class", () => {
-      const { result } = makeMenu();
-      expect(result.element.classList.contains("context-menu")).toBe(true);
-      result.destroy();
-    });
-
-    it("renders Edit Channel, Create Channel, and Delete Channel items", () => {
-      const { result } = makeMenu();
-      const items = result.element.querySelectorAll(".context-menu__item");
-      const texts = Array.from(items).map((i) => i.textContent);
-
-      expect(texts).toContain("Edit Channel");
-      expect(texts).toContain("Create Channel");
-      expect(texts).toContain("Delete Channel");
-      result.destroy();
-    });
-
-    it("clicking Edit Channel calls onEdit", () => {
-      const onEdit = vi.fn();
-      const { result } = makeMenu({ onEdit });
-
-      const items = result.element.querySelectorAll(".context-menu__item");
-      const editItem = Array.from(items).find(
-        (i) => i.textContent === "Edit Channel",
-      ) as HTMLDivElement;
-      editItem.click();
-
-      expect(onEdit).toHaveBeenCalledOnce();
-      result.destroy();
-    });
-
-    it("clicking Create Channel calls onCreate", () => {
-      const onCreate = vi.fn();
-      const { result } = makeMenu({ onCreate });
-
-      const items = result.element.querySelectorAll(".context-menu__item");
-      const createItem = Array.from(items).find(
-        (i) => i.textContent === "Create Channel",
-      ) as HTMLDivElement;
-      createItem.click();
-
-      expect(onCreate).toHaveBeenCalledOnce();
-      result.destroy();
-    });
-
-    it("Delete Channel requires double-click confirmation", () => {
-      const onDelete = vi.fn(async () => {});
-      const { result } = makeMenu({ onDelete });
-
-      const dangerItems = result.element.querySelectorAll(".context-menu__item--danger");
-      const deleteItem = dangerItems[0] as HTMLDivElement;
-
-      deleteItem.click();
-      expect(deleteItem.textContent).toBe("Are you sure?");
-      expect(onDelete).not.toHaveBeenCalled();
-
-      deleteItem.click();
-      expect(onDelete).toHaveBeenCalledOnce();
-      result.destroy();
-    });
-
-    it("destroy removes element from DOM", () => {
-      const { result } = makeMenu();
-      expect(container.querySelector(".context-menu")).not.toBeNull();
-      result.destroy();
-      expect(container.querySelector(".context-menu")).toBeNull();
-    });
-
-    it("omits the purge section when onPurge is not supplied", () => {
-      const { result } = makeMenu();
-      expect(result.element.querySelector('[data-testid="ctx-purge-messages"]')).toBeNull();
-      result.destroy();
-    });
-
-    it("purge asks for a count before it fires and clamps to 1-100", async () => {
-      const onPurge = vi.fn(async () => {});
-      const { result } = makeMenu({ onPurge });
-
-      const trigger = result.element.querySelector(
-        '[data-testid="ctx-purge-messages"]',
-      ) as HTMLDivElement;
-      expect(trigger.textContent).toBe("Purge Messages…");
-
-      const form = result.element.querySelector('[data-testid="purge-form"]') as HTMLDivElement;
-      expect(form.style.display).toBe("none");
-      trigger.click();
-      expect(form.style.display).toBe("");
-      expect(onPurge).not.toHaveBeenCalled();
-
-      const input = result.element.querySelector(
-        '[data-testid="purge-count-input"]',
-      ) as HTMLInputElement;
-      input.value = "0";
-      (result.element.querySelector('[data-testid="purge-confirm"]') as HTMLDivElement).click();
-
-      await vi.waitFor(() => {
-        expect(onPurge).toHaveBeenCalledWith(1);
-      });
-      result.destroy();
-    });
-
-    it("purge falls back to the default count for a non-numeric entry", async () => {
-      const onPurge = vi.fn(async () => {});
-      const { result } = makeMenu({ onPurge });
-
-      (
-        result.element.querySelector('[data-testid="ctx-purge-messages"]') as HTMLDivElement
-      ).click();
-      const input = result.element.querySelector(
-        '[data-testid="purge-count-input"]',
-      ) as HTMLInputElement;
-      input.value = "";
-      (result.element.querySelector('[data-testid="purge-confirm"]') as HTMLDivElement).click();
-
-      await vi.waitFor(() => {
-        expect(onPurge).toHaveBeenCalledWith(50);
-      });
-      result.destroy();
-    });
-
-    it("purge shows an in-flight state and ignores a second click", async () => {
-      let release: (() => void) | null = null;
-      const onPurge = vi.fn(
-        () =>
-          new Promise<void>((resolve) => {
-            release = resolve;
-          }),
-      );
-      const { result } = makeMenu({ onPurge });
-
-      (
-        result.element.querySelector('[data-testid="ctx-purge-messages"]') as HTMLDivElement
-      ).click();
-      const confirm = result.element.querySelector(
-        '[data-testid="purge-confirm"]',
-      ) as HTMLDivElement;
-      confirm.click();
-      expect(confirm.textContent).toBe("Purging…");
-      confirm.click();
-      expect(onPurge).toHaveBeenCalledTimes(1);
-
-      release!();
-      await vi.waitFor(() => {
-        expect(confirm.textContent).toBe("Confirm Purge");
-      });
-      result.destroy();
-    });
-  });
 });
 
 describe("MemberContextMenu - full menu (3C-3)", () => {
@@ -534,6 +373,8 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
 
   function open(overrides: Partial<MemberContextMenuOptions> = {}) {
     const options: MemberContextMenuOptions = {
+      x: 0,
+      y: 0,
       userId: 5,
       username: "Dave",
       currentRole: "member",

@@ -6,10 +6,12 @@
  * Uses the existing .modal-overlay / .cert-* CSS classes from login.css.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import type { MountableComponent } from "@lib/safe-render";
 import { connectText } from "../i18n/connect";
 
@@ -98,20 +100,14 @@ export function createCertMismatchModal(options: CertMismatchModalOptions): Moun
     overlay.appendChild(modal);
 
     // Close on backdrop click
-    overlay.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === overlay) onReject();
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(overlay, () => onReject(), disposable.signal);
 
     // Escape maps to reject because that is the fail-closed safe default
     // (Disconnect) — dismissing a trust prompt must never grant trust.
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && overlay?.isConnected === true) onReject();
+        if (e.key === "Escape" && !isImeCommit(e) && overlay?.isConnected === true) onReject();
       },
       { signal: disposable.signal },
     );
@@ -211,20 +207,14 @@ export function createCertFirstUseModal(options: CertFirstUseModalOptions): Moun
     appendChildren(modal, header, body, footer);
     overlay.appendChild(modal);
 
-    overlay.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === overlay) onReject();
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(overlay, () => onReject(), disposable.signal);
 
     // Escape rejects (Cancel) — the fail-closed default: never trust a
     // certificate because the prompt was dismissed.
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && overlay?.isConnected === true) onReject();
+        if (e.key === "Escape" && !isImeCommit(e) && overlay?.isConnected === true) onReject();
       },
       { signal: disposable.signal },
     );

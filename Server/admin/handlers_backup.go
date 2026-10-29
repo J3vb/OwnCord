@@ -19,8 +19,22 @@ import (
 
 // ─── Backup Handlers ─────────────────────────────────────────────────────────
 
-func handleBackup(database *db.DB, paths backupPaths) http.Handler {
+// handleBackup takes a manual backup. Only one runs at a time on this API: a
+// second POST while one is in flight is a 409 BACKUP_RUNNING that starts no
+// second VACUUM and leaves no partial file (WP 8.4c). The scheduled
+// maintenance backup is a separate path and does not take this guard: its
+// files have their own names and BackupToSafe publishes by atomic rename, so
+// the two cannot collide.
+func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !gate.running.CompareAndSwap(false, true) {
+			writeErr(w, http.StatusConflict, "BACKUP_RUNNING", "A backup is already being taken. Try again when it finishes.")
+			return
+		}
+		defer gate.running.Store(false)
+		if hold := gate.hold.Load(); hold != nil {
+			(*hold)()
+		}
 		backupDir := paths.dir
 		if err := os.MkdirAll(backupDir, 0o750); err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create backup directory")
@@ -28,7 +42,11 @@ func handleBackup(database *db.DB, paths backupPaths) http.Handler {
 		}
 
 		timestamp := time.Now().UTC().Format("20060102_150405")
-		backupPath := filepath.Join(backupDir, "chatserver_"+timestamp+".db")
+		backupPath, err := freeBackupPath(backupDir, "chatserver_"+timestamp)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to choose a backup name")
+			return
+		}
 
 		// Detached like the restore path's safety backup. BackupToSafe runs
 		// the VACUUM on the reader pool and publishes the result with an

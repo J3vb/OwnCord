@@ -51,13 +51,18 @@ func evictForMove(ctx context.Context, mod VoiceModerator, targetID, channelID i
 func (h *Hub) EvictForModeratorMove(ctx context.Context, userID, channelID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
 	txn := h.begin(userID)
 	defer txn.end()
-	c := h.GetClient(userID)
+	c := h.voiceClient(userID)
 	if c == nil {
+		h.noteModeratorExit(userID, nil)
 		return h.leaveParkedVoice(ctx, txn, txn.takeParked(channelID), voiceLeaveReasonModerator)
 	}
-	return h.evictAndStash(ctx, txn, c, channelID,
+	evicted := h.evictAndStash(ctx, txn, c, channelID,
 		modFlagStash{muted: serverMuted, deafened: serverDeafened, mutedBy: serverMutedBy},
 		voiceLeaveReasonModerator)
+	if evicted {
+		h.noteModeratorExit(userID, c)
+	}
+	return evicted
 }
 
 // modFlagStash is the moderator mute/deafen an eviction carries to the

@@ -35,7 +35,7 @@ type User struct {
 	// Nil = unset. Set over the WebSocket presence path and cleared on logout.
 	CustomStatus *string
 	// CustomStatusExpiresAt is the instant CustomStatus clears itself, as
-	// CustomStatusExpiryLayout text. Nil = no expiry. Only ever set with a
+	// dbtime.ISOLayout text. Nil = no expiry. Only ever set with a
 	// non-nil CustomStatus.
 	CustomStatusExpiresAt *string
 	// BannerID is the attachment id of the profile banner image (migration
@@ -191,44 +191,6 @@ type Message struct {
 	ThreadJoined []int64 // WP 6.9c: users this send newly made thread followers; send transactions only
 }
 
-// The stored values of messages.kind. 0 is a message a user wrote, 1 a call
-// log row (WP 3B-9) and 2 to 6 the group DM event rows (WP 3B-10), 7 a pin row (WP 6.12).
-// MessageKindName gives their wire names (protocol enum chat_message.kind).
-const (
-	MessageKindUser        int64 = 0
-	MessageKindCall        int64 = 1
-	MessageKindGroupAdd    int64 = 2
-	MessageKindGroupRemove int64 = 3
-	MessageKindGroupLeave  int64 = 4
-	MessageKindGroupRename int64 = 5
-	MessageKindGroupIcon   int64 = 6
-	MessageKindPinAdd      int64 = 7
-
-	MessageKindNameCall = "call"
-)
-
-// MessageKindName is the wire name of a stored kind: "" for an ordinary
-// message (the field is omitted) and for a value this server does not know.
-func MessageKindName(kind int64) string {
-	switch kind {
-	case MessageKindCall:
-		return MessageKindNameCall
-	case MessageKindGroupAdd:
-		return "group_add"
-	case MessageKindGroupRemove:
-		return "group_remove"
-	case MessageKindGroupLeave:
-		return "group_leave"
-	case MessageKindGroupRename:
-		return "group_rename"
-	case MessageKindGroupIcon:
-		return "group_icon"
-	case MessageKindPinAdd:
-		return "pin_add"
-	}
-	return ""
-}
-
 // MessageWithUser joins a Message with the author's public fields.
 type MessageWithUser struct {
 	Message
@@ -245,14 +207,15 @@ type ReactionCount struct {
 
 // MessageSearchResult is a row returned by the FTS5 message search.
 type MessageSearchResult struct {
-	MessageID        int64      `json:"message_id"`
-	ChannelID        int64      `json:"channel_id"`
-	ChannelName      string     `json:"channel_name"`
-	User             UserPublic `json:"user"`
-	Content          string     `json:"content"`
-	Timestamp        string     `json:"timestamp"`
-	Mentions         []int64    `json:"mentions"`
-	MentionsEveryone bool       `json:"mentions_everyone"`
+	MessageID        int64               `json:"message_id"`
+	ChannelID        int64               `json:"channel_id"`
+	ChannelName      string              `json:"channel_name"`
+	User             UserPublic          `json:"user"`
+	Content          string              `json:"content"`
+	Timestamp        string              `json:"timestamp"`
+	Mentions         []int64             `json:"mentions"`
+	MentionsEveryone bool                `json:"mentions_everyone"`
+	Sticker          *MessageStickerInfo `json:"sticker,omitempty"` // WP 8.8a
 }
 
 // SearchPage selects one page of full-text search results. The zero values
@@ -311,6 +274,8 @@ type MessageAPIResponse struct {
 	// Poll is set only on a poll (6.9b), Thread only on a thread starter (6.9c).
 	Poll   *PollInfo   `json:"poll,omitempty"`
 	Thread *ThreadInfo `json:"thread,omitempty"`
+	// Sticker is set only on a sticker message (8.8a). See MessageStickerInfo.
+	Sticker *MessageStickerInfo `json:"sticker,omitempty"`
 }
 
 // GroupEventInfo is the group_event block of a group DM row. Which fields are
@@ -340,20 +305,10 @@ type ReferencedMessage struct {
 	Deleted        bool        `json:"deleted"`
 	HasAttachments bool        `json:"has_attachments"`
 	// IsSystem marks a server-written row (a call log or group event row, any
-	// kind other than MessageKindUser). It is server-side only: a reply to one
-	// is refused, so it never reaches the wire.
+	// kind other than MessageKindUser and the welcome row a member waves at).
+	// It is server-side only: a reply to one is refused, so it never reaches
+	// the wire.
 	IsSystem bool `json:"-"`
-}
-
-// AttachmentInfo is the attachment shape in API responses.
-type AttachmentInfo struct {
-	ID       string `json:"id"`
-	Filename string `json:"filename"`
-	Size     int64  `json:"size"`
-	Mime     string `json:"mime"`
-	URL      string `json:"url"`
-	Width    *int   `json:"width,omitempty"`
-	Height   *int   `json:"height,omitempty"`
 }
 
 // ReactionInfo is the reaction shape in API responses.
@@ -477,12 +432,6 @@ type Emoji struct {
 // expires_at at created_at + 365 days, the absolute lifetime from sign-in,
 // in its query (sessions.sql).
 const sessionTTL = 30 * 24 * time.Hour
-
-// sessionTimeLayout is the storage format for sessions.expires_at (and the
-// other RFC3339-UTC expiry columns). DeleteExpiredSessions compares these as
-// plain text against an index, so every writer and the sweep's cutoff must
-// use exactly this layout.
-const sessionTimeLayout = "2006-01-02T15:04:05Z"
 
 // Registration statuses of a users row (B4-1).
 const (

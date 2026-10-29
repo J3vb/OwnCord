@@ -148,8 +148,10 @@ stores only an argon2id verifier of it.
 
 See [docs/trust-model.md](trust-model.md).
 
-**Owner-assisted recovery.** Only the server owner can issue a recovery
-credential for an account.
+**Owner-assisted recovery.** Only the server owner, or a member holding the
+Issue Recovery permission, can issue a recovery credential. A holder can do so
+only for members ranked below them, and not for an account carrying an
+owner-level permission the holder lacks.
 
 - The owner first checks the person's identity outside OwnCord, and records
   how, as one of four fixed values: `in_person`, `voice_call`, `video_call`
@@ -377,10 +379,10 @@ action, target and detail:
 - **Auth:** `user_register`, `user_login`, `user_logout`, `login_blocked_banned`, `account_deleted`, `password_change`, `session_revoke`, `session_revoke_all`, `recovery_kit_issued`, `recovery_kit_used`, `recovery_kit_locked`, `recovery_assist_used`, `account_erasure_replayed`
 - **2FA:** `totp_enabled`, `totp_verified`, `totp_disabled`, `recovery_codes_regenerated`
 - **Admin:** `role_change`, `role_add`, `role_remove`, `role_create`, `role_update`, `role_delete`, `role_reorder`, `user_ban`, `user_unban`, `force_logout`, `setting_change`, `server_setup`, `api_token_create`, `api_token_revoke`, `config_write`, `config_override_change`, `invite_create`, `invite_revoke`, `registration_mode_change`, `registration_approve`, `registration_deny`, `recovery_assist_issued`, `plugin_install`, `plugin_uninstall`, `retention_policy_change`, `channel_retention_change`, `permission_explain`, `permission_preview`
-- **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`
+- **Content:** `channel_create`, `channel_update`, `channel_delete`, `channel_perms_update`, `channel_perms_clear`, `channel_user_perms_update`, `channel_user_perms_clear`, `message_delete`, `message_purge`, `emoji_create`, `emoji_delete`, `sticker_create`, `sticker_update`, `sticker_delete`
 - **Voice moderation:** `voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`, `voice_mod_kick`
 - **Profile:** `profile_update`, `identity_key_update`
-- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`, `backup_download`,
+- **Ops:** `backup_create`, `backup_delete`, `backup_restore`, `backup_archive`, `archive_link`, `backup_link`, `backup_download`,
   `log_level_debug_on`, `log_level_reverted`, `update_apply`, `update_applied`,
   `update_failed`, `server_restart_requested`, `ws_connect`
 
@@ -458,6 +460,9 @@ The Tauri desktop client uses the following security measures.
   - Before any login has been verified in this app run, the set is empty and
     the first-run behaviour applies. So a restart can still auto-login from a
     saved credential.
+  - The pending-message commands (unsent message text) act on the active
+    host, or while no session is active on a host in that set. They never
+    skip the set, even before the first verified login.
 
 ### Tauri Capabilities (Least Privilege)
 

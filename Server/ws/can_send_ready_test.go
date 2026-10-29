@@ -88,6 +88,57 @@ func TestBuildReady_CanModerateVoice(t *testing.T) {
 	}
 }
 
+// TestBuildReady_CanMoveVoice: every ready channel carries the WP 8.4b move
+// affordance, independent of can_moderate_voice. A role with only
+// MOVE_MEMBERS moves but does not moderate; a role with only MUTE_MEMBERS
+// moderates but does not move; a role with neither gets neither.
+func TestBuildReady_CanMoveVoice(t *testing.T) {
+	hub, database := newCoverageHub(t)
+	user := seedCoverageOwner(t, database, "movevoice-ready-user")
+	if _, err := database.CreateChannel(context.Background(), "lounge", "voice", "", "", 0); err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	base := permissions.ReadMessages | permissions.ConnectVoice
+	for _, tc := range []struct {
+		name          string
+		perms         int64
+		wantMove, mod bool
+	}{
+		{"move only", base | permissions.MoveMembers, true, false},
+		{"mute only", base | permissions.MuteMembers, false, true},
+		{"neither", base, false, false},
+	} {
+		role, err := database.GetRoleByID(context.Background(), 4)
+		if err != nil || role == nil {
+			t.Fatalf("GetRoleByID(4): %v", err)
+		}
+		role.Permissions = tc.perms
+		msg, err := hub.BuildReadyWithRoleForTest(database, user.ID, role)
+		if err != nil {
+			t.Fatalf("%s: BuildReadyWithRoleForTest: %v", tc.name, err)
+		}
+		var env struct {
+			Payload struct {
+				Channels []map[string]any `json:"channels"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(msg, &env); err != nil {
+			t.Fatalf("%s: unmarshal: %v", tc.name, err)
+		}
+		if len(env.Payload.Channels) == 0 {
+			t.Fatalf("%s: expected at least one channel", tc.name)
+		}
+		for _, ch := range env.Payload.Channels {
+			if got, ok := ch["can_move_voice"]; !ok || got != tc.wantMove {
+				t.Errorf("%s: channel %v can_move_voice = %v (present %v), want %v", tc.name, ch["name"], got, ok, tc.wantMove)
+			}
+			if got := ch["can_moderate_voice"]; got != tc.mod {
+				t.Errorf("%s: channel %v can_moderate_voice = %v, want %v", tc.name, ch["name"], got, tc.mod)
+			}
+		}
+	}
+}
+
 // TestBuildReady_MessageAffordances: every non-DM ready channel carries
 // can_delete_others, can_pin and can_react for each kind of viewer, always
 // present, and the dm_channels entries carry none of them.

@@ -73,3 +73,71 @@ test("the pinned dev revision is recorded in the job summary", () => {
   });
   assert.match(md, /abc123/);
 });
+
+test("perShard scores are each shard's own pooled score", () => {
+  const small = report({ "src/a.ts": ["Killed"] });
+  const big = report({
+    "src/b.ts": ["Killed", ...Array(4).fill("Survived")],
+    "src/c.ts": ["Timeout", ...Array(4).fill("Survived"), "CompileError"],
+  });
+  const { perShard, score } = aggregate([small, big], ["s1", "s2"]);
+  assert.equal(perShard.s1.score, 1);
+  assert.equal(perShard.s1.scored, 1);
+  assert.equal(perShard.s1.files, 1);
+  assert.equal(perShard.s2.score, 0.2);
+  assert.equal(perShard.s2.scored, 10);
+  assert.equal(perShard.s2.files, 2);
+  assert.equal(perShard.s2.totals.CompileError, 1);
+  assert.equal(score, 3 / 11);
+});
+
+test("a shard with no scored mutants has score 0", () => {
+  const { perShard } = aggregate([report({ "src/a.ts": ["CompileError"] })], ["s1"]);
+  assert.equal(perShard.s1.score, 0);
+  assert.equal(perShard.s1.scored, 0);
+});
+
+test("perFile carries the shard name and per-status counts", () => {
+  const { perFile } = aggregate(
+    [
+      report({ "src/a.ts": ["Killed"] }),
+      report({ "src/b.ts": ["Killed", "Timeout", "Survived", "NoCoverage", "CompileError"] }),
+    ],
+    ["s1", "s2"],
+  );
+  assert.deepEqual(perFile["src/b.ts"], {
+    shard: "s2",
+    score: 0.5,
+    scored: 4,
+    killed: 1,
+    timeout: 1,
+    survived: 1,
+    noCoverage: 1,
+  });
+  assert.equal(perFile["src/a.ts"].shard, "s1");
+});
+
+test("the job summary has one row per shard, sorted, without file names", () => {
+  const { perShard } = aggregate(
+    [
+      report({ "src/z.ts": ["Killed", "Survived"] }),
+      report({ "src/a.ts": ["Killed", "NoCoverage"] }),
+    ],
+    ["b-shard", "a-shard"],
+  );
+  const md = jobSummary({
+    pct: "50.00",
+    configured: 2,
+    files: 2,
+    shards: 2,
+    scored: 4,
+    totals: { Killed: 2 },
+    revision: "abc",
+    perShard,
+  });
+  assert.match(md, /\| Shard \| Score \| Survived \| NoCoverage \|/);
+  assert.match(md, /\| a-shard \| 50\.00 % \| 0 \| 1 \|/);
+  assert.match(md, /\| b-shard \| 50\.00 % \| 1 \| 0 \|/);
+  assert.ok(md.indexOf("a-shard") < md.indexOf("b-shard"));
+  assert.doesNotMatch(md, /src\//);
+});

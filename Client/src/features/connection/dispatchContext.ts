@@ -29,6 +29,7 @@ export type DispatchApi = Pick<ApiClient, "listBlocks"> &
       | "updateProfile"
       | "getConfig"
       | "listEmoji"
+      | "listStickers"
       | "getMessages"
       | "getMessagesAround"
       | "listDmRequests"

@@ -29,6 +29,8 @@ import {
   voiceStore,
 } from "@stores/voice.store";
 import { loadPref } from "@lib/preferences";
+import { offeredShareFps } from "@lib/shareFps";
+import { setH264GpuProfiles } from "@lib/h264Profile";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
 import {
@@ -42,10 +44,12 @@ import {
   type SenderStatsTrack,
   type ShareSenderSample,
 } from "../features/voice/shareSenderStats";
+import { getShareMotionPolicy, shareMotionArm } from "./shareFlags";
 import { nativeCameraSupport } from "../features/voice/native/devices";
 import { voiceText } from "../i18n/voice";
 import { channelPeerDecode } from "../features/voice/peerDecode";
 import {
+  h264GpuPublish,
   resolveCodecChoice,
   type CodecChoice,
   type PublishCodec,
@@ -226,10 +230,9 @@ export const SCREENSHARE_SIMULCAST_LAYERS: readonly VideoPreset[] = [
 
 /** Saved screen share FPS preference. 30 is the default and keeps each
  *  quality's own cap (5 for low, 30 otherwise); 60/120 are explicit
- *  overrides. */
+ *  overrides. A saved 120 reads as 60 while 120 is not offered. */
 export function getScreenShareFps(): number {
-  const saved = loadPref<number>("screenShareFps", 30);
-  return saved === 60 || saved === 120 ? saved : 30;
+  return offeredShareFps(loadPref<number>("screenShareFps", 30));
 }
 
 /** Effective capture/publish frame rate for a quality + fps preference. */
@@ -274,7 +277,8 @@ export function screenVideoPublishOptions(
       maxFramerate: effectiveFps,
     },
     videoCodec: codec,
-    degradationPreference: screenShareDegradation(effectiveFps),
+    degradationPreference:
+      shareMotionArm(getShareMotionPolicy()).degradation ?? screenShareDegradation(effectiveFps),
   };
 }
 
@@ -289,6 +293,15 @@ export function screenVideoPublishOptions(
  *  constraint translation treats 0 as uncapped) and the frame rate is passed
  *  through the raw video constraints instead. */
 export function getScreenShareCaptureOptions(
+  quality: StreamQuality,
+  fps: number,
+): ScreenShareCaptureOptions {
+  const { contentHint } = shareMotionArm(getShareMotionPolicy());
+  const options = baseScreenShareCaptureOptions(quality, fps);
+  return contentHint === undefined ? options : { ...options, contentHint };
+}
+
+function baseScreenShareCaptureOptions(
   quality: StreamQuality,
   fps: number,
 ): ScreenShareCaptureOptions {
@@ -547,6 +560,7 @@ export async function enableCamera(state: CameraTrackState, deps: VideoTrackDeps
       videoTrack.stop();
       return;
     }
+    setH264GpuProfiles(videoTrack.mediaStreamTrack, h264GpuPublish(videoCodec));
     await room.localParticipant.publishTrack(videoTrack, cameraPublishOptions(videoCodec, quality));
     if ((state.generation ?? 0) !== generation || state.manualCameraTrack !== videoTrack) {
       // A disableCamera (or the track unplugging) ran to completion while
@@ -857,6 +871,8 @@ export async function enableScreenshare(
       for (const t of screenTracks) t.stop();
       return;
     }
+    if (videoTrack !== undefined)
+      setH264GpuProfiles(videoTrack.mediaStreamTrack, h264GpuPublish(videoCodec));
     for (const track of screenTracks) {
       const isVideo = track.kind === Track.Kind.Video;
       // oxlint-disable-next-line no-await-in-loop -- tracks must be published sequentially to maintain correct order
@@ -1067,6 +1083,7 @@ export async function republishVideo(
     // A stop between the two awaits already unpublished and stopped the track
     // and sent its `false`: publishing now would resurrect it.
     if (stale()) return false;
+    setH264GpuProfiles(track.mediaStreamTrack, h264GpuPublish(codec));
     await room.localParticipant.publishTrack(track, options);
     if (stale()) {
       // The stop's unpublish may have run before this publish landed: undo it

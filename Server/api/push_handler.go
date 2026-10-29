@@ -15,7 +15,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -160,8 +159,7 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 			return
 		}
 		var req pushSubscribeRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: "malformed request body"})
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		id, err := push.Subscribe(r.Context(), user.ID, service.PushSubscribeInput{
@@ -172,7 +170,7 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidSubscription) {
-				writeJSON(w, http.StatusBadRequest, errorResponse{Error: "INVALID_INPUT", Message: err.Error()})
+				writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 				return
 			}
 			writeServiceError(r.Context(), w, err)

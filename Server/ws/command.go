@@ -36,6 +36,9 @@ type ChatSendCmd struct {
 	// ReplyPing is true only when the client sent reply_ping=true on a reply.
 	ReplyPing   bool
 	attachments []string
+	// StickerID is the sticker a sticker message carries (WP 8.8a), 0 for an
+	// ordinary send.
+	StickerID int64
 }
 
 func (c ChatSendCmd) Type() string          { return MsgTypeChatSend }
@@ -225,6 +228,10 @@ type VoiceE2EEAnnounceCmd struct {
 	userID    int64
 	PublicKey string
 	Signature string
+	// IdentityKey is the announcing device's identity public key from the
+	// announce payload, already validated and trimmed by the parser; "" when the
+	// client sent none or an invalid one (the connection's auth key is used then).
+	IdentityKey string
 	// VideoDecode is the sender's raw video_decode list (WP M-4). Unvalidated
 	// here; handleVoiceE2EEAnnounceV2 runs it through sanitizeVideoDecode.
 	VideoDecode []string
@@ -292,30 +299,24 @@ func (c CallDeclineCmd) UserID() int64 { return c.userID }
 // ── Command constructors ────────────────────────────────────────────────────
 
 // parseModTarget parses the (channel, target user) pair every voice moderation
-// payload carries. Both must be positive: a non-positive id can only come from
-// a malformed client, and rejecting at parse time keeps the handlers free of
-// id-shape checks.
-func parseModTarget(channelID, userID json.Number) (int64, int64, error) {
-	chID, err := channelID.Int64()
+// payload carries; channelField names the channel key in the error. Both must
+// be positive: a non-positive id can only come from a malformed client, and
+// rejecting at parse time keeps the handlers free of id-shape checks.
+func parseModTarget(channelID, userID json.Number, channelField string) (int64, int64, error) {
+	chID, err := positiveID(channelID, channelField)
 	if err != nil {
-		return 0, 0, fmt.Errorf("channel_id must be integer: %w", err)
+		return 0, 0, err
 	}
-	if chID <= 0 {
-		return 0, 0, fmt.Errorf("channel_id must be positive")
-	}
-	targetID, err := userID.Int64()
+	targetID, err := positiveID(userID, "user_id")
 	if err != nil {
-		return 0, 0, fmt.Errorf("user_id must be integer: %w", err)
-	}
-	if targetID <= 0 {
-		return 0, 0, fmt.Errorf("user_id must be positive")
+		return 0, 0, err
 	}
 	return chID, targetID, nil
 }
 
-// parseCallChannelID parses the lone channel_id both call signalling payloads
-// carry. Shared so call_ring and call_decline cannot drift on what counts as a
-// valid channel reference.
+// parseCallChannelID parses the lone channel_id the call signalling, typing,
+// focus, read and voice_join payloads carry. Shared so they cannot drift on
+// what counts as a valid channel reference.
 func parseCallChannelID(msgType string, raw json.RawMessage) (int64, error) {
 	var p struct {
 		ChannelID json.Number `json:"channel_id"`
@@ -323,14 +324,7 @@ func parseCallChannelID(msgType string, raw json.RawMessage) (int64, error) {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return 0, fmt.Errorf("invalid %s payload: %w", msgType, err)
 	}
-	chID, err := p.ChannelID.Int64()
-	if err != nil {
-		return 0, fmt.Errorf("channel_id must be integer: %w", err)
-	}
-	if chID <= 0 {
-		return 0, fmt.Errorf("channel_id must be positive")
-	}
-	return chID, nil
+	return positiveID(p.ChannelID, "channel_id")
 }
 
 // commandConstructors maps message types to functions that parse payloads
@@ -342,51 +336,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		return PingCmd{userID: userID}, nil
 	},
 
-	MsgTypeChatSend: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {
-		var p struct {
-			ClientMessageID string      `json:"client_message_id"`
-			ChannelID       json.Number `json:"channel_id"`
-			Content         string      `json:"content"`
-			ReplyTo         *int64      `json:"reply_to"`
-			ReplyPing       *bool       `json:"reply_ping"`
-			Attachments     []string    `json:"attachments"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("invalid chat_send payload: %w", err)
-		}
-		chID, err := p.ChannelID.Int64()
-		if err != nil {
-			return nil, fmt.Errorf("channel_id must be integer: %w", err)
-		}
-		if len(p.Attachments) > 10 {
-			return nil, fmt.Errorf("too many attachments (max 10)")
-		}
-		// These are upload IDs (UUIDs from POST /api/v1/uploads), NOT URLs: the
-		// client renders an attachment by resolving its id to /api/v1/files/{id},
-		// and SendMessage links each id through LinkAttachmentsToMessage, which
-		// keeps only ids that name a real upload owned by the sender and still
-		// unlinked. A javascript:/data: string is therefore never stored or
-		// echoed — it simply matches no row and is dropped. A scheme check would
-		// be wrong here (it would reject the legitimate UUID ids); the only
-		// bound that applies is length.
-		for i, id := range p.Attachments {
-			if len(id) > 2048 {
-				return nil, fmt.Errorf("attachment[%d] id too long (max 2048)", i)
-			}
-		}
-		attachments := make([]string, len(p.Attachments))
-		copy(attachments, p.Attachments)
-		return ChatSendCmd{
-			ClientMessageID: p.ClientMessageID,
-			userID:          userID,
-			ReqID:           reqID,
-			ChannelID:       chID,
-			Content:         p.Content,
-			ReplyTo:         p.ReplyTo,
-			ReplyPing:       p.ReplyTo != nil && p.ReplyPing != nil && *p.ReplyPing,
-			attachments:     attachments,
-		}, nil
-	},
+	MsgTypeChatSend: parseChatSend,
 
 	MsgTypeChatForward: parseChatForward,
 	MsgTypePollCreate:  parsePollCreate,
@@ -408,9 +358,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid chat_edit payload: %w", err)
 		}
-		msgID, err := p.MessageID.Int64()
+		msgID, err := positiveID(p.MessageID, "message_id")
 		if err != nil {
-			return nil, fmt.Errorf("message_id must be integer: %w", err)
+			return nil, err
 		}
 		return ChatEditCmd{
 			userID:    userID,
@@ -427,9 +377,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid chat_delete payload: %w", err)
 		}
-		msgID, err := p.MessageID.Int64()
+		msgID, err := positiveID(p.MessageID, "message_id")
 		if err != nil {
-			return nil, fmt.Errorf("message_id must be integer: %w", err)
+			return nil, err
 		}
 		return ChatDeleteCmd{
 			userID:    userID,
@@ -478,9 +428,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid reaction_add payload: %w", err)
 		}
-		msgID, err := p.MessageID.Int64()
+		msgID, err := positiveID(p.MessageID, "message_id")
 		if err != nil {
-			return nil, fmt.Errorf("message_id must be integer: %w", err)
+			return nil, err
 		}
 		return ReactionAddCmd{userID: userID, MessageID: msgID, Emoji: p.Emoji}, nil
 	},
@@ -493,9 +443,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid reaction_remove payload: %w", err)
 		}
-		msgID, err := p.MessageID.Int64()
+		msgID, err := positiveID(p.MessageID, "message_id")
 		if err != nil {
-			return nil, fmt.Errorf("message_id must be integer: %w", err)
+			return nil, err
 		}
 		return ReactionRemoveCmd{userID: userID, MessageID: msgID, Emoji: p.Emoji}, nil
 	},
@@ -565,7 +515,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_mod_mute payload: %w", err)
 		}
-		chID, targetID, err := parseModTarget(p.ChannelID, p.UserID)
+		chID, targetID, err := parseModTarget(p.ChannelID, p.UserID, "channel_id")
 		if err != nil {
 			return nil, err
 		}
@@ -581,7 +531,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_mod_deafen payload: %w", err)
 		}
-		chID, targetID, err := parseModTarget(p.ChannelID, p.UserID)
+		chID, targetID, err := parseModTarget(p.ChannelID, p.UserID, "channel_id")
 		if err != nil {
 			return nil, err
 		}
@@ -596,7 +546,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_mod_move payload: %w", err)
 		}
-		toChID, targetID, err := parseModTarget(p.ToChannelID, p.UserID)
+		toChID, targetID, err := parseModTarget(p.ToChannelID, p.UserID, "to_channel_id")
 		if err != nil {
 			return nil, err
 		}
@@ -610,12 +560,9 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("invalid voice_mod_kick payload: %w", err)
 		}
-		targetID, err := p.UserID.Int64()
+		targetID, err := positiveID(p.UserID, "user_id")
 		if err != nil {
-			return nil, fmt.Errorf("user_id must be integer: %w", err)
-		}
-		if targetID <= 0 {
-			return nil, fmt.Errorf("user_id must be positive")
+			return nil, err
 		}
 		return VoiceModKickCmd{userID: userID, TargetID: targetID}, nil
 	},
@@ -624,6 +571,7 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		var p struct {
 			PublicKey   string          `json:"public_key"`
 			Signature   string          `json:"signature"`
+			IdentityKey json.RawMessage `json:"identity_public_key"`
 			VideoDecode json.RawMessage `json:"video_decode"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -634,7 +582,13 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		if len(p.VideoDecode) > 0 && json.Unmarshal(p.VideoDecode, &videoDecode) != nil {
 			videoDecode = nil
 		}
-		return VoiceE2EEAnnounceCmd{userID: userID, PublicKey: p.PublicKey, Signature: p.Signature, VideoDecode: videoDecode}, nil
+		return VoiceE2EEAnnounceCmd{
+			userID:      userID,
+			PublicKey:   p.PublicKey,
+			Signature:   p.Signature,
+			IdentityKey: announceIdentityKey(userID, p.IdentityKey),
+			VideoDecode: videoDecode,
+		}, nil
 	},
 
 	MsgTypeVoiceWatch: func(userID int64, _ string, raw json.RawMessage) (Command, error) {

@@ -13,13 +13,37 @@ type imageLimits struct {
 	MaxBytes int64
 	MaxW     int
 	MaxH     int
+	// AllowGIF admits image/gif next to PNG, JPEG and WebP (WP 8.7). The
+	// client shows an animated picture as its first frame until hovered, so
+	// only the surfaces that do that accept one.
+	AllowGIF bool
 }
 
-// avatarImageLimits are the avatar (and group DM icon) limits. Tests pin them.
-var avatarImageLimits = imageLimits{Label: "avatar", MaxBytes: maxAvatarFileBytes, MaxW: maxAvatarDimension, MaxH: maxAvatarDimension}
+// avatarImageLimits are the avatar limits. Tests pin them.
+var avatarImageLimits = imageLimits{Label: "avatar", MaxBytes: maxAvatarFileBytes, MaxW: maxAvatarDimension, MaxH: maxAvatarDimension, AllowGIF: true}
 
-// bannerImageLimits are the profile banner limits (WP 6.11b).
-var bannerImageLimits = imageLimits{Label: "banner", MaxBytes: maxBannerFileBytes, MaxW: maxBannerWidth, MaxH: maxBannerHeight}
+// groupIconImageLimits are the group DM icon limits: an avatar's pixels, but
+// still-only and the pre-8.7 byte cap.
+var groupIconImageLimits = imageLimits{Label: "avatar", MaxBytes: maxGroupIconFileBytes, MaxW: maxAvatarDimension, MaxH: maxAvatarDimension}
+
+// bannerImageLimits are the profile banner limits (WP 6.11b, 8.7).
+var bannerImageLimits = imageLimits{Label: "banner", MaxBytes: maxBannerFileBytes, MaxW: maxBannerWidth, MaxH: maxBannerHeight, AllowGIF: true}
+
+// allows reports whether mimeType (sniffed) is a type lim accepts.
+func (lim imageLimits) allows(mimeType string) bool {
+	if lim.AllowGIF && mimeType == "image/gif" {
+		return true
+	}
+	return allowedAvatarMIME[mimeType]
+}
+
+// typeRefusal is the 400 text for a type lim does not accept.
+func (lim imageLimits) typeRefusal() string {
+	if lim.AllowGIF {
+		return lim.Label + " must be a PNG, JPEG, WebP or GIF image"
+	}
+	return lim.Label + " must be a PNG, JPEG or WebP image"
+}
 
 // readProfileImage is the bytes stage of the avatar, group icon and banner
 // uploads: read the uploaded file under lim's cap, sniff its type and measure
@@ -42,8 +66,8 @@ func readProfileImage(w http.ResponseWriter, file io.Reader, lim imageLimits) (r
 
 	// Never trust the client's Content-Type — sniff the bytes.
 	mimeType = http.DetectContentType(raw)
-	if !allowedAvatarMIME[mimeType] {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", lim.Label+" must be a PNG, JPEG or WebP image")
+	if !lim.allows(mimeType) {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", lim.typeRefusal())
 		return nil, "", 0, 0, false
 	}
 

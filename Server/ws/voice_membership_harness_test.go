@@ -293,7 +293,7 @@ func (h *vmHarness) connect(m *vmMember) {
 	h.hub.Register(c)
 	// Wait for the hub loop to install c, so the next step sees it.
 	deadline := time.Now().Add(2 * time.Second)
-	for h.hub.GetClient(m.userID) != c {
+	for h.hub.ClientForTest(m.userID) != c {
 		if time.Now().After(deadline) {
 			h.failf("%s: connection never registered", m.name)
 		}
@@ -1044,7 +1044,7 @@ func TestVoiceMembership_GraceWindowHandshakeFailure(t *testing.T) {
 		t.Fatalf("the redial after a failed handshake inherited ch%d, want ch%d", ch, chA)
 	}
 	alice.c.tokenHash = "revoked-during-handshake"
-	if !h.hub.postRegisterSessionRecheck(ctx, alice.c) {
+	if h.hub.postRegisterSessionRecheck(ctx, alice.c) != postRegisterRevoked {
 		t.Fatalf("precondition: the session recheck did not see the revoked session")
 	}
 	alice.c = nil

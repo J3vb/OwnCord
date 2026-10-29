@@ -279,3 +279,72 @@ func TestTokenService_ActorSelfAttributesToTheBoundUser(t *testing.T) {
 		t.Errorf("audit actor_id = %d, want 1 — an explicit actor must not be rewritten", actor)
 	}
 }
+
+// WP 8.4d: a MANAGE_TOKENS holder who is not the owner sees and revokes only
+// the tokens bound to them, and mints only for themself.
+func TestTokenService_OwnTokensOnly(t *testing.T) {
+	svc, database, ctx := tokenFixture(t)
+	seedTokenUser(t, database, 1, "owner", permissions.OwnerRoleID)
+	seedTokenUser(t, database, 2, "holder", permissions.MemberRoleID)
+	seedTokenUser(t, database, 3, "other", permissions.MemberRoleID)
+	holder, _ := database.GetUserByID(ctx, 2)
+
+	ownerTok, err := svc.Create(ctx, 1, "", "owner-bot", 0)
+	if err != nil {
+		t.Fatalf("owner mint: %v", err)
+	}
+	otherTok, err := svc.Create(ctx, 1, "other", "other-bot", 0)
+	if err != nil {
+		t.Fatalf("mint for other: %v", err)
+	}
+
+	// Empty username and the holder's own name (any case) bind to the holder.
+	mine1, err := svc.CreateOwn(ctx, holder, "", "mine-1", 0)
+	if err != nil || mine1.User.ID != 2 {
+		t.Fatalf("CreateOwn(empty) = %+v, %v; want a token bound to the holder", mine1, err)
+	}
+	mine2, err := svc.CreateOwn(ctx, holder, "HOLDER", "mine-2", time.Hour)
+	if err != nil || mine2.User.ID != 2 {
+		t.Fatalf("CreateOwn(own name) = %+v, %v; want a token bound to the holder", mine2, err)
+	}
+	// Any other username, even a real one or the owner, is refused and mints nothing.
+	for _, name := range []string{"owner", "other", "nobody"} {
+		if _, err := svc.CreateOwn(ctx, holder, name, "stolen", 0); !errors.Is(err, ErrForbidden) {
+			t.Errorf("CreateOwn(%q) = %v, want ErrForbidden", name, err)
+		}
+	}
+	all, _ := svc.List(ctx)
+	if len(all) != 4 {
+		t.Fatalf("tokens after the refusals = %d, want 4 (two owner-minted, two own)", len(all))
+	}
+
+	// List returns only the holder's.
+	own, err := svc.ListOwn(ctx, 2)
+	if err != nil || len(own) != 2 {
+		t.Fatalf("ListOwn = %+v, %v; want the holder's two tokens", own, err)
+	}
+	for _, it := range own {
+		if it.UserID != 2 {
+			t.Errorf("ListOwn leaked token %d of user %d", it.ID, it.UserID)
+		}
+	}
+
+	// Revoking someone else's token is "not found", the same as an unknown id,
+	// and leaves it active.
+	for name, id := range map[string]int64{"the owner's": ownerTok.ID, "another member's": otherTok.ID, "an unknown": 99999} {
+		if err := svc.RevokeOwn(ctx, 2, id); !errors.Is(err, ErrNotFound) {
+			t.Errorf("RevokeOwn(%s token) = %v, want ErrNotFound", name, err)
+		}
+	}
+	for _, it := range func() []db.APITokenListItem { l, _ := svc.List(ctx); return l }() {
+		if (it.ID == ownerTok.ID || it.ID == otherTok.ID) && it.RevokedAt != nil {
+			t.Errorf("token %d was revoked by a non-owner", it.ID)
+		}
+	}
+	if err := svc.RevokeOwn(ctx, 2, mine1.ID); err != nil {
+		t.Fatalf("RevokeOwn(own token): %v", err)
+	}
+	if err := svc.RevokeOwn(ctx, 2, mine1.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("second RevokeOwn = %v, want ErrNotFound", err)
+	}
+}

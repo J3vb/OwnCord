@@ -91,7 +91,7 @@ const CANARIES: readonly Canary[] = [
   },
   {
     rule: "local/invoke-needs-try-catch",
-    severity: 1,
+    severity: 2,
     filePath: "src/platform/desktop/nativeVoiceService.ts",
     code: `const service = { clearRoomKey: () => invoke("native_voice_clear_key") };`,
     messageId: "bareInvoke",

@@ -104,3 +104,33 @@ func TestExplainUnknownAction(t *testing.T) {
 		t.Fatalf("err = %v, want a non-denial error", err)
 	}
 }
+
+// move_voice traces AuthorizeVoiceMover over READ_MESSAGES and MOVE_MEMBERS,
+// not MUTE_MEMBERS (WP 8.4b).
+func TestExplainMoveVoiceTracesMoveMembers(t *testing.T) {
+	s := Subject{RolePerms: ReadMessages | MoveMembers, Channel: voice(false)}
+	d, err := Explain(ActionMoveVoice, s)
+	if err != nil {
+		t.Fatalf("Explain(move_voice): %v", err)
+	}
+	if !d.Allowed {
+		t.Fatalf("MOVE_MEMBERS holder denied: %+v", d)
+	}
+	seen := map[string]bool{}
+	for _, b := range d.Bits {
+		seen[b.Bit] = true
+	}
+	if len(d.Bits) != 2 || !seen["READ_MESSAGES"] || !seen["MOVE_MEMBERS"] {
+		t.Errorf("trace bits = %+v, want READ_MESSAGES and MOVE_MEMBERS", d.Bits)
+	}
+	if d, _ := Explain(ActionMoveVoice, Subject{RolePerms: ReadMessages | MuteMembers, Channel: voice(false)}); d.Allowed {
+		t.Errorf("MUTE_MEMBERS alone allowed to move_voice: %+v", d)
+	}
+	found := false
+	for _, a := range Actions {
+		found = found || a == ActionMoveVoice
+	}
+	if !found {
+		t.Error("ActionMoveVoice missing from Actions")
+	}
+}

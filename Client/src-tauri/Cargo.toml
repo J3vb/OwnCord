@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.4.0-beta.1"
+version = "2.5.0"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -163,6 +163,12 @@ windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Data_Xml_Dom",
     "UI_Notifications",
+    # The song being played (media_activity/win.rs): Global System Media
+    # Transport Controls sessions, with the Foundation types (TimeSpan,
+    # DateTime) and collections they return.
+    "Media_Control",
+    "Foundation",
+    "Foundation_Collections",
 ] }
 # DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
 # fallback in secret_store, and the window lookup that hides WebView2's
@@ -177,6 +183,12 @@ windows-sys = { version = "0.60", features = [
     "Wdk_System_SystemServices",
     "Win32_System_SystemInformation",
     "Win32_System_Diagnostics_ToolHelp",
+    # game_activity.rs: the process list (Toolhelp, above), each process's
+    # image path and start time (OpenProcess, QueryFullProcessImageNameW,
+    # GetProcessTimes) and Steam's install folder (HKCU\Software\Valve\Steam).
+    # Features on the existing windows-sys 0.60 dependency, so no new crate.
+    "Win32_System_Threading",
+    "Win32_System_Registry",
 ] }
 # WebView2 profile permission state (windows_media.rs). Both match the
 # versions tauri/wry already build, so no new crate enters the tree.
@@ -203,10 +215,16 @@ libc = "0.2"
 dbus = "0.9"
 # System-wide input idle on Wayland compositors without a Mutter or
 # ScreenSaver idle source (KDE Plasma, wlroots): the ext-idle-notify-v1
-# protocol (idle.rs). Pure-Rust wire backend, so no libwayland link; Smithay
-# crates, exact-pinned like the other Linux deps.
-wayland-client = "=0.31.15"
+# protocol (idle.rs); and window_activation.rs, which raises the window with
+# xdg-activation-v1 on GDK's own connection. That needs the `system` backend
+# (libwayland-client, which GTK already links, so no new runtime library):
+# the pure-Rust backend cannot adopt GDK's wl_display. Smithay crates,
+# exact-pinned like the other Linux deps.
+wayland-client = { version = "=0.31.15", features = ["system"] }
 wayland-protocols = { version = "=0.32.13", features = ["client", "staging"] }
+# GDK's wl_display and the window's wl_surface (window_activation.rs). Same
+# version tao already builds, pinned like it.
+gdkwayland-sys = "=0.18.2"
 # Desktop id of an integrated AppImage's launcher entry (unread_badge.rs).
 md-5 = "=0.10.6"
 # Native LiveKit for Linux voice/video. No mainstream WebKitGTK build ships
@@ -236,7 +254,7 @@ livekit = "=0.9.5"
 # Names the SDK's permission/track-source protobuf types (its `proto` module
 # does not re-export them). Same version livekit 0.9.5 resolves, so no
 # new crate enters the tree.
-livekit-protocol = "=0.8.1"
+livekit-protocol = "=0.8.2"
 # Encodes the screen picker's thumbnails (native_voice/screen.rs). Already in
 # the tree via tauri's tray-icon, so this costs no extra build.
 png = "0.18"
@@ -254,7 +272,7 @@ cpal = { version = "0.18", features = ["pulseaudio"] }
 # recognises OwnCord's own playback by the client name cpal gives its
 # connections (`cpal-pulseaudio-<pid>`, cpal src/host/pulseaudio/mod.rs): a
 # cpal bump has to re-check that name.
-pulseaudio = "=0.3.1"
+pulseaudio = "=0.3.2"
 # RNNoise for the Enhanced Noise Suppression setting on the native capture
 # path (native_voice/capture.rs): a pure-Rust port of the RNNoise model the web
 # path runs as WASM. Default features only add its command-line tool.

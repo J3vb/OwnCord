@@ -1021,6 +1021,23 @@ describe("ServerPanel", () => {
       expect(container.querySelector(".modal-overlay")).toBeNull();
     });
 
+    it("stays open when drag-selecting the address text ends on the backdrop", () => {
+      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
+      addBtn.click();
+
+      const hostInput = container.querySelectorAll(".modal .form-input")[1] as HTMLInputElement;
+      hostInput.value = "chat.example.com:8443";
+      const overlay = container.querySelector(".modal-overlay") as HTMLElement;
+      hostInput.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      expect(container.querySelector(".modal-overlay")).not.toBeNull();
+      expect(hostInput.value).toBe("chat.example.com:8443");
+    });
+
     it("does NOT close modal when clicking inside the modal body", () => {
       const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
       container.appendChild(panel.element);
@@ -1200,6 +1217,29 @@ describe("ServerPanel", () => {
 
       expect(onAddProfile).toHaveBeenCalledWith("v6-bare", "2001:db8::1");
       expect(container.querySelector(".modal-overlay")).toBeNull();
+    });
+
+    it("Enter that commits an IME candidate in the host input does not save", () => {
+      const onAddProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      (container.querySelector(".btn-add-server") as HTMLElement).click();
+      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+      inputs[0]!.value = "IME Server";
+      inputs[1]!.value = "ime.example.com:8443";
+
+      inputs[1]!.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          isComposing: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      expect(onAddProfile).not.toHaveBeenCalled();
+      inputs[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      expect(onAddProfile).toHaveBeenCalledWith("IME Server", "ime.example.com:8443");
     });
 
     it("submits on Enter key in host input", () => {

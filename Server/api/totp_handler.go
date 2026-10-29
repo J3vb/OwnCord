@@ -1,9 +1,6 @@
 package api
 
 import (
-	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -43,8 +40,7 @@ func handleVerifyTOTP(svc AuthService) http.HandlerFunc {
 		}
 
 		var req verifyTotpRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 
@@ -67,8 +63,7 @@ func handleEnableTOTP(svc AuthService) http.HandlerFunc {
 		}
 
 		var req passwordConfirmationRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 
@@ -103,8 +98,7 @@ func handleRegenerateRecoveryCodes(svc AuthService) http.HandlerFunc {
 		}
 
 		var req passwordConfirmationRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 
@@ -127,8 +121,7 @@ func handleConfirmTOTP(svc AuthService) http.HandlerFunc {
 		}
 
 		var req totpConfirmationRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 
@@ -153,8 +146,7 @@ func handleDisableTOTP(svc AuthService) http.HandlerFunc {
 		}
 
 		var req passwordConfirmationRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+		if !decodeOptionalJSON(w, r, &req) {
 			return
 		}
 

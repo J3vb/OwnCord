@@ -78,7 +78,7 @@ func TestCseq_FilteredFramesDoNotAdvance(t *testing.T) {
 	h := newEmitTestHub()
 	registerEmitTestClient(h, 1, 5)
 	bobSend := registerEmitTestClient(h, 2, 6)
-	bob := h.clients[2]
+	bob := h.clients[2][0]
 
 	h.BroadcastToChannel(5, []byte(`{"type":"typing","payload":{"channel_id":5}}`))
 	h.BroadcastToChannel(6, []byte(`{"type":"typing","payload":{"channel_id":6}}`))

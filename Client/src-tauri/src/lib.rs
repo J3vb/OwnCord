@@ -15,8 +15,10 @@ mod dpapi;
 #[cfg(target_os = "linux")]
 mod exit_watch;
 mod external_content;
+mod external_open;
 #[cfg(not(windows))]
 mod fallback_crypto;
+mod game_activity;
 mod http_pool;
 mod http_proxy;
 mod idle;
@@ -28,6 +30,7 @@ mod linux_media;
 #[cfg(target_os = "linux")]
 mod linux_spellcheck;
 mod livekit_proxy;
+mod media_activity;
 // Message notifications that open their message on click (the plugin's desktop
 // backend drops clicks). Desktop-only: the plugin's mobile backend has its own
 // action callback.
@@ -39,6 +42,8 @@ mod mouse_buttons;
 mod notification_bus;
 #[cfg(desktop)]
 mod popout;
+#[cfg(target_os = "linux")]
+mod portal_app_id;
 #[cfg(target_os = "linux")]
 mod portal_shortcuts;
 // Public: `examples/native_voice_interop.rs` drives the same session code.
@@ -53,6 +58,8 @@ mod tofu;
 mod tray;
 mod unread_badge;
 mod update_commands;
+#[cfg(target_os = "linux")]
+mod window_activation;
 #[cfg(desktop)]
 mod window_prefs;
 // Command set exists on every target (unavailable off Windows); only the
@@ -82,6 +89,20 @@ fn log_level_from_env() -> log::LevelFilter {
         "off" => log::LevelFilter::Off,
         _ => log::LevelFilter::Info,
     }
+}
+
+/// Stdout log target that drops a line it cannot write. The plugin's own
+/// Stdout target falls back to stderr and panics when that fails too, so a
+/// closed terminal or pipe aborted the app (the panic hook logs through the
+/// same target).
+fn stdout_log_dispatch() -> tauri_plugin_log::fern::Dispatch {
+    tauri_plugin_log::fern::Dispatch::new().chain(tauri_plugin_log::fern::Output::call(|record| {
+        write_log_line(&mut std::io::stdout().lock(), record.args())
+    }))
+}
+
+fn write_log_line(out: &mut impl std::io::Write, line: &std::fmt::Arguments) {
+    let _ = writeln!(out, "{line}").and_then(|()| out.flush());
 }
 
 #[cfg(target_os = "linux")]
@@ -125,6 +146,8 @@ fn should_restore_on_second_launch(installer_launching: bool) -> bool {
 pub fn run() {
     // First, so a panic anywhere after the log plugin starts reaches the log.
     diagnostics::install_panic_hook();
+    #[cfg(target_os = "linux")]
+    window_activation::stash_launch_token();
     let builder = tauri::Builder::default();
 
     // The single-instance plugin MUST be registered first: a second launch is
@@ -139,7 +162,11 @@ pub fn run() {
             update_commands::update_in_progress()
         );
         if should_restore_on_second_launch(launching) {
-            message_notification::focus_main_window(app);
+            #[cfg(target_os = "linux")]
+            let token = window_activation::take_forwarded_token();
+            #[cfg(not(target_os = "linux"))]
+            let token = None;
+            message_notification::focus_main_window_with(app, token);
         }
     }));
 
@@ -147,11 +174,13 @@ pub fn run() {
         // Log plugin registered early so logging is available to everything
         // after it. Writes to stdout (dev) and a rotating file in the OS
         // app-log dir so a shipped user — whose release build has no console —
-        // can retrieve logs.
+        // can retrieve logs. `clear_targets` drops the builder's defaults (a
+        // second stdout and an `OwnCord.log` copy of the file).
         .plugin(
             tauri_plugin_log::Builder::new()
+                .clear_targets()
                 .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
+                    tauri_plugin_log::TargetKind::Dispatch(stdout_log_dispatch()),
                 ))
                 .target(tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::LogDir {
@@ -263,10 +292,14 @@ pub fn run() {
             external_content::external_preview,
             external_content::external_image,
             idle::system_idle_ms,
+            game_activity::detect_game,
+            game_activity::list_running_programs,
+            media_activity::detect_media,
             windows_app_audio::app_audio_available,
             windows_app_audio::start_app_audio,
             windows_app_audio::stop_app_audio,
             tray::open_log_folder,
+            external_open::open_external_url,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_build_info,
             #[cfg(target_os = "linux")]
@@ -588,7 +621,25 @@ mod startup_dialog_tests {
 
 #[cfg(all(test, desktop))]
 mod tests {
-    use super::should_restore_on_second_launch;
+    use super::{should_restore_on_second_launch, write_log_line};
+
+    struct ClosedPipe;
+    impl std::io::Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    #[test]
+    fn a_log_line_to_a_closed_stdout_is_dropped_not_a_panic() {
+        write_log_line(&mut ClosedPipe, &format_args!("lost"));
+        let mut open = Vec::new();
+        write_log_line(&mut open, &format_args!("kept {}", 1));
+        assert_eq!(open, b"kept 1\n");
+    }
 
     #[test]
     fn forwarded_launch_restores_window_unless_installer_is_launching() {

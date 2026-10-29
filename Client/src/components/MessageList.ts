@@ -73,6 +73,7 @@ import {
 import {
   isAudioMime,
   isGalleryImage,
+  isImageMime,
   isVideoAttachment,
   resolveServerUrl,
   thumbnailUrl,
@@ -85,6 +86,7 @@ import {
 } from "./message-list/image-sizes";
 import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
+import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./message-list/row-heights";
 import type { PollOutcome } from "../features/messaging/pollSend";
 import { messagingText } from "../i18n/messaging";
 import {
@@ -102,6 +104,7 @@ import {
 } from "@lib/read-state";
 import { idMentionsEnabled, readPointerEnabled } from "@lib/serverCapabilities";
 import { markMessageUnread } from "./message-list/mark-unread";
+import { onPrefChange } from "@lib/preferences";
 
 // -- Options ------------------------------------------------------------------
 
@@ -170,6 +173,8 @@ export interface MessageListOptions {
    * "Jump to Present" pill, which only appears while the window is detached.
    */
   readonly onJumpToPresent?: () => void;
+  /** Send the 👋 reply to a welcome row (WP 8.6). Absent, the row has no Wave button. */
+  readonly onWave?: (messageId: number) => boolean;
   /** Open the pinned-messages panel ("pinned messages" link of a pin row). It never closes an open panel. */
   readonly onOpenPins?: () => void;
   /** Join the DM call a live call log row stands for (WP 3B-9c). No Join button without it. */
@@ -334,7 +339,7 @@ export function estimateItemHeight(
       height += 220;
     } else if (isAudioMime(att.mime)) {
       height += 96;
-    } else if (att.mime.startsWith("image/")) {
+    } else if (isImageMime(att.mime)) {
       const known = knownAttachmentHeight(att);
       height += known === undefined ? 220 : known + MEDIA_MARGIN;
     }
@@ -850,7 +855,23 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function getItemHeight(index: number): number {
     const cached = heightCache.get(itemKey(index));
     if (cached !== undefined) return cached;
-    return estimateItemHeight(virtualItems[index]!, estimateWidth);
+    return estimateRow(index);
+  }
+
+  /** A message row's height key across lists; null for rows that are not a
+   *  confirmed message. */
+  function rememberKey(index: number): string | null {
+    const item = virtualItems[index];
+    if (item === undefined || item.kind !== "message" || item.message.id === 0) return null;
+    return rowHeightKey(item.message.id, item.isGrouped, item.message.editedAt);
+  }
+
+  /** An unmeasured row: the height an earlier list of this channel drew it at,
+   *  else the estimate. */
+  function estimateRow(index: number): number {
+    const key = estimateWidth === undefined ? null : rememberKey(index);
+    const remembered = key === null ? undefined : rememberedRowHeight(key, estimateWidth!);
+    return remembered ?? estimateItemHeight(virtualItems[index]!, estimateWidth);
   }
 
   function totalHeight(): number {
@@ -936,6 +957,17 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     setScrollTop(root.scrollHeight);
   }
 
+  /** Distance from the bottom at the last scroll event or resize pass: what the
+   *  resize observer judges "at the bottom" by, since by the time it runs a
+   *  grown row has already pushed the bottom further away. */
+  let bottomGapBeforeResize = 0;
+
+  function bottomGap(m?: ScrollMetrics): number {
+    if (root === null) return 0;
+    const { scrollTop, scrollHeight, clientHeight } = m ?? readMetrics(root);
+    return scrollHeight - scrollTop - clientHeight;
+  }
+
   /** What the pill shows now, so a scroll burst writes the DOM only on a change. */
   let btnShownKey = "";
 
@@ -967,7 +999,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   /** Move the view to the NEW divider once one exists. Does not force a row rebuild (R2). */
   function openAtDividerIfReady(): boolean {
-    if (!openAtDividerPending || root === null) return false;
+    // Hidden, the scroller cannot move: the resize observer places it once shown.
+    if (!openAtDividerPending || root === null || root.clientHeight === 0) return false;
     const idx = virtualItems.findIndex((item) => item.kind === "new-divider");
     if (idx === -1) return false;
     openAtDividerPending = false;
@@ -1234,10 +1267,16 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }
     }
 
+    // The width these rows were laid out at, read with the heights (layout is
+    // already clean): the observer may not have reported a resize yet.
+    const measuredWidth = root?.clientWidth ?? 0;
+
     // Pass 2 — pure writes: apply all cached heights to heightCache and the
     // Fenwick tree. No DOM reads here, so no additional reflow is triggered.
     for (const { key, idx, h } of measurements) {
       heightCache.set(key, h);
+      const shared = measuredWidth > 0 ? rememberKey(idx) : null;
+      if (shared !== null) rememberRowHeight(shared, measuredWidth, h);
       if (tree !== null) {
         tree.set(idx, h);
       }
@@ -1328,6 +1367,15 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   // The last jumped-to message, re-centred from the resize callback while
   // content above it is still sizing.
   let jumpTarget: { readonly messageId: number; readonly until: number } | null = null;
+
+  /** Index of the message a recent jump is still centring, or -1. */
+  function activeJumpIndex(): number {
+    if (jumpTarget === null || Date.now() >= jumpTarget.until) return -1;
+    const { messageId } = jumpTarget;
+    return virtualItems.findIndex(
+      (item) => item.kind === "message" && item.message.id === messageId,
+    );
+  }
 
   let renderWindowCount = 0;
   let renderWindowResetTimer = 0;
@@ -1585,8 +1633,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function reseedUnmeasured(): void {
     if (tree === null) return;
     for (let i = 0; i < virtualItems.length; i++) {
-      if (!heightCache.has(itemKey(i)))
-        tree.set(i, estimateItemHeight(virtualItems[i]!, estimateWidth));
+      if (!heightCache.has(itemKey(i))) tree.set(i, estimateRow(i));
     }
   }
 
@@ -1832,6 +1879,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       }
     }
     dropGoneEdit(editHadFocus);
+    // The rows changed under the reader without a scroll event: a newer page
+    // landing below a reader near the bottom of a detached window leaves them
+    // where they were, so the resize pass must not pull them down to it.
+    bottomGapBeforeResize = bottomGap();
     return true;
   }
 
@@ -2001,6 +2052,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
         }
       }
       dropGoneEdit(editHadFocus);
+      bottomGapBeforeResize = bottomGap();
       log.debug("renderAll END");
     } finally {
       renderAllRunning = false;
@@ -2096,7 +2148,6 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    *  is a distance, so it must be recomputed when the viewport grows or shrinks. */
   let lastViewportHeight = 0;
   let resizeObserver: ResizeObserver | null = null;
-  // resizeDirty tracking removed — resize observer batches via RAF directly
   function handleScroll(): void {
     if (root === null) return;
 
@@ -2107,6 +2158,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // second layout.
     const m = readMetrics(root);
     scrollSnapshot = m;
+    if (m.clientHeight > 0) bottomGapBeforeResize = bottomGap(m);
     const nearTop =
       m.scrollTop < Math.max(SCROLL_TOP_THRESHOLD, m.clientHeight * SCROLL_TOP_VIEWPORTS);
     if (!nearTop) olderRetryAt = 0;
@@ -2440,68 +2492,103 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     );
 
     // Watch for height changes in rendered items (images loading, embeds expanding).
-    // Batched via RAF with anchor-based scroll preservation.
+    // A plain re-measure runs inside the observer callback, which comes after
+    // layout and before paint: deferring it to the next frame painted one frame
+    // with the rows below a grown image or card shifted, then snapped them back.
+    // A pass that may build rows (a resized viewport, a jump settling, the NEW
+    // divider still to place) resizes the observed content itself, so it waits
+    // for the next frame instead of looping the observer.
+    const resizePass = (): void => {
+      if (root === null || contentContainer === null) return;
+      // The text estimates wrap at the list's width: when it changes, the
+      // rows nothing has measured yet are estimated again (below).
+      const width = root.clientWidth;
+      // A list mounted hidden learns its width here, even at the default one,
+      // so the rows an earlier visit measured seed it.
+      const widthChanged = width > 0 && width !== estimateWidth;
+      if (widthChanged) estimateWidth = width;
+
+      // A viewport that grew (pane enlarged, window maximized) needs more
+      // rows than the window holds, with no scroll event to say so.
+      const viewportHeight = root.clientHeight;
+      if (viewportHeight !== lastViewportHeight) renderWindow();
+
+      const jumpIdx = activeJumpIndex();
+      if (jumpIdx !== -1) {
+        if (widthChanged) reseedUnmeasured();
+        measureRendered();
+        updateSpacers();
+        centreOnIndex(jumpIdx);
+        return;
+      }
+
+      // Where the reader was before the content changed size: a row near the
+      // bottom that grew past the threshold has already moved the bottom away
+      // by the time this runs, which must not unpin a reader who was at it.
+      const atBottom = isNearBottom() || bottomGapBeforeResize < SCROLL_BOTTOM_THRESHOLD;
+
+      // Capture anchor: the first item that starts in view, and its offset
+      // from the viewport top. Not the item straddling the top edge: growth
+      // inside it (an image box settling below its header) would then move
+      // every row the reader is looking at.
+      const { scrollTop, clientHeight } = readMetrics(root);
+      let anchorIdx = offsetToIndex(scrollTop);
+      if (
+        offsetBefore(anchorIdx) < scrollTop &&
+        anchorIdx + 1 < renderedEnd &&
+        offsetBefore(anchorIdx + 1) < scrollTop + clientHeight
+      ) {
+        anchorIdx++;
+      }
+      const anchorOffset = scrollTop - offsetBefore(anchorIdx);
+
+      // The anchor above was read against the old estimates; the restore
+      // below reads the new ones, so the reading position holds.
+      if (widthChanged) reseedUnmeasured();
+
+      // Re-measure rendered elements
+      measureRendered();
+
+      // Update spacer heights with new measurements
+      updateSpacers();
+
+      // Restore scroll position using anchor
+      if (atBottom) {
+        // A list mounted while hidden still owes the reader its NEW divider.
+        if (!openAtDividerIfReady()) scrollToBottom();
+      } else {
+        setScrollTop(offsetBefore(anchorIdx) + anchorOffset);
+      }
+      bottomGapBeforeResize = bottomGap();
+      keepEditorCaretInView();
+    };
     resizeObserver = new ResizeObserver(() => {
       if (root === null || contentContainer === null) return;
+      // Hidden (the call grid has the chat column, display: none): nothing is
+      // laid out, so there is nothing to measure, and the position from before
+      // it was hidden is what showing it again restores.
+      if (root.clientHeight === 0) return;
+      const buildsRows =
+        root.clientHeight !== lastViewportHeight ||
+        activeJumpIndex() !== -1 ||
+        openAtDividerPending;
+      if (!buildsRows) {
+        if (resizeRafId === 0) resizePass();
+        return;
+      }
       if (resizeRafId !== 0) return;
-
       resizeRafId = requestAnimationFrame(() => {
         resizeRafId = 0;
-        if (root === null || contentContainer === null) return;
-        // The text estimates wrap at the list's width: when it changes, the
-        // rows nothing has measured yet are estimated again (below).
-        const width = root.clientWidth;
-        const widthChanged = width > 0 && width !== (estimateWidth ?? DEFAULT_LIST_WIDTH);
-        if (widthChanged) estimateWidth = width;
-
-        // A viewport that grew (pane enlarged, window maximized) needs more
-        // rows than the window holds, with no scroll event to say so.
-        const viewportHeight = root.clientHeight;
-        if (viewportHeight !== lastViewportHeight) renderWindow();
-
-        const jumpIdx =
-          jumpTarget !== null && Date.now() < jumpTarget.until
-            ? virtualItems.findIndex(
-                (item) => item.kind === "message" && item.message.id === jumpTarget?.messageId,
-              )
-            : -1;
-        if (jumpIdx !== -1) {
-          if (widthChanged) reseedUnmeasured();
-          measureRendered();
-          updateSpacers();
-          centreOnIndex(jumpIdx);
-          return;
-        }
-
-        const atBottom = isNearBottom();
-
-        // Capture anchor: topmost visible item and its offset from viewport top
-        const anchorIdx = offsetToIndex(root.scrollTop);
-        const anchorOffset = root.scrollTop - offsetBefore(anchorIdx);
-
-        // The anchor above was read against the old estimates; the restore
-        // below reads the new ones, so the reading position holds.
-        if (widthChanged) reseedUnmeasured();
-
-        // Re-measure rendered elements
-        measureRendered();
-
-        // Update spacer heights with new measurements
-        updateSpacers();
-
-        // Restore scroll position using anchor
-        if (atBottom) {
-          scrollToBottom();
-        } else {
-          setScrollTop(offsetBefore(anchorIdx) + anchorOffset);
-        }
-        keepEditorCaretInView();
+        if (root !== null && root.clientHeight > 0) resizePass();
       });
     });
     resizeObserver.observe(contentContainer);
     resizeObserver.observe(root);
 
     parentContainer.appendChild(region);
+    // Estimate at the real width from the first render, so rows an earlier
+    // visit measured seed it rather than a reseed after the observer fires.
+    if (root.clientWidth > 0) estimateWidth = root.clientWidth;
 
     openAtDividerPending = unreadOnOpen > 0;
     renderAll();
@@ -2755,13 +2842,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Switching the 12h/24h clock preference relabels the rendered rows in
     // place, the same way midnight does. Owned by disposable.signal, so the
     // listener dies with the component.
-    window.addEventListener(
-      "owncord:pref-change",
-      ((e: CustomEvent<{ key: string }>) => {
-        if (e.detail.key === "timeFormat") relabelRenderedTimes();
-      }) as EventListener,
-      { signal: disposable.signal },
-    );
+    onPrefChange(["timeFormat"], relabelRenderedTimes, disposable.signal);
   }
 
   /**
@@ -3158,6 +3239,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     // A server-written row (call log, group event) is read-only.
     if (isServerRowKind(msg.kind)) return false;
+    // A sticker message has no text to edit (WP 8.8); the server refuses it.
+    if (msg.sticker !== undefined) return false;
     if (edit?.messageId === messageId) {
       if (takeFocus) edit.session?.focusEnd();
       return true;

@@ -191,8 +191,13 @@ describe("spoiler attachment cover", () => {
   it("blocks a covered video's play button and download overlay until revealed", async () => {
     // jsdom has no media playback.
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    // A server without file links: the clip plays through the play button.
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
+    const fileCalls = () =>
+      fetchMock.mock.calls.filter(([, init]) => (init as { method?: string })?.method !== "POST");
     const node = renderAttachment(att("v", "SPOILER_clip.mp4", "video/mp4"));
     document.body.appendChild(node);
+    await vi.waitFor(() => expect(node.querySelector(".msg-media-play")).not.toBeNull());
     const play = node.querySelector<HTMLButtonElement>(".msg-media-play")!;
     const download = node.querySelector<HTMLButtonElement>(
       ".msg-media-overlay .msg-file-download",
@@ -204,18 +209,20 @@ describe("spoiler attachment cover", () => {
     play.click();
     download.click();
     expect(reached).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fileCalls()).toHaveLength(0);
     expect(play.disabled).toBe(false);
 
     node.querySelector<HTMLButtonElement>(".msg-spoiler-cover")!.click();
     play.click();
     expect(reached).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await vi.waitFor(() => expect(fileCalls()).toHaveLength(1));
   });
 
-  it("hands focus to the play button when a video is revealed", () => {
+  it("hands focus to the play button when a video is revealed", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 404 });
     const node = renderAttachment(att("v", "SPOILER_clip.mp4", "video/mp4"));
     document.body.appendChild(node);
+    await vi.waitFor(() => expect(node.querySelector(".msg-media-play")).not.toBeNull());
     const cover = node.querySelector<HTMLButtonElement>(".msg-spoiler-cover")!;
     cover.focus();
     cover.click();

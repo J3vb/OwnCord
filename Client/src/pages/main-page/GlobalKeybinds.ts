@@ -26,6 +26,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
@@ -46,7 +47,7 @@ import {
   type EffectiveKeybinds,
 } from "@lib/keybinds";
 import { inputMode } from "@lib/inputMode";
-import { loadPref } from "@lib/preferences";
+import { loadPref, onPrefChange } from "@lib/preferences";
 
 const log = createLogger("global-keybinds");
 
@@ -195,11 +196,16 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
       // Ctrl+M / Ctrl+D: hidden aliases from before the Ctrl+Shift keys.
       // A text field keeps its own Ctrl+D (forward-delete on macOS).
       // remove after beta.5
+      // Toggle on the press edge only: a held key must not flip it back.
       case "m":
-        if (!isTypingTarget(e.target)) run("toggle-mute", handlers.onToggleMute);
+        if (isTypingTarget(e.target)) break;
+        if (e.repeat) e.preventDefault();
+        else run("toggle-mute", handlers.onToggleMute);
         break;
       case "d":
-        if (!isTypingTarget(e.target)) run("toggle-deafen", handlers.onToggleDeafen);
+        if (isTypingTarget(e.target)) break;
+        if (e.repeat) e.preventDefault();
+        else run("toggle-deafen", handlers.onToggleDeafen);
         break;
       default:
         break;
@@ -216,17 +222,9 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
     cachedTable ??= buildTable(loadEffectiveKeybinds());
     return cachedTable;
   };
-  const onPrefChange = (e: Event): void => {
-    const key = e instanceof CustomEvent ? (e.detail as { key?: unknown } | null)?.key : undefined;
-    // The effective set also derives from the mute/deafen keys and push to talk.
-    if (
-      key === KEYBINDS_PREF ||
-      key === GLOBAL_MUTE_VK_PREF ||
-      key === GLOBAL_DEAFEN_VK_PREF ||
-      key === "pttVk"
-    ) {
-      cachedTable = null;
-    }
+  // The effective set also derives from the mute/deafen keys and push to talk.
+  const onKeybindPrefChange = (): void => {
+    cachedTable = null;
   };
 
   /** Run the rebindable action bound to this keydown. True when the key was
@@ -334,7 +332,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   // closes it.
   let escapeTaken = false;
   const onEscapeCapture = (e: KeyboardEvent): void => {
-    if (e.key !== "Escape") return;
+    if (e.key !== "Escape" || isImeCommit(e)) return;
     escapeTaken = handlers.isSuspended?.() === true || dialogOpen();
   };
   // Ctrl+Enter answers a ringing call. It is taken in the capture phase,
@@ -342,14 +340,14 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   // ring the key reaches the message box untouched.
   const onAcceptRingCapture = (e: KeyboardEvent): void => {
     if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
-    if (e.repeat || e.isComposing || handlers.isSuspended?.() === true || dialogOpen()) return;
+    if (e.repeat || isImeCommit(e) || handlers.isSuspended?.() === true || dialogOpen()) return;
     if (handlers.ringActive?.() !== true) return;
     e.stopPropagation();
     runGlobal(e, "accept-ring", () => handlers.onAcceptRing?.());
   };
   const onEscape = (e: KeyboardEvent): void => {
-    if (e.key !== "Escape" || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (escapeTaken || e.defaultPrevented || e.isComposing || e.repeat) return;
+    if (e.key !== "Escape" || isImeCommit(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (escapeTaken || e.defaultPrevented || e.repeat) return;
     if (isTypingTarget(e.target) && !isComposer(e.target)) return;
     // Escape in the thread panel's composer must not mark the parent read.
     if (inThreadPanel(e.target)) return;
@@ -368,7 +366,11 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   window.addEventListener("keydown", onEscapeCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onAcceptRingCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onEscape, { signal: owner.signal });
-  window.addEventListener("owncord:pref-change", onPrefChange, { signal: owner.signal });
+  onPrefChange(
+    [KEYBINDS_PREF, GLOBAL_MUTE_VK_PREF, GLOBAL_DEAFEN_VK_PREF, "pttVk"],
+    onKeybindPrefChange,
+    owner.signal,
+  );
   return () => owner.destroy();
 }
 

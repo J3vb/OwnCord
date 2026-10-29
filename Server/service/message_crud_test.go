@@ -515,6 +515,26 @@ func TestSendMessage_GroupDMLookupFailureDoesNotMisfireFirstContactGate(t *testi
 	}
 }
 
+// A failed delivery-target read leaves the message saved and its live
+// frame addressed to the sender alone, never to the channel topic.
+func TestSendMessage_DeliveryTargetsFailureAddressesOnlySender(t *testing.T) {
+	database, _ := newDMFixture(t)
+	svc := New(&erroringIsGroupDMStore{DB: database}, nil)
+
+	result, err := svc.Messages.SendMessage(context.Background(), SendMessageParams{
+		ChannelID: 50, UserID: 1, Username: "alice", Content: "hi",
+	})
+	if err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if result == nil || result.MessageID == 0 || !result.IsDM {
+		t.Fatalf("SendMessage result = %+v, want a saved DM message", result)
+	}
+	if !slices.Equal(result.ParticipantIDs, []int64{1}) {
+		t.Errorf("ParticipantIDs = %v, want only the sender [1]", result.ParticipantIDs)
+	}
+}
+
 // dmSendSpyStore counts the per-send DM lookups and writes DP-51 removed from
 // SendMessage's post-commit DM tail: the separate group-flag and
 // participant-ID reads, the per-recipient trust read, the DMAudience

@@ -329,6 +329,9 @@ describe("loginWithSavedPassword", () => {
     const err = await loginWithSavedPassword("h.example", "alice").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TransportError);
     expect((err as Error).message).toBe("saved-password login timed out");
+    // The original rejection stays reachable for diagnostics.
+    expect((err as Error).cause).toBeInstanceOf(Error);
+    expect(((err as Error).cause as Error).message).toBe("saved-password login timed out");
     expect(logMock.error).toHaveBeenCalledWith("Saved-password login failed", {
       host: "h.example",
       error: "saved-password login timed out",
@@ -497,5 +500,54 @@ describe("parseRelayedLogin", () => {
     expect(() => parseRelayedLogin({ status: 200, body: "not json" })).toThrow();
     expect(() => parseRelayedLogin({ status: 200, body: "" })).toThrow();
     expect(() => parseRelayedLogin({ status: 204, body: "" })).toThrow();
+  });
+
+  it.each([
+    ["a JSON string", '"token"'],
+    ["a JSON number", "42"],
+    ["a JSON boolean", "true"],
+    ["a JSON null", "null"],
+  ])("throws for a 2xx whose body is %s rather than an object", (_label, body) => {
+    expect(() => parseRelayedLogin({ status: 200, body })).toThrow(Error);
+    expect(() => parseRelayedLogin({ status: 200, body })).not.toThrow(ApiClientError);
+  });
+
+  it.each([100, 199, 300, 301, 399])(
+    "treats a relayed status %i outside 2xx as a failure even with a login-shaped body",
+    (status) => {
+      try {
+        parseRelayedLogin({ status, body: '{"token":"t"}' });
+        throw new Error("should have thrown");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ApiClientError);
+        expect((err as InstanceType<typeof ApiClientError>).status).toBe(status);
+      }
+    },
+  );
+
+  it.each([200, 201, 299])("accepts a relayed status %i as a successful login", (status) => {
+    expect(parseRelayedLogin({ status, body: '{"token":"t"}' }).token).toBe("t");
+  });
+
+  it("uses the server's error code and message from a non-2xx JSON body", () => {
+    try {
+      parseRelayedLogin({ status: 429, body: '{"error":"RATE_LIMITED","message":"Slow down"}' });
+      throw new Error("should have thrown");
+    } catch (err) {
+      expect((err as InstanceType<typeof ApiClientError>).code).toBe("RATE_LIMITED");
+      expect((err as Error).message).toBe("Slow down");
+    }
+  });
+
+  it("falls back to UNKNOWN and a status message when a non-2xx JSON body is not an object", () => {
+    for (const body of ['"oops"', "7", "null"]) {
+      try {
+        parseRelayedLogin({ status: 500, body });
+        throw new Error("should have thrown");
+      } catch (err) {
+        expect((err as InstanceType<typeof ApiClientError>).code).toBe("UNKNOWN");
+        expect((err as Error).message).toContain("500");
+      }
+    }
   });
 });

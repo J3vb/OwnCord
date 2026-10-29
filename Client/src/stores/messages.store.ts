@@ -23,6 +23,7 @@ import type {
   MessageUser,
   Attachment,
   MessageResponse,
+  MessageStickerInfo,
 } from "@lib/types";
 import { chatPayloadToMessage, INITIAL_STATE } from "../features/messaging/messageModel";
 import type { Message, MessagesState, PendingReaction } from "../features/messaging/messageModel";
@@ -113,6 +114,8 @@ export function addOptimisticMessage(params: {
   content: string;
   replyTo: number | null;
   attachments?: readonly Attachment[];
+  /** A sticker send (WP 8.8): the row shows the image at once; `content` is the server's fallback text. */
+  sticker?: MessageStickerInfo;
   timestamp: string;
   /** "uploading" for a send queued behind its files; absent means "pending". */
   status?: "uploading";
@@ -133,6 +136,7 @@ export function addOptimisticMessage(params: {
     correlationId: params.correlationId,
     clientMessageId: params.clientMessageId,
     errorCode: null,
+    ...(params.sticker !== undefined && { sticker: params.sticker }),
   };
   messagesStore.setState((prev) => reduceAddOptimisticMessage(prev, params, optimistic));
 }
@@ -377,6 +381,33 @@ export function editMessage(payload: ChatEditedPayload): void {
 /** Soft-delete: mark message as deleted but keep in array. */
 export function deleteMessage(payload: ChatDeletedPayload): void {
   messagesStore.setState((prev) => reduceDeleteMessage(prev, payload));
+}
+
+/**
+ * A sticker_update removed stickers (WP 8.8): every loaded sticker message
+ * whose sticker is no longer in `liveIds` becomes a deleted-sticker row, the
+ * same shape the server sends for history (id and url null, name kept). Lists
+ * with nothing to change keep their identity, so only the affected channels
+ * (channel, thread and DM rows all live here) are touched.
+ */
+export function markStickersDeleted(liveIds: ReadonlySet<number>): void {
+  messagesStore.setState((prev) => {
+    let changed: Map<number, readonly Message[]> | null = null;
+    for (const [channelId, list] of prev.messagesByChannel) {
+      const stale = (m: Message): boolean =>
+        m.sticker?.id !== null && m.sticker !== undefined && !liveIds.has(m.sticker.id);
+      if (!list.some(stale)) continue;
+      const next: Map<number, readonly Message[]> = changed ?? new Map(prev.messagesByChannel);
+      changed = next;
+      next.set(
+        channelId,
+        list.map((m) =>
+          stale(m) ? { ...m, sticker: { id: null, name: m.sticker!.name, url: null } } : m,
+        ),
+      );
+    }
+    return changed === null ? prev : { ...prev, messagesByChannel: changed };
+  });
 }
 
 /**

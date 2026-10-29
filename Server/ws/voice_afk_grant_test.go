@@ -92,7 +92,7 @@ func TestVoiceJoin_AFKChannelGrantsNoPublish(t *testing.T) {
 	c := NewTestClient(h, uid, send)
 	c.user = &db.User{ID: uid, Username: "afk-joiner"}
 	h.mu.Lock()
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	h.mu.Unlock()
 
 	requirePublishSources(t, afkTokenGrant(t, joinAndReadToken(t, h, c, send, normal), afkHarnessSecret), true, "ordinary channel")

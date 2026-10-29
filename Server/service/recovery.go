@@ -57,7 +57,8 @@ const (
 var RecoveryVerifications = []string{"in_person", "voice_call", "video_call", "trusted_contact"}
 
 var (
-	ErrRecoveryAssistOwnerOnly    = &authError{ErrForbidden, "only the server owner can issue a recovery credential"}
+	ErrRecoveryAssistForbidden    = &authError{ErrForbidden, "only the server owner or a member with the Issue Recovery permission can issue a recovery credential"}
+	ErrRecoveryAssistRank         = &authError{ErrForbidden, "a recovery credential can only be issued to a member ranked below you"}
 	ErrRecoveryAssistVerification = &authError{ErrBadRequest, "verification must be one of in_person, voice_call, video_call, trusted_contact"}
 	ErrRecoveryAssistTarget       = &authError{ErrNotFound, "no such account"}
 	ErrRecoveryAssistUnusable     = &authError{ErrBadRequest, "this account cannot be recovered with a credential"}
@@ -335,13 +336,15 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 		revoked, err = s.st.RedeemRecoveryAssist(ctx, user.ID, target.assist.Verifier, newHash, "recovery_assist_used",
 			"account recovered with an owner-issued credential")
 	} else {
-		revoked, err = s.st.RedeemRecoveryKit(ctx, user.ID, newHash, "recovery_kit_used",
+		// Likewise only the kit the compare verified: one enrolled
+		// meanwhile is a fresh secret and stays.
+		revoked, err = s.st.RedeemRecoveryKit(ctx, user.ID, target.kit.Verifier, newHash, "recovery_kit_used",
 			"account recovered with the recovery kit")
 	}
 	if err != nil {
 		if errors.Is(err, db.ErrRecoveryKitSpent) || errors.Is(err, db.ErrRecoveryAssistSpent) {
 			// Lost the race to a concurrent redemption (or the credential
-			// expired meanwhile): it is spent now.
+			// expired or was replaced meanwhile): it is spent now.
 			s.recoveryLockout(ctx, in, user, at)
 			return nil, ErrRecoveryKitInvalid
 		}
@@ -408,15 +411,16 @@ func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID
 		return nil, ErrRecoveryAssistFailed
 	}
 	if actor == nil {
-		return nil, ErrRecoveryAssistOwnerOnly
+		return nil, ErrRecoveryAssistForbidden
 	}
-	role, err := s.st.GetRoleByID(ctx, actor.RoleID)
+	// Top role's rank with the OR of every held mask: a second role counts.
+	held, err := s.st.GetMemberRoles(ctx, actor.ID)
 	if err != nil {
-		slog.Error("recovery assist: GetRoleByID failed", "err", err, "actor_id", actor.ID)
+		slog.Error("recovery assist: GetMemberRoles failed", "err", err, "actor_id", actor.ID)
 		return nil, ErrRecoveryAssistFailed
 	}
-	if role == nil || !permissions.IsOwner(role.ID, role.Position) {
-		return nil, ErrRecoveryAssistOwnerOnly
+	if held == nil || !permissions.CanIssueRecovery(held.Perms, held.Top.ID, held.Top.Position) {
+		return nil, ErrRecoveryAssistForbidden
 	}
 	if !slices.Contains(RecoveryVerifications, verification) {
 		return nil, ErrRecoveryAssistVerification
@@ -428,6 +432,9 @@ func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID
 	}
 	if target == nil {
 		return nil, ErrRecoveryAssistTarget
+	}
+	if err := s.requireRecoveryTargetBelow(ctx, held, target.ID); err != nil {
+		return nil, err
 	}
 	// Not for the issuer's own account (they are signed in), a banned
 	// account (it cannot sign in), an application still pending, or an

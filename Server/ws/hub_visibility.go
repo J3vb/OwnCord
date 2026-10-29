@@ -81,10 +81,7 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 // the bare test hub with no database: the role scan runs without a channel ref.
 func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *db.Channel, ignoreArchived bool) []int64 {
 	h.mu.RLock()
-	userIDs := make([]int64, 0, len(h.clients))
-	for uid := range h.clients {
-		userIDs = append(userIDs, uid)
-	}
+	userIDs := h.connectedUserIDsLocked()
 	h.mu.RUnlock()
 
 	// A DM channel carries no channel_overrides rows, so every connected
@@ -234,24 +231,16 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		return
 	}
 
-	// Bump the watermark immediately, before the h.clients snapshot below and
-	// the (potentially slow — up to two DB round trips per connected client)
-	// fan-out loop that follows it. A reconnect handshake re-checks this
-	// watermark right before it registers (OC-0206); bumping only at the end,
-	// after the loop, left a window where that re-check could still observe
-	// the pre-change value even though this function's snapshot — taken next
-	// — will never include a client that registers mid-loop. Ratcheted
-	// upward only (see bumpVisibilityWatermark), so this is a no-op whenever
-	// a concurrent writer already pushed the watermark higher; the trailing
-	// bump below still runs and covers any change to h.seq made during the
-	// loop itself.
-	h.bumpVisibilityWatermark()
+	// The sends below are unsequenced and walk a snapshot taken next, so a
+	// reconnect that registers mid-loop is skipped by it, and its last_seq can
+	// sit above any single leading watermark bump. begin/endTargetedFanout
+	// force every reconnect during the loop onto a full ready, and the bump in
+	// endTargetedFanout covers any resume after it (OC-0206, codex-oc-1732).
+	h.beginTargetedFanout()
+	defer h.endTargetedFanout()
 
 	h.mu.RLock()
-	clients := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
-		clients = append(clients, c)
-	}
+	clients := h.allClientsLocked()
 	h.mu.RUnlock()
 
 	// Called via the admin HubBroadcaster interface, which carries no context;
@@ -302,9 +291,10 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		// leaves a topic alone when the current holder differs from the client
 		// passed in — stranding the replacement with a subscription (or a
 		// missing one) exactly inverted from what this fan-out just decided.
-		// A nil result means the user disconnected entirely since the
-		// snapshot; nothing to act on.
-		live := h.GetClient(c.user.ID)
+		// A nil result means that device disconnected entirely since the
+		// snapshot; nothing to act on. The user's other devices are separate
+		// entries of the snapshot, each judged here on its own.
+		live := h.sessionClient(c.user.ID, c.tokenHash)
 		if live == nil {
 			continue
 		}
@@ -332,14 +322,6 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 		live.mu.Unlock()
 		h.revokeHeldThread(ctx, live, ch.ID)
 	}
-
-	// Clients not connected right now missed the targeted sends above. Move
-	// the watermark so any resume from a seq at or before this point is
-	// forced onto the full-ready path instead of replay. Ratcheted upward
-	// only — see bumpVisibilityWatermark — so a concurrent writer that read
-	// an older seq cannot regress a watermark another writer already pushed
-	// higher.
-	h.bumpVisibilityWatermark()
 }
 
 // refreshChannelVisibilityAffordances is the five affordance verdicts the
@@ -382,28 +364,17 @@ func (h *Hub) RefreshAllChannelVisibility() {
 }
 
 func (h *Hub) revokeUnreadableChannels(userID int64) {
-	// Ratcheted upward only (see bumpVisibilityWatermark), and evaluated at
-	// defer-RUN time — not the plain Store(Load(&h.seq)) this used to be,
-	// whose argument would have been evaluated at this defer STATEMENT,
-	// capturing entry-time seq and stomping any higher watermark stored by a
-	// concurrent writer during the per-topic DB loop below. Deferred because
-	// it must cover the early returns too: a user who is offline, or whose
-	// socket is closed below, converges via the full-ready path.
-	defer h.bumpVisibilityWatermark()
-
-	// Also bump immediately, before the h.clients lookup below and the
-	// per-topic DB loop (a GetChannel round trip per revoked topic) that
-	// follows it — see RefreshChannelVisibility's matching early bump and
-	// OC-0206. Ratcheted upward only, so this is a no-op whenever a
-	// concurrent writer already pushed the watermark higher; the deferred
-	// bump above still covers every return path, including the early ones.
-	h.bumpVisibilityWatermark()
+	// The channel_delete frames revokeTopicsNotIn sends are unsequenced, so
+	// bracket the whole pass like RefreshChannelVisibility: a reconnect during
+	// it goes to a full ready, and endTargetedFanout's bump covers every
+	// return path, including the early ones (offline user, closed socket).
+	h.beginTargetedFanout()
+	defer h.endTargetedFanout()
 
 	if h.db == nil {
 		return
 	}
-	c := h.GetClient(userID)
-	if c == nil || c.user == nil {
+	if conns := h.clientsOf(userID); len(conns) == 0 || conns[0].user == nil {
 		return
 	}
 
@@ -432,7 +403,7 @@ func (h *Hub) revokeUnreadableChannels(userID int64) {
 		// Re-resolve before kicking: the lookups above are DB round trips a
 		// reconnect can overlap, and kicking the stale snapshot would close a
 		// dead socket while the replacement keeps its subscriptions.
-		if live := h.GetClient(userID); live != nil {
+		for _, live := range h.clientsOf(userID) {
 			h.kickClient(live)
 		}
 		return

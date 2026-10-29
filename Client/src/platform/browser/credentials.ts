@@ -76,14 +76,20 @@ export const credentials: CredentialStore = {
     const other =
       sessionOnlyArg === undefined ? null : area(sessionOnly ? "localStorage" : "sessionStorage");
     try {
-      // The other copy goes first, so a failed save never leaves two.
-      other?.removeItem(keyFor(host));
-      // The password argument is never written: only the token is kept.
+      // The new token goes in first, so a write that throws (quota, Safari
+      // private mode) leaves the old sign-in where it was. The password
+      // argument is never written: only the token is kept.
       target.setItem(keyFor(host), JSON.stringify({ username, token }));
-      return true;
     } catch {
       return false;
     }
+    try {
+      other?.removeItem(keyFor(host));
+    } catch {
+      // The new token is saved. A leftover copy is the older token; the
+      // auth_error compare-and-delete drops it once the server rejects it.
+    }
+    return true;
   },
 
   async load(host) {

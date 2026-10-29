@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
-import type { QuickSwitcherOptions } from "@components/QuickSwitcher";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { addDmToChannelsStore } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
@@ -132,6 +131,30 @@ describe("QuickSwitcher", () => {
     expect(items[3]!.classList.contains("quick-switcher__item--active")).toBe(true);
   });
 
+  it("keys an IME is composing with do not select, move or close", () => {
+    switcher.mount(container);
+    const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "ArrowDown", keyCode: 229, bubbles: true }),
+    );
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+
+    expect(onSelectChannel).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    const items = container.querySelectorAll(".quick-switcher__item");
+    expect(items[0]!.classList.contains("quick-switcher__item--active")).toBe(true);
+  });
+
   it("Enter selects the active channel", () => {
     switcher.mount(container);
     const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
@@ -189,6 +212,14 @@ describe("QuickSwitcher", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("stays open when a drag-select ends on the backdrop", () => {
+    switcher.mount(container);
+    const overlayEl = container.querySelector(".quick-switcher-overlay") as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("destroy removes DOM", () => {
     switcher.mount(container);
     expect(container.querySelector(".quick-switcher-overlay")).not.toBeNull();
@@ -232,6 +263,14 @@ describe("QuickSwitcher", () => {
       new KeyboardEvent("keydown", { key: "K", ctrlKey: true, bubbles: true }),
     );
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("an auto-repeating Ctrl+K (the opening press still held) does not close the switcher", () => {
+    switcher.mount(container);
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: true, repeat: true, bubbles: true }),
+    );
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("AltGr+K (ctrlKey+altKey) does not close the switcher", () => {

@@ -45,7 +45,8 @@ func TestFileTypePolicy_DefaultsBlockWindowsScripts(t *testing.T) {
 func TestFileTypePolicy_DefaultsBlockOpenToRunFiles(t *testing.T) {
 	p := storage.FileTypePolicy{Blocked: storage.DefaultBlockedExtensions}
 	for _, name := range []string{
-		"page.html", "logo.svg", "install.sh", "report.docm", "budget.xlsm", "app.desktop", "run.command",
+		"page.html", "page.htm", "page.xhtml", "page.xht", "page.shtml", "page.mht", "page.mhtml",
+		"logo.svg", "logo.svgz", "install.sh", "report.docm", "budget.xlsm", "app.desktop", "run.command",
 	} {
 		if err := p.Check(name); err == nil {
 			t.Errorf("Check(%q) = nil, want a blocked file type", name)

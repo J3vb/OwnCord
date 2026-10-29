@@ -33,6 +33,8 @@ const (
 	MsgTypeMarkRead          = "mark_read"
 	MsgTypeMarkUnread        = "mark_unread"
 	MsgTypePresenceUpdate    = "presence_update"
+	MsgTypeActivityUpdate    = "activity_update"
+	MsgTypeListeningUpdate   = "listening_update"
 	MsgTypeVoiceJoin         = "voice_join"
 	MsgTypeVoiceLeave        = "voice_leave"
 	MsgTypeVoiceMute         = "voice_mute"
@@ -95,7 +97,9 @@ const (
 	MsgTypeMemberBan           = "member_ban"
 	MsgTypeRolesUpdate         = "roles_update"
 	MsgTypeEmojiUpdate         = "emoji_update"
-	MsgTypeUploadPolicy        = "upload_policy" // the upload file-type lists after the owner saves them in the admin panel
+	MsgTypeStickerUpdate       = "sticker_update"
+	MsgTypeUploadPolicy        = "upload_policy"        // the upload file-type lists after the owner saves them in the admin panel
+	MsgTypeGameActivityPolicy  = "game_activity_policy" // WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume
 	MsgTypeServerRestart       = "server_restart"
 	MsgTypeModQueue            = "mod_queue"          // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
 	MsgTypeModAction           = "mod_action"         // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
@@ -142,4 +146,5 @@ const (
 	MessageKindGroupRename MessageKind = "group_rename" // a group DM row: the group name changed or was cleared, written only by the server
 	MessageKindGroupIcon   MessageKind = "group_icon"   // a group DM row: the group icon changed or was removed, written only by the server
 	MessageKindPinAdd      MessageKind = "pin_add"      // a row saying a member pinned a message; reply_to names the pinned message; written only by the server
+	MessageKindMemberJoin  MessageKind = "member_join"  // a welcome row: the author just joined the server; written only by the server into the admin-chosen welcome channel
 )

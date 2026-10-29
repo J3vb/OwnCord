@@ -21,6 +21,7 @@ import (
 type Store interface {
 	CallLogStore // the DM call log worker's reads and writes (WP 3B-9)
 	GroupDMStore // group DM membership and its system rows (WP 3B-10)
+	EmojiStore   // the custom emoji set (R-2)
 	// ── Second-factor state (B4-3) ──
 	// The durable backend behind the auth service's partial-auth, pending
 	// enrolment and used-code stores, plus the recovery-code rows; stdlib
@@ -134,7 +135,7 @@ type Store interface {
 	// Recovery kit (B4-5).
 	UpsertRecoveryKit(ctx context.Context, userID int64, verifier string) error
 	GetRecoveryKit(ctx context.Context, userID int64) (*db.RecoveryKit, error)
-	RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHash, auditAction, auditDetail string) (int64, error)
+	RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (int64, error)
 	// Owner-issued recovery credential (B4-6).
 	UpsertRecoveryAssist(ctx context.Context, userID int64, verifier string, issuedBy int64, verification string, expiresAt time.Time) error
 	GetRecoveryAssist(ctx context.Context, userID int64) (*db.RecoveryAssist, error)
@@ -228,13 +229,6 @@ type Store interface {
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	CountRoleMembers(ctx context.Context) (map[int64]int, error)
 
-	// ── Emoji ──
-	ListEmoji(ctx context.Context) ([]*db.Emoji, error)
-	GetEmoji(ctx context.Context, id int64) (*db.Emoji, error)
-	GetEmojiByShortcode(ctx context.Context, shortcode string) (*db.Emoji, error)
-	CreateEmoji(ctx context.Context, shortcode, storedAs, mimeType string, uploadedBy int64) (*db.Emoji, error)
-	DeleteEmoji(ctx context.Context, id int64) (bool, error)
-
 	// ── Invites ──
 	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
 	GetInvite(ctx context.Context, code string) (*db.Invite, error)
@@ -321,7 +315,7 @@ type Store interface {
 	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
 
 	// ── Attachments ──
-	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
+	CreateAttachmentVoice(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height, durationMs *int, waveform *string) error
 	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
 	DeleteUnlinkedAttachment(ctx context.Context, id string, userID int64) (bool, error)
 	DiscardUnlinkedAttachment(ctx context.Context, id string, userID int64) (storedAs string, found bool, err error)

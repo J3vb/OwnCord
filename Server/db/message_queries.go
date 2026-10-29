@@ -339,10 +339,10 @@ func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, befo
 // already-open tx so callers can extend the same transaction (the ledger
 // row PurgeChannelMessagesWithAction adds).
 func purgeChannelMessagesTx(ctx context.Context, tx *sql.Tx, channelID, before int64, limit int) ([]int64, error) {
-	sel := `SELECT id FROM messages WHERE channel_id = ? AND deleted = 0 AND kind IN (0, 7) ORDER BY id DESC LIMIT ?`
+	sel := `SELECT id FROM messages WHERE channel_id = ? AND deleted = 0 AND kind IN (0, 7, 8) ORDER BY id DESC LIMIT ?`
 	args := []any{channelID, limit}
 	if before > 0 {
-		sel = `SELECT id FROM messages WHERE channel_id = ? AND id < ? AND deleted = 0 AND kind IN (0, 7) ORDER BY id DESC LIMIT ?`
+		sel = `SELECT id FROM messages WHERE channel_id = ? AND id < ? AND deleted = 0 AND kind IN (0, 7, 8) ORDER BY id DESC LIMIT ?`
 		args = []any{channelID, before, limit}
 	}
 
@@ -898,6 +898,9 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 
 	if err := d.attachPolls(ctx, msgs, requestingUserID); err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages polls: %w", err)
+	}
+	if err := d.attachStickers(ctx, msgs); err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages stickers: %w", err)
 	}
 	if err := d.attachThreads(ctx, msgs); err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages threads: %w", err)

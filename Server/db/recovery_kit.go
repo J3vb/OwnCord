@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // RecoveryKit is the server's whole knowledge of an account's recovery kit
@@ -20,7 +21,7 @@ type RecoveryKit struct {
 }
 
 // ErrRecoveryKitSpent is RedeemRecoveryKit finding no unspent kit for the
-// account — already used, or never issued.
+// account — already used, never issued, or replaced since the compare.
 var ErrRecoveryKitSpent = errors.New("recovery kit already spent or absent")
 
 // UpsertRecoveryKit stores the verifier of a freshly issued kit, replacing
@@ -29,7 +30,7 @@ func (d *DB) UpsertRecoveryKit(ctx context.Context, userID int64, verifier strin
 	if err := d.q.UpsertRecoveryKit(ctx, dbgen.UpsertRecoveryKitParams{
 		UserID:    userID,
 		Verifier:  verifier,
-		CreatedAt: time.Now().UTC().Format(sessionTimeLayout),
+		CreatedAt: time.Now().UTC().Format(dbtime.ISOLayout),
 	}); err != nil {
 		return fmt.Errorf("UpsertRecoveryKit: %w", err)
 	}
@@ -60,9 +61,10 @@ func (d *DB) DeleteRecoveryKit(ctx context.Context, userID int64) error {
 // one transaction (data-lifecycle O8, axis A1): the kit is spent, the
 // password replaced, every session and API token of the account revoked and
 // the audit row written with both counts, or none of it. The consume is
-// conditional on the kit being unspent, so two concurrent redemptions admit
-// at most one; the loser gets ErrRecoveryKitSpent.
-func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHash, auditAction, auditDetail string) (sessionsRevoked int64, err error) {
+// conditional on the kit being unspent and still holding the verifier the
+// caller compared against, so two concurrent redemptions admit at most one
+// and a kit enrolled meanwhile stays; the loser gets ErrRecoveryKitSpent.
+func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (sessionsRevoked int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryKit begin: %w", err)
@@ -70,8 +72,8 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, newPasswordHas
 	defer tx.Rollback() //nolint:errcheck
 	q := d.q.WithTx(tx)
 
-	now := time.Now().UTC().Format(sessionTimeLayout)
-	res, err := q.ConsumeRecoveryKit(ctx, dbgen.ConsumeRecoveryKitParams{UsedAt: &now, UserID: userID})
+	now := time.Now().UTC().Format(dbtime.ISOLayout)
+	res, err := q.ConsumeRecoveryKit(ctx, dbgen.ConsumeRecoveryKitParams{UsedAt: &now, UserID: userID, Verifier: verifier})
 	if err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryKit consume: %w", err)
 	}

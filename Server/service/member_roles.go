@@ -33,12 +33,12 @@ func (s *ModerationService) memberRoleStore() (MemberRoleStore, error) {
 }
 
 // AddUserRole grants roleID to the target next to the roles they already hold.
-// The checks are ChangeUserRole's (AuthorizeRoleChange): MANAGE_ROLES, the actor
+// The checks are ChangeUserRole's (authorizeRoleAssignment): MANAGE_ROLES, the actor
 // outranks the target's top role, and the role sits below the actor's top role.
 // Granting a role the target already holds is a no-op: no write, audit row or
 // fan-out. The cached permissions are dropped before the live clients are told.
 func (s *ModerationService) AddUserRole(ctx context.Context, actorID, targetID, roleID int64) (*db.Role, error) {
-	_, target, role, err := s.AuthorizeRoleChange(ctx, actorID, targetID, roleID)
+	_, target, role, err := s.authorizeRoleAssignment(ctx, actorID, targetID, roleID)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (s *ModerationService) AddUserRole(ctx context.Context, actorID, targetID, 
 // concurrent removals of a member's last two roles cannot both succeed.
 // Removing a role the target does not hold is a no-op.
 func (s *ModerationService) RemoveUserRole(ctx context.Context, actorID, targetID, roleID int64) (*db.Role, error) {
-	_, target, role, err := s.AuthorizeRoleChange(ctx, actorID, targetID, roleID)
+	_, target, role, err := s.authorizeRoleAssignment(ctx, actorID, targetID, roleID)
 	if err != nil {
 		return nil, err
 	}

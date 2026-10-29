@@ -283,6 +283,9 @@ type channelActivityEntry struct {
 	AuthorID         *int64 `json:"author_id,omitempty"`
 	MentionsYou      bool   `json:"mentions_you"`
 	MentionsEveryone bool   `json:"mentions_everyone"`
+	// forum marks an entry for a forum-scoped channel: only a connection that
+	// declared forums is sent it (the user may have several devices).
+	forum bool
 }
 
 type channelActivityPayload struct {
@@ -317,10 +320,18 @@ func (h *Hub) flushChannelActivity(ctx context.Context) {
 		}
 		// Resolved at send time: a reconnect inside the window gets the frame
 		// on its new connection, and the displaced one is never touched.
-		if c := h.GetClient(uid); c != nil {
+		for _, c := range h.clientsOf(uid) {
+			// A forum's posts go only to a connection that declared forums.
+			shown := entries
+			if lacksForums(c) {
+				shown = slices.DeleteFunc(slices.Clone(entries), func(e channelActivityEntry) bool { return e.forum })
+				if len(shown) == 0 {
+					continue
+				}
+			}
 			c.sendLowMsg(buildJSON(wsMsg{
 				Type:    MsgTypeChannelActivity,
-				Payload: channelActivityPayload{Channels: entries},
+				Payload: channelActivityPayload{Channels: shown},
 			}))
 		}
 	}
@@ -367,11 +378,11 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 		if focused[uid] || uid == pc.latestAuthorID {
 			continue
 		}
-		if forumScoped && lacksForums(h.GetClient(uid)) {
-			continue
+		entries := h.activityUserEntries(uid, chID, pc, mentions, blockers, ch.NSFW && !acked[uid])
+		for i := range entries {
+			entries[i].forum = forumScoped
 		}
-		perUser[uid] = append(perUser[uid],
-			h.activityUserEntries(uid, chID, pc, mentions, blockers, ch.NSFW && !acked[uid])...)
+		perUser[uid] = append(perUser[uid], entries...)
 	}
 }
 

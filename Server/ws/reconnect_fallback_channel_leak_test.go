@@ -86,7 +86,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 	// chID, mirroring an admin edit racing the resume, exactly like
 	// TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady.
 	var hookRan bool
-	handleReconnectPreRegisterRaceHook = func() {
+	handleReconnectPreSeqMuRaceHook = func() {
 		hookRan = true
 		if overrideErr := database.UpsertChannelOverride(ctx, chID, harvestVoiceRoleID, 0, permissions.ReadMessages); overrideErr != nil {
 			t.Fatalf("UpsertChannelOverride: %v", overrideErr)
@@ -94,7 +94,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 		//nolint:contextcheck // RefreshChannelVisibility takes no context by design.
 		hub.RefreshChannelVisibility(ch)
 	}
-	defer func() { handleReconnectPreRegisterRaceHook = nil }()
+	defer func() { handleReconnectPreSeqMuRaceHook = nil }()
 
 	srv := httptest.NewServer(ServeWS(hub, []string{"*"}, 0))
 	defer srv.Close()
@@ -152,14 +152,14 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 	}
 
 	if !hookRan {
-		t.Fatal("handleReconnectPreRegisterRaceHook never fired — test setup is broken, not exercising the race window")
+		t.Fatal("handleReconnectPreSeqMuRaceHook never fired — test setup is broken, not exercising the race window")
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
 	var c *Client
 	for {
 		hub.mu.Lock()
-		c = hub.clients[uid]
+		c = hub.newestLocked(uid)
 		hub.mu.Unlock()
 		if c != nil {
 			break
@@ -174,9 +174,7 @@ func TestReconnect_FullReadyFallbackDoesNotLeakRevokedChannelSubscription(t *tes
 		t.Errorf("resumed-then-fallback client kept focus on revoked channel %d after registerNow, want 0", got)
 	}
 
-	hub.pubsub.mu.RLock()
-	sub := hub.pubsub.topics[ChannelTopic(chID)][uid]
-	hub.pubsub.mu.RUnlock()
+	sub := hub.pubsub.subscriberForTest(ChannelTopic(chID), uid)
 	if sub != nil {
 		t.Errorf("client is subscribed to ChannelTopic(%d) despite READ_MESSAGES being revoked before registration — "+
 			"every subsequent broadcast to that channel will be delivered to this socket", chID)

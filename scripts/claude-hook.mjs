@@ -117,7 +117,20 @@ if (mode === "session-start") {
       "WARNING: the repo git hooks are not installed (core.hooksPath is not .githooks). Run `npm run hooks:install` at the repository root.",
     );
   }
-  if (cloud) cloudToolchain();
+  if (cloud) {
+    // The findings-ledger merge driver (.gitattributes): parallel lanes merge
+    // dev into their branches, and the ledger conflicted on every merge.
+    try {
+      execFileSync(
+        "git",
+        ["config", "merge.findings-ledger.driver", "node scripts/merge-ledger.mjs %O %A %B %P"],
+        { stdio: "ignore" },
+      );
+    } catch {
+      console.log("WARNING: could not register the findings-ledger merge driver.");
+    }
+    cloudToolchain();
+  }
 } else if (mode === "pre-bash") {
   let command = "";
   try {

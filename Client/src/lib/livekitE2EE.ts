@@ -23,6 +23,7 @@ import {
   clearPeerVerification,
   clearPeerVerifications,
   setLocalSessionFingerprint,
+  setLocalSafetyNumber,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { markJoinMilestone } from "@lib/voiceJoinTrace";
@@ -129,7 +130,7 @@ export class E2EEManager {
   /** Announces blocked on a TOFU pin mismatch, replayed by a re-pin (OC-0212). */
   private get _blockedAnnounces(): Map<
     number,
-    { publicKeyBase64: string; signatureBase64?: string }
+    { publicKeyBase64: string; signatureBase64?: string; identityKeyBase64?: string }
   > {
     return this._peers.blockedAnnounces;
   }
@@ -235,6 +236,17 @@ export class E2EEManager {
     // nothing about our local state is null yet — see the field comment.
     const myGeneration = this._sessionGeneration;
     this._channelId = channelId;
+    // Announces held while this join waited behind another attempt join the
+    // queue the drain below replays. Taken synchronously, before any await:
+    // the held ones are the newest word on their peer, so they replace an
+    // older queued entry for the same user.
+    const staged = this._peers.takeStagedAnnounces(channelId);
+    if (staged.length > 0) {
+      this._pendingAnnounces = [
+        ...this._pendingAnnounces.filter((p) => !staged.some((s) => s.userId === p.userId)),
+        ...staged,
+      ];
+    }
     // Generate a fresh ECDH keypair for this session, but keep it local and
     // do NOT publish it to this._ecdhKeyPair until right before the drain
     // below (after _isKeyHolder/_roomKey are ready). Until then,
@@ -262,6 +274,9 @@ export class E2EEManager {
     // the keyring once, so the added identity round-trip does NOT stack on
     // the non-key-holder's 10s key-exchange stall below (F3).
     const announcePayload = await this._identity.buildAnnouncePayload(myPubKeyBase64);
+    // Only a signed announce gives peers a safety number to compare ours with.
+    const mySafetyNumber =
+      announcePayload.signature === undefined ? null : await this._identity.safetyNumber();
 
     // Same check again after the keyring round trip — the widest window of
     // the three, and the next statements install OUR role and room key over
@@ -316,6 +331,7 @@ export class E2EEManager {
     // processed with no offer sent) and gets its offer sent below.
     this._ecdhKeyPair = ecdhKeyPair;
     setLocalSessionFingerprint(myFingerprint);
+    setLocalSafetyNumber(mySafetyNumber);
 
     if (this._isKeyHolder) {
       // Announce our (signed) key BEFORE draining queued announces. The
@@ -344,13 +360,14 @@ export class E2EEManager {
       userId: qId,
       publicKeyBase64: qKey,
       signatureBase64: qSig,
+      identityKeyBase64: qIdentity,
       peerGeneration,
     } of queued) {
       if (this._sessionGeneration !== myGeneration || this._ecdhKeyPair !== ecdhKeyPair)
         return false;
       if ((this._peerGenerations.get(qId) ?? 0) !== peerGeneration) continue;
       // oxlint-disable-next-line no-await-in-loop -- sequential drain: verify each queued announce
-      await this.handleAnnounce(qId, qKey, qSig);
+      await this.applyAnnounce(qId, qKey, qSig, qIdentity);
       log.info("E2EE: drained queued announce", { userId: qId });
     }
     if (this._sessionGeneration !== myGeneration || this._ecdhKeyPair !== ecdhKeyPair) return false;
@@ -585,7 +602,12 @@ export class E2EEManager {
     if (pending) {
       this._blockedAnnounces.delete(userId);
       log.info("E2EE: replaying blocked announce after re-pin (TOFU recovery)", { userId });
-      await this.handleAnnounce(userId, pending.publicKeyBase64, pending.signatureBase64);
+      await this.applyAnnounce(
+        userId,
+        pending.publicKeyBase64,
+        pending.signatureBase64,
+        pending.identityKeyBase64,
+      );
     } else {
       clearPeerVerification(userId);
     }
@@ -615,11 +637,71 @@ export class E2EEManager {
    * store the ECDH key + (if key holder) wrap the room key for them. Peers with
    * no published identity key (legacy) are accepted but marked unverified.
    */
-  handleAnnounce(userId: number, publicKeyBase64: string, signatureBase64?: string): Promise<void> {
+  handleAnnounce(
+    userId: number,
+    publicKeyBase64: string,
+    signatureBase64?: string,
+    identityKeyBase64?: string,
+  ): Promise<void> {
+    // A join for another attempt is queued behind the one in flight: this
+    // announce is the queued channel's peer, not the live session's. Hold it
+    // for that session — applying it here would store it (and, for a key
+    // holder, wrap this session's room key for it) only for the queued join's
+    // clearState()/setupKeyExchange to wipe it before its own exchange runs.
+    if (
+      this._peers.stageAnnounce({ userId, publicKeyBase64, signatureBase64, identityKeyBase64 })
+    ) {
+      log.info("E2EE: held announce for the queued join", { userId });
+      return Promise.resolve();
+    }
+    return this.applyAnnounce(userId, publicKeyBase64, signatureBase64, identityKeyBase64);
+  }
+
+  /** Identity key from the peer's current announce (see E2EEPeerState). */
+  peerAnnouncedIdentityKey(userId: number): string | null {
+    return this._peers.announcedIdentityKey(userId);
+  }
+
+  /** Hold announces for a join to `channelId` that is queued behind the one in
+   *  flight, until its setupKeyExchange(…, channelId) takes them. */
+  holdAnnouncesForQueuedJoin(channelId: number): void {
+    this._peers.holdAnnouncesFor(channelId);
+  }
+
+  /** Stop holding announces: no queued join is going to take them. What was
+   *  held for `channelId` belongs to the live session on that channel, so it
+   *  goes through the normal announce path instead of being dropped. */
+  releaseHeldAnnounces(channelId: number): void {
+    const held = this._peers.takeStagedAnnounces(channelId);
+    this._peers.discardStagedAnnounces();
+    for (const announce of held) {
+      void this.applyAnnounce(
+        announce.userId,
+        announce.publicKeyBase64,
+        announce.signatureBase64,
+        announce.identityKeyBase64,
+      );
+    }
+  }
+
+  /** The announce body, past the queued-join hold: the live path and the
+   *  replays of queued, held and re-pinned announces. */
+  private applyAnnounce(
+    userId: number,
+    publicKeyBase64: string,
+    signatureBase64?: string,
+    identityKeyBase64?: string,
+  ): Promise<void> {
     const isCurrent = this._peers.peerAttemptIsCurrent(userId);
     const run = this._announceChain.then(() => {
       if (!isCurrent()) return undefined;
-      return this.handleAnnounceInner(userId, publicKeyBase64, signatureBase64, isCurrent);
+      return this.handleAnnounceInner(
+        userId,
+        publicKeyBase64,
+        signatureBase64,
+        isCurrent,
+        identityKeyBase64,
+      );
     });
     this._announceChain = run;
     return run;
@@ -630,10 +712,11 @@ export class E2EEManager {
     publicKeyBase64: string,
     signatureBase64: string | undefined,
     isCurrent: () => boolean,
+    identityKeyBase64?: string,
   ): Promise<void> {
     // Queue if our keypair isn't ready yet (announce arrived during connectAndSetup).
     if (!this._ecdhKeyPair) {
-      this._pendingAnnounces.push({ userId, publicKeyBase64, signatureBase64 });
+      this._pendingAnnounces.push({ userId, publicKeyBase64, signatureBase64, identityKeyBase64 });
       log.info("E2EE: queued announce (keypair not ready)", { userId });
       return;
     }
@@ -657,7 +740,13 @@ export class E2EEManager {
       // BEFORE storing the ECDH key or wrapping the room key. A malicious
       // server that swaps user_id↔ephemeral-key or forges keys fails here.
       if (
-        !(await this._peers.verifyPeerAnnounce(userId, publicKeyBase64, signatureBase64, isCurrent))
+        !(await this._peers.verifyPeerAnnounce(
+          userId,
+          publicKeyBase64,
+          signatureBase64,
+          isCurrent,
+          identityKeyBase64,
+        ))
       ) {
         return; // rejected/blocked — do not store or wrap
       }
@@ -813,7 +902,9 @@ export class E2EEManager {
     // them is survivable here, so keep the session half separately (OC-0442).
     const entrySessionGeneration = this._sessionGeneration;
     this._pendingAnnounces = this._pendingAnnounces.filter((entry) => entry.userId !== userId);
+    this._peers.dropStagedAnnounce(userId);
     this._blockedAnnounces.delete(userId);
+    this._peers.announcedIdentityKeys.delete(userId);
     const departingKey = this._peerPublicKeys.get(userId);
     const hadPeerKey = departingKey !== undefined;
     this._peerPublicKeys.delete(userId);
@@ -1009,7 +1100,10 @@ export class E2EEManager {
   /** Clear all E2EE state (called on voice leave). The long-term identity
    *  keypair is intentionally NOT cleared here — it persists across calls to
    *  the same host (cleared only on host change / cleanupAll). */
-  clearState(): void {
+  clearState(options?: { keepHeldAnnounces?: boolean }): void {
+    // A queued join re-enters here to shed the attempt it replaces; the
+    // announces held for it belong to the session it is about to start.
+    if (options?.keepHeldAnnounces !== true) this._peers.discardStagedAnnounces();
     this._sessionGeneration++;
     this._channelId = null;
     this._offers.clearState();
@@ -1023,6 +1117,7 @@ export class E2EEManager {
     this._peerOfferEpochs.clear();
     clearPeerVerifications();
     setLocalSessionFingerprint(null);
+    setLocalSafetyNumber(null);
     this._isKeyHolder = false;
     this._rotatingKey = false;
     this._rotationPending = false;
@@ -1030,6 +1125,7 @@ export class E2EEManager {
     this._pendingAnnounces.length = 0;
     this._blockedAnnounces.clear();
     this._peers.keyChangedPeers.clear();
+    this._peers.announcedIdentityKeys.clear();
     this._epoch.clearKeyRotationTimer();
     this.clearReconnectConfirmTimer();
     // Reject (not resolve) so waiting setupKeyExchange sees a failure, not a

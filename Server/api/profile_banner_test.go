@@ -52,7 +52,7 @@ func TestUploadBanner_LimitsAndTypes(t *testing.T) {
 	store := newUploadTestStorage(t)
 	router := buildBannerRouter(database, store, &userUpdateSpy{})
 
-	oversized := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, (1<<20)+1)...)
+	oversized := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, (4<<20)+1)...)
 	cases := []struct {
 		name string
 		body []byte
@@ -62,9 +62,11 @@ func TestUploadBanner_LimitsAndTypes(t *testing.T) {
 		{"1x1 ok", makePNGBytes(t, 1, 1), http.StatusCreated},
 		{"1921 wide refused", makePNGBytes(t, 1921, 100), http.StatusBadRequest},
 		{"961 tall refused", makePNGBytes(t, 100, 961), http.StatusBadRequest},
-		{"gif refused", []byte("GIF89a"), http.StatusBadRequest},
+		{"animated gif ok", makeAnimatedGIFBytes(t, 600, 240, 0), http.StatusCreated},
+		{"3 MiB animated gif ok", makeAnimatedGIFBytes(t, 600, 240, 3<<20), http.StatusCreated},
+		{"1921 wide gif refused", makeAnimatedGIFBytes(t, 1921, 100, 0), http.StatusBadRequest},
 		{"text refused", []byte("not an image"), http.StatusBadRequest},
-		{"1 MiB + 1 refused", oversized, http.StatusBadRequest},
+		{"4 MiB + 1 refused", oversized, http.StatusBadRequest},
 	}
 	for i, tc := range cases {
 		token := uploadCreateToken(t, database, "banner_lim_"+string(rune('a'+i)), 4)
@@ -78,6 +80,14 @@ func TestUploadBanner_LimitsAndTypes(t *testing.T) {
 	rr := doBannerUpload(t, router, token, "b.png", makePNGBytes(t, 1921, 100))
 	if !strings.Contains(rr.Body.String(), "banner must be at most 1920x960") {
 		t.Errorf("message = %s", rr.Body.String())
+	}
+	rr = doBannerUpload(t, router, token, "b.png", oversized)
+	if !strings.Contains(rr.Body.String(), "banner must be at most 4096 KB") {
+		t.Errorf("size message = %s", rr.Body.String())
+	}
+	rr = doBannerUpload(t, router, token, "b.txt", []byte("not an image"))
+	if !strings.Contains(rr.Body.String(), "banner must be a PNG, JPEG, WebP or GIF image") {
+		t.Errorf("type message = %s", rr.Body.String())
 	}
 }
 
@@ -380,13 +390,13 @@ func TestServeFile_DeniedOwnersBannerRefused(t *testing.T) {
 	}
 }
 
-// The avatar limits are the contract the banner refactor must not move: 1 MiB,
-// at most 1024x1024, PNG/JPEG/WebP, and the same refusal wording.
-func TestAvatarUpload_LimitsUnchanged(t *testing.T) {
+// The avatar limits: 2 MiB (WP 8.7), at most 1024x1024, PNG/JPEG/WebP/GIF,
+// and the refusal wording.
+func TestAvatarUpload_Limits(t *testing.T) {
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildAvatarRouter(database, store)
-	oversized := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, (1<<20)+1)...)
+	oversized := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, (2<<20)+1)...)
 	cases := []struct {
 		name string
 		body []byte
@@ -397,8 +407,11 @@ func TestAvatarUpload_LimitsUnchanged(t *testing.T) {
 		{"1025 wide refused", makePNGBytes(t, 1025, 10), http.StatusBadRequest, "avatar must be at most 1024x1024 pixels (got 1025x10)"},
 		{"1025 tall refused", makePNGBytes(t, 10, 1025), http.StatusBadRequest, "avatar must be at most 1024x1024 pixels (got 10x1025)"},
 		{"banner-sized refused", makePNGBytes(t, 1920, 960), http.StatusBadRequest, "avatar must be at most 1024x1024"},
-		{"gif refused", []byte("GIF89a"), http.StatusBadRequest, "avatar must be a PNG, JPEG or WebP image"},
-		{"1 MiB + 1 refused", oversized, http.StatusBadRequest, "avatar must be at most 1024 KB"},
+		{"animated gif ok", makeAnimatedGIFBytes(t, 128, 128, 0), http.StatusCreated, ""},
+		{"1.5 MiB animated gif ok", makeAnimatedGIFBytes(t, 128, 128, 3<<19), http.StatusCreated, ""},
+		{"1025 wide gif refused", makeAnimatedGIFBytes(t, 1025, 10, 0), http.StatusBadRequest, "avatar must be at most 1024x1024 pixels (got 1025x10)"},
+		{"text refused", []byte("not an image"), http.StatusBadRequest, "avatar must be a PNG, JPEG, WebP or GIF image"},
+		{"2 MiB + 1 refused", oversized, http.StatusBadRequest, "avatar must be at most 2048 KB"},
 	}
 	for i, tc := range cases {
 		token := uploadCreateToken(t, database, "avlim_"+string(rune('a'+i)), 4)

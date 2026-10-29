@@ -23,13 +23,30 @@ import {
   updateMemberProfile,
   updatePresence,
   applyPresenceBatch,
+  applyReadyActivities,
+  applyReadyListening,
+  membersStore,
+  toMemberActivity,
+  toMemberListening,
 } from "../../stores/members.store";
 import { updateVoiceUserProfile } from "../../stores/voice.store";
-import { dmStore, updateDmParticipant } from "../../stores/dm.store";
+import {
+  dmStore,
+  setDmActivityLookup,
+  setDmListeningLookup,
+  updateDmParticipant,
+  type DmUser,
+} from "../../stores/dm.store";
 import { emojiStore, setCustomEmoji } from "../../stores/emoji.store";
+import { setStickers, stickersStore } from "../../stores/stickers.store";
 import { uiStore } from "../../stores/ui.store";
-import { getChannelMessages } from "../../stores/messages.store";
-import { isTextLikeChannel, type ChannelActivityEntry } from "../../lib/types";
+import { getChannelMessages, markStickersDeleted } from "../../stores/messages.store";
+import {
+  isTextLikeChannel,
+  type ChannelActivityEntry,
+  type ReadyActivity,
+  type ReadyListening,
+} from "../../lib/types";
 import { loadLastChannel } from "../../lib/last-channel";
 import {
   acceptReadState,
@@ -42,9 +59,12 @@ import {
   writeReadPointer,
 } from "../../lib/read-state";
 import {
+  applyGameActivityPolicy,
   applyReadyCapabilities,
+  gameActivityPolicyIsOff,
   hasReceivedReady,
   readPointerEnabled,
+  stickersEnabled,
 } from "../../lib/serverCapabilities";
 import { showToast } from "../../lib/toast";
 import {
@@ -285,31 +305,149 @@ export function applyReadyEmoji(api: DispatchApi | undefined): void {
   }
 }
 
-export function handlePresence(payload: Payload<"presence">): void {
-  // custom_status is passed through verbatim, undefined included: the
-  // store treats "field absent" as "leave the text alone", which is what
-  // an older server's presence event means.
-  updatePresence(payload.user_id, payload.status, payload.custom_status);
-  // dmStore keeps its own frozen copy of a DM partner's status for the
-  // sidebar row (see buildDmConversations) — membersStore alone does not
-  // reach it.
-  updateDmParticipant(payload.user_id, { status: payload.status });
+/**
+ * The custom-sticker slice of `ready` (WP 8.8). Like emoji, the set is not in
+ * the ready payload: load it once here, only on a server that advertises the
+ * `stickers` capability (applyReadyCapabilities has already run), and let
+ * `sticker_update` keep it fresh. A failure is non-fatal: the picker shows its
+ * empty state until the next broadcast.
+ *
+ * The revision snapshot mirrors the emoji one: a `sticker_update` that lands
+ * while this GET is in flight bumps it, and the stale reply is then dropped.
+ */
+export function applyReadyStickers(api: DispatchApi | undefined): void {
+  if (!stickersEnabled() || api?.listStickers === undefined) return;
+  const revAtFetch = stickersStore.getState().rev;
+  api
+    .listStickers()
+    .then((list) => setStickers(list, revAtFetch))
+    .catch((err) => log.warn("Failed to load custom stickers", { error: String(err) }));
 }
 
-export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
-  const full = payload.full === true;
-  applyPresenceBatch(payload.updates, full);
-  // Only DM partners need the dmStore copy (see handlePresence); a full
-  // snapshot takes a partner it leaves out offline.
-  const statuses = new Map(payload.updates.map((u) => [u.user_id, u.status]));
+/**
+ * `ready.activities` (WP 8.3) and `ready.listening` (WP 8.10): who plays what
+ * and who listens to what right now. Applied after the roster and the DM list
+ * are in, so it reaches both copies; a server without the key sends none, and
+ * the members then play and listen to nothing.
+ */
+export function applyReadyGameActivities(payload: Payload<"ready">): void {
+  applyGameActivityList(payload.activities ?? [], payload.listening ?? []);
+}
+
+/**
+ * `game_activity_policy` (WP 8.3e-2): an admin turned game activity on or off.
+ * The capability follows at once. Off also clears every shown game, so none
+ * lingers if a clearing `presence` frame is dropped; on restates nothing,
+ * since the games return with presence.
+ */
+export function handleGameActivityPolicy(payload: Payload<"game_activity_policy">): void {
+  if (applyGameActivityPolicy(payload.enabled) && !payload.enabled) applyGameActivityList([], []);
+}
+
+/**
+ * `auth_ok.game_activity_policy`: the same switch on every connect and resume.
+ * A resume gets no `ready` and may have missed the frame while offline. An
+ * older server states none, and the `ready` capability decides.
+ */
+export function applyAuthOkGameActivityPolicy(payload: Payload<"auth_ok">): void {
+  if (payload.game_activity_policy !== undefined) {
+    handleGameActivityPolicy(payload.game_activity_policy);
+  }
+}
+
+/**
+ * Who plays what, restated from `list`: the roster and the DM copies of it
+ * both follow, and a DM opened from now on takes its people's games from the
+ * members store.
+ */
+function applyGameActivityList(
+  list: readonly ReadyActivity[],
+  songs: readonly ReadyListening[],
+): void {
+  applyReadyActivities(list);
+  applyReadyListening(songs);
+  setDmActivityLookup((userId) => membersStore.getState().members.get(userId)?.activity);
+  setDmListeningLookup((userId) => membersStore.getState().members.get(userId)?.listening);
+  const byUser = new Map(list.map((a) => [a.user_id, toMemberActivity(a)]));
+  const songByUser = new Map(songs.map((l) => [l.user_id, toMemberListening(l)]));
   const partners = new Set<number>();
   for (const c of dmStore.getState().channels) {
     partners.add(c.recipient.id);
     for (const p of c.participants) partners.add(p.id);
   }
   for (const id of partners) {
+    updateDmParticipant(id, {
+      activity: byUser.get(id) ?? null,
+      listening: songByUser.get(id) ?? null,
+    });
+  }
+}
+
+export function handlePresence(payload: Payload<"presence">): void {
+  // custom_status is passed through verbatim, undefined included: the
+  // store treats "field absent" as "leave the text alone", which is what
+  // an older server's presence event means.
+  // activity follows the same rule (WP 8.3): absent leaves the shown game alone.
+  // While the server states game activity is off, a game on a frame that
+  // outran the off frame is not shown (WP 8.3e-2).
+  const off = gameActivityPolicyIsOff();
+  const activity = off ? null : payload.activity;
+  // The same switch covers the song (WP 8.10).
+  const listening = off ? null : payload.listening;
+  updatePresence(
+    payload.user_id,
+    payload.status,
+    payload.custom_status,
+    undefined,
+    activity,
+    listening,
+  );
+  // dmStore keeps its own frozen copy of a DM partner's status for the
+  // sidebar row (see buildDmConversations) — membersStore alone does not
+  // reach it.
+  updateDmParticipant(payload.user_id, {
+    status: payload.status,
+    ...(activity === undefined ? {} : { activity: toMemberActivity(activity) }),
+    ...(listening === undefined ? {} : { listening: toMemberListening(listening) }),
+  });
+}
+
+export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
+  const full = payload.full === true;
+  // As in handlePresence: no game is shown while the server states it is off.
+  const off = gameActivityPolicyIsOff();
+  const updates = off
+    ? payload.updates.map((u) => ({ ...u, activity: null, listening: null }))
+    : payload.updates;
+  applyPresenceBatch(updates, full);
+  // Only DM partners need the dmStore copy (see handlePresence); a full
+  // snapshot takes a partner it leaves out offline.
+  const statuses = new Map(updates.map((u) => [u.user_id, u.status]));
+  const activities = new Map(updates.map((u) => [u.user_id, u.activity]));
+  const songs = new Map(updates.map((u) => [u.user_id, u.listening]));
+  const partners = new Set<number>();
+  for (const c of dmStore.getState().channels) {
+    partners.add(c.recipient.id);
+    for (const p of c.participants) partners.add(p.id);
+  }
+  for (const id of partners) {
+    const listed = statuses.has(id);
     const status = statuses.get(id) ?? (full ? "offline" : undefined);
-    if (status !== undefined) updateDmParticipant(id, { status });
+    if (status === undefined) continue;
+    const activity = activities.get(id);
+    const song = songs.get(id);
+    // A partner the snapshot leaves out plays and listens to nothing; an entry
+    // without the field (an older server) leaves what is shown alone.
+    const patch: Partial<DmUser> = { status };
+    if (!listed) {
+      updateDmParticipant(id, { ...patch, activity: null, listening: null });
+      continue;
+    }
+    updateDmParticipant(id, {
+      ...patch,
+      ...(activity === undefined ? {} : { activity: toMemberActivity(activity) }),
+      ...(song === undefined ? {} : { listening: toMemberListening(song) }),
+    });
   }
 }
 
@@ -625,6 +763,18 @@ export function handleRolesUpdate(payload: Payload<"roles_update">): void {
 export function handleEmojiUpdate(payload: Payload<"emoji_update">): void {
   log.info("Custom emoji updated", { count: payload.emoji?.length ?? 0 });
   setCustomEmoji(payload.emoji ?? []);
+}
+
+// Custom stickers changed server-side (uploaded, renamed or deleted). Whole
+// set, like emoji_update: a sticker deleted while a picker is open drops out of
+// its grid, and a stale id can no longer be sent from the next open.
+export function handleStickerUpdate(payload: Payload<"sticker_update">): void {
+  log.info("Custom stickers updated", { count: payload.stickers?.length ?? 0 });
+  const stickers = payload.stickers ?? [];
+  setStickers(stickers);
+  // Messages already on screen still name the removed sticker: turn them into
+  // "Deleted sticker" rows (never fetching the image again).
+  markStickersDeleted(new Set(stickers.map((s) => s.id)));
 }
 
 export function handleUserUpdate(payload: Payload<"user_update">): void {

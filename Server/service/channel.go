@@ -8,6 +8,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
@@ -174,7 +175,7 @@ type PresenceResult struct {
 	// CustomStatus is the sanitized line to publish (nil = none).
 	CustomStatus *string
 	// ExpiresAt is the stored expiry of CustomStatus in
-	// db.CustomStatusExpiryLayout, "" when it has none. For a bare status flip
+	// dbtime.ISOLayout, "" when it has none. For a bare status flip
 	// it is the expiry already stored with the text it carries.
 	ExpiresAt string
 }
@@ -242,7 +243,7 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 
 	var expiresAt *string
 	if expiresIn != nil {
-		at := s.now().UTC().Add(time.Duration(*expiresIn) * time.Second).Format(db.CustomStatusExpiryLayout)
+		at := s.now().UTC().Add(time.Duration(*expiresIn) * time.Second).Format(dbtime.ISOLayout)
 		expiresAt = &at
 	}
 	// Status and text commit together in one writer transaction (P5-O08), so
@@ -393,4 +394,12 @@ func admitReadState(ctx context.Context, st Store, perms *PermissionService, use
 		return nil, fmt.Errorf("%w: %w", ErrForbidden, err)
 	}
 	return ch, nil
+}
+
+// CheckActivityAllowed reports whether userID may publish a game activity
+// name (WP 8.3a). The name is text every member sees, so a timeout refuses
+// it with ErrTimedOut, like a custom status line; clearing one stays allowed
+// and needs no check.
+func (s *ChannelService) CheckActivityAllowed(ctx context.Context, userID int64) error {
+	return requireNotTimedOut(ctx, s.perms, userID)
 }

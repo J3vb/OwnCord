@@ -107,6 +107,9 @@ export type WsErrorCode =
   // thread is locked and only a moderator may post in or change it.
   | "THREAD_EXISTS"
   | "THREAD_LOCKED"
+  // WP 8.8: a chat_send named a custom sticker that does not exist (any more).
+  | "STICKER_NOT_FOUND"
+  | "GAME_ACTIVITY_DISABLED"
   | "NOT_KEY_HOLDER"
   // The same account connected from another device and displaced this socket.
   | "SESSION_REPLACED"
@@ -194,6 +197,17 @@ export interface Attachment {
   readonly url: string;
   readonly width?: number;
   readonly height?: number;
+  /** Length of a voice message in ms (WP 8.9). With `waveform`, the attachment is one. */
+  readonly duration_ms?: number;
+  /** A voice message's loudness, base64url (no padding) bytes 0-255, one per bar. */
+  readonly waveform?: string;
+}
+
+/** The length and waveform an upload declares to be a voice message (WP 8.9). */
+export interface VoiceUploadMeta {
+  readonly durationMs: number;
+  /** base64url without padding, 1..256 bytes decoded. */
+  readonly waveform: string;
 }
 
 /** Reaction summary on a REST message response. */
@@ -239,6 +253,13 @@ export interface ReadyChannel {
    * stay server-side refusals. Absent from older servers.
    */
   readonly can_moderate_voice?: boolean;
+  /**
+   * Whether the current user may move voice participants in this channel at
+   * any rank (MOVE_MEMBERS, WP 8.4a), independent of can_moderate_voice: a
+   * role with only Move Members moves but cannot mute, deafen or disconnect.
+   * Absent from older servers.
+   */
+  readonly can_move_voice?: boolean;
   /**
    * Whether the current user may delete other people's messages here, as the
    * server computed it from the channel's effective permissions. Absent from
@@ -371,12 +392,20 @@ export interface ReadyRole {
 export enum Permission {
   SEND_MESSAGES = 0x1,
   READ_MESSAGES = 0x2,
+  MANAGE_CONFIG = 0x4,
+  MANAGE_UPDATES = 0x8,
+  MANAGE_TOKENS = 0x10,
   ATTACH_FILES = 0x20,
   ADD_REACTIONS = 0x40,
+  ISSUE_RECOVERY = 0x80,
+  VIEW_DIAGNOSTICS = 0x100,
   CONNECT_VOICE = 0x200,
   SPEAK_VOICE = 0x400,
   USE_VIDEO = 0x800,
   SHARE_SCREEN = 0x1000,
+  MOVE_MEMBERS = 0x2000,
+  MANAGE_BACKUPS = 0x4000,
+  RESTORE_BACKUPS = 0x8000,
   MANAGE_MESSAGES = 0x10000,
   MANAGE_CHANNELS = 0x20000,
   KICK_MEMBERS = 0x40000,
@@ -389,6 +418,7 @@ export enum Permission {
   MANAGE_SERVER = 0x2000000,
   MANAGE_INVITES = 0x4000000,
   VIEW_AUDIT_LOG = 0x8000000,
+  ERASE_ACCOUNTS = 0x10000000,
   ADMINISTRATOR = 0x40000000,
 }
 
@@ -421,6 +451,11 @@ export interface AuthOkPayload {
   readonly replay_source?: "none" | "buffer" | "db";
   /** What the composer checks before an upload; absent on older servers. */
   readonly upload_policy?: UploadPolicy;
+  /**
+   * Whether game activity is shown on this server right now (WP 8.3e-2). Sent
+   * on every connect and resume; absent on older servers.
+   */
+  readonly game_activity_policy?: GameActivityPolicyPayload;
 }
 
 /** auth_ok's upload_policy. The server's upload route stays authoritative. */
@@ -460,6 +495,36 @@ export interface ChannelCategoriesPayload {
   readonly categories: readonly ChannelCategory[];
 }
 
+/** The game a member is playing, as it rides `presence` and `activity_update`. */
+export interface GameActivity {
+  readonly name: string;
+  /** Unix milliseconds the game started (the server clamps it to the last 24 h). */
+  readonly started_at: number;
+}
+
+/** One entry of `ready.activities`. */
+export interface ReadyActivity extends GameActivity {
+  readonly user_id: number;
+}
+
+/** The song a member is listening to, as it rides `presence` and `listening_update` (WP 8.10). */
+export interface ListeningActivity {
+  readonly title: string;
+  /** May be empty. */
+  readonly artist: string;
+  /** The app that plays it ("Spotify"). */
+  readonly player: string;
+  /** Unix milliseconds the song would have started at (now minus the position). */
+  readonly started_at: number;
+  /** The song's length in milliseconds; 0 = unknown. */
+  readonly duration_ms: number;
+}
+
+/** One entry of `ready.listening`. */
+export interface ReadyListening extends ListeningActivity {
+  readonly user_id: number;
+}
+
 export interface ReadyPayload {
   readonly capabilities?: {
     readonly message_deduplication?: boolean;
@@ -488,6 +553,12 @@ export interface ReadyPayload {
      * `poll_update` (WP 6.9b). Absent means an older server: no Poll button.
      */
     readonly polls?: boolean;
+    /**
+     * The server has custom stickers (WP 8.8): `sticker_id` on `chat_send`,
+     * `sticker` on `chat_message`, `sticker_update` and `/api/v1/stickers`.
+     * Absent means an older server: no sticker button.
+     */
+    readonly stickers?: boolean;
     /**
      * The server stores the caller's two direct message privacy settings (WP
      * 6.8b), read and written over `/users/me/privacy`. Absent means an older
@@ -531,7 +602,37 @@ export interface ReadyPayload {
      * means an older server: no Follow control, no followed threads.
      */
     readonly thread_follows?: boolean;
+    /**
+     * The server accepts `voice_duration_ms` and `voice_waveform` on an upload
+     * and returns `duration_ms` and `waveform` on the attachment (WP 8.9).
+     * Absent means an older server: no mic button in the composer.
+     */
+    readonly voice_messages?: boolean;
+    /**
+     * The server understands `activity_update` and carries a member's game as
+     * `activity` on `presence` and `presence_batch` and as `ready.activities`
+     * (WP 8.3). Absent means an older server: nothing is sent, no game shown.
+     */
+    readonly game_activity?: boolean;
+    /**
+     * The server understands `listening_update` and carries a member's song as
+     * `listening` on `presence` and `presence_batch` and as `ready.listening`
+     * (WP 8.10). Absent means an older server: nothing is sent, no song shown.
+     */
+    readonly listening_activity?: boolean;
   };
+  /**
+   * The songs connected members are listening to (WP 8.10), sorted by user id.
+   * Absent from a server without `listening_activity`; later changes arrive as
+   * `presence`.
+   */
+  readonly listening?: readonly ReadyListening[];
+  /**
+   * The games connected members are playing (WP 8.3), sorted by user id. Absent
+   * from a server without `game_activity`; authoritative for the moment of the
+   * snapshot, later changes arrive as `presence`.
+   */
+  readonly activities?: readonly ReadyActivity[];
   readonly channels: readonly ReadyChannel[];
   /**
    * The viewer's followed, open threads, newest activity first (WP 6.9c).
@@ -896,6 +997,8 @@ export interface ChatMessagePayload {
   readonly forward?: ForwardInfo;
   /** Present on a poll message only (WP 6.9b). */
   readonly poll?: PollInfo;
+  /** Present on a sticker message only (WP 8.8). */
+  readonly sticker?: MessageStickerInfo;
   /** Present on a thread's starter message only (WP 6.9c). */
   readonly thread?: ThreadInfo;
 }
@@ -972,6 +1075,13 @@ export interface PresencePayload {
    *  (null = none), so a cleared text is distinguishable from an event that
    *  simply does not mention it. */
   readonly custom_status?: string | null;
+  /** The game the user is playing (WP 8.3). Always present on a server with
+   *  `game_activity` (null = none); absent from an older one, where the store
+   *  leaves the shown game alone. */
+  readonly activity?: GameActivity | null;
+  /** The song the user is listening to (WP 8.10). Always present on a server
+   *  with `listening_activity` (null = none); absent from an older one. */
+  readonly listening?: ListeningActivity | null;
 }
 
 export interface ChannelCreatePayload {
@@ -1013,6 +1123,8 @@ export interface ChannelCreatePayload {
    * unchanged rules as can_send.
    */
   readonly can_moderate_voice?: boolean;
+  /** This viewer's move affordance — see ReadyChannel.can_move_voice. Absent means unchanged. */
+  readonly can_move_voice?: boolean;
   /** This viewer's message affordances — see ReadyChannel. Absent means unchanged. */
   readonly can_delete_others?: boolean;
   readonly can_pin?: boolean;
@@ -1078,6 +1190,8 @@ export interface VoiceStatePayload {
 export interface VoiceMovedPayload {
   readonly to_channel_id: number;
   readonly reason?: "afk";
+  /** The moderator who made the move; absent for the AFK sweep and on older servers. */
+  readonly by_user_id?: number;
 }
 
 /** Server -> Client: a moderator removed this client from voice. */
@@ -1128,6 +1242,10 @@ export interface VoiceE2EEAnnouncePayload {
   /** Sender's identity-key signature over the ephemeral key (F3 TOFU).
    *  Omitted for legacy clients that have not published an identity key. */
   readonly signature?: string;
+  /** Identity public key (base64) of the announcing device. Peers verify
+   *  `signature` against it. Absent from an older server or older peer: the
+   *  receiver falls back to the member's published key. */
+  readonly identity_public_key?: string;
   /** Video codecs the sender decodes (lowercase MIME subtypes). Absent from an
    *  old client or server: the receiver assumes VP8 and H.264. */
   readonly video_decode?: readonly string[];
@@ -1152,6 +1270,10 @@ export interface PresenceBatchEntry {
   readonly status: UserStatus;
   /** Always present (null = none). */
   readonly custom_status: string | null;
+  /** Always present on a server with `game_activity` (null = none). */
+  readonly activity?: GameActivity | null;
+  /** Always present on a server with `listening_activity` (null = none). */
+  readonly listening?: ListeningActivity | null;
 }
 
 /** Many users' presence in one frame: a coalescing window's changes, or with
@@ -1192,6 +1314,14 @@ export interface EmojiUpdatePayload {
 }
 
 /**
+ * `sticker_update` (WP 8.8) — the server's whole custom-sticker set after an
+ * upload, rename or delete, replaced wholesale like `emoji_update`.
+ */
+export interface StickerUpdatePayload {
+  readonly stickers: readonly StickerResponse[];
+}
+
+/**
  * `upload_policy` — the file-type lists in force after the owner saves them in
  * the admin panel. Both are always present (`[]` when emptied) and replace the
  * lists auth_ok gave; the size cap and thumbnails stay as auth_ok set them.
@@ -1199,6 +1329,15 @@ export interface EmojiUpdatePayload {
 export interface UploadPolicyPayload {
   readonly blocked_extensions: readonly string[];
   readonly allowed_extensions: readonly string[];
+}
+
+/**
+ * `game_activity_policy` — an admin turned game activity on or off for the
+ * server (WP 8.3e-2). Unsequenced and not replayed; `auth_ok` carries the same
+ * value on every connect and resume.
+ */
+export interface GameActivityPolicyPayload {
+  readonly enabled: boolean;
 }
 
 export interface MemberUpdatePayload {
@@ -1381,6 +1520,13 @@ export interface AuthPayload {
    * server withholds anything not declared, so an older client never sees it.
    */
   readonly features?: readonly string[];
+  /**
+   * This device's identity public key (base64, the format PATCH /users/me
+   * takes). The server attaches it to the voice E2EE announces this connection
+   * sends, so peers verify against the announcing device's own key. Omitted
+   * when the key is unavailable or for an older client.
+   */
+  readonly identity_public_key?: string;
 }
 
 export interface ChatSendPayload {
@@ -1391,6 +1537,8 @@ export interface ChatSendPayload {
   /** With reply_to, whether the reply mentions the parent's author (3A-12). */
   readonly reply_ping?: boolean;
   readonly attachments: readonly string[];
+  /** Sends a custom sticker (WP 8.8): needs `client_message_id`, no text, no attachments. */
+  readonly sticker_id?: number;
 }
 
 /** Create a forum post and its opening message in one step (WP 6.9d). */
@@ -1522,6 +1670,16 @@ export interface PresenceUpdatePayload {
   readonly custom_status_expires_in?: number;
 }
 
+/** Client→Server: the game being played, or null once it stops (WP 8.3). */
+export interface ActivityUpdatePayload {
+  readonly activity: GameActivity | null;
+}
+
+/** Client→Server: the song being listened to, or null once it stops (WP 8.10). */
+export interface ListeningUpdatePayload {
+  readonly listening: ListeningActivity | null;
+}
+
 export interface VoiceJoinPayload {
   readonly channel_id: number;
   /** Set on the user's own join; automatic rejoins (reconnect, voice_moved) omit it. */
@@ -1627,7 +1785,9 @@ export type ServerMessage =
   | (WsEnvelope<MemberTimeoutsPayload> & { readonly type: "member_timeouts" })
   | (WsEnvelope<RolesUpdatePayload> & { readonly type: "roles_update" })
   | (WsEnvelope<EmojiUpdatePayload> & { readonly type: "emoji_update" })
+  | (WsEnvelope<StickerUpdatePayload> & { readonly type: "sticker_update" })
   | (WsEnvelope<UploadPolicyPayload> & { readonly type: "upload_policy" })
+  | (WsEnvelope<GameActivityPolicyPayload> & { readonly type: "game_activity_policy" })
   | (WsEnvelope<DmChannelOpenPayload> & { readonly type: "dm_channel_open" })
   | (WsEnvelope<DmChannelClosePayload> & { readonly type: "dm_channel_close" })
   | (WsEnvelope<DmRequestPayload> & { readonly type: "dm_request" })
@@ -1664,6 +1824,8 @@ export type ClientMessage =
   | (WsEnvelope<MarkReadPayload> & { readonly type: "mark_read" })
   | (WsEnvelope<MarkUnreadPayload> & { readonly type: "mark_unread" })
   | (WsEnvelope<PresenceUpdatePayload> & { readonly type: "presence_update" })
+  | (WsEnvelope<ActivityUpdatePayload> & { readonly type: "activity_update" })
+  | (WsEnvelope<ListeningUpdatePayload> & { readonly type: "listening_update" })
   | (WsEnvelope<VoiceJoinPayload> & { readonly type: "voice_join" })
   | (WsEnvelope<VoiceLeaveClientPayload> & { readonly type: "voice_leave" })
   | (WsEnvelope<VoiceMutePayload> & { readonly type: "voice_mute" })
@@ -1675,7 +1837,13 @@ export type ClientMessage =
   | (WsEnvelope<VoiceModMovePayload> & { readonly type: "voice_mod_move" })
   | (WsEnvelope<VoiceModKickPayload> & { readonly type: "voice_mod_kick" })
   | (WsEnvelope<Record<string, never>> & { readonly type: "voice_token_refresh" })
-  | (WsEnvelope<{ public_key: string; signature?: string; video_decode?: readonly string[] }> & {
+  | (WsEnvelope<{
+      public_key: string;
+      signature?: string;
+      /** This device's identity public key (the one that signed `signature`). */
+      identity_public_key?: string;
+      video_decode?: readonly string[];
+    }> & {
       readonly type: "voice_e2ee_announce";
     })
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {
@@ -1823,6 +1991,8 @@ export interface MessageResponse {
   readonly forward?: ForwardInfo;
   /** Present on a poll message only (WP 6.9b). */
   readonly poll?: PollInfo;
+  /** Present on a sticker message only (WP 8.8). */
+  readonly sticker?: MessageStickerInfo;
   /** Present on a thread's starter message only (WP 6.9c). */
   readonly thread?: ThreadInfo;
 }
@@ -1903,6 +2073,8 @@ export interface AdminUser {
   readonly avatar?: string | null;
   readonly role_id: number;
   readonly role_name: string;
+  /** Every held role, top role first; only the users list sends it. */
+  readonly role_ids?: readonly number[];
   readonly status: UserStatus;
   readonly created_at: string;
   readonly last_seen?: string;
@@ -1950,6 +2122,28 @@ export interface EmojiResponse {
   readonly url: string;
 }
 
+/**
+ * One custom sticker from GET/POST/PATCH /api/v1/stickers and `sticker_update`.
+ * `url` is server-relative and behind the session token, like an emoji's.
+ */
+export interface StickerResponse {
+  readonly id: number;
+  readonly name: string;
+  readonly emoji: string | null;
+  readonly url: string;
+}
+
+/**
+ * The `sticker` block of a sticker message, live and in history (WP 8.8).
+ * `name` is the label kept from send time; `id` and `url` are null once the
+ * sticker has been deleted.
+ */
+export interface MessageStickerInfo {
+  readonly id: number | null;
+  readonly name: string;
+  readonly url: string | null;
+}
+
 /** Single invite object from GET/POST /api/invites. */
 export interface InviteResponse {
   readonly id: number;
@@ -1970,6 +2164,8 @@ export interface UploadResponse {
   readonly size: number;
   readonly mime: string;
   readonly url: string;
+  readonly duration_ms?: number;
+  readonly waveform?: string;
 }
 
 /**

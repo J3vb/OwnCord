@@ -640,6 +640,87 @@ describe("ConnectPage", () => {
     page.destroy?.();
   });
 
+  it("drops the saved password when switching to a server with no saved username", async () => {
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(
+      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
+      testProfiles,
+    );
+    page.mount(container);
+
+    page.selectServer("server-a:8443", "saveduser");
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    // An Add Server profile has no username, so no credential load resets the form.
+    page.selectServer("server-b:8443");
+    expect(page.isUsingSavedPassword()).toBe(false);
+    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    expect(passwordInput.value).toBe("");
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("drops the saved password when the user types a different host", async () => {
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
+    const page = createConnectPage(makeCallbacks({ onLoginWithSavedPassword }), testProfiles);
+    page.mount(container);
+
+    page.selectServer("server-a:8443", "saveduser");
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+
+    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    hostInput.value = "server-c:8443";
+    hostInput.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(page.isUsingSavedPassword()).toBe(false);
+    expect((container.querySelector("#password") as HTMLInputElement).value).toBe("");
+
+    const form = container.querySelector(".connect-form") as HTMLFormElement;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
+
+    page.destroy?.();
+  });
+
+  it("keeps the saved password when the same server is selected again", async () => {
+    mockLoadCredential.mockResolvedValue({
+      username: "saveduser",
+      token: "tok",
+      hasPassword: true,
+    });
+    const page = createConnectPage(makeCallbacks(), testProfiles);
+    page.mount(container);
+
+    page.selectServer("server-a:8443", "saveduser");
+    await vi.waitFor(() => {
+      expect(page.isUsingSavedPassword()).toBe(true);
+    });
+    page.selectServer("server-a:8443");
+    expect(page.isUsingSavedPassword()).toBe(true);
+
+    page.destroy?.();
+  });
+
   it("rejects the pasted placeholder in Register after reselecting the same host", async () => {
     // The exact sequence that slipped through the old latch: select the
     // saved-password host (arms it), switch to Register, then re-click the

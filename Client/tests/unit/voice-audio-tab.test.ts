@@ -1354,6 +1354,54 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
+  it("a pick the live camera could not use shows the camera it kept", async () => {
+    const stream = (label: string) =>
+      ({
+        label,
+        getTracks: () => [{ stop: vi.fn(), kind: "video" }],
+        getAudioTracks: () => [],
+      }) as unknown as MediaStream;
+    const cam1 = stream("cam-1");
+    const getUserMedia = vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
+      const video = constraints.video as { deviceId?: { exact: string } } | false | undefined;
+      if (video && constraints.audio === false) {
+        return Promise.resolve(video.deviceId?.exact === "cam-1" ? cam1 : stream("other"));
+      }
+      return Promise.resolve(stream("audio"));
+    });
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        enumerateDevices: vi.fn().mockResolvedValue([
+          { kind: "videoinput", deviceId: "cam-1", label: "Camera 1" },
+          { kind: "videoinput", deviceId: "cam-2", label: "Camera 2" },
+        ]),
+        getUserMedia,
+      },
+    });
+    // The call's camera stays on cam-1: the saved choice goes back to it.
+    mockSwitchVideoDevice.mockImplementationOnce(async () => {
+      localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
+    });
+
+    const ac = new AbortController();
+    const el = createVoiceAudioTab(ac.signal).build();
+    document.body.appendChild(el);
+    const videoSelect = await vi.waitFor(() => {
+      const select = el.querySelector('select[aria-label="Video Device"]') as HTMLSelectElement;
+      expect(select.querySelectorAll("option").length).toBeGreaterThan(2);
+      return select;
+    });
+
+    videoSelect.value = "cam-2";
+    videoSelect.dispatchEvent(new Event("change"));
+    expect(mockSwitchVideoDevice).toHaveBeenCalledWith("cam-2");
+    await vi.waitFor(() => {
+      expect(videoSelect.value).toBe("cam-1");
+      expect((el.querySelector("video") as HTMLVideoElement).srcObject).toBe(cam1);
+    });
+    ac.abort();
+  });
+
   it("camera preview shows error when getUserMedia fails", async () => {
     localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
     const audioStream = {
@@ -1787,6 +1835,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   const unsubscribeTest = vi.fn();
   /** The mic test's event handler, as the host would call it. */
   let testHandler: ((envelope: NativeMicTestEnvelope) => void) | null = null;
+  /** Every preview renderer the tab made, oldest first. */
+  const renderers: Array<{ url: string; onClosed?: () => void; disposed: boolean }> = [];
   beforeEach(async () => {
     vi.resetModules();
     startMicTest.mockReset().mockResolvedValue(7);
@@ -1848,16 +1898,27 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
             portalVersion: 0,
             triggers: { ptt: null, mute: null, deafen: null },
             canConfigure: false,
+            triggersUnnamed: false,
+            sessionRefused: false,
           }),
           onStatusChange: () => () => {},
         },
       },
     }));
+    renderers.length = 0;
     vi.doMock("../../src/features/voice/native/videoRenderer", () => ({
       NativeVideoRenderer: class {
         readonly mediaStreamTrack = { stop: vi.fn(), dispatchEvent: vi.fn() };
-        constructor(readonly url: string) {}
-        dispose() {}
+        disposed = false;
+        constructor(
+          readonly url: string,
+          readonly onClosed?: () => void,
+        ) {
+          renderers.push(this);
+        }
+        dispose() {
+          this.disposed = true;
+        }
       },
     }));
     localStorage.clear();
@@ -2686,6 +2747,45 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       [...sel.options].some((o) => o.value === "cam-1"),
     );
     expect(videoSelect).toBeDefined();
+  });
+
+  it("starts the native preview again when the host closes its socket", async () => {
+    // The call's camera turning on takes the device from the preview (or off,
+    // handing it back): the host closes the preview socket, and the tab asks
+    // again for whichever capture owns the camera now.
+    vi.stubGlobal(
+      "MediaStream",
+      class {
+        constructor(readonly tracks: unknown[] = []) {}
+        getTracks(): unknown[] {
+          return this.tracks;
+        }
+      },
+    );
+    startCameraPreview
+      .mockResolvedValueOnce({ width: 320, height: 180, frames: "ws://127.0.0.1:9/own" })
+      .mockResolvedValue({ width: 1280, height: 720, frames: "ws://127.0.0.1:9/call" });
+    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const ac = new AbortController();
+    const element = create(ac.signal).build();
+    document.body.appendChild(element);
+    await vi.waitFor(() => expect(renderers).toHaveLength(1));
+    const first = renderers[0]!;
+    expect(first.url).toBe("ws://127.0.0.1:9/own/camera");
+
+    first.onClosed?.();
+    expect(first.disposed).toBe(true);
+    await vi.waitFor(() => expect(renderers).toHaveLength(2));
+    expect(startCameraPreview).toHaveBeenCalledTimes(2);
+    expect(renderers[1]!.url).toBe("ws://127.0.0.1:9/call/camera");
+    // The closed preview had nothing left to release on the host.
+    expect(stopCameraPreview).not.toHaveBeenCalled();
+
+    // A close after the tab is gone starts nothing.
+    ac.abort();
+    renderers[1]!.onClosed?.();
+    await new Promise((r) => setTimeout(r, 600));
+    expect(startCameraPreview).toHaveBeenCalledTimes(2);
   });
 
   it("does not let a superseded native preview stop the newer capture", async () => {

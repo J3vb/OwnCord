@@ -55,8 +55,10 @@ describe("RemoteTracks", () => {
     const onRemoved = vi.fn();
     tracks.setOnRemoteVideo(onVideo);
     tracks.setOnRemoteVideoRemoved(onRemoved);
-    expect(tracks.onRemoteVideoCallback).toBe(onVideo);
-    expect(tracks.onRemoteVideoRemovedCallback).toBe(onRemoved);
+    tracks.onRemoteVideoCallback?.(7, null, true);
+    tracks.onRemoteVideoRemovedCallback?.(7, true);
+    expect(onVideo).toHaveBeenCalledWith(7, null, true);
+    expect(onRemoved).toHaveBeenCalledWith(7, true);
     tracks.clearOnRemoteVideo();
     expect(tracks.onRemoteVideoCallback).toBeNull();
     expect(tracks.onRemoteVideoRemovedCallback).toBeNull();
@@ -85,6 +87,10 @@ describe("RemoteTracks", () => {
           mimeType: "video/VP8",
           packetsLost: 1,
           packetsReceived: 999,
+          framesDropped: 4,
+          framesReceived: 604,
+          decoderImplementation: "ExternalDecoder",
+          jitterBufferDelay: 12.5,
         })),
       };
       const tracks = new RemoteTracks(() => roomWith("user-7:abc", "screen_share", track));
@@ -98,6 +104,10 @@ describe("RemoteTracks", () => {
         codec: "video/VP8",
         packetsLost: 1,
         packetsReceived: 999,
+        framesDropped: 4,
+        framesReceived: 604,
+        decoderImplementation: "ExternalDecoder",
+        jitterBufferDelay: 12.5,
       });
     });
 
@@ -358,5 +368,90 @@ describe("RemoteTracks", () => {
       tracks.clearWatched();
       expect(cb).toHaveBeenCalledTimes(4);
     });
+  });
+});
+
+// A replaced room (voice reconnect or rejoin) is detached before it
+// disconnects, so it raises no unpublish for a stream that ended or a user
+// who left during the outage. The sweep over the new room removes the tiles
+// for streams it no longer publishes.
+/** A room whose users publish the given sources ("camera", "screen_share"). */
+function roomOf(users: Record<number, string[]>): Room {
+  const remoteParticipants = new Map(
+    Object.entries(users).map(([id, sources]) => [
+      `user-${id}:tok`,
+      {
+        identity: `user-${id}:tok`,
+        getTrackPublication: (s: string) => (sources.includes(s) ? { source: s } : undefined),
+      },
+    ]),
+  );
+  return { remoteParticipants } as unknown as Room;
+}
+
+function buildSwap(first: Room) {
+  let room: Room | null = first;
+  const tracks = new RemoteTracks(() => room);
+  const offered = vi.fn();
+  const removed = vi.fn();
+  tracks.setOnRemoteVideo(offered);
+  tracks.setOnRemoteVideoRemoved(removed);
+  return {
+    tracks,
+    offered,
+    removed,
+    swap: (next: Room | null) => {
+      room = next;
+    },
+  };
+}
+
+describe("RemoteTracks.removeUnpublishedTiles", () => {
+  it("removes a share that ended and a camera whose user left during the swap", () => {
+    const { tracks, removed, swap } = buildSwap(roomOf({ 7: ["screen_share"], 8: ["camera"] }));
+    tracks.onRemoteVideoCallback?.(7, null, true);
+    tracks.onRemoteVideoCallback?.(8, null, false);
+
+    swap(roomOf({ 7: [] }));
+    tracks.removeUnpublishedTiles();
+
+    expect(removed).toHaveBeenCalledWith(7, true);
+    expect(removed).toHaveBeenCalledWith(8, false);
+    expect(removed).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the tiles the new room still publishes", () => {
+    const { tracks, removed, swap } = buildSwap(roomOf({ 7: ["screen_share", "camera"] }));
+    tracks.onRemoteVideoCallback?.(7, null, true);
+    tracks.onRemoteVideoCallback?.(7, null, false);
+
+    swap(roomOf({ 7: ["camera"] }));
+    tracks.removeUnpublishedTiles();
+
+    expect(removed).toHaveBeenCalledOnce();
+    expect(removed).toHaveBeenCalledWith(7, true);
+  });
+
+  it("does not remove a tile twice once its unpublish already removed it", () => {
+    const { tracks, removed, swap } = buildSwap(roomOf({ 7: ["screen_share"] }));
+    tracks.onRemoteVideoCallback?.(7, null, true);
+    tracks.onRemoteVideoRemovedCallback?.(7, true);
+    removed.mockClear();
+
+    swap(roomOf({}));
+    tracks.removeUnpublishedTiles();
+
+    expect(removed).not.toHaveBeenCalled();
+  });
+
+  it("forgets the offered tiles on leave", () => {
+    const { tracks, removed, swap } = buildSwap(roomOf({ 7: ["camera"] }));
+    tracks.onRemoteVideoCallback?.(7, null, false);
+
+    tracks.clearWatched();
+    swap(roomOf({}));
+    tracks.removeUnpublishedTiles();
+
+    expect(removed).not.toHaveBeenCalled();
   });
 });

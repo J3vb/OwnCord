@@ -20,7 +20,6 @@ import {
 test.use({ trace: "off", video: "off" });
 
 const TOTAL = 600;
-const PAGE = 50;
 /** A direct GIF link in every 12th message (distinct URL per row). */
 const GIF_EVERY = 12;
 /** The smallest valid GIF (1x1), served for every external image. */
@@ -66,9 +65,9 @@ function pagedHistory(): void {
   };
   (window as any).__scale = scale;
   // `offsetHeight` reads made while the list slides (chat-scroll-perf PR f).
-  // The ResizeObserver pass re-measures the whole window in a frame it
-  // schedules from the observer callback, by design, so reads inside such a
-  // frame are not counted.
+  // The ResizeObserver pass re-measures the whole window, by design, in the
+  // observer callback (or, when it may build rows, in a frame it schedules
+  // from there), so reads inside either are not counted.
   let heightReads = 0;
   let skipReads = false;
   let inObserver = false;
@@ -76,7 +75,7 @@ function pagedHistory(): void {
   Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
     configurable: true,
     get() {
-      if (!skipReads) heightReads++;
+      if (!skipReads && !inObserver) heightReads++;
       return heightDesc.get!.call(this);
     },
   });

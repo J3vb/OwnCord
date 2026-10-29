@@ -52,6 +52,10 @@ type channelPayload struct {
 	// Q5), the same value the ready payload ships per channel. Same
 	// per-recipient, targeted-only, absent-means-unchanged rules as CanSend.
 	CanModerateVoice *bool `json:"can_moderate_voice,omitempty"`
+	// CanMoveVoice is the per-recipient move affordance (WP 8.4b): the verdict
+	// of permissions.AuthorizeVoiceMover, independent of CanModerateVoice. Same
+	// per-recipient, targeted-only, absent-means-unchanged rules as CanSend.
+	CanMoveVoice *bool `json:"can_move_voice,omitempty"`
 	// CanDeleteOthers, CanPin and CanReact are the per-recipient message
 	// affordances (3A-13), the same values the ready payload ships per
 	// channel. Same per-recipient, targeted-only, absent-means-unchanged

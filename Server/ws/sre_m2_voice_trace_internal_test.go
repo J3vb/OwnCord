@@ -69,7 +69,7 @@ func newVoiceTraceHub(t *testing.T, name string) (*Hub, *db.DB, *Client, int64) 
 	}
 	c := NewTestClient(h, uid, make(chan []byte, 256))
 	c.user = user
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	return h, database, c, chID
 }
 

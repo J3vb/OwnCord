@@ -29,6 +29,8 @@ import {
 } from "@components/dmContextMenu";
 import { voiceText } from "../../i18n/voice";
 import { dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
+import { rowActivity } from "../../features/members/listeningLine";
+import { onPrefChange } from "@lib/preferences";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,6 +72,7 @@ function dmRowSignature(dm: DmChannel): string {
     dmDisplayName(dm),
     dm.isGroup ? "g" : "1",
     dm.recipient.status,
+    dm.isGroup ? "" : (rowActivity(dm.recipient.activity, dm.recipient.listening)?.text ?? ""),
     isChannelMuted(dm.channelId) ? "m" : "",
     isDmInCall(dm.channelId) ? "c" : "",
     dm.mentionCount,
@@ -244,7 +247,24 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     // timestamp means the DM was never messaged, so no time is drawn.
     const preview = createElement("span", { class: "dm-preview" }, dmPreviewText(dm));
     const body = createElement("div", { class: "dm-item-body" });
-    appendChildren(body, name, preview);
+    // A 1:1 partner's game, else their music, between the name and the last
+    // line (WP 8.3, 8.10).
+    const shown = dm.isGroup ? null : rowActivity(dm.recipient.activity, dm.recipient.listening);
+    if (shown !== null) {
+      const activity = createElement("span", {
+        class: "dm-activity",
+        "data-testid": `dm-activity-${dm.channelId}`,
+      });
+      const icon = createIcon(shown.icon, 12);
+      icon.setAttribute("aria-hidden", "true");
+      icon.classList.add("dm-activity-icon");
+      const text = createElement("span", { class: "dm-activity-text" });
+      text.textContent = shown.text;
+      appendChildren(activity, icon, text);
+      appendChildren(body, name, activity, preview);
+    } else {
+      appendChildren(body, name, preview);
+    }
     const time = createElement(
       "span",
       { class: "dm-preview-time" },
@@ -383,13 +403,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // A row's time is "3:04 PM" today and "Sep 29" after midnight.
   atEachMidnight(listLifecycle.signal, renderDmListItems);
   // A clock-format change relabels the preview times in place.
-  window.addEventListener(
-    "owncord:pref-change",
-    ((e: CustomEvent<{ key: string }>) => {
-      if (e.detail.key === "timeFormat") renderDmListItems();
-    }) as EventListener,
-    { signal: listLifecycle.signal },
-  );
+  onPrefChange(["timeFormat"], () => renderDmListItems(), listLifecycle.signal);
 
   // A mute toggled from a row menu (or Settings) is not in a store.
   window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDmListItems(), {

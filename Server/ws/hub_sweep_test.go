@@ -79,7 +79,7 @@ func TestStartSweep_NeverRunsConcurrentlyWithItself(t *testing.T) {
 func TestUnregisterNow_KickedClientIsNotReportedAsReplaced(t *testing.T) {
 	h := newEmitTestHub()
 	c := NewTestClient(h, 1, make(chan []byte, 4))
-	h.clients[1] = c
+	h.clients[1] = []*Client{c}
 
 	h.kickClient(c)
 
@@ -94,7 +94,8 @@ func TestUnregisterNow_ReplacedClientIsReportedAsReplaced(t *testing.T) {
 	h := newEmitTestHub()
 	old := NewTestClient(h, 1, make(chan []byte, 4))
 	live := NewTestClient(h, 1, make(chan []byte, 4))
-	h.clients[1] = live // the reconnect already took the slot
+	h.clients[1] = []*Client{live} // the reconnect already took the slot
+	old.displaced.Store(true)      // registerNow marks the connection it replaces
 
 	if replaced := h.unregisterNow(old); !replaced {
 		t.Error("unregisterNow(old client) = false, want true (a live client holds the slot)")
@@ -124,7 +125,7 @@ func TestSweepStaleVoiceStates_TransientPermissionErrorDoesNotEvict(t *testing.T
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
 	c.voice.setState(chID, "tok")
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 
 	// Fault-inject exactly the permission read: harvestVoiceRoleID grants
 	// CONNECT_VOICE directly on the role, so the sweep's permission lookup
@@ -178,7 +179,7 @@ func TestSweepStaleVoiceStates_GhostRemovalReelectsKeyHolder(t *testing.T) {
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	survivor := NewTestClient(h, survivorUID, make(chan []byte, 8))
 	survivor.voice.setState(chID, "tok-survivor")
-	h.clients[survivorUID] = survivor
+	h.clients[survivorUID] = []*Client{survivor}
 
 	// Simulate the stale-holder precondition from the finding: the ghost is
 	// still recorded as key holder (e.g. from before it dropped out of
@@ -232,7 +233,7 @@ func TestCleanupVoiceForChannel_ConcurrentJoinNotClobbered(t *testing.T) {
 
 	h := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	c := NewTestClient(h, uid, make(chan []byte, 8))
-	h.clients[uid] = c
+	h.clients[uid] = []*Client{c}
 	c.voice.setState(chA, "tok-a")
 	h.pubsub.Subscribe(c, VoiceTopic(chA))
 
@@ -282,7 +283,7 @@ func TestSweepStaleVoiceStates_CommittedGhostDeleteStillBroadcastsAfterCancel(t 
 	send := make(chan []byte, 8)
 	survivor := NewTestClient(h, survivorUID, send)
 	survivor.voice.setState(chID, "tok-survivor")
-	h.clients[survivorUID] = survivor
+	h.clients[survivorUID] = []*Client{survivor}
 	h.pubsub.Subscribe(survivor, VoiceTopic(chID))
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -10,6 +10,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
 
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
@@ -102,6 +105,7 @@ func newCRSWAF(paranoiaLevel int, block bool, onMatch func(types.MatchedRule)) (
 				# raw image bytes) under CRS blocking mode.
 				SecRule REQUEST_URI "@beginsWith /api/v1/admin/plugins/install" "id:1002,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/avatar" "id:1003,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
+				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/banner" "id:1005,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 				SecRule REQUEST_METHOD "@streq POST" "id:1004,phase:1,pass,nolog,chain"
 					SecRule REQUEST_URI "@rx ^/api/v1/dms/[0-9]+/icon([?]|$)" "ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 
@@ -130,6 +134,25 @@ func newCRSWAF(paranoiaLevel int, block bool, onMatch func(types.MatchedRule)) (
 	)
 }
 
+// logURIPath is the request target without its query string, for log lines:
+// a query can carry a credential, so only the path is recorded. A target that
+// does not parse is cut at the first '?'.
+func logURIPath(raw string) string {
+	if u, err := url.ParseRequestURI(raw); err == nil {
+		return u.EscapedPath()
+	}
+	path, _, _ := strings.Cut(raw, "?")
+	return path
+}
+
+// linkQueryValue matches a file-link query value inside text a rule reports.
+var linkQueryValue = regexp.MustCompile(`(?i)(link=)[^&\s"']+`)
+
+// scrubLogQuery blanks any file-link value in text taken from a matched rule.
+func scrubLogQuery(s string) string {
+	return linkQueryValue.ReplaceAllString(s, "${1}[removed]")
+}
+
 // logCRSMatch is the per-rule CRS match logger. It is used for the block-mode
 // default (blocked requests are rare and their per-rule detail is wanted) and
 // whenever a caller supplies it explicitly (tests). The default detect-mode
@@ -138,9 +161,9 @@ func logCRSMatch(mr types.MatchedRule) {
 	slog.Warn("waf: CRS rule matched",
 		"rule_id", mr.Rule().ID(),
 		"severity", mr.Rule().Severity().String(),
-		"uri", mr.URI(),
-		"msg", mr.Message(),
-		"data", mr.Data(),
+		"uri", logURIPath(mr.URI()),
+		"msg", scrubLogQuery(mr.Message()),
+		"data", scrubLogQuery(mr.Data()),
 	)
 }
 
@@ -180,8 +203,8 @@ func logCRSMatchesAggregate(tx types.Transaction) {
 		if sev := mr.Rule().Severity(); len(ids) == 1 || sev < topSev {
 			topSev = sev
 			topRuleID = mr.Rule().ID()
-			topURI = mr.URI()
-			topMsg = mr.Message()
+			topURI = logURIPath(mr.URI())
+			topMsg = scrubLogQuery(mr.Message())
 		}
 	}
 	if len(ids) == 0 {
@@ -259,12 +282,13 @@ func wafInlineEngine(paranoiaLevel int) (coraza.WAF, error) {
 
 				# Exclude the other routes with a larger-than-1-MiB app-level
 				# cap too (see bodyCapExemptPrefixes in constants.go: 16 MiB
-				# plugin installs, 2 MiB avatars). Without this, coraza's
+				# plugin installs, 3 MiB avatars, 5 MiB banners). Without this, coraza's
 				# default SecRequestBodyLimitAction (Reject) 413s any body
 				# that reaches this engine's 1 MiB SecRequestBodyLimit before
 				# the app's own, larger limit is ever consulted.
 				SecRule REQUEST_URI "@beginsWith /api/v1/admin/plugins/install" "id:900004,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/avatar" "id:900005,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
+				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/banner" "id:900007,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 				SecRule REQUEST_METHOD "@streq POST" "id:900006,phase:1,pass,nolog,chain"
 					SecRule REQUEST_URI "@rx ^/api/v1/dms/[0-9]+/icon([?]|$)" "ctl:requestBodyAccess=Off"
 			`, paranoiaLevel)),

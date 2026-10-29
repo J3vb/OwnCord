@@ -23,6 +23,8 @@ import {
   voiceStore,
   setPeerVerification,
   clearPeerVerifications,
+  setLocalSafetyNumber,
+  setLocalSessionFingerprint,
   clearPeerVerification,
   type VoiceUser,
 } from "../../src/stores/voice.store";
@@ -212,6 +214,8 @@ beforeEach(() => {
 
 afterEach(() => {
   clearPeerVerifications();
+  setLocalSafetyNumber(null);
+  setLocalSessionFingerprint(null);
   voiceStore.flush();
   panel?.destroy?.();
   panel = null;
@@ -955,6 +959,38 @@ describe("DmCallPanel — video in the call", () => {
     expect(people.map((p) => p.userId)).toEqual([SELF, OTTO]);
     expect(people[0]!.content.classList.contains("dcp-avatar--ringing")).toBe(false);
     expect(people[1]!.content.classList.contains("dcp-avatar--ringing")).toBe(true);
+  });
+
+  it("[F-11] shows your own safety number on your own shield while you are in the call", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { opts, root } = mount();
+    panel!.setVideoActive(true);
+    hostAvatars(opts);
+    expect(shield(root, SELF)).toBeNull();
+
+    patchVoice({ localSafetyNumber: "AB12 CD34", localSessionFingerprint: "5E55 1234" });
+    const own = shield(root, SELF)!;
+    expect(own).not.toBeNull();
+    expect(own.tagName).toBe("SPAN");
+    expect(own.title).toContain("Your safety number: AB12 CD34");
+    expect(own.title).toContain("5E55 1234");
+    expect(own.getAttribute("aria-label")).toBe(own.title);
+
+    // A new session's numbers redraw it; leaving the session removes it.
+    patchVoice({ localSafetyNumber: "FFFF 0000" });
+    expect(shield(root, SELF)!.title).toContain("FFFF 0000");
+    patchVoice({ localSafetyNumber: null, localSessionFingerprint: null });
+    expect(shield(root, SELF)).toBeNull();
+  });
+
+  it("[F-11] shows no own shield when the numbers belong to another call", () => {
+    const elsewhere = 555;
+    setVoice(elsewhere, [vu(SELF)], elsewhere);
+    patchVoice({ localSafetyNumber: "AB12 CD34", localSessionFingerprint: "5E55 1234" });
+    const { root } = mount();
+    panel!.setIncoming(ring);
+    patchVoice({ localSafetyNumber: "AB12 CD35" });
+    expect(shield(root, SELF)).toBeNull();
   });
 
   it("moves a blocked peer's shield with their camera tile, and back when it goes", async () => {

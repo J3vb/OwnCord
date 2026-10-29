@@ -95,6 +95,14 @@ describe("IdentityMismatchModal", () => {
     expect(onReject).toHaveBeenCalledOnce();
   });
 
+  it("stays open when a drag-select ends on the backdrop", () => {
+    const { onReject } = mountModal();
+    const overlayEl = container.querySelector(".modal-overlay") as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onReject).not.toHaveBeenCalled();
+  });
+
   it("does not call onReject when the modal body is clicked", () => {
     const { onReject } = mountModal();
     const modal = container.querySelector(".modal") as HTMLDivElement;

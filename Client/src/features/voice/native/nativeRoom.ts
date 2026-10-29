@@ -51,7 +51,7 @@ import { nativeCounters } from "./counters";
 const DECRYPT_REPORT_MS = 1000;
 import { NativeVideoRenderer } from "./videoRenderer";
 import { NativeCameraTrack } from "./nativeCameraTrack";
-import { CameraSwitchUnavailable } from "../cameraSwitch";
+import { CameraDeviceUnusable, CameraSwitchUnavailable } from "../cameraSwitch";
 import { NativeScreenAudioTrack } from "./screenAudioTrack";
 import {
   NativeScreenTrack,
@@ -71,6 +71,11 @@ import type { StreamQuality } from "@lib/screenShare";
 import type { PublishCodec } from "../videoCodec";
 
 const log = createLogger("nativeRoom");
+
+/** The host's reason for a camera that opened but produced no first frame
+ *  (`TIMED_OUT` in `src-tauri/src/native_voice/camera.rs`). */
+// i18n-exempt: the host's error text matched, never rendered
+const CAMERA_NO_FRAME = "camera capture produced no frame in time";
 
 type Listener = (...args: unknown[]) => void;
 
@@ -714,8 +719,10 @@ export class NativeRoom {
    *  capture beside the old one and swaps the publication's source once it
    *  has a frame (same sid, same preview socket). A host refusal leaves the
    *  old capture running and rejects `CameraSwitchUnavailable`, the cue for
-   *  the restart path; a stop or leave meanwhile is a plain error, which the
-   *  caller drops because the camera it was switching is gone. */
+   *  the restart path, or `CameraDeviceUnusable` when the new device opened
+   *  but gave no frame, where a restart would not help; a stop or leave
+   *  meanwhile is a plain error, which the caller drops because the camera it
+   *  was switching is gone. */
   private async changeCameraDevice(
     session: number,
     track: NativeCameraTrack,
@@ -731,6 +738,7 @@ export class NativeRoom {
         // A stop or leave meanwhile is not an unavailable switch: no restart.
         // i18n-exempt: internal native-room state guard, never rendered
         if (!live()) throw new Error("camera ended during the device change");
+        if (String(err).includes(CAMERA_NO_FRAME)) throw new CameraDeviceUnusable(err);
         throw new CameraSwitchUnavailable(err);
       });
     if (!live()) {

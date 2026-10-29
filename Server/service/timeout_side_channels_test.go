@@ -62,6 +62,13 @@ func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
 		t.Errorf("custom status while timed out = %v, want ErrTimedOut", err)
 	}
 
+	if err := channels.CheckActivityAllowed(ctx, fixtureMember); !errors.Is(err, ErrTimedOut) {
+		t.Errorf("game activity while timed out = %v, want ErrTimedOut", err)
+	}
+	if err := channels.CheckActivityAllowed(ctx, fixtureMember2); err != nil {
+		t.Errorf("game activity by a member who is not timed out = %v, want nil", err)
+	}
+
 	// Changing only the presence status, or clearing the custom status,
 	// publishes no text of the user's own, so it stays allowed.
 	if _, err := channels.HandlePresenceUpdate(ctx, fixtureMember, "idle", nil, nil, nil); err != nil {

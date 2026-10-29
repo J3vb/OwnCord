@@ -7,15 +7,20 @@
 // sends the next frame only after that ack, so a slow renderer skips to the
 // latest frame instead of queueing them.
 //
-// The canvas is exposed as a `MediaStreamTrack` (`canvas.captureStream()`),
-// so the video grid and track lifecycle keep consuming
-// MediaStreams exactly as they do for browser LiveKit tracks.
+// The canvas itself is the picture: it is registered as the surface of a
+// `MediaStreamTrack` (`lib/videoSurface.ts`), and every <video> given that
+// track shows the canvas in its place. The track keeps the video grid and
+// track lifecycle consuming MediaStreams exactly as they do for browser
+// LiveKit tracks, but carries no frames (`captureStream(0)`): on some
+// WebKitGTK GPU stacks a captured canvas reaches a <video> as its first frames
+// only, and remote video froze on them.
 //
 // Lifecycle (B7-11): the owner (`NativeRoom`) disposes it when the track is
 // unsubscribed or the room disconnects; dispose closes the socket, stops the
-// captured track and releases the GL context. The frame server also closes
-// every socket when the native session ends.
+// track, takes the canvas down and releases the GL context. The frame server
+// also closes every socket when the native session ends.
 import { createLogger } from "../../../lib/logger";
+import { registerVideoSurface } from "../../../lib/videoSurface";
 import { nativeCounters } from "./counters";
 
 const log = createLogger("nativeVideo");
@@ -111,15 +116,37 @@ function setup(gl: WebGL2RenderingContext): WebGLTexture[] {
 
 export class NativeVideoRenderer {
   readonly mediaStreamTrack: MediaStreamTrack;
-  private readonly canvas = document.createElement("canvas");
+  /** The picture, shown by any <video> given `mediaStreamTrack`. */
+  readonly canvas = document.createElement("canvas");
   private readonly gl: WebGL2RenderingContext | null;
   private socket: WebSocket;
   private disposed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** `url`: the frame socket's `/remote/<sid>` route for one track. */
-  constructor(private readonly url: string) {
+  /** `url`: the frame socket's `/remote/<sid>` route for one track.
+   *  `onClosed`: called instead of reopening when the host closes the socket
+   *  (the settings camera preview, which picks its next source itself). */
+  constructor(
+    private readonly url: string,
+    private readonly onClosed?: () => void,
+  ) {
+    // No picture until the first frame: 0x0, not the default 300x150.
+    this.canvas.width = 0;
+    this.canvas.height = 0;
     this.gl = this.canvas.getContext("webgl2", { alpha: false, antialias: false, depth: false });
+    this.setup();
+    // The canvas moves between documents with its tile (the pop-out window):
+    // should WebKit drop the context there, take it back and set it up again.
+    this.canvas.addEventListener("webglcontextlost", (e) => e.preventDefault());
+    this.canvas.addEventListener("webglcontextrestored", () => this.setup());
+    this.canvas.className = "video-surface";
+    this.mediaStreamTrack = this.canvas.captureStream(0).getVideoTracks()[0]!;
+    registerVideoSurface(this.mediaStreamTrack, this.canvas);
+    this.socket = this.openSocket();
+    nativeCounters.videoRenderers++;
+  }
+
+  private setup(): void {
     try {
       // i18n-exempt: internal WebGL guard, never rendered
       if (this.gl === null) throw new Error("WebGL2 unavailable");
@@ -128,9 +155,6 @@ export class NativeVideoRenderer {
       // The tile stays black; everything else (audio, the call) carries on.
       log.error("native video renderer setup failed", err);
     }
-    this.mediaStreamTrack = this.canvas.captureStream().getVideoTracks()[0]!;
-    this.socket = this.openSocket();
-    nativeCounters.videoRenderers++;
   }
 
   private openSocket(): WebSocket {
@@ -145,7 +169,10 @@ export class NativeVideoRenderer {
     });
     // A dropped loopback socket (the host restarted) used to freeze the tile
     // for the rest of the call; reopen it (voice #13).
-    socket.addEventListener("close", () => this.scheduleReconnect());
+    socket.addEventListener("close", () => {
+      if (this.onClosed === undefined) this.scheduleReconnect();
+      else if (!this.disposed) this.onClosed();
+    });
     return socket;
   }
 
@@ -191,6 +218,7 @@ export class NativeVideoRenderer {
     }
     this.socket.close();
     this.mediaStreamTrack.stop();
+    this.canvas.remove();
     this.gl?.getExtension("WEBGL_lose_context")?.loseContext();
   }
 }

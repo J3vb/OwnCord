@@ -41,7 +41,9 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 // a format it cannot encode, one too large to decode within
 // thumbMaxDecodeBytes or one that does not decode — is served as the original.
 // A failed generation is kept as an empty thumbnail, so it is never retried.
-// A file that is not an image is a 404.
+// A file that is not an image is a 404. HEIC, HEIF and TIFF originals are the
+// exception to "served as the original": their preview is always a JPEG, and a
+// failed conversion is a 404 (serveConvertedPreview).
 func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
 	slots := make(chan struct{}, thumbConcurrency)
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +53,10 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 		}
 		if !strings.HasPrefix(aa.MimeType, "image/") {
 			http.NotFound(w, r)
+			return
+		}
+		if format := convertedFormat(aa.MimeType); format != "" {
+			serveConvertedPreview(w, r, aa, uploads, store, slots, format, allowedOrigins)
 			return
 		}
 		format := thumbFormat(aa.MimeType)
@@ -100,6 +106,59 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 			return
 		}
 		serveFileContent(w, r, aa, aa.MimeType, time.Now(), bytes.NewReader(thumb), allowedOrigins)
+	}
+}
+
+// serveConvertedPreview answers the thumbnail route for a HEIC, HEIF or TIFF
+// original (WP 8.12): always a JPEG, even for a picture already inside
+// thumbBox, because no webview shows the original. Generated once under the
+// same slot as every other thumbnail and then kept; a conversion that fails or
+// is refused is kept as an empty thumbnail and answered 404 from then on, so it
+// is decoded at most once and the original bytes are never served as an image.
+func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, uploads *service.UploadService, store FileStore, slots chan struct{}, format string, allowedOrigins []string) {
+	serveKept := func(t storage.File) {
+		defer t.Close() //nolint:errcheck
+		serveFileContent(w, r, aa, convertedPreviewMIME, fileModTime(t), t, allowedOrigins)
+	}
+	t, found := keptThumb(store, aa.StoredAs)
+	if t != nil {
+		serveKept(t)
+		return
+	}
+	if found {
+		http.NotFound(w, r)
+		return
+	}
+	f, err := store.Open(aa.StoredAs)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close() //nolint:errcheck
+	select {
+	case slots <- struct{}{}:
+	case <-r.Context().Done():
+		return
+	}
+	// A request that waited for the slot may find the preview already made.
+	t, found = keptThumb(store, aa.StoredAs)
+	var preview []byte
+	if t == nil && !found {
+		var convErr error
+		preview, convErr = makeConvertedPreview(f, format)
+		if convErr != nil {
+			slog.Warn("could not convert an image preview", "stored_as", aa.StoredAs, "error", convErr)
+		}
+		keepThumbnail(r.Context(), uploads, store, aa.StoredAs, preview)
+	}
+	<-slots
+	switch {
+	case t != nil:
+		serveKept(t)
+	case preview != nil:
+		serveFileContent(w, r, aa, convertedPreviewMIME, time.Now(), bytes.NewReader(preview), allowedOrigins)
+	default:
+		http.NotFound(w, r)
 	}
 }
 
@@ -227,7 +286,7 @@ func writeFileAccessError(w http.ResponseWriter, r *http.Request, fileID string,
 	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
 		// B5-7: the response carries the code and nothing else — no detail
 		// that could distinguish it from any other refusal on this route.
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "NSFW_ACKNOWLEDGEMENT_REQUIRED"})
+		writeErr(w, http.StatusForbidden, "NSFW_ACKNOWLEDGEMENT_REQUIRED", "")
 	case errors.Is(err, service.ErrForbidden):
 		writeErr(w, http.StatusForbidden, "FORBIDDEN", "you do not have access to this file")
 	default:

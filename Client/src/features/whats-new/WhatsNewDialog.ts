@@ -4,8 +4,10 @@
  * live on Settings › About, which the dialog links to.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "../../lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/a11y";
+import { closeOnBackdropClick } from "../../lib/modalFactory";
 import { createElement, appendChildren } from "../../lib/dom";
 import { createIcon } from "../../lib/icons";
 import { whatsNewText as t } from "../../i18n/whatsNew";
@@ -103,17 +105,11 @@ export function showWhatsNewDialog(
 
   appendChildren(modal, header, body, footer);
   overlay.appendChild(modal);
-  overlay.addEventListener(
-    "click",
-    (e) => {
-      if (e.target === overlay) close();
-    },
-    { signal: disposable.signal },
-  );
+  closeOnBackdropClick(overlay, () => close(), disposable.signal);
   document.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape" && !isImeCommit(e)) close();
     },
     { signal: disposable.signal },
   );

@@ -82,6 +82,11 @@ func BroadcastEmojiSetForTest(ctx context.Context, svc *service.Services, broadc
 	broadcastEmojiSet(ctx, svc, broadcaster)
 }
 
+// BroadcastStickerSetForTest exposes broadcastStickerSet for external tests.
+func BroadcastStickerSetForTest(ctx context.Context, svc *service.Services, broadcaster StickerBroadcaster) {
+	broadcastStickerSet(ctx, svc, broadcaster)
+}
+
 // SetGIFUpstreamForTest points the GIF proxy at a stub upstream and returns a
 // restore func.
 //
@@ -237,3 +242,49 @@ func SetRestRequestDeadlineForTest(t testing.TB, d time.Duration) {
 	restRequestDeadline = d
 	t.Cleanup(func() { restRequestDeadline = old })
 }
+
+// ValidateHEICForTest exposes validateHEIC for external tests.
+func ValidateHEICForTest(r io.ReaderAt, size int64) (quarterTurn bool, err error) {
+	info, err := validateHEIC(r, size)
+	return info.quarterTurn, err
+}
+
+// SetFileLinkTTLForTest shortens the minted file-link lifetime and returns the
+// restore func.
+func SetFileLinkTTLForTest(d time.Duration) func() {
+	old := fileLinkTTL
+	fileLinkTTL = d
+	return func() { fileLinkTTL = old }
+}
+
+// FileLinkMaxEntriesForTest is the link map's hard cap.
+const FileLinkMaxEntriesForTest = fileLinkMaxEntries
+
+// FileLinksForTest exposes the link store so the cap and sweep can be driven
+// without minting thousands of sessions.
+type FileLinksForTest struct{ l *fileLinks }
+
+func NewFileLinksForTest(now func() time.Time) *FileLinksForTest {
+	l := newFileLinks()
+	l.now = now
+	return &FileLinksForTest{l: l}
+}
+
+func (f *FileLinksForTest) Issue(fileID, hash string) (string, time.Time, error) {
+	return f.l.issue(fileID, hash)
+}
+
+func (f *FileLinksForTest) Lookup(token, fileID string) (string, bool) {
+	return f.l.lookup(token, fileID)
+}
+
+func (f *FileLinksForTest) Size() int { return f.l.size() }
+
+// SniffMIMEForTest exposes the upload content sniffer.
+func SniffMIMEForTest(header []byte) string { return sniffMIME(header) }
+
+// Link-store limits the tests drive.
+const (
+	FileLinkMaxPerCredentialForTest   = fileLinkMaxPerCredential
+	FileLinkRateLimitPerMinuteForTest = fileLinkRateLimitPerMinute
+)

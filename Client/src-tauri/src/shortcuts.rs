@@ -104,6 +104,11 @@ pub struct Triggers {
     pub ptt: Option<String>,
     pub mute: Option<String>,
     pub deafen: Option<String>,
+    /// The portal holds all three of our shortcuts but names none of their
+    /// keys (xdg-desktop-portal-hyprland always does; the user binds them in
+    /// the compositor's config).
+    #[serde(skip)]
+    pub unnamed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -115,6 +120,12 @@ pub struct GlobalKeysStatus {
     pub triggers: Triggers,
     /// Whether the portal can open its own shortcut settings (version 2+).
     pub can_configure: bool,
+    /// The portal holds our shortcuts but names none of their keys, so the
+    /// user assigns them in the desktop's own settings.
+    pub triggers_unnamed: bool,
+    /// The portal refused to open a session for us, so no shortcut can work
+    /// until it does.
+    pub session_refused: bool,
 }
 
 impl GlobalKeysStatus {
@@ -122,9 +133,18 @@ impl GlobalKeysStatus {
         Self {
             backend,
             portal_version,
-            triggers,
             can_configure: backend == Backend::Portal && portal_version >= 2,
+            triggers_unnamed: backend == Backend::Portal && triggers.unnamed,
+            session_refused: false,
+            triggers,
         }
+    }
+
+    /// The same status with the portal's refusal of our session recorded.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub(crate) fn with_refused(mut self, refused: bool) -> Self {
+        self.session_refused = refused;
+        self
     }
 
     pub(crate) fn without_triggers(backend: Backend) -> Self {
@@ -132,12 +152,13 @@ impl GlobalKeysStatus {
     }
 
     /// Whether a push-to-talk press can arrive. On the portal path that needs
-    /// a bound trigger and a desktop known to send the release.
+    /// a bound trigger (or a portal that holds the shortcut without naming
+    /// its key) and a desktop known to send the release.
     pub(crate) fn ptt_supported(&self, xdg_current_desktop: Option<&str>) -> bool {
         match self.backend {
             Backend::Polling => true,
             Backend::Portal => {
-                self.triggers.ptt.is_some()
+                (self.triggers.ptt.is_some() || self.triggers.unnamed)
                     && portal_ptt_allowed(xdg_current_desktop, PORTAL_PTT_DENY)
             }
             Backend::None => false,
@@ -489,6 +510,8 @@ mod tests {
                 "portalVersion": 2,
                 "triggers": { "ptt": "F8", "mute": null, "deafen": null },
                 "canConfigure": true,
+                "triggersUnnamed": false,
+                "sessionRefused": false,
             })
         );
     }

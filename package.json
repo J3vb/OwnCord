@@ -17,10 +17,10 @@
     "release:preflight": "node scripts/run.mjs release:preflight",
     "changelog": "changelogen",
     "release": "changelogen --release",
-    "hooks:install": "git config core.hooksPath .githooks"
+    "hooks:install": "git config core.hooksPath .githooks && git config merge.findings-ledger.driver \"node scripts/merge-ledger.mjs %O %A %B %P\""
   },
   "devDependencies": {
     "changelogen": "^0.6.2",
-    "prettier": "^3.9.9"
+    "prettier": "^3.9.10"
   }
 }

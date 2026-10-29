@@ -161,6 +161,68 @@ func TestCallLog_EndReachesTheStartAudience(t *testing.T) {
 	}
 }
 
+// A member removed from a group mid-call gets no end frame; the others do.
+func TestCallLog_GroupEndSkipsARemovedMember(t *testing.T) {
+	f := newCallLogFixture(t)
+	ctx := context.Background()
+	seedUser(t, f.database, &db.User{ID: clCarol, Username: "carol"})
+	seedDMParticipant(t, f.database, clDM, clCarol)
+	if _, err := f.database.ExecContext(ctx, `UPDATE channels SET is_group = 1 WHERE id = ?`, clDM); err != nil {
+		t.Fatal(err)
+	}
+	f.join(t, clAlice, clDM)
+	f.pass(t)
+	if aud := f.sink.created[0].Audience; !slices.Equal(aud, []int64{clAlice, clBob, clCarol}) {
+		t.Fatalf("start audience = %v, want every member", aud)
+	}
+	if _, err := f.database.ExecContext(ctx,
+		`DELETE FROM dm_participants WHERE channel_id = ? AND user_id = ?`, clDM, clCarol); err != nil {
+		t.Fatal(err)
+	}
+	f.endAfterLeave(t, clAlice)
+	if _, ended := f.sink.counts(); ended != 1 {
+		t.Fatalf("ended frames = %d", ended)
+	}
+	if aud := f.sink.ended[0].Audience; !slices.Equal(aud, []int64{clAlice, clBob}) {
+		t.Errorf("end audience = %v, want the current members only", aud)
+	}
+}
+
+// A failed participant read at the end announces nothing but still ends the row.
+func TestCallLog_EndTargetsErrorAnnouncesNothing(t *testing.T) {
+	f := newCallLogFixture(t)
+	st := &flakyTargetsStore{Store: f.database}
+	f.svc.st = st
+	f.join(t, clAlice, clDM)
+	f.pass(t)
+	oc := f.open(t, clDM)
+	if oc == nil {
+		t.Fatal("call was not logged")
+	}
+	st.fail.Store(true)
+	f.endAfterLeave(t, clAlice)
+	if _, ended := f.sink.counts(); ended != 0 {
+		t.Errorf("ended frames = %d, want none when the participant read fails", ended)
+	}
+	if f.open(t, clDM) != nil {
+		t.Error("the call is still open")
+	}
+	if f.info(t, oc.MessageID).EndedAt == nil {
+		t.Error("the ended row was not stored")
+	}
+}
+
+// endAfterLeave takes userID out of the room and runs the worker past the end grace.
+func (f *callLogFixture) endAfterLeave(t *testing.T, userID int64) {
+	t.Helper()
+	f.clock.advance(5 * time.Second)
+	f.leave(t, userID, clDM)
+	f.clock.advance(2 * time.Second)
+	f.pass(t)
+	f.clock.advance(11 * time.Second)
+	f.svc.reconcileDue(context.Background())
+}
+
 // A note left in the dirty map cannot open a second row after the end.
 func TestCallLog_DueEndTakesTheChannelsPendingNotes(t *testing.T) {
 	f := newCallLogFixture(t)

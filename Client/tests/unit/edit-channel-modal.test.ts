@@ -312,6 +312,16 @@ describe("EditChannelModal", () => {
     modal.destroy?.();
   });
 
+  it("stays open when a drag-select ends on the backdrop", () => {
+    const onClose = vi.fn();
+    const { modal } = makeModal({ onClose });
+    const overlayEl = container.querySelector("[data-testid='edit-channel-modal']") as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onClose).not.toHaveBeenCalled();
+    modal.destroy?.();
+  });
+
   it("adds error class to input on empty name validation", () => {
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave });
@@ -684,6 +694,19 @@ describe("EditChannelModal", () => {
 
       expect(onClose).toHaveBeenCalledTimes(1);
       expect(onSave).not.toHaveBeenCalled();
+      modal.destroy?.();
+    });
+
+    it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () => {
+      const onClose = vi.fn();
+      const { modal } = makeModal({ onClose });
+
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+      );
+      expect(onClose).not.toHaveBeenCalled();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(onClose).toHaveBeenCalledTimes(1);
       modal.destroy?.();
     });
 

@@ -85,9 +85,25 @@ button.msg-thread-chip:hover {
 }
 .thread-panel-slot.open {
   display: flex;
+  position: relative;
+}
+/* The width handle on the panel's left edge (paneResize.ts sets the width). */
+.thread-panel-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.thread-panel-resize:hover,
+.thread-panel-resize:focus-visible {
+  background: var(--accent-primary, var(--accent));
 }
 .thread-panel {
-  width: 380px;
+  width: var(--thread-panel-width, 380px);
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -173,6 +189,9 @@ button.msg-thread-chip:hover {
   .thread-panel {
     width: 100%;
     border-left: none;
+  }
+  .thread-panel-resize {
+    display: none;
   }
 }
 

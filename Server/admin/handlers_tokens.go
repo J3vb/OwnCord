@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -14,16 +13,20 @@ import (
 // These are the HTTP-panel equivalent of `server token create|list|revoke`
 // (token_cli.go). Both are thin adapters over service.TokenService, which is
 // what keeps them in sync — they used to wrap the same db.*APIToken calls
-// twice and had already drifted apart. All three routes are Owner-gated in
-// api.go: minting a long-lived bearer credential over the network is the one
-// admin action that, via a hijacked session, would outlive a password change
-// or an admin force-logout (API tokens deliberately live outside the session
-// table; only sign-out-everywhere and account recovery revoke them), so it
-// stays behind the Owner role rather than the broad ADMINISTRATOR bit.
+// twice and had already drifted apart. All three routes sit behind the
+// owner-or-MANAGE_TOKENS gate in api.go (WP 8.4d): minting a long-lived bearer
+// credential over the network is the one admin action that, via a hijacked
+// session, would outlive a password change or an admin force-logout (API
+// tokens deliberately live outside the session table; only sign-out-everywhere
+// and account recovery revoke them), so it stays behind the Owner role or the
+// explicit bit, never the broad ADMINISTRATOR bit. The owner sees and manages
+// every token; a holder who is not the owner is confined to their own.
 
 func handleListAPITokens(tokens *service.TokenService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		list, err := tokens.List(r.Context())
+		// A MANAGE_TOKENS holder who is not the owner sees only the tokens
+		// bound to them (WP 8.4d).
+		list, err := tokens.ListFor(r.Context(), actorFromContext(r), isOwnerFromContext(r))
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list tokens")
 			return
@@ -53,8 +56,7 @@ type createTokenResponse struct {
 func handleCreateAPIToken(tokens *service.TokenService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createTokenRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 		// expires_hours=0 means "never expires" (see createTokenRequest doc).
@@ -67,9 +69,14 @@ func handleCreateAPIToken(tokens *service.TokenService) http.HandlerFunc {
 			return
 		}
 
-		minted, err := tokens.Create(r.Context(), actorFromContext(r),
+		// A MANAGE_TOKENS holder who is not the owner mints for themself only
+		// (WP 8.4d); another username is a 403.
+		minted, err := tokens.CreateFor(r.Context(), actorUserFromContext(r), isOwnerFromContext(r),
 			req.Username, req.Label, time.Duration(req.ExpiresHours)*time.Hour)
 		switch {
+		case errors.Is(err, service.ErrForbidden):
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", "you can only create tokens for your own account")
+			return
 		case errors.Is(err, service.ErrBadRequest):
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 			return
@@ -98,7 +105,8 @@ func handleRevokeAPIToken(tokens *service.TokenService) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid token id")
 			return
 		}
-		switch err := tokens.Revoke(r.Context(), actorFromContext(r), id); {
+		// A holder who is not the owner revokes only their own (WP 8.4d).
+		switch err := tokens.RevokeFor(r.Context(), actorFromContext(r), id, isOwnerFromContext(r)); {
 		case errors.Is(err, service.ErrNotFound):
 			writeErr(w, http.StatusNotFound, "NOT_FOUND", "no active token with that id")
 			return

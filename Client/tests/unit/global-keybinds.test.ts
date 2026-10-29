@@ -569,6 +569,22 @@ describe("global keybinds", () => {
       expect(h.onToggleDeafen).toHaveBeenCalledOnce();
     });
 
+    it("a held Ctrl+M or Ctrl+D alias toggles once (auto-repeat is ignored)", () => {
+      const h = makeHandlers();
+      detach = attachGlobalKeybinds(h);
+
+      press("m", { code: "KeyM" });
+      const muteRepeat = press("m", { code: "KeyM", repeat: true });
+      press("m", { code: "KeyM", repeat: true });
+      press("d", { code: "KeyD" });
+      const deafenRepeat = press("d", { code: "KeyD", repeat: true });
+
+      expect(h.onToggleMute).toHaveBeenCalledOnce();
+      expect(h.onToggleDeafen).toHaveBeenCalledOnce();
+      expect(muteRepeat.defaultPrevented).toBe(true);
+      expect(deafenRepeat.defaultPrevented).toBe(true);
+    });
+
     it("stands down while the global poller is active, still swallowing the key", () => {
       const h = makeHandlers();
       detach = attachGlobalKeybinds({ ...h, isGlobalPollerActive: () => true });

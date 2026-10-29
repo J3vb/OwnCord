@@ -96,15 +96,15 @@ The sequence number system enables reconnection with state recovery.
 
 ### Which Messages Get seq
 
-| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                          |
-| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                               |
-| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                            |
-| Ephemeral          | No       | `typing`, `upload_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
-| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                            |
-| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                        |
-| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                                                  |
-| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                       |
+| Category           | Has seq? | Examples                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Channel broadcasts | Yes      | `chat_message`, `chat_edited`, `chat_deleted`, `chat_bulk_deleted`, `chat_pinned`, `reaction_update`, `poll_update`                                                                                                                                                                                                                                                   |
+| Global broadcasts  | Yes      | `presence`, `presence_batch` (see below), `member_join`, `member_update`, `member_ban`, `roles_update`, `emoji_update`, `sticker_update`, `voice_state` (broadcast form; see below), `voice_leave`, `channel_update`, `channel_delete`, `server_restart`                                                                                                              |
+| Ephemeral          | No       | `typing`, `upload_policy` (see below), `game_activity_policy` (see below), a full `presence_batch` snapshot (see below), `mod_queue`, `mod_action`, `member_timeouts` (see below), `channel_categories` (see below), `appeal_status`, `mention_count`, `read_state`, `channel_activity`, `thread_follow_update`, `channel_create` (targeted per recipient; see below) |
+| DM chat events     | Yes      | DM `chat_message`, `chat_edited`, `chat_deleted`, `reaction_update`, `poll_update` — sequenced and replayable exactly like channel broadcasts, delivered only to the DM's participants                                                                                                                                                                                |
+| DM lifecycle       | No       | `dm_channel_open`, `dm_channel_close`, `dm_request` (B5-6)                                                                                                                                                                                                                                                                                                            |
+| Call signalling    | No       | `call_incoming`, `call_declined`                                                                                                                                                                                                                                                                                                                                      |
+| Direct responses   | No       | `auth_ok`, `auth_error`, `chat_send_ok`, `chat_forward_ok`, `poll_create_ok`, `poll_vote_ok`, `poll_end_ok`, `error`, `voice_config`, `voice_token`, `pong`                                                                                                                                                                                                           |
 
 **Presence is sequenced, but droppable.** Connect and disconnect presence
 arrives as `presence_batch` (one frame per coalescing window), a status change
@@ -149,14 +149,28 @@ After the WebSocket connection is established, the client sends the first messag
 }
 ```
 
-| Field               | Type     | Required | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `token`             | string   | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `last_seq`          | uint64   | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `active_channel_id` | int64    | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                                                                                                                                                                                           |
-| `wake`              | bool     | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). The server refuses it with `ANOTHER_DEVICE_ACTIVE` (an `error` frame) when a different session of the same account holds the live connection or a call it parked in the voice grace window, so a woken device cannot silently displace another. Kept on every later dial (including a user's Retry) until one authenticates; only an explicit takeover ("Use here") omits it. |
-| `epoch`             | int      | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                                                                                                                                                                                           |
-| `features`          | string[] | No       | Optional capabilities this client can render, declared once per connection (see [Client features](#client-features)). Absent means none. Only `"forums"` is defined; unknown names are ignored. The list is untrusted input and only ever narrows what the socket is sent.                                                                                                                                                                                                                 |
+| Field                 | Type     | Required | Description                                                                                                                                                                                                                                                                                                               |
+| --------------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `token`               | string   | Yes      | Session token obtained from `POST /api/v1/auth/login`                                                                                                                                                                                                                                                                     |
+| `last_seq`            | uint64   | No       | Last sequence number received. If > 0, server attempts replay. Default 0.                                                                                                                                                                                                                                                 |
+| `active_channel_id`   | int64    | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                          |
+| `wake`                | bool     | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). Servers that keep one connection per device session accept it like any other dial; the flag is ignored. Older servers refused it with `ANOTHER_DEVICE_ACTIVE` while a different session held the connection. |
+| `epoch`               | int      | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                          |
+| `features`            | string[] | No       | Optional capabilities this client can render, declared once per connection (see [Client features](#client-features)). Absent means none. Only `"forums"` is defined; unknown names are ignored. The list is untrusted input and only ever narrows what the socket is sent.                                                |
+| `identity_public_key` | string   | No       | This device's voice E2EE identity public key (base64, at most 128 characters, same rules as `identity_public_key` on `PATCH /users/me`). See [Identity key per device](#identity-key-per-device). An invalid or wrongly typed value is ignored and logged; it never fails the handshake.                                  |
+
+#### Identity key per device
+
+Each device keeps its own identity keypair, and several devices of one account
+can be connected at once, so the account's single published key
+(`users.identity_public_key`) cannot say which key signed a given voice
+announce. The key therefore travels with the connection: the server keeps the
+`identity_public_key` from a connection's `auth` frame on that connection and
+on its session row (`sessions.identity_public_key`, rewritten on every connect),
+and attaches it to every `voice_e2ee_announce` that connection makes (see
+[voice_e2ee_announce (Server -> Client)](#voice_e2ee_announce-server---client-broadcast-to-voice-channel)).
+The field is optional: an older client sends none, and its announces carry
+none. `users.identity_public_key` and `PATCH /users/me` are unchanged.
 
 `active_channel_id` closes a resume-only gap. The hub restores a reconnecting
 client's channel subscription by copying it from the previous connection entry,
@@ -177,19 +191,42 @@ the same frames.
 Clients should still send `channel_focus` after `auth_ok` — it remains the
 fallback for servers that predate this field, and it is idempotent.
 
-`wake` carries no privilege and grants nothing: it only asks the server not to
-displace a **different** session's live connection or a call it parked in the
-voice grace window. The server holds one live socket per account (last connect
-wins), so a device dialling on its own after a suspend could otherwise end the
-call on the machine the user is actually at. When a different session is live,
-or has a call parked in the grace window, the server answers an `error` frame
-with code `ANOTHER_DEVICE_ACTIVE` (not `auth_error` — the token is still valid)
-and closes without touching that session; the client stays signed in and offers
-"Use here", which reconnects **without** `wake` and takes the connection back.
-With no other session — or when the live connection or parked call is this same
-session's own — the wake connects normally. Only an explicit takeover ("Use
-here") omits `wake`; every other dial after a suspend, including a user's Retry,
-keeps it until one authenticates.
+`wake` carries no privilege and grants nothing. The server keeps one live
+connection per **device session** (the session token the socket authenticated
+with), not one per account, so a device dialling on its own after a suspend no
+longer displaces another device and is never refused: it connects alongside the
+others. The flag is accepted and ignored. `ANOTHER_DEVICE_ACTIVE` is no longer
+sent; the code stays in the protocol for clients that still talk to an older
+server, which refused a wake dial while a different session held the live
+connection or a call parked in the voice grace window.
+
+#### Connection model
+
+- One connection per device session. A user may be connected from several
+  devices at once, each on its own session token; everything addressed to "the
+  user" (direct messages, read state, mention counts, permission and role
+  changes, timeouts, settings) reaches every connection.
+- A new connection replaces an older one only when it is the **same session**
+  (a reload, a network reconnect, a wake on the same device). The older socket
+  receives `SESSION_REPLACED` and is closed; the new one carries on.
+- At most 10 connections per user. The 11th evicts the oldest connection of a
+  different session with `SESSION_REPLACED`.
+- Presence is online while any connection exists; the user goes offline, once,
+  when the last one drops.
+- A ban, sign-out-everywhere or an admin disconnect closes every connection. A
+  single revoked session closes only the connection that rode it.
+- Voice: one call per account. A `voice_join` from a second device **moves**
+  the call: the device that held it receives `voice_disconnected` with reason
+  `Call moved to another device` before anything produced by the new join, and
+  the new device joins normally. A move to a different channel broadcasts
+  `voice_leave` for the old one; a move within the same channel does not, since
+  the new device's join produces the `voice_state`. Voice commands
+  (`voice_leave`, `voice_mute`, `voice_deafen`, `voice_camera`,
+  `voice_screenshare`, watching and E2EE announces, token refresh) from a
+  connection that does not hold the call do nothing to the call another
+  connection holds. While a call is on another device, `ready` and
+  `voice_state` still list the user as in voice, so a client must not send
+  `voice_leave` on `ready` for a call it does not hold locally.
 
 ### Step 2: Success -- auth_ok
 
@@ -218,10 +255,20 @@ keeps it until one authenticates.
       "max_upload_bytes": 104857600,
       "blocked_extensions": ["bat", "cmd", "ps1", "vbs", "js", "hta"],
       "thumbnails": true
-    }
+    },
+    "game_activity_policy": { "enabled": true }
   }
 }
 ```
+
+`game_activity_policy.enabled` (WP 8.3e-2) is whether game activity is shown on
+this server right now. It rides every `auth_ok`, connect and resume alike: a
+resume gets no `ready`, and the unsequenced
+[`game_activity_policy`](#game_activity_policy-server---client-broadcast)
+frame is not replayed, so a switch flipped while the client was offline
+reaches it here. A client treats this value, when present, as the answer to
+"is game activity supported", ahead of `ready.capabilities.game_activity`; a
+server that omits it leaves the answer to `ready`.
 
 `display_name`, `about`, `custom_status`, `banner` and `banner_color` are the
 signed-in user's own profile fields, `null` when unset. `display_name` is what clients render
@@ -276,6 +323,9 @@ connections from then on.
 `GET /api/v1/files/{id}/thumb`, an image's bounded preview. A client then shows
 an inline image from that route and loads the full file only when it is
 opened. It is omitted by older servers, and clients then show the full file.
+A `image/heic`, `image/heif` or `image/tiff` attachment has no image a client
+can show except that route's JPEG, so a client without `thumbnails` shows it as
+a file to download.
 
 ### Step 3: Failure -- auth_error
 
@@ -447,8 +497,8 @@ one already due sooner). A socket that died during the suspend is redialled
 within about 15 seconds instead of staying Connected for up to a minute.
 A gap longer than 90 seconds since the client last saw its clock running — at
 a heartbeat tick, an inbound frame or when a reconnect is about to dial — also
-marks its next dials `wake: true` ([Step 1](#step-1-client-sends-auth)), so
-the server refuses one that would displace another device
+marks its next dials `wake: true` ([Step 1](#step-1-client-sends-auth)); the
+flag is informational now that devices coexist
 ([connection-and-auth.md](architecture/ux/connection-and-auth.md) §4).
 
 ### Desktop Transport Liveness
@@ -510,12 +560,12 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "thread_follows": true }`. `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "game_activity": true, "listening_activity": true, "thread_follows": true, "voice_messages": true }`. `voice_messages` (WP 8.9) means `POST /api/v1/uploads` accepts the `voice_duration_ms` and `voice_waveform` query parameters and an attachment of a voice message carries `duration_ms` and `waveform` (see `docs/api.md`, File Upload and Serving); a client that does not see it offers no voice message recorder. `listening_activity` (WP 8.10a) means the server understands `listening_update`, carries a member's song as `listening` on `presence` and `presence_batch` and as `ready.listening`, and has member activity switched on right now; it follows the same admin switch as `game_activity` and is `false` while it is off. A client that does not see it sends no `listening_update` and shows no song. `game_activity` means the server understands `activity_update`, carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`, and has game activity switched on right now (WP 8.3e-2: an admin can turn it off, and the flag is then `false`, like `threads` tracking whether threads are available); a client that does not see it sends no `activity_update` and shows no game. The runtime switch is [`game_activity_policy`](#game_activity_policy-server---client-broadcast). `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
 
-**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`/`forum`), `category`, `category_id`, `category_position`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
+**channels[]:** `id`, `name`, `type` (`text`/`voice`/`announcement`/`forum`), `category`, `category_id`, `category_position`, `topic`, `position`, `can_send`, `can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin`, `can_react`, `slow_mode`, `nsfw`, `afk`, `private`, `nsfw_acknowledged`, `voice_max_users`, `voice_max_video`, `unread_count` (text, announcement and voice), `last_message_id` (text, announcement and voice), `mention_count` (text, announcement and voice), `last_read_message_id` (text, announcement and voice)
 
 `last_read_message_id` is the caller's own read pointer (`read_states.last_message_id`):
 the newest message id they have read, or `0` when they have no read state for the
@@ -572,14 +622,25 @@ channel, not of the viewer: every recipient of a frame gets the same value, so
 the shared `channel_update` carries it. An older server omits it; treat an
 absent `private` as `false`. A per-member override never changes it.
 
-`can_moderate_voice` is whether the caller may mute, deafen, move or disconnect
-voice participants in that channel. It is `permissions.AuthorizeVoiceModerator`,
+`can_moderate_voice` is whether the caller may mute, deafen or disconnect
+voice participants (and move those they outrank) in that channel. It is `permissions.AuthorizeVoiceModerator`,
 the same authorizer the voice-moderation commands enforce in the target's
 channel: the base role must hold `MUTE_MEMBERS`, and the effective permission
 after both override layers must hold `READ_MESSAGES | MUTE_MEMBERS`
 (Administrator bypasses the bits). Target rank and move-destination capacity
 are per-target and stay server-side refusals. No override data is sent. Older
 servers omit it.
+
+`can_move_voice` is whether the caller may move voice participants in that
+channel regardless of rank. It is `permissions.AuthorizeVoiceMover`: the base
+role must hold `MOVE_MEMBERS` and the effective permission after both override
+layers must hold `READ_MESSAGES | MOVE_MEMBERS` (Administrator bypasses the
+bits). It is independent of `can_moderate_voice`: a caller with only
+`MOVE_MEMBERS` gets `can_move_voice` true and `can_moderate_voice` false and may
+move but not mute, deafen or disconnect. The owner is a valid move target only
+while the owner-only setting `voice_owner_movable` is on, and each target takes
+at most 3 moves per 30 seconds; both stay server-side refusals. Older servers
+omit it; treat an absent value as "unchanged", never as `false`.
 
 `can_delete_others`, `can_pin` and `can_react` are the caller's per-channel
 message affordances, always present on every non-DM channel and absent from
@@ -642,6 +703,8 @@ every reconnect; the ready payload now ships the stored value. A DM's
 
 **members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name of the member's top role), `role_ids` (every role the member holds, top role first, always an array with at least one id; absent on an older server, where `role` is the only role), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
 
+**activities[]:** The games connected members are playing, as `{user_id, name, started_at}` (`started_at` in unix milliseconds), sorted by `user_id`; always an array, `[]` when nobody is playing. It lists every connected member who reports a game and is not offline to this viewer, the viewer included: an invisible member appears only in their own `ready`. It is a separate array, not a field of `members[]`, and is the first key of the payload. It is `[]` while an admin has game activity switched off, and absent on a server without the `game_activity` capability; a client then treats every member as not playing. Later changes arrive as `presence`.
+
 **member_timeouts[]:** The active timeouts this viewer may see, as `{user_id, expires_at}` (RFC 3339 UTC); always an array, `[]` when there are none. A viewer who holds `MODERATE_MEMBERS` or `ADMINISTRATOR` gets every unexpired timeout, sorted by `user_id`; everyone else gets only their own entry, because a timeout is a sanction and other members are not told of it. It is the last field before `members` in the payload. An absent key means an older server: show no timeout icons. See [member_timeouts](#member_timeouts-server---client).
 
 **categories[]:** The full channel category list, as `{id, name, position}` ordered by `(position, id)`. It is present **only** when the viewer holds `MANAGE_CHANNELS` or `ADMINISTRATOR`, and then always, as `[]` when no category exists. Everyone else gets no `categories` key at all: they build their sidebar groups from the `category`, `category_id` and `category_position` of the channels they can see, so the name of an empty category, or of one whose channels are all hidden from them, never reaches them. It sorts between `capabilities` and `channels` in the payload. An absent key means either an older server or a viewer who cannot manage channels: derive groups from `channels[]`. A manager who gains `MANAGE_CHANNELS` mid-session learns the empty categories at the next `ready`, or from the next `channel_categories` frame. See [channel_categories](#channel_categories-server---client).
@@ -656,6 +719,8 @@ to reconstruct them:
    yet is `"offline"` too; their `presence` broadcast follows once it does.
 2. An `"invisible"` member is `"offline"` to everyone but themselves. The
    viewer's own entry carries their true status.
+
+**listening[]:** The songs connected members are listening to (WP 8.10a), as `{user_id, title, artist, player, started_at, duration_ms}` (`started_at` in unix milliseconds, `duration_ms` `0` when unknown), sorted by `user_id`; always an array, `[]` when nobody is. Same visibility as `activities[]`: every connected member who reports a song and is not offline to this viewer, the viewer included, so an invisible member appears only in their own `ready`. It is a separate array, not a field of `members[]`, and sorts between `dm_channels` and `member_timeouts`. It is `[]` while an admin has member activity switched off, and absent on a server without the `listening_activity` capability. Later changes arrive as `presence`.
 
 **threads[]:** The viewer's followed, open threads (WP 6.9c), newest activity first, at most 200; the key is present whenever the server advertises `thread_follows` and is `[]` when the viewer follows none. Each entry is `{ "thread": ThreadInfo, "last_message_id", "last_read_message_id", "unread_count", "mention_count" }`: the thread, the newest live message in it (`0` when empty), the viewer's read pointer for it (`0` for none), the number of messages after the pointer (counted up to 100, as in `channels[]`) and the viewer's `read_states.mention_count` for it. An archived thread is left out (it is still in the thread list), and so is a thread whose parent channel the viewer cannot read (a deny override, a lost role, an archived parent): the follow is kept and the thread returns when read access does. A thread of an NSFW-labelled parent the viewer has not acknowledged is left out too, and `thread_follow_update` frames for it are not sent, because a thread's name discloses its starter message. A follow row for a user who cannot read the parent (or has not acknowledged it) is kept and ignored; it surfaces again if they later regain `READ_MESSAGES` or acknowledge. An older client ignores the key. `ready` is authoritative for the set; `thread_follow_update` only keeps it current.
 
@@ -690,6 +755,25 @@ to reconstruct them:
 | `reply_ping`        | bool           | No       | With `reply_to`, `true` adds the replied-to author to `mentions`. See below.  |
 | `attachments`       | string[]       | No       | Upload IDs from `POST /api/v1/uploads`. Requires `ATTACH_FILES` permission.   |
 | `client_message_id` | string         | No       | Stable timestamp and UUID v4, scoped to the sender. See retry contract below. |
+| `sticker_id`        | number         | No       | Sends a custom sticker. See _Sticker messages_ below.                         |
+
+**Sticker messages (WP 8.8a).** `sticker_id`, a positive integer naming a row of
+`GET /api/v1/stickers`, makes the send a sticker message. A sticker send has no
+text and no attachments (`content` empty or absent, `attachments` empty), and
+`client_message_id` is required, because the message and its sticker row commit
+in one transaction with the receipt, as a poll's rows do. Any of those broken is
+`BAD_REQUEST`, as is a `sticker_id` that is not a positive integer. A sticker
+that does not exist, or was deleted after the sender last loaded the set, is
+refused with `STICKER_NOT_FOUND` (it refines `NOT_FOUND`) and nothing is stored;
+the client refreshes its picker from `sticker_update`. Every other gate is the
+ordinary send's: `SEND_MESSAGES`, the channel, DM, thread and forum checks,
+slow mode and the rate limit all apply, and `reply_to` and `reply_ping` work.
+The stored `content` is the fallback `[Sticker: <name>]`, so search, push text
+and clients that do not know the field still read something. A sticker message
+cannot be edited or forwarded (`BAD_REQUEST`); it can be deleted, replied to
+and reacted to like any message. The server advertises the `stickers`
+capability in `ready`; an older server ignores `sticker_id` and would store an
+empty send as `BAD_REQUEST`, so a client sends it only when the capability is set.
 
 `reply_ping` is optional and defaults to `false`: a send that omits it does
 not ping, so a client from before the field existed keeps its old behaviour.
@@ -1150,6 +1234,16 @@ message of `GET /channels/{id}/messages`. Votes, the end and expiry change the
 block only through `poll_update`, and the server advertises the `polls` capability
 in `ready`.
 
+A sticker message (WP 8.8a, `chat_send` with `sticker_id`) is an ordinary message
+with one more payload field, `sticker`, omitted for every other message and for a
+deleted one: `{"id": 3, "name": "Wave", "url": "/api/v1/stickers/3/image"}`.
+`content` is the fallback `[Sticker: Wave]`. `name` is the label kept from send
+time, so it survives a rename or delete of the sticker. When the sticker has been
+deleted, `id` and `url` are `null` and only `name` is left: a client shows a
+"deleted sticker" placeholder. The live frame always carries the id and url, the
+block is static, and it rides on each message in `GET /channels/{id}/messages`
+and on each search hit, where a deleted sticker already reads `null`.
+
 A group DM can also hold group event rows (WP 3B-10): `kind` is one of
 `group_add`, `group_remove`, `group_leave`, `group_rename` and `group_icon`, and
 the payload gains `group_event`, present only for these kinds. `group_event` is
@@ -1195,6 +1289,22 @@ reconnect; it raises the unread count for everyone but the pinner (the pinner's 
 mention and sends no push. Unlike a call or group row, its author or a moderator
 (MANAGE_MESSAGES in a channel, the author only in a DM) may delete it, as an
 ordinary message. It cannot be edited, replied to, reacted to or pinned.
+
+A welcome row (WP 8.6) greets a new member in the channel the admin picked with the
+`welcome_channel_id` setting: `kind` is `member_join`, the author is the new member,
+`reply_to` is null and `content` is the English fallback `alice joined the server.`
+that only clients that do not know `kind` show; a current client draws its own
+greeting line. The server writes it once the account is usable, that is after a
+`register` in invite or open mode and when an admin approves an application in approval
+mode, and only while that setting names an existing, non-archived text channel; it
+writes nothing otherwise, and a failure to write or deliver it never fails the
+registration or approval. It is a sequenced `chat_message` to the channel's readers
+with a `channel_activity` note for readers elsewhere, replayed on reconnect, raising
+the unread count for everyone but the new member (whose read state advances to the
+row), carrying no mention and sending no push. Its author or a moderator
+(MANAGE_MESSAGES) may delete it, as an ordinary message. It cannot be edited, reacted to
+or pinned, but unlike the other system rows a member may reply to it: the client's
+wave button sends an ordinary `chat_send` of `👋` with `reply_to` set to the row.
 
 The server writes one call row per DM call, from voice presence. The row is
 created when the first person joins the DM's voice channel (its author is the
@@ -1526,6 +1636,133 @@ The chosen status is stored as chosen, `invisible` included, and persists
 across reconnects (see `auth_ok`). A custom status persists too, and is
 cleared on `POST /api/v1/auth/logout`.
 
+### activity_update (Client -> Server)
+
+Reports the game the user is playing, or that they stopped. It has its own
+frame and its own budget, so it never competes with `presence_update` (the
+client's auto-idle timer spends that budget) and writes nothing to the
+database.
+
+```json
+{
+  "type": "activity_update",
+  "payload": { "activity": { "name": "Factorio", "started_at": 1761206400000 } }
+}
+```
+
+```json
+{ "type": "activity_update", "payload": { "activity": null } }
+```
+
+`activity` is required: an object with a string `name` and an integer
+`started_at` (unix milliseconds), or `null` to clear. A missing field, a field
+of another JSON type or a non-integer `started_at` is refused with
+`BAD_REQUEST`.
+
+- `name` is trimmed, then follows the `custom_status` text rules (single line,
+  no control or invisible characters, runs of spaces collapse), 1 to 128
+  characters. Too long or bad text is `BAD_REQUEST`. A name that is empty after
+  trimming clears the activity, like `null`.
+- `started_at` is clamped to the last 24 hours: never later than now, never
+  earlier than now minus 24 h.
+- While the user is timed out a set is refused with `TIMED_OUT`, like a
+  non-empty `custom_status`; a clear still applies.
+- While an admin has game activity switched off for the server (WP 8.3e-2) a
+  set is refused with `GAME_ACTIVITY_DISABLED`, before the rate limit, so the
+  refusal spends no budget; a clear still applies (with nothing set it does
+  nothing). The client takes the refusal quietly and asks again on its next
+  poll, so its game shows once the switch is back on; a refusal never overrides
+  the policy the server last stated (it can arrive after a newer `true`). Turning the switch
+  off clears every shown game on the server: every connected client gets a
+  `presence` frame with `activity: null` about each affected visible user (an
+  invisible user's goes to that user's own connection only), and `presence`
+  frames sent afterwards carry no game.
+- Setting an activity is limited to 1 per 10 seconds per user, on its own
+  budget; over it the frame is refused with `RATE_LIMITED` and the client
+  retries on its next poll. A clear is never limited.
+- Naming the game the connection already shows (whatever its `started_at`), or
+  clearing when nothing is set, does nothing: no frame is sent, no budget is
+  spent and no reply is sent. The shown `started_at` is kept, so a client sends
+  `null` when a game exits and a relaunch starts a new timer.
+- A change is broadcast as a `presence` frame with the user's live status and
+  custom status plus the new `activity`. While the user is invisible only their
+  own connection gets that frame; nobody else is sent anything.
+- The activity belongs to the connection and has no table of its own (the
+  `presence` frames that carry it are logged like any other). A device that
+  connects again replaces the previous connection and starts with no activity
+  until it sends one; a late `activity_update` from the replaced connection is
+  ignored. Disconnecting, or a server restart, clears it.
+
+The capability is `game_activity`.
+
+### listening_update (Client -> Server)
+
+Reports the song the user is listening to, or that it stopped (WP 8.10a). Same
+shape of rules as `activity_update`, with its own frame and its own budget so a
+song change never eats the game's or `presence_update`'s. It writes nothing to
+the database.
+
+```json
+{
+  "type": "listening_update",
+  "payload": {
+    "listening": {
+      "title": "Song",
+      "artist": "Band",
+      "player": "Spotify",
+      "started_at": 1761206400000,
+      "duration_ms": 215000
+    }
+  }
+}
+```
+
+```json
+{ "type": "listening_update", "payload": { "listening": null } }
+```
+
+`listening` is required: an object with string `title`, `artist` and `player`
+and integer `started_at` and `duration_ms`, or `null` to clear. A missing
+field, a field of another JSON type or a non-integer number is refused with
+`BAD_REQUEST`.
+
+- `title`, `artist` and `player` are trimmed, then follow the `custom_status`
+  text rules (single line, no control or invisible characters, runs of spaces
+  collapse). `title` is 1 to 128 characters and `artist` 0 to 128 (it may be
+  empty); `player` (the app that plays it) is 1 to 64, and an empty `player` is
+  `BAD_REQUEST`. A `title` that is empty after trimming clears the listening,
+  like `null`.
+- `started_at` is the unix milliseconds the song would have started at (now
+  minus the position) and is clamped like a game's: never later than now,
+  never earlier than now minus 24 h.
+- `duration_ms` is the song's length: `0` means unknown, a negative value is
+  `BAD_REQUEST`, and anything over 24 h is capped at 24 h.
+- While the user is timed out a set is refused with `TIMED_OUT`; a clear still
+  applies.
+- The per-server switch covers music too: while an admin has member activity
+  switched off a set is refused with `GAME_ACTIVITY_DISABLED`, before the rate
+  limit, and a clear still applies. Turning the switch off clears every shown
+  song together with every shown game, in the same `presence` frame per user
+  (see `activity_update` for who receives it).
+- Setting a song is limited to 1 per 10 seconds per user, on its own budget;
+  over it the frame is refused with `RATE_LIMITED`, and the client keeps its
+  latest song and sends it on its next poll. A clear is never limited.
+- Naming the song the connection already shows (same `title`, `artist` and
+  `player`, whatever its `started_at` or `duration_ms`), or clearing when
+  nothing is set, does nothing: no frame, no budget, no reply. The shown
+  `started_at` is kept, so a seek does not rebroadcast.
+- A change is broadcast as a `presence` frame with the user's live status,
+  custom status and game plus the new `listening`; a game change likewise
+  keeps the song. While the user is invisible only their own connection gets
+  that frame.
+- The song belongs to the connection and has no table of its own. A device
+  that connects again replaces the previous connection and starts with no song
+  until it sends one; a late `listening_update` from the replaced connection
+  is ignored, and its disconnect does not clear the new connection's.
+  Disconnecting, or a server restart, clears it.
+
+The capability is `listening_activity`.
+
 ### presence (Server -> Client, broadcast)
 
 ```json
@@ -1535,10 +1772,29 @@ cleared on `POST /api/v1/auth/logout`.
   "payload": {
     "user_id": 1,
     "status": "online",
-    "custom_status": "shipping phase 6"
+    "custom_status": "shipping phase 6",
+    "activity": { "name": "Factorio", "started_at": 1761206400000 },
+    "listening": null
   }
 }
 ```
+
+`listening` (WP 8.10a) is the song the user is listening to (see
+`listening_update`): `{title, artist, player, started_at, duration_ms}`, always
+present (`null` when none), with the same rules as `activity`: every presence
+frame carries the current value, invisible users show `null` to everyone else
+and the truth to themselves, and it is `null` while member activity is switched
+off. A server without the `listening_activity` capability omits the key.
+
+`activity` is the game the user is playing (see `activity_update`), always
+present (`null` when none), like `custom_status`. Every presence frame carries
+the current value, so a status change, a custom status expiry or an idle flip
+keeps showing the game. For an invisible user, everyone else gets `activity:
+null` (the same rule that blanks `custom_status`) and only the user's own copy
+carries the game; an `activity_update` while invisible reaches only the user,
+and going back online shows it again. While game activity is switched off for the server the value is always
+`null`. A server without the
+`game_activity` capability omits the key.
 
 `custom_status` is always present (`null` when unset), so "cleared it" is
 distinguishable from "this event does not mention it"; every presence
@@ -1571,16 +1827,28 @@ of N users costs each client a handful of frames instead of N.
   "type": "presence_batch",
   "payload": {
     "updates": [
-      { "user_id": 1, "status": "online", "custom_status": "shipping phase 6" },
-      { "user_id": 4, "status": "offline", "custom_status": null }
+      {
+        "user_id": 1,
+        "status": "online",
+        "custom_status": "shipping phase 6",
+        "activity": { "name": "Factorio", "started_at": 1761206400000 },
+        "listening": null
+      },
+      {
+        "user_id": 4,
+        "status": "offline",
+        "custom_status": null,
+        "activity": null,
+        "listening": null
+      }
     ]
   }
 }
 ```
 
-Each entry means what a `presence` with the same fields means: `custom_status`
-is always present (`null` when unset), and an invisible user is `"offline"`
-with `custom_status: null` for everyone but themselves — the invisible user's
+Each entry means what a `presence` with the same fields means: `custom_status`,
+`activity` and `listening` (WP 8.10a) are always present (`null` when unset), and an invisible user is
+`"offline"` with `custom_status: null`, `activity: null` and `listening: null` for everyone but themselves — the invisible user's
 own copy of the same frame (same `seq`) carries their true status. An entry
 for a user the client does not know is ignored: a member the recipient's list
 may not have yet arrives first as a `member_join` (see `member_join`).
@@ -1590,7 +1858,7 @@ arrived has that frame dropped (not the connection) and receives, within the
 next window, an unsequenced `presence_batch` with `"full": true`. It lists
 every connected user who is not offline to that client (its own true status
 and custom text included, even when invisible), each with their current
-`custom_status` (always present, `null` when unset); every member it leaves
+`custom_status`, `activity` and `listening` (always present, `null` when unset); every member it leaves
 out is offline, so an invisible member is simply absent. Clear an offline
 member's custom text, which is what `ready` shows.
 
@@ -1682,7 +1950,7 @@ including the one on screen. Sent after every accepted `mark_read` and
 `mark_unread`, even a no-op, and never after `channel_focus`. A rejected command
 sends no frame.
 
-Targeted to the caller's one live connection, unsequenced and never replayed;
+Sent to every live connection of the caller, unsequenced and never replayed;
 it shares the queue of `mention_count`, and each is written and sent under one
 lock, so a reader's last frame carries the latest committed state. A client that
 resumes keeps its own pointer, and the next full `ready` is the truth. A frame
@@ -1955,6 +2223,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
     "voice_max_video": 0,
     "can_send": true,
     "can_moderate_voice": false,
+    "can_move_voice": false,
     "can_delete_others": false,
     "can_pin": false,
     "can_react": true
@@ -1963,7 +2232,7 @@ Channel messages are triggered by REST API calls from admins and reach only the 
 ```
 
 Every `channel_create` is addressed to one client and carries that viewer's own
-`can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin` and `can_react`
+`can_send`, `can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin` and `can_react`
 — the same values `ready` ships per channel.
 It has no `seq` and is not replayed: a client that misses one is forced onto a
 full `ready` on resume instead. It is sent in three cases:
@@ -1981,7 +2250,7 @@ full `ready` on resume instead. It is sent in three cases:
   timeout without a reconnect.
 
 Older servers sent `channel_create` as one shared broadcast without these fields.
-**Treat an absent `can_send`, `can_moderate_voice`, `can_delete_others`, `can_pin` or `can_react` as "unchanged", never as `false`.**
+**Treat an absent `can_send`, `can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin` or `can_react` as "unchanged", never as `false`.**
 
 ### channel_update (Server -> Client, broadcast)
 
@@ -2016,7 +2285,7 @@ every viewer including the one that just turned the label on, since those
 frames carry no message content; `nsfw_acknowledged` is per-viewer and ships
 only in `ready` (above), not in this broadcast, the same reason `can_send` is
 omitted from it. None of the per-viewer fields (`can_send`,
-`can_moderate_voice`, `can_delete_others`, `can_pin`, `can_react`) ship here:
+`can_moderate_voice`, `can_move_voice`, `can_delete_others`, `can_pin`, `can_react`) ship here:
 this is one encoded frame for every recipient, and a single value would be
 wrong for some of them. See `PUT`/`DELETE
 /api/v1/channels/{id}/nsfw-acknowledgement` (`docs/api.md`) for how a client
@@ -2215,6 +2484,34 @@ channel visibility is delivered separately, as targeted
 `channel_create`/`channel_delete` messages, and a role deletion additionally
 sends one `member_update` per reassigned member.
 
+### sticker_update (Server -> Client, broadcast)
+
+Sent to every connected client after a custom sticker is uploaded, renamed or
+deleted through `/api/v1/stickers`. Like `emoji_update` it carries the **whole**
+set, so a client replaces its list wholesale and a dropped event can never leave
+a deleted sticker in a picker.
+
+```json
+{
+  "seq": 75,
+  "type": "sticker_update",
+  "payload": {
+    "stickers": [
+      { "id": 3, "name": "Wave", "emoji": "👋", "url": "/api/v1/stickers/3/image" },
+      { "id": 7, "name": "Party Blob", "emoji": null, "url": "/api/v1/stickers/7/image" }
+    ]
+  }
+}
+```
+
+`stickers` is always an array, `[]` when the last sticker was deleted, ordered by
+name ignoring case. `emoji` is the optional related emoji (a single emoji or a
+`:shortcode:`) the picker searches by, `null` for none. `url` is a server-relative
+path that requires the session token (see api.md). Unfiltered, for the same
+reason `emoji_update` is, and, like the emoji, **not** in the `ready` payload:
+clients load the set once over `GET /api/v1/stickers` and keep it fresh from this
+event.
+
 ### emoji_update (Server -> Client, broadcast)
 
 Sent to every connected client after a custom emoji is uploaded or deleted
@@ -2273,6 +2570,42 @@ Unsequenced and never replayed: auth_ok carries the current lists on every
 connect and resume, so a replayed older frame could only overwrite them. A
 client whose send queue is full is disconnected instead, and its next auth_ok
 carries the current lists.
+
+### game_activity_policy (Server -> Client, broadcast)
+
+Sent to every connected client after an admin with `MANAGE_SERVER` saves the
+`game_activity_enabled` setting in the admin panel (`PATCH
+/admin/api/settings`). The setting is `true` while no row exists.
+
+```json
+{
+  "type": "game_activity_policy",
+  "payload": { "enabled": false }
+}
+```
+
+`enabled` is whether member activity is shown on this server: games
+(`activity_update`) and, since WP 8.10a, music (`listening_update`); the admin
+panel calls the setting "Member activity (games and music)". Turning it off
+clears the server's state first (every connection's shown game and song, see
+`activity_update`) and then sends this frame; turning it on sends only the
+frame, and the games return as clients send them again. The clearing `presence`
+frames ride the sequenced broadcast queue and this frame is sent directly, so
+their wire order against each other is not guaranteed: a client treats `false`
+as clearing every game itself and ignores a game that arrives on `presence`
+afterwards. A client that sees `false` sends no `activity_update` and
+shows no game; on `true` it sends its current game at once.
+
+Unfiltered, unsequenced and never replayed, like
+[`upload_policy`](#upload_policy-server---client-broadcast): `auth_ok` carries
+the same value as `game_activity_policy` on every connect and resume, so a
+replayed older frame could only overwrite a newer one. A client whose send
+queue is full is disconnected instead, and its next `auth_ok` carries the
+current value. For operators: if the setting cannot be read at server start the
+switch starts off (the server logs `game_activity_policy_unreadable`); saving
+it again in the admin panel recovers. A client that connects at the moment of the switch may keep
+asking once per poll; the server refuses each set with
+`GAME_ACTIVITY_DISABLED`, so nothing is shown.
 
 ### user_update (Server -> Client, broadcast)
 
@@ -2670,18 +3003,24 @@ Rate limited: 1 per 60 seconds. Must be in a voice channel.
 
 ## Voice Moderation
 
-Four moderator commands act on another user's voice session. All four run
-`permissions.AuthorizeVoiceModerator` against the actor in the TARGET's channel:
-the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR` bypasses the bit,
-never the hierarchy), and the effective permission after both override layers
+Four moderator commands act on another user's voice session. Mute, deafen,
+disconnect and, for a target the actor outranks, move run
+`permissions.AuthorizeVoiceModerator`; `voice_mod_move` can also be authorized
+by `MOVE_MEMBERS` through `permissions.AuthorizeVoiceMover` (see `voice_mod_move`
+below). Each runs its authorizer against the actor in the TARGET's channel:
+the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR` bypasses the bit;
+for mute, deafen and disconnect never the hierarchy, and as it also passes
+`AuthorizeVoiceMover`, an Administrator may move anyone), and the effective permission after both override layers
 must hold `READ_MESSAGES | MUTE_MEMBERS`, so a channel-level deny holds and a
 room the actor cannot see cannot be moderated. For a DM call the actor must be a
-participant. The actor must strictly outrank the target by role position, and the
-target must currently be in a voice channel. Each is rate limited to 5/sec and
+participant. The actor must strictly outrank the target by role position, except
+for a move authorized by `MOVE_MEMBERS`. The target must currently be in a voice
+channel. Each is rate limited to 5/sec and
 written to the audit log (`voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
 `voice_mod_kick`, target type `user`).
 
-Failures: `FORBIDDEN` (missing bit, or target of equal/higher rank),
+Failures: `FORBIDDEN` (missing bit, or a target of equal/higher rank on the
+`MUTE_MEMBERS` path),
 `VOICE_ERROR` (target not in voice, not in the named channel, or not
 connected), `BAD_REQUEST` (self-target, non-voice destination),
 `NOT_FOUND` (unknown destination channel), `CHANNEL_FULL` (destination at
@@ -2724,6 +3063,18 @@ the moderator did and restates it with `voice_deafen`.
 { "type": "voice_mod_move", "payload": { "user_id": 7, "to_channel_id": 12 } }
 ```
 
+Authorized by either of two paths. A `MUTE_MEMBERS` holder moves members they
+strictly outrank, exactly as before `MOVE_MEMBERS` existed (no owner switch, no
+per-target limit). A `MOVE_MEMBERS` holder (base role, effective in the target's
+channel) may move a member of any rank, the owner included; the owner is skipped
+(`FORBIDDEN`, "the owner cannot be moved") while the owner-only setting
+`voice_owner_movable` is `false` (default `true`), and a move of a member of
+equal or higher rank is further limited to 3 per 30 seconds per target (a
+move that then fails at eviction still counts). An actor holding neither bit
+gets the same refusal whether the target is in voice or not. On every move the
+mover must also be able to see the destination channel; one they cannot see
+answers `NOT_FOUND` ("channel not found"), the same as a missing one.
+
 The destination is checked against the TARGET's `CONNECT_VOICE` and, outside a
 DM, `READ_MESSAGES` (a move must not place someone where they could not go
 themselves) and against the destination's `voice_max_users` (skipped when the
@@ -2748,6 +3099,14 @@ voice instead of moved").
 
 Sent only to the moved user. The client tears down its LiveKit session and joins
 `to_channel_id`.
+
+`by_user_id` is optional: the id of the moderator who made the move, so the
+client can tell the member who moved them. It is present on a moderator move and
+absent on the AFK sweep's, which has no actor. Older servers omit it.
+
+```json
+{ "type": "voice_moved", "payload": { "to_channel_id": 12, "by_user_id": 7 } }
+```
 
 `reason` is optional and absent on a moderator move. `"afk"` means the server's
 AFK sweep moved a member who had been idle (presence `idle`) in a server voice
@@ -2839,10 +3198,22 @@ published identity key but the signature is missing/invalid → reject).
   "payload": {
     "public_key": "base64-ecdh-pubkey",
     "signature": "base64-ecdsa-signature",
+    "identity_public_key": "base64-device-identity-public-key",
     "video_decode": ["vp8", "h264", "vp9"]
   }
 }
 ```
+
+`identity_public_key` is optional: the public half of the device identity key
+that made `signature`. A client sends it because the `auth` frame often cannot
+carry the key on the first connection of an app start (the user id that scopes
+the key only arrives in `auth_ok`). It uses the same rules as the `auth`
+frame's field (base64, at most 128 characters). The server stores the
+announce's key with the announce and relays it; when the announce has none, it
+uses the connection's `auth`-frame key, and when neither exists the relayed
+announce carries none. An invalid or wrongly typed value is ignored (the
+announce is still accepted and the `auth`-frame key is used) and logged. The
+connection's own key is never changed by an announce.
 
 The server validates `signature` like `public_key` (standard-alphabet base64,
 max 128 chars) and stores it alongside the key, but never verifies it — only
@@ -2861,8 +3232,13 @@ treat an absent or empty list as `["vp8", "h264"]`.
 
 Relayed to the other participants with the sender's user ID attached. Also
 replayed to late joiners (and to a resumed socket) from the stored
-key+signature+list. `signature` and `video_decode` are omitted when the
-announcing client did not send them (or sent an invalid `video_decode`):
+key+signature+list+identity key. `signature` and `video_decode` are omitted
+when the announcing client did not send them (or sent an invalid
+`video_decode`). `identity_public_key` is the announcing device's key: the
+one in the announce itself when it sent a valid one, otherwise its connection's
+`auth`-frame key. It is stored with the announce, so a live relay and every
+replay carry the key of the device that made that announce. It is omitted when
+the client sent neither (an older client):
 
 ```json
 {
@@ -2871,10 +3247,17 @@ announcing client did not send them (or sent an invalid `video_decode`):
     "user_id": 1,
     "public_key": "base64-ecdh-pubkey",
     "signature": "base64-ecdsa-signature",
-    "video_decode": ["vp8", "h264", "vp9"]
+    "video_decode": ["vp8", "h264", "vp9"],
+    "identity_public_key": "base64-device-identity-public-key"
   }
 }
 ```
+
+**Verify rule.** A receiving client verifies `signature` against the
+announce's `identity_public_key` when it is present, and otherwise against the
+member's published key (`identity_public_key` on the member object), which is
+what an older server or client provides. The server relays the key and never
+verifies the signature itself.
 
 ### voice_watch (Client -> Server)
 
@@ -3326,40 +3709,52 @@ warm resume served by replay never waits for a permit.
 
 ### Error Codes
 
-| Code                       | Description                                                                                                                                                                                                                                                                      |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BAD_REQUEST`              | Invalid payload format or field values                                                                                                                                                                                                                                           |
-| `BAD_PAYLOAD`              | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)                                                                                                                                                            |
-| `INTERNAL`                 | Server-side error                                                                                                                                                                                                                                                                |
-| `NOT_FOUND`                | Channel or message not found                                                                                                                                                                                                                                                     |
-| `FORBIDDEN`                | Missing required permission                                                                                                                                                                                                                                                      |
-| `NOT_KEY_HOLDER`           | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                                                                                                                                                     |
-| `THREAD_EXISTS`            | The message already has a thread; the error carries `thread_id`                                                                                                                                                                                                                  |
-| `THREAD_LOCKED`            | The thread is locked; only a moderator may post in it or change it                                                                                                                                                                                                               |
-| `RATE_LIMITED`             | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                                                        |
-| `ALREADY_JOINED`           | Already in this voice channel                                                                                                                                                                                                                                                    |
-| `CHANNEL_FULL`             | Voice channel at capacity                                                                                                                                                                                                                                                        |
-| `VOICE_ERROR`              | Voice-specific error                                                                                                                                                                                                                                                             |
-| `VIDEO_LIMIT`              | Maximum video streams reached                                                                                                                                                                                                                                                    |
-| `BANNED`                   | User is banned                                                                                                                                                                                                                                                                   |
-| `INVALID_JSON`             | Message is not valid JSON                                                                                                                                                                                                                                                        |
-| `UNKNOWN_TYPE`             | Unrecognized message type                                                                                                                                                                                                                                                        |
-| `SLOW_MODE`                | Channel has slow mode enabled                                                                                                                                                                                                                                                    |
-| `TIMED_OUT`                | A send, edit, reaction, voice join, call ring or custom status refused by an active moderator timeout (B5-9)                                                                                                                                                                     |
-| `CALL_REQUIRES_ACCEPTANCE` | A 1:1 `call_ring` whose recipient has not accepted the caller's message request; the ring is never delivered                                                                                                                                                                     |
-| `CONFLICT`                 | Duplicate reaction or constraint violation                                                                                                                                                                                                                                       |
-| `ALREADY_DELETED`          | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                                                                  |
-| `REACTION_LIMIT`           | A `reaction_add` with a new emoji on a message that already has 20 different ones. No `reaction_update` is sent. Refines `BAD_REQUEST`.                                                                                                                                          |
-| `POLL_ENDED`               | A `poll_vote` on a poll that was ended or whose time ran out, or a `poll_end` on one already ended. Nothing was written and no `poll_update` is sent. Refines `BAD_REQUEST`.                                                                                                     |
-| `ATTACHMENTS_UNAVAILABLE`  | A `chat_send` with no text whose every attachment was skipped (swept, foreign, already attached, a live avatar or group icon, or missing). No message is delivered and no ids are returned; the client holds the list. Refines `BAD_REQUEST`.                                    |
-| `SERVER_MUTED`             | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                                                                |
-| `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                                                            |
-| `SESSION_REPLACED`         | Sent before the close to a connection displaced because the same account connected from another device; the client does not reconnect on its own                                                                                                                                 |
-| `SERVER_BUSY`              | A fresh connect waited too long for a ready-build permit; carries `retry_after_ms`, and the socket closes 1013 (see Fresh-connect admission)                                                                                                                                     |
-| `REQUEST_TIMEOUT`          | A command's database work ran past the per-frame deadline and was not applied; the `error` carries the command's `id` (see Command deadlines). Unlike `SERVER_BUSY` it does not end the connection                                                                               |
-| `ANOTHER_DEVICE_ACTIVE`    | Sent to a wake reconnect (auth `wake: true`) refused because a different session of the same account holds the live connection or a call it parked in the voice grace window; that session is not displaced, and the client does not reconnect until the user chooses "Use here" |
+| Code                       | Description                                                                                                                                                                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BAD_REQUEST`              | Invalid payload format or field values                                                                                                                                                                                                        |
+| `BAD_PAYLOAD`              | Structurally valid message with a field that fails validation (E2EE announce/offer key material, signatures, targets)                                                                                                                         |
+| `INTERNAL`                 | Server-side error                                                                                                                                                                                                                             |
+| `NOT_FOUND`                | Channel or message not found                                                                                                                                                                                                                  |
+| `FORBIDDEN`                | Missing required permission                                                                                                                                                                                                                   |
+| `NOT_KEY_HOLDER`           | `voice_e2ee_offer` sent by a participant who is not the channel's key holder                                                                                                                                                                  |
+| `STICKER_NOT_FOUND`        | A `chat_send` named a sticker that does not exist or was deleted. Nothing was stored. Refines `NOT_FOUND`.                                                                                                                                    |
+| `THREAD_EXISTS`            | The message already has a thread; the error carries `thread_id`                                                                                                                                                                               |
+| `THREAD_LOCKED`            | The thread is locked; only a moderator may post in it or change it                                                                                                                                                                            |
+| `GAME_ACTIVITY_DISABLED`   | `activity_update` or `listening_update` set a game or a song while an admin has member activity switched off for the server; a clear is never refused (WP 8.3e-2, 8.10a)                                                                      |
+| `RATE_LIMITED`             | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                     |
+| `ALREADY_JOINED`           | Already in this voice channel                                                                                                                                                                                                                 |
+| `CHANNEL_FULL`             | Voice channel at capacity                                                                                                                                                                                                                     |
+| `VOICE_ERROR`              | Voice-specific error                                                                                                                                                                                                                          |
+| `VIDEO_LIMIT`              | Maximum video streams reached                                                                                                                                                                                                                 |
+| `BANNED`                   | User is banned                                                                                                                                                                                                                                |
+| `INVALID_JSON`             | Message is not valid JSON                                                                                                                                                                                                                     |
+| `UNKNOWN_TYPE`             | Unrecognized message type                                                                                                                                                                                                                     |
+| `SLOW_MODE`                | Channel has slow mode enabled                                                                                                                                                                                                                 |
+| `TIMED_OUT`                | A send, edit, reaction, voice join, call ring or custom status refused by an active moderator timeout (B5-9)                                                                                                                                  |
+| `CALL_REQUIRES_ACCEPTANCE` | A 1:1 `call_ring` whose recipient has not accepted the caller's message request; the ring is never delivered                                                                                                                                  |
+| `CONFLICT`                 | Duplicate reaction or constraint violation                                                                                                                                                                                                    |
+| `ALREADY_DELETED`          | The target message is already soft-deleted (the WebSocket twin of REST's `409 ALREADY_DELETED`)                                                                                                                                               |
+| `REACTION_LIMIT`           | A `reaction_add` with a new emoji on a message that already has 20 different ones. No `reaction_update` is sent. Refines `BAD_REQUEST`.                                                                                                       |
+| `POLL_ENDED`               | A `poll_vote` on a poll that was ended or whose time ran out, or a `poll_end` on one already ended. Nothing was written and no `poll_update` is sent. Refines `BAD_REQUEST`.                                                                  |
+| `ATTACHMENTS_UNAVAILABLE`  | A `chat_send` with no text whose every attachment was skipped (swept, foreign, already attached, a live avatar or group icon, or missing). No message is delivered and no ids are returned; the client holds the list. Refines `BAD_REQUEST`. |
+| `SERVER_MUTED`             | Self-unmute refused: a moderator imposed the mute                                                                                                                                                                                             |
+| `SERVER_DEAFENED`          | Self-undeafen refused: a moderator imposed the deafen                                                                                                                                                                                         |
+| `SESSION_REPLACED`         | Sent before the close to a connection displaced because the same device session reconnected, or because the account is over its 10-connection cap; the client does not reconnect on its own                                                   |
+| `SERVER_BUSY`              | A fresh connect waited too long for a ready-build permit; carries `retry_after_ms`, and the socket closes 1013 (see Fresh-connect admission)                                                                                                  |
+| `REQUEST_TIMEOUT`          | A command's database work ran past the per-frame deadline and was not applied; the `error` carries the command's `id` (see Command deadlines). Unlike `SERVER_BUSY` it does not end the connection                                            |
+| `ANOTHER_DEVICE_ACTIVE`    | No longer sent; kept for clients that still talk to an older server, which refused a wake reconnect while a different session held the connection                                                                                             |
 
 After 10 consecutive invalid JSON messages, the connection is forcibly closed.
+
+A command's `channel_id`, `message_id`, `thread_id`, `user_id` and
+`to_channel_id` must be positive integers. A missing, fractional, zero or
+negative one is refused with `BAD_REQUEST` and an `invalid payload` message
+before the command runs. Two exceptions: `chat_command`'s `channel_id` may be
+0 ("no channel"), and ids sent as plain integers or lists (`reply_to`,
+`target_user_id`, `user_ids`, `tag_ids`, `answer_ids`) are checked by the
+command itself. An id that a
+command documents as optional (`mark_read`'s `message_id`, `thread_focus`'s
+`thread_id`) may be left out or `null`, but is checked when present.
 
 ### Command deadlines
 
@@ -3456,44 +3851,46 @@ tables below add per-type behavioral notes.
 
 ### Client -> Server (28 types)
 
-| Type                  | Rate Limit                           | Notes                                                           |
-| --------------------- | ------------------------------------ | --------------------------------------------------------------- |
-| `auth`                | N/A (first message)                  | Token + optional last_seq                                       |
-| `chat_send`           | 10/sec                               | + slow mode per channel                                         |
-| `chat_forward`        | 10/sec, then 5/10sec                 | One target per frame; `client_message_id` required; no pings    |
-| `poll_create`         | 10/sec, then 5/10min                 | `client_message_id` required; no pings                          |
-| `poll_vote`           | 10/10sec (shared with `poll_end`)    | Whole selection; idempotent                                     |
-| `poll_end`            | 10/10sec (shared with `poll_vote`)   | Author, or `MANAGE_MESSAGES`; DM author only                    |
-| `chat_edit`           | 10/sec                               | Own messages only                                               |
-| `chat_delete`         | 10/sec                               | Own or mod (non-DM)                                             |
-| `reaction_add`        | 5/sec                                |                                                                 |
-| `reaction_remove`     | 5/sec                                |                                                                 |
-| `typing_start`        | 1/3sec/channel                       | Silently dropped                                                |
-| `channel_focus`       | 5/sec (deferred, see above)          | Updates read state                                              |
-| `thread_focus`        | 5/sec, own budget (`RATE_LIMITED`)   | Second focus slot for a thread; marks it read                   |
-| `thread_create`       | 5/10min                              | `RATE_LIMITED`; a retry by the owner is free                    |
-| `thread_follow`       | 5/sec, own budget (`RATE_LIMITED`)   | Follow or unfollow a thread; idempotent                         |
-| `mark_read`           | 5/sec, own budget (silently dropped) | Updates read state without moving focus; answers `read_state`   |
-| `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)   | Moves the read pointer back; answers `read_state`               |
-| `presence_update`     | 1/10sec                              |                                                                 |
-| `voice_join`          | 5/sec                                |                                                                 |
-| `voice_leave`         | 5/sec                                | Empty payload                                                   |
-| `voice_mute`          | 2/sec                                | Refused with `SERVER_MUTED` while server muted                  |
-| `voice_deafen`        | 2/sec                                | Refused with `SERVER_DEAFENED` while server deafened            |
-| `voice_camera`        | 2/sec                                | Requires USE_VIDEO                                              |
-| `voice_screenshare`   | 2/sec                                | Requires SHARE_SCREEN                                           |
-| `voice_mod_mute`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
-| `voice_mod_deafen`    | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
-| `voice_mod_move`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
-| `voice_mod_kick`      | 5/sec                                | AuthorizeVoiceModerator in target's channel + outranks          |
-| `voice_token_refresh` | 1/60sec                              | Must be in voice                                                |
-| `voice_e2ee_announce` | 5/sec                                | ECDH pubkey announce                                            |
-| `voice_e2ee_offer`    | 64/sec outer, 5/sec per target       | Wrapped room key to target (budgeted per key rotation)          |
-| `voice_watch`         | 10/5sec                              | Must be in voice; screen shares watched, max 16 ids             |
-| `call_ring`           | 1/3sec                               | DM participants only; fans out as `call_incoming`               |
-| `call_decline`        | 1/3sec                               | DM participants only; fans out as `call_declined`               |
-| `chat_command`        | 5/sec                                | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
-| `ping`                | 2/sec (silently dropped)             | Heartbeat                                                       |
+| Type                  | Rate Limit                                                  | Notes                                                           |
+| --------------------- | ----------------------------------------------------------- | --------------------------------------------------------------- |
+| `auth`                | N/A (first message)                                         | Token + optional last_seq                                       |
+| `chat_send`           | 10/sec                                                      | + slow mode per channel                                         |
+| `chat_forward`        | 10/sec, then 5/10sec                                        | One target per frame; `client_message_id` required; no pings    |
+| `poll_create`         | 10/sec, then 5/10min                                        | `client_message_id` required; no pings                          |
+| `poll_vote`           | 10/10sec (shared with `poll_end`)                           | Whole selection; idempotent                                     |
+| `poll_end`            | 10/10sec (shared with `poll_vote`)                          | Author, or `MANAGE_MESSAGES`; DM author only                    |
+| `chat_edit`           | 10/sec                                                      | Own messages only                                               |
+| `chat_delete`         | 10/sec                                                      | Own or mod (non-DM)                                             |
+| `reaction_add`        | 5/sec                                                       |                                                                 |
+| `reaction_remove`     | 5/sec                                                       |                                                                 |
+| `typing_start`        | 1/3sec/channel                                              | Silently dropped                                                |
+| `channel_focus`       | 5/sec (deferred, see above)                                 | Updates read state                                              |
+| `thread_focus`        | 5/sec, own budget (`RATE_LIMITED`)                          | Second focus slot for a thread; marks it read                   |
+| `thread_create`       | 5/10min                                                     | `RATE_LIMITED`; a retry by the owner is free                    |
+| `thread_follow`       | 5/sec, own budget (`RATE_LIMITED`)                          | Follow or unfollow a thread; idempotent                         |
+| `mark_read`           | 5/sec, own budget (silently dropped)                        | Updates read state without moving focus; answers `read_state`   |
+| `mark_unread`         | 5/sec, own budget (`RATE_LIMITED`)                          | Moves the read pointer back; answers `read_state`               |
+| `presence_update`     | 1/10sec                                                     |                                                                 |
+| `activity_update`     | 1/10sec, own budget (`RATE_LIMITED`)                        | A set only; a clear and a repeat of the current one are free    |
+| `listening_update`    | 1/10sec, own budget (`RATE_LIMITED`)                        | A set only; a clear and a repeat of the current song are free   |
+| `voice_join`          | 5/sec                                                       |                                                                 |
+| `voice_leave`         | 5/sec                                                       | Empty payload                                                   |
+| `voice_mute`          | 2/sec                                                       | Refused with `SERVER_MUTED` while server muted                  |
+| `voice_deafen`        | 2/sec                                                       | Refused with `SERVER_DEAFENED` while server deafened            |
+| `voice_camera`        | 2/sec                                                       | Requires USE_VIDEO                                              |
+| `voice_screenshare`   | 2/sec                                                       | Requires SHARE_SCREEN                                           |
+| `voice_mod_mute`      | 5/sec                                                       | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_deafen`    | 5/sec                                                       | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_mod_move`      | 5/sec (and 3 per 30 sec per target of equal or higher rank) | AuthorizeVoiceModerator + outranks, or AuthorizeVoiceMover      |
+| `voice_mod_kick`      | 5/sec                                                       | AuthorizeVoiceModerator in target's channel + outranks          |
+| `voice_token_refresh` | 1/60sec                                                     | Must be in voice                                                |
+| `voice_e2ee_announce` | 5/sec                                                       | ECDH pubkey announce                                            |
+| `voice_e2ee_offer`    | 64/sec outer, 5/sec per target                              | Wrapped room key to target (budgeted per key rotation)          |
+| `voice_watch`         | 10/5sec                                                     | Must be in voice; screen shares watched, max 16 ids             |
+| `call_ring`           | 1/3sec                                                      | DM participants only; fans out as `call_incoming`               |
+| `call_decline`        | 1/3sec                                                      | DM participants only; fans out as `call_declined`               |
+| `chat_command`        | 5/sec                                                       | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
+| `ping`                | 2/sec (silently dropped)                                    | Heartbeat                                                       |
 
 ### Server -> Client (46 types)
 
@@ -3538,7 +3935,9 @@ tables below add per-type behavioral notes.
 | `member_ban`           | Yes      | All clients                                                                                            |
 | `roles_update`         | Yes      | All clients (full role list)                                                                           |
 | `emoji_update`         | Yes      | All clients (full custom-emoji set)                                                                    |
+| `sticker_update`       | Yes      | All clients (full custom-sticker set)                                                                  |
 | `upload_policy`        | No       | All clients (both upload file-type lists)                                                              |
+| `game_activity_policy` | No       | All clients (the game activity switch)                                                                 |
 | `dm_channel_open`      | No       | Direct to participant                                                                                  |
 | `dm_channel_close`     | No       | Direct to participant                                                                                  |
 | `dm_request`           | No       | Direct to recipient (B5-6)                                                                             |

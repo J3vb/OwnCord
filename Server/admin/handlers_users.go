@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
@@ -35,7 +34,7 @@ func handleGetStats(users *service.UserService, hub HubBroadcaster) http.Handler
 			return
 		}
 		if hub != nil {
-			stats.OnlineCount = hub.ClientCount()
+			stats.OnlineCount = hub.UserCount()
 		}
 		resp := statsResponse{ServerStats: stats, TLSMode: tlsMode}
 		resp.CertificateFingerprint = servedCert().Fingerprint
@@ -135,8 +134,7 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.Us
 		return 0, req, 0, false
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return 0, req, 0, false
 	}
 

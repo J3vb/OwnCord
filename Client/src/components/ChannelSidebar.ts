@@ -87,6 +87,7 @@ import {
   type VoiceRowInputs,
   type VoiceUserContext,
 } from "../features/channels/voiceRowModel";
+import { PREF_CHANGE_EVENT } from "@lib/preferences";
 
 // The per-user volume menu loads on its first open (O-6b).
 const volumeMenuScreen = createLazyScreen(
@@ -139,6 +140,12 @@ export function canModerateVoice(): boolean {
   return currentUserRoleHasPermission(Permission.MUTE_MEMBERS);
 }
 
+/** Whether the signed-in user's role holds MOVE_MEMBERS (WP 8.4a); like
+ *  canModerateVoice, only used to explain a channel with no verdict. */
+function canMoveVoiceByRole(): boolean {
+  return currentUserRoleHasPermission(Permission.MOVE_MEMBERS);
+}
+
 export interface ChannelSidebarOptions {
   readonly onVoiceJoin: (channelId: number) => void;
   /** Called when the user clicks the voice channel they are already in. Leaving
@@ -189,7 +196,10 @@ export interface ChannelSidebarOptions {
 /** Moderation section for one participant row, from the channel's
  *  server-computed can_moderate_voice (B9-14, Q5): undefined when it is false
  *  (which hides the section entirely), and the reason it is unavailable when
- *  the server gave no verdict to a role that holds MUTE_MEMBERS. Read when the
+ *  the server gave no verdict to a role that holds MUTE_MEMBERS or
+ *  MOVE_MEMBERS. A channel whose can_moderate_voice is false but whose
+ *  can_move_voice is true (a Move Members-only role, WP 8.4b) gets a section
+ *  with only Move to: mute, deafen and disconnect are left out. Read when the
  *  menu opens, so a role or override change since the last render counts. Move
  *  targets are the other voice channels; the server re-checks rank, timeouts
  *  and that the TARGET may connect to the one picked. */
@@ -199,11 +209,19 @@ export function buildVoiceModOptions(
   cb?: VoiceModerationCallbacks,
 ): VoiceModMenuOptions | string | undefined {
   if (cb === undefined) return undefined;
-  const verdict = channelsStore.getState().channels.get(channelId)?.canModerateVoice;
-  if (verdict === undefined) {
-    return canModerateVoice() ? voiceText("volume.modUnknown") : undefined;
+  const channel = channelsStore.getState().channels.get(channelId);
+  const verdict = channel?.canModerateVoice;
+  const moveVerdict = channel?.canMoveVoice;
+  const full = verdict === true;
+  if (!full && moveVerdict !== true) {
+    // No verdict from the server at all: explain, to roles that could hold one.
+    if (verdict === undefined && moveVerdict === undefined) {
+      return canModerateVoice() || canMoveVoiceByRole()
+        ? voiceText("volume.modUnknown")
+        : undefined;
+    }
+    return undefined;
   }
-  if (!verdict) return undefined;
   const moveTargets = Array.from(channelsStore.getState().channels.values())
     .filter((ch) => ch.type === "voice" && ch.id !== channelId)
     .map((ch) => ({ id: ch.id, name: ch.name }));
@@ -216,6 +234,13 @@ export function buildVoiceModOptions(
       : voiceText(
           connectionStatus === "reconnecting" ? "volume.modReconnecting" : "volume.modNotConnected",
         );
+  if (!full) {
+    return {
+      ...(disabledReason !== undefined ? { disabledReason } : {}),
+      moveTargets,
+      onMove: (toChannelId) => cb.onMove(user.userId, toChannelId),
+    };
+  }
   return {
     ...(disabledReason !== undefined ? { disabledReason } : {}),
     serverMuted: user.serverMuted === true,
@@ -255,13 +280,16 @@ function projectVoiceInputs(
   }
   const moderatable: number[] = [];
   for (const ch of channels.channels.values()) {
-    if (ch.type === "voice" && ch.canModerateVoice === true) moderatable.push(ch.id);
+    if (ch.type === "voice" && (ch.canModerateVoice === true || ch.canMoveVoice === true)) {
+      moderatable.push(ch.id);
+    }
   }
   return {
     voiceUsers: voice.voiceUsers,
     currentChannelId: voice.currentChannelId,
     peerVerifications: voice.peerVerifications ?? NO_VERIFICATIONS,
     localSessionFingerprint: voice.localSessionFingerprint ?? null,
+    localSafetyNumber: voice.localSafetyNumber ?? null,
     voiceMembers,
     selfId: auth.user?.id ?? null,
     connectionStatus: ui.connectionStatus,
@@ -280,6 +308,7 @@ function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
     a.currentChannelId !== b.currentChannelId ||
     a.peerVerifications !== b.peerVerifications ||
     a.localSessionFingerprint !== b.localSessionFingerprint ||
+    a.localSafetyNumber !== b.localSafetyNumber ||
     a.selfId !== b.selfId ||
     a.connectionStatus !== b.connectionStatus ||
     a.timeout !== b.timeout ||
@@ -1062,7 +1091,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     const muteSource = eventSource(CHANNEL_MUTE_CHANGED, () => ({}));
     // The Hide Muted Channels preference; any other key reruns the projection
     // and compares equal.
-    const hideMutedSource = eventSource("owncord:pref-change", isHideMutedChannels);
+    const hideMutedSource = eventSource(PREF_CHANGE_EVENT, isHideMutedChannels);
     sidebarSel = select(
       [
         voiceStore,

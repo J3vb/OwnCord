@@ -7,12 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
 // visibleCustomStatus is the publish guard for a custom status line that may
 // predate its own clear: it returns text while expiresAt (a
-// db.CustomStatusExpiryLayout instant, "" for none) is still ahead of now, and
+// dbtime.ISOLayout instant, "" for none) is still ahead of now, and
 // nil from the expiry on. An unparseable expiry keeps the text, since nothing
 // can then say it ended. The expirer clears the row and tells the hub about a
 // second after the instant, so every place a status leaves the server from a
@@ -21,7 +22,7 @@ func visibleCustomStatus(text *string, expiresAt string, now time.Time) *string 
 	if text == nil || expiresAt == "" {
 		return text
 	}
-	at, err := time.Parse(service.CustomStatusExpiryLayout, expiresAt)
+	at, err := time.Parse(dbtime.ISOLayout, expiresAt)
 	if err != nil {
 		return text
 	}
@@ -72,8 +73,8 @@ var customStatusExpiredLookupHook func(*Hub)
 // (the tag no longer matches and nothing is sent) or emits after this frame
 // with its own, newer text.
 func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
-	c := h.GetClient(userID)
-	if c == nil {
+	conns := h.clientsOf(userID)
+	if len(conns) == 0 {
 		return
 	}
 	if customStatusExpiredLookupHook != nil {
@@ -81,24 +82,37 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 	}
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
-	// A same-account reconnect may have replaced c since the lookup; the
-	// replacement carries its own presence, so leave it to its own tag.
-	if h.GetClient(userID) != c {
+	// A same-session reconnect may have replaced a connection since the
+	// lookup; re-read so only live ones are cleared (the replacement carries
+	// its own presence and its own tag).
+	conns = h.clientsOf(userID)
+	if len(conns) == 0 {
 		return
 	}
-	cur := c.presence.Load()
-	if cur == nil || cur.customStatus == nil || cur.customStatusExpiresAt != expiresAt {
+	// The user's shown presence is the most recent setter's. The expiry is
+	// announced only when that is the status that expired; any connection
+	// still carrying the expired tag is cleared either way.
+	shown := mergeLivePresence(conns)
+	announce := shown.customStatus != nil && shown.customStatusExpiresAt == expiresAt
+	var first *Client
+	for _, c := range conns {
+		cur := c.presence.Load()
+		if cur == nil || cur.customStatus == nil || cur.customStatusExpiresAt != expiresAt {
+			continue
+		}
+		if c.presence.CompareAndSwap(cur, &livePresence{status: cur.status, idleSince: cur.idleSince, setAt: cur.setAt, activity: cur.activity, listening: cur.listening}) && first == nil {
+			first = c
+		}
+	}
+	if !announce || first == nil {
 		// Not the status that expired: no frame, and the queued connect
 		// presence (if any) is still owed, so it is not dropped either.
 		return
 	}
-	if !c.presence.CompareAndSwap(cur, &livePresence{status: cur.status, idleSince: cur.idleSince}) {
-		return
-	}
 	// Like every user-chosen presence, this supersedes a queued connect entry.
 	h.dropQueuedPresenceLocked(userID)
-	for _, ev := range presenceEvents(userID, cur.status, nil) {
-		h.enqueueExpiredPresence(c, ev)
+	for _, ev := range presenceEvents(userID, shown.status, nil, shown.activity, shown.listening) {
+		h.enqueueExpiredPresence(first, ev)
 	}
 }
 

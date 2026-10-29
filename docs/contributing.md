@@ -23,6 +23,31 @@ has more detail there.
 | `.claude/`, `.codex/`, `.agents/` | Setup for AI coding agents, plus `.no-mistakes.yaml`. Human contributors can ignore these. The rules in `AGENTS.md` and `CLAUDE.md` apply to everyone. |
 | [.superpowers/](../.superpowers/) | The shared bug-hunt findings ledger and its renderer.                                                                                                  |
 
+## Starting a change
+
+Find the owner below before following dependencies. The checks are starting
+points for iteration, not a replacement for the full [testing requirements](#testing)
+or required CI checks.
+
+| Task                               | Start here                                                                                                                                                                           | Find the relevant checks                                                                                                                                                             |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Server REST or WebSocket behaviour | [api/](../Server/api/), [ws/](../Server/ws/), then the owning [service/](../Server/service/)                                                                                         | Tests beside the Go package; see [Server commands](#server-go).                                                                                                                      |
+| Desktop UI or feature behaviour    | [features/](../Client/src/features/), [components/](../Client/src/components/), [pages/](../Client/src/pages/); use the [client architecture](architecture/client.md) for ownership. | Client unit/integration tests and the feature's browser or E2E tests; see [Client commands](#client-tauri-v2).                                                                       |
+| Native desktop behaviour           | [src-tauri/src/](../Client/src-tauri/src/) and its caller in [platform/desktop/](../Client/src/platform/desktop/)                                                                    | Rust tests plus the relevant native E2E suite. Check platform-specific code on its target OS.                                                                                        |
+| Server admin panel                 | [admin/static/js/](../Server/admin/static/js/); action registration is in [core.js](../Server/admin/static/js/core.js).                                                              | Server admin tests, Client contract tests and admin E2E; see [contract ownership](#what-belongs-in-testscontract). The tests are in `Client/` and need Node 26 and its dependencies. |
+| Database query or schema           | Hand-written [queries/](../Server/db/queries/) or a new [migration](../Server/migrations/); sqlc output is generated.                                                                | Regeneration/drift checks, migration tests and the consuming service tests.                                                                                                          |
+| WebSocket message-type constants   | [protocol/schema.json](../protocol/schema.json), then the Go and TypeScript consumers                                                                                                | Protocol regeneration/drift checks and the affected server/client tests. The schema generates constants, not complete payload definitions.                                           |
+| Check, build or CI behaviour       | [run.mjs](../scripts/run.mjs), [ci-select.mjs](../scripts/ci-select.mjs) and the affected [workflow](../.github/workflows/)                                                          | Adjacent script tests and the affected gate. Cross-component inputs can select checks outside the changed folder.                                                                    |
+
+From the repository root, `node scripts/run.mjs --list` prints the existing
+check commands and their working directories. Server-only contributors can
+use the [Go commands directly](#server-go) without Node.
+
+For a failure, keep the command, working directory, failing test and relevant
+error together; use the full log when the excerpt is insufficient. A skipped
+tool or a platform you could not exercise is a verification limitation, not
+a passing check.
+
 ## Development Setup
 
 ### Prerequisites
@@ -252,6 +277,11 @@ Turn them on once per clone, from the repository root:
 npm run hooks:install    # runs: git config core.hooksPath .githooks
 ```
 
+It also registers the findings-ledger merge driver (`scripts/merge-ledger.mjs`,
+named in `.gitattributes`), so merging `dev` into a branch that added ledger
+entries keeps both sides' entries instead of conflicting. If both sides took the
+same new id, the branch's entry is renumbered and the driver prints the rename.
+
 **`pre-commit`** looks only at staged files:
 
 - Go files staged: `gofmt` and `go vet`.
@@ -371,6 +401,29 @@ Three things to know before you open a PR:
   node scripts/ci-select.mjs --paths-file "$TMPDIR/changed-paths.txt"
   ```
 
+  The file must hold `git diff --name-status` lines. A bare list of paths reads
+  as no paths, and an empty or unreadable diff or an unknown path selects
+  every capability. The selector prints one name per line; this is what each
+  name runs:
+
+  | Name          | CI job(s) it gates                                                                         | Run it locally                                                           | Covered by `npm run check`?                                      |
+  | ------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+  | `server`      | Server Lint & Invariants; the steps of Server Build & Test (ubuntu-latest, windows-latest) | `npm run check:server`                                                   | Yes, except the optional `golangci-lint` and `sqlc`; one OS only |
+  | `client`      | Client Static Checks; Client Unit Tests; Node policy (refused major)                       | `npm run check:client`                                                   | Mostly. Not run: the npm security audit and `typecheck:e2e`      |
+  | `rust`        | Rust Unit Tests                                                                            | `npm run check:rust`                                                     | Yes, on your OS only. Linux also needs the WebRTC toolchain      |
+  | `browser`     | Client E2E (Playwright); Client E2E (parity subset, blocking)                              | In `Client/`: `npm run test:e2e:smoke`, `test:browser`, `test:e2e:prod`  | No                                                               |
+  | `integration` | Client E2E (real server and media); Admin Panel E2E (real server)                          | In `Client/`: `npm run test:e2e:fullstack`, `npm run test:e2e:admin`     | No                                                               |
+  | `native`      | Client E2E (Windows native)                                                                | Windows only: `npm run test:e2e:native` in `Client/` after a Tauri build | No. No local equivalent off Windows                              |
+  | `webclient`   | Client E2E (web portal, non-blocking)                                                      | In `Client/`: `npm run test:e2e:web`                                     | No                                                               |
+  | `workflows`   | Workflow Security Lint                                                                     | `zizmor --offline .github/workflows/`                                    | No. `actionlint` runs in `check:hygiene` if installed            |
+  | `deps`        | Supply-chain Scan                                                                          | `osv-scanner` and `cargo deny`; see `osv-scanner.toml`                   | No                                                               |
+  | `permissions` | The "Permissions mutation hotspot" step of Client Static Checks                            | In `Client/`: `npx stryker run stryker.ci.config.mjs`                    | No                                                               |
+  | `changelog`   | The "Changelog gate" step of Server Build & Test (ubuntu-latest); Server Lint & Invariants | In `Server/`: `go test -count=1 -run TestBundledChangelog ./admin/`      | Yes, as part of `check:server`                                   |
+
+  Docs & Ledger Consistency and Repository Hygiene always run. A skipped
+  optional tool is a verification limitation, not a pass: `run.mjs` names it
+  at the end of the task.
+
   A PR into `main` always runs every job. Release evidence needs every
   required check to pass on the tagged commit, so a skipped check would block
   the release. A **push to `dev`** also runs every job. That push is the
@@ -386,7 +439,10 @@ Three things to know before you open a PR:
 This is the end-to-end procedure for cutting a release. Every step runs on
 `main` or against it. The order matters, because the release workflow
 (`release.yml`) stops on any missing input. In the examples below,
-`vX.Y.Z-beta.N` stands for the version you are releasing.
+`vX.Y.Z` stands for the version you are releasing. From 2.5.0 on, versions
+carry no `-beta.N` suffix: a release with new features bumps the minor number,
+a fixes-only release bumps the patch number. The project is still a beta; the
+release notes say so.
 
 1. **Reconcile `main` into `dev` first, if the last release was squashed.**
    A release PR that was squash-merged makes `dev` and `main` drift apart. You
@@ -403,7 +459,7 @@ This is the end-to-end procedure for cutting a release. Every step runs on
    mismatch fails the whole run. Make this edit at release time, not earlier.
 
 3. **Write the release notes under the tag heading in `CHANGELOG.md`.**
-   `release.yml` finds the `## vX.Y.Z-beta.N` heading (a title may follow the
+   `release.yml` finds the `## vX.Y.Z` heading (a title may follow the
    tag) and copies everything up to the next `## ` heading. If that section is
    missing or empty, it stops the publish. Normally you rename
    `## Unreleased` to the tag, then start a fresh `## Unreleased` above it.
@@ -440,7 +496,7 @@ This is the end-to-end procedure for cutting a release. Every step runs on
    `dev` and `main` sharing history. Squash is still the rule for PRs into
    `dev`.
 
-7. **Run the Linux checklist and check the nightly, then tag on `main`.** Cut the tag (`vX.Y.Z-beta.N`) on
+7. **Run the Linux checklist and check the nightly, then tag on `main`.** Cut the tag (`vX.Y.Z`) on
    the merge commit.
    - The release ruleset forbids deleting a tag. So a failed first run costs
      you the next version number, not a rewrite.

@@ -90,9 +90,21 @@ SELECT id, user_id, token, device, ip_address, created_at, last_used, expires_at
 FROM sessions WHERE token = ?
 `
 
-func (q *Queries) GetSessionByTokenHash(ctx context.Context, token string) (Session, error) {
+type GetSessionByTokenHashRow struct {
+	ID        int64   `json:"id"`
+	UserID    int64   `json:"userId"`
+	Token     string  `json:"token"`
+	Device    *string `json:"device"`
+	IpAddress *string `json:"ipAddress"`
+	CreatedAt string  `json:"createdAt"`
+	LastUsed  string  `json:"lastUsed"`
+	ExpiresAt string  `json:"expiresAt"`
+	Unseen    int64   `json:"unseen"`
+}
+
+func (q *Queries) GetSessionByTokenHash(ctx context.Context, token string) (GetSessionByTokenHashRow, error) {
 	row := q.db.QueryRowContext(ctx, getSessionByTokenHash, token)
-	var i Session
+	var i GetSessionByTokenHashRow
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
@@ -189,15 +201,27 @@ WHERE user_id = ?
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListUserSessions(ctx context.Context, userID int64) ([]Session, error) {
+type ListUserSessionsRow struct {
+	ID        int64   `json:"id"`
+	UserID    int64   `json:"userId"`
+	Token     string  `json:"token"`
+	Device    *string `json:"device"`
+	IpAddress *string `json:"ipAddress"`
+	CreatedAt string  `json:"createdAt"`
+	LastUsed  string  `json:"lastUsed"`
+	ExpiresAt string  `json:"expiresAt"`
+	Unseen    int64   `json:"unseen"`
+}
+
+func (q *Queries) ListUserSessions(ctx context.Context, userID int64) ([]ListUserSessionsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listUserSessions, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Session{}
+	items := []ListUserSessionsRow{}
 	for rows.Next() {
-		var i Session
+		var i ListUserSessionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
@@ -238,6 +262,21 @@ func (q *Queries) MarkSessionsSeen(ctx context.Context, arg MarkSessionsSeenPara
 	return q.db.ExecContext(ctx, markSessionsSeen, arg.UserID, arg.ID)
 }
 
+const setSessionIdentityKey = `-- name: SetSessionIdentityKey :execresult
+UPDATE sessions SET identity_public_key = ?1 WHERE token = ?2
+`
+
+type SetSessionIdentityKeyParams struct {
+	IdentityPublicKey *string `json:"identityPublicKey"`
+	Token             string  `json:"token"`
+}
+
+// The device identity public key a WebSocket auth frame carried, stored on the
+// session it authenticated. Written on every connect, last write wins.
+func (q *Queries) SetSessionIdentityKey(ctx context.Context, arg SetSessionIdentityKeyParams) (sql.Result, error) {
+	return q.db.ExecContext(ctx, setSessionIdentityKey, arg.IdentityPublicKey, arg.Token)
+}
+
 const touchSessions = `-- name: TouchSessions :exec
 UPDATE sessions
 SET last_used = datetime('now'),
@@ -255,7 +294,7 @@ type TouchSessionsParams struct {
 // expires sessionTTL after its last touch, capped at created_at + 365 days,
 // the absolute lifetime from sign-in. expires_at > now keeps a lapsed row
 // lapsed, so a touch racing an expiry can never revive it. Both bounds use
-// sessionTimeLayout, which keeps the sweep's index comparison in
+// dbtime.ISOLayout, which keeps the sweep's index comparison in
 // DeleteExpiredSessions valid. The hub batches its touches (P5-S07), so now is
 // the flush time, at most one flush interval after the use it records. The
 // slice stays last: sqlc numbers the named args (?1, ?2), and a slice expanded

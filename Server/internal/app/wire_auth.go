@@ -66,6 +66,10 @@ func wireAuth(svc *service.Services, authSvc *service.AuthService, store *storag
 			svc.Appeals.SetUnbanBroadcaster(hub)
 		}
 	}
+	authSvc.UseWelcome(svc.Welcome)
+	if hub != nil {
+		svc.Welcome.SetNotifier(hub)
+	}
 	if svc.Erasure != nil {
 		authSvc.UseErasure(svc.Erasure)
 	} else {

@@ -46,7 +46,7 @@ const (
 // reversal are kept from the anonymising deletion this replaces.
 //
 // Children are deleted before the users row: messages.user_id,
-// invites.created_by and emoji.uploaded_by carry no ON DELETE action,
+// invites.created_by, emoji.uploaded_by and stickers.uploaded_by carry no ON DELETE action,
 // so with foreign_keys=ON the users DELETE passes only once they are gone.
 // The subject's invites are deleted (an unused code stops working, and who
 // invited whom is what the erasure removes); invites the subject redeemed
@@ -308,8 +308,9 @@ func erasureCollectFiles(ctx context.Context, tx *sql.Tx, userID int64) ([]strin
 // mention_count is a stored counter nothing else ever zeroes. Inline rather
 // than DecrementMentionCounts, which opens its own writer transaction.
 //
-// The subquery mirrors DecrementMentionCounts' guard: undeleted messages
-// past the recipient's last_message_id (a reader who has since marked the
+// The subquery mirrors DecrementMentionCounts' guard: the readers each
+// message's mention_receipts say it counted, undeleted messages past the
+// recipient's last_message_id (a reader who has since marked the
 // channel read is left alone), excluding mentions to a user who has blocked
 // the departing author — mentionEntries (service/mentions.go) never
 // counted those (OC-0293), so reversing them would wipe a genuine, unrelated
@@ -319,12 +320,13 @@ func erasureReverseMentionCounts(ctx context.Context, tx *sql.Tx, userID int64) 
 		`UPDATE read_states
 		 SET mention_count = MAX(0, mention_count - (
 		     SELECT COUNT(*)
-		     FROM message_mentions mm
-		     JOIN messages m ON m.id = mm.message_id
-		     WHERE mm.mentioned_user_id = read_states.user_id
-		       AND m.channel_id = read_states.channel_id
+		     FROM mention_receipts r
+		     JOIN messages m ON m.id = r.message_id
+		     WHERE r.user_id = read_states.user_id
+		       AND r.channel_id = read_states.channel_id
 		       AND m.user_id = ?
 		       AND m.deleted = 0
+		       AND `+countedReceipt+`
 		       AND m.id > read_states.last_message_id
 		       AND NOT EXISTS (
 		           SELECT 1 FROM user_blocks b
@@ -378,28 +380,47 @@ func erasureReassignAssets(ctx context.Context, tx *sql.Tx, userID int64) ([]str
 		if _, err := tx.ExecContext(ctx, `UPDATE emoji SET uploaded_by = ? WHERE uploaded_by = ?`, heir, userID); err != nil {
 			return nil, fmt.Errorf("EraseAccount reassign emoji: %w", err)
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE stickers SET uploaded_by = ? WHERE uploaded_by = ?`, heir, userID); err != nil {
+			return nil, fmt.Errorf("EraseAccount reassign stickers: %w", err)
+		}
 		return nil, nil
 	case errors.Is(err, sql.ErrNoRows):
-		rows, err := tx.QueryContext(ctx, `DELETE FROM emoji WHERE uploaded_by = ? RETURNING filename`, userID)
-		if err != nil {
-			return nil, fmt.Errorf("EraseAccount delete emoji: %w", err)
-		}
-		defer rows.Close() //nolint:errcheck
 		var files []string
-		for rows.Next() {
-			var name string
-			if err := rows.Scan(&name); err != nil {
-				return nil, fmt.Errorf("EraseAccount scan emoji: %w", err)
+		for _, table := range []string{"emoji", "stickers"} {
+			removed, err := erasureDeleteAssetRows(ctx, tx, table, userID)
+			if err != nil {
+				return nil, err
 			}
-			files = append(files, name)
-		}
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("EraseAccount emoji rows: %w", err)
+			files = append(files, removed...)
 		}
 		return files, nil
 	default:
 		return nil, fmt.Errorf("EraseAccount asset heir: %w", err)
 	}
+}
+
+// erasureDeleteAssetRows deletes the subject's rows of one server-wide asset
+// table (emoji or stickers, both with a filename and an uploaded_by column) and
+// returns their stored file names. table is a fixed literal chosen by the caller.
+func erasureDeleteAssetRows(ctx context.Context, tx *sql.Tx, table string, userID int64) ([]string, error) {
+	// G202: table is a fixed literal from the caller, never request data.
+	rows, err := tx.QueryContext(ctx, `DELETE FROM `+table+` WHERE uploaded_by = ? RETURNING filename`, userID) //nolint:gosec
+	if err != nil {
+		return nil, fmt.Errorf("EraseAccount delete %s: %w", table, err)
+	}
+	defer rows.Close() //nolint:errcheck
+	var files []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("EraseAccount scan %s: %w", table, err)
+		}
+		files = append(files, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("EraseAccount %s rows: %w", table, err)
+	}
+	return files, nil
 }
 
 // ListUnfinishedErasureJobs returns every job whose files are not yet gone,
@@ -480,7 +501,7 @@ func (d *DB) CompleteErasureJob(ctx context.Context, id int64, filesRemoved int)
 }
 
 // ReferencedStoredFiles reports which of names are still referenced by a
-// row — an attachment's stored_as or an emoji's filename — for
+// row — an attachment's stored_as, an emoji's filename or a sticker's filename — for
 // the storage reconciliation pass (data-lifecycle O3 A3): a file in the
 // upload directory that no row names is stranded and may be removed.
 func (d *DB) ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error) {
@@ -501,8 +522,10 @@ func (d *DB) ReferencedStoredFiles(ctx context.Context, names []string) (map[str
 		in := string(placeholders)
 		// G202: `in` is "?" placeholders only; every name is bound below.
 		query := `SELECT stored_as FROM attachments WHERE stored_as IN (` + in + `)` + //nolint:gosec
-			` UNION SELECT filename FROM emoji WHERE filename IN (` + in + `)`
-		all := make([]any, 0, 2*len(args))
+			` UNION SELECT filename FROM emoji WHERE filename IN (` + in + `)` +
+			` UNION SELECT filename FROM stickers WHERE filename IN (` + in + `)`
+		all := make([]any, 0, 3*len(args))
+		all = append(all, args...)
 		all = append(all, args...)
 		all = append(all, args...)
 		rows, err := d.reader.QueryContext(ctx, query, all...)

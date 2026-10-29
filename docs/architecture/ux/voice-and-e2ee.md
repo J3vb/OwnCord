@@ -152,7 +152,14 @@ view.
 **The voice channel's chat beside the grid** (guild calls): opening the call
 view selects the voice channel you are in (`pages/main-page/callChat.ts`), so
 its chat mounts as for any channel, and the grid sits left of it with the chat
-in a 360px column on the right (stacked under the grid at narrow width). The
+in a column on the right (stacked under the grid at narrow width). The chat
+column is 360px by default; the handle on its left edge resizes it (drag, or
+the arrow keys, Home and End) from 280px to 640px, always leaving the grid
+360px, and the width is saved (`features/voice/callChatResize.ts`, on the
+shared `features/panes/paneResize.ts` handle). While the call view is up (and
+in a forum channel) the member column steps aside so the grid gets its width; the
+Member List toggle opens it for the moment without changing the saved choice,
+and leaving the call view puts that choice back (`MemberColumn.setCallView`). The
 split holds only while the active channel is the joined voice channel; a
 stream watched over a text channel, a DM call and a popped-out call keep the
 grid over the chat. Moving to another voice channel follows to its chat. Leaving
@@ -219,6 +226,11 @@ popup inherits the app's CSP. The stream's volume and mute go along into the win
 The tile shows **Bring back**, and closing the window returns the video and its controls; closing the main window closes every pop-out. Where
 no window opens the video stays in the grid and an error toast says "Couldn't open the pop-out window". Full screen on a
 popped-out tile closes the pop-out first, and leaving full screen returns it to the grid (Pop out re-pops it).
+**Ctrl + scroll** over a tile or a pop-out window zooms the video towards the pointer (up to 8x), and a
+drag pans it, edges never pulled into view; a pan is no click, so it never focuses or swaps the tile, and
+a plain scroll still scrolls the grid (`bindVideoZoom` in `src/lib/zoomPan.ts`, shared with the image
+lightbox). Scrolling back to 1x, a new or stopped stream, and popping out start it unzoomed; the
+mini-player and your own screen share's cover do not zoom.
 Choosing a text channel from the stream view, the open one included (`onChannelReselect` in
 `lib/channel-navigation.ts`), leaves it with voice still up, and the stream you watch keeps playing in
 a **mini-player** over the app (`features/voice/miniPlayer.ts`, loaded on first use; the tile's own video
@@ -385,7 +397,15 @@ trust action entirely (a blind accept is refused).
   unmasked renderer names a non-Intel GPU, else VP8: livekit-client 2.22.3
   cannot decrypt Intel Quick Sync H.264 (livekit/client-sdk-js#2140), so a
   manual H.264 choice carries a warning. The Linux native engine always
-  publishes VP8 and the setting is hidden there.
+  publishes VP8 and the setting is hidden there. In the Windows app on a
+  non-Intel hardware GPU an H.264 camera or share offers only H.264 Main and High
+  (`lib/h264Profile.ts`, codec preferences set on every offer): WebView2
+  encodes those on the GPU but Constrained Baseline only in software, and
+  LiveKit answers Constrained Baseline first when it is offered. A saved
+  H.264 there skips the `encodingInfo` probe, which always reports software
+  in WebView2. The 120 fps share option is hidden for now
+  (`lib/shareFps.ts`): WebView2's capture delivers about 60 fps, and a saved
+  120 reads as 60.
 - **Sensitivity gate:** `public/vad-worklet.js` on the processor's tap
   (`startVadDetector`, with a setTimeout fallback of the same timing). It
   opens after about 32 ms of sustained level, so a mouse click does not open

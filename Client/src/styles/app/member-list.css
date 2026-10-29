@@ -317,7 +317,7 @@
 
 @media (max-width: 899px) {
   .member-column {
-    padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) 0;
+    padding: 0 env(safe-area-inset-right) var(--safe-bottom) 0;
   }
 }
 /* Phones: the overlay takes the whole width. */

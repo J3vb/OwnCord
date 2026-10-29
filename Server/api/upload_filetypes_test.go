@@ -48,6 +48,8 @@ func TestUpload_BlockedExtensionRefused(t *testing.T) {
 	assertBlocked(t, h, "cleanup.BAT", []byte("@echo off\r\n"), ".bat")
 	assertBlocked(t, h, "report.pdf.ps1", []byte("Get-ChildItem\n"), ".ps1")
 	assertBlocked(t, h, "photo.jpg.hta", []byte("<html></html>"), ".hta")
+	assertBlocked(t, h, "Page.HTM", []byte("<html></html>"), ".htm")
+	assertBlocked(t, h, "notes.txt.mhtml", []byte("MIME-Version: 1.0\r\n"), ".mhtml")
 
 	for _, name := range []string{"notes.txt", "www.amazon.com.txt", "notes.hta.txt"} {
 		if rr := doUpload(t, h.router, h.token, "file", name, []byte("hello")); rr.Code != http.StatusCreated {

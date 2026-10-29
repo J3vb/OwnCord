@@ -213,12 +213,11 @@ export const MOCK_MESSAGES_RICH = {
 };
 
 // Remote users only — the ready payload must never claim the LOCAL user
-// (id 1) is in a voice channel: the dispatcher treats "self in
-// ready.voice_states while voiceStatus is idle" as stale state from a
-// reload and immediately sends voice_leave + clears the local store
-// (dispatcher.ts stale-voice cleanup), which would hide the widget again.
-// Tests that need the widget visible must join via the real click path
-// (see joinVoiceChannelByName).
+// (id 1) is in a voice channel. A device whose voice status is idle reads its
+// own user's row (in ready.voice_states or a voice_state frame) as ANOTHER
+// device's call: the roster shows it, but this device holds no call, so the
+// widget stays hidden. Tests that need the widget visible must join via the
+// real click path (see joinVoiceChannelByName).
 export const MOCK_VOICE_STATE = [
   { user_id: 2, channel_id: 10, muted: true, deafened: false },
   { user_id: 3, channel_id: 10, muted: false, deafened: false },
@@ -275,12 +274,14 @@ function buildReadyPayload(overrides?: {
   notices?: unknown[];
   categories?: unknown[];
   capabilities?: Record<string, boolean>;
+  listening?: unknown[];
 }): unknown {
   return {
     type: "ready",
     payload: {
       ...(overrides?.capabilities === undefined ? {} : { capabilities: overrides.capabilities }),
       ...(overrides?.categories === undefined ? {} : { categories: overrides.categories }),
+      ...(overrides?.listening === undefined ? {} : { listening: overrides.listening }),
       channels: overrides?.channels ?? MOCK_CHANNELS,
       members: overrides?.members ?? MOCK_READY_PAYLOAD.payload.members,
       voice_states: overrides?.voice_states ?? [],
@@ -538,7 +539,12 @@ export function buildTauriMockScript(opts: {
     categories?: unknown[];
     /** The server capability flags of `ready` (for example `{ forums: true }`); omitted = absent. */
     capabilities?: Record<string, boolean>;
+    /** `ready.listening` (WP 8.10): the songs members are listening to; omitted = absent. */
+    listening?: unknown[];
   };
+  /** What `detect_media` answers (WP 8.10), for a spec that needs a song playing on
+   *  this device. Omitted = `{ state: "none" }`, which every other spec relies on. */
+  detectMedia?: unknown;
   /** Functions run after the mock installs `__TAURI_INTERNALS__`, inside the
    *  same init script, because Playwright does not order separate
    *  `addInitScript` registrations. Each is serialised with `toString()`, so it
@@ -874,6 +880,14 @@ export function buildTauriMockScript(opts: {
         // so the replay would re-fail and the mock would report a permanent
         // mismatch the real keyring never produces.
         if (cmd === "store_identity_pin") {
+          // Same validation as store_identity_pin in src-tauri/src/commands.rs
+          // (1-512 chars of [A-Za-z0-9+/=_-]), so an encoding the real store
+          // refuses cannot pass here.
+          const pin = args?.pin;
+          if (typeof pin !== "string" || pin.length < 1 || pin.length > 512 ||
+              !/^[A-Za-z0-9+/=_-]+$/.test(pin)) {
+            throw "pin must be 1-512 characters of [A-Za-z0-9+/=_-]";
+          }
           window.__mockIdentityPins ??= ${JSON.stringify(opts.identityPins ?? {})};
           window.__mockIdentityPins[String(args?.userId)] = args?.pin ?? null;
           return null;
@@ -892,12 +906,18 @@ export function buildTauriMockScript(opts: {
              "plugin:deep-link|get_current", "plugin:deep-link|register", "plugin:fs|mkdir", "plugin:fs|write_text_file", "plugin:fs|remove", "plugin:autostart|is_enabled",
              "plugin:notification|is_permission_granted", "plugin:notification|notify", "notify_message", "clear_call_notification",
              // plugin:dialog|save cancels; a spec that needs a real save must override it.
-             "plugin:opener|open_url", "plugin:dialog|save", "ptt_set_key", "ptt_start", "ptt_stop",
+             "open_external_url", "plugin:dialog|save", "ptt_set_key", "ptt_start", "ptt_stop",
              "voice_shortcuts_start", "voice_shortcuts_set_keys",
              "open_devtools", "frontend_ready"].includes(cmd)) return null;
         // Auto-idle's OS idle poll (DP-33): null is "the OS cannot say", so the
         // mocked app keeps the in-window idle timer it had before the poll.
         if (cmd === "system_idle_ms") return null;
+        // The game scan (WP 8.3): no game is running in the mocked app.
+        if (cmd === "detect_game") return null;
+        // The song read (WP 8.10): nothing is playing in the mocked app.
+        if (cmd === "detect_media") return ${JSON.stringify(opts.detectMedia ?? { state: "none" })};
+        // The "Add a game" picker's program list: nothing is running here.
+        if (cmd === "list_running_programs") return [];
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
         if (cmd === "set_unread_badge") return null;
         if (cmd === "ptt_polling_supported") return false;
@@ -1289,8 +1309,9 @@ export async function navigateToMainPageReady(page: Page): Promise<void> {
 /**
  * Join a voice channel through the real click path and wait for the voice
  * widget to become visible. This is the only supported way for tests to get
- * the local user into voice: pre-seeding the ready payload with user 1 no
- * longer works (the dispatcher's stale-voice cleanup immediately leaves).
+ * the local user into voice: a self row in ready or a self voice_state on an
+ * idle device is treated as another device's call (roster only), so it never
+ * shows the widget.
  */
 export async function joinVoiceChannelByName(
   page: Page,

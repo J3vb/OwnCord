@@ -38,6 +38,7 @@ const {
       id: number;
       content?: string;
       user?: { id: number; username: string; display_name?: string | null };
+      sticker?: { id: number | null; name: string; url: string | null };
       attachments?: Array<{ id: string }>;
       deleted?: boolean;
       status?: string;
@@ -297,6 +298,7 @@ vi.mock("@stores/dm.store", async () => {
       }),
     },
     dmDisplayName: actual.dmDisplayName,
+    clearDmUnread: vi.fn(),
   };
 });
 
@@ -335,6 +337,19 @@ vi.mock("@stores/blocks.store", () => ({
   dmComposerBlockReason: mockDmComposerBlockReason,
 }));
 
+const { mockThreadOpenById } = vi.hoisted(() => ({ mockThreadOpenById: vi.fn() }));
+
+// Only tests that pass a threadSlot get a thread panel host.
+vi.mock("../../src/pages/main-page/ThreadPanelHost", () => ({
+  createThreadPanelHost: vi.fn(() => ({
+    open: vi.fn(),
+    openById: mockThreadOpenById,
+    close: vi.fn(),
+    openThreadId: null,
+    destroy: vi.fn(),
+  })),
+}));
+
 // ---------------------------------------------------------------------------
 // Imports
 // ---------------------------------------------------------------------------
@@ -366,9 +381,16 @@ import {
 import { createMessageList } from "@components/MessageList";
 import { loadSavedDraft, saveDraft } from "@lib/savedDrafts";
 import {
+  clearReactionUsersCache,
+  getCachedReactionUsers,
+  loadReactionUsers,
+  setReactionUsersFetcher,
+} from "../../src/features/messaging/reactionUsers";
+import {
   NAVIGATION_DESTINATIONS,
   type ForumViewContext,
 } from "../../src/features/navigation/destinations";
+import { requestOpenThread } from "../../src/features/threads/threadNavigation";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -585,6 +607,20 @@ describe("createChannelController", () => {
     expect(mockInvalidateWindow).toHaveBeenCalledWith(99);
     // Each mount still asks for the tail exactly once.
     expect(opts.msgCtrl.loadMessages).toHaveBeenCalledTimes(3);
+  });
+
+  it("drops cached who-reacted lists when leaving a channel, since its reaction updates stop", async () => {
+    setReactionUsersFetcher(vi.fn().mockResolvedValue([{ id: 2, username: "bob", avatar: "" }]));
+    clearReactionUsersCache();
+    const ctrl = createChannelController(makeOpts());
+    ctrl.mountChannel(42, "general");
+    await loadReactionUsers(42, 500, "👍");
+    expect(getCachedReactionUsers(500, "👍")).toHaveLength(1);
+
+    ctrl.mountChannel(99, "random");
+
+    expect(getCachedReactionUsers(500, "👍")).toBeUndefined();
+    setReactionUsersFetcher(null);
   });
 
   // UX-8: the ready-time auto-select no longer clears a badge (selecting is
@@ -2307,6 +2343,34 @@ describe("createChannelController", () => {
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
 
       expect(mockStartEdit).toHaveBeenCalledExactlyOnceWith(4);
+    });
+
+    it("skips a sticker message and edits the last message with text", () => {
+      mockGetChannelMessages.mockReturnValue([
+        {
+          id: 1,
+          content: "my text",
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "sent",
+        },
+        {
+          id: 2,
+          content: "[Sticker: Wave]",
+          sticker: { id: 3, name: "Wave", url: "/api/v1/stickers/3/image" },
+          user: { id: 1, username: "me" },
+          deleted: false,
+          status: "sent",
+        },
+      ]);
+      const opts = makeOpts();
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      vi.clearAllMocks();
+
+      opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
+
+      expect(mockStartEdit).toHaveBeenCalledExactlyOnceWith(1);
     });
 
     it("skips deleted messages and finds earlier non-deleted message", () => {
@@ -4658,6 +4722,29 @@ describe("a forum channel (WP 6.9d)", () => {
     expect(mockMarkChannelRead).not.toHaveBeenCalledWith(FORUM);
     expect(mockLeaveChannel).not.toHaveBeenCalledWith(FORUM);
     ctrl.destroyChannel();
+  });
+
+  it("opens a followed post asked for from another channel once the forum mounts", () => {
+    const opts = makeOpts({
+      slots: { ...makeSlots(), threadSlot: document.createElement("div") as HTMLDivElement },
+    });
+    const ctrl = createChannelController(opts);
+    ctrl.mountChannel(TEXT, "general", "text");
+    requestOpenThread(77, FORUM);
+    expect(mockThreadOpenById).not.toHaveBeenCalled();
+
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+    expect(mockThreadOpenById).toHaveBeenCalledTimes(1);
+    const [threadId, parentId, signal] = mockThreadOpenById.mock.calls[0]!;
+    expect(threadId).toBe(77);
+    expect(parentId).toBe(FORUM);
+    expect(signal).toBe(built[0]!.signal);
+
+    // The request is spent: the next mount opens nothing.
+    ctrl.mountChannel(TEXT, "general", "text");
+    ctrl.mountChannel(FORUM, "feedback", "forum");
+    expect(mockThreadOpenById).toHaveBeenCalledTimes(1);
+    ctrl.destroy();
   });
 
   it("puts a labelled forum behind the consent gate, mounting nothing of the forum", async () => {

@@ -26,5 +26,5 @@ SELECT id, channel_id, kind, deleted FROM messages WHERE id = ?;
 -- name: ListAttachmentsForForward :many
 -- The files a forward clones, in upload order. stored_as names the bytes on
 -- disk, which the clone links or copies; nothing here is sent to a client.
-SELECT id, filename, stored_as, mime_type, size, width, height
+SELECT id, filename, stored_as, mime_type, size, width, height, duration_ms, waveform
 FROM attachments WHERE message_id = ? ORDER BY rowid;

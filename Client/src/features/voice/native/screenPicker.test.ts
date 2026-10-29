@@ -229,6 +229,18 @@ describe("armScreenRestart (WP 1C-6)", () => {
     await expect(armScreenRestart()).resolves.toBe(false);
   });
 
+  it("refuses a portal pick even when the host lists a source of that name", async () => {
+    host.sources = {
+      portal: true,
+      audio: false,
+      sources: [{ id: "portal", kind: "screen", title: "portal", thumbnail: null }],
+    };
+    host.pick = () => ({ source: "portal", quality: "medium", fps: 30 });
+    await pickScreenSource();
+
+    await expect(armScreenRestart()).resolves.toBe(false);
+  });
+
   it("disarming puts the dialog back", async () => {
     host.pick = () => ({ source: "screen:277", quality: "medium", fps: 30 });
     await pickScreenSource();
@@ -265,6 +277,18 @@ describe("pickChangeSource", () => {
     await expect(armScreenRestart()).resolves.toBe(true);
     // Same capture and encoding as the share's own pick, the new source.
     await expect(pickScreenSource()).resolves.toEqual({ ...first, source: "screen:277" });
+  });
+
+  it("offers the listed sources, not the portal, to the dialog", async () => {
+    let offered: FakePickOptions | undefined;
+    host.pick = (opts) => {
+      offered = opts;
+      return { source: "screen:277", quality: "low", fps: 5 };
+    };
+
+    await pickChangeSource();
+
+    expect(offered).toMatchObject({ portal: false, sourceOnly: true, sources: x11.sources });
   });
 
   it("leaves the pick to the portal on Wayland, with no dialog", async () => {

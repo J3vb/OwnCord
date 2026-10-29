@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -88,11 +89,15 @@ func TestRemoveParticipantAsync_JoinedByStopHub(t *testing.T) {
 
 // stopJoinLeaveStore is the voice service whose LeaveIfMatch fails calls 1 and
 // 3 (each leave's synchronous attempt) and blocks every other call (a
-// background retry) until its ctx ends, reporting how it ended.
+// background retry) until its ctx ends, reporting how it ended. The call then
+// returns only once release is closed: a cancelled retry otherwise exits in
+// the microseconds between the group's cancel and its running count, and a
+// short join that raced it read 0 (#2797, run 40097892996).
 type stopJoinLeaveStore struct {
 	*service.VoiceService
-	calls atomic.Int32
-	ended chan error
+	calls   atomic.Int32
+	ended   chan error
+	release chan struct{}
 }
 
 func (s *stopJoinLeaveStore) LeaveIfMatch(ctx context.Context, _, _ int64, _ string) (bool, error) {
@@ -101,6 +106,7 @@ func (s *stopJoinLeaveStore) LeaveIfMatch(ctx context.Context, _, _ int64, _ str
 	}
 	<-ctx.Done()
 	s.ended <- ctx.Err()
+	<-s.release
 	return false, ctx.Err()
 }
 
@@ -110,7 +116,14 @@ func TestVoiceLeaveRetry_JoinedByStopHub(t *testing.T) {
 	t.Cleanup(func() { voiceLeaveRetryTimeout.Store(old) })
 
 	database := newHarvestVoiceDB(t)
-	voice := &stopJoinLeaveStore{VoiceService: service.NewVoiceService(database), ended: make(chan error, 4)}
+	voice := &stopJoinLeaveStore{
+		VoiceService: service.NewVoiceService(database),
+		ended:        make(chan error, 4),
+		release:      make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	releaseRetry := func() { releaseOnce.Do(func() { close(voice.release) }) }
+	t.Cleanup(releaseRetry)
 	h := newTestHubWith(t, HubOptions{DB: database, Voice: voice})
 
 	if err := leaveVoiceChannelWithRetry(context.Background(), h.heldTxn(1), 2, "tok"); err == nil {
@@ -131,6 +144,7 @@ func TestVoiceLeaveRetry_JoinedByStopHub(t *testing.T) {
 	if n := h.JoinBackground(short); n != 1 {
 		t.Fatalf("JoinBackground within the grace reported %d running jobs, want the parked retry (owned by the hub group)", n)
 	}
+	releaseRetry()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if n := h.JoinBackground(ctx); n != 0 {

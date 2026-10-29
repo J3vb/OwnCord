@@ -16,13 +16,14 @@ import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
-import { isRenderableAvatar } from "@components/message-list/avatar";
+import { isRenderableAvatar, setAvatarSource } from "@components/message-list/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
 } from "@components/message-list/attachments";
-import { cropImage } from "@lib/imageCrop";
+import { cropImage, type CropResult } from "@lib/imageCrop";
+import { isAnimatedImage } from "@lib/animatedStill";
 import { profileBannersEnabled } from "@lib/serverCapabilities";
 import { isBannerColor, paintBanner } from "../../features/profiles/banner";
 import { bannerImages } from "../bannerImages";
@@ -57,9 +58,12 @@ const log = createLogger("AccountTab");
  *  about the limit from a rejected request (the name limits are in nameLimits). */
 const MAX_ABOUT_LEN = 300;
 /** Mirrors maxAvatarFileBytes / maxAvatarDimension on the server. */
-const MAX_AVATAR_BYTES = 1024 * 1024;
+const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const MAX_AVATAR_DIMENSION = 1024;
-const ACCEPTED_AVATAR_TYPES = "image/png,image/jpeg,image/webp";
+/** Mirrors maxBannerFileBytes: what an animated banner, sent uncropped, may weigh. */
+const MAX_BANNER_BYTES = 4 * 1024 * 1024;
+/** Avatars and banners may move (WP 8.7): GIF joins the still types. */
+const ACCEPTED_AVATAR_TYPES = "image/png,image/jpeg,image/webp,image/gif";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -181,13 +185,18 @@ function paintAvatar(
     target.style.background = "";
   };
   if (url === null) {
+    delete target.dataset["avatarSrc"];
     showInitial();
     return;
   }
-  void fetchImageAsObjectUrl(url).then((objectUrl) => {
-    if (objectUrl === null || !target.isConnected) return;
-    const img = createElement("img", { class: "avatar-img", src: objectUrl, alt });
+  // A later paint (a new upload, a user_update) wins over this one.
+  target.dataset["avatarSrc"] = url;
+  void fetchImageAsObjectUrl(url).then(async (objectUrl) => {
+    const current = (): boolean => target.isConnected && target.dataset["avatarSrc"] === url;
+    if (objectUrl === null || !current()) return;
+    const img = createElement("img", { class: "avatar-img", alt });
     recoverEvictedImage(img, { url });
+    if (!(await setAvatarSource(img, objectUrl, () => "always", current))) return;
     target.replaceChildren(img);
     target.style.background = "transparent";
   });
@@ -228,7 +237,7 @@ export function validateAvatarFile(
   dimensions: { width: number; height: number } | null,
 ): string | null {
   if (!ACCEPTED_AVATAR_TYPES.split(",").includes(file.type)) {
-    return t("avatar.notImage");
+    return t("avatar.notImageOrGif");
   }
   if (file.size > MAX_AVATAR_BYTES) {
     return t("avatar.tooLarge", { kb: String(MAX_AVATAR_BYTES / 1024) });
@@ -359,6 +368,36 @@ function buildAvatarUploader(
 /** A banner is shown 5:2; 1200 px wide keeps it sharp and under the server's 1920x960 cap. */
 const BANNER_ASPECT = 2.5;
 const BANNER_MAX_WIDTH = 1200;
+
+/**
+ * What goes up as the banner. A still picture is cropped to 5:2 and scaled
+ * down; a GIF or an animated WebP/PNG goes as it is, since a canvas crop keeps
+ * only its first frame (WP 8.7). The banner strip cover-crops it instead.
+ */
+export async function prepareBannerFile(file: File): Promise<CropResult> {
+  if (file.type === "image/gif" || (await isAnimatedFile(file))) {
+    if (file.size > MAX_BANNER_BYTES) {
+      return { ok: false, error: t("banner.tooLarge", { kb: String(MAX_BANNER_BYTES / 1024) }) };
+    }
+    return { ok: true, file };
+  }
+  return cropImage(file, { aspect: BANNER_ASPECT, maxWidth: BANNER_MAX_WIDTH, fileBase: "banner" });
+}
+
+/** WebP's animation flag sits in its header and APNG's acTL chunk comes
+ *  before the first image data, so the head of the file is enough. */
+const ANIMATION_SNIFF_BYTES = 64 * 1024;
+
+async function isAnimatedFile(file: File): Promise<boolean> {
+  if (file.type !== "image/webp" && file.type !== "image/png") return false;
+  try {
+    return isAnimatedImage(
+      new Uint8Array(await file.slice(0, ANIMATION_SNIFF_BYTES).arrayBuffer()),
+    );
+  } catch {
+    return false;
+  }
+}
 /** What the colour picker shows while no colour is set (it cannot be empty). */
 const BANNER_PICKER_DEFAULT = "#5865f2";
 
@@ -486,16 +525,12 @@ function buildBannerEditor(
       setText(uploadBtn, t("profile.uploading"));
       void (async () => {
         try {
-          const cropped = await cropImage(file, {
-            aspect: BANNER_ASPECT,
-            maxWidth: BANNER_MAX_WIDTH,
-            fileBase: "banner",
-          });
-          if (!cropped.ok) {
-            setText(errorEl, cropped.error);
+          const prepared = await prepareBannerFile(file);
+          if (!prepared.ok) {
+            setText(errorEl, prepared.error);
             return;
           }
-          await upload(cropped.file);
+          await upload(prepared.file);
         } catch (err) {
           // 404: the server advertises banners with attachment storage off, so
           // the upload route is not mounted.
@@ -1698,6 +1733,7 @@ export function buildAccountTab(
   });
   const usernameHint = attachLimitHint(editInput, {
     max: MAX_USERNAME_LEN,
+    countCharacters: true,
     hint: usernameHintText(),
     id: "username-edit-hint",
     signal,

@@ -261,6 +261,8 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
       "Access & registration",
       "Security",
       "Voice: AFK",
+      "Member activity (games and music)",
+      "Welcome messages",
       "Upload file types",
       "Running configuration",
     ]);
@@ -515,6 +517,8 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
     const booted = await boot(fetchCalls, respondWith());
     dom = booted.dom;
     const { document } = dom.window;
+    // The schedule is the owner's (a Manage Backups holder does not see it).
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
     await render(booted.bridge, dom.window, booted.bridge.renderBackups);
     const schedule = document.getElementById("s-backup_schedule") as HTMLSelectElement;
     const save = document.getElementById("saveBackupPolicyBtn") as HTMLButtonElement;
@@ -528,6 +532,52 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
 
     const patch = fetchCalls.find((c) => c.method === "PATCH");
     expect(patch).toMatchObject({ path: "/settings", body: { backup_schedule: "weekly" } });
+  });
+
+  // WP 8.4c: a Manage Backups holder gets the page cut down to create, list
+  // and download; the owner's view keeps everything.
+  it("shows a Manage Backups holder only create, status and Download, and the owner everything", async () => {
+    const respond = respondWith({
+      "GET /backups": { json: [{ name: BACKUP, size: 1024, date: new Date().toISOString() }] },
+      "GET /settings": { json: LOADED_SETTINGS },
+    });
+    const holderCalls: FetchCall[] = [];
+    const holder = await boot(holderCalls, respond);
+    dom = holder.dom;
+    holder.bridge.state.me = { permissions: holder.bridge.PERM.MANAGE_BACKUPS, is_owner: false };
+    const content = await render(holder.bridge, dom.window, holder.bridge.renderBackups);
+    expect(content.querySelector('[data-action="createBackup"]')).not.toBeNull();
+    expect(content.querySelector("#backupStatus")).not.toBeNull();
+    expect(content.querySelector('[data-action="downloadBackup"]')).not.toBeNull();
+    for (const action of [
+      "downloadArchive",
+      "openRestoreModal",
+      "openDeleteBackupModal",
+      "saveBackupPolicy",
+    ]) {
+      expect(content.querySelector(`[data-action="${action}"]`), action).toBeNull();
+    }
+    expect(content.querySelector("#s-backup_schedule")).toBeNull();
+    expect(content.textContent).toContain("restoring and deleting backups stay with the owner");
+    // The policy is the owner's: it is not even fetched for a holder.
+    expect(holderCalls.some((c) => c.path === "/settings")).toBe(false);
+    dom.window.close();
+
+    const owner = await boot([], respond);
+    dom = owner.dom;
+    owner.bridge.state.me = { permissions: owner.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    const full = await render(owner.bridge, dom.window, owner.bridge.renderBackups);
+    for (const action of [
+      "createBackup",
+      "downloadArchive",
+      "downloadBackup",
+      "openRestoreModal",
+      "openDeleteBackupModal",
+      "saveBackupPolicy",
+    ]) {
+      expect(full.querySelector(`[data-action="${action}"]`), action).not.toBeNull();
+    }
+    expect(full.querySelector("#s-backup_schedule")).not.toBeNull();
   });
 
   async function backupStatus(
@@ -998,6 +1048,118 @@ describe("Server/admin/static — upload file types", () => {
       expect(field(document, key).disabled).toBe(true);
     }
     expect(content.textContent).toContain("Only the server owner can change the file types");
+  });
+});
+
+// WP 8.4b: the owner-only switch for whether Move Members holders can move the owner.
+describe("Server/admin/static — voice_owner_movable switch", () => {
+  let dom: JSDOM | undefined;
+
+  afterEach(() => {
+    dom?.window?.close();
+    dom = undefined;
+  });
+
+  const toggle = (document: Document) =>
+    document.getElementById("s-voice_owner_movable") as HTMLButtonElement | null;
+
+  it("is on when the setting is unset, and saves only the flip, as a string", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+
+    const sw = toggle(document)!;
+    expect(sw.getAttribute("role")).toBe("switch");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(document.getElementById("s-voice_owner_movable-name")?.textContent).toBe(
+      "Members with Move Members can move the owner",
+    );
+    const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    sw.click();
+    expect(save.disabled).toBe(false);
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      voice_owner_movable: "false",
+    });
+  });
+
+  it("shows a stored false as off", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /settings": { json: { ...LOADED_SETTINGS, voice_owner_movable: "false" } },
+      }),
+    );
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    expect(toggle(dom.window.document)!.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("is not shown to anyone but the owner", async () => {
+    const booted = await boot([], respondWith());
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: false };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    expect(toggle(dom.window.document)).toBeNull();
+  });
+});
+
+// WP 8.3e-2: the per-server game activity switch. Manage Server's, not the owner's.
+describe("Server/admin/static — game_activity_enabled switch", () => {
+  let dom: JSDOM | undefined;
+
+  afterEach(() => {
+    dom?.window?.close();
+    dom = undefined;
+  });
+
+  const toggle = (document: Document) =>
+    document.getElementById("s-game_activity_enabled") as HTMLButtonElement | null;
+
+  it("is on when the setting is unset, shown to a non-owner, and saves only the flip", async () => {
+    const calls: FetchCall[] = [];
+    const booted = await boot(calls, respondWith());
+    dom = booted.dom;
+    const { document } = dom.window;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.MANAGE_SERVER, is_owner: false };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+
+    const sw = toggle(document)!;
+    expect(sw.getAttribute("role")).toBe("switch");
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    expect(document.getElementById("s-game_activity_enabled-name")?.textContent).toBe(
+      "Show what members are playing and listening to",
+    );
+    const save = document.getElementById("saveSettingsBtn") as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+
+    sw.click();
+    expect(save.disabled).toBe(false);
+    calls.length = 0;
+    await booted.bridge.saveSettings();
+    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+      game_activity_enabled: "false",
+    });
+  });
+
+  it("shows a stored false as off", async () => {
+    const booted = await boot(
+      [],
+      respondWith({
+        "GET /settings": { json: { ...LOADED_SETTINGS, game_activity_enabled: "false" } },
+      }),
+    );
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions: booted.bridge.PERM.MANAGE_SERVER, is_owner: false };
+    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    expect(toggle(dom.window.document)!.getAttribute("aria-checked")).toBe("false");
   });
 });
 

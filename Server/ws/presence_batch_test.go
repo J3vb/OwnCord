@@ -54,6 +54,9 @@ func presenceBatchHub(t *testing.T) (*Hub, *db.DB, func(name string, seen bool) 
 	h := newTestHub(t, database, limiter, service.New(database, limiter))
 	go h.Run()
 	t.Cleanup(h.Stop)
+	// awaitDispatch returns at once until Run has started, so a frame sent
+	// before then would land after the caller's drain.
+	waitUntilRunning(t, h)
 	ctx := context.Background()
 	connect := func(name string, seen bool) *Client {
 		id, err := database.CreateUser(ctx, name, "hash", 4)
@@ -334,7 +337,7 @@ func TestPresenceFrame_FullQueueDropsAndMarksStale_ContentFrameStillCloses(t *te
 	// A window batch and a single status change, both into a full queue.
 	h.QueuePresence(mover.userID, db.StatusIdle, nil)
 	settle(t, h)
-	h.EmitEvents(context.Background(), presenceEvents(mover.userID, db.StatusDND, nil))
+	h.EmitEvents(context.Background(), presenceEvents(mover.userID, db.StatusDND, nil, nil, nil))
 	if err := h.awaitDispatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +405,7 @@ func TestPresenceDrop_ForcesFullReadyOnResume(t *testing.T) {
 	fillQueue(slow)
 
 	h.QueuePresence(mover.userID, db.StatusIdle, nil)
-	settleUntil(t, h, func() bool { return h.presenceResyncPending(slow.userID) },
+	settleUntil(t, h, func() bool { return h.presenceResyncPending(slow.userID, "") },
 		"the slow client never dropped the presence frame")
 
 	resume := func(u *db.User) bool {
@@ -442,7 +445,7 @@ func TestPresenceUpdate_InsideTheWindowStillDeliversTheNewMember(t *testing.T) {
 		t.Fatal("a later state in the window lost the member data")
 	}
 
-	h.EmitEvents(context.Background(), presenceEvents(9, db.StatusDND, nil))
+	h.EmitEvents(context.Background(), presenceEvents(9, db.StatusDND, nil, nil, nil))
 	if len(h.broadcast) != 2 {
 		t.Fatalf("got %d frames, want member_join then the fresher presence", len(h.broadcast))
 	}

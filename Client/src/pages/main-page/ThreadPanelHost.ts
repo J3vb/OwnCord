@@ -15,6 +15,7 @@ import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import type { ThreadInfo } from "@lib/types";
 import { createLogger } from "@lib/logger";
+import { Disposable } from "@lib/disposable";
 import {
   adoptThreadSnapshots,
   authorityChannelId,
@@ -33,8 +34,16 @@ import { resumeThreadFocus } from "../../features/messaging/threadResume";
 import type { MessageController } from "./MessageController";
 import { createReactionController } from "./ReactionController";
 import { messagingText } from "../../i18n/messaging";
+import { createPaneResize } from "../../features/panes/paneResize";
 
 const log = createLogger("thread-panel-host");
+
+export const THREAD_PANEL_WIDTH_PREF = "threadPanelWidth";
+export const THREAD_PANEL_WIDTH_MIN = 320;
+export const THREAD_PANEL_WIDTH_MAX = 960;
+export const THREAD_PANEL_WIDTH_DEFAULT = 380;
+/** What the panel leaves for the rest of the row (sidebar and chat). */
+const THREAD_PANEL_ROW_RESERVE = 640;
 
 export interface ThreadPanelHostOptions {
   readonly ws: WsClient;
@@ -80,6 +89,30 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
   let returnFocus: (() => HTMLElement | null) | null = null;
   // Across a reconnect the dispatcher asks us to re-focus the open thread.
   setThreadResume(resumeThreadFocus);
+  // The handle on the panel's left edge; the slot carries the width.
+  const resize = createPaneResize({
+    host: slot,
+    property: "--thread-panel-width",
+    pref: THREAD_PANEL_WIDTH_PREF,
+    min: THREAD_PANEL_WIDTH_MIN,
+    max: THREAD_PANEL_WIDTH_MAX,
+    initial: THREAD_PANEL_WIDTH_DEFAULT,
+    room: () => {
+      const row = slot.parentElement?.getBoundingClientRect().width ?? 0;
+      return row > 0 ? row - THREAD_PANEL_ROW_RESERVE : 0;
+    },
+    label: messagingText("thread.resizePanel"),
+    className: "thread-panel-resize",
+    testId: "thread-panel-resize",
+  });
+  const owner = new Disposable();
+  window.addEventListener(
+    "resize",
+    () => {
+      if (openId !== null) resize.apply();
+    },
+    { signal: owner.signal },
+  );
 
   /** `thread_focus` is the second subscription slot; null closes it. */
   function sendFocus(threadId: number | null): void {
@@ -97,6 +130,7 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
     openId = null;
     slot.classList.remove("open");
     slot.parentElement?.classList.remove("thread-open");
+    resize.release();
     slot.replaceChildren();
   }
 
@@ -123,6 +157,8 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
     sendFocus(thread.id);
     slot.classList.add("open");
     slot.parentElement?.classList.add("thread-open");
+    slot.appendChild(resize.handle);
+    resize.apply();
     const gen = ++loadGen;
     const id = thread.id;
     void import("@components/ThreadPanel").then(
@@ -238,10 +274,12 @@ export function createThreadPanelHost(options: ThreadPanelHostOptions): ThreadPa
     },
     destroy() {
       setThreadResume(null);
+      owner.destroy();
       unsubscribe();
       for (const off of unsubscribeRights) off();
       if (openId !== null) setFocusedThread(null);
       unmount();
+      resize.destroy();
     },
   };
 }

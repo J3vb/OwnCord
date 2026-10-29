@@ -5,6 +5,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
@@ -204,6 +205,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
         // Keystrokes inside the input must not reach the dropdown's own
         // Enter/Escape handling, which would close the menu mid-edit.
         e.stopPropagation();
+        if (isImeCommit(e)) return;
         if (e.key === "Enter") {
           e.preventDefault();
           // A refused (over-limit) status keeps the menu open with the hint.
@@ -213,7 +215,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
           // skips a focused one, so a TIMED_OUT rollback arriving right after
           // this commit could not re-seed the refused text out of it.
           dotEl?.focus();
-        } else if (e.key === "Escape") {
+        } else if (e.key === "Escape" && !isImeCommit(e)) {
           e.preventDefault();
           input.value = lastCommittedCustom;
           hint.reset();
@@ -297,7 +299,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && isOpen()) {
+        if (e.key === "Escape" && !isImeCommit(e) && isOpen()) {
           e.preventDefault();
           closeDropdown();
           dotEl?.focus();

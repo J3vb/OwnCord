@@ -92,8 +92,8 @@ export function keyEventToVk(event: KeyboardEvent): number | null {
 
 /**
  * Why `vk` cannot be bound to `action`, or null when it is free. `inAppVks` is
- * the VK of every in-app binding that is exactly Ctrl+Shift+key
- * (`lib/keybinds.ts` `inAppCtrlShiftVks`), which a global binding may not claim.
+ * every VK whose Ctrl+Shift combo something else already acts on
+ * (`lib/keybinds.ts` `globalShortcutTakenVks`), which a global binding may not claim.
  */
 export function shortcutConflict(
   vk: number,

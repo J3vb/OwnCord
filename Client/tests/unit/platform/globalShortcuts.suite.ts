@@ -11,6 +11,8 @@ const portalStatus: GlobalKeysStatus = {
   portalVersion: 2,
   triggers: { ptt: "F8", mute: "Ctrl+Alt+M", deafen: null },
   canConfigure: true,
+  triggersUnnamed: false,
+  sessionRefused: false,
 };
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
@@ -110,6 +112,8 @@ export function describeGlobalShortcutsSuite(
         portalVersion: 0,
         triggers: { ptt: null, mute: null, deafen: null },
         canConfigure: false,
+        triggersUnnamed: false,
+        sessionRefused: false,
       });
     });
 
@@ -121,6 +125,19 @@ export function describeGlobalShortcutsSuite(
     check("status reads an empty trigger as unbound", async () => {
       ctx.native.statusIs({ ...portalStatus, triggers: { ptt: "", mute: "x", deafen: null } });
       expect((await ctx.subject.status()).triggers).toEqual({ ptt: null, mute: "x", deafen: null });
+    });
+
+    check("status carries the unnamed-triggers and refused-session flags", async () => {
+      ctx.native.statusIs({ ...portalStatus, triggersUnnamed: true, sessionRefused: true });
+      const flagged = await ctx.subject.status();
+      expect(flagged.triggersUnnamed).toBe(true);
+      expect(flagged.sessionRefused).toBe(true);
+      ctx.native.statusIs({ ...portalStatus, triggersUnnamed: "yes", sessionRefused: 1 });
+      const loose = await ctx.subject.status();
+      expect(loose.triggersUnnamed).toBe(false);
+      expect(loose.sessionRefused).toBe(false);
+      ctx.native.statusIs({ backend: "portal", portalVersion: 1, triggers: {} });
+      expect((await ctx.subject.status()).triggersUnnamed).toBe(false);
     });
 
     check("bindPortal hands the suggested keys to the host and returns its status", async () => {

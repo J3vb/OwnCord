@@ -26,13 +26,13 @@ import (
 const (
 	// storeMethodBaseline is the number of distinct methods in Store, counting
 	// transitively through embedded interfaces declared in this package
-	// (CallLogStore, GroupDMStore). Methods promoted from the cross-package
+	// (CallLogStore, GroupDMStore, EmojiStore). Methods promoted from the cross-package
 	// embeds in storeCrossPackageEmbeds are not counted here.
 	//
 	// The pin was 306 when this test was written. WP 4.1a (#2582) landed first
 	// and replaced EraseAccount with the embedded ErasureStageStore slice, a net
 	// three more methods; it is accepted as the starting point.
-	storeMethodBaseline = 309 // 292 written in Store itself plus 17 from the three same-package embeds (CallLogStore, GroupDMStore, ErasureStageStore)
+	storeMethodBaseline = 309 // 287 written in Store itself plus 22 more from the four same-package embeds (CallLogStore, GroupDMStore, ErasureStageStore, EmojiStore; EmojiStore's LogAudit is also written in Store)
 
 	// modelsJSONTagBaseline is the number of struct fields in db/models.go
 	// whose tag carries a json: key, json:"-" included.
@@ -62,9 +62,15 @@ const (
 	// 6.9c-a2 adds one (131 to 132): MessageAPIResponse.Thread, the optional
 	// thread summary on a starter message. 6.3c moves db.Role out of models.go
 	// into db/role_model.go (its six tags leave the count; it also gains the
-	// two hoist/mentionable wire tags, outside it), 132 to 126. Any further
-	// tag fails.
-	modelsJSONTagBaseline = 126
+	// two hoist/mentionable wire tags, outside it), 132 to 126. 8.8a adds two
+	// (126 to 128): MessageAPIResponse.Sticker and MessageSearchResult.Sticker,
+	// the optional sticker block on history rows and search hits, for the same
+	// reason as 6.9a's. MessageStickerInfo lives in db/stickers.go, outside the
+	// count.
+	// WP 8.9 gives AttachmentInfo two voice message tags and moves it into
+	// db/attachment_model.go (models.go hit its line limit), so its tags
+	// leave the count: 128 to 121. Any further tag fails.
+	modelsJSONTagBaseline = 121
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included (309 plus the 9

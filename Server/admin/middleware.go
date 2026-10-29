@@ -141,3 +141,21 @@ func ownerOnlyMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// gateMiddleware gates next on g (WP 8.4d). The role is the one adminAuthMiddleware stored in the
+// request context, so no extra query runs; a request that arrives without one
+// fails closed as unauthenticated, like requirePerm and ownerOnlyMiddleware.
+func gateMiddleware(g routeGate, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		role, ok := r.Context().Value(adminRoleKey).(*db.Role)
+		if !ok || role == nil {
+			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			return
+		}
+		if !g.allow(role.Permissions, role.ID, role.Position) {
+			writeErr(w, http.StatusForbidden, "FORBIDDEN", g.msg)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

@@ -77,7 +77,7 @@ import {
 } from "@stores/channels.store";
 import { keepDmForCall, releaseKeptDm } from "../../features/direct-messages/keptCallDms";
 import { dmStore, closeDmLocally, restoreDmChannel } from "@stores/dm.store";
-import { voiceStore } from "@stores/voice.store";
+import { clearChannelVoiceUsers, voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
 import { canManageInvites, canModerateMembers, canViewAuditLog } from "@lib/permissions";
@@ -324,9 +324,18 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   const syncMarkAllBtn = (): void => {
     const show = unreadChannelIds({ includeDms: false }).length > 0;
     // Hiding the focused button would drop focus to <body>; hand it to the
-    // neighbouring header action (Invite) so the next Tab starts nearby.
+    // next header action still shown (Invite, Audit Log, Moderation are each
+    // permission-gated), else to the channel list's roving row, so the next
+    // Tab starts nearby.
     if (!show && document.activeElement === markAllBtn) {
-      headerActions.querySelector<HTMLElement>('[data-testid="invite-btn"]')?.focus();
+      const next =
+        [...headerActions.querySelectorAll<HTMLElement>(".sidebar-header-action")].find(
+          (btn) => btn !== markAllBtn && btn.style.display !== "none",
+        ) ??
+        headerActions
+          .closest(".unified-sidebar")
+          ?.querySelector<HTMLElement>('[data-channel-id][tabindex="0"]');
+      next?.focus();
     }
     markAllBtn.style.display = show ? "" : "none";
   };
@@ -843,11 +852,18 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     // does not (the server removes the leaver from the call).
     if (removed !== undefined && !removed.isGroup) keepDmForCall(channelId);
     closeDmLocally(channelId, fallBackFromDm);
-    void api.closeDm(channelId).catch(() => {
-      releaseKeptDm(channelId);
-      if (removed !== undefined) restoreDmChannel(removed, index);
-      getToast()?.show(shellText("dm.leaveFailed"), "error");
-    });
+    void api.closeDm(channelId).then(
+      () => {
+        // The leave committed: the server stops sending this room's voice
+        // events, so drop the roster rather than let it go stale.
+        if (removed?.isGroup === true) clearChannelVoiceUsers(channelId);
+      },
+      () => {
+        releaseKeptDm(channelId);
+        if (removed !== undefined) restoreDmChannel(removed, index);
+        getToast()?.show(shellText("dm.leaveFailed"), "error");
+      },
+    );
   }
 
   /** Rename a group DM (participants only; the server refuses a 1:1). */

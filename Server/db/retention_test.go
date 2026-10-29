@@ -218,7 +218,11 @@ func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A mention on old1 that bob has not read, and one on a fresh message.
+	// The receipt is what records that old1 raised bob's badge.
 	if _, err := database.ExecContext(ctx, `INSERT INTO message_mentions (message_id, mentioned_user_id) VALUES (?, ?)`, old1, bob); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO mention_receipts (user_id, channel_id, message_id) VALUES (?, ?, ?)`, bob, ch, old1); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.ExecContext(ctx, `INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES (?, ?, 0, 2)`, bob, ch); err != nil {

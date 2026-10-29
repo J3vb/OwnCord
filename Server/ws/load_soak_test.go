@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -134,7 +135,15 @@ func TestTheLoadTest(t *testing.T) {
 			defer drainWG.Done()
 			for {
 				select {
-				case <-ch:
+				case _, ok := <-ch:
+					// The hub closes the send channel when it drops the
+					// client. Receiving from it again would spin a core
+					// until stop closes; on a run that failed before that,
+					// eight of these starved the rest of the package past
+					// its 20-minute timeout (Windows, PR #2739).
+					if !ok {
+						return
+					}
 				case <-stop:
 					return
 				}
@@ -143,6 +152,18 @@ func TestTheLoadTest(t *testing.T) {
 
 		anchors = append(anchors, anchor{user: u, c: c, send: send, stopDrain: stop})
 	}
+	// A failed run skips the ordered shutdown at the end, so the drains are
+	// released here too; the deferred join runs before the goleak check.
+	var stopDrainsOnce sync.Once
+	stopDrains := func() {
+		stopDrainsOnce.Do(func() {
+			for _, a := range anchors {
+				close(a.stopDrain)
+			}
+		})
+		drainWG.Wait()
+	}
+	defer stopDrains()
 	for _, a := range anchors {
 		waitRegistered(t, hub, a.c)
 	}
@@ -262,6 +283,10 @@ func TestTheLoadTest(t *testing.T) {
 	select {
 	case <-allDone:
 	case <-time.After(overallTimeout):
+		// Every goroutine's stack, the hub loop's included: the deferred
+		// hub.Stop ends that loop before goleak lists what is left.
+		buf := make([]byte, 4<<20)
+		t.Logf("goroutines at the timeout:\n%s", buf[:runtime.Stack(buf, true)])
 		t.Fatal("load test workers did not finish within timeout — possible deadlock in the hub")
 	}
 
@@ -297,7 +322,7 @@ func TestTheLoadTest(t *testing.T) {
 	for {
 		stillRegistered = stillRegistered[:0]
 		for _, u := range churnUsers {
-			if hub.GetClient(u.ID) != nil {
+			if hub.ClientForTest(u.ID) != nil {
 				stillRegistered = append(stillRegistered, u.ID)
 			}
 		}
@@ -321,10 +346,7 @@ func TestTheLoadTest(t *testing.T) {
 	// Unregister calls are async too, and a 5s budget is a wall-clock guess
 	// about a runner rather than a statement about the hub.
 	waitFor(t, overallTimeout, func() bool { return hub.ClientCount() == 0 }, "anchors to unregister")
-	for _, a := range anchors {
-		close(a.stopDrain)
-	}
-	drainWG.Wait()
+	stopDrains()
 
 	// SendMessage fires mention-count bookkeeping with a bare `go fn()` and
 	// deliberately does not wait for it (see MessageService.bg) — that is the

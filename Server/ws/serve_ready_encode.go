@@ -38,7 +38,11 @@ type readyPayload struct {
 // declared in sorted key order: ready used to be json.Marshal of a map, which
 // sorts its keys, and the bytes must not change.
 type readyHead struct {
-	Capabilities map[string]any `json:"capabilities"`
+	// Activities (WP 8.3a) lists the games connected members are playing, as
+	// the viewer may see them. Always present; "activities" sorts before
+	// "capabilities", so it is the first head field and key order holds.
+	Activities   []readyActivityPayload   `json:"activities"`
+	Capabilities readyCapabilitiesPayload `json:"capabilities"`
 	// Categories (WP 6.5a) is the full category list, present only for a
 	// MANAGE_CHANNELS/Administrator holder (a pointer so an empty list still
 	// encodes as [] for them while everyone else omits the key). "categories"
@@ -46,6 +50,10 @@ type readyHead struct {
 	Categories *[]channelCategoryPayload `json:"categories,omitempty"`
 	Channels   []map[string]any          `json:"channels"`
 	DMChannels []db.DMChannelInfo        `json:"dm_channels"`
+	// Listening (WP 8.10a) lists the songs connected members are listening
+	// to, as the viewer may see them. Always present; "listening" sorts
+	// between "dm_channels" and "member_timeouts", so key order holds.
+	Listening []readyListeningPayload `json:"listening"`
 	// MemberTimeouts is the viewer's member_timeouts view (WP 3C-7c); "member_timeouts"
 	// sorts before "members", so it is the last head field and key order holds.
 	MemberTimeouts []memberTimeoutEntry `json:"member_timeouts"`

@@ -7,6 +7,7 @@
  */
 
 import type { ReplyTarget } from "@components/MessageInput";
+import { loadStoredJson, removeStored, saveStoredJson } from "./preferences";
 
 const KEY_PREFIX = "owncord:drafts:";
 /** Oldest entries go first once a scope holds this many drafts. */
@@ -53,33 +54,30 @@ function isStoredDraft(v: unknown): v is StoredDraft {
   );
 }
 
+/** Unavailable or corrupt storage reads as no drafts. */
 function readAll(key: string, now: number): Map<string, StoredDraft> {
-  const out = new Map<string, StoredDraft>();
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw === null) return out;
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return out;
-    // Object keys that look like numbers come back in numeric order, so the
-    // save order is rebuilt from savedAt: oldest first, for the trim in saveDraft.
-    const live = Object.entries(parsed).filter(
-      (e): e is [string, StoredDraft] => isStoredDraft(e[1]) && now - e[1].savedAt < MAX_AGE_MS,
-    );
-    live.sort((a, b) => a[1].savedAt - b[1].savedAt);
-    for (const [channel, draft] of live) out.set(channel, draft);
-  } catch {
-    // Unavailable or corrupt storage reads as no drafts.
-  }
-  return out;
+  return loadStoredJson(
+    key,
+    (parsed) => {
+      const out = new Map<string, StoredDraft>();
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return out;
+      // Object keys that look like numbers come back in numeric order, so the
+      // save order is rebuilt from savedAt: oldest first, for the trim in saveDraft.
+      const live = Object.entries(parsed).filter(
+        (e): e is [string, StoredDraft] => isStoredDraft(e[1]) && now - e[1].savedAt < MAX_AGE_MS,
+      );
+      live.sort((a, b) => a[1].savedAt - b[1].savedAt);
+      for (const [channel, draft] of live) out.set(channel, draft);
+      return out;
+    },
+    new Map<string, StoredDraft>(),
+  );
 }
 
+/** Full or disabled storage: the in-memory draft still covers a switch. */
 function writeAll(key: string, drafts: Map<string, StoredDraft>): void {
-  try {
-    if (drafts.size === 0) localStorage.removeItem(key);
-    else localStorage.setItem(key, JSON.stringify(Object.fromEntries(drafts)));
-  } catch {
-    // Full or disabled storage: the in-memory draft still covers a switch.
-  }
+  if (drafts.size === 0) removeStored(key);
+  else saveStoredJson(key, Object.fromEntries(drafts));
 }
 
 /** The saved draft for a channel, or null when there is none. */

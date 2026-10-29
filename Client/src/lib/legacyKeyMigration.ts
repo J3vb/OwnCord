@@ -12,6 +12,8 @@
 // it, and this session remembers the claim as well, so no other host reads or
 // consumes it and the owner retries the copy on its next read.
 
+import { readStored, removeStored, writeStored } from "./preferences";
+
 const CLAIM_PREFIX = "owncord:legacy-claim:";
 
 /** Migrations this session could not complete, by legacy key. */
@@ -25,37 +27,26 @@ const unsettled = new Map<string, { scopedKey: string; value: string }>();
  */
 export function migrateLegacyValue(legacyKey: string, scopedKey: string): string | null {
   const claimKey = CLAIM_PREFIX + legacyKey;
-  try {
-    const held = unsettled.get(legacyKey);
-    if (held !== undefined && held.scopedKey !== scopedKey) return null;
-    const claim = localStorage.getItem(claimKey);
-    if (claim !== null && claim !== scopedKey) return null;
+  const held = unsettled.get(legacyKey);
+  if (held !== undefined && held.scopedKey !== scopedKey) return null;
+  const claim = readStored(claimKey);
+  if (claim !== null && claim !== scopedKey) return null;
 
-    const value = held?.value ?? localStorage.getItem(legacyKey);
-    if (value === null) {
-      localStorage.removeItem(claimKey);
-      return null;
-    }
-    localStorage.removeItem(legacyKey);
-    if (persist(scopedKey, value)) {
-      unsettled.delete(legacyKey);
-      localStorage.removeItem(claimKey);
-      return value;
-    }
-    unsettled.set(legacyKey, { scopedKey, value });
-    persist(legacyKey, value);
-    persist(claimKey, scopedKey);
-    return value;
-  } catch {
+  const value = held?.value ?? readStored(legacyKey);
+  if (value === null) {
+    removeStored(claimKey);
     return null;
   }
-}
-
-function persist(key: string, value: string): boolean {
-  try {
-    localStorage.setItem(key, value);
-    return true;
-  } catch {
-    return false;
+  // A legacy key that cannot be removed stays readable by every later host, so
+  // nothing is migrated off it.
+  if (!removeStored(legacyKey)) return null;
+  if (writeStored(scopedKey, value)) {
+    unsettled.delete(legacyKey);
+    removeStored(claimKey);
+    return value;
   }
+  unsettled.set(legacyKey, { scopedKey, value });
+  writeStored(legacyKey, value);
+  writeStored(claimKey, scopedKey);
+  return value;
 }

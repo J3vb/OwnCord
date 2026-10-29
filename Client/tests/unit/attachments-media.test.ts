@@ -48,9 +48,26 @@ import {
 } from "../../src/components/message-list/attachments";
 import type { Attachment } from "@lib/types";
 
-/** Press the play button that stands in for the player until it is wanted. */
-function pressPlay(el: HTMLElement): void {
+/** Press the play button that stands in for the player until it is wanted.
+ *  A video shows it only once its link request has come back empty. */
+async function pressPlay(el: HTMLElement): Promise<void> {
+  await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
   (el.querySelector(".msg-media-play") as HTMLButtonElement).click();
+}
+
+/** A server without file links (the link POST answers 404) whose file route
+ *  answers `fileResponse`: the blob path these tests cover. */
+function serveBlob(fileResponse: unknown): void {
+  fetchMock.mockImplementation((_url: string, init?: { method?: string }) =>
+    Promise.resolve(init?.method === "POST" ? { ok: false, status: 404 } : fileResponse),
+  );
+}
+
+/** The calls that fetched the file itself, not a link for it. */
+function fileCalls(): unknown[][] {
+  return fetchMock.mock.calls.filter(
+    ([, init]) => (init as { method?: string })?.method !== "POST",
+  );
 }
 
 function att(overrides: Partial<Attachment> & Pick<Attachment, "mime">): Attachment {
@@ -101,8 +118,9 @@ describe("isVideoMime / isAudioMime", () => {
 
   it("accepts QuickTime, which Chromium's demuxers read", () => {
     expect(isVideoMime("video/quicktime")).toBe(true);
-    expect(isVideoMime("video/x-m4v")).toBe(false);
-    expect(isVideoMime("video/x-matroska")).toBe(false);
+    expect(isVideoMime("video/x-m4v")).toBe(true);
+    expect(isVideoMime("video/x-matroska")).toBe(true);
+    expect(isVideoMime("video/3gpp")).toBe(true);
   });
 
   it("rejects unknown containers rather than handing them to a player", () => {
@@ -130,16 +148,23 @@ describe("isVideoAttachment", () => {
     expect(isVideoAttachment({ mime: "", filename })).toBe(true);
   });
 
-  it.each(["clip.mp4", "clip.m4v", "clip.webm", "clip.mkv"])(
-    "leaves an untyped %s on the chip",
+  it.each(["clip.mp4", "clip.m4v", "clip.webm", "clip.mkv", "clip.3gp", "clip.ogv"])(
+    "treats an untyped %s as a video",
     (filename) => {
-      expect(isVideoAttachment({ mime: "application/octet-stream", filename })).toBe(false);
+      expect(isVideoAttachment({ mime: "application/octet-stream", filename })).toBe(true);
     },
   );
 
   it("does not let an extension override a real non-video type", () => {
     expect(isVideoAttachment({ mime: "text/plain", filename: "clip.mov" })).toBe(false);
     expect(isVideoAttachment({ mime: "image/svg+xml", filename: "clip.mp4" })).toBe(false);
+  });
+
+  it("keeps .avi a download: the engines do not read it", () => {
+    expect(isVideoAttachment({ mime: "application/octet-stream", filename: "clip.avi" })).toBe(
+      false,
+    );
+    expect(isVideoAttachment({ mime: "video/avi", filename: "clip.avi" })).toBe(false);
   });
 
   it("leaves an untyped file with another extension on the chip", () => {
@@ -163,7 +188,7 @@ describe("renderAttachment — video", () => {
 
   /** Render a video, press play and wait for its source to arrive. */
   async function playedVideo(): Promise<HTMLVideoElement> {
-    fetchMock.mockResolvedValue({
+    serveBlob({
       ok: true,
       headers: { get: () => "video/quicktime" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
@@ -172,7 +197,7 @@ describe("renderAttachment — video", () => {
       renderAttachment(att({ mime: "video/quicktime", filename: "clip.mov", size: 2048 })),
     );
     const video = el.querySelector("video") as HTMLVideoElement;
-    pressPlay(el);
+    await pressPlay(el);
     await vi.waitFor(() => expect(video.src).toContain("blob:mock-1"));
     return video;
   }
@@ -322,7 +347,8 @@ describe("renderAttachment — video", () => {
     expect(document.querySelector(".msg-file")).toBeNull();
   });
 
-  it("renders an inline <video> behind a labelled play button", () => {
+  it("falls back to a labelled play button when the server has no file links", async () => {
+    serveBlob({ ok: false, status: 403 });
     const el = renderAttachment(att({ mime: "video/mp4", filename: "clip.mp4" }));
 
     expect(el.classList.contains("msg-video")).toBe(true);
@@ -333,12 +359,13 @@ describe("renderAttachment — video", () => {
     expect(video?.getAttribute("preload")).toBe("metadata");
     // Native controls are inert without a source, so they appear with it.
     expect(video?.controls).toBe(false);
+    await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
     expect(el.querySelector(".msg-media-play")?.getAttribute("aria-label")).toBe("Play clip.mp4");
     expect(el.querySelector(".msg-file-download")).not.toBeNull();
   });
 
   it("downloads nothing until play is pressed", async () => {
-    fetchMock.mockResolvedValue({
+    serveBlob({
       ok: true,
       headers: { get: () => "video/mp4" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
@@ -348,22 +375,22 @@ describe("renderAttachment — video", () => {
       renderAttachment(att({ mime: "video/mp4", filename: "clip.mp4" })),
     );
     await new Promise((r) => setTimeout(r, 0));
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fileCalls()).toHaveLength(0);
 
-    pressPlay(el);
+    await pressPlay(el);
 
     const video = el.querySelector("video") as HTMLVideoElement;
     await vi.waitFor(() => {
       expect(video.src).toContain("blob:mock-1");
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fileCalls()).toHaveLength(1);
     expect(video.controls).toBe(true);
     expect(playMock).toHaveBeenCalledTimes(1);
     expect(el.querySelector(".msg-media-play")).toBeNull();
   });
 
   it("sources the player from the authenticated fetch, not the raw URL", async () => {
-    fetchMock.mockResolvedValue({
+    serveBlob({
       ok: true,
       headers: { get: () => "video/mp4" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
@@ -371,7 +398,7 @@ describe("renderAttachment — video", () => {
 
     const el = renderAttachment(att({ mime: "video/webm", filename: "clip.webm" }));
     const video = el.querySelector("video") as HTMLVideoElement;
-    pressPlay(el);
+    await pressPlay(el);
 
     await vi.waitFor(() => {
       expect(video.src).toContain("blob:mock-1");
@@ -379,16 +406,16 @@ describe("renderAttachment — video", () => {
 
     // Server-bound: routed through the cert-pinned proxy origin with the
     // session bearer token attached.
-    const [url, init] = fetchMock.mock.calls[0] as [string, { headers: Record<string, string> }];
+    const [url, init] = fileCalls()[0] as [string, { headers: Record<string, string> }];
     expect(url).toBe("http://127.0.0.1:9999/api/v1/files/a1");
     expect(init.headers["Authorization"]).toBe("Bearer session-token");
   });
 
   it("marks the wrapper failed (keeping the download button) when the fetch fails", async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 403 });
+    serveBlob({ ok: false, status: 403 });
 
     const el = renderAttachment(att({ mime: "video/mp4", filename: "clip.mp4" }));
-    pressPlay(el);
+    await pressPlay(el);
 
     await vi.waitFor(() => {
       expect(el.classList.contains("msg-media-failed")).toBe(true);
@@ -400,36 +427,38 @@ describe("renderAttachment — video", () => {
   });
 
   it("reuses one download when the same attachment is rendered twice", async () => {
-    fetchMock.mockResolvedValue({
+    serveBlob({
       ok: true,
       headers: { get: () => "video/mp4" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
     });
 
     const first = renderAttachment(att({ mime: "video/mp4" }));
-    pressPlay(first);
+    await pressPlay(first);
     await vi.waitFor(() => {
       expect((first.querySelector("video") as HTMLVideoElement).src).toContain("blob:");
     });
     const second = renderAttachment(att({ mime: "video/mp4" }));
-    pressPlay(second);
+    await pressPlay(second);
     await vi.waitFor(() => {
       expect((second.querySelector("video") as HTMLVideoElement).src).toContain("blob:");
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // One refused link request (cached, so not repeated) and one download.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fileCalls()).toHaveLength(1);
     expect(createObjectURLMock).toHaveBeenCalledTimes(1);
   });
 
   it("revokes cached blob URLs when the attachment caches are cleared", async () => {
-    fetchMock.mockResolvedValue({
+    serveBlob({
       ok: true,
       headers: { get: () => "video/mp4" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
     });
 
     const el = renderAttachment(att({ mime: "video/mp4" }));
-    pressPlay(el);
+    await pressPlay(el);
     await vi.waitFor(() => {
       expect((el.querySelector("video") as HTMLVideoElement).src).toContain("blob:");
     });
@@ -441,7 +470,7 @@ describe("renderAttachment — video", () => {
   it("evicts the oldest blob (FIFO) once the media cache cap is exceeded", async () => {
     let nextBlobId = 0;
     createObjectURLMock.mockImplementation(() => `blob:mock-${++nextBlobId}`);
-    fetchMock.mockResolvedValue({
+    serveBlob({
       ok: true,
       headers: { get: () => "video/mp4" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
@@ -498,7 +527,7 @@ describe("renderAttachment — audio", () => {
   });
 
   it("sets the player source from the authenticated fetch", async () => {
-    fetchMock.mockResolvedValue({
+    serveBlob({
       ok: true,
       headers: { get: () => "audio/wav" },
       arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
@@ -508,7 +537,7 @@ describe("renderAttachment — audio", () => {
       renderAttachment(att({ mime: "audio/wav", filename: "sound.wav" })),
     );
     const audio = el.querySelector("audio") as HTMLAudioElement;
-    pressPlay(el);
+    await pressPlay(el);
 
     await vi.waitFor(() => {
       expect(audio.src).toContain("blob:mock-1");
@@ -526,7 +555,7 @@ describe("renderAttachment — audio", () => {
       renderAttachment(att({ mime: "audio/wav", filename: "sound.wav" })),
     );
     const audio = el.querySelector("audio") as HTMLAudioElement;
-    pressPlay(el);
+    await pressPlay(el);
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     el.remove();

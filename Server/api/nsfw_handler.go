@@ -98,7 +98,7 @@ func nsfwRequestParams(w http.ResponseWriter, r *http.Request) (*db.User, int64,
 // otherwise answer with); everything else goes through the shared mapper.
 func writeNSFWError(ctx context.Context, w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrNotNSFW) {
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "NOT_NSFW", Message: err.Error()})
+		writeErr(w, http.StatusConflict, "NOT_NSFW", err.Error())
 		return
 	}
 	writeServiceError(ctx, w, err)

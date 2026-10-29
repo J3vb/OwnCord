@@ -36,7 +36,8 @@ function arrow(
  *  to an open viewer. Everything is released with the viewer's `signal`. */
 export function attachLightboxGallery(gallery: LightboxGallery, handle: LightboxHandle): void {
   const { items, isGone, watch, row } = gallery;
-  const { overlay, img, controls, signal, fetchImageAsObjectUrl, thumbnailUrl } = handle;
+  const { overlay, img, controls, signal, fetchImageAsObjectUrl, thumbnailUrl, shownImageUrl } =
+    handle;
   const total = items.length;
   if (signal.aborted || total < 2) return;
 
@@ -76,7 +77,8 @@ export function attachLightboxGallery(gallery: LightboxGallery, handle: Lightbox
     if (item === undefined) return;
     handle.resetView();
     handle.closeMenu();
-    handle.setCurrent({ external: { url: item.url }, alt: item.filename });
+    const shown = shownImageUrl(item.url, item.mime);
+    handle.setCurrent({ external: { url: item.url }, alt: item.filename, shown });
     overlay.setAttribute("aria-label", item.filename);
     img.alt = item.filename;
     label();
@@ -95,7 +97,7 @@ export function attachLightboxGallery(gallery: LightboxGallery, handle: Lightbox
           img.src = preview;
           loaded = true;
         }
-        return fetchImageAsObjectUrl(item.url);
+        return fetchImageAsObjectUrl(shown);
       })
       .then((full) => {
         if (mine !== step) return;
@@ -112,7 +114,7 @@ export function attachLightboxGallery(gallery: LightboxGallery, handle: Lightbox
 
     // The next image in the direction of travel, so the next step is instant.
     const ahead = items[(((index + direction) % total) + total) % total];
-    if (ahead !== undefined) void fetchImageAsObjectUrl(ahead.url);
+    if (ahead !== undefined) void fetchImageAsObjectUrl(shownImageUrl(ahead.url, ahead.mime));
   };
 
   for (const [btn, direction] of [

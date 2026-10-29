@@ -10,6 +10,18 @@ import type { ThreadInfo } from "@lib/types";
 
 export type ForumSort = "activity" | "created";
 
+/** How the post list is drawn; the reader picks one and it is remembered. */
+export type ForumLayout = "grid" | "list" | "split" | "feed";
+export const FORUM_LAYOUTS: readonly ForumLayout[] = ["grid", "list", "split", "feed"];
+export const FORUM_LAYOUT_PREF = "forumLayout";
+/** Whether a forum's guidelines start open; the reader's last choice. */
+export const FORUM_GUIDELINES_PREF = "forumGuidelinesOpen";
+
+/** A stored layout, or the default for anything else. */
+export function parseForumLayout(value: unknown): ForumLayout {
+  return FORUM_LAYOUTS.find((l) => l === value) ?? "grid";
+}
+
 /** Posts per page: the server's default for a forum, spelled out. */
 export const POST_PAGE_SIZE = 25;
 /** The server refuses more than five `tag` filters in one request. */

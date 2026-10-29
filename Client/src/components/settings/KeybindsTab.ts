@@ -19,7 +19,7 @@ import {
   shortcutConflict,
   type GlobalShortcutAction,
 } from "@lib/voiceShortcuts";
-import { anyTriggerBound, globalKeysErrorCode, markPortalBound } from "@lib/globalKeys";
+import { globalKeysErrorCode, markPortalBound, portalHoldsShortcuts } from "@lib/globalKeys";
 import { desktop } from "../../platform/desktop";
 import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
@@ -28,7 +28,7 @@ import { buildPttControls } from "./pttControls";
 import { KEYBIND_GROUPS, UNBOUND_BY_DEFAULT_ROWS, type KeybindGroupId } from "@lib/keybindCatalog";
 import {
   REBINDABLE_ACTIONS,
-  inAppCtrlShiftVks,
+  globalShortcutTakenVks,
   loadEffectiveKeybinds,
   saveKeybind,
   type RebindableId,
@@ -263,7 +263,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
             vk,
             action,
             globalKeys,
-            inAppCtrlShiftVks(loadEffectiveKeybinds()),
+            globalShortcutTakenVks(loadEffectiveKeybinds()),
           );
           if (reason !== null) {
             finish();
@@ -361,6 +361,16 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     },
     "",
   );
+  // The portal holds our shortcuts but names no keys (Hyprland): the user
+  // assigns them in the compositor's config, so there is nothing to set up.
+  const portalUnnamed = createElement(
+    "div",
+    {
+      style: "display: none; font-size: 11px; color: var(--text-micro); line-height: 1.4;",
+      "data-testid": "keybinds-portal-unnamed",
+    },
+    t("keybinds.portalUnnamed"),
+  );
   appendChildren(
     portalSection,
     createElement(
@@ -373,12 +383,17 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     portalSetUp,
     portalChange,
     portalWhere,
+    portalUnnamed,
     portalNote,
   );
   section.appendChild(portalSection);
 
   let binding = false;
-  const showPortalNote = (text: string | null): void => {
+  // What the note holds: the portal's refusal (replaced by a later status),
+  // or the outcome of a bind the user just ran (never replaced by one).
+  let noteKind: "none" | "refused" | "bind" = "none";
+  const showPortalNote = (text: string | null, kind: "refused" | "bind" = "bind"): void => {
+    noteKind = text === null ? "none" : kind;
     portalNote.style.display = text === null ? "none" : "";
     setText(portalNote, text ?? "");
   };
@@ -399,12 +414,24 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
     const muteKbd = commKbd.mute;
     const deafenKbd = commKbd.deafen;
     // An unbound action keeps the in-app Ctrl+Shift combination it still answers to.
-    if (muteKbd !== undefined) setText(muteKbd, mute ?? comboText("mute"));
-    if (deafenKbd !== undefined) setText(deafenKbd, deafen ?? comboText("deafen"));
-    portalSetUp.style.display = mute === null || deafen === null ? "" : "none";
+    // A desktop that names no keys has none to show; the action has no in-app
+    // fallback to promise either, so say where it is set.
+    const unbound = (action: "mute" | "deafen"): string =>
+      status.triggersUnnamed ? t("keybinds.portalSetInDesktop") : comboText(action);
+    if (muteKbd !== undefined) setText(muteKbd, mute ?? unbound("mute"));
+    if (deafenKbd !== undefined) setText(deafenKbd, deafen ?? unbound("deafen"));
+    portalSetUp.style.display =
+      (mute === null || deafen === null) && !status.triggersUnnamed ? "" : "none";
     portalSetUp.disabled = binding;
+    portalUnnamed.style.display = status.triggersUnnamed ? "" : "none";
+    if (status.sessionRefused) {
+      if (noteKind !== "bind") showPortalNote(t("keybinds.portalRefused"), "refused");
+    } else if (noteKind === "refused") {
+      showPortalNote(null);
+    }
     // Where to change keys only matters once the desktop holds some.
-    const anyBound = mute !== null || deafen !== null || status.triggers.ptt !== null;
+    const anyBound =
+      mute !== null || deafen !== null || status.triggers.ptt !== null || status.triggersUnnamed;
     portalChange.style.display = anyBound && status.canConfigure ? "" : "none";
     portalWhere.style.display = anyBound && !status.canConfigure ? "" : "none";
   };
@@ -425,7 +452,7 @@ export function buildKeybindsTab(signal: AbortSignal): HTMLDivElement {
         })
         .then((status) => {
           // Saved even when the tab is gone, so the next start restores it.
-          if (anyTriggerBound(status)) markPortalBound();
+          if (portalHoldsShortcuts(status)) markPortalBound();
           binding = false;
           if (signal.aborted) return;
           renderPortal(status);

@@ -79,7 +79,8 @@ func SetClientVoiceChID(c *Client, channelID int64) {
 func (h *Hub) SubscribedToVoiceTopicForTest(c *Client, channelID int64) bool {
 	h.pubsub.mu.RLock()
 	defer h.pubsub.mu.RUnlock()
-	return h.pubsub.topics[VoiceTopic(channelID)][c.userID] == c
+	_, ok := h.pubsub.topics[VoiceTopic(channelID)][c]
+	return ok
 }
 
 // SubscribeVoiceTopicForTest subscribes c to channelID's voice topic, as the
@@ -93,7 +94,8 @@ func (h *Hub) SubscribeVoiceTopicForTest(c *Client, channelID int64) {
 func (h *Hub) SubscribedToChannelTopicForTest(c *Client, channelID int64) bool {
 	h.pubsub.mu.RLock()
 	defer h.pubsub.mu.RUnlock()
-	return h.pubsub.topics[ChannelTopic(channelID)][c.userID] == c
+	_, ok := h.pubsub.topics[ChannelTopic(channelID)][c]
+	return ok
 }
 
 // ApplySetChannelIDForTest exposes Hub.applySetChannelID for external tests —
@@ -254,7 +256,7 @@ func (p *LiveKitProcess) SetProcessStoppedForTest() {
 // the topic rate limit unconditionally.
 func NewHubForTest() *Hub {
 	return &Hub{
-		clients:  make(map[int64]*Client),
+		clients:  make(map[int64][]*Client),
 		pubsub:   NewPubSub(),
 		limiter:  auth.NewRateLimiter(),
 		voiceMod: newUserLocks[lockRankVoiceMod](),
@@ -329,6 +331,8 @@ func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, rol
 		members = append(members, m)
 	}
 	payload := map[string]any{
+		"activities":      f.head.Activities,
+		"listening":       f.head.Listening,
 		"capabilities":    f.head.Capabilities,
 		"channels":        f.head.Channels,
 		"member_timeouts": f.head.MemberTimeouts,
@@ -592,7 +596,7 @@ func (h *Hub) SendSequencedToUsersForTest(channelID int64, userIDs []int64, msg 
 // as handleReconnect runs it. ok=false means the ring no longer covers lastSeq
 // and production would fall through to a full ready.
 func (h *Hub) ReconnectRegisterForTest(c *Client, lastSeq uint64, allowed map[int64]bool) ([][]byte, bool) {
-	events, ok, _ := h.reconnectRegister(context.Background(), c, lastSeq, allowed, allowed, "buffer", nil, 0)
+	events, ok := h.reconnectRegister(context.Background(), c, lastSeq, allowed, allowed, "buffer", nil, 0)
 	return events, ok
 }
 
@@ -699,10 +703,10 @@ func SetLivePresenceForTest(c *Client, status string, customStatus *string, expi
 // callers do, then call the txn-taking function. A test that already holds a
 // handle passes it to the real function instead.
 
-func (h *Hub) registerNowTest(c *Client, readableChannelIDs map[int64]bool) bool {
+func (h *Hub) registerNowTest(c *Client, readableChannelIDs map[int64]bool) {
 	txn := h.begin(c.userID)
 	defer txn.end()
-	return h.registerNow(c, readableChannelIDs, txn)
+	h.registerNow(c, readableChannelIDs, txn)
 }
 
 func (h *Hub) handleVoiceLeaveTest(ctx context.Context, c *Client, reason string) {
@@ -797,4 +801,44 @@ func (h *Hub) handleVoiceJoin(ctx context.Context, c *Client, payload json.RawMe
 // external tests that cannot implement the sealed Event interface themselves.
 func NewTestDMEvent(evType string, channelID int64, participantIDs []int64, payload []byte) Event {
 	return dmEvt{evType: evType, channelID: channelID, participantIDs: participantIDs, payload: payload}
+}
+
+// ClientForTest returns userID's newest live connection, or nil. Tests built
+// around one connection per user use it where production code asks for
+// clientsOf, isConnected or voiceClient.
+func (h *Hub) ClientForTest(userID int64) *Client {
+	conns := h.clientsOf(userID)
+	if len(conns) == 0 {
+		return nil
+	}
+	return conns[len(conns)-1]
+}
+
+// ClientsOfForTest exposes clientsOf.
+func (h *Hub) ClientsOfForTest(userID int64) []*Client { return h.clientsOf(userID) }
+
+// VoiceClientForTest exposes voiceClient.
+func (h *Hub) VoiceClientForTest(userID int64) *Client { return h.voiceClient(userID) }
+
+// subscriberForTest returns userID's subscribed connection on topic (the
+// newest registered when there are several is not defined: tests that use it
+// hold one connection per user), or nil.
+func (ps *PubSub) subscriberForTest(topic Topic, userID int64) *Client {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	for c := range ps.topics[topic] {
+		if c.userID == userID {
+			return c
+		}
+	}
+	return nil
+}
+
+// newestLocked returns userID's newest connection; the caller holds h.mu.
+func (h *Hub) newestLocked(userID int64) *Client {
+	conns := h.clients[userID]
+	if len(conns) == 0 {
+		return nil
+	}
+	return conns[len(conns)-1]
 }

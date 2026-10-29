@@ -8,12 +8,20 @@ package permissions
 const (
 	SendMessages    = int64(0x0001)     // bit 0
 	ReadMessages    = int64(0x0002)     // bit 1
+	ManageConfig    = int64(0x0004)     // bit 2 — read and change the server's config overrides and restart it (WP 8.4d); owner tier
+	ManageUpdates   = int64(0x0008)     // bit 3 — check for and apply server updates (WP 8.4d); owner tier
+	ManageTokens    = int64(0x0010)     // bit 4 — mint, list and revoke the holder's own API tokens (WP 8.4d); owner tier
 	AttachFiles     = int64(0x0020)     // bit 5
 	AddReactions    = int64(0x0040)     // bit 6
+	IssueRecovery   = int64(0x0080)     // bit 7 — issue a recovery credential to a member ranked below the holder (WP 8.4d); owner tier
+	ViewDiagnostics = int64(0x0100)     // bit 8 — server logs, log level, support bundles and the attention panel (WP 8.4d); administrator tier
 	ConnectVoice    = int64(0x0200)     // bit 9
 	SpeakVoice      = int64(0x0400)     // bit 10
 	UseVideo        = int64(0x0800)     // bit 11
 	ShareScreen     = int64(0x1000)     // bit 12
+	MoveMembers     = int64(0x2000)     // bit 13 — move any member between voice channels, whatever their rank (WP 8.4a); server-wide, outside AdminPerimeter
+	ManageBackups   = int64(0x4000)     // bit 14 — create, list and download database backups (WP 8.4c); holds more than the perimeter read surface, so owner-grant-only
+	RestoreBackups  = int64(0x8000)     // bit 15 — restore, delete and download backups and the full archive (WP 8.4d); owner tier
 	ManageMessages  = int64(0x10000)    // bit 16
 	ManageChannels  = int64(0x20000)    // bit 17
 	KickMembers     = int64(0x40000)    // bit 18
@@ -26,16 +34,18 @@ const (
 	ManageServer    = int64(0x2000000)  // bit 25
 	ManageInvites   = int64(0x4000000)  // bit 26
 	ViewAuditLog    = int64(0x8000000)  // bit 27
+	EraseAccounts   = int64(0x10000000) // bit 28 — erase a member's account, whatever the Administrator bit says (WP 8.4d); administrator tier
 	Administrator   = int64(0x40000000) // bit 30 — bypasses all permission checks
 )
 
 // AllPerms is the union of every defined permission bit. Use it to mask
 // externally supplied permission values so unknown bits are dropped.
-const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
-	ConnectVoice | SpeakVoice | UseVideo | ShareScreen |
+const AllPerms = SendMessages | ReadMessages | ManageConfig | ManageUpdates | ManageTokens |
+	AttachFiles | AddReactions | IssueRecovery | ViewDiagnostics |
+	ConnectVoice | SpeakVoice | UseVideo | ShareScreen | MoveMembers | ManageBackups | RestoreBackups |
 	ManageMessages | ManageChannels | KickMembers | BanMembers | MuteMembers |
 	MentionEveryone | ModerateMembers | ManageNicknames | ManageRoles | ManageServer | ManageInvites | ViewAuditLog |
-	Administrator
+	EraseAccounts | Administrator
 
 // AdminPerimeter is the set of bits that admits a principal to the /admin/api
 // surface. Holding ANY one of them is enough to pass the perimeter; each route
@@ -48,20 +58,65 @@ const AllPerms = SendMessages | ReadMessages | AttachFiles | AddReactions |
 // 5): a warning-only moderator must not inherit the perimeter's read surface
 // (/stats, the /users list, /me), which re-checks nothing by design — the
 // report queue lives under /api/v1, not /admin/api.
+//
+// ManageBackups is inside it (WP 8.4c) because a holder has to reach /admin/api
+// at all to use the backup routes. The backup itself holds far more than the
+// perimeter's read surface (every message and every password hash), which is
+// why the bit is owner-grant-only.
+//
+// The seven owner-type bits (WP 8.4d) are inside it for the same reason: a
+// holder has to reach /admin/api at all to use the routes the bit opens.
 const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
-	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers
+	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers | ManageBackups |
+	OwnerTierBits | AdministratorTierBits
+
+// OwnerTierBits are the owner-type bits (WP 8.4d) whose actions were
+// owner-only before they were bits: restoring and deleting backups and the
+// full archive, the config overrides and restart, updates, API tokens and
+// recovery credentials. The gate is the owner or the bit held explicitly;
+// Administrator does NOT bypass it, because the seeded Admin role carries
+// ADMINISTRATOR and these actions are owner-only today, so a bypass would hand
+// every default Admin the owner's powers on upgrade.
+const OwnerTierBits = RestoreBackups | ManageConfig | ManageUpdates | ManageTokens | IssueRecovery
+
+// AdministratorTierBits are the owner-type bits (WP 8.4d) whose actions an
+// Administrator already had: server diagnostics and account erasure.
+// Administrator keeps passing them, and the bit lets a role without
+// ADMINISTRATOR do just that.
+const AdministratorTierBits = ViewDiagnostics | EraseAccounts
+
+// OwnerGrantOnly is the mask of bits that only the owner or an Administrator
+// may add to or remove from a role, or hand out by assigning a role that
+// carries them. Holding ManageRoles is not enough for these. It includes both
+// owner-type tiers; the owner tier is narrowed further by OwnerOnlyGrant.
+const OwnerGrantOnly = MoveMembers | ManageBackups | OwnerTierBits | AdministratorTierBits
+
+// OwnerOnlyGrant is the subset of OwnerGrantOnly that only the owner may add
+// to or remove from a role or an override, or hand out by assigning a role
+// that carries it (WP 8.4d). An Administrator is not enough: otherwise an
+// Administrator could create a role with an owner-tier bit and give it to
+// themself, which the owner tier's no-bypass rule exists to prevent.
+const OwnerOnlyGrant = OwnerTierBits
 
 // bitNames maps each single permission bit to its SCHEMA.md name. Used for
 // authorization error messages so the wording lives in one place.
 var bitNames = map[int64]string{
 	SendMessages:    "SEND_MESSAGES",
 	ReadMessages:    "READ_MESSAGES",
+	ManageConfig:    "MANAGE_CONFIG",
+	ManageUpdates:   "MANAGE_UPDATES",
+	ManageTokens:    "MANAGE_TOKENS",
 	AttachFiles:     "ATTACH_FILES",
 	AddReactions:    "ADD_REACTIONS",
+	IssueRecovery:   "ISSUE_RECOVERY",
+	ViewDiagnostics: "VIEW_DIAGNOSTICS",
 	ConnectVoice:    "CONNECT_VOICE",
 	SpeakVoice:      "SPEAK_VOICE",
 	UseVideo:        "USE_VIDEO",
 	ShareScreen:     "SHARE_SCREEN",
+	MoveMembers:     "MOVE_MEMBERS",
+	ManageBackups:   "MANAGE_BACKUPS",
+	RestoreBackups:  "RESTORE_BACKUPS",
 	ManageMessages:  "MANAGE_MESSAGES",
 	ManageChannels:  "MANAGE_CHANNELS",
 	KickMembers:     "KICK_MEMBERS",
@@ -74,6 +129,7 @@ var bitNames = map[int64]string{
 	ManageServer:    "MANAGE_SERVER",
 	ManageInvites:   "MANAGE_INVITES",
 	ViewAuditLog:    "VIEW_AUDIT_LOG",
+	EraseAccounts:   "ERASE_ACCOUNTS",
 	Administrator:   "ADMINISTRATOR",
 }
 

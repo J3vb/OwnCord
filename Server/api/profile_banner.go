@@ -35,8 +35,8 @@ func handleUploadBanner(
 			return
 		}
 
-		r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBodySize)
-		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, bannerMaxBodySize)
+		if err := r.ParseMultipartForm(bannerMultipartMemoryLimit); err != nil {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
 			return
 		}

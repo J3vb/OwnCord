@@ -214,6 +214,8 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
           status: live.status,
           displayName: live.displayName,
           customStatus: live.customStatus,
+          activity: live.activity ?? null,
+          listening: live.listening ?? null,
           // Absent (older server) hides the sections, as before.
           ...(live.about === undefined ? {} : { about: live.about }),
           banner: live.banner ?? null,

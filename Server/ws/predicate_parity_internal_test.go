@@ -123,6 +123,7 @@ func TestRefreshChannelVisibilityAffordances_Parity(t *testing.T) {
 			want := channelAffordances{
 				CanSend:          permissions.CanSendMessage(sub) == nil,
 				CanModerateVoice: permissions.AuthorizeVoiceModerator(sub) == nil,
+				CanMoveVoice:     permissions.AuthorizeVoiceMover(sub) == nil,
 				CanDeleteOthers:  delErr == nil && asMod,
 				CanPin:           permissions.CanPinMessage(sub) == nil,
 				CanReact:         permissions.CanAddReaction(sub) == nil,

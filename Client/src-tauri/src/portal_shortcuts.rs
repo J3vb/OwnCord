@@ -32,6 +32,7 @@ use dbus::Path;
 use tauri::{AppHandle, Emitter, Runtime};
 use tokio::sync::oneshot;
 
+use crate::portal_app_id::{self, Ensured, APP_ID};
 use crate::shortcuts::{
     backend, portal_ptt_allowed, Backend, GlobalKeysStatus, Triggers, PORTAL_PTT_DENY,
 };
@@ -40,6 +41,7 @@ use crate::text;
 const DESKTOP: &str = "org.freedesktop.portal.Desktop";
 const DESKTOP_PATH: &str = "/org/freedesktop/portal/desktop";
 const SHORTCUTS_IFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
+const REGISTRY_IFACE: &str = "org.freedesktop.host.portal.Registry";
 const REQUEST_IFACE: &str = "org.freedesktop.portal.Request";
 const SESSION_IFACE: &str = "org.freedesktop.portal.Session";
 const REQUEST_PREFIX: &str = "/org/freedesktop/portal/desktop/request";
@@ -61,6 +63,10 @@ const MAX_REOPENS: u8 = 3;
 /// How long the loop blocks on the bus before it reads commands again.
 const TICK: Duration = Duration::from_millis(50);
 const RECONNECT: Duration = Duration::from_secs(2);
+/// Extra Register attempts after a freshly written desktop entry, and the
+/// pause between them: the portal's GIO may not have seen the file yet.
+const REGISTER_RETRIES: u8 = 2;
+const REGISTER_RETRY_WAIT: Duration = Duration::from_millis(300);
 /// What exit waits for the thread before it lets go of it.
 const JOIN_BUDGET: Duration = Duration::from_secs(2);
 
@@ -108,10 +114,57 @@ fn triggers_from(entries: &[(String, Option<String>)]) -> Triggers {
             .and_then(|(_, trigger)| trigger.clone())
             .filter(|trigger| !trigger.is_empty())
     };
-    Triggers {
+    let listed = |id: &str| entries.iter().any(|(entry, _)| entry == id);
+    let triggers = Triggers {
         ptt: find(ID_PTT),
         mute: find(ID_MUTE),
         deafen: find(ID_DEAFEN),
+        unnamed: false,
+    };
+    // xdg-desktop-portal-hyprland lists our shortcuts with an empty trigger
+    // every time: the keys live in the compositor's config.
+    let unnamed = listed(ID_PTT)
+        && listed(ID_MUTE)
+        && listed(ID_DEAFEN)
+        && triggers.ptt.is_none()
+        && triggers.mute.is_none()
+        && triggers.deafen.is_none();
+    Triggers {
+        unnamed,
+        ..triggers
+    }
+}
+
+/// Whether a failed Register means this connection already has an app id,
+/// which is what we wanted.
+fn already_registered(error: &str) -> bool {
+    error.contains("already associated")
+}
+
+/// Run `attempt` (a Register call) and, when it fails after this run wrote the
+/// desktop entry, up to `retries` more times `wait` apart. An error that says
+/// the connection already has an id counts as success.
+fn register_with(
+    mut attempt: impl FnMut() -> Result<(), String>,
+    ensured: Ensured,
+    retries: u8,
+    wait: Duration,
+) -> Result<(), String> {
+    let mut left = if ensured == Ensured::Written {
+        retries
+    } else {
+        0
+    };
+    loop {
+        match attempt() {
+            Ok(()) => return Ok(()),
+            Err(e) if already_registered(&e) => return Ok(()),
+            Err(e) if left == 0 => return Err(e),
+            Err(_) => {
+                left -= 1;
+                std::thread::sleep(wait);
+            }
+        }
     }
 }
 
@@ -177,6 +230,8 @@ enum Event {
     /// The interface `version` read, or `None` when it did not.
     Probed(Option<u32>),
     SessionCreated(String),
+    /// CreateSession failed or was refused.
+    SessionRefused,
     /// A bind Response with code 0; its triggers when it carried any.
     BindDone(Option<Triggers>),
     TriggersChanged {
@@ -222,6 +277,8 @@ struct Core {
     session: Option<String>,
     triggers: Triggers,
     ptt_held: bool,
+    /// The portal refused to open our session; cleared by one that opens.
+    refused: bool,
     /// A bind in this run succeeded, so a restarted portal gets one again.
     bound_this_run: bool,
     /// `establish` is running: the owner change our own probe causes is not
@@ -241,6 +298,7 @@ impl Core {
             ptt_allowed,
             version: None,
             session: None,
+            refused: false,
             triggers: Triggers::default(),
             ptt_held: false,
             bound_this_run: false,
@@ -254,6 +312,7 @@ impl Core {
             self.version.unwrap_or(0),
             self.triggers.clone(),
         )
+        .with_refused(self.refused)
     }
 
     fn session(&self) -> Option<&str> {
@@ -301,11 +360,25 @@ impl Core {
         match event {
             Event::Probed(version) => {
                 self.version = version;
+                if version.is_none() {
+                    self.refused = false;
+                }
                 vec![Effect::StatusChanged]
             }
             Event::SessionCreated(session) => {
                 self.session = Some(session);
-                Vec::new()
+                if std::mem::take(&mut self.refused) {
+                    vec![Effect::StatusChanged]
+                } else {
+                    Vec::new()
+                }
+            }
+            Event::SessionRefused => {
+                if std::mem::replace(&mut self.refused, true) {
+                    Vec::new()
+                } else {
+                    vec![Effect::StatusChanged]
+                }
             }
             Event::BindDone(triggers) => {
                 self.bound_this_run = true;
@@ -375,6 +448,7 @@ impl Core {
             }
             Event::BusLost => {
                 self.version = None;
+                self.refused = false;
                 self.lost(armed)
             }
         }
@@ -421,6 +495,8 @@ struct BindSpec {
 /// The portal calls the thread makes. `DbusBus` is the real one; tests fake it.
 /// A call that opens a Request returns every path its Response may arrive on.
 trait Bus {
+    /// Tell the portal which app this connection is, before any other call.
+    fn register(&mut self) -> Result<(), String>;
     fn version(&mut self) -> Result<u32, String>;
     fn create_session(&mut self, token: u64) -> Result<Vec<String>, String>;
     fn bind(
@@ -584,6 +660,24 @@ fn watch(conn: &Connection, tx: &Sender<Incoming>) -> Result<(), dbus::Error> {
 }
 
 impl Bus for DbusBus {
+    fn register(&mut self) -> Result<(), String> {
+        let ensured = portal_app_id::ensure_desktop_entry();
+        register_with(
+            || {
+                self.call(
+                    DESKTOP_PATH,
+                    REGISTRY_IFACE,
+                    "Register",
+                    PROBE_TIMEOUT,
+                    (APP_ID, PropMap::new()),
+                )
+            },
+            ensured,
+            REGISTER_RETRIES,
+            REGISTER_RETRY_WAIT,
+        )
+    }
+
     fn version(&mut self) -> Result<u32, String> {
         self.conn
             .with_proxy(DESKTOP, DESKTOP_PATH, PROBE_TIMEOUT)
@@ -1001,6 +1095,12 @@ impl Worker {
     }
 
     fn establish_inner<B: Bus>(&mut self, bus: &mut B) -> Result<(), End> {
+        // First on the connection, and again after a portal restart: the new
+        // portal instance has not seen this connection's app id. An old
+        // portal has no Registry; a systemd scope may still name the app.
+        if let Err(e) = bus.register() {
+            log::info!("[portal] cannot register the app id: {e}");
+        }
         let version = match bus.version() {
             Ok(version) => Some(version),
             Err(e) => {
@@ -1025,7 +1125,7 @@ impl Worker {
             Ok(paths) => paths,
             Err(e) => {
                 log::warn!("[portal] {e}");
-                return Ok(());
+                return self.dispatch(bus, Event::SessionRefused);
             }
         };
         match self.wait(bus, &paths, CALL_TIMEOUT, false)? {
@@ -1035,6 +1135,7 @@ impl Worker {
             },
             Wait::Done(response) => {
                 log::warn!("[portal] CreateSession refused (code {})", response.code);
+                self.dispatch(bus, Event::SessionRefused)?;
             }
             Wait::Timeout => {
                 close_last(bus, &paths);
@@ -1438,6 +1539,7 @@ mod tests {
             ptt: Some("F8".into()),
             mute: Some("Ctrl+Shift+M".into()),
             deafen: Some("Ctrl+Shift+D".into()),
+            unnamed: false,
         }
     }
 
@@ -1517,6 +1619,7 @@ mod tests {
                 ptt: Some("F8".into()),
                 mute: None,
                 deafen: None,
+                unnamed: false,
             }
         );
         assert_eq!(triggers_from(&[]), Triggers::default());
@@ -1569,6 +1672,7 @@ mod tests {
                 ptt: Some("F8".into()),
                 mute: None,
                 deafen: None,
+                unnamed: false,
             })
         );
         let mut as_string = PropMap::new();
@@ -1857,6 +1961,138 @@ mod tests {
     }
 
     #[test]
+    fn three_listed_shortcuts_without_keys_are_unnamed() {
+        let listed = |ptt: Option<&str>, mute: Option<&str>, deafen: Option<&str>| {
+            vec![
+                (ID_PTT.to_string(), ptt.map(str::to_string)),
+                (ID_MUTE.to_string(), mute.map(str::to_string)),
+                (ID_DEAFEN.to_string(), deafen.map(str::to_string)),
+            ]
+        };
+        let all_empty = triggers_from(&listed(Some(""), None, Some("")));
+        assert!(all_empty.unnamed);
+        assert_eq!(all_empty.ptt, None);
+
+        assert!(!triggers_from(&listed(Some("F8"), Some(""), Some(""))).unnamed);
+        assert!(!triggers_from(&listed(Some(""), Some(""), Some("Ctrl+Shift+D"))).unnamed);
+        let partial = vec![
+            (ID_PTT.to_string(), Some(String::new())),
+            (ID_MUTE.to_string(), Some(String::new())),
+        ];
+        assert!(!triggers_from(&partial).unnamed, "deafen is not listed");
+        assert!(!triggers_from(&[]).unnamed, "nothing listed is not unnamed");
+    }
+
+    #[test]
+    fn an_unnamed_portal_supports_ptt_but_not_the_in_app_stand_down() {
+        let unnamed = Triggers {
+            unnamed: true,
+            ..Triggers::default()
+        };
+        let status = GlobalKeysStatus::new(Backend::Portal, 1, unnamed.clone());
+        assert!(status.triggers_unnamed);
+        assert!(status.ptt_supported(Some("Hyprland")));
+        assert!(
+            !status.keys_supported(),
+            "an unbound key keeps working in-app"
+        );
+        let polling = GlobalKeysStatus::new(Backend::Polling, 0, unnamed);
+        assert!(!polling.triggers_unnamed, "only the portal reports it");
+    }
+
+    #[test]
+    fn activated_toggle_mute_reaches_the_webview_on_an_unnamed_portal() {
+        let mut core = Core::new(true);
+        core.on_event(Event::Probed(Some(1)), ARMED, 0x77);
+        core.on_event(Event::SessionCreated(SESSION.into()), ARMED, 0x77);
+        core.on_event(
+            Event::BindDone(Some(Triggers {
+                unnamed: true,
+                ..Triggers::default()
+            })),
+            ARMED,
+            0x77,
+        );
+        assert!(core.status().triggers_unnamed);
+        assert_eq!(
+            core.on_event(activated(ID_MUTE), ARMED, 0x77),
+            vec![Effect::VoiceShortcut("mute")]
+        );
+        assert_eq!(
+            core.on_event(activated(ID_PTT), ARMED, 0x77),
+            vec![Effect::PttState(true)]
+        );
+    }
+
+    #[test]
+    fn a_refused_session_shows_in_the_status_until_one_opens() {
+        let mut core = Core::new(true);
+        core.on_event(Event::Probed(Some(1)), IDLE, 0);
+        assert!(!core.status().session_refused);
+        assert_eq!(
+            core.on_event(Event::SessionRefused, IDLE, 0),
+            vec![Effect::StatusChanged]
+        );
+        assert!(core.status().session_refused);
+        assert!(
+            core.on_event(Event::SessionRefused, IDLE, 0).is_empty(),
+            "already known"
+        );
+        assert_eq!(
+            core.on_event(Event::SessionCreated(SESSION.into()), IDLE, 0),
+            vec![Effect::StatusChanged]
+        );
+        assert!(!core.status().session_refused);
+        assert!(core
+            .on_event(Event::SessionCreated(SESSION.into()), IDLE, 0)
+            .is_empty());
+
+        core.on_event(Event::SessionRefused, IDLE, 0);
+        core.on_event(Event::BusLost, IDLE, 0);
+        assert!(!core.status().session_refused, "a lost bus clears it");
+        core.on_event(Event::Probed(Some(1)), IDLE, 0);
+        core.on_event(Event::SessionRefused, IDLE, 0);
+        core.on_event(Event::Probed(None), IDLE, 0);
+        assert!(!core.status().session_refused, "no portal clears it");
+    }
+
+    #[test]
+    fn register_retries_only_after_writing_the_entry() {
+        let attempts = std::cell::Cell::new(0u8);
+        let failing = || {
+            attempts.set(attempts.get() + 1);
+            Err("Register: Could not register app ID".to_string())
+        };
+        let none = Duration::ZERO;
+        assert!(register_with(failing, Ensured::Present, 2, none).is_err());
+        assert_eq!(
+            attempts.get(),
+            1,
+            "no retry when the entry was already there"
+        );
+
+        attempts.set(0);
+        assert!(register_with(failing, Ensured::Written, 2, none).is_err());
+        assert_eq!(attempts.get(), 3, "one try and two retries");
+
+        attempts.set(0);
+        let second_works = || {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() < 2 {
+                Err("not yet".to_string())
+            } else {
+                Ok(())
+            }
+        };
+        assert!(register_with(second_works, Ensured::Written, 2, none).is_ok());
+        assert_eq!(attempts.get(), 2);
+
+        let associated =
+            || Err("Register: Connection already associated with an application ID".to_string());
+        assert!(register_with(associated, Ensured::Failed, 2, none).is_ok());
+    }
+
+    #[test]
     fn ptt_supported_needs_a_bound_trigger_and_an_allowed_desktop() {
         let mut status = GlobalKeysStatus::new(Backend::Portal, 1, Triggers::default());
         assert!(!status.ptt_supported(Some("GNOME")), "unbound");
@@ -1902,6 +2138,13 @@ mod tests {
         activate_on_create: Arc<AtomicBool>,
         /// ListShortcuts answers with the triggers the desktop remembered.
         answer_list: Arc<AtomicBool>,
+        /// The error `register` fails with, when set.
+        register_error: Arc<Mutex<Option<String>>>,
+        /// CreateSession fails outright, as "An app id is required" does.
+        create_error: Arc<AtomicBool>,
+        /// ListShortcuts answers with all three shortcuts and no keys, as
+        /// xdg-desktop-portal-hyprland does.
+        list_unnamed: Arc<AtomicBool>,
     }
 
     impl Script {
@@ -1926,12 +2169,23 @@ mod tests {
     }
 
     impl Bus for FakeBus {
+        fn register(&mut self) -> Result<(), String> {
+            lock(&self.0.calls).push("register".into());
+            match lock(&self.0.register_error).clone() {
+                Some(e) => Err(e),
+                None => Ok(()),
+            }
+        }
         fn version(&mut self) -> Result<u32, String> {
+            lock(&self.0.calls).push("version".into());
             Ok(2)
         }
         fn create_session(&mut self, token: u64) -> Result<Vec<String>, String> {
             let path = format!("/req/{token}");
             lock(&self.0.calls).push("create".into());
+            if self.0.create_error.load(Ordering::SeqCst) {
+                return Err("CreateSession: An app id is required".into());
+            }
             if self.0.activate_on_create.load(Ordering::SeqCst) {
                 self.0.push(Incoming::Event(Event::NameOwnerChanged {
                     old: String::new(),
@@ -1964,7 +2218,16 @@ mod tests {
                 return Err("no list".into());
             }
             let path = format!("/req/{token}");
-            self.0.push(answered(&path, None, Some(bound_triggers())));
+            let triggers = if self.0.list_unnamed.load(Ordering::SeqCst) {
+                triggers_from(&[
+                    (ID_PTT.to_string(), Some(String::new())),
+                    (ID_MUTE.to_string(), Some(String::new())),
+                    (ID_DEAFEN.to_string(), Some(String::new())),
+                ])
+            } else {
+                bound_triggers()
+            };
+            self.0.push(answered(&path, None, Some(triggers)));
             Ok(vec![path])
         }
         fn configure(&mut self, _: &str) -> Result<(), String> {
@@ -2030,6 +2293,77 @@ mod tests {
             })
             .expect("send the bind");
         answer
+    }
+
+    #[test]
+    fn the_app_id_is_registered_before_the_probe_and_again_after_a_restart() {
+        let script = Script::default();
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let handle = fake_handle(&script, &emitted);
+        handle.shared.wait_probed(Duration::from_secs(5));
+        {
+            let calls = lock(&script.calls);
+            assert_eq!(calls[0], "register");
+            assert_eq!(calls[1], "version");
+        }
+        script.push(Incoming::Event(Event::NameOwnerChanged {
+            old: ":1.1".into(),
+            new: ":1.2".into(),
+        }));
+        // Wait for the call after the second registration too: the portal
+        // thread records `register` before it sends the next call.
+        wait_until("a second registration and the call after it", || {
+            let calls = lock(&script.calls);
+            calls.iter().filter(|c| c.starts_with("register")).count() == 2
+                && calls
+                    .iter()
+                    .rposition(|c| c == "register")
+                    .is_some_and(|i| i + 1 < calls.len())
+        });
+        let calls = lock(&script.calls).clone();
+        let second = calls.iter().rposition(|c| c == "register").unwrap();
+        assert_eq!(calls[second + 1], "version", "register stays first");
+        drop(calls);
+        stop_handle(handle);
+    }
+
+    #[test]
+    fn a_register_error_does_not_stop_the_session() {
+        let script = Script::default();
+        *lock(&script.register_error) = Some("Register: no such interface".into());
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let handle = fake_handle(&script, &emitted);
+        handle.shared.wait_probed(Duration::from_secs(5));
+        assert_eq!(handle.shared.status().backend, Backend::Portal);
+        assert!(script.called("create"));
+        assert!(!handle.shared.status().session_refused);
+        stop_handle(handle);
+    }
+
+    #[test]
+    fn a_create_session_error_is_reported_as_refused() {
+        let script = Script::default();
+        script.create_error.store(true, Ordering::SeqCst);
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let handle = fake_handle(&script, &emitted);
+        handle.shared.wait_probed(Duration::from_secs(5));
+        assert!(handle.shared.status().session_refused);
+        stop_handle(handle);
+    }
+
+    #[test]
+    fn an_all_empty_listing_marks_the_triggers_unnamed() {
+        let script = Script::default();
+        script.answer_list.store(true, Ordering::SeqCst);
+        script.list_unnamed.store(true, Ordering::SeqCst);
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let handle = fake_handle(&script, &emitted);
+        handle.shared.wait_probed(Duration::from_secs(5));
+        let status = handle.shared.status();
+        assert!(status.triggers_unnamed);
+        assert!(status.ptt_supported(Some("Hyprland")));
+        assert!(!status.keys_supported());
+        stop_handle(handle);
     }
 
     #[test]

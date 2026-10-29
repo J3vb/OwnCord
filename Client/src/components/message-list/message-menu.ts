@@ -20,7 +20,6 @@ import {
 import { Disposable } from "@lib/disposable";
 import { readPointerEnabled } from "@lib/serverCapabilities";
 import { wantsNativeMenu } from "@lib/dom";
-import { showToast } from "@lib/toast";
 import type { Message } from "@stores/messages.store";
 import { isServerRowKind } from "@lib/messageKind";
 
@@ -40,6 +39,7 @@ import {
   messageActionGates,
 } from "./message-actions";
 import { atReactionLimit } from "./reactions";
+import { copyThenToast } from "@lib/clipboard";
 
 export interface MessageMenuRequest {
   readonly msg: Message;
@@ -72,10 +72,7 @@ function rowOf(id: number): HTMLElement | null {
 }
 
 function copyText(text: string): void {
-  navigator.clipboard.writeText(text).then(
-    () => showToast(messageMenuText("copied"), "success"),
-    () => showToast(messageMenuText("copyFailed"), "error"),
-  );
+  copyThenToast(text, messageMenuText("copied"), messageMenuText("copyFailed"));
 }
 
 /** The selected text, when the selection starts and ends inside `row`. */
@@ -151,10 +148,7 @@ function buildItems(
         label: imageMenuText("copyLink"),
         testId: "msg-menu-copy-link",
         onClick: act(() => {
-          navigator.clipboard.writeText(href).then(
-            () => showToast(imageMenuText("linkCopied"), "success"),
-            () => showToast(imageMenuText("linkCopyFailed"), "error"),
-          );
+          copyThenToast(href, imageMenuText("linkCopied"), imageMenuText("linkCopyFailed"));
         }),
       },
       {

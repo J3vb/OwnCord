@@ -4,6 +4,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
@@ -44,11 +45,26 @@ import { isSpoilerFilename, toggleSpoilerFilename } from "../features/messaging/
 // main-page chunk.
 const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("@components/EmojiPicker"));
 const gifPickerScreen = createLazyScreen("gif-picker", () => import("@components/GifPicker"));
+const stickerPickerScreen = createLazyScreen(
+  "sticker-picker",
+  () => import("@components/StickerPicker"),
+);
 
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
-import { pollsEnabled } from "@lib/serverCapabilities";
+import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/serverCapabilities";
+import { currentUserRoleHasPermission } from "@lib/permissions";
+import { Permission, type VoiceUploadMeta } from "@lib/types";
+import {
+  createExpressionPopup,
+  type ExpressionPanel,
+  type ExpressionPopup,
+  type ExpressionTab,
+} from "@components/ExpressionPopup";
+import type { VoiceComposer } from "../features/voice-messages/voiceComposer";
+import { voiceMessagesText } from "../i18n/voiceMessages";
 import { messagingText } from "../i18n/messaging";
+import { stickersText } from "../i18n/stickers";
 import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
 
 export interface MessageInputOptions {
@@ -76,6 +92,8 @@ export interface MessageInputOptions {
     file: File,
     signal?: AbortSignal,
     onProgress?: (fraction: number) => void,
+    /** Set for a voice message (WP 8.9): its length and waveform ride the upload. */
+    voice?: VoiceUploadMeta,
   ) => Promise<{ id: string; url: string; filename: string }>;
   /** Withdraw an upload that will never be sent, so its quota is free at
    *  once. Best effort: a rejection is ignored. */
@@ -86,6 +104,16 @@ export interface MessageInputOptions {
    * also left out on a server that does not advertise polls.
    */
   readonly onCreatePoll?: () => void;
+  /**
+   * Sends a custom sticker at once (WP 8.8): `replyTo` and `replyPing` are the
+   * pending reply, if any. Omit to leave the sticker button and tab out; they
+   * are also left out on a server that does not advertise stickers.
+   */
+  readonly onSendSticker?: (
+    sticker: { readonly id: number; readonly name: string },
+    replyTo: number | null,
+    replyPing: boolean,
+  ) => void;
   /** The draft's text or reply changed; read it back with peekDraft(). */
   readonly onDraftChange?: () => void;
   /** Initial disabled reason (e.g. read-only / no-permission / offline). */
@@ -220,9 +248,9 @@ export type MessageInputComponent = MountableComponent & {
    * didn't wire an upload handler.
    */
   openFilePicker(): void;
-  /** Open or close the emoji or GIF picker, as its button does (Ctrl+E,
-   *  Ctrl+G). No-op while that button is disabled. */
-  togglePicker(kind: "emoji" | "gif"): void;
+  /** Open or close the emoji, sticker or GIF tab of the expression popup, as
+   *  its button does (Ctrl+E, Ctrl+G). No-op while that button is disabled or absent. */
+  togglePicker(kind: "emoji" | "gif" | "sticker"): void;
 };
 
 const TYPING_THROTTLE_MS = 3_000;
@@ -340,6 +368,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** True once the server has told us GIFs are off, or if no GIF api was wired. */
   let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
+  /** The voice-message recorder bar (WP 8.9), owned by this composer. */
+  let voice: VoiceComposer | null = null;
   let attachmentPreviewBar: HTMLDivElement | null = null;
   /** The composer's single refusal line. It stays until the user edits or
    *  sends rather than vanishing after a few seconds (A11Y-05), so it is one
@@ -352,7 +382,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Set by mount() when file uploads are wired; backs openFilePicker(). */
   let openPicker: (() => void) | null = null;
   /** Set by mount(); backs togglePicker(). */
-  let togglePickerOf: ((kind: "emoji" | "gif") => void) | null = null;
+  let togglePickerOf: ((kind: "emoji" | "gif" | "sticker") => void) | null = null;
   let mentionPopup: MentionAutocompleteComponent | null = null;
   /** Users and roles picked from the popup for this draft (WP 6.3e), by the
    *  text now in the textarea. Send turns the spans still intact into id
@@ -904,6 +934,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     textarea.placeholder = disabled ? disabledReason! : idlePlaceholder();
     const uploadsOff = uploadsDisabledByServer();
     for (const btn of controlButtons) {
+      // The mic needs what "+" needs (an upload) and a server that keeps the clip's metadata.
+      if (btn.classList.contains("mic-btn")) {
+        btn.hidden = uploadsOff || !voiceMessagesEnabled();
+        if (disabled) btn.setAttribute("disabled", "true");
+        else btn.removeAttribute("disabled");
+        continue;
+      }
       const isAttach = btn.classList.contains("attach-btn");
       if (isAttach) btn.title = uploadsOff ? messagingText("attach.serverDisabled") : "";
       if (disabled || (isAttach && uploadsOff)) {
@@ -1604,6 +1641,19 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (gifUnavailable) {
       markGifUnavailable(gifBtn, messagingText("gif.disabled"));
     }
+    // The Sticker button (WP 8.8): only where the host can send one and the server has stickers.
+    const sendSticker = options.onSendSticker;
+    const stickerBtn =
+      sendSticker !== undefined && stickersEnabled()
+        ? createElement("button", {
+            class: "input-btn sticker-btn",
+            type: "button",
+            title: stickersText("button.label"),
+            "aria-label": stickersText("button.label"),
+            "data-testid": "sticker-btn",
+          })
+        : null;
+    stickerBtn?.appendChild(createIcon("sticker", 20));
     // The Poll button (WP 6.9b): only where the host can open the dialog and the server has polls.
     const createPoll = options.onCreatePoll;
     const pollBtn =
@@ -1627,10 +1677,25 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "data-testid": "send-btn",
     });
     sendBtn.appendChild(createIcon("send", 20));
+    // The mic (WP 8.9): where the composer can upload at all, unless a text-only composer.
+    const micBtn =
+      options.onUploadFile !== undefined && options.noAttach !== true
+        ? createElement("button", {
+            class: "input-btn mic-btn",
+            type: "button",
+            title: voiceMessagesText("mic.label"),
+            "aria-label": voiceMessagesText("mic.label"),
+            "data-testid": "voice-mic-btn",
+          })
+        : null;
+    micBtn?.appendChild(createIcon("mic", 20));
+    micBtn?.setAttribute("hidden", "");
     // Register interactive controls so the disabled state can toggle them.
     controlButtons.length = 0;
     controlButtons.push(sendBtn, emojiBtn, gifBtn);
+    if (stickerBtn !== null) controlButtons.push(stickerBtn);
     if (pollBtn !== null) controlButtons.push(pollBtn);
+    if (micBtn !== null) controlButtons.push(micBtn);
     if (options.onUploadFile !== undefined) {
       controlButtons.push(attachBtn);
       disposable.onStoreChange(
@@ -1681,13 +1746,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           // A CJK IME commits the current candidate on Enter, firing keydown
           // with isComposing true (or the legacy keyCode 229). Sending here
           // would ship the raw composition text instead of the committed word.
-          if (e.isComposing || e.keyCode === 229) return;
+          if (isImeCommit(e)) return;
           e.preventDefault();
           handleSend();
         }
         // An Escape that cancels something is used up: the app-wide Escape
         // (mark the channel read) leaves a prevented key alone.
-        if (e.key === "Escape") {
+        if (e.key === "Escape" && !isImeCommit(e)) {
           if (state.replyTo !== null) {
             e.preventDefault();
             clearReply();
@@ -1774,145 +1839,101 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     sendBtn.addEventListener("click", handleSend, { signal });
 
-    // Picker state (declared together so both toggle functions can cross-close)
-    let emojiPicker: { element: HTMLDivElement; destroy(): void } | null = null;
-    let gifPicker: { element: HTMLDivElement; destroy(): void } | null = null;
-    // One outside-click owner per open picker, destroyed when that picker closes.
-    let emojiDismiss: Disposable | null = null;
-    let gifDismiss: Disposable | null = null;
-    // Set while a picker's code loads. A second toggle (or any close) clears
-    // it, which cancels the mount; the load resolving later checks it still
-    // holds the same ticket and that the composer is still mounted.
-    let emojiPending: object | null = null;
-    let gifPending: object | null = null;
+    // The GIF, sticker and emoji buttons share one tabbed popup (WP 8.8). Each
+    // button opens it on its own tab; the active tab's button closes it.
+    let popup: ExpressionPopup | null = null;
+    // One outside-click owner for the open popup, destroyed when it closes.
+    let popupDismiss: Disposable | null = null;
 
-    function closeEmojiPicker(): void {
-      emojiPending = null;
-      if (emojiPicker !== null) {
-        emojiPicker.element.remove();
-        emojiPicker.destroy();
-        emojiPicker = null;
-        emojiDismiss?.destroy();
-        emojiDismiss = null;
-      }
+    function tabButton(tab: ExpressionTab): HTMLButtonElement | null {
+      if (tab === "gif") return gifBtn;
+      return tab === "sticker" ? stickerBtn : emojiBtn;
     }
 
-    function handleClickOutside(e: MouseEvent): void {
-      if (emojiPicker === null) return;
-      const target = e.target as Node;
-      // Close if click is outside both the picker and the emoji button
-      if (
-        !emojiPicker.element.contains(target) &&
-        target !== emojiBtn &&
-        !emojiBtn.contains(target)
-      ) {
-        closeEmojiPicker();
-      }
+    /** Close the popup (a no-op when closed). Escape hands focus back to the button of the tab it was on. */
+    function closePopup(returnFocus = false): void {
+      const closing = popup;
+      if (closing === null) return;
+      const tab = closing.activeTab();
+      popup = null;
+      popupDismiss?.destroy();
+      popupDismiss = null;
+      closing.element.remove();
+      closing.destroy();
+      if (returnFocus) tabButton(tab)?.focus();
     }
 
-    function toggleEmojiPicker(): void {
-      // Close GIF picker if open (or still loading)
-      closeGifPicker();
-      if (emojiPicker !== null || emojiPending !== null) {
-        closeEmojiPicker();
-        return;
-      }
-      const ticket = {};
-      emojiPending = ticket;
-      void emojiPickerScreen
-        .load(() => emojiPending === ticket)
-        .then((screen) => {
-          if (emojiPending !== ticket || signal.aborted) return;
-          emojiPending = null;
-          if (screen !== null) openEmojiPicker(screen);
-        });
-    }
-
-    function openEmojiPicker(screen: typeof import("@components/EmojiPicker")): void {
-      emojiPicker = screen.createEmojiPicker({
-        // Read the set at open time, not at mount: an emoji_update while the
-        // composer is alive must be in the next picker the user opens.
-        customEmoji: listCustomEmoji(),
-        onSelect: (emoji: string, select) => {
-          const keepOpen = select?.keepOpen === true;
-          if (textarea !== null) {
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const before = textarea.value.slice(0, start);
-            const after = textarea.value.slice(end);
-            textarea.value = before + emoji + after;
-            textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
-            // Shift-pick keeps focus in the picker so the next pick lands at
-            // the caret just advanced.
-            if (!keepOpen) textarea.focus();
-          }
-          if (!keepOpen) closeEmojiPicker();
-        },
-        onClose: () => {
-          closeEmojiPicker();
-        },
-      });
-      root?.appendChild(emojiPicker.element);
-      const dismiss = new Disposable();
-      emojiDismiss = dismiss;
-      // Defer so this click doesn't immediately close it
-      const t1 = setTimeout(() => {
-        activeTimers.delete(t1);
-        if (!signal.aborted) {
-          document.addEventListener("mousedown", handleClickOutside, { signal: dismiss.signal });
-        }
-      }, 0);
-      activeTimers.add(t1);
-    }
-
-    emojiBtn.addEventListener("click", toggleEmojiPicker, { signal });
-
-    // GIF picker toggle
-    function closeGifPicker(): void {
-      gifPending = null;
-      if (gifPicker !== null) {
-        gifPicker.element.remove();
-        gifPicker.destroy();
-        gifPicker = null;
-        gifDismiss?.destroy();
-        gifDismiss = null;
-      }
-    }
-
-    function handleGifClickOutside(e: MouseEvent): void {
-      if (gifPicker === null) return;
+    function handlePopupClickOutside(e: MouseEvent): void {
+      if (popup === null) return;
       const target = e.target as Node;
       if ((target as Element).closest?.(".modal-overlay")) return;
-      if (!gifPicker.element.contains(target) && target !== gifBtn && !gifBtn.contains(target)) {
-        closeGifPicker();
+      if (popup.element.contains(target)) return;
+      for (const tab of ["gif", "sticker", "emoji"] as const) {
+        const btn = tabButton(tab);
+        if (btn !== null && (target === btn || btn.contains(target))) return;
       }
+      closePopup();
     }
 
-    function toggleGifPicker(): void {
-      const gifApi = options.gifApi;
-      if (gifApi === undefined) return;
-      // Close emoji picker if open (or still loading)
-      closeEmojiPicker();
-      if (gifPicker !== null || gifPending !== null) {
-        closeGifPicker();
+    /** Send a picked sticker at once, under the same gates as a GIF. */
+    function sendPickedSticker(sticker: { readonly id: number; readonly name: string }): void {
+      const refusal = disabledReason ?? sendGateReason;
+      if (refusal !== null) {
+        showUploadError(refusal);
         return;
       }
-      const ticket = {};
-      gifPending = ticket;
-      void gifPickerScreen
-        .load(() => gifPending === ticket)
-        .then((screen) => {
-          if (gifPending !== ticket || signal.aborted) return;
-          gifPending = null;
-          if (screen !== null) openGifPicker(screen, gifApi);
-        });
+      const now = Date.now();
+      if (now - lastSendTime < SEND_DEBOUNCE_MS) return;
+      lastSendTime = now;
+      options.onSendSticker?.(sticker, state.replyTo?.messageId ?? null, replyPing());
+      clearReply();
     }
 
-    function openGifPicker(
-      screen: typeof import("@components/GifPicker"),
-      gifApi: NonNullable<MessageInputOptions["gifApi"]>,
-    ): void {
-      gifPicker = screen.createGifPicker({
+    /** Build the picker for a tab, loading its code on first use. */
+    async function buildPanel(tab: ExpressionTab): Promise<ExpressionPanel | null> {
+      const wanted = (): boolean => popup === null || popup.activeTab() === tab;
+      if (tab === "emoji") {
+        const screen = await emojiPickerScreen.load(wanted);
+        if (screen === null) return null;
+        return screen.createEmojiPicker({
+          // Read the set at open time, not at mount: an emoji_update while the
+          // composer is alive must be in the next picker the user opens.
+          customEmoji: listCustomEmoji(),
+          onSelect: (emoji: string, select) => {
+            const keepOpen = select?.keepOpen === true;
+            if (textarea !== null) {
+              const start = textarea.selectionStart;
+              const end = textarea.selectionEnd;
+              const before = textarea.value.slice(0, start);
+              const after = textarea.value.slice(end);
+              textarea.value = before + emoji + after;
+              textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
+              // Shift-pick keeps focus in the picker so the next pick lands at
+              // the caret just advanced.
+              if (!keepOpen) textarea.focus();
+            }
+            if (!keepOpen) closePopup();
+          },
+          onClose: () => closePopup(true),
+        });
+      }
+      if (tab === "sticker") {
+        const screen = await stickerPickerScreen.load(wanted);
+        if (screen === null) return null;
+        return screen.createStickerPicker({
+          canManage: currentUserRoleHasPermission(Permission.MANAGE_SERVER),
+          onSelect: (sticker) => {
+            sendPickedSticker(sticker);
+            closePopup();
+          },
+          onClose: () => closePopup(true),
+        });
+      }
+      const gifApi = options.gifApi;
+      if (gifApi === undefined) return null;
+      const screen = await gifPickerScreen.load(wanted);
+      if (screen === null) return null;
+      return screen.createGifPicker({
         api: gifApi,
         onUnavailable: (reason: string) => {
           gifUnavailable = true;
@@ -1937,37 +1958,67 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
               clearReply();
             }
           }
-          closeGifPicker();
+          closePopup();
         },
-        onClose: () => {
-          closeGifPicker();
-        },
+        onClose: () => closePopup(true),
       });
-      root?.appendChild(gifPicker.element);
-      const dismiss = new Disposable();
-      gifDismiss = dismiss;
-      const t2 = setTimeout(() => {
-        activeTimers.delete(t2);
-        if (!signal.aborted) {
-          document.addEventListener("mousedown", handleGifClickOutside, { signal: dismiss.signal });
-        }
-      }, 0);
-      activeTimers.add(t2);
     }
 
-    gifBtn.addEventListener("click", toggleGifPicker, { signal });
+    function openPopup(tab: ExpressionTab): void {
+      // The tabs on offer: no GIF tab where GIFs are off, no sticker tab where
+      // the server has none.
+      const tabs: ExpressionTab[] = [];
+      if (options.gifApi !== undefined && !gifUnavailable) tabs.push("gif");
+      if (stickerBtn !== null) tabs.push("sticker");
+      tabs.push("emoji");
+      if (!tabs.includes(tab)) return;
+      const opened = createExpressionPopup({
+        tabs,
+        initial: tab,
+        mountPanel: buildPanel,
+        onClose: () => closePopup(true),
+      });
+      popup = opened;
+      root?.appendChild(opened.element);
+      // Focus starts inside the popup, so Escape closes it even before the
+      // lazy picker has mounted and moved focus to its search box.
+      opened.element.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+      const dismiss = new Disposable();
+      popupDismiss = dismiss;
+      // Defer so the click that opened the popup doesn't immediately close it.
+      setOwnedTimeout(
+        dismiss.signal,
+        () =>
+          document.addEventListener("mousedown", handlePopupClickOutside, {
+            signal: dismiss.signal,
+          }),
+        0,
+      );
+    }
+
+    function toggleTab(tab: ExpressionTab): void {
+      if (popup === null) {
+        openPopup(tab);
+      } else if (popup.activeTab() === tab) {
+        closePopup();
+      } else {
+        popup.showTab(tab);
+      }
+    }
+
+    emojiBtn.addEventListener("click", () => toggleTab("emoji"), { signal });
+    gifBtn.addEventListener("click", () => toggleTab("gif"), { signal });
+    stickerBtn?.addEventListener("click", () => toggleTab("sticker"), { signal });
 
     togglePickerOf = (kind) => {
-      const btn = kind === "emoji" ? emojiBtn : gifBtn;
-      if (btn.disabled) return;
-      if (kind === "emoji") toggleEmojiPicker();
-      else toggleGifPicker();
+      const btn = tabButton(kind);
+      if (btn === null || btn.disabled) return;
+      toggleTab(kind);
     };
 
     // Store picker cleanup for destroy()
     cleanupPickers = () => {
-      closeEmojiPicker();
-      closeGifPicker();
+      closePopup();
       closeSlashPopup();
       closeMentionPopup();
       closeChannelPopup();
@@ -1980,14 +2031,73 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     });
     charCounter.hidden = true;
     if (options.noAttach !== true) inputBox.appendChild(attachBtn);
-    appendChildren(inputBox, textarea, emojiBtn, gifBtn);
+    // Emoji, sticker, GIF: the sticker button sits between the other two.
+    appendChildren(inputBox, textarea, emojiBtn);
+    if (stickerBtn !== null) inputBox.appendChild(stickerBtn);
+    inputBox.appendChild(gifBtn);
     if (pollBtn !== null) inputBox.appendChild(pollBtn);
+    if (micBtn !== null) inputBox.appendChild(micBtn);
     appendChildren(inputBox, charCounter, sendBtn);
     slowModeNoteEl = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",
     });
     appendChildren(root, replyBar, attachmentPreviewBar, inputBox, slowModeNoteEl);
+    const upload = options.onUploadFile;
+    if (micBtn !== null && upload !== undefined) {
+      const voiceHost = root;
+      // The recorder and its bar load on the first mic click, so they stay out of the app chunk.
+      let voiceLoading = false;
+      const startVoice = async (): Promise<void> => {
+        if (voice === null) {
+          if (voiceLoading) return;
+          voiceLoading = true;
+          let mod: typeof import("../features/voice-messages/voiceComposer");
+          try {
+            mod = await import("../features/voice-messages/voiceComposer");
+          } catch {
+            voiceLoading = false;
+            if (!signal.aborted) showUploadError(voiceMessagesText("error.failed"));
+            return;
+          }
+          voiceLoading = false;
+          // The composer was destroyed while the code loaded.
+          if (signal.aborted) return;
+          voice ??= mod.createVoiceComposer({
+            host: voiceHost,
+            before: inputBox,
+            root: voiceHost,
+            signal,
+            upload: (file, meta, uploadSignal) => upload(file, uploadSignal, undefined, meta),
+            ...(options.onDiscardUpload === undefined
+              ? {}
+              : { discardUpload: options.onDiscardUpload }),
+            send: (attachment) => {
+              // A message of its own: no text, the reply stays (as on Discord).
+              options.onSend(
+                "",
+                state.replyTo?.messageId ?? null,
+                [attachment.id],
+                [attachment],
+                replyPing(),
+              );
+              clearReply();
+            },
+            gate: () =>
+              disabledReason ??
+              sendGateReason ??
+              (uploadsDisabledByServer() ? messagingText("attach.serverDisabled") : null),
+            onError: showUploadError,
+            onClearError: clearUploadError,
+            onActiveChange: (active) => {
+              if (!active) textarea?.focus();
+            },
+          });
+        }
+        voice.start();
+      };
+      micBtn.addEventListener("click", () => void startVoice(), { signal });
+    }
     applySlowModeNote();
     container.appendChild(root);
     releaseComposer?.();
@@ -2025,6 +2135,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       if (!handedOff.has(att.upload)) att.upload.owner.destroy();
     }
     handedOff.clear();
+    // The microphone and a clip not yet sent go with the composer.
+    voice?.destroy();
+    voice = null;
     disposable.destroy();
     // Image previews now use data: URLs (via readFileAsDataUrl) which don't
     // require revocation — just clear the array and let GC reclaim them.
@@ -2070,7 +2183,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     return true;
   }
 
-  function togglePicker(kind: "emoji" | "gif"): void {
+  function togglePicker(kind: "emoji" | "gif" | "sticker"): void {
     togglePickerOf?.(kind);
   }
 

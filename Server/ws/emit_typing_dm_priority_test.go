@@ -44,7 +44,7 @@ func TestEmitEvents_TypingDMEvent_UsesLowPriorityQueue(t *testing.T) {
 		sendHigh: make(chan []byte, 8),
 		sendLow:  make(chan []byte, 8),
 	}
-	h.clients[2] = target
+	h.clients[2] = []*Client{target}
 
 	payload := []byte(`{"type":"typing","channel_id":9,"user_id":1}`)
 	h.EmitEvents(context.Background(), []Event{
@@ -88,7 +88,7 @@ func TestEmitEvents_TypingDMEvent_DropsRatherThanDisconnectsOnOverflow(t *testin
 	// (sendHighMsg -> fallback to send -> closeAllSendLocked) would trip.
 	target.send <- []byte("normal-filler")
 	target.sendHigh <- []byte("high-filler")
-	h.clients[3] = target
+	h.clients[3] = []*Client{target}
 
 	payload := []byte(`{"type":"typing","channel_id":9,"user_id":1}`)
 	h.EmitEvents(context.Background(), []Event{

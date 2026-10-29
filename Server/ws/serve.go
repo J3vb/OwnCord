@@ -166,6 +166,15 @@ var serveWSAdmissionRaceHook func()
 // for the analogous races elsewhere in this package (OC-0206).
 var handleReconnectPreRegisterRaceHook func()
 
+// handleReconnectPreSeqMuRaceHook, when non-nil, runs once inside
+// reconnectRegister just before it takes h.seqMu: after the handshake has
+// computed its allowed set and before the final re-check. Test-only (nil in
+// production). A visibility fan-out (RefreshChannelVisibility,
+// revokeUnreadableChannels) takes h.seqMu through beginTargetedFanout, so a
+// test lands one in the handshake window here, never from
+// handleReconnectPreRegisterRaceHook, which runs with h.seqMu held.
+var handleReconnectPreSeqMuRaceHook func()
+
 // handleReconnectPostCheckPreRegisterRaceHook, when non-nil, runs once
 // inside handleReconnect's h.seqMu critical section immediately AFTER the
 // mustFullResync re-check passes and immediately before registerNow (Codex

@@ -17,16 +17,32 @@ export interface ReadyCapabilityFlags {
   readonly profile_banners?: boolean;
   readonly dm_privacy?: boolean;
   readonly polls?: boolean;
+  readonly stickers?: boolean;
   readonly threads?: boolean;
   readonly forums?: boolean;
   readonly multi_role?: boolean;
   readonly manage_nicknames?: boolean;
   readonly id_mentions?: boolean;
   readonly thread_follows?: boolean;
+  readonly voice_messages?: boolean;
+  readonly game_activity?: boolean;
+  readonly listening_activity?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
 let caps: ReadyCapabilityFlags | null = null;
+
+/**
+ * The game activity switch the server last stated (WP 8.3e-2), from
+ * `auth_ok.game_activity_policy` or the `game_activity_policy` frame; null
+ * until it states one (an older server never does). It outranks
+ * `caps.game_activity`, which only says what the server understood at the last
+ * `ready`.
+ */
+let gameActivityPolicy: boolean | null = null;
+
+/** Who wants to hear the switch change. Owners remove their own listener. */
+const gameActivityPolicyListeners = new Set<(enabled: boolean) => void>();
 
 /** Record the capabilities of a full `ready`. An absent field means false. */
 export function applyReadyCapabilities(next: ReadyCapabilityFlags | undefined): void {
@@ -36,6 +52,7 @@ export function applyReadyCapabilities(next: ReadyCapabilityFlags | undefined): 
 /** Forget everything: the session that learned it is gone. */
 export function resetServerCapabilities(): void {
   caps = null;
+  gameActivityPolicy = null;
 }
 
 /** Whether a full `ready` has been applied this session. */
@@ -91,6 +108,15 @@ export function pollsEnabled(): boolean {
 }
 
 /**
+ * Whether the server has custom stickers (WP 8.8): `sticker_id` on `chat_send`,
+ * `sticker` on messages, `sticker_update` and `/api/v1/stickers`. False hides
+ * the composer's sticker button and the Stickers tab; nothing is fetched.
+ */
+export function stickersEnabled(): boolean {
+  return caps?.stickers === true;
+}
+
+/**
  * Whether the server supports threads (WP 6.9c): the `thread_*` frames and `GET
  * /channels/{id}/threads`. False hides Create Thread, the header's Threads
  * button and the chip.
@@ -142,4 +168,61 @@ export function idMentionsEnabled(): boolean {
  */
 export function threadFollowsEnabled(): boolean {
   return caps?.thread_follows === true && caps.threads === true;
+}
+
+/**
+ * Whether the server keeps a voice message's length and waveform on the upload
+ * and its attachment (WP 8.9). False hides the composer's mic button.
+ */
+export function voiceMessagesEnabled(): boolean {
+  return caps?.voice_messages === true;
+}
+
+/**
+ * Whether the server carries a member's game (WP 8.3): `activity_update`, and
+ * `activity` on `presence`, `presence_batch` and `ready.activities`. False
+ * sends no `activity_update` and shows no game. The server's stated switch
+ * (WP 8.3e-2) wins over the `ready` flag, but nothing is trusted before a full
+ * `ready` has arrived, like every other capability.
+ */
+export function serverSupportsGameActivity(): boolean {
+  if (caps === null) return false;
+  return (gameActivityPolicy ?? caps.game_activity) === true;
+}
+
+/**
+ * Whether the server carries a member's song (WP 8.10): `listening_update`, and
+ * `listening` on `presence`, `presence_batch` and `ready.listening`. The one
+ * admin switch covers games and music, so the stated policy decides while it
+ * is known; a server that never listed the flag (older) never supports it.
+ */
+export function serverSupportsListeningActivity(): boolean {
+  if (caps === null || caps.listening_activity === undefined) return false;
+  return (gameActivityPolicy ?? caps.listening_activity) === true;
+}
+
+/** Whether the server has stated that game activity is off (WP 8.3e-2). */
+export function gameActivityPolicyIsOff(): boolean {
+  return gameActivityPolicy === false;
+}
+
+/**
+ * Record the switch the server stated. Returns whether it differs from the one
+ * held before (the first statement of a session always does), and tells the
+ * listeners when it does.
+ */
+export function applyGameActivityPolicy(enabled: boolean): boolean {
+  if (gameActivityPolicy === enabled) return false;
+  gameActivityPolicy = enabled;
+  // A Set tolerates a listener unsubscribing itself while it is called.
+  for (const listener of gameActivityPolicyListeners) listener(enabled);
+  return true;
+}
+
+/** Listen for the switch changing; returns the unsubscribe. */
+export function onGameActivityPolicy(listener: (enabled: boolean) => void): () => void {
+  gameActivityPolicyListeners.add(listener);
+  return () => {
+    gameActivityPolicyListeners.delete(listener);
+  };
 }

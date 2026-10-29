@@ -1,0 +1,24 @@
+-- WP 8.4d: seven owner-type permission bits become real permissions, so an
+-- owner can hand one of them to a role instead of keeping the action to
+-- themself. Data only: each bit is a value in roles.permissions.
+--
+--   bit 2  (0x4)        MANAGE_CONFIG      config overrides and restart
+--   bit 3  (0x8)        MANAGE_UPDATES     check for and apply updates
+--   bit 4  (0x10)       MANAGE_TOKENS      the holder's own API tokens
+--   bit 7  (0x80)       ISSUE_RECOVERY     recovery credentials, below the holder
+--   bit 8  (0x100)      VIEW_DIAGNOSTICS   logs, log level, support bundles, attention
+--   bit 15 (0x8000)     RESTORE_BACKUPS    restore, delete, archive
+--   bit 28 (0x10000000) ERASE_ACCOUNTS     erase a lower-ranked account
+--
+-- Nobody holds any of them after this migration except the owner. The seeded
+-- Admin (0x3FFF9FFF) and Moderator (0xEF9FFF) masks carry these bits as unused
+-- bits, left over from before they were defined, and a role that kept one would
+-- gain a power it never had: the first five were owner-only until now, and the
+-- owner tier ignores ADMINISTRATOR on purpose, so a stray bit would be the only
+-- thing that could open them. So for every role except the owner (id 1, or a
+-- position of 100 or more) all seven are cleared (mask 0x1000819C = 268468636).
+-- The owner grants them by hand in the role grid. An Administrator keeps
+-- diagnostics and account erasure through ADMINISTRATOR itself, so nobody loses
+-- anything they could do before.
+UPDATE roles SET permissions = permissions & ~268468636
+ WHERE id != 1 AND position < 100;

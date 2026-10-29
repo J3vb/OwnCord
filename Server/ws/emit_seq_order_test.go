@@ -17,7 +17,7 @@ func TestEmitSequencedDM_UsesNormalQueueToPreserveSeqOrder(t *testing.T) {
 	sendHigh := make(chan []byte, 8)
 	c := NewTestClientWithChannel(h, 42, 0, send)
 	c.sendHigh = sendHigh // split queues so the test can see which one delivers
-	h.clients[42] = c
+	h.clients[42] = []*Client{c}
 	h.pubsub.Subscribe(c, UserTopic(42))
 
 	h.EmitEvents(context.Background(), []Event{stubSequencedDMEvent{
@@ -42,7 +42,7 @@ func TestEmitUserTargeted_KeepsHighPriorityFastLane(t *testing.T) {
 	sendHigh := make(chan []byte, 8)
 	c := NewTestClientWithChannel(h, 42, 0, send)
 	c.sendHigh = sendHigh
-	h.clients[42] = c
+	h.clients[42] = []*Client{c}
 
 	h.EmitEvents(context.Background(), []Event{stubUserTargetedEvent{
 		targetUserID: 42,

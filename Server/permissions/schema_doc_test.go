@@ -118,3 +118,56 @@ func TestClientPermissionEnumHasManageNicknames(t *testing.T) {
 		t.Error("Client/src/lib/types.ts's Permission enum has no `MANAGE_NICKNAMES = 0x800000` line")
 	}
 }
+
+// TestClientPermissionEnumHasMoveMembers is the client half of the
+// MOVE_MEMBERS bit (WP 8.4a): the Permission enum must carry the same value
+// the server defines.
+func TestClientPermissionEnumHasMoveMembers(t *testing.T) {
+	raw, err := os.ReadFile("../../Client/src/lib/types.ts")
+	if err != nil {
+		t.Fatalf("read Client/src/lib/types.ts: %v", err)
+	}
+	if !regexp.MustCompile(`(?m)^\s*MOVE_MEMBERS\s*=\s*0x2000\s*,?\s*$`).Match(raw) {
+		t.Error("Client/src/lib/types.ts's Permission enum has no `MOVE_MEMBERS = 0x2000` line")
+	}
+}
+
+// TestClientPermissionEnumHasManageBackups is the client half of the
+// MANAGE_BACKUPS bit (WP 8.4c): the Permission enum must carry the same value
+// the server defines.
+func TestClientPermissionEnumHasManageBackups(t *testing.T) {
+	raw, err := os.ReadFile("../../Client/src/lib/types.ts")
+	if err != nil {
+		t.Fatalf("read Client/src/lib/types.ts: %v", err)
+	}
+	if !regexp.MustCompile(`(?m)^\s*MANAGE_BACKUPS\s*=\s*0x4000\s*,?\s*$`).Match(raw) {
+		t.Error("Client/src/lib/types.ts's Permission enum has no `MANAGE_BACKUPS = 0x4000` line")
+	}
+}
+
+// TestClientPermissionEnumHasOwnerTypeBits is the client half of WP 8.4d's
+// seven owner-type bits: the Permission enum must carry the same values the
+// server defines.
+func TestClientPermissionEnumHasOwnerTypeBits(t *testing.T) {
+	raw, err := os.ReadFile("../../Client/src/lib/types.ts")
+	if err != nil {
+		t.Fatalf("read Client/src/lib/types.ts: %v", err)
+	}
+	for _, c := range []struct {
+		name string
+		hex  string
+	}{
+		{"MANAGE_CONFIG", "0x4"},
+		{"MANAGE_UPDATES", "0x8"},
+		{"MANAGE_TOKENS", "0x10"},
+		{"ISSUE_RECOVERY", "0x80"},
+		{"VIEW_DIAGNOSTICS", "0x100"},
+		{"RESTORE_BACKUPS", "0x8000"},
+		{"ERASE_ACCOUNTS", "0x10000000"},
+	} {
+		re := regexp.MustCompile(`(?m)^\s*` + c.name + `\s*=\s*` + c.hex + `\s*,?\s*$`)
+		if !re.Match(raw) {
+			t.Errorf("Client/src/lib/types.ts's Permission enum has no `%s = %s` line", c.name, c.hex)
+		}
+	}
+}

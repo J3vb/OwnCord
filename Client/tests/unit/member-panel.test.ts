@@ -187,4 +187,41 @@ describe("memberPanel", () => {
     await Promise.resolve();
     expect(o.api.adminListUsers).toHaveBeenCalledTimes(1);
   });
+  it("offers Unban only for bans the viewer outranks", async () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      roles: [
+        { id: 1, name: "owner", color: null, permissions: Permission.BAN_MEMBERS, position: 100 },
+        { id: 3, name: "senior", color: null, permissions: 0, position: 60 },
+        { id: 2, name: "admin", color: null, permissions: Permission.BAN_MEMBERS, position: 50 },
+        { id: 4, name: "member", color: null, permissions: 0, position: 1 },
+      ],
+    }));
+    const banned = (id: number, name: string, roleName: string, extra: object = {}) => ({
+      id,
+      username: name,
+      banned: true,
+      role_id: 4,
+      role_name: roleName,
+      status: "offline",
+      created_at: "2026-01-01T00:00:00Z",
+      ...extra,
+    });
+    const o = opts();
+    vi.mocked(o.api.adminListUsers).mockResolvedValue([
+      banned(10, "low", "member"),
+      banned(11, "peer", "admin"),
+      banned(12, "boss", "owner"),
+      banned(13, "multi", "member", { role_ids: [3, 4] }),
+    ] as never);
+    const panel = createMemberPanel(o);
+    host.appendChild(panel.element);
+
+    await vi.waitFor(() => expect(panel.element.querySelectorAll(".banned-row")).toHaveLength(4));
+    const withButton = [...panel.element.querySelectorAll(".banned-row")]
+      .filter((row) => row.querySelector('[data-testid="unban-member"]') !== null)
+      .map((row) => row.querySelector(".banned-name")?.textContent);
+    expect(withButton).toEqual(["low"]);
+    panel.destroy();
+  });
 });

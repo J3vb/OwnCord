@@ -35,6 +35,14 @@ type presencePayload struct {
 	// "cleared it" from "this event does not mention it", and every presence
 	// broadcast carries the current value.
 	CustomStatus *string `json:"custom_status"`
+	// Activity is the game the user is playing (WP 8.3a). Always present,
+	// null when none, like CustomStatus: every presence frame carries the
+	// current value. Blanked for everyone but the owner while invisible.
+	Activity *gameActivity `json:"activity"`
+	// Listening is the song the user is listening to (WP 8.10a). Same rules
+	// as Activity: always present, null when none, blanked for everyone but
+	// the owner while invisible.
+	Listening *listeningActivity `json:"listening"`
 }
 
 type memberUserPayload struct {
@@ -141,6 +149,20 @@ type emojiUpdatePayload struct {
 	Emoji []emojiInfo `json:"emoji"`
 }
 
+// gameActivityPolicyPayload is game_activity_policy's payload and the shape of
+// auth_ok's game_activity_policy key.
+type gameActivityPolicyPayload struct {
+	Enabled bool `json:"enabled"`
+}
+
+// buildGameActivityPolicy constructs a game_activity_policy broadcast.
+func buildGameActivityPolicy(enabled bool) []byte {
+	return buildJSON(wsMsg{
+		Type:    MsgTypeGameActivityPolicy,
+		Payload: gameActivityPolicyPayload{Enabled: enabled},
+	})
+}
+
 // uploadPolicyPayload is upload_policy's payload: the file-type lists in
 // force, as auth_ok's upload_policy carries them.
 type uploadPolicyPayload struct {
@@ -226,6 +248,10 @@ type voiceMovedPayload struct {
 	// Reason says why the server moved the client; "afk" for the idle sweep
 	// (WP 6.10b). Omitted for a moderator move, so those bytes are unchanged.
 	Reason string `json:"reason,omitempty"`
+	// ByUserID is the moderator who made the move (WP 8.4b), so the moved
+	// client can say who moved it. Omitted for the AFK sweep, which has no
+	// actor.
+	ByUserID int64 `json:"by_user_id,omitempty"`
 }
 
 // voiceMovedReasonAFK is voice_moved's reason for a move by the AFK sweep.
@@ -272,6 +298,11 @@ type voiceE2EEAnnounceBroadcast struct {
 	// VideoDecode is the sender's sanitized decodable video codec list
 	// (WP M-4), omitted when absent so legacy announces serialize unchanged.
 	VideoDecode []string `json:"video_decode,omitempty"`
+	// IdentityPublicKey is the announcing connection's device identity key
+	// (key per device), omitted when that connection sent none so an announce
+	// from an older client serializes unchanged. Peers verify Signature
+	// against it when present, else against the member's published key.
+	IdentityPublicKey string `json:"identity_public_key,omitempty"`
 }
 
 // voiceE2EEOfferRelay is the server→client relay with from_user_id.
@@ -412,10 +443,10 @@ func buildProtocolEpochError(clientEpoch int) []byte {
 // pass db.BroadcastStatus(status) for everyone but the owner. Keeping the
 // mapping out of the builder is deliberate — a builder that always collapsed
 // invisible could never produce the owner's own true-state message.
-func buildPresenceMsg(userID int64, status string, customStatus *string) []byte {
+func buildPresenceMsg(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypePresence,
-		Payload: presencePayload{UserID: userID, Status: status, CustomStatus: customStatus},
+		Payload: presencePayload{UserID: userID, Status: status, CustomStatus: customStatus, Activity: activity, Listening: listening},
 	})
 }
 
@@ -625,11 +656,12 @@ func buildVoiceState(state db.VoiceState) []byte {
 
 // buildVoiceMoved constructs a voice_moved message for the moved client.
 //
-// reason is "" for a moderator move and "afk" for the AFK sweep's.
-func buildVoiceMoved(toChannelID int64, reason string) []byte {
+// reason is "" for a moderator move and "afk" for the AFK sweep's. byUserID is
+// the moderator's id, 0 (omitted) for the sweep.
+func buildVoiceMoved(toChannelID int64, reason string, byUserID int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceMoved,
-		Payload: voiceMovedPayload{ToChannelID: toChannelID, Reason: reason},
+		Payload: voiceMovedPayload{ToChannelID: toChannelID, Reason: reason, ByUserID: byUserID},
 	})
 }
 
@@ -683,10 +715,11 @@ func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceE2EEAnnounceBC,
 		Payload: voiceE2EEAnnounceBroadcast{
-			UserID:      userID,
-			PublicKey:   a.key,
-			Signature:   a.sig,
-			VideoDecode: a.videoDecode,
+			UserID:            userID,
+			PublicKey:         a.key,
+			Signature:         a.sig,
+			VideoDecode:       a.videoDecode,
+			IdentityPublicKey: a.identityKey,
 		},
 	})
 }
@@ -717,6 +750,7 @@ func buildChannelCreateFor(ch *db.Channel, private bool, a channelAffordances) [
 	p := channelPayloadFrom(ch, private)
 	p.CanSend = &a.CanSend
 	p.CanModerateVoice = &a.CanModerateVoice
+	p.CanMoveVoice = &a.CanMoveVoice
 	p.CanDeleteOthers = &a.CanDeleteOthers
 	p.CanPin = &a.CanPin
 	p.CanReact = &a.CanReact

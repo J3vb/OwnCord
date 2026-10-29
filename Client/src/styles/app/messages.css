@@ -773,6 +773,10 @@
   display: block;
   width: 100%;
   height: auto;
+  /* YouTube thumbnails are 16:9: the row holds that box before the bytes land,
+     so it does not grow under the reader when they do. */
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
 }
 .msg-embed-play {
   position: absolute;
@@ -1021,28 +1025,34 @@
 
 /* Syntax highlighting — hues come from theme tokens so custom themes and the
    light theme recolour along with everything else. */
-.msg-codeblock .tok-comment {
+.msg-codeblock .tok-comment,
+.msg-textpreview-code .tok-comment {
   color: var(--text-micro);
   font-style: italic;
 }
 
-.msg-codeblock .tok-string {
+.msg-codeblock .tok-string,
+.msg-textpreview-code .tok-string {
   color: var(--green);
 }
 
-.msg-codeblock .tok-number {
+.msg-codeblock .tok-number,
+.msg-textpreview-code .tok-number {
   color: var(--yellow);
 }
 
-.msg-codeblock .tok-keyword {
+.msg-codeblock .tok-keyword,
+.msg-textpreview-code .tok-keyword {
   color: var(--text-link);
 }
 
-.msg-codeblock .tok-inserted {
+.msg-codeblock .tok-inserted,
+.msg-textpreview-code .tok-inserted {
   color: var(--green);
 }
 
-.msg-codeblock .tok-deleted {
+.msg-codeblock .tok-deleted,
+.msg-textpreview-code .tok-deleted {
   color: var(--red);
 }
 
@@ -1602,6 +1612,100 @@ ul.md-list-nested {
   color: var(--text-normal);
 }
 
+/* Text and code file preview (8.5): the file header, the first lines of the
+   file in a code box, and an Expand/Collapse footer. Collapsed it shows six
+   lines; the loading state reserves the same height so the row does not jump. */
+.msg-textpreview {
+  --tp-body-h: calc(6 * 1.5 * var(--font-size-sm) + 24px);
+  max-width: 520px;
+  background: var(--bg-secondary);
+}
+.msg-textpreview-view {
+  position: relative;
+}
+.msg-textpreview-body {
+  max-height: var(--tp-body-h);
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+.msg-textpreview.loading .msg-textpreview-view {
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  height: var(--tp-body-h);
+}
+.msg-textpreview.has-more:not(.expanded) .msg-textpreview-view::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 3em;
+  background: linear-gradient(to bottom, transparent, var(--bg-tertiary));
+  pointer-events: none;
+}
+.msg-textpreview.expanded .msg-textpreview-body {
+  max-height: 400px;
+  overflow: auto;
+}
+.msg-textpreview-scroll {
+  display: flex;
+  min-width: max-content;
+}
+.msg-textpreview-gutter {
+  position: sticky;
+  left: 0;
+  padding: 12px 8px 12px 12px;
+  background: var(--bg-tertiary);
+  color: var(--text-micro);
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+}
+.msg-textpreview-code {
+  flex: 1;
+  padding: 12px 12px 12px 8px;
+  white-space: pre;
+}
+.msg-textpreview-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 33px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-textpreview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  padding: 4px 6px;
+  margin-left: -6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-link);
+  font-size: inherit;
+  cursor: pointer;
+}
+.msg-textpreview-toggle:hover {
+  background: var(--bg-hover);
+}
+.msg-textpreview-foot > :first-child:not(.msg-textpreview-toggle) {
+  margin-left: auto;
+}
+.msg-textpreview-note {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
 /* Inline video attachment — shares the .msg-image box so a video is capped to
    the same max width/height as an image and never widens the message column.
    The box hugs the player, which renderVideoAttachment sizes to the clip's own
@@ -1656,6 +1760,95 @@ ul.md-list-nested {
   display: none;
 }
 
+/* Voice message (WP 8.9): round play button, waveform that fills as it plays,
+   time left and speed. The fill is a class per bar, so reduced motion changes
+   nothing: no bar animates either way. */
+.msg-voice {
+  max-width: 400px;
+}
+.msg-voice .msg-file-inner {
+  align-items: center;
+  gap: 10px;
+}
+.msg-voice-audio[hidden] {
+  display: none;
+}
+.msg-voice-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  flex-shrink: 0;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+.msg-voice-play:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.msg-voice-play:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+.msg-voice-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.msg-voice-wave {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  cursor: pointer;
+  touch-action: none;
+  border-radius: var(--radius-sm);
+}
+.msg-voice-wave:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.msg-voice-bar {
+  flex: 1;
+  min-width: 1px;
+  max-width: 5px;
+  border-radius: 2px;
+  background: var(--text-muted);
+  opacity: 0.55;
+}
+.msg-voice-bar.played {
+  background: var(--accent-text);
+  opacity: 1;
+}
+.msg-voice-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.msg-voice-time {
+  font-variant-numeric: tabular-nums;
+}
+.msg-voice-speed {
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-normal);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+.msg-voice-error {
+  font-size: var(--font-size-xs);
+  color: var(--text-danger);
+}
+
 /* Stands in for a video/audio player until the clip is wanted: nothing is
    downloaded before it is pressed. */
 .msg-media-play {
@@ -1677,6 +1870,11 @@ ul.md-list-nested {
 .msg-media-play:disabled {
   cursor: progress;
   opacity: 0.6;
+}
+/* The blob path downloads the whole clip before it plays: the button shows a
+   spinner at full strength instead of the dimmed disabled look. */
+.msg-media-play[aria-busy="true"] {
+  opacity: 1;
 }
 .msg-video .msg-media-play {
   position: absolute;
@@ -1924,6 +2122,64 @@ ul.md-list-nested {
   margin-left: auto;
 }
 
+/* Welcome row (WP 8.6): the joiner's avatar, a greeting line and a Wave button */
+.message.welcome-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.welcome-row .wr-avatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  overflow: hidden;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: #fff;
+}
+.welcome-row .wr-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.welcome-row .wr-text {
+  font-size: var(--font-size-sm);
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+.welcome-row .wr-wave {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+.welcome-row .wr-wave:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.welcome-row .wr-wave:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+.welcome-row .wr-time {
+  flex: none;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
 /* Message hover actions */
 .msg-actions-bar {
   position: absolute;
@@ -2118,4 +2374,26 @@ ul.md-list-nested {
     min-width: 44px;
     min-height: 44px;
   }
+}
+
+/* ── Sticker messages (WP 8.8) ── */
+.msg-sticker {
+  width: 160px;
+  height: 160px;
+  margin-top: 2px;
+}
+.msg-sticker-img {
+  width: 160px;
+  height: 160px;
+  object-fit: contain;
+}
+.msg-sticker-deleted {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-style: italic;
 }

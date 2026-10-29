@@ -67,7 +67,7 @@
 /* The drawer clears the notch; the member overlay (member-list.css) its right edge. */
 @media (max-width: 800px) {
   .unified-sidebar.drawer-open {
-    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
+    padding: env(safe-area-inset-top) 0 var(--safe-bottom) env(safe-area-inset-left);
   }
   /* The channel column fills the drawer instead of keeping its 260px. */
   .unified-sidebar.drawer-open .channel-sidebar {

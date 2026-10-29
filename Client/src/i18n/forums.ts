@@ -4,6 +4,11 @@ import { defineCatalog } from "./format";
  *  catalog so the copy loads with those lazy modules, not with the main page. */
 export const forumsText = defineCatalog("forums", {
   "view.label": "Forum posts",
+  "layout.label": "Post layout",
+  "layout.grid": "Cards",
+  "layout.list": "List",
+  "layout.split": "List and reader",
+  "layout.feed": "Feed",
   "guidelines.title": "Guidelines",
   newPost: "New Post",
   "sort.label": "Sort posts",

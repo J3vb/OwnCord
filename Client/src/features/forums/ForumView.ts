@@ -19,7 +19,8 @@ import { Disposable } from "@lib/disposable";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { resolveDisplayName } from "@lib/avatar";
+import { avatarInitial, resolveDisplayName } from "@lib/avatar";
+import { loadPref, savePref } from "@lib/preferences";
 import type { ForumTag, ThreadInfo } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -29,16 +30,28 @@ import { threadAgoLabel } from "../threads/threadAgo";
 import { forumsText } from "../../i18n/forums";
 import type { ForumViewContext } from "../navigation/destinations";
 import {
+  FORUM_GUIDELINES_PREF,
+  FORUM_LAYOUTS,
+  FORUM_LAYOUT_PREF,
   MAX_TAG_FILTERS,
   activityMs,
+  parseForumLayout,
   matchesTags,
   postListQuery,
   replyCount,
   sortPosts,
+  type ForumLayout,
   type ForumSort,
 } from "./forumModel";
 
 const log = createLogger("forum-view");
+
+const LAYOUT_LABEL = {
+  grid: "layout.grid",
+  list: "layout.list",
+  split: "layout.split",
+  feed: "layout.feed",
+} as const satisfies Record<ForumLayout, string>;
 
 /** One half of the list (open or archived) and how far it has been paged. */
 interface Section {
@@ -58,9 +71,13 @@ const freshSection = (): Section => ({
   started: false,
 });
 
-function authorName(post: ThreadInfo): string {
+function authorOf(post: ThreadInfo) {
   const id = post.owner_id ?? post.post?.first_message?.author_id ?? null;
-  const member = id === null ? undefined : membersStore.getState().members.get(id);
+  return id === null ? undefined : membersStore.getState().members.get(id);
+}
+
+function authorName(post: ThreadInfo): string {
+  const member = authorOf(post);
   return member === undefined ? forumsText("post.unknownAuthor") : resolveDisplayName(member);
 }
 
@@ -111,7 +128,8 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
   const seen = new Map<number, ThreadInfo>();
   /** True while this view itself writes a page into the store (not a live frame). */
   let writing = false;
-  let guidelinesOpen = true;
+  let guidelinesOpen = loadPref<boolean>(FORUM_GUIDELINES_PREF, true);
+  let layout: ForumLayout = parseForumLayout(loadPref<string>(FORUM_LAYOUT_PREF, "grid"));
   /** A refresh keeps the rows on screen until its first page lands, then swaps. */
   let refreshing = false;
   /** The New Post dialog is loading or open: one at a time. */
@@ -141,7 +159,7 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     class: "forum-guidelines-body",
     "data-testid": "forum-guidelines-body",
   });
-  guidelines.append(guidelinesToggle, guidelinesBody);
+  guidelines.append(guidelinesBody);
 
   const newPostBtn = createElement("button", {
     type: "button",
@@ -165,8 +183,24 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     sortButtons.set(value, btn);
     sortGroup.appendChild(btn);
   }
+  const layoutGroup = createElement("div", {
+    class: "forum-sort forum-layouts",
+    role: "group",
+    "aria-label": forumsText("layout.label"),
+  });
+  const layoutButtons = new Map<ForumLayout, HTMLButtonElement>();
+  for (const value of FORUM_LAYOUTS) {
+    const btn = createElement(
+      "button",
+      { type: "button", class: "forum-sort-btn", "data-testid": `forum-layout-${value}` },
+      forumsText(LAYOUT_LABEL[value]),
+    );
+    layoutButtons.set(value, btn);
+    layoutGroup.appendChild(btn);
+  }
   const toolbar = createElement("div", { class: "forum-toolbar" });
-  toolbar.append(sortGroup, newPostBtn);
+  const spacer = createElement("span", { class: "forum-toolbar-spacer" });
+  toolbar.append(guidelinesToggle, sortGroup, layoutGroup, spacer, newPostBtn);
 
   const tagBar = createElement("div", {
     class: "forum-tag-bar",
@@ -176,7 +210,7 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
   });
 
   const header = createElement("div", { class: "forum-header" });
-  header.append(guidelines, toolbar, tagBar);
+  header.append(toolbar, guidelines, tagBar);
 
   // ── List ──────────────────────────────────────────────────────────────────
 
@@ -239,6 +273,12 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
       "data-post-id": String(post.id),
       "data-testid": `forum-post-${post.id}`,
     });
+    const member = authorOf(post);
+    const subject = member ?? { username: author };
+    const avatar =
+      ctx.avatar?.(subject, "forum-post-avatar") ??
+      createElement("span", { class: "forum-post-avatar" }, avatarInitial(subject));
+    const body = createElement("span", { class: "forum-post-body" });
     const head = createElement("span", { class: "forum-post-head" });
     head.appendChild(createElement("span", { class: "forum-post-title" }, post.name));
     if (post.locked) head.appendChild(createIcon("lock", 12));
@@ -266,7 +306,13 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
         ago,
       ].join(" · "),
     );
-    btn.append(head, previewEl, meta);
+    const stats = createElement("span", { class: "forum-post-stats", "aria-hidden": "true" });
+    stats.append(
+      createIcon("message-square", 14),
+      createElement("span", { class: "forum-post-count" }, String(replies)),
+    );
+    body.append(head, previewEl, meta);
+    btn.append(avatar, body, stats);
     btn.addEventListener("click", () => ctx.openPost(post.id), { signal });
     li.appendChild(btn);
     return li;
@@ -334,16 +380,30 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     moreBtn.hidden = busy || (done && !failed);
     setText(moreBtn, forumsText(failed ? "list.retry" : "list.loadMore"));
 
+    markCurrent();
+
     if (focusedId !== undefined) {
       const back = root.querySelector<HTMLElement>(`[data-post-id="${focusedId}"]`);
       if (back !== null && back !== document.activeElement) back.focus();
     }
   }
 
+  /** The post open in the side panel is marked in the list. */
+  function markCurrent(): void {
+    const current = String(threadsStore.getState().focusedThreadId ?? "");
+    for (const btn of root.querySelectorAll<HTMLElement>("[data-post-id]")) {
+      const on = btn.dataset["postId"] === current;
+      btn.classList.toggle("current", on);
+      if (on) btn.setAttribute("aria-current", "true");
+      else btn.removeAttribute("aria-current");
+    }
+  }
+
   function paintHeader(): void {
     const channel = forumChannel();
     const topic = (channel?.topic ?? "").trim();
-    guidelines.hidden = topic === "";
+    guidelines.hidden = topic === "" || !guidelinesOpen;
+    guidelinesToggle.hidden = topic === "";
     setText(guidelinesBody, topic);
     guidelinesBody.hidden = !guidelinesOpen;
     guidelinesToggle.setAttribute("aria-expanded", String(guidelinesOpen));
@@ -354,6 +414,10 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     newPostBtn.hidden = channel?.canSend === false;
     for (const [value, btn] of sortButtons)
       btn.setAttribute("aria-pressed", String(value === sort));
+    for (const [value, btn] of layoutButtons)
+      btn.setAttribute("aria-pressed", String(value === layout));
+    for (const value of FORUM_LAYOUTS)
+      root.classList.toggle(`forum-view--${value}`, value === layout);
 
     const tags = forumTags();
     tagBar.hidden = tags.length === 0;
@@ -541,10 +605,23 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
     "click",
     () => {
       guidelinesOpen = !guidelinesOpen;
+      savePref(FORUM_GUIDELINES_PREF, guidelinesOpen);
       paintHeader();
     },
     { signal },
   );
+  for (const [value, btn] of layoutButtons) {
+    btn.addEventListener(
+      "click",
+      () => {
+        if (layout === value) return;
+        layout = value;
+        savePref(FORUM_LAYOUT_PREF, value);
+        paintHeader();
+      },
+      { signal },
+    );
+  }
   moreBtn.addEventListener("click", () => void loadMore(), { signal });
   newPostBtn.addEventListener(
     "click",
@@ -607,6 +684,7 @@ export function renderForumView(root: HTMLElement, ctx: ForumViewContext): void 
       if (!writing) paintList();
     },
   );
+  disposable.onStoreChange(threadsStore, (s) => s.focusedThreadId, markCurrent);
   // A reconnect: frames were missed, so the list is read again.
   let wasConnected = uiStore.getState().connectionStatus === "connected";
   disposable.onStoreChange(

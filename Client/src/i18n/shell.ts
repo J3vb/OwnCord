@@ -113,6 +113,8 @@ export const shellText = defineCatalog("shell", {
   "channel.locallyMuted": "Muted for you",
   "channel.ownSessionFingerprint":
     "Your session fingerprint (changes every call — not an identity): {fingerprint}",
+  "channel.ownSafetyNumber":
+    "Your safety number: {safetyNumber} · Compare it with the number they see for you",
   "channel.empty": "No channels yet",
   "channel.emptyHint": "Ask a moderator to create a channel",
   "channel.markAllRead": "Mark Server as Read",
@@ -165,7 +167,7 @@ export const shellText = defineCatalog("shell", {
     "Same key as before · Safety number: {safetyNumber} · Compare it with them to confirm it is them",
   "identity.mismatch":
     "Blocked — unverified: this participant's key is missing or its signature is invalid. Click to review",
-  "identity.keyChanged": "Security key changed · Safety number: {safetyNumber}",
+  "identity.newDevice": "New device · Safety number: {safetyNumber}",
   "identity.unknown":
     "Could not check this participant's identity — key storage is unavailable, so they are blocked for E2EE until it recovers",
   "identity.unverified": "Identity not verified — this participant published no key.",
@@ -235,6 +237,7 @@ export const shellText = defineCatalog("shell", {
   "members.toggle": "Member List",
   "callChat.hide": "Hide chat",
   "callChat.show": "Show chat",
+  "callChat.resize": "Resize call chat",
   "members.resize": "Resize member list",
   "members.empty": "No members online",
   "members.groupHeader": "{role} — {count}",

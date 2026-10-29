@@ -25,6 +25,7 @@ import type {
 } from "../contracts/nativeVoice";
 
 import { createLogger } from "@lib/logger";
+import { invokeOrThrow } from "./nativeInvoke";
 
 const log = createLogger("nativeVoiceService");
 
@@ -66,14 +67,16 @@ function qualityFailure(err: unknown): NativeVoiceScreenQualityResult {
 }
 
 export const nativeVoice: NativeVoice = {
-  setRoomKey: (key) => invoke<void>("native_voice_set_key", { key }),
-  clearRoomKey: () => invoke<void>("native_voice_clear_key"),
+  setRoomKey: (key) => invokeOrThrow<void>("native_voice_set_key", { key }),
+  clearRoomKey: () => invokeOrThrow<void>("native_voice_clear_key"),
   connect: (url, token, audio) =>
-    invoke<NativeVoiceConnected>("native_voice_connect", { url, token, audio }),
-  disconnect: (session) => invoke<NativeVoiceResources>("native_voice_disconnect", { session }),
+    invokeOrThrow<NativeVoiceConnected>("native_voice_connect", { url, token, audio }),
+  disconnect: (session) =>
+    invokeOrThrow<NativeVoiceResources>("native_voice_disconnect", { session }),
   setMicrophone: (session, enabled, bitrate) =>
-    invoke<void>("native_voice_set_microphone", { session, enabled, bitrate }),
-  setPttGated: (session, gated) => invoke<void>("native_voice_set_ptt_gated", { session, gated }),
+    invokeOrThrow<void>("native_voice_set_microphone", { session, enabled, bitrate }),
+  setPttGated: (session, gated) =>
+    invokeOrThrow<void>("native_voice_set_ptt_gated", { session, gated }),
   async setVoiceGate(session, threshold, retune) {
     try {
       await invoke<void>("native_voice_set_voice_gate", { session, threshold, retune });
@@ -97,19 +100,25 @@ export const nativeVoice: NativeVoice = {
     }
   },
   setSubscribed: (session, identity, sid, subscribed) =>
-    invoke<void>("native_voice_set_subscribed", { session, identity, sid, subscribed }),
+    invokeOrThrow<void>("native_voice_set_subscribed", { session, identity, sid, subscribed }),
   setVideoView: (session, identity, sid, enabled, quality) =>
-    invoke<void>("native_voice_set_video_view", { session, identity, sid, enabled, quality }),
+    invokeOrThrow<void>("native_voice_set_video_view", {
+      session,
+      identity,
+      sid,
+      enabled,
+      quality,
+    }),
   setVolume: (session, identity, volume) =>
-    invoke<void>("native_voice_set_volume", { session, identity, volume }),
+    invokeOrThrow<void>("native_voice_set_volume", { session, identity, volume }),
   setScreenshareVolume: (session, identity, volume) =>
-    invoke<void>("native_voice_set_screenshare_volume", { session, identity, volume }),
+    invokeOrThrow<void>("native_voice_set_screenshare_volume", { session, identity, volume }),
   publishCamera: (session, capture, options) =>
-    invoke<string>("native_voice_publish_camera", { session, capture, options }),
+    invokeOrThrow<string>("native_voice_publish_camera", { session, capture, options }),
   unpublishCamera: (session, sid) =>
-    invoke<void>("native_voice_unpublish_camera", { session, sid }),
-  listCameras: () => invoke<NativeVoiceCameraDevice[]>("native_voice_list_cameras"),
-  cameraSupport: () => invoke<NativeVoiceCameraSupport>("native_voice_camera_support"),
+    invokeOrThrow<void>("native_voice_unpublish_camera", { session, sid }),
+  listCameras: () => invokeOrThrow<NativeVoiceCameraDevice[]>("native_voice_list_cameras"),
+  cameraSupport: () => invokeOrThrow<NativeVoiceCameraSupport>("native_voice_camera_support"),
   async videoCodecs() {
     try {
       return await invoke<NativeVoiceVideoCodecs>("native_voice_video_codecs");
@@ -121,16 +130,28 @@ export const nativeVoice: NativeVoice = {
     }
   },
   startCamera: (session, source, capture) =>
-    invoke<NativeVoiceCameraStarted>("native_voice_start_camera", { session, source, capture }),
-  stopCamera: (session, capture) => invoke<void>("native_voice_stop_camera", { session, capture }),
+    invokeOrThrow<NativeVoiceCameraStarted>("native_voice_start_camera", {
+      session,
+      source,
+      capture,
+    }),
+  stopCamera: (session, capture) =>
+    invokeOrThrow<void>("native_voice_stop_camera", { session, capture }),
   startCameraPreview: (source, capture) =>
-    invoke<NativeVoiceCameraPreview>("native_voice_start_camera_preview", { source, capture }),
-  stopCameraPreview: () => invoke<void>("native_voice_stop_camera_preview"),
-  screenSources: () => invoke<NativeVoiceScreenSources>("native_voice_screen_sources"),
+    invokeOrThrow<NativeVoiceCameraPreview>("native_voice_start_camera_preview", {
+      source,
+      capture,
+    }),
+  stopCameraPreview: () => invokeOrThrow<void>("native_voice_stop_camera_preview"),
+  screenSources: () => invokeOrThrow<NativeVoiceScreenSources>("native_voice_screen_sources"),
   startScreen: (session, source, capture) =>
-    invoke<NativeVoiceScreenStarted>("native_voice_start_screen", { session, source, capture }),
+    invokeOrThrow<NativeVoiceScreenStarted>("native_voice_start_screen", {
+      session,
+      source,
+      capture,
+    }),
   publishScreen: (session, capture, options) =>
-    invoke<string>("native_voice_publish_screen", { session, capture, options }),
+    invokeOrThrow<string>("native_voice_publish_screen", { session, capture, options }),
   async unpublishScreen(session, capture) {
     try {
       await invoke<void>("native_voice_unpublish_screen", { session, capture });
@@ -153,7 +174,8 @@ export const nativeVoice: NativeVoice = {
       throw err instanceof Error ? err : new Error(String(err));
     }
   },
-  stopScreen: (session, capture) => invoke<void>("native_voice_stop_screen", { session, capture }),
+  stopScreen: (session, capture) =>
+    invokeOrThrow<void>("native_voice_stop_screen", { session, capture }),
   async setScreenQuality(session, capture, options, publish) {
     try {
       const set = await invoke<NativeVoiceScreenQualitySet>("native_voice_set_screen_quality", {
@@ -199,10 +221,10 @@ export const nativeVoice: NativeVoice = {
       return null;
     }
   },
-  debugInfo: () => invoke<NativeVoiceResources>("native_voice_debug_info"),
-  listDevices: () => invoke<NativeVoiceDevices>("native_voice_list_devices"),
+  debugInfo: () => invokeOrThrow<NativeVoiceResources>("native_voice_debug_info"),
+  listDevices: () => invokeOrThrow<NativeVoiceDevices>("native_voice_list_devices"),
   setDevice: (session, kind, deviceId) =>
-    invoke<void>("native_voice_set_device", { session, kind, deviceId }),
+    invokeOrThrow<void>("native_voice_set_device", { session, kind, deviceId }),
   async startMicTest(options) {
     try {
       return await invoke<number>("native_voice_start_mic_test", { options });

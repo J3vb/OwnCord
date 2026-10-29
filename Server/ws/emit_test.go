@@ -30,7 +30,7 @@ func drainChan(ch chan []byte, timeout time.Duration) [][]byte {
 // and the locks needed for delivery.
 func newEmitTestHub() *Hub {
 	return &Hub{
-		clients:         make(map[int64]*Client),
+		clients:         make(map[int64][]*Client),
 		broadcast:       make(chan broadcastMsg, 64),
 		clientEvents:    make(chan clientEvent, 32),
 		stop:            make(chan struct{}),
@@ -50,7 +50,7 @@ func registerEmitTestClient(h *Hub, userID, channelID int64) chan []byte {
 	// drainChan captures messages regardless of which priority path delivers.
 	c.sendHigh = send
 	c.sendLow = send
-	h.clients[userID] = c
+	h.clients[userID] = []*Client{c}
 	// Subscribe to pub/sub topics so deliverBroadcast can reach this client.
 	h.pubsub.Subscribe(c, TopicGlobal)
 	h.pubsub.Subscribe(c, UserTopic(userID))
@@ -67,7 +67,7 @@ func registerEmitTestVoiceClient(h *Hub, userID, channelID, voiceChID int64) cha
 	c.sendHigh = send
 	c.sendLow = send
 	SetClientVoiceChID(c, voiceChID)
-	h.clients[userID] = c
+	h.clients[userID] = []*Client{c}
 	// Subscribe to pub/sub topics so deliverBroadcast can reach this client.
 	h.pubsub.Subscribe(c, TopicGlobal)
 	h.pubsub.Subscribe(c, UserTopic(userID))

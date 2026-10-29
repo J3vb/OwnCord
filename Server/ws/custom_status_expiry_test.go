@@ -44,7 +44,7 @@ func drainBroadcast(h *Hub) []broadcastMsg {
 func newExpiryHub(c *Client) *Hub {
 	return &Hub{
 		broadcast: make(chan broadcastMsg, 1024),
-		clients:   map[int64]*Client{c.userID: c},
+		clients:   map[int64][]*Client{c.userID: {c}},
 		stop:      make(chan struct{}),
 	}
 }
@@ -145,7 +145,7 @@ func TestCustomStatusExpired_SupersededTagIsNoop(t *testing.T) {
 	}
 	// No client, and a client that has not stamped a presence yet: both no-ops.
 	h.CustomStatusExpired(99, "x")
-	h.clients[8] = &Client{userID: 8}
+	h.clients[8] = []*Client{{userID: 8}}
 	h.CustomStatusExpired(8, "x")
 }
 
@@ -216,7 +216,7 @@ func TestCustomStatusExpired_RaceWithPresenceUpdate(t *testing.T) {
 			}
 			// handleMessageApply stores the live presence, then emits.
 			c.setLivePresence(db.StatusOnline, str("new"), newTag)
-			h.EmitEvents(ctx, presenceEvents(uid, db.StatusOnline, str("new")))
+			h.EmitEvents(ctx, presenceEvents(uid, db.StatusOnline, str("new"), nil, nil))
 		}()
 		close(start)
 		wg.Wait()
@@ -247,7 +247,7 @@ func TestCustomStatusExpired_ReplacedClientIsNoop(t *testing.T) {
 	replacement := newExpiryClient(db.StatusOnline, "new", "")
 	customStatusExpiredLookupHook = func(h *Hub) {
 		h.mu.Lock()
-		h.clients[7] = replacement
+		h.clients[7] = []*Client{replacement}
 		h.mu.Unlock()
 	}
 	t.Cleanup(func() { customStatusExpiredLookupHook = nil })

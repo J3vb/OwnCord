@@ -24,9 +24,11 @@
 
 import { createElement } from "@lib/dom";
 import { avatarInitial, resolveDisplayName, type AvatarSubject } from "@lib/avatar";
+import { animatedStill, bindAnimatedImage, type AnimationMode } from "@lib/animatedStill";
 import {
   fetchImageAsObjectUrl,
   isSafeUrl,
+  cachedImageBytes,
   recoverEvictedImage,
   resolveServerUrl,
 } from "./attachments";
@@ -46,6 +48,60 @@ export interface AvatarOptions {
    * per row on every rebuild would flood the network. Off by default.
    */
   readonly deferUntilVisible?: boolean;
+  /**
+   * An animated avatar (WP 8.7) shows its first frame and plays while the row
+   * around it is hovered (`"hover"`, the default), or plays from the start
+   * (`"always"`: the profile popup). Never under reduced motion.
+   */
+  readonly animate?: "hover" | "always";
+}
+
+/** The rows whose hover plays an animated avatar inside them, as on Discord:
+ *  a message, a member, a DM, a voice participant, the user bar. Anything
+ *  else plays when the avatar itself is hovered. */
+const AVATAR_HOVER_SCOPE = ".message, .member-item, .dm-item, .voice-user-item, .user-bar";
+/** The still is drawn no larger than this: past any avatar surface at 2x. */
+const AVATAR_STILL_SIDE = 256;
+
+/** The first frame of the avatar at `objectUrl` (from `fetchImageAsObjectUrl`)
+ *  when it is animated, else null. */
+export function avatarStill(
+  objectUrl: string,
+  maxSide = AVATAR_STILL_SIDE,
+): Promise<string | null> {
+  const read = cachedImageBytes(objectUrl);
+  // Not from the image cache (a data: URI, an external picture): shown as is.
+  if (read === null) return Promise.resolve(null);
+  return animatedStill(objectUrl, maxSide, read);
+}
+
+/** How an avatar inside `el` plays: with its row's hover, or always. */
+export function avatarAnimationMode(
+  el: HTMLElement,
+  animate: "hover" | "always" = "hover",
+): AnimationMode {
+  if (animate === "always") return "always";
+  return { hover: el.closest<HTMLElement>(AVATAR_HOVER_SCOPE) ?? el };
+}
+
+/**
+ * Show `objectUrl` on `img`: as it is when it is still, as its first frame
+ * that plays per `mode` when animated. Resolves once `src` is set, so an
+ * image inserted after it never flashes the animation; resolves false (and
+ * sets nothing) when `stillCurrent` says the picture changed meanwhile.
+ */
+export async function setAvatarSource(
+  img: HTMLImageElement,
+  objectUrl: string,
+  mode: () => AnimationMode,
+  stillCurrent: () => boolean = () => true,
+  maxSide = AVATAR_STILL_SIDE,
+): Promise<boolean> {
+  const still = await avatarStill(objectUrl, maxSide);
+  if (!stillCurrent()) return false;
+  if (still === null) img.src = objectUrl;
+  else bindAnimatedImage(img, objectUrl, still, mode());
+  return true;
 }
 
 /** Fetches in flight at once for `deferUntilVisible` avatars. */
@@ -183,23 +239,30 @@ export function createAvatarElement(
   }
 
   const resolved = resolveServerUrl(subject.avatar);
-  const swapInImage = (objectUrl: string | null): void => {
+  const swapInImage = (objectUrl: string | null): Promise<void> | undefined => {
     // The row may have been torn down while the fetch was in flight; an
     // element with no parent is one nobody is looking at.
-    if (objectUrl === null || !wrapper.isConnected) return;
+    if (objectUrl === null || !wrapper.isConnected) return undefined;
     const img = createElement("img", {
       class: "avatar-img",
-      src: objectUrl,
       alt: options.decorative === true ? "" : resolveDisplayName(subject),
       loading: "lazy",
       decoding: "async",
     });
     recoverEvictedImage(img, { url: resolved });
-    // Replacing rather than hiding keeps the letter out of the accessibility
-    // tree once a real picture is there.
-    letter.remove();
-    wrapper.style.background = "transparent";
-    wrapper.insertBefore(img, wrapper.firstChild);
+    return setAvatarSource(
+      img,
+      objectUrl,
+      () => avatarAnimationMode(wrapper, options.animate),
+      () => wrapper.isConnected,
+    ).then((current) => {
+      if (!current) return;
+      // Replacing rather than hiding keeps the letter out of the accessibility
+      // tree once a real picture is there.
+      letter.remove();
+      wrapper.style.background = "transparent";
+      wrapper.insertBefore(img, wrapper.firstChild);
+    });
   };
 
   if (options.deferUntilVisible !== true) {

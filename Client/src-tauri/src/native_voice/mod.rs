@@ -160,6 +160,10 @@ impl Inner {
             .then(|| self.take_mic_test())
             .flatten()
     }
+    /// The call camera's preview, when a call has its camera running.
+    fn call_camera_preview(&self) -> Option<(String, (u32, u32))> {
+        self.session.as_ref().and_then(|(_, s)| s.camera_preview())
+    }
     /// Supersede any in-flight start and release the current preview.
     fn clear_standalone(&mut self) {
         self.standalone_generation += 1;
@@ -706,16 +710,32 @@ pub async fn native_voice_start_camera(
     capture: camera::CaptureOptions,
 ) -> Result<CameraStarted, String> {
     let target = camera::Target::parse(&source)?;
-    let (id, started) = state
-        .inner
-        .lock()
+    let (id, started) = {
+        let mut inner = state.inner.lock().await;
+        inner.current(session)?;
+        // The settings preview may hold the device: free it for the call,
+        // whose camera the preview then shows.
+        inner.clear_standalone();
+        inner
+            .current(session)?
+            .start_camera(target, capture)
+            .await?
+    };
+    let started = started
         .await
-        .current(session)?
-        .start_camera(target, capture)
-        .await?;
-    let (width, height) = started
-        .await
-        .map_err(|_| "camera capture stopped before it started".to_string())??;
+        .map_err(|_| "camera capture stopped before it started".to_string())
+        .and_then(|r| r);
+    let (width, height) = match started {
+        Ok(size) => size,
+        Err(e) => {
+            // A capture that never started must not stay as the call's camera:
+            // the settings preview would show its dead socket.
+            if let Ok(s) = state.inner.lock().await.current(session) {
+                s.stop_camera(id).await;
+            }
+            return Err(e);
+        }
+    };
     Ok(CameraStarted {
         capture: id,
         width,
@@ -851,6 +871,8 @@ pub struct CameraPreviewStarted {
 /// WebKitGTK cannot keep a camera alive while the window is hidden. Replaces
 /// any earlier preview. Resolves once the first frame arrives; a start a newer
 /// one superseded while it started rejects after releasing its own capture.
+/// While a call's camera runs, the device is the call's: the preview is that
+/// camera's own socket and no second capture starts.
 #[tauri::command]
 pub async fn native_voice_start_camera_preview(
     state: tauri::State<'_, NativeVoiceState>,
@@ -858,7 +880,19 @@ pub async fn native_voice_start_camera_preview(
     capture: camera::CaptureOptions,
 ) -> Result<CameraPreviewStarted, String> {
     let target = camera::Target::parse(&source)?;
-    let generation = state.inner.lock().await.begin_standalone();
+    let generation = {
+        let mut inner = state.inner.lock().await;
+        let generation = inner.begin_standalone();
+        if let Some((frames, (width, height))) = inner.call_camera_preview() {
+            inner.standalone = None;
+            return Ok(CameraPreviewStarted {
+                width,
+                height,
+                frames,
+            });
+        }
+        generation
+    };
     let (capturer, started) = camera::CameraCapture::start(target, capture, || {})?;
     let frames = video::FrameServer::bind().await?;
     frames.set_camera(Some(capturer.preview()));

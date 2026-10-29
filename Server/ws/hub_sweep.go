@@ -35,8 +35,8 @@ func (h *Hub) refreshTelemetryGauges() {
 	participants := 0
 	rooms := make(map[int64]struct{})
 	h.mu.RLock()
-	connected := len(h.clients)
-	for _, c := range h.clients {
+	connected := h.connectionCountLocked()
+	for _, c := range h.allClientsLocked() {
 		if chID := c.voice.channel(); chID != 0 {
 			participants++
 			rooms[chID] = struct{}{}
@@ -55,9 +55,7 @@ func (h *Hub) refreshTelemetryGauges() {
 // It is safe to call from any goroutine.
 func (h *Hub) kickClient(c *Client) {
 	h.mu.Lock()
-	if current, ok := h.clients[c.userID]; ok && current == c {
-		delete(h.clients, c.userID)
-	}
+	h.removeClientLocked(c)
 	h.mu.Unlock()
 	// closeSend BEFORE UnsubscribeAll: Subscribe's only re-take guard is
 	// isSendClosed, so a Subscribe racing this kick either lands before the
@@ -123,7 +121,7 @@ func (h *Hub) sweepStaleClients() {
 	now := time.Now()
 	h.mu.RLock()
 	var stale []*Client
-	for _, c := range h.clients {
+	for _, c := range h.allClientsLocked() {
 		if now.Sub(c.getLastActivity()) > staleClientTimeout {
 			stale = append(stale, c)
 		}
@@ -144,7 +142,7 @@ func (h *Hub) sweepStaleClients() {
 func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 	h.mu.RLock()
 	snapshot := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
+	for _, c := range h.allClientsLocked() {
 		if c.tokenHash != "" {
 			snapshot = append(snapshot, c)
 		}
@@ -198,20 +196,31 @@ func (h *Hub) applySessionVerdict(c *Client, verdict service.SessionVerdict) {
 
 // DisconnectIfSessionRevoked is the revoked-session sweep for one account,
 // run now: after a password change or a single-session revoke, which remove
-// some of the account's sessions but perhaps not the one its socket rides,
-// the socket goes at once if its own session was among them. A failed
+// some of the account's sessions but perhaps not the ones its sockets ride,
+// each socket goes at once if its own session was among them. A failed
 // lookup leaves it to the sweep's next tick, as the sweep itself does.
 func (h *Hub) DisconnectIfSessionRevoked(userID int64) {
-	c := h.GetClient(userID)
-	if c == nil || c.tokenHash == "" {
+	var conns []*Client
+	var hashes []string
+	for _, c := range h.clientsOf(userID) {
+		if c.tokenHash != "" {
+			conns = append(conns, c)
+			hashes = append(hashes, c.tokenHash)
+		}
+	}
+	if len(conns) == 0 {
 		return
 	}
-	verdicts, err := h.authn.SweepSessions(context.Background(), []string{c.tokenHash})
+	verdicts, err := h.authn.SweepSessions(context.Background(), hashes)
 	if err != nil {
 		slog.Warn("session sweep: batch session lookup failed", "user_id", userID, "err", err)
 		return
 	}
-	h.applySessionVerdict(c, verdicts[c.tokenHash])
+	// Each device is judged by its own session: only connections whose token
+	// hash was revoked go; the account's other devices stay connected.
+	for _, c := range conns {
+		h.applySessionVerdict(c, verdicts[c.tokenHash])
+	}
 }
 
 // sweepStaleVoiceStates queries all voice_states rows and removes any that
@@ -237,8 +246,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 		joinedAt  string
 	}
 	for _, vs := range allStates {
-		c, ok := h.clients[vs.UserID]
-		if !ok || c.voice.channel() != vs.ChannelID {
+		if !h.anyConnInVoiceChannelLocked(vs.UserID, vs.ChannelID) {
 			stale = append(stale, struct {
 				userID    int64
 				channelID int64
@@ -287,10 +295,7 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 	// (BUG-088's ordering), so a join can commit and get snapshotted as a
 	// ghost above. Under the voice lock that join has finished by now; if the
 	// client's state agrees with the row, it is no longer stale.
-	h.mu.RLock()
-	liveClient, liveOK := h.clients[userID]
-	h.mu.RUnlock()
-	if liveOK {
+	for _, liveClient := range h.clientsOf(userID) {
 		if liveChID, liveJoinedAt := liveClient.voice.state(); liveChID == channelID && liveJoinedAt == joinedAt {
 			return false
 		}
@@ -412,10 +417,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		// along with its own voice-topic subscription (OC-0050). Mirrors
 		// sweepStaleVoiceStates' handleVoiceLeaveIfStillIn and the LiveKit
 		// webhook's clearExact.
-		h.mu.RLock()
-		client, ok := h.clients[vs.UserID]
-		h.mu.RUnlock()
-		if ok {
+		for _, client := range h.clientsOf(vs.UserID) {
 			if cleanupVoiceRaceClearHook != nil {
 				cleanupVoiceRaceClearHook(client)
 			}

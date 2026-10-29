@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -92,7 +93,7 @@ func encodeRoster(members []db.MemberSummary) (*memberRoster, error) {
 // renders SQLite's clock, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), so a lapse
 // ends the cached list on the same second a fresh read would include it.
 func sqliteNow() string {
-	return time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	return time.Now().UTC().Format(dbtime.ISOLayout)
 }
 
 // lookup returns the cached roster when it is at least as new as gen and no

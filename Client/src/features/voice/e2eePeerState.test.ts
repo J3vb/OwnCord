@@ -324,3 +324,132 @@ describe("verifyPeerAnnounce (F3 TOFU)", () => {
     expect(setPeerVerification).not.toHaveBeenCalled();
   });
 });
+
+/** A pin store that behaves like lib/identity: keys are added, never replaced. */
+function statefulPins(initial: string[] = []) {
+  const keys = [...initial];
+  vi.mocked(getIdentityPin).mockImplementation(async () => {
+    const [only] = keys;
+    const newest = keys[keys.length - 1];
+    if (newest === undefined || only === undefined) return { status: "unpinned" };
+    return keys.length === 1
+      ? { status: "pinned", pin: only }
+      : { status: "pinned", pin: newest, pins: [...keys] };
+  });
+  vi.mocked(storeIdentityPin).mockImplementation(async (_host, _user, key) => {
+    if (!keys.includes(key)) keys.push(key);
+    return "stored";
+  });
+  return keys;
+}
+
+describe("verifyPeerAnnounce with a key per device", () => {
+  it("verifies against the announce's own key, not the published one", async () => {
+    members.set(PEER, { identityPublicKey: "published-id", username: "alice" });
+    const { peers } = setup();
+    await expect(
+      peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "device-id"),
+    ).resolves.toBe(true);
+    expect(verifyEphemeralKeySignature).toHaveBeenCalledTimes(1);
+    expect(verifyEphemeralKeySignature).toHaveBeenCalledWith(
+      "idkey:device-id",
+      PEER,
+      new Uint8Array([4, 5]),
+      "sig",
+    );
+    expect(storeIdentityPin).toHaveBeenCalledWith("chat.example", String(PEER), "device-id");
+    expect(peers.announcedIdentityKey(PEER)).toBe("device-id");
+  });
+
+  it("falls back to the published key when the announce carries none (older server)", async () => {
+    members.set(PEER, { identityPublicKey: "published-id", username: "alice" });
+    const { peers } = setup();
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current)).resolves.toBe(true);
+    expect(verifyEphemeralKeySignature).toHaveBeenCalledWith(
+      "idkey:published-id",
+      PEER,
+      new Uint8Array([4, 5]),
+      "sig",
+    );
+    expect(peers.announcedIdentityKey(PEER)).toBe("published-id");
+  });
+
+  it("drops the previous announce's key when the latest announce carries none", async () => {
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "device-id");
+    expect(peers.announcedIdentityKey(PEER)).toBe("device-id");
+    // Next announce: no key of its own and no published key to fall back to.
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(peers.announcedIdentityKey(PEER)).toBeNull();
+  });
+
+  it("rejects a signature made by a different device than the announce names", async () => {
+    members.set(PEER, { identityPublicKey: "published-id", username: "alice" });
+    vi.mocked(verifyEphemeralKeySignature).mockImplementation(
+      async (key) => key === ("idkey:published-id" as unknown),
+    );
+    const { peers } = setup();
+    await expect(
+      peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "device-id"),
+    ).resolves.toBe(false);
+    expect(lastVerification()).toMatchObject({ status: "mismatch" });
+    expect(peers.blockedAnnounces.get(PEER)).toMatchObject({ identityKeyBase64: "device-id" });
+  });
+
+  it("trusts both devices of a user and shows the new-device notice once", async () => {
+    statefulPins();
+    members.set(PEER, { identityPublicKey: "published-id", username: "alice" });
+    const { peers } = setup();
+
+    // Device A: first sight of the user, nothing to warn about.
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "key-a");
+    expect(lastVerification()).toMatchObject({ status: "verified" });
+    expect(showToast).not.toHaveBeenCalled();
+
+    // Device B: first sight of a second key for a pinned user -> one notice.
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "key-b");
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(showToast).mock.lastCall?.[0]).toContain("alice");
+    expect(vi.mocked(showToast).mock.lastCall?.[0]).toContain("new device");
+    expect(lastVerification()).toMatchObject({ status: "changed", safetyNumber: "safety-number" });
+
+    // Back to A and to B again: both are pinned, so nothing more is shown.
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "key-a");
+    expect(lastVerification()).toMatchObject({ status: "verified" });
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "key-b");
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "key-a");
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(storeIdentityPin).toHaveBeenCalledTimes(2);
+    expect(peers.announcedIdentityKey(PEER)).toBe("key-a");
+  });
+
+  it("stays silent when a user with two pinned devices switches the call between them", async () => {
+    statefulPins(["key-a", "key-b"]);
+    members.set(PEER, { identityPublicKey: "key-b", username: "alice" });
+    const { peers } = setup();
+    for (const key of ["key-b", "key-a", "key-b"]) {
+      // oxlint-disable-next-line no-await-in-loop -- announces arrive in order
+      await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, key)).resolves.toBe(
+        true,
+      );
+      expect(lastVerification()).toMatchObject({ status: "verified" });
+    }
+    expect(showToast).not.toHaveBeenCalled();
+    expect(storeIdentityPin).not.toHaveBeenCalled();
+  });
+
+  it("mixed old and new clients: an old peer without a key keeps verifying against its published key", async () => {
+    // The user's new device announces with its own key; their old device
+    // announces nothing extra, so the published key (the same as the pin) is used.
+    statefulPins(["published-id"]);
+    members.set(PEER, { identityPublicKey: "published-id", username: "alice" });
+    const { peers } = setup();
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current)).resolves.toBe(true);
+    expect(lastVerification()).toMatchObject({ status: "verified" });
+    expect(showToast).not.toHaveBeenCalled();
+    await expect(
+      peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "new-device-id"),
+    ).resolves.toBe(true);
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+});

@@ -4,7 +4,9 @@
 
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
+import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/shareFps";
 import { createLogger } from "@lib/logger";
+import { syncVideoSurface } from "@lib/videoSurface";
 import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../features/voice/autoPlayCameras";
 import {
   switchInputDevice,
@@ -101,6 +103,9 @@ const MIC_NOISE_FLOOR = 0.005;
 const MIC_HEARD_HOLD_MS = 1000;
 /** DeviceManager debounces a devicechange by 500 ms, then moves the capture. */
 const DEVICE_MANAGER_SETTLE_MS = 1000;
+/** Pause before the Linux camera preview starts again after its socket
+ *  closed, so a capture that is ending has released the device. */
+const PREVIEW_RESTART_MS = 500;
 
 export interface VoiceAudioTabHandle {
   /**
@@ -943,13 +948,15 @@ function buildVoiceAudioTabInner(
     style: "width:100%;margin-bottom:16px",
     "aria-label": t("voiceAudio.screenFps"),
   });
+  const fpsLabels: Record<number, string> = {
+    60: t("voiceAudio.fps.60"),
+    120: t("voiceAudio.fps.120"),
+  };
   const fpsOptions: Array<[number, string]> = [
     [30, t("voiceAudio.fps.30")],
-    [60, t("voiceAudio.fps.60")],
-    [120, t("voiceAudio.fps.120")],
+    ...SHARE_FPS_OPTIONS.map((fps): [number, string] => [fps, fpsLabels[fps] ?? String(fps)]),
   ];
-  const savedFpsRaw = loadPref<number>("screenShareFps", 30);
-  const savedFps = savedFpsRaw === 60 || savedFpsRaw === 120 ? savedFpsRaw : 30;
+  const savedFps = offeredShareFps(loadPref<number>("screenShareFps", 30));
   for (const [value, label] of fpsOptions) {
     const opt = createElement("option", { value: String(value) }, label);
     if (value === savedFps) opt.setAttribute("selected", "");
@@ -1235,12 +1242,14 @@ function buildVoiceAudioTabInner(
     // still has a source among its pending activities, and it holds the whole
     // torn-down pane alive with it. Stopping the tracks does not release it.
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
   });
 
   function stopCameraPreview(): void {
     cameraRequestId += 1;
     registerCamera(null);
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
     setText(previewLabel, t("voiceAudio.previewOff"));
     previewLabel.hidden = false;
   }
@@ -1274,14 +1283,26 @@ function buildVoiceAudioTabInner(
     })();
   }
 
+  function previewDevice(deviceId: string): void {
+    stopCameraPreview();
+    stopNativeCameraPreview();
+    if (isLinuxDesktop()) void startNativeCameraPreview(deviceId);
+    else startCameraPreview(deviceId);
+  }
+
   videoSelect.addEventListener(
     "change",
     () => {
-      void switchVideoDevice(videoSelect.value);
-      stopCameraPreview();
-      stopNativeCameraPreview();
-      if (isLinuxDesktop()) void startNativeCameraPreview(videoSelect.value);
-      else startCameraPreview(videoSelect.value);
+      const picked = videoSelect.value;
+      void switchVideoDevice(picked).then(() => {
+        // The live camera could not use the pick and stayed on its device:
+        // show that one again.
+        const kept = loadPref<string>("videoInputDevice", "");
+        if (signal.aborted || kept === picked || videoSelect.value !== picked) return;
+        videoSelect.value = kept;
+        previewDevice(kept);
+      });
+      previewDevice(picked);
     },
     { signal },
   );
@@ -1361,10 +1382,30 @@ function buildVoiceAudioTabInner(
         // nothing (stopping here would release the newer preview's capture).
         return;
       }
-      const renderer = new NativeVideoRenderer(`${started.frames}/camera`);
+      // The host closes the socket when the camera's owner changes: the
+      // call's camera turned on (it takes the device) or off, or the call
+      // ended. Start again, which shows whichever capture owns the camera now.
+      const renderer = new NativeVideoRenderer(`${started.frames}/camera`, () => {
+        if (activeNativePreview !== stop) return;
+        const closedAt = cameraRequestId;
+        renderer.dispose();
+        activeNativePreview = null;
+        registerNativePreview(() => {});
+        previewVideo.srcObject = null;
+        syncVideoSurface(previewVideo);
+        setOwnedTimeout(
+          signal,
+          () => {
+            // A camera picked meanwhile already started its own preview.
+            if (cameraRequestId === closedAt) void startNativeCameraPreview(videoSelect.value);
+          },
+          PREVIEW_RESTART_MS,
+        );
+      });
       const stream = new MediaStream([renderer.mediaStreamTrack]);
       registerCamera(stream);
       previewVideo.srcObject = stream;
+      syncVideoSurface(previewVideo);
       previewLabel.hidden = true;
       const stop = (): void => {
         renderer.dispose();
@@ -1391,6 +1432,7 @@ function buildVoiceAudioTabInner(
     activeNativePreview = null;
     registerNativePreview(() => {});
     previewVideo.srcObject = null;
+    syncVideoSurface(previewVideo);
   }
 
   // Camera teardown on overlay close is already covered by the factory's

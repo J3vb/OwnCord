@@ -310,6 +310,24 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("stays open when a drag-select ends on the backdrop, and a backdrop click still closes", () => {
+    const overlay = createSettingsOverlay(defaultOptions);
+    overlay.mount(container);
+    overlay.open();
+    defaultOptions.onClose.mockClear();
+    const root = container.querySelector<HTMLElement>(".settings-overlay")!;
+    root
+      .querySelector(".settings-panel")!
+      .dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    root.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(defaultOptions.onClose).not.toHaveBeenCalled();
+    root.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    root.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(defaultOptions.onClose).toHaveBeenCalledOnce();
+
+    overlay.destroy?.();
+  });
+
   // --- Appearance tab tests ---
 
   it("applies theme on click", () => {
@@ -830,10 +848,21 @@ describe("SettingsOverlay", () => {
 
   it("bounds the rename input and shows the rule", () => {
     const { overlay, editInput } = openUsernameEditor();
-    expect(editInput.maxLength).toBe(32);
+    expect(editInput.maxLength).toBe(64); // 2 units per character; the 32-character cap is by count
     const hintId = editInput.getAttribute("aria-describedby")!.split(" ").at(-1)!;
     const hint = container.querySelector<HTMLElement>(`#${hintId}`)!;
     expect(hint.textContent).toContain("2–32 characters");
+    overlay.destroy?.();
+  });
+
+  it("fits and sends a 32-letter rename outside the BMP", async () => {
+    const onUpdateProfile = vi.fn().mockResolvedValue(undefined);
+    const { overlay, editInput, saveBtn } = openUsernameEditor(onUpdateProfile);
+    const bold = "\u{1D400}".repeat(32); // 2 UTF-16 units per letter
+    expect(bold.length).toBeLessThanOrEqual(editInput.maxLength);
+    editInput.value = bold;
+    saveBtn.click();
+    await vi.waitFor(() => expect(onUpdateProfile).toHaveBeenCalledWith({ username: bold }));
     overlay.destroy?.();
   });
 

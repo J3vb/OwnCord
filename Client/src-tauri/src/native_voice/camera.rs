@@ -45,7 +45,9 @@ pub fn active_captures() -> usize {
 /// The error a camera reports when it fails before the first frame.
 pub const FAILED: &str = "camera capture failed to start";
 
-/// The error a camera reports when no first frame arrives in time.
+/// The error a camera reports when no first frame arrives in time. The webview
+/// matches this text (`CAMERA_NO_FRAME` in `nativeRoom.ts`) to keep the live
+/// camera instead of restarting onto a device that gives no picture.
 pub const TIMED_OUT: &str = "camera capture produced no frame in time";
 
 /// The error a camera reports when the requested device is gone.
@@ -60,6 +62,9 @@ const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(15);
 pub struct CameraDevice {
     pub id: String,
     pub name: String,
+    /// Offers only greyscale formats: a face-unlock infrared sensor, which
+    /// usually shares the colour camera's name and gives no usable picture.
+    pub infrared: bool,
     #[serde(skip)]
     pub index: u16,
 }
@@ -74,6 +79,31 @@ fn device_id(device: &gst::Device) -> Option<String> {
         .find_map(|key| props.get::<&str>(*key).ok().map(str::to_string))
         .filter(|id| !id.is_empty())
         .or_else(|| Some(device.display_name().to_string()))
+}
+
+/// Whether every format in `caps` is greyscale raw video (V4L2 `GREY`/`Y16`):
+/// an infrared sensor. Empty or any caps (nothing known) are not.
+fn greyscale_only(caps: &gst::CapsRef) -> bool {
+    !caps.is_empty()
+        && !caps.is_any()
+        && caps.iter().all(|s| {
+            s.name() == "video/x-raw"
+                && match s.get::<&str>("format") {
+                    Ok(f) => f.starts_with("GRAY"),
+                    Err(_) => s.get::<gst::List>("format").is_ok_and(|l| {
+                        !l.is_empty()
+                            && l.iter()
+                                .all(|v| v.get::<&str>().is_ok_and(|f| f.starts_with("GRAY")))
+                    }),
+                }
+        })
+}
+
+/// Colour cameras first, infrared sensors after, each group in monitor
+/// order: `Target::Default` opens the first one listed.
+fn colour_first(mut devices: Vec<CameraDevice>) -> Vec<CameraDevice> {
+    devices.sort_by_key(|d| d.infrared);
+    devices
 }
 
 /// Enumerate the `Video/Source` devices GStreamer knows: V4L2 cameras and
@@ -92,7 +122,7 @@ pub fn list_devices() -> Vec<CameraDevice> {
     }
     let devices = monitor.devices();
     monitor.stop();
-    devices
+    let listed = devices
         .iter()
         .enumerate()
         .filter_map(|(i, d)| {
@@ -108,10 +138,12 @@ pub fn list_devices() -> Vec<CameraDevice> {
             Some(CameraDevice {
                 id,
                 name,
+                infrared: d.caps().is_some_and(|c| greyscale_only(&c)),
                 index: i as u16,
             })
         })
-        .collect()
+        .collect();
+    colour_first(listed)
 }
 
 /// The elements every capture pipeline builds by name, plus the source
@@ -340,6 +372,9 @@ enum Producer {
     Device {
         pipeline: gst::Pipeline,
         sink: AppSink,
+        /// Set while a chosen camera mode pins the pipeline and no frame has
+        /// arrived yet: a failure then rebuilds it once without the pin.
+        unpinned: Option<String>,
     },
     Synthetic {
         width: u32,
@@ -349,7 +384,7 @@ enum Producer {
 }
 
 impl Producer {
-    fn new(target: &Target) -> Result<Self, String> {
+    fn new(target: &Target, options: &CaptureOptions) -> Result<Self, String> {
         match target {
             Target::Synthetic { width, height } => Ok(Self::Synthetic {
                 width: *width,
@@ -360,23 +395,60 @@ impl Producer {
                 let id = target
                     .resolve_id(&list_devices())
                     .ok_or_else(|| NO_DEVICE.to_string())?;
-                Self::device(&id)
+                Self::device(&id, options)
             }
         }
     }
 
-    fn device(id: &str) -> Result<Self, String> {
-        let source = device_source(id)?;
-        let (pipeline, sink) = build_pipeline(source)?;
-        pipeline
-            .set_state(gst::State::Playing)
-            .map_err(|e| format!("camera pipeline: {e}"))?;
-        Ok(Self::Device { pipeline, sink })
+    fn device(id: &str, options: &CaptureOptions) -> Result<Self, String> {
+        let (source, device_caps) = device_source(id)?;
+        let mode = device_caps
+            .as_ref()
+            .map(|caps| camera_modes(caps))
+            .and_then(|modes| pick_mode(&modes, options));
+        if let Some(mode) = mode {
+            log::info!("[native_voice] camera mode {mode:?}");
+            match build_pipeline(source, Some(&mode.caps())).and_then(play) {
+                Ok((pipeline, sink)) => {
+                    return Ok(Self::Device {
+                        pipeline,
+                        sink,
+                        unpinned: Some(id.to_string()),
+                    });
+                }
+                Err(e) => log::warn!("[native_voice] camera mode {mode:?} refused: {e}"),
+            }
+            return Self::unpinned(id);
+        }
+        build_pipeline(source, None)
+            .and_then(play)
+            .map(|(pipeline, sink)| Self::Device {
+                pipeline,
+                sink,
+                unpinned: None,
+            })
+    }
+
+    /// Capture `id` in whatever mode its source picks, with a fresh source
+    /// element (the old one belongs to the pipeline that was given up).
+    fn unpinned(id: &str) -> Result<Self, String> {
+        let (source, _) = device_source(id)?;
+        build_pipeline(source, None)
+            .and_then(play)
+            .map(|(pipeline, sink)| Self::Device {
+                pipeline,
+                sink,
+                unpinned: None,
+            })
     }
 
     fn grab(&mut self) -> Grab {
         match self {
-            Self::Device { pipeline, sink } => {
+            Self::Device {
+                pipeline,
+                sink,
+                unpinned,
+            } => {
                 // A device unplugged mid-capture ends the stream: the pipeline
                 // posts an error or EOS on its bus. Report it so capture stops
                 // (and, once started, the caller is told via `on_end`).
@@ -386,11 +458,29 @@ impl Producer {
                             msg.view(),
                             gst::MessageView::Error(_) | gst::MessageView::Eos(_)
                         ) {
-                            return Grab::Failed;
+                            // The chosen mode would not negotiate: let the
+                            // source pick its own, as before modes were chosen.
+                            let Some(id) = unpinned.take() else {
+                                return Grab::Failed;
+                            };
+                            log::warn!("[native_voice] camera mode failed; capturing unpinned");
+                            // Release the device before the new pipeline opens it.
+                            let _ = pipeline.set_state(gst::State::Null);
+                            return match Self::unpinned(&id) {
+                                Ok(fresh) => {
+                                    *self = fresh;
+                                    Grab::Pending
+                                }
+                                Err(_) => Grab::Failed,
+                            };
                         }
                     }
                 }
-                match sink.try_pull_sample(gst::ClockTime::ZERO) {
+                let sample = sink.try_pull_sample(gst::ClockTime::ZERO);
+                if sample.is_some() {
+                    unpinned.take();
+                }
+                match sample {
                     Some(sample) => {
                         let frame =
                             sample
@@ -422,11 +512,12 @@ impl Drop for Producer {
     }
 }
 
-/// The source element for a device id: the monitor's own element when the id
-/// round-trips (V4L2 and PipeWire), else a `v4l2src`/`pipewiresrc` by path.
-fn device_source(id: &str) -> Result<gst::Element, String> {
-    if let Some(element) = monitor_element(id) {
-        return Ok(element);
+/// The source element for a device id, with the modes the device lists when
+/// the monitor knows it: the monitor's own element when the id round-trips
+/// (V4L2 and PipeWire), else a `v4l2src`/`pipewiresrc` by path.
+fn device_source(id: &str) -> Result<(gst::Element, Option<gst::Caps>), String> {
+    if let Some(found) = monitor_element(id) {
+        return Ok(found);
     }
     let (factory, prop) = if id.starts_with('/') {
         ("v4l2src", "device")
@@ -436,12 +527,13 @@ fn device_source(id: &str) -> Result<gst::Element, String> {
     gst::ElementFactory::make(factory)
         .property(prop, id)
         .build()
+        .map(|element| (element, None))
         .map_err(|_| format!("{NO_DEVICE}: {id}"))
 }
 
 /// Re-find the monitored device with this id and let it build its element; the
 /// monitor knows which backend (V4L2, PipeWire) the id belongs to.
-fn monitor_element(id: &str) -> Option<gst::Element> {
+fn monitor_element(id: &str) -> Option<(gst::Element, Option<gst::Caps>)> {
     if gst::init().is_err() {
         return None;
     }
@@ -452,14 +544,27 @@ fn monitor_element(id: &str) -> Option<gst::Element> {
         .devices()
         .iter()
         .find(|d| device_id(d).as_deref() == Some(id))
-        .and_then(|d| d.create_element(None).ok());
+        .and_then(|d| d.create_element(None).ok().map(|e| (e, d.caps())));
     monitor.stop();
     found
 }
 
-/// `source ! decodebin ! videoconvert ! videoscale ! I420 ! appsink`, linked
-/// once GStreamer (re)exposes a decoded pad.
-fn build_pipeline(source: gst::Element) -> Result<(gst::Pipeline, AppSink), String> {
+/// Start `pipeline`; on a refusal it goes back to Null so the device is free.
+fn play((pipeline, sink): (gst::Pipeline, AppSink)) -> Result<(gst::Pipeline, AppSink), String> {
+    if let Err(e) = pipeline.set_state(gst::State::Playing) {
+        let _ = pipeline.set_state(gst::State::Null);
+        return Err(format!("camera pipeline: {e}"));
+    }
+    Ok((pipeline, sink))
+}
+
+/// `source ! [mode] ! decodebin ! videoconvert ! videoscale ! I420 ! appsink`,
+/// linked once GStreamer (re)exposes a decoded pad. `mode` pins the camera
+/// mode; without it the source picks its own.
+fn build_pipeline(
+    source: gst::Element,
+    mode: Option<&gst::Caps>,
+) -> Result<(gst::Pipeline, AppSink), String> {
     let pipeline = gst::Pipeline::new();
     let make = |name: &str| {
         gst::ElementFactory::make(name)
@@ -503,10 +608,120 @@ fn build_pipeline(source: gst::Element) -> Result<(gst::Pipeline, AppSink), Stri
         }
         let _ = pad.link(&convert_sink);
     });
-    source
-        .link(&decode)
-        .map_err(|e| format!("camera pipeline: {e}"))?;
+    match mode {
+        Some(caps) => {
+            let pin = gst::ElementFactory::make("capsfilter")
+                .property("caps", caps)
+                .build()
+                .map_err(|_| "camera pipeline: no capsfilter".to_string())?;
+            pipeline
+                .add(&pin)
+                .map_err(|e| format!("camera pipeline: {e}"))?;
+            gst::Element::link_many([&source, &pin, &decode])
+                .map_err(|e| format!("camera pipeline: {e}"))?;
+        }
+        None => source
+            .link(&decode)
+            .map_err(|e| format!("camera pipeline: {e}"))?,
+    }
     Ok((pipeline, sink))
+}
+
+/// One capture mode a camera lists: raw or MJPEG, a fixed size, one rate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Mode {
+    jpeg: bool,
+    width: u32,
+    height: u32,
+    fps: gst::Fraction,
+}
+
+impl Mode {
+    fn rate(&self) -> f64 {
+        f64::from(self.fps.numer()) / f64::from(self.fps.denom().max(1))
+    }
+
+    fn caps(&self) -> gst::Caps {
+        gst::Caps::builder(if self.jpeg {
+            "image/jpeg"
+        } else {
+            "video/x-raw"
+        })
+        .field("width", self.width as i32)
+        .field("height", self.height as i32)
+        .field("framerate", self.fps)
+        .build()
+    }
+}
+
+/// The fixed-size raw and MJPEG modes in a device's caps, one per listed
+/// rate. Ranged sizes (some PipeWire cameras) are left to the source.
+fn camera_modes(caps: &gst::CapsRef) -> Vec<Mode> {
+    let mut modes = Vec::new();
+    for s in caps.iter() {
+        let jpeg = match s.name().as_str() {
+            "video/x-raw" => false,
+            "image/jpeg" => true,
+            _ => continue,
+        };
+        let (Ok(width), Ok(height)) = (s.get::<i32>("width"), s.get::<i32>("height")) else {
+            continue;
+        };
+        if width <= 0 || height <= 0 {
+            continue;
+        }
+        let Ok(rates) = s.value("framerate") else {
+            continue;
+        };
+        let rates: Vec<gst::Fraction> = if let Ok(f) = rates.get::<gst::Fraction>() {
+            vec![f]
+        } else if let Ok(list) = rates.get::<gst::List>() {
+            list.iter()
+                .filter_map(|v| v.get::<gst::Fraction>().ok())
+                .collect()
+        } else if let Ok(range) = rates.get::<gst::FractionRange>() {
+            vec![range.max()]
+        } else {
+            continue;
+        };
+        modes.extend(rates.into_iter().filter(|f| f.numer() > 0).map(|fps| Mode {
+            jpeg,
+            width: width as u32,
+            height: height as u32,
+            fps,
+        }));
+    }
+    modes
+}
+
+/// The camera mode to capture in. Left alone, `v4l2src` takes raw over MJPEG
+/// and the largest size, and a webcam's largest raw size (1080p YUYV) often
+/// runs at 5 fps. Best first: a mode that reaches the asked rate (else the
+/// fastest), then one that covers the size cap with the fewest pixels (else
+/// the largest; with no cap, the largest), then raw over MJPEG, then the
+/// lowest rate that still reaches the asked one. `None` with no modes.
+fn pick_mode(modes: &[Mode], options: &CaptureOptions) -> Option<Mode> {
+    let want = options.fps.clamp(1.0, 120.0);
+    let capped = options.max_width > 0 && options.max_height > 0;
+    let key = |m: &Mode| {
+        let fast = m.rate() + 0.5 >= want;
+        let covers = !capped || (m.width >= options.max_width && m.height >= options.max_height);
+        let area = u64::from(m.width) * u64::from(m.height);
+        let rate = (m.rate() * 1000.0) as u64;
+        (
+            fast,
+            if fast { 0 } else { rate },
+            covers,
+            if capped && covers {
+                u64::MAX - area
+            } else {
+                area
+            },
+            !m.jpeg,
+            if fast { u64::MAX - rate } else { 0 },
+        )
+    };
+    modes.iter().copied().max_by_key(key)
 }
 
 /// A `GStreamer` I420 buffer as a libwebrtc `I420Buffer`, honouring strides.
@@ -577,7 +792,7 @@ fn run(
     on_end: impl FnOnce(),
 ) {
     let mut ready = Some(ready);
-    let mut producer = match Producer::new(&target) {
+    let mut producer = match Producer::new(&target, &options) {
         Ok(p) => p,
         Err(e) => {
             if let Some(r) = ready.take() {
@@ -759,11 +974,13 @@ mod tests {
             CameraDevice {
                 id: "/dev/video0".into(),
                 name: "Cam A".into(),
+                infrared: false,
                 index: 0,
             },
             CameraDevice {
                 id: "/dev/video2".into(),
                 name: "Cam B".into(),
+                infrared: false,
                 index: 1,
             },
         ];
@@ -789,6 +1006,7 @@ mod tests {
         let listed = vec![CameraDevice {
             id: "/dev/video0".into(),
             name: "Cam A".into(),
+            infrared: false,
             index: 0,
         }];
         for id in ["evil;id", "-evil", "", "/dev/video9"] {
@@ -957,7 +1175,7 @@ mod tests {
             .property("num-buffers", 30i32)
             .build()
             .expect("videotestsrc");
-        let (pipeline, sink) = build_pipeline(source).expect("pipeline");
+        let (pipeline, sink) = build_pipeline(source, None).expect("pipeline");
         pipeline.set_state(gst::State::Playing).unwrap();
         let sample = (0..100)
             .find_map(|_| {
@@ -980,12 +1198,162 @@ mod tests {
         assert!(!u.is_empty() && !v.is_empty());
     }
 
+    /// A typical laptop webcam: raw YUYV is slow at its larger sizes, MJPEG
+    /// keeps 30 fps at every size.
+    const WEBCAM: &str = "video/x-raw, format=YUY2, width=1920, height=1080, framerate=5/1; \
+        video/x-raw, format=YUY2, width=1280, height=720, framerate=10/1; \
+        video/x-raw, format=YUY2, width=640, height=360, framerate={ 30/1, 15/1 }; \
+        video/x-raw, format=YUY2, width=320, height=180, framerate=30/1; \
+        image/jpeg, width=1920, height=1080, framerate={ 30/1, 15/1 }; \
+        image/jpeg, width=1280, height=720, framerate=30/1; \
+        image/jpeg, width=640, height=360, framerate=30/1";
+
+    fn webcam_modes() -> Vec<Mode> {
+        gst::init().unwrap();
+        camera_modes(&WEBCAM.parse::<gst::Caps>().unwrap())
+    }
+
+    fn pick(fps: f64, max_width: u32, max_height: u32) -> Option<(bool, u32, u32, i32)> {
+        pick_mode(
+            &webcam_modes(),
+            &CaptureOptions {
+                fps,
+                max_width,
+                max_height,
+            },
+        )
+        .map(|m| (m.jpeg, m.width, m.height, m.fps.numer()))
+    }
+
+    #[test]
+    fn camera_modes_lists_each_fixed_size_at_each_rate() {
+        let modes = webcam_modes();
+        assert_eq!(modes.len(), 9);
+        let ranged = "video/x-raw, width=[ 1, 4096 ], height=[ 1, 2160 ], framerate=30/1; \
+            image/jpeg, width=640, height=480, framerate=[ 1/1, 60/1 ]; \
+            video/x-bayer, width=640, height=480, framerate=30/1"
+            .parse::<gst::Caps>()
+            .unwrap();
+        let modes = camera_modes(&ranged);
+        assert_eq!(modes.len(), 1, "ranged sizes and other formats are skipped");
+        assert_eq!(
+            (modes[0].jpeg, modes[0].width, modes[0].fps.numer()),
+            (true, 640, 60)
+        );
+    }
+
+    #[test]
+    fn the_call_camera_takes_a_mode_that_keeps_its_rate() {
+        // 720p at 30 fps: raw 720p only does 10, so MJPEG 720p.
+        assert_eq!(pick(30.0, 1280, 720), Some((true, 1280, 720, 30)));
+        // 360p at 30 fps: raw keeps up, and raw needs no decode.
+        assert_eq!(pick(30.0, 640, 360), Some((false, 640, 360, 30)));
+        // The settings preview: the smallest mode covering 320x180 at 15 fps.
+        assert_eq!(pick(15.0, 320, 180), Some((false, 320, 180, 30)));
+        // No cap (the source preset): the largest size that still keeps 30 fps.
+        assert_eq!(pick(30.0, 0, 0), Some((true, 1920, 1080, 30)));
+        // Asked for more than the camera has: the fastest it can do.
+        assert_eq!(pick(60.0, 1280, 720), Some((true, 1280, 720, 30)));
+    }
+
+    #[test]
+    fn a_camera_without_a_fast_mode_gets_its_fastest_one() {
+        gst::init().unwrap();
+        let slow = "video/x-raw, width=1920, height=1080, framerate=5/1; \
+            video/x-raw, width=1280, height=720, framerate=10/1"
+            .parse::<gst::Caps>()
+            .unwrap();
+        let options = CaptureOptions {
+            fps: 30.0,
+            max_width: 1920,
+            max_height: 1080,
+        };
+        let mode = pick_mode(&camera_modes(&slow), &options).unwrap();
+        assert_eq!((mode.width, mode.fps.numer()), (1280, 10));
+        assert_eq!(pick_mode(&[], &options), None);
+    }
+
+    /// A pinned mode is a capsfilter between the source and decodebin: a
+    /// source that can produce the mode negotiates it and frames flow.
+    #[test]
+    fn a_pinned_mode_reaches_the_appsink() {
+        if gst::init().is_err() {
+            eprintln!("no GStreamer runtime; skipping the pinned-mode proof");
+            return;
+        }
+        let source = gst::ElementFactory::make("videotestsrc")
+            .property("is-live", true)
+            .build()
+            .expect("videotestsrc");
+        let mode = Mode {
+            jpeg: false,
+            width: 320,
+            height: 180,
+            fps: gst::Fraction::new(30, 1),
+        };
+        let (pipeline, sink) = play(build_pipeline(source, Some(&mode.caps())).unwrap()).unwrap();
+        let sample = sink
+            .try_pull_sample(gst::ClockTime::from_seconds(5))
+            .expect("a sample");
+        pipeline.set_state(gst::State::Null).ok();
+        let info = VideoInfo::from_caps(sample.caps().unwrap()).unwrap();
+        assert_eq!((info.width(), info.height()), (320, 180));
+    }
+
     #[test]
     fn fit_keeps_aspect_and_even_sizes_within_the_cap() {
         assert_eq!(fit(1920, 1080, 1920, 1080), None);
         assert_eq!(fit(3840, 2160, 0, 0), None, "source preset: no cap");
         assert_eq!(fit(3840, 2160, 1920, 1080), Some((1920, 1080)));
         assert_eq!(fit(2560, 1600, 1280, 720), Some((1152, 720)));
+    }
+
+    #[test]
+    fn a_greyscale_only_device_is_infrared() {
+        gst::init().unwrap();
+        let caps = |s: &str| s.parse::<gst::Caps>().unwrap();
+        assert!(greyscale_only(&caps(
+            "video/x-raw, format=GRAY8, width=640, height=360"
+        )));
+        assert!(greyscale_only(&caps(
+            "video/x-raw, format={ GRAY8, GRAY16_LE }"
+        )));
+        assert!(!greyscale_only(&caps(
+            "video/x-raw, format=YUY2; image/jpeg"
+        )));
+        assert!(!greyscale_only(&caps(
+            "video/x-raw, format=GRAY8; video/x-raw, format=YUY2"
+        )));
+        assert!(!greyscale_only(&caps("image/jpeg")));
+        assert!(!greyscale_only(&gst::Caps::new_any()));
+        assert!(!greyscale_only(&gst::Caps::new_empty()));
+    }
+
+    #[test]
+    fn infrared_sensors_list_after_colour_cameras() {
+        let cam = |id: &str, infrared: bool| CameraDevice {
+            id: id.into(),
+            name: "Integrated_Webcam_FHD: Integrat".into(),
+            infrared,
+            index: 0,
+        };
+        let ids: Vec<String> = colour_first(vec![
+            cam("/dev/video2", true),
+            cam("/dev/video0", false),
+            cam("/dev/video4", false),
+        ])
+        .into_iter()
+        .map(|d| d.id)
+        .collect();
+        assert_eq!(ids, ["/dev/video0", "/dev/video4", "/dev/video2"]);
+        assert_eq!(
+            Target::Default.resolve_id(&colour_first(vec![
+                cam("/dev/video2", true),
+                cam("/dev/video0", false),
+            ])),
+            Some("/dev/video0".into()),
+            "the default camera is never the infrared sensor"
+        );
     }
 
     /// Device listing must not panic when there is no camera (CI), and any id

@@ -118,6 +118,11 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
       // fetch was in flight — its response landing now must not clobber the
       // window the newer jump already applied.
       if (gen !== jumpGen) return false;
+      // The user left the channel while the fetch was in flight. The switch
+      // already dropped its loaded flag, so writing the window now would mark
+      // it loaded and detached, and the next visit would open on this old
+      // window instead of the live tail.
+      if (opts.getChannelCtrl()?.currentChannelId !== channelId) return false;
       setAroundMessages(channelId, resp.messages, resp.has_more_before, resp.has_more_after);
     } catch (err) {
       // The channel's NSFW gate is showing and says why (B9-7).

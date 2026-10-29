@@ -57,7 +57,7 @@ func TestVoiceMediaFlags_SweepClearsRevokedFlags(t *testing.T) {
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
 	c.voice.setState(100, state.JoinedAt)
-	h.clients[1] = c
+	h.clients[1] = []*Client{c}
 	setVoiceMediaFlags(t, h, 1, true, true)
 
 	seedVoiceOnlyRole(t, database, voiceOnlyRoleID, base)
@@ -101,7 +101,7 @@ func TestVoiceMediaFlags_SweepClearsOnlyRevokedFlag(t *testing.T) {
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
 	c.voice.setState(100, state.JoinedAt)
-	h.clients[1] = c
+	h.clients[1] = []*Client{c}
 
 	setVoiceMediaFlags(t, h, 1, true, false)
 	h.sweepStaleVoiceEvictRevoked(ctx)
@@ -137,7 +137,7 @@ func TestVoiceMediaFlags_StaleSessionIsNotTouched(t *testing.T) {
 	}
 	c := NewTestClient(h, 1, make(chan []byte, 8))
 	c.voice.setState(100, "an-older-session")
-	h.clients[1] = c
+	h.clients[1] = []*Client{c}
 	setVoiceMediaFlags(t, h, 1, true, true)
 
 	h.clearRevokedVoiceMedia(ctx, c, 100)

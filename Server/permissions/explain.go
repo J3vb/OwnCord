@@ -14,12 +14,13 @@ const (
 	ActionAddReaction   Action = "add_reaction"   // CanAddReaction
 	ActionJoinVoice     Action = "join_voice"     // CanJoinVoice
 	ActionModerateVoice Action = "moderate_voice" // AuthorizeVoiceModerator
+	ActionMoveVoice     Action = "move_voice"     // AuthorizeVoiceMover
 )
 
 // Actions lists every explainable action in a stable order.
 var Actions = []Action{
 	ActionViewChannel, ActionReadContent, ActionSendMessage,
-	ActionAddReaction, ActionJoinVoice, ActionModerateVoice,
+	ActionAddReaction, ActionJoinVoice, ActionModerateVoice, ActionMoveVoice,
 }
 
 // actionPredicate maps an Action to its predicate and the bits that
@@ -45,6 +46,8 @@ func actionPredicate(a Action, s Subject) (func(Subject) error, int64, bool) {
 		return CanJoinVoice, ReadMessages | ConnectVoice, true
 	case ActionModerateVoice:
 		return AuthorizeVoiceModerator, ReadMessages | MuteMembers, true
+	case ActionMoveVoice:
+		return AuthorizeVoiceMover, ReadMessages | MoveMembers, true
 	}
 	return nil, 0, false
 }

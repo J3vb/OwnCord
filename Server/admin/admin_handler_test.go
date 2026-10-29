@@ -219,7 +219,8 @@ func TestOwnerOnlyMiddleware_OwnerAllowed(t *testing.T) {
 // (position < 100) cannot reach owner-only endpoints.
 func TestOwnerOnlyMiddleware_AdminDenied(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{BackupDir: t.TempDir()})
 
 	// Create admin user (role_id=2, position=80)
 	adminUID, _ := database.CreateUser(context.Background(), "middlewareadmin", "hash", 2)
@@ -237,7 +238,8 @@ func TestOwnerOnlyMiddleware_AdminDenied(t *testing.T) {
 // reach owner-only endpoints.
 func TestOwnerOnlyMiddleware_MemberDenied(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{BackupDir: t.TempDir()})
 
 	memberToken := createMemberUser(t, database)
 
@@ -254,7 +256,8 @@ func TestOwnerOnlyMiddleware_MemberDenied(t *testing.T) {
 // rejected before reaching ownerOnlyMiddleware.
 func TestOwnerOnlyMiddleware_Unauthenticated(t *testing.T) {
 	database := openAdminTestDB(t)
-	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database),
+		admin.SetupOptions{BackupDir: t.TempDir()})
 
 	w := doRequest(t, handler, http.MethodPost, "/backup", "", nil)
 

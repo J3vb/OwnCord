@@ -94,3 +94,20 @@ func TestUploadStoreFile_ShortReadStillSniffsFullHeader(t *testing.T) {
 		t.Errorf("size = %d, want %d", size, len(data))
 	}
 }
+
+// A 3GPP clip stores its brand in the ftyp box; without the sniff it lands as
+// application/octet-stream and chat offers only a download.
+func TestUploadSniff_ThreeGPPBrands(t *testing.T) {
+	for _, tc := range []struct{ brand, want string }{
+		{"3gp4", "video/3gpp"},
+		{"3gp5", "video/3gpp"},
+		{"3g2a", "video/3gpp"},
+		{"qt  ", "video/quicktime"},
+	} {
+		hdr := append([]byte{0, 0, 0, 0x18}, []byte("ftyp"+tc.brand)...)
+		hdr = append(hdr, make([]byte, 16)...)
+		if got := api.SniffMIMEForTest(hdr); got != tc.want {
+			t.Errorf("brand %q sniffed as %q, want %q", tc.brand, got, tc.want)
+		}
+	}
+}

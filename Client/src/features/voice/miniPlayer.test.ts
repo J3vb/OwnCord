@@ -5,6 +5,7 @@ import {
   resetMiniPlayerPosition,
   type MiniPlayer,
 } from "./miniPlayer";
+import { registerVideoSurface } from "../../lib/videoSurface";
 
 /** jsdom lays nothing out: give the player a size. */
 function sized(player: MiniPlayer, width: number, height: number): void {
@@ -31,6 +32,17 @@ describe("mini-player", () => {
     player?.close();
     player = null;
     resetMiniPlayerPosition();
+  });
+
+  it("takes a canvas-drawn stream's canvas along with its video (Linux)", () => {
+    const track = { kind: "video" } as MediaStreamTrack;
+    const canvas = document.createElement("canvas");
+    registerVideoSurface(track, canvas);
+    const video = document.createElement("video");
+    video.srcObject = { getVideoTracks: () => [track] } as unknown as MediaStream;
+    player = open({ video }).player;
+    expect(video.nextSibling).toBe(canvas);
+    expect(player.element.contains(canvas)).toBe(true);
   });
 
   it("keeps a position inside the window", () => {

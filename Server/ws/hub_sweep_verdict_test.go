@@ -29,6 +29,9 @@ func (a partialSweepAuthn) SweepSessions(context.Context, []string) (map[string]
 func (a partialSweepAuthn) RecordSocketConnect(context.Context, int64, string) {}
 
 func (a partialSweepAuthn) TouchSession(context.Context, string) error { return nil }
+func (a partialSweepAuthn) RecordSessionIdentityKey(context.Context, string, string) error {
+	return nil
+}
 
 // TestSweepRevokedSessions_MissingVerdictFailsClosed pins the sweep's posture
 // for a session the authenticator did not answer for: kick, exactly as the
@@ -55,8 +58,8 @@ func TestSweepRevokedSessions_MissingVerdictFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	answered := newClient(h, nil, &db.User{ID: 1, Username: "answered"}, "hash-answered-live", 0, ctx)
 	unanswered := newClient(h, nil, &db.User{ID: 2, Username: "unanswered"}, "hash-nobody-answered-for", 0, ctx)
-	h.clients[answered.userID] = answered
-	h.clients[unanswered.userID] = unanswered
+	h.clients[answered.userID] = []*Client{answered}
+	h.clients[unanswered.userID] = []*Client{unanswered}
 
 	h.sweepRevokedSessions(context.Background())
 

@@ -10,6 +10,7 @@
  * A11y: role="dialog", aria-label, focus trap, return focus on close.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
@@ -26,6 +27,9 @@ import { paintBanner } from "../features/profiles/banner";
 import { bannerImages } from "./bannerImages";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
+import { playingForLine } from "../features/members/gameActivityLine";
+import { mountListeningCard } from "../features/members/listeningCard";
+import type { ListeningSong } from "../features/members/listeningLine";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -43,6 +47,11 @@ export interface UserProfileData {
   readonly about?: string | null;
   /** Free-text status line, shown under the name. */
   readonly customStatus?: string | null;
+  /** The game being played (WP 8.3), shown as "Playing <game> · for N min". */
+  readonly activity?: { readonly name: string; readonly startedAt: number } | null;
+  /** The song being listened to (WP 8.10): a card under the game with a
+   *  progress bar that ticks while the popup is open. */
+  readonly listening?: ListeningSong | null;
   readonly joinDate?: string | null;
   /** Banner image path and colour (WP 6.11); absent or null = the gradient. */
   readonly banner?: string | null;
@@ -216,6 +225,7 @@ function buildAvatar(user: UserProfileData): HTMLDivElement {
     },
     {
       className: "upp-avatar",
+      animate: "always",
       background: user.isDeleted === true ? "#4e5058" : "var(--accent, #5865f2)",
     },
   );
@@ -310,6 +320,31 @@ export function createUserProfilePopup(
     const customStatusEl = createElement("div", { class: "upp-custom-status" });
     if (typeof user.customStatus === "string" && user.customStatus.length > 0) {
       setText(customStatusEl, user.customStatus);
+    }
+
+    // The game being played, under the custom status (WP 8.3). Empty (and
+    // hidden by CSS) when there is none.
+    const activityEl = createElement("div", {
+      class: "upp-activity",
+      "data-testid": "upp-activity",
+    });
+    if (user.activity != null && user.isDeleted !== true) {
+      const icon = createIcon("gamepad-2", 14);
+      icon.setAttribute("aria-hidden", "true");
+      icon.classList.add("upp-activity-icon");
+      const text = createElement("span", { class: "upp-activity-text" });
+      setText(text, playingForLine(user.activity, Date.now()));
+      appendChildren(activityEl, icon, text);
+    }
+
+    // The song being listened to, under the game (WP 8.10). Its clock stops
+    // with the popup.
+    const listeningEl = createElement("div", {
+      class: "upp-listening",
+      "data-testid": "upp-listening",
+    });
+    if (user.listening != null && user.isDeleted !== true) {
+      disposable.addCleanup(mountListeningCard(listeningEl, user.listening, { prefix: "upp" }));
     }
 
     // Role badge, or the role picker for a viewer who may change it.
@@ -508,7 +543,7 @@ export function createUserProfilePopup(
             else if (e.key === "ArrowUp") focusRoleOption(at - 1);
             else if (e.key === "Home") focusRoleOption(0);
             else if (e.key === "End") focusRoleOption(-1);
-            else if (e.key === "Escape") {
+            else if (e.key === "Escape" && !isImeCommit(e)) {
               e.stopPropagation();
               closeRoleMenu(true);
               return;
@@ -636,7 +671,7 @@ export function createUserProfilePopup(
             else if (e.key === "ArrowUp") focusRoleOption(at - 1);
             else if (e.key === "Home") focusRoleOption(0);
             else if (e.key === "End") focusRoleOption(-1);
-            else if (e.key === "Escape") {
+            else if (e.key === "Escape" && !isImeCommit(e)) {
               // Closes the list only; the card stays.
               e.stopPropagation();
               closeRoleMenu(true);
@@ -851,6 +886,8 @@ export function createUserProfilePopup(
       nameEl,
       handleEl,
       customStatusEl,
+      activityEl,
+      listeningEl,
       roleHolder,
       statusLine,
       aboutSection,
@@ -913,7 +950,7 @@ export function createUserProfilePopup(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape" && isOpen()) {
+        if (e.key === "Escape" && !isImeCommit(e) && isOpen()) {
           close();
         }
       },

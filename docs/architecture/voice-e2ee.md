@@ -118,6 +118,24 @@ and, if it later changes, accept the new key once the announce verifies
 against it, replacing the pin and showing a persistent notice (see
 [ux/voice-and-e2ee.md](ux/voice-and-e2ee.md)).
 
+Each device has its own identity keypair, so the key a peer verifies against
+travels with the connection, not the account. The `auth` frame carries the
+device's `identity_public_key`; `Server/ws` keeps it on the `Client`
+(immutable after the handshake) and on the session row
+(`sessions.identity_public_key`, migration 085), and `buildVoiceE2EEAnnounce`
+attaches it to each `voice_e2ee_announce`. The first connection of an app
+start cannot put the key in its `auth` frame (the user id that scopes it only
+arrives in `auth_ok`), so the client also puts the key in its own
+`voice_e2ee_announce`, and the server stores that key in preference to the
+`auth`-frame one. The key is stored inside the stored
+announce (`e2eeAnnounce.identityKey`), so the replay to a late joiner, a
+resumed socket and the key holder's re-relay all carry the key of the
+connection that made the announce. When a call moves to another device, that
+device's own announce replaces the stored one, so later replays carry the new
+device's key. A new client verifies an announce against its
+`identity_public_key` when present and against the member's published key
+otherwise. An older client sends no key and its announces carry none.
+
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
 `Client/src/lib/livekitSession.ts`, `Client/src/features/voice/`,
 `Client/src/lib/livekitE2EE.ts`, `Client/src/lib/e2eeCrypto.ts`,
@@ -321,8 +339,13 @@ the call. Three routes:
 
 **Remote video.** On `trackSubscribed` for a video track, `NativeRoom` opens a
 `NativeVideoRenderer` (`features/voice/native/videoRenderer.ts`): it draws each
-frame with a WebGL2 I420→RGB shader (BT.601 limited range) and exposes the
-canvas as a `MediaStreamTrack` (`canvas.captureStream()`). The adapter raises
+frame with a WebGL2 I420→RGB shader (BT.601 limited range). The canvas itself
+is the picture: `lib/videoSurface.ts` shows it right after any `<video>` given
+the renderer's `MediaStreamTrack` and hides that `<video>`, following it into
+the pop-out window, the mini-player and back. The track is
+`canvas.captureStream(0)` and carries no frames: on some WebKitGTK GPU stacks
+a captured canvas reached the `<video>` as its first two frames only, and
+remote video froze. The adapter raises
 `RoomEvent.TrackSubscribed` with that track, so `roomEventHandlers`, the video
 grid consumes a MediaStream exactly
 as they do on Windows. `trackUnsubscribed`, `trackUnpublished` and a
@@ -339,7 +362,8 @@ below). `NativeRoom.localParticipant.createCameraTracks` is the stand-in for
 the room exposes it, so Windows and macOS keep the web path. It starts a
 `GstDeviceMonitor`-listed `Video/Source` (V4L2 or PipeWire) through
 `v4l2src`/`pipewiresrc` (or the monitor's own element for the id) →
-`decodebin` → `videoconvert` → an I420 `appsink`, capped at the selected
+a capsfilter pinning the camera mode → `decodebin` → `videoconvert` → an I420
+`appsink`, capped at the selected
 preset's resolution (720p for the default "medium", 1080p when chosen; "source"
 is uncapped, `createCameraTracks`' `resolution` option), and returns a
 `NativeCameraTrack` whose `mediaStreamTrack` is the capture's local preview
@@ -362,7 +386,19 @@ mid-capture ends the stream; the backend sends `cameraCaptureEnded` and the
 track raises `ended`, which the shared code already handles by turning the
 camera off. The settings tab's own camera preview has no room: it starts a
 capture and its own frame socket (`native_voice_start_camera_preview`), read
-back over the same `camera` route. Screen share is phase 3 (below).
+back over the same `camera` route. During a call whose camera runs, the device
+is the call's (V4L2 refuses a second open), so the preview start returns the
+call's frame socket instead; the call's camera start drops a standalone preview
+first. Either way the preview's socket closes and the tab starts the preview
+again, which then shows whichever capture owns the camera.
+
+The camera mode is chosen, not left to the source: `v4l2src` on its own takes
+raw over MJPEG and the largest size, and a laptop webcam's 1080p YUYV mode
+often runs at 5 fps. `pick_mode` (`camera.rs`) reads the device's listed modes
+and takes one that reaches the asked rate, at the smallest size covering the
+cap (raw before MJPEG at equal size); a pinned mode that fails to negotiate
+before its first frame falls back to the source's own choice. Screen share is
+phase 3 (below).
 
 **E2EE covers video exactly as audio.** The camera is published into the same
 room, whose single key provider and `KEY_INDEX` 0 already cover every sender
@@ -819,7 +855,13 @@ the watcher switches back to it on the first tick it is listed again. A
 restart kills the host connection, so the watcher rebuilds it (`WatchedHost`
 in `playout.rs`), never onto a lower backend than the one in use: while the
 server is down `cpal`'s default host is ALSA, whose constant `default` device
-would hide every later move of the real default. It adds one thread for the
+would hide every later move of the real default. Hosts come from one
+process-wide pool (`HostPool` in `playout.rs`), one per backend and role
+(device lists, capture, playout): an idle dropped PulseAudio host never closes
+its connection (pulseaudio 0.3.1's reactor thread is never woken to notice),
+so a host is only replaced once its connection is dead, and capture and
+playout keep separate connections because each connection runs its streams'
+callbacks on one thread. The watcher adds one thread for the
 call, starts when the stream first opens, and is stopped and joined when the
 session closes.
 

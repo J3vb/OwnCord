@@ -37,11 +37,6 @@ func (d *DB) UpdateUserProfile(ctx context.Context, userID int64, username strin
 	return nil
 }
 
-// CustomStatusExpiryLayout is how users.custom_status_expires_at is written:
-// UTC, second precision, the same shape SQLite's strftime renders, so the
-// stored text compares correctly as a string.
-const CustomStatusExpiryLayout = "2006-01-02T15:04:05Z"
-
 // UpdateUserCustomStatus sets (or clears, with nil) the user's custom status
 // line with no expiry, clearing any expiry the old text carried. Kept separate
 // from UpdateUserProfile because it arrives on the presence path and must not
@@ -95,7 +90,7 @@ func (d *DB) NextCustomStatusExpiry(ctx context.Context) (next string, ok bool, 
 }
 
 // ListExpiredCustomStatuses returns up to limit statuses whose expiry is at or
-// before now (CustomStatusExpiryLayout text), oldest first.
+// before now (dbtime.ISOLayout text), oldest first.
 func (d *DB) ListExpiredCustomStatuses(ctx context.Context, now string, limit int) ([]ExpiredCustomStatus, error) {
 	rows, err := d.q.ListExpiredCustomStatuses(ctx, dbgen.ListExpiredCustomStatusesParams{
 		CustomStatusExpiresAt: &now,
@@ -172,7 +167,7 @@ func (d *DB) ListUserSessions(ctx context.Context, userID int64) ([]Session, err
 	}
 	sessions := make([]Session, 0, len(rows))
 	for _, s := range rows {
-		sessions = append(sessions, sessionFromGen(s))
+		sessions = append(sessions, sessionFromColumns(s.ID, s.UserID, s.Token, s.Device, s.IpAddress, s.CreatedAt, s.LastUsed, s.ExpiresAt, s.Unseen))
 	}
 	return sessions, nil
 }
@@ -241,4 +236,18 @@ func (d *DB) SignOutEverywhere(ctx context.Context, userID int64) (sessions, tok
 		return 0, 0, fmt.Errorf("SignOutEverywhere commit: %w", err)
 	}
 	return sessions, tokens, nil
+}
+
+// SetSessionIdentityKey stores the device identity public key a WebSocket
+// auth frame carried on the session that authenticated it. A token hash that
+// matches no row changes nothing and is not an error: the session may have
+// been revoked between the handshake read and this write.
+func (d *DB) SetSessionIdentityKey(ctx context.Context, tokenHash, key string) error {
+	if _, err := d.q.SetSessionIdentityKey(ctx, dbgen.SetSessionIdentityKeyParams{
+		IdentityPublicKey: &key,
+		Token:             tokenHash,
+	}); err != nil {
+		return fmt.Errorf("SetSessionIdentityKey: %w", err)
+	}
+	return nil
 }

@@ -12,6 +12,7 @@ vi.mock("@lib/livekitSession", () => ({
   getUserVolume: vi.fn(() => 1),
   getUserLocalMute: (userId: number) => mockGetUserLocalMute(userId),
   rePinPeerIdentity: mockRePinPeerIdentity,
+  peerAnnouncedIdentityKey: vi.fn(() => null),
 }));
 
 const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }));
@@ -2433,6 +2434,75 @@ describe("ChannelSidebar", () => {
     expect((await reopen())!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
+  it("offers only Move to to a role whose verdict is can_move_voice without can_moderate_voice (WP 8.4b)", async () => {
+    const cb = voiceModCallbacks();
+    const channels: ReadyChannel[] = [
+      ...testChannels.map((ch) =>
+        ch.type === "voice" ? { ...ch, can_moderate_voice: false, can_move_voice: true } : ch,
+      ),
+      {
+        id: 5,
+        name: "voice-two",
+        type: "voice",
+        category: "Voice Channels",
+        position: 1,
+        can_moderate_voice: false,
+        can_move_voice: true,
+      },
+    ];
+    const menu = await openVoiceMenuAs(Permission.MOVE_MEMBERS, {}, cb, channels, null);
+    expect(menu!.querySelector('[data-action="move-to"]')).not.toBeNull();
+    expect(menu!.querySelector('[data-action="server-mute"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="server-deafen"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="voice-disconnect"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
+    const target = menu!.querySelector<HTMLElement>('[data-move-channel="5"]');
+    expect(target).not.toBeNull();
+    target!.click();
+    expect(cb.onMove).toHaveBeenCalledWith(80, 5);
+  });
+
+  it("shows the full section when can_moderate_voice is true even if can_move_voice is false", async () => {
+    const channels = testChannels.map((ch) =>
+      ch.type === "voice" ? { ...ch, can_moderate_voice: true, can_move_voice: false } : ch,
+    );
+    const menu = await openVoiceMenuAs(
+      Permission.MUTE_MEMBERS,
+      {},
+      voiceModCallbacks(),
+      channels,
+      null,
+    );
+    expect(menu!.querySelector('[data-action="server-mute"]')).not.toBeNull();
+    expect(menu!.querySelector('[data-action="voice-disconnect"]')).not.toBeNull();
+  });
+
+  it("offers nothing when both verdicts are false", async () => {
+    const channels = testChannels.map((ch) =>
+      ch.type === "voice" ? { ...ch, can_moderate_voice: false, can_move_voice: false } : ch,
+    );
+    const menu = await openVoiceMenuAs(
+      Permission.MOVE_MEMBERS,
+      {},
+      voiceModCallbacks(),
+      channels,
+      null,
+    );
+    expect(menu!.querySelector('[data-action="move-to"]')).toBeNull();
+    expect(menu!.querySelector('[data-action="voice-mod-unavailable"]')).toBeNull();
+  });
+
+  it("says why to a role holding MOVE_MEMBERS when the server gave no verdict", async () => {
+    const menu = await openVoiceMenuAs(
+      Permission.MOVE_MEMBERS,
+      {},
+      voiceModCallbacks(),
+      testChannels,
+      null,
+    );
+    expect(menu!.querySelector('[data-action="voice-mod-unavailable"]')).not.toBeNull();
+  });
+
   it("hides the moderation section when the page wired no callbacks", async () => {
     const menu = await openVoiceMenuAs(Permission.MUTE_MEMBERS);
     expect(menu).not.toBeNull();
@@ -3069,7 +3139,7 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(own!.getAttribute("title")).toContain("0123 4567 89AB CDEF");
   });
 
-  it("shows a key-changed badge, not a plain verified one, after a changed key was accepted", () => {
+  it("shows a new-device badge, not a plain verified one, after a new device key was accepted", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     setPeerVerif(10, "changed", "AB12 CD34");
     sidebar.mount(container);
@@ -3077,7 +3147,7 @@ describe("ChannelSidebar voice identity badge", () => {
     const badge = badgeFor(10);
     expect(badge).not.toBeNull();
     expect(badge!.classList.contains("changed")).toBe(true);
-    expect(badge!.getAttribute("title")).toContain("Security key changed");
+    expect(badge!.getAttribute("title")).toContain("New device");
     expect(badge!.getAttribute("title")).toContain("AB12 CD34");
     expect(badge!.getAttribute("title")).not.toContain("Same key as before");
   });

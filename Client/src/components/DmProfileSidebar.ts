@@ -11,13 +11,15 @@
  * focus first focusable on open.
  */
 
+import { isImeCommit } from "@lib/ime";
 import { Disposable } from "@lib/disposable";
 import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
-import { isRenderableAvatar } from "./message-list/avatar";
+import { isRenderableAvatar, setAvatarSource } from "./message-list/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
@@ -28,6 +30,9 @@ import { paintBanner } from "../features/profiles/banner";
 import { bannerImages } from "./bannerImages";
 import { shellText, statusLabel } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";
+import { playingForLine } from "../features/members/gameActivityLine";
+import { mountListeningCard } from "../features/members/listeningCard";
+import type { ListeningSong } from "../features/members/listeningLine";
 import {
   NOTE_MAX_LENGTH,
   createNoteBinding,
@@ -47,6 +52,10 @@ export interface DmProfileData {
   readonly displayName?: string | null;
   readonly avatar: string | null;
   readonly status: UserStatus;
+  /** The game being played (WP 8.3): "Playing <game> · for N min" under the status. */
+  readonly activity?: { readonly name: string; readonly startedAt: number } | null;
+  /** The song being listened to (WP 8.10), with a progress bar that ticks while open. */
+  readonly listening?: ListeningSong | null;
   readonly about?: string | null;
   readonly joinDate?: string | null;
   /** Banner image path and colour; absent or null = no strip (WP 6.11d). */
@@ -159,6 +168,33 @@ export function createDmProfileSidebar(
   let statusDotNode: HTMLDivElement | null = null;
   let statusDotInlineNode: HTMLSpanElement | null = null;
   let statusTextNode: HTMLSpanElement | null = null;
+  let activityNode: HTMLDivElement | null = null;
+  let listeningNode: HTMLDivElement | null = null;
+  /** Stops the song card's clock; null when no card is drawn. */
+  let stopListening: (() => void) | null = null;
+
+  /** Draw (or clear) the "Playing <game> · for N min" line from `user`. */
+  function paintActivity(): void {
+    if (activityNode === null) return;
+    activityNode.replaceChildren();
+    if (user.activity == null) return;
+    const icon = createIcon("gamepad-2", 14);
+    icon.setAttribute("aria-hidden", "true");
+    icon.classList.add("dps-activity-icon");
+    const text = createElement("span", { class: "dps-activity-text" });
+    setText(text, playingForLine(user.activity, Date.now()));
+    appendChildren(activityNode, icon, text);
+  }
+
+  /** Draw (or clear) the song card from `user`, restarting its clock. */
+  function paintListening(): void {
+    stopListening?.();
+    stopListening = null;
+    if (listeningNode === null) return;
+    listeningNode.replaceChildren();
+    if (user.listening == null) return;
+    stopListening = mountListeningCard(listeningNode, user.listening, { prefix: "dps" });
+  }
 
   function isOpen(): boolean {
     return open;
@@ -186,14 +222,12 @@ export function createDmProfileSidebar(
     if (isRenderableAvatar(user.avatar)) {
       const resolved = resolveServerUrl(user.avatar);
       const name = resolveDisplayName(user);
-      void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
-        if (objectUrl === null || !wrapper.isConnected || gen !== avatarGen) return;
-        const img = createElement("img", {
-          src: objectUrl,
-          alt: name,
-          class: "dps-avatar-img",
-        });
+      void fetchImageAsObjectUrl(resolved).then(async (objectUrl) => {
+        const current = (): boolean => wrapper.isConnected && gen === avatarGen;
+        if (objectUrl === null || !current()) return;
+        const img = createElement("img", { alt: name, class: "dps-avatar-img" });
         recoverEvictedImage(img, { url: resolved });
+        if (!(await setAvatarSource(img, objectUrl, () => "always", current))) return;
         letter.remove();
         wrapper.style.background = "transparent";
         wrapper.insertBefore(img, wrapper.firstChild);
@@ -270,7 +304,21 @@ export function createDmProfileSidebar(
     statusTextNode = statusText;
     appendChildren(statusLine, statusDotInline, statusText);
 
-    appendChildren(content, nameEl, statusLine);
+    const activityLine = createElement("div", {
+      class: "dps-activity",
+      "data-testid": "dps-activity",
+    });
+    activityNode = activityLine;
+    paintActivity();
+
+    const listeningLine = createElement("div", {
+      class: "dps-listening",
+      "data-testid": "dps-listening",
+    });
+    listeningNode = listeningLine;
+    paintListening();
+
+    appendChildren(content, nameEl, statusLine, activityLine, listeningLine);
 
     // About section
     if (user.about !== undefined && user.about !== null && user.about.length > 0) {
@@ -449,7 +497,7 @@ export function createDmProfileSidebar(
     window.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape") escapeTaken = dialogOpen();
+        if (e.key === "Escape" && !isImeCommit(e)) escapeTaken = dialogOpen();
       },
       { capture: true, signal },
     );
@@ -458,7 +506,7 @@ export function createDmProfileSidebar(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key !== "Escape" || !open) return;
+        if (e.key !== "Escape" || isImeCommit(e) || !open) return;
         if (escapeTaken || e.defaultPrevented) return;
         if (panel === null || !panel.contains(document.activeElement)) return;
         e.preventDefault();
@@ -486,6 +534,10 @@ export function createDmProfileSidebar(
     statusDotNode = null;
     statusDotInlineNode = null;
     statusTextNode = null;
+    activityNode = null;
+    stopListening?.();
+    stopListening = null;
+    listeningNode = null;
   }
 
   function update(nextUser: DmProfileData): void {
@@ -521,6 +573,8 @@ export function createDmProfileSidebar(
       statusDotInlineNode.style.background = color;
     }
     if (statusTextNode !== null) setText(statusTextNode, label);
+    paintActivity();
+    paintListening();
 
     // A changed avatar swaps the face (letter or picture); an unchanged one
     // only refreshes the fallback letter, if it is still showing, since the

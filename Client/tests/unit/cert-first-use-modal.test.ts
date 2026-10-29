@@ -35,6 +35,26 @@ describe("createCertFirstUseModal (F4/F8)", () => {
     expect(container.querySelector(".modal-overlay")).toBeNull();
   });
 
+  it("does not reject when a drag-select ends on the backdrop, and a backdrop click rejects", () => {
+    const onReject = vi.fn();
+    const modal = createCertFirstUseModal({
+      host: "example.com:8443",
+      fingerprint: "aa:bb:cc:dd:ee:ff",
+      onAccept: vi.fn(),
+      onReject,
+    });
+    const container = document.createElement("div");
+    modal.mount(container);
+    const overlay = container.querySelector<HTMLElement>(".modal-overlay")!;
+    overlay.querySelector(".modal")!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onReject).not.toHaveBeenCalled();
+    overlay.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onReject).toHaveBeenCalledTimes(1);
+    modal.destroy?.();
+  });
+
   it("carries dialog semantics labelled by the h3 title", () => {
     const modal = createCertFirstUseModal({
       host: "example.com:8443",

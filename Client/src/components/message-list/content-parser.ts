@@ -44,6 +44,7 @@ import {
   type InlineStyle,
 } from "@lib/markdown";
 import { highlightCode, resolveLanguage, type CodeToken } from "./syntax-highlight";
+import { copyThenRelabel } from "@lib/clipboard";
 
 // -- Regex constants ----------------------------------------------------------
 
@@ -737,7 +738,15 @@ export function resyncMentions(root: ParentNode, info?: MentionInfo): void {
       const parent = textNode.parentElement;
       if (parent === null || parent.closest(MENTION_OPAQUE_SELECTOR) !== null) continue;
       const wrapped = wrapResolvedMentions(textNode.nodeValue ?? "", info);
-      if (wrapped !== null) textNode.replaceWith(wrapped);
+      if (wrapped === null) continue;
+      // A token in a masked link's label that resolves only now stays plain
+      // link content too, or a click on it would open a profile, not the link.
+      if (parent.closest("a.msg-link.masked") !== null) {
+        for (const chip of wrapped.querySelectorAll<HTMLElement>(".mention")) {
+          stripMentionControl(chip);
+        }
+      }
+      textNode.replaceWith(wrapped);
     }
   }
 }
@@ -947,16 +956,16 @@ function renderParsedCodeBlock(segment: Extract<ParsedSegment, { kind: "code" }>
   const copyBtn = createElement("button", { class: "msg-codeblock-copy" });
   setText(copyBtn, messagingText("code.copy"));
   copyBtn.addEventListener("click", () => {
-    void navigator.clipboard
-      .writeText(code)
-      .then(() => {
-        setText(copyBtn, messagingText("code.copied"));
-        setTimeout(() => setText(copyBtn, messagingText("code.copy")), 2000);
-      })
-      .catch(() => {
-        setText(copyBtn, messagingText("code.copyFailed"));
-        setTimeout(() => setText(copyBtn, messagingText("code.copy")), 2000);
-      });
+    copyThenRelabel(
+      code,
+      copyBtn,
+      {
+        idle: messagingText("code.copy"),
+        done: messagingText("code.copied"),
+        failed: messagingText("code.copyFailed"),
+      },
+      { ms: 2000 },
+    );
   });
 
   wrap.appendChild(block);

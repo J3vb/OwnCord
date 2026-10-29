@@ -197,7 +197,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// WebSocket hub — built, wired and started by internal/app; WS does its
 	// own in-band auth, so no AuthMiddleware here.
 	hub := rt.Hub
-	getOnlineUsers = func() int { return hub.ClientCount() }
+	getOnlineUsers = func() int { return hub.UserCount() }
 	hubAlive = func() bool { return hub.DispatchAlive() }
 
 	// Auth routes. StartRuntime built the service over the hub (its
@@ -240,6 +240,11 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// mounted at all (a 404 the client reads as "this server has no emoji").
 	if store != nil {
 		MountEmojiRoutes(r, svc, store, limiter, hub)
+		// Custom sticker routes (WP 8.8a), on the same storage and for the
+		// same reason. The service is nil when the store cannot hold stickers.
+		if svc.Stickers != nil {
+			MountStickerRoutes(r, svc, store, limiter, hub)
+		}
 	}
 
 	// Report intake, moderator actions and appeals (B5-8/B5-9/B5-10) —
@@ -495,7 +500,7 @@ func routerMetricsRoutes(r chi.Router, cfg *config.Config, database *db.DB, svc 
 	// admin_allowed_cidrs) so a central scraper can be admitted without widening
 	// /admin. The shape is documented in docs/deployment.md — keep the two in sync.
 	src := MetricsSources{
-		ConnectedUsers:      hub.ClientCount,
+		ConnectedUsers:      hub.UserCount,
 		VoiceSessions:       hub.VoiceSessionCount,
 		BroadcastDrops:      hub.BroadcastDropCount,
 		TopicSheds:          hub.TopicShedCount,

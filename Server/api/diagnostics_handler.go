@@ -76,7 +76,7 @@ func handleDiagnosticsConnectivity(
 				Version:     ver,
 				Uptime:      int64(time.Since(serverStartTime).Seconds()),
 				GoVersion:   runtime.Version(),
-				OnlineUsers: hub.ClientCount(),
+				OnlineUsers: hub.UserCount(),
 			},
 			Voice: voiceDiag{
 				Enabled:       cfg.Voice.LiveKitURL != "",

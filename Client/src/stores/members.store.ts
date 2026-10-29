@@ -5,7 +5,60 @@
 
 import { createStore } from "@lib/store";
 import { registerSessionReset } from "@lib/sessionRegistry";
-import type { ReadyMember, MemberJoinPayload, PresenceBatchEntry, UserStatus } from "@lib/types";
+import type {
+  GameActivity,
+  ListeningActivity,
+  ReadyActivity,
+  ReadyListening,
+  ReadyMember,
+  MemberJoinPayload,
+  PresenceBatchEntry,
+  UserStatus,
+} from "@lib/types";
+
+/** The game a member is playing (WP 8.3). Session state: a presence event, a
+ *  full presence snapshot or `ready.activities` set it, and a new roster or
+ *  sign-out clears it with the rest of the store. */
+export interface MemberActivity {
+  readonly name: string;
+  /** Unix milliseconds the game started. */
+  readonly startedAt: number;
+}
+
+/** The wire shape as the store keeps it; a blank name is no game. */
+export function toMemberActivity(raw: GameActivity | null | undefined): MemberActivity | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw.name !== "string" || raw.name.trim() === "") return null;
+  return { name: raw.name, startedAt: raw.started_at };
+}
+
+/** The song a member is listening to (WP 8.10). Session state, set and cleared
+ *  the same ways as `MemberActivity`. */
+export interface MemberListening {
+  readonly title: string;
+  /** May be empty. */
+  readonly artist: string;
+  readonly player: string;
+  /** Unix milliseconds the song would have started at. */
+  readonly startedAt: number;
+  /** The song's length in milliseconds; 0 = unknown. */
+  readonly durationMs: number;
+}
+
+/** The wire shape as the store keeps it; a blank title or player is no song. */
+export function toMemberListening(
+  raw: ListeningActivity | null | undefined,
+): MemberListening | null {
+  if (raw === null || raw === undefined) return null;
+  if (!raw.title?.trim() || !raw.player?.trim()) return null;
+  return {
+    title: raw.title,
+    artist: raw.artist ?? "",
+    player: raw.player,
+    startedAt: raw.started_at,
+    durationMs: raw.duration_ms > 0 ? raw.duration_ms : 0,
+  };
+}
 
 export interface Member {
   readonly id: number;
@@ -26,6 +79,10 @@ export interface Member {
    *  told it, so it is set on your own entry alone. Null = no expiry,
    *  undefined = not known (use auth_ok's). */
   readonly customStatusExpiresAt?: string | null;
+  /** The game being played. Null or undefined = none. */
+  readonly activity?: MemberActivity | null;
+  /** The song being listened to (WP 8.10). Null or undefined = none. */
+  readonly listening?: MemberListening | null;
   /** Profile text. Null = unset, undefined = never sent (older server). */
   readonly about?: string | null;
   /** Banner image path. Null = none, undefined = none or never sent. */
@@ -108,6 +165,17 @@ export function setMembers(members: readonly ReadyMember[]): void {
   }));
 }
 
+/** A rejoining member keeps the game their last presence told us about. */
+function keepActivity(existing: Member | undefined): {
+  activity?: MemberActivity | null;
+  listening?: MemberListening | null;
+} {
+  return {
+    ...(existing?.activity === undefined ? {} : { activity: existing.activity }),
+    ...(existing?.listening === undefined ? {} : { listening: existing.listening }),
+  };
+}
+
 /** Add a member from a member_join event.
  *  status comes from the payload's viewer-safe field, never assumed —
  *  an invisible user's join broadcasts "offline", and a server old enough to
@@ -127,6 +195,7 @@ export function addMember(payload: MemberJoinPayload): void {
       // member_join carries no custom status; a presence event follows it and
       // is what fills this in.
       customStatus: prev.members.get(payload.user.id)?.customStatus ?? null,
+      ...keepActivity(prev.members.get(payload.user.id)),
       identityPublicKey: payload.user.identity_public_key ?? null,
       ...(payload.user.about === undefined ? {} : { about: payload.user.about }),
       ...(payload.user.banner === undefined ? {} : { banner: payload.user.banner }),
@@ -226,6 +295,8 @@ export function updatePresence(
   status: UserStatus,
   customStatus?: string | null,
   customStatusExpiresAt?: string | null,
+  activity?: GameActivity | null,
+  listening?: ListeningActivity | null,
 ): void {
   membersStore.setState((prev) => {
     const existing = prev.members.get(userId);
@@ -236,6 +307,9 @@ export function updatePresence(
       status,
       customStatus: customStatus === undefined ? existing.customStatus : customStatus,
       ...nextCustomStatusExpiry(existing, customStatus, customStatusExpiresAt),
+      // Absent = an older server (or your own optimistic status flip): the shown game stays.
+      ...(activity === undefined ? {} : { activity: toMemberActivity(activity) }),
+      ...(listening === undefined ? {} : { listening: toMemberListening(listening) }),
     });
     return { ...prev, members: next };
   });
@@ -251,7 +325,15 @@ export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full:
     if (full) {
       const listed = new Set(updates.map((u) => u.user_id));
       for (const [id, m] of next) {
-        if (!listed.has(id)) next.set(id, { ...m, status: "offline", customStatus: null });
+        if (!listed.has(id)) {
+          next.set(id, {
+            ...m,
+            status: "offline",
+            customStatus: null,
+            activity: null,
+            listening: null,
+          });
+        }
       }
     }
     for (const u of updates) {
@@ -262,7 +344,53 @@ export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full:
         status: u.status,
         customStatus: u.custom_status,
         ...nextCustomStatusExpiry(existing, u.custom_status, undefined),
+        ...(u.activity === undefined ? {} : { activity: toMemberActivity(u.activity) }),
+        ...(u.listening === undefined ? {} : { listening: toMemberListening(u.listening) }),
       });
+    }
+    return { ...prev, members: next };
+  });
+}
+
+/** Apply `ready.activities`: the listed members play those games and everyone
+ *  else plays nothing. Run after `setMembers` has put the roster in. */
+export function applyReadyActivities(list: readonly ReadyActivity[]): void {
+  const byUser = new Map<number, MemberActivity>();
+  for (const a of list) {
+    const activity = toMemberActivity(a);
+    if (activity !== null) byUser.set(a.user_id, activity);
+  }
+  membersStore.setState((prev) => {
+    const next = new Map(prev.members);
+    for (const [id, m] of next) {
+      const activity = byUser.get(id) ?? null;
+      const current = m.activity ?? null;
+      const same = current?.name === activity?.name && current?.startedAt === activity?.startedAt;
+      // A member a roster snapshot just made has no activity key yet: state it.
+      if (same && m.activity !== undefined) continue;
+      next.set(id, { ...m, activity });
+    }
+    return { ...prev, members: next };
+  });
+}
+
+/** Apply `ready.listening`: the listed members listen to those songs and
+ *  everyone else to nothing. Run after `setMembers` has put the roster in. */
+export function applyReadyListening(list: readonly ReadyListening[]): void {
+  const byUser = new Map<number, MemberListening>();
+  for (const l of list) {
+    const listening = toMemberListening(l);
+    if (listening !== null) byUser.set(l.user_id, listening);
+  }
+  membersStore.setState((prev) => {
+    const next = new Map(prev.members);
+    for (const [id, m] of next) {
+      const listening = byUser.get(id) ?? null;
+      // A member a roster snapshot just made has no listening key yet: state it.
+      if (m.listening !== undefined && JSON.stringify(m.listening) === JSON.stringify(listening)) {
+        continue;
+      }
+      next.set(id, { ...m, listening });
     }
     return { ...prev, members: next };
   });

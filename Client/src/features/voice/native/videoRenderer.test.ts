@@ -6,6 +6,7 @@ vi.mock("../../../lib/logger", () => ({
 
 import { NativeVideoRenderer, parseI420 } from "./videoRenderer";
 import { nativeCounters } from "./counters";
+import { syncVideoSurface, videoSurfaceOf } from "../../../lib/videoSurface";
 
 /** One frame-socket message, as `video.rs`'s `pack_i420` writes it. */
 function message(width: number, height: number, fill = 0): ArrayBuffer {
@@ -69,10 +70,13 @@ class FakeSocket {
 
 describe("NativeVideoRenderer", () => {
   const stop = vi.fn();
+  /** The frame rate each `captureStream` call asked for. */
+  const captures: Array<number | undefined> = [];
   const gl = {
     uploads: [] as Array<[number, number]>,
     draws: 0,
     lost: 0,
+    programs: 0,
   };
   beforeEach(() => {
     vi.stubGlobal("WebSocket", FakeSocket);
@@ -80,6 +84,7 @@ describe("NativeVideoRenderer", () => {
     gl.uploads.length = 0;
     gl.draws = 0;
     gl.lost = 0;
+    gl.programs = 0;
     nativeCounters.videoRenderers = 0;
     const context = {
       VERTEX_SHADER: 1,
@@ -89,7 +94,7 @@ describe("NativeVideoRenderer", () => {
       shaderSource: () => {},
       compileShader: () => {},
       getShaderParameter: () => true,
-      createProgram: () => ({}),
+      createProgram: () => (gl.programs++, {}),
       attachShader: () => {},
       linkProgram: () => {},
       getProgramParameter: () => true,
@@ -109,8 +114,13 @@ describe("NativeVideoRenderer", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
       context as unknown as RenderingContext,
     );
-    (HTMLCanvasElement.prototype as unknown as { captureStream: () => unknown }).captureStream =
-      () => ({ getVideoTracks: () => [{ stop }] });
+    captures.length = 0;
+    (
+      HTMLCanvasElement.prototype as unknown as { captureStream: (fps?: number) => unknown }
+    ).captureStream = (fps?: number) => {
+      captures.push(fps);
+      return { getVideoTracks: () => [{ stop }] };
+    };
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -162,6 +172,41 @@ describe("NativeVideoRenderer", () => {
     expect(nativeCounters.videoRenderers).toBe(0);
   });
 
+  it("is the picture of its track, which captures no frames", () => {
+    const renderer = new NativeVideoRenderer("ws://x");
+    // WebKitGTK's canvas capture freezes after the first frames on some GPU
+    // stacks: the tile shows the canvas instead of anything captured.
+    expect(captures).toEqual([0]);
+    const tile = document.createElement("div");
+    const video = document.createElement("video");
+    video.srcObject = {
+      getVideoTracks: () => [renderer.mediaStreamTrack],
+    } as unknown as MediaStream;
+    tile.appendChild(video);
+    expect(videoSurfaceOf(video)).toBe(renderer.canvas);
+    syncVideoSurface(video);
+    expect(video.nextSibling).toBe(renderer.canvas);
+    expect(renderer.canvas.className).toBe("video-surface");
+    // Disposed, the canvas leaves the tile with it.
+    renderer.dispose();
+    expect(renderer.canvas.parentNode).toBeNull();
+  });
+
+  it("has no size before its first frame, and sets up again after a lost context", () => {
+    const renderer = new NativeVideoRenderer("ws://x");
+    expect([renderer.canvas.width, renderer.canvas.height]).toEqual([0, 0]);
+    expect(gl.programs).toBe(1);
+    const lost = new Event("webglcontextlost", { cancelable: true });
+    renderer.canvas.dispatchEvent(lost);
+    // Without preventDefault WebKit never restores the context.
+    expect(lost.defaultPrevented).toBe(true);
+    renderer.canvas.dispatchEvent(new Event("webglcontextrestored"));
+    expect(gl.programs).toBe(2);
+    FakeSocket.last.deliver!({ data: message(4, 2) });
+    expect(gl.draws).toBe(1);
+    renderer.dispose();
+  });
+
   it("reopens the loopback socket after the host closes it (voice #13)", async () => {
     const renderer = new NativeVideoRenderer("ws://x/remote/sid");
     const first = FakeSocket.last;
@@ -177,5 +222,17 @@ describe("NativeVideoRenderer", () => {
     FakeSocket.last.deliver!({ data: message(4, 2) });
     expect(gl.draws).toBe(1);
     renderer.dispose();
+  });
+
+  it("hands a host close to its owner instead of reopening, until disposed", async () => {
+    const onClosed = vi.fn();
+    const renderer = new NativeVideoRenderer("ws://x/camera", onClosed);
+    FakeSocket.last.emitClose();
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    renderer.dispose();
+    FakeSocket.last.emitClose();
+    await new Promise((r) => setTimeout(r, 1100));
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    expect(FakeSocket.instances).toHaveLength(1);
   });
 });

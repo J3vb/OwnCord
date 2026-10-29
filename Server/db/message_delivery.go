@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 var (
@@ -54,6 +55,10 @@ type MessageDeliveryParams struct {
 	// answers commit with the message and the receipt. Content is the readable
 	// fallback text the service built from the same fields.
 	Poll *PollInput
+	// Sticker, when set, makes this send a sticker message (WP 8.8a): the
+	// message_stickers row commits with the message and the receipt. Content is
+	// the readable fallback the service built.
+	Sticker *StickerRef
 	// ForumPost, when set, makes this send a forum post (WP 6.9d-a2).
 	// ChannelID is the forum: the receipt is keyed on it, but the message is
 	// written into a thread the transaction creates under the forum, so the
@@ -191,7 +196,7 @@ func deliveryTargetChannel(ctx context.Context, q *dbgen.Queries, p MessageDeliv
 	if p.ForumPost == nil {
 		return p.ChannelID, nil
 	}
-	now := time.Now().UTC().Format(ThreadActivityLayout)
+	now := time.Now().UTC().Format(dbtime.ISOLayout)
 	return insertForumPost(ctx, q, p.ChannelID, p.UserID, p.ForumPost, now)
 }
 
@@ -207,7 +212,7 @@ func (d *DB) finishForumPost(ctx context.Context, q *dbgen.Queries, p MessageDel
 	return d.getThread(ctx, q, threadID)
 }
 
-// insertMessageSideRows writes the forward block or poll a message carries.
+// insertMessageSideRows writes the forward block, poll or sticker a message carries.
 func insertMessageSideRows(ctx context.Context, q *dbgen.Queries, messageID int64, p MessageDeliveryParams) error {
 	if p.Forward != nil {
 		if err := insertForwardRow(ctx, q, messageID, p.Forward); err != nil {
@@ -216,6 +221,11 @@ func insertMessageSideRows(ctx context.Context, q *dbgen.Queries, messageID int6
 	}
 	if p.Poll != nil {
 		if err := insertPollRows(ctx, q, messageID, p.Poll); err != nil {
+			return err
+		}
+	}
+	if p.Sticker != nil {
+		if err := insertStickerRow(ctx, q, messageID, p.Sticker); err != nil {
 			return err
 		}
 	}

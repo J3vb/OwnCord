@@ -38,12 +38,15 @@ import {
   globalKeysErrorCode,
   portalBoundBefore,
 } from "@lib/globalKeys";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, onPrefChange, savePref } from "@lib/preferences";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
+import type { GameActivityLoop } from "@lib/gameActivity";
+import type { MusicActivityLoop } from "@lib/musicActivity";
 import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { watchGroupDmExits } from "../features/direct-messages/groupExitWatch";
 import {
   voiceStore,
   isSelfMuted,
@@ -159,6 +162,11 @@ function personName(userId: number): string | undefined {
   return (member !== undefined ? memberDisplayName(member) : "") || voiceUser?.username;
 }
 
+/** What the DM profile panel repaints from a member's song. */
+function listeningKey(l: DmProfileData["listening"] | undefined): string {
+  return l == null ? "" : `${l.title}|${l.artist}|${l.player}|${l.startedAt}|${l.durationMs}`;
+}
+
 /** Saved preference: the 1:1 DM profile panel opens with the conversation. */
 const DM_PROFILE_PREF = "dmProfileOpen";
 
@@ -197,6 +205,10 @@ function buildDmProfileUser(channelId: number): DmProfileData | null {
     displayName: recipient.displayName ?? null,
     avatar: recipient.avatar || null,
     status,
+    // The live copy first, as for the status; the DM list's own copy covers a
+    // partner who is not a member of this server.
+    activity: member === undefined ? (recipient.activity ?? null) : (member.activity ?? null),
+    listening: member === undefined ? (recipient.listening ?? null) : (member.listening ?? null),
     about: null,
     joinDate: null,
     banner: member?.banner ?? null,
@@ -334,6 +346,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
+  /** Reports the game running on this machine (WP 8.3). Desktop only, and
+   *  loaded on first use so the web build and the startup path never carry it. */
+  let gameActivity: GameActivityLoop | null = null;
+  let musicActivity: MusicActivityLoop | null = null;
   let speakingActivityTimer: ReturnType<typeof setInterval> | null = null;
   let statusTimerWatcher: StatusTimerWatcher | null = null;
 
@@ -424,6 +440,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // The right-hand member column's controller (3C-6b). Loaded on demand; the
   // <aside> itself always exists so the header toggle's aria-controls resolves.
   let memberColumn: MemberColumn | null = null;
+  /** The call view is up in this window (callChat's capable state). */
+  let callViewUp = false;
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -541,7 +559,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       if (next !== null) dmProfileSidebar?.update(next);
     };
     const unsubMembers = membersStore.subscribeSelector(
-      (s) => s.members.get(recipientId)?.status,
+      (s) =>
+        `${s.members.get(recipientId)?.status ?? ""}|${s.members.get(recipientId)?.activity?.name ?? ""}|${listeningKey(s.members.get(recipientId)?.listening)}`,
       refresh,
     );
     // A banner change shows without reopening the panel.
@@ -944,6 +963,35 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onStatusChange: (status) => applyPresence(status),
       systemIdleMs: () => desktop.systemIdle.idleMs(),
     });
+    // The game being played, for other members' "Playing <game>" line. The
+    // loop sends nothing unless the setting is on and the server advertises
+    // game_activity; the web build has no detector and never loads it.
+    if (desktop.gameDetector.available) {
+      void import("@lib/gameActivity").then(
+        ({ startGameActivity }) => {
+          if (tornDown) return;
+          gameActivity = startGameActivity({
+            ws,
+            detect: (prefs) => desktop.gameDetector.detect(prefs),
+          });
+        },
+        (err: unknown) => log.warn("Game activity failed to load", { error: String(err) }),
+      );
+    }
+    // The song being listened to, for the "Listening to <player>" line. Same
+    // rules as the game loop, with its own capability (listening_activity).
+    if (desktop.mediaDetector.available) {
+      void import("@lib/musicActivity").then(
+        ({ startMusicActivity }) => {
+          if (tornDown) return;
+          musicActivity = startMusicActivity({
+            ws,
+            detect: (prefs) => desktop.mediaDetector.detect(prefs),
+          });
+        },
+        (err: unknown) => log.warn("Music activity failed to load", { error: String(err) }),
+      );
+    }
     // Talking in a call is being here even with hands off the keyboard and
     // mouse, which neither the window nor (for another app) the OS poll sees.
     // The local ring is the same on web and native (voice.store withLocalRing).
@@ -1079,7 +1127,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const callChatBtn = chatAreaResult.chatHeaderRefs.callChatBtn;
     callChat = createCallChat({
       videoModeCtrl,
-      onStateChange: (state) => setChatHeaderCallChat(chatAreaResult.chatHeaderRefs, state),
+      onStateChange: (state) => {
+        setChatHeaderCallChat(chatAreaResult.chatHeaderRefs, state);
+        // The call view takes the member column's width while it is up.
+        callViewUp = state.capable;
+        memberColumn?.setCallView(callViewUp);
+      },
     });
     callChatBtn.addEventListener("click", () => callChat?.toggleChat());
 
@@ -1174,15 +1227,13 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         buildPanel: sidebar.buildMemberPanel,
         fallbackFocus: focusReachable,
       });
+      memberColumn.setCallView(callViewUp);
       memberColumn.sync();
     });
     const layoutOwner = new Disposable();
-    window.addEventListener(
-      "owncord:pref-change",
-      (e) => {
-        const key =
-          e instanceof CustomEvent ? (e.detail as { key?: string } | null)?.key : undefined;
-        if (key !== MEMBER_LAYOUT_PREF) return;
+    onPrefChange(
+      [MEMBER_LAYOUT_PREF],
+      () => {
         if (loadMemberLayout() === "right") {
           sidebar.syncMemberSection();
           memberColumn?.sync();
@@ -1191,7 +1242,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           sidebar.syncMemberSection();
         }
       },
-      { signal: layoutOwner.signal },
+      layoutOwner.signal,
     );
     unsubscribers.push(() => {
       layoutOwner.destroy();
@@ -1459,6 +1510,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // On a Wayland session the desktop's shortcut service is the "poller": it
     // is live only once both keys are bound, so the flag follows the host's
     // status changes too (a bind, the user editing the keys, a portal restart).
+    // start() runs whether or not the host says it is supported: the host
+    // decides whether anything can observe keys, and on Wayland it arms the
+    // portal so a press from a key the compositor itself was told to deliver
+    // (Hyprland: the portal names no keys, so it never reads as bound) gets
+    // through. Only the in-app stand-down follows `supported`.
     // Answers can arrive out of order (a status change during startup), so
     // only the latest query may set the flag.
     let refreshSeq = 0;
@@ -1469,7 +1525,6 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         .then(async (supported) => {
           if (seq !== refreshSeq || tornDown) return;
           globalPollerActive = supported;
-          if (!supported) return;
           await desktop.globalShortcuts.start();
         })
         .catch(() => {
@@ -1693,6 +1748,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
             }
           }
         }
+      }),
+    );
+
+    // Losing a group (left, or removed) ends its ring without a missed call:
+    // the server stops sending that room's voice_leave, so the 30 s timeout
+    // would otherwise report a call from a group the user is no longer in.
+    // A leave the server then refuses restores the row but not the ring.
+    unsubscribers.push(
+      watchGroupDmExits((channelId) => {
+        if (ringCtrl?.current()?.channelId === channelId) ringCtrl.cancel(channelId);
+        if (outgoingCall?.current()?.channelId === channelId) outgoingCall.clear();
       }),
     );
 
@@ -2041,7 +2107,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // and it clears the grid it was just given (OC-0207).
           let sig =
             `${String(channelId)}|` +
-            (state.localCamera ? "c" : "") +
+            (state.localCamera ? `c${String(state.localCameraRev ?? 0)}` : "") +
             (state.localScreenshare ? `s${String(state.localShareRev ?? 0)}` : "");
           if (channelId !== null) {
             const users = state.voiceUsers.get(channelId);
@@ -2218,6 +2284,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       step("autoIdle", () => {
         autoIdle?.destroy();
         autoIdle = null;
+      });
+      step("musicActivity", () => {
+        musicActivity?.destroy();
+        musicActivity = null;
+      });
+      step("gameActivity", () => {
+        gameActivity?.destroy();
+        gameActivity = null;
       });
       step("statusTimerWatcher", () => {
         statusTimerWatcher?.destroy();

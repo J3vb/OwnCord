@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), and `/api/v1/users/me/avatar` and `/api/v1/users/me/banner` (2 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), `/api/v1/users/me/avatar` and `/api/v1/dms/{id}/icon` (3 MiB envelope), and `/api/v1/users/me/banner` (5 MiB envelope).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 231 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 237 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -172,6 +172,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
 | GET     | `/api/v1/emoji/{id}/image`                                           |
 | GET     | `/api/v1/files/{id}`                                                 |
+| POST    | `/api/v1/files/{id}/link`                                            |
 | GET     | `/api/v1/files/{id}/thumb`                                           |
 | DELETE  | `/api/v1/gif/favorites`                                              |
 | GET     | `/api/v1/gif/favorites`                                              |
@@ -225,6 +226,11 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/reports/mine`                                               |
 | GET     | `/api/v1/search`                                                     |
 | GET     | `/api/v1/server-info`                                                |
+| GET     | `/api/v1/stickers/`                                                  |
+| POST    | `/api/v1/stickers/`                                                  |
+| DELETE  | `/api/v1/stickers/{id}`                                              |
+| PATCH   | `/api/v1/stickers/{id}`                                              |
+| GET     | `/api/v1/stickers/{id}/image`                                        |
 | POST    | `/api/v1/uploads`                                                    |
 | DELETE  | `/api/v1/uploads/{id}`                                               |
 | PATCH   | `/api/v1/users/me/`                                                  |
@@ -290,35 +296,36 @@ endpoints return plain-text errors — see their section):
 
 ### Error Codes
 
-| Code                            | HTTP Status | When It Occurs                                                                                                                                                                                                                                   |
-| ------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `UNAUTHORIZED`                  | 401         | Missing/invalid/expired session token                                                                                                                                                                                                            |
-| `INVALID_CREDENTIALS`           | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                |
-| `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                |
-| `TIMED_OUT`                     | 403         | The caller has an active moderator timeout and the action is one it refuses (B5-9) — see `POST /api/v1/moderation/users/{id}/timeout` for the full list                                                                                          |
-| `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                |
-| `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                          |
-| `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                           |
-| `INVALID_INPUT` / `BAD_REQUEST` | 400         | Malformed body, missing required fields, invalid query params, or an upload exceeding the size limit (oversize uploads are rejected 400, not 413; the only 413 in the API is the plugin-install endpoint's plain-text "plugin upload too large") |
-| `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                           |
-| `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                             |
-| `ALREADY_DELETED`               | 409         | The target of a removal was already soft-deleted, e.g. the author deleted the reported message first (B9-14)                                                                                                                                     |
-| `ALREADY_APPEALED`              | 409         | An appeal against this moderation action already exists, in any state — decided appeals can never be re-appealed (B5-10)                                                                                                                         |
-| `SELF_REVIEW`                   | 403         | A moderator acting on their own filed report, deciding/assigning the appeal of an action they themselves took where another eligible moderator exists, or being that appeal's own appellant (B5-8/B5-10)                                         |
-| `REVERSAL_FAILED`               | 409         | Overturning an appeal hit a genuine error applying its ledger reversal — nothing committed, including the decision itself (B5-10)                                                                                                                |
-| `INTERNAL_ERROR`                | 500         | Internal server error                                                                                                                                                                                                                            |
-| `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                    |
-| `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                             |
-| `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                    |
-| `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                    |
-| `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                 |
-| `SERVICE_UNAVAILABLE`           | 503         | The request ran past the server's 15 s request deadline and failed (`Retry-After: 2`; see Request deadline below), or the auth store was unavailable while resolving a token                                                                     |
-| `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                             |
-| `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                               |
-| `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                            |
-| `CATEGORY_NAME_TAKEN`           | 409         | Category create or rename onto a name another category already has, ignoring case                                                                                                                                                                |
-| `CATEGORY_LIST_STALE`           | 409         | `PUT .../categories/order` with an id set that is not exactly the current set of categories; nothing is written                                                                                                                                  |
-| `PERMISSIONS_CHANGED`           | 409         | A channel sync found override rows it had not checked (they changed under it); nothing is written, retry                                                                                                                                         |
+| Code                            | HTTP Status | When It Occurs                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UNAUTHORIZED`                  | 401         | Missing/invalid/expired session token                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `INVALID_CREDENTIALS`           | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                                                                                                                                                                                                                                          |
+| `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `TIMED_OUT`                     | 403         | The caller has an active moderator timeout and the action is one it refuses (B5-9) — see `POST /api/v1/moderation/users/{id}/timeout` for the full list                                                                                                                                                                                                                                                                                                                    |
+| `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                                                                                                                                                                                                                                                    |
+| `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                                                                                                                                                                                                                                                     |
+| `INVALID_INPUT` / `BAD_REQUEST` | 400         | Missing required fields, invalid query params, a non-positive or non-numeric id in a path (emoji and sticker image routes answer 404 instead), or a file over the upload size limit. A JSON body that does not decode (an empty one included where the body is required) is always `400 INVALID_INPUT` "malformed request body" on the `/api/v1` routes and `400 BAD_REQUEST` "malformed request body" under `/admin/api` and `/api/v1/moderation/members` and `/channels` |
+| `PAYLOAD_TOO_LARGE`             | 413         | A JSON body past its route's size cap (every route that reads JSON, `/admin/api` included), or an upload body padded past its cap. The plugin-install endpoint answers its own plain-text 413                                                                                                                                                                                                                                                                              |
+| `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ALREADY_DELETED`               | 409         | The target of a removal was already soft-deleted, e.g. the author deleted the reported message first (B9-14)                                                                                                                                                                                                                                                                                                                                                               |
+| `ALREADY_APPEALED`              | 409         | An appeal against this moderation action already exists, in any state — decided appeals can never be re-appealed (B5-10)                                                                                                                                                                                                                                                                                                                                                   |
+| `SELF_REVIEW`                   | 403         | A moderator acting on their own filed report, deciding/assigning the appeal of an action they themselves took where another eligible moderator exists, or being that appeal's own appellant (B5-8/B5-10)                                                                                                                                                                                                                                                                   |
+| `REVERSAL_FAILED`               | 409         | Overturning an appeal hit a genuine error applying its ledger reversal — nothing committed, including the decision itself (B5-10)                                                                                                                                                                                                                                                                                                                                          |
+| `INTERNAL_ERROR`                | 500         | Internal server error                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `SERVICE_UNAVAILABLE`           | 503         | The request ran past the server's 15 s request deadline and failed (`Retry-After: 2`; see Request deadline below), or the auth store was unavailable while resolving a token                                                                                                                                                                                                                                                                                               |
+| `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                                                                                                                                                                                                                                                       |
+| `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                                                                                                                                                                                                                                                         |
+| `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                                                                                                                                                                                                                                                      |
+| `CATEGORY_NAME_TAKEN`           | 409         | Category create or rename onto a name another category already has, ignoring case                                                                                                                                                                                                                                                                                                                                                                                          |
+| `CATEGORY_LIST_STALE`           | 409         | `PUT .../categories/order` with an id set that is not exactly the current set of categories; nothing is written                                                                                                                                                                                                                                                                                                                                                            |
+| `PERMISSIONS_CHANGED`           | 409         | A channel sync found override rows it had not checked (they changed under it); nothing is written, retry                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Request deadline
 
@@ -920,16 +927,17 @@ Not registered when the server has no working storage backend.
 
 `multipart/form-data` with a single `file` part.
 
-| Rule       | Value                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
-| Size       | 1 MiB                                                                                                                 |
-| Dimensions | 1024x1024, measured from the sniffed image                                                                            |
+| Rule       | Value                                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg`, `image/webp` or `image/gif`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 2 MiB                                                                                                                              |
+| Dimensions | 1024x1024, measured from the sniffed image                                                                                         |
 
-GIF is refused (an animated avatar renders in every message row), and so is
-SVG — it is markup with script and external-fetch capability, and an avatar is
-rendered inline by definition. The server does not re-encode or crop; the
-client is expected to downscale and square-crop before uploading.
+An animated GIF, WebP or PNG is accepted as-is (WP 8.7): clients show its first
+frame and play it on hover, never under reduced motion. SVG is refused — it is
+markup with script and external-fetch capability, and an avatar is rendered
+inline by definition. The server does not re-encode or crop; the client is
+expected to downscale a still picture before uploading.
 
 #### Response 201 Created
 
@@ -989,14 +997,15 @@ Not registered when the server has no working storage backend.
 
 `multipart/form-data` with a single `file` part.
 
-| Rule       | Value                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| Type       | `image/png`, `image/jpeg` or `image/webp`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
-| Size       | 1 MiB                                                                                                                 |
-| Dimensions | At most 1920x960, measured from the sniffed image                                                                     |
+| Rule       | Value                                                                                                                              |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Type       | `image/png`, `image/jpeg`, `image/webp` or `image/gif`, sniffed from the file's own bytes (the client's `Content-Type` is ignored) |
+| Size       | 4 MiB                                                                                                                              |
+| Dimensions | At most 1920x960, measured from the sniffed image                                                                                  |
 
-GIF and SVG are refused for the reasons given for avatars. The server does not
-re-encode or crop; the client is expected to crop and scale before uploading.
+Animated pictures are accepted and shown as for avatars; SVG is refused. The
+server does not re-encode or crop; the client crops and scales a still picture
+before uploading and sends an animated one unchanged.
 
 #### Response 201 Created
 
@@ -1294,6 +1303,12 @@ omitted for every other message and for a deleted one: `{"question", "answers":
 when the poll was ended or `expires_at` has passed, even before anything marked it
 ended. The poll's `content` is a readable fallback of the question and answers. A poll
 cannot be edited or forwarded.
+
+A sticker message (`chat_send` with `sticker_id`, see `docs/protocol.md`) carries a
+`sticker` block, omitted for every other message and for a deleted one: `{"id",
+"name", "url"}`. `id` and `url` are `null` when the sticker was deleted, and `name`
+is the label kept from send time. The message's `content` is the fallback `[Sticker:
+name]`, and it cannot be edited or forwarded. Search hits carry the same block.
 
 A group DM can also hold group event rows: `kind` is `group_add`, `group_remove`,
 `group_leave`, `group_rename` or `group_icon`, with a `group_event` block
@@ -1890,7 +1905,7 @@ receives a `dm_channel_open`. Re-opening an existing DM (`200`) emits nothing �
 it only touches the caller's own open state. The creator is not sent the event
 on either path; it learns the channel from the response body above.
 
-If the caller holds a `pending` or `ignored` message request from the other
+If the caller holds a `pending`, `ignored` or `deleted` message request from the other
 user, `POST /api/v1/dms` accepts it, atomically: trusts the sender, opens the
 conversation and marks the request `accepted`, and sends the caller's other
 devices the `dm_channel_open` and `dm_request` frames `accept` sends.
@@ -2250,10 +2265,10 @@ Set a group DM's icon. Any member may.
 #### Request
 
 `multipart/form-data` with one `file` part, under the same rules as an avatar
-(`POST /api/v1/users/me/avatar`): at most 1 MiB, a PNG, JPEG or WebP image
-(sniffed from the bytes, never from the filename or the client's type), at most
-1024 x 1024 pixels, and it counts against the uploader's storage quota. The
-request body is capped at 2 MiB. Crop to a square client-side.
+(`POST /api/v1/users/me/avatar`) except that it stays still: at most 1 MiB, a
+PNG, JPEG or WebP image (no GIF; sniffed from the bytes, never from the filename
+or the client's type), at most 1024 x 1024 pixels, and it counts against the
+uploader's storage quota. The request body is capped at 3 MiB. Crop to a square client-side.
 
 #### Response 200 OK
 
@@ -2624,6 +2639,17 @@ Files are validated against blocked magic bytes (PE executables, ELF binaries, M
 
 Before any of its bytes are read, the file name is checked against the server's file-type policy (`upload.blocked_extensions` and `upload.allowed_extensions` in config.yaml, or the owner's saved `upload_blocked_extensions`/`upload_allowed_extensions` settings, which replace them). Matching is case-insensitive and looks only at the final extension, the one Windows opens the file by, so `report.pdf.bat` is refused when `bat` is blocked and `report.bat.pdf` is not; trailing dots and spaces are ignored. A non-empty allowed list means only those final extensions are accepted. A refused name gets `400 BAD_REQUEST` ("upload rejected: blocked file type: .bat"), the same shape as a magic-byte refusal. Allowing an extension never lifts the magic-byte blocks.
 
+#### Voice messages
+
+A voice message is an ordinary attachment that also carries its length and a small waveform, so a client can draw the player before it downloads the file (server capability `voice_messages`, WP 8.9). Send both as query parameters, not form fields:
+
+| Parameter           | Value                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `voice_duration_ms` | Clip length in milliseconds, a decimal integer from 1 to 300000                            |
+| `voice_waveform`    | Amplitude bytes, base64url without padding (`RawURLEncoding`), 1 to 256 bytes once decoded |
+
+Send both or neither; with neither the upload is an ordinary one, exactly as before. One alone, a number out of range or not a plain decimal, a waveform that is not valid unpadded base64url or decodes outside 1 to 256 bytes, or a repeated parameter is refused with `400 BAD_REQUEST` before any quota is reserved or any of the body is read. After the type is sniffed from the file's own bytes, a voice upload whose type is not `audio/*`, `video/webm`, `video/mp4` or `application/ogg` is refused with `400 BAD_REQUEST` and the stored file is deleted. The waveform is stored as the canonical encoding of the decoded bytes. Each upload is its own attachment: sending the same clip again (a retry after a dropped connection) makes a second, independent row. The two values come back on the attachment of the message that carries it, in history, pins, threads and forwarded copies.
+
 #### Response 201 Created
 
 ```json
@@ -2638,7 +2664,7 @@ Before any of its bytes are read, the file name is checked against the server's 
 }
 ```
 
-`width` and `height` are only present for image files.
+`width` and `height` are only present for image files. `duration_ms` (integer) and `waveform` (string, the canonical base64url form) are only present for a voice upload and are omitted otherwise.
 
 ---
 
@@ -2687,8 +2713,36 @@ format, turned upright by its EXIF orientation. Any other image — one that
 already fits, a GIF (kept animated), another format, one too large to decode
 within the server's memory bound (judged from its header, so a 16-bit image
 or a progressive JPEG reaches it at fewer pixels) or one that does not decode —
-is served as the original bytes. A file that is not an image is a `404`. A
-thumbnail is made on the first request, kept beside the original under
+is served as the original bytes. A file that is not an image is a `404`.
+
+A HEIC, HEIF or TIFF file (stored as `image/heic`, `image/heif` or `image/tiff`,
+which the server tells apart by the file's own bytes) is the exception, because
+no webview shows one: the response is always a JPEG with `Content-Type:
+image/jpeg`, scaled to fit the 800×800 box when larger (never enlarged) and
+turned upright by the file's rotation. Only a HEIC with the plain still-image layout is converted. The file has only
+ftyp, meta, mdat, free and skip boxes (no movie or fragment boxes), and its
+items, locations and property associations are listed once each. Its primary
+item is a coded image or a grid of them. A grid's descriptor may sit in the
+file or in the meta box's idat (as phones write it), and it lists each tile
+once. The images the decoder reads (the primary item, a grid's tiles and any
+alpha auxiliary image) are held to the layout: item data in the file body,
+one base-layer picture each, parameter sets only in the decoder configuration,
+and the properties the converter reads (ispe, hvcC, pixi, auxC, irot, imir,
+clap, colr). Items the decoder never reads — Exif and XMP, a tone map (tmap),
+thumbnails and other auxiliary images such as a depth or gain map — may carry
+anything. An overlay (iovl) or other derived primary item is not converted. A HEIC
+larger than about 22 megapixels (half as many at 10 bits), or a TIFF whose
+decode would take more than the 96 MiB bound (judged from its header), is not
+converted. If it cannot be converted — it is outside that layout, does not
+decode, is too large, or the decoder fails — the response is a `404`, never
+the original bytes. The failure is remembered and not tried again, and the
+file is stored without dimensions. A camera RAW (DNG, NEF, CR2, ARW and the
+like) is TIFF-structured but is stored as `application/octet-stream` and stays
+a plain file. The original stays at
+`GET /api/v1/files/{id}`. A file uploaded before the server knew these formats
+was stored as `application/octet-stream` and stays a plain file.
+
+A thumbnail is made on the first request, kept beside the original under
 `upload.storage_dir/thumbs/`, and removed with it; an image that fails to
 decode is remembered there too and not tried again. A server that has this
 route says so with `upload_policy.thumbnails` on `auth_ok`.
@@ -2812,6 +2866,153 @@ literal `:shortcode:` text. Broadcasts `emoji_update` on success.
 | 400    | `BAD_REQUEST` | id is not a positive integer |
 | 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER   |
 | 404    | `NOT_FOUND`   | no emoji with that id        |
+
+---
+
+## Custom Stickers
+
+Server-wide custom stickers (WP 8.8a), sent as their own message with
+`chat_send.sticker_id` (see `docs/protocol.md`).
+
+**Permission model.** The same as custom emoji: reading the set is open to any
+authenticated member, and adding, renaming and removing require
+**MANAGE_SERVER**. There is no `MANAGE_STICKERS` bit.
+
+A sticker has a `name` (2 to 30 characters of ASCII letters, digits, space,
+underscore or hyphen; the case typed is kept, trimmed, and uniqueness ignores
+case), an optional related `emoji` the picker searches by (a single emoji or a
+`:shortcode:` of a custom emoji, at most 64 bytes) and an image. A server holds
+at most 60 stickers.
+
+### GET /api/v1/stickers
+
+List every sticker, ordered by name ignoring case.
+
+**Auth:** Required
+
+#### Response 200 OK
+
+```json
+[
+  { "id": 3, "name": "Wave", "emoji": "👋", "url": "/api/v1/stickers/3/image" },
+  { "id": 7, "name": "Party Blob", "emoji": null, "url": "/api/v1/stickers/7/image" }
+]
+```
+
+`url` is server-relative and authenticated, see GET /api/v1/stickers/{id}/image.
+
+---
+
+### POST /api/v1/stickers
+
+Upload one sticker as multipart form data.
+
+**Auth:** Required, **MANAGE_SERVER**
+**Rate limit:** 10 requests/minute per user
+**Body size limit:** 1 MiB (the image itself is capped at 512 KiB)
+**Content-Type:** `multipart/form-data`
+
+| Field   | Type   | Notes                                                         |
+| ------- | ------ | ------------------------------------------------------------- |
+| `name`  | string | 2 to 30 characters of `[A-Za-z0-9 _-]` after trimming         |
+| `emoji` | string | Optional. A single emoji or a `:shortcode:`, at most 64 bytes |
+| `file`  | file   | PNG, GIF or WebP; animated GIF and WebP are allowed           |
+
+Validation, in the order it is applied. The permission check runs before the
+multipart body is read, so a member without the bit never causes a spool to disk:
+
+1. MANAGE_SERVER, then the rate limit, then the name and emoji format.
+2. At most **512 KiB** of image bytes.
+3. The MIME type is **sniffed from the file's own bytes**, never taken from the
+   client's part header. Only `image/png`, `image/gif` and `image/webp` are
+   accepted. JPEG and SVG are refused.
+4. Dimensions are re-read from the sniffed image and must be at most
+   **320 x 320**.
+5. Names are unique ignoring case; a collision is `409 CONFLICT`. Two uploads of
+   the same name at once give one `201` and one `409`, and the loser leaves no
+   file behind.
+6. A server holds at most 60 stickers.
+
+On success the full set is broadcast as `sticker_update` (see protocol.md).
+
+#### Response 201 Created
+
+```json
+{ "id": 3, "name": "Wave", "emoji": "👋", "url": "/api/v1/stickers/3/image" }
+```
+
+#### Errors
+
+| Status | Code           | Cause                                                     |
+| ------ | -------------- | --------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | bad name or emoji, wrong format, too large, too big, full |
+| 403    | `FORBIDDEN`    | caller lacks MANAGE_SERVER                                |
+| 409    | `CONFLICT`     | a sticker with that name already exists                   |
+| 429    | `RATE_LIMITED` | upload rate limit exceeded                                |
+
+---
+
+### PATCH /api/v1/stickers/{id}
+
+Rename a sticker and set or clear its related emoji. The image never changes.
+
+**Auth:** Required, **MANAGE_SERVER**
+**Content-Type:** `application/json`
+
+```json
+{ "name": "Hello", "emoji": "" }
+```
+
+Both fields are optional. An absent `name` or `emoji` is kept, and `"emoji": ""`
+clears it. Broadcasts `sticker_update` on success. Messages that used the sticker
+keep the name they were sent with.
+
+#### Response 200 OK
+
+The updated sticker, in the shape of the list entries.
+
+#### Errors
+
+| Status | Code          | Cause                                           |
+| ------ | ------------- | ----------------------------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer, bad name or emoji |
+| 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER                      |
+| 404    | `NOT_FOUND`   | no sticker with that id                         |
+| 409    | `CONFLICT`    | another sticker already has that name           |
+
+---
+
+### GET /api/v1/stickers/{id}/image
+
+Serve one sticker's image bytes.
+
+**Auth:** Required (Bearer token)
+**Caching:** `Cache-Control: private, max-age=86400, immutable`
+
+Authenticated rather than public, for the same reason the emoji image is. A
+sticker is server-wide, so authentication is the whole check. Its bytes never
+change for a given id. Unknown ids answer 404.
+
+---
+
+### DELETE /api/v1/stickers/{id}
+
+Delete one sticker and unlink its stored file.
+
+**Auth:** Required, **MANAGE_SERVER**
+
+Messages that carried the sticker stay, with their name and a `null` `id` and
+`url` in `sticker`. Broadcasts `sticker_update` on success.
+
+#### Response 204 No Content
+
+#### Errors
+
+| Status | Code          | Cause                        |
+| ------ | ------------- | ---------------------------- |
+| 400    | `BAD_REQUEST` | id is not a positive integer |
+| 403    | `FORBIDDEN`   | caller lacks MANAGE_SERVER   |
+| 404    | `NOT_FOUND`   | no sticker with that id      |
 
 ---
 
@@ -3693,10 +3894,12 @@ a given wire contract reports the same number. The version is available on the
 admin-authenticated `GET /api/v1/diagnostics/connectivity`.
 
 **`browser_client_enabled: true` does not mean a client is being served.** The
-flag reports the operator's setting; the bundle, its route and its own CSP
-arrive in B8. Until then no route is mounted and no asset is served in either
-state — `Server/api/browser_hosting_posture_test.go` proves it by route walk and
-by wire probe.
+flag reports the operator's setting, not the build. Release builds embed the
+browser client, but a build from source without the bundle answers `GET /` with
+a 404 note even when the flag is on. With the flag off, no route is mounted and
+no asset is served in any build —
+`Server/api/browser_hosting_posture_test.go` proves it by route walk and by
+wire probe.
 
 ---
 
@@ -3991,38 +4194,47 @@ Authorization is two-layered:
 1. **Perimeter.** The request is rejected with `403 FORBIDDEN` unless the
    principal's role holds at least one bit of `permissions.AdminPerimeter`
    (`ADMINISTRATOR`, `MANAGE_CHANNELS`, `MANAGE_ROLES`, `MANAGE_SERVER`,
-   `VIEW_AUDIT_LOG`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`). Banned
+   `VIEW_AUDIT_LOG`, `KICK_MEMBERS`, `BAN_MEMBERS`, `MUTE_MEMBERS`,
+   `MANAGE_BACKUPS`, and the seven owner-type bits `RESTORE_BACKUPS`,
+   `MANAGE_CONFIG`, `MANAGE_UPDATES`, `MANAGE_TOKENS`, `ISSUE_RECOVERY`,
+   `VIEW_DIAGNOSTICS`, `ERASE_ACCOUNTS`). Banned
    users are rejected here even while their session is still valid.
 2. **Per-route bit.** Route groups then require the specific permission below.
-   `ADMINISTRATOR` bypasses every one of them; owner-only routes gate on the
-   Owner role itself (`permissions.IsOwner`: role id 1 **or** role position
-   `>= 100`) instead of on a bit, so not even `ADMINISTRATOR` substitutes for
-   being the owner.
+   `ADMINISTRATOR` bypasses every one of them except the **owner tier** (WP
+   8.4d): restore, config, updates, tokens and recovery gate on the Owner role
+   itself (`permissions.IsOwner`: role id 1 **or** role position `>= 100`) **or**
+   the bit held explicitly, so not even `ADMINISTRATOR` substitutes for the owner
+   or for the bit. Only the owner can grant an owner-tier bit. The
+   **administrator tier** (`VIEW_DIAGNOSTICS`, `ERASE_ACCOUNTS`) passes
+   `ADMINISTRATOR` like any other bit. Every use by a non-owner leaves an audit
+   row. Only the backup schedule and retention stay Owner-only, as settings keys.
 
-| Route                                                                                                                                                | Requires                                                                                     |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `GET /admin/api/me`                                                                                                                                  | perimeter only                                                                               |
-| `GET /admin/api/stats`                                                                                                                               | perimeter only                                                                               |
-| `GET /admin/api/users`                                                                                                                               | perimeter only                                                                               |
-| `PATCH /admin/api/users/{id}`                                                                                                                        | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service) |
-| `PUT/DELETE /admin/api/users/{id}/roles/{roleId}`                                                                                                    | perimeter; `MANAGE_ROLES` (checked in the service) — WP 6.3c                                 |
-| `DELETE /admin/api/users/{id}/sessions`                                                                                                              | `KICK_MEMBERS`                                                                               |
-| `DELETE /admin/api/users/{id}`                                                                                                                       | `ADMINISTRATOR`; the actor must outrank the target (checked in the service) — B4-9           |
-| `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`), not a bit — B4-6         |
-| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                            |
-| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                               |
-| `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                             |
-| `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                              |
-| `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                              |
-| `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
-| `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                      |
-| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                                                           | `MANAGE_SERVER`                                                                              |
-| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                                                          | `ADMINISTRATOR`                                                                              |
-| `GET/PATCH/DELETE /admin/api/logs/level`                                                                                                             | `ADMINISTRATOR` — the running level and a timed debug boost, SRE-07                          |
-| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                                                                | `ADMINISTRATOR`                                                                              |
-| `GET /admin/api/attention`                                                                                                                           | `ADMINISTRATOR` — RI-07                                                                      |
-| `/api/v1/admin/plugins…`                                                                                                                             | `ADMINISTRATOR`                                                                              |
-| `/admin/api/tokens…`, `/admin/api/backup(s)…`, `/admin/api/updates…`                                                                                 | Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`)                           |
+| Route                                                                                                                                                | Requires                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /admin/api/me`                                                                                                                                  | perimeter only                                                                                                                                                                                                                                                                                               |
+| `GET /admin/api/stats`                                                                                                                               | perimeter only                                                                                                                                                                                                                                                                                               |
+| `GET /admin/api/users`                                                                                                                               | perimeter only                                                                                                                                                                                                                                                                                               |
+| `PATCH /admin/api/users/{id}`                                                                                                                        | perimeter; `BAN_MEMBERS` for `banned`, `MANAGE_ROLES` for `role_id` (checked in the service)                                                                                                                                                                                                                 |
+| `PUT/DELETE /admin/api/users/{id}/roles/{roleId}`                                                                                                    | perimeter; `MANAGE_ROLES` (checked in the service) — WP 6.3c                                                                                                                                                                                                                                                 |
+| `DELETE /admin/api/users/{id}/sessions`                                                                                                              | `KICK_MEMBERS`                                                                                                                                                                                                                                                                                               |
+| `DELETE /admin/api/users/{id}`                                                                                                                       | `ERASE_ACCOUNTS` (`ADMINISTRATOR` passes); the actor must outrank the target (checked in the service) — B4-9, WP 8.4d                                                                                                                                                                                        |
+| `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role **or** `ISSUE_RECOVERY` (`permissions.CanIssueRecovery`; `ADMINISTRATOR` does not pass); a holder who is not the owner can only issue to a member ranked strictly below them, never the owner — B4-6, WP 8.4d                                                                                     |
+| `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                                                                                                                                                                                                                                            |
+| `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                                                                                                                                                                                                                                               |
+| `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                                                                                                                                                                                                                                             |
+| `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
+| `GET /admin/api/config`                                                                                                                              | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
+| `GET/PATCH /admin/api/config/settings`, `POST /admin/api/restart`                                                                                    | Owner role **or** `MANAGE_CONFIG` (`permissions.CanManageConfig`; `ADMINISTRATOR` does not pass) — WP 8.4d                                                                                                                                                                                                   |
+| `GET /admin/api/retention`, `GET /admin/api/retention/channels`, `GET /admin/api/retention/preview`, `PUT/DELETE /admin/api/channels/{id}/retention` | `MANAGE_SERVER` — B4-11                                                                                                                                                                                                                                                                                      |
+| `/admin/api/registrations…` (GET, and `POST` `{id}/approve` / `{id}/deny`)                                                                           | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
+| `POST /admin/api/logs/ticket`, `GET /admin/api/logs/stream`                                                                                          | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes); the stream re-checks it on every write — WP 8.4d                                                                                                                                                                                                                |
+| `GET/PATCH/DELETE /admin/api/logs/level`                                                                                                             | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — the running level and a timed debug boost, SRE-07                                                                                                                                                                                                              |
+| `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                                                                | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
+| `GET /admin/api/attention`                                                                                                                           | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — RI-07                                                                                                                                                                                                                                                          |
+| `/api/v1/admin/plugins…`                                                                                                                             | `ADMINISTRATOR`                                                                                                                                                                                                                                                                                              |
+| `/admin/api/tokens…`, `/admin/api/updates…`                                                                                                          | `/admin/api/tokens…`: Owner role **or** `MANAGE_TOKENS` (`permissions.CanManageTokens`; a holder who is not the owner sees, creates and revokes only their own tokens); `/admin/api/updates…`: Owner role **or** `MANAGE_UPDATES` (`permissions.CanManageUpdates`); `ADMINISTRATOR` passes neither — WP 8.4d |
+| `DELETE /admin/api/backups/{name}`, `POST /admin/api/backups/{name}/restore`, `GET /admin/api/archive`, `POST /admin/api/archive/link`               | Owner role **or** `RESTORE_BACKUPS` (`permissions.CanRestoreBackups`; `ADMINISTRATOR` does not pass); the archive link is re-checked when opened — WP 8.4d                                                                                                                                                   |
+| `POST /admin/api/backup`, `GET /admin/api/backups`, `POST /admin/api/backups/{name}/link` (and its `/download`)                                      | Owner role **or** `MANAGE_BACKUPS` (`permissions.CanManageBackups`; `ADMINISTRATOR` passes) — WP 8.4c; `GET /admin/api/backups` also admits `RESTORE_BACKUPS`, so a restorer can pick a backup (WP 8.4d)                                                                                                     |
 
 Moderation routes additionally enforce the **role hierarchy**: the actor must
 strictly outrank the target (`actor.position > target.position`), and a role
@@ -4145,6 +4357,11 @@ during the first run (B11-8); the secret is returned once as
 `recovery_kit_secret` and only its verifier is stored. Pass
 `"recovery_kit": false` to skip it.
 
+A TLS choice the next boot could not serve answers 400 before the account is
+created, as the admin panel refuses the same change: `tls_mode` `manual` when
+the configured `tls.cert_file`/`tls.key_file` pair does not load or has
+expired, and `tls_mode` `acme` with `port` 80.
+
 #### Response 200 OK
 
 ```json
@@ -4219,7 +4436,7 @@ run); this route only reads that state. Thresholds and hysteresis are in
 [server-configuration.md](server-configuration.md#admin-attention-panel-attention).
 Nothing here is exported off the host.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Response 200 OK
 
@@ -4476,7 +4693,7 @@ admin-class account cannot be erased, and the action is audited as
 `account_deleted` with the actor and the target unlinked to the deletion
 marker's token (B4-10). Connected clients receive `member_ban`.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `ERASE_ACCOUNTS` (`ADMINISTRATOR` passes), WP 8.4d
 
 #### Response 204 No Content
 
@@ -4503,8 +4720,10 @@ kit withdraws it.
 Refused for the caller's own account, a banned or pending account and an
 anonymised row; budgeted at 5 issuances per owner and 3 per account per hour.
 Audited as `recovery_assist_issued` with the verification wording only.
+A holder of `ISSUE_RECOVERY` who is not the owner can issue only to a member
+ranked strictly below them (`403` for an equal or higher rank and for the owner).
 
-**Auth:** Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`); `ADMINISTRATOR` does not substitute
+**Auth:** Owner role (`permissions.IsOwner`: role id 1 or position `>= 100`) **or** `ISSUE_RECOVERY` (`permissions.CanIssueRecovery`); `ADMINISTRATOR` does not substitute
 
 #### Request
 
@@ -4835,7 +5054,8 @@ audited as `setting_change`.
 A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
 `motd`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
-`upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`.
+`upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
+`voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`.
 Boolean settings
 accept `1/0/true/false` and are normalized to `1`/`0`. `registration_mode`
 accepts `closed`, `invite`, `approval` or `open` (case-insensitive, stored
@@ -4862,6 +5082,20 @@ character, or is longer than 32 bytes, is refused with `400`. A saved row
 replaces the matching config.yaml list; an empty allowed list turns allow-only
 mode off. Like the backup policy they need the **Owner** role (`403 FORBIDDEN` otherwise).
 
+`voice_owner_movable` (WP 8.4a) decides whether a member holding `MOVE_MEMBERS`
+can move the owner between voice channels: `true` (the default while no row
+exists) or `false`, also accepted as `1`/`0`. It is stored as `true`/`false`.
+Only the **Owner** role may change it (`403 FORBIDDEN` otherwise).
+
+`game_activity_enabled` (WP 8.3e-2) decides whether members' game activity and,
+since WP 8.10a, the song they are listening to are shown on this server (the
+admin panel calls it "Member activity (games and music)"): `true` (the default while no row exists) or `false`, also
+accepted as `1`/`0`, stored as `true`/`false`. Unlike `voice_owner_movable` it
+is not owner-only: `MANAGE_SERVER` may change it. A save hands the value to the
+running hub, which clears every shown game and song when it is `false` and sends the
+[`game_activity_policy`](protocol.md#game_activity_policy-server---client-broadcast)
+frame to every connected client; an unreadable row at start-up counts as `false`.
+
 `retention_days` (B4-11) is the server-wide message-retention window: `0`
 (the default) keeps everything, otherwise between 1 and 3650 days; a change
 is audited as `retention_policy_change` naming the old and new value. The
@@ -4875,6 +5109,13 @@ before the AFK channel may take them: one of `60`, `300`, `900`, `1800` or
 `3600`, anything else is refused with `400`. A server with no row uses `300`.
 Which channel is the AFK channel is not a setting: see
 [`PUT /admin/api/afk-channel`](#put-adminapiafk-channel).
+
+`welcome_channel_id` (WP 8.6) names the text channel that greets each new member
+with a `member_join` row (see `docs/protocol.md`): the id of an existing,
+non-archived `text` channel, or the empty string to turn welcome messages off (the
+default while no row exists). A voice, archived, missing or non-numeric id is refused
+with `400`. It needs only `MANAGE_SERVER`. The pointer can dangle later (the channel
+deleted or archived): registration then writes no row and still succeeds.
 
 `server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
 held to the same limits the first-run setup wizard enforces.
@@ -4983,15 +5224,19 @@ Settings page shows until the owner saves its own.
 
 ## API Tokens
 
-Owner-only: minting a long-lived bearer credential over the network is the one
-admin action that, via a hijacked session, would outlive a password change or an
+Owner role or `MANAGE_TOKENS` (WP 8.4d; `ADMINISTRATOR` does not pass): minting a
+long-lived bearer credential over the network is the one admin action that, via a hijacked session, would outlive a password change or an
 admin force-logout (API tokens deliberately live outside the session table;
 sign-out-everywhere and account recovery do revoke them). These
-routes are the HTTP equivalent of the `server token create|list|revoke` CLI.
+routes are the HTTP equivalent of the `server token create|list|revoke` CLI. A
+holder who is not the owner sees only the tokens bound to them, creates tokens
+only for their own account (an empty `username` is themself; another username is
+`403`) and revokes only their own (another's is `404`, like an unknown id). The
+owner is unchanged.
 
 ### GET /admin/api/tokens
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_TOKENS` (own tokens only for a holder)
 
 #### Response 200 OK
 
@@ -5016,7 +5261,7 @@ Token hashes are never returned.
 
 ### POST /admin/api/tokens
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_TOKENS` (own tokens only for a holder)
 
 #### Request
 
@@ -5048,7 +5293,7 @@ The raw token is shown exactly once and is never recoverable.
 
 ### DELETE /admin/api/tokens/{id}
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_TOKENS` (own tokens only for a holder)
 
 #### Response 204 No Content
 
@@ -5058,14 +5303,22 @@ The raw token is shown exactly once and is never recoverable.
 
 ## Backups
 
-All backup routes are Owner-only. Backups are SQLite snapshots (`VACUUM INTO`)
-stored under `data/backups/`.
+Backups are SQLite snapshots (`VACUUM INTO`) stored under `data/backups/`. Create,
+list and download (the link and its redemption) are for the Owner or a holder
+of `MANAGE_BACKUPS` (`ADMINISTRATOR` passes like for every bit); restore, delete
+and the full archive are for the Owner or a holder of `RESTORE_BACKUPS` (WP
+8.4d; `ADMINISTRATOR` does not pass), who can also list backups. The backup
+schedule and retention stay Owner-only. A backup holds every message and every
+password hash, which is why only the owner or an Administrator can grant
+`MANAGE_BACKUPS`.
 
 ### POST /admin/api/backup
 
-Create a backup named `chatserver_<UTC timestamp>.db`.
+Create a backup named `chatserver_<UTC timestamp>.db`. One manual backup runs
+at a time: a second request while one is in flight is `409 BACKUP_RUNNING` and
+starts nothing.
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5080,9 +5333,9 @@ Create a backup named `chatserver_<UTC timestamp>.db`.
 
 ### GET /admin/api/backups
 
-List backups, newest first.
+List backups, newest first. This is every `.db` file in the backup directory, including the `pre_restore_` safety copies a restore writes.
 
-**Auth:** Owner role
+**Auth:** Owner role, `MANAGE_BACKUPS` or `RESTORE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5094,7 +5347,7 @@ List backups, newest first.
 
 ### DELETE /admin/api/backups/{name}
 
-**Auth:** Owner role
+**Auth:** Owner role or `RESTORE_BACKUPS`
 
 `name` is validated against path traversal. Returns `204 No Content`, or
 `404 NOT_FOUND` if the file does not exist.
@@ -5104,9 +5357,9 @@ List backups, newest first.
 ### POST /admin/api/backups/{name}/link
 
 Issue a short-lived, single-use link to download one backup file, on the same
-terms as the [archive link](#post-adminapiarchivelink).
+terms as the [archive link](#post-adminapiarchivelink). Audited as `backup_link`.
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5116,7 +5369,7 @@ terms as the [archive link](#post-adminapiarchivelink).
 }
 ```
 
-The token is random, bound to the requesting owner and to this one file,
+The token is random, bound to the requesting credential and to this one file,
 valid for about a minute and consumable once. It is never logged. `400` for a
 name that fails the path-traversal check, `404 NOT_FOUND` when no such `.db`
 backup exists.
@@ -5127,7 +5380,8 @@ backup exists.
 
 Redeem a single-use backup link. **Auth:** the `token` query parameter, as for
 [`GET /admin/api/archive/download`](#get-adminapiarchivedownload); the
-credential that asked for it must still be a signed-in, non-banned Owner, and
+credential that asked for it must still be a signed-in, non-banned Owner or
+holder of `MANAGE_BACKUPS` (the bit is re-checked when the link is opened), and
 `{name}` must be the file the link was issued for. `200
 application/octet-stream` streamed from disk as an attachment, audited as
 `backup_download`; `403 FORBIDDEN` for an unknown, expired, already-used or
@@ -5144,7 +5398,7 @@ restarts itself through the normal shutdown. The database that is running is
 not written. The next start swaps the staged copy in before the database
 opens, checks it, and keeps the previous database if the check fails.
 
-**Auth:** Owner role
+**Auth:** Owner role or `RESTORE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5172,7 +5426,7 @@ The admin panel does not call this route; it asks for a single-use link
 disk instead of being buffered in the page. This route stays for direct API
 callers that send the `Authorization` header themselves.
 
-**Auth:** Owner role
+**Auth:** Owner role or `RESTORE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5189,7 +5443,7 @@ volume below `server.min_free_disk_mb`, otherwise `500 INTERNAL_ERROR`.
 Issue a short-lived, single-use link to the full archive, for the panel to
 open as a plain browser download.
 
-**Auth:** Owner role
+**Auth:** Owner role or `RESTORE_BACKUPS`
 
 #### Response 200 OK
 
@@ -5219,12 +5473,12 @@ sent.
 
 ## Server Updates
 
-Owner-only self-update from GitHub Releases (minisign/Ed25519-verified; see
+Self-update from GitHub Releases, for the Owner or a holder of `MANAGE_UPDATES` (WP 8.4d; `ADMINISTRATOR` does not pass) (minisign/Ed25519-verified; see
 `docs/security.md`).
 
 ### GET /admin/api/updates
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_UPDATES`
 
 #### Response 200 OK
 
@@ -5270,7 +5524,7 @@ Download, verify and apply the latest release. On success the server responds
 first, then broadcasts a restart notice, swaps the binary (with staged-hash
 re-verification against TOCTOU swaps), spawns the new process and shuts down.
 
-**Auth:** Owner role
+**Auth:** Owner role or `MANAGE_UPDATES`
 
 #### Response 200 OK
 
@@ -5303,7 +5557,7 @@ an `Authorization` header.
 
 Issue a single-use ticket (30 s TTL) bound to the calling bearer credential.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Response 200 OK
 
@@ -5318,7 +5572,7 @@ Issue a single-use ticket (30 s TTL) bound to the calling bearer credential.
 Server-Sent Events stream of structured log records: on connect the in-memory
 ring buffer (capacity 2000) is replayed as backfill, then new entries stream
 live, with a keepalive every 15 s. The ticket is consumed on connect; the
-`ADMINISTRATOR` bit is re-checked throughout the stream, and revoking the
+`VIEW_DIAGNOSTICS` bit (or `ADMINISTRATOR`) is re-checked throughout the stream, and revoking the
 underlying session or API token (or banning the user) mid-stream cuts it.
 The server ends every open stream as its shutdown begins, so an open stream
 does not hold up a restart; reconnect with a fresh ticket once it is back.
@@ -5338,7 +5592,7 @@ Each event's data is one JSON record:
 The log level the server is running at, the level it started with (and
 reverts to), and when a debug boost reverts.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Response 200 OK
 
@@ -5362,7 +5616,7 @@ Raise the server's log level to `debug` for 15 minutes. The server reverts to
 `base_level` on its own when the window ends; a second PATCH restarts the
 window. Recorded in the audit log as `log_level_debug_on`.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Request
 
@@ -5388,7 +5642,7 @@ Both fields are required and only these values are accepted.
 Revert to `base_level` at once and cancel a pending boost. Recorded in the
 audit log as `log_level_reverted`.
 
-**Auth:** `ADMINISTRATOR`
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
 
 #### Response 200 OK -- same shape as `GET /admin/api/logs/level`.
 
@@ -5811,6 +6065,7 @@ server's authorization predicates:
 | `add_reaction`   | `CanAddReaction`                                          |
 | `join_voice`     | `CanJoinVoice`                                            |
 | `moderate_voice` | `AuthorizeVoiceModerator` (base `MUTE_MEMBERS` + channel) |
+| `move_voice`     | `AuthorizeVoiceMover` (base `MOVE_MEMBERS` + channel)     |
 
 The decision is the predicate's own verdict over the member's live state —
 role bits, both override layers, active timeout and NSFW acknowledgement,
@@ -5932,7 +6187,7 @@ Unlike the rest of the API, these endpoints answer errors as **plain text**
 install's `400 INSTALL_FAILED`. When the runtime is unavailable, mutating
 endpoints answer `503` `plugin runtime disabled`; other plain-text statuses
 are `400` (bad multipart/zip), `415` (not a `.zip`), `413` (`plugin upload
-too large` — the API's only 413), and `500`. `GET /api/v1/admin/plugins`
+too large`), and `500`. `GET /api/v1/admin/plugins`
 always answers `200` and reports the runtime state in an `X-Plugin-Runtime`
 response header instead.
 

@@ -8,7 +8,10 @@ const republish = vi.hoisted(() => vi.fn());
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
 const nativeVp9 = vi.hoisted(() => ({ value: false }));
 
-vi.mock("./native/platform", () => ({ isLinuxDesktop: () => isLinuxDesktop() }));
+vi.mock("./native/platform", () => ({
+  isLinuxDesktop: () => isLinuxDesktop(),
+  isWindowsDesktop: () => false,
+}));
 vi.mock("./native/videoCodecs", () => ({
   nativeVideoCodecs: () => Promise.resolve({ h264: false, vp9: nativeVp9.value, decode: [] }),
 }));
@@ -75,6 +78,11 @@ function rig(
     preferred?: PublishCodec;
     /** What the screen share's sender reports; none reads as null. */
     sample?: ShareSenderSample | null;
+    /** Replaces the sender sample read (a deferred or failing one). */
+    readSample?: () => Promise<ShareSenderSample | null>;
+    onSwitchError?: (err: unknown) => void;
+    /** A republish rejects with this. */
+    failWith?: Error;
   } = {},
 ): Rig {
   const preferred = opts.preferred ?? "vp9";
@@ -109,6 +117,7 @@ function rig(
         codec: PublishCodec,
       ) => {
         calls.push(`${kind}:${codec}`);
+        if (opts.failWith !== undefined) return Promise.reject(opts.failWith);
         const finish = (): boolean => {
           state.published = codec;
           return true;
@@ -121,8 +130,9 @@ function rig(
     getCameraState: () => camera,
     getScreenState: () => screen,
     getDeps: () => ({}) as VideoTrackDeps,
-    readScreenSenderSample: () => Promise.resolve(opts.sample === undefined ? null : opts.sample),
-    onSwitchError: () => {},
+    readScreenSenderSample:
+      opts.readSample ?? (() => Promise.resolve(opts.sample === undefined ? null : opts.sample)),
+    onSwitchError: opts.onSwitchError ?? (() => {}),
   });
   made.push(controller);
   return {
@@ -561,5 +571,241 @@ describe("CodecSwitchController", () => {
 
     expect(r.calls).toEqual([]);
     r.controller.stop();
+  });
+});
+
+/** A sender read that stays open until the test resolves it. */
+function deferredSample(): {
+  read: () => Promise<ShareSenderSample | null>;
+  resolve: (s: ShareSenderSample | null) => void;
+} {
+  let resolve: ((s: ShareSenderSample | null) => void) | null = null;
+  const read = (): Promise<ShareSenderSample | null> =>
+    new Promise((res) => {
+      resolve = res;
+    });
+  return { read, resolve: (s) => resolve?.(s) };
+}
+
+describe("CodecSwitchController timers and ownership", () => {
+  it("stop clears a pending switch at once, for both kinds", () => {
+    const r = rig({ screen: "vp9", camera: "vp9" });
+    r.controller.kick();
+    join();
+    expect(vi.getTimerCount()).toBe(2);
+    r.controller.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stop clears the software encoder check at once", () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    expect(vi.getTimerCount()).toBe(1);
+    r.controller.stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("checks the same share again after a stop and a new kick", async () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    r.controller.stop();
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("does not clear a check that already ran when it stops", async () => {
+    const r = h264Rig({ encoder: "ExternalEncoder" });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    const clear = vi.spyOn(globalThis, "clearTimeout");
+    r.controller.stop();
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("drops the check when the share stops being live", () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    expect(vi.getTimerCount()).toBe(1);
+    r.screen.quality = undefined;
+    r.controller.kick();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("replaces the check when a different share goes live", () => {
+    const r = h264Rig({ encoder: "OpenH264" });
+    const next = {} as LocalVideoTrack;
+    r.screen.manualScreenTracks = [next];
+    r.screen.announced = next;
+    r.controller.kick();
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("looks for the encoder name only twice", async () => {
+    h264Rig({ sentFps: 2 });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not look again when the share stopped being live while the sample was read", async () => {
+    const sample = deferredSample();
+    const r = rig({
+      screen: "h264",
+      preferred: "h264",
+      readSample: sample.read,
+    });
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    r.screen.quality = undefined;
+    r.controller.kick();
+    sample.resolve({ sentFps: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ignores a sample that arrives after stop", async () => {
+    const sample = deferredSample();
+    const r = rig({
+      screen: "h264",
+      preferred: "h264",
+      readSample: sample.read,
+    });
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    r.controller.stop();
+    sample.resolve({ encoder: "OpenH264" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(r.calls).toEqual([]);
+  });
+
+  it("does not let a sample of an earlier share move the next share early", async () => {
+    const sample = deferredSample();
+    const r = rig({
+      screen: "h264",
+      preferred: "h264",
+      readSample: sample.read,
+    });
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    join();
+    const next = {} as LocalVideoTrack;
+    r.screen.manualScreenTracks = [next];
+    r.screen.announced = next;
+    r.screen.preferred = "vp9";
+    r.screen.published = "vp9";
+    r.controller.kick();
+    sample.resolve({ encoder: "OpenH264" });
+    await vi.advanceTimersByTimeAsync(SWITCH_DOWN_MS - 1);
+    expect(r.calls).toEqual([]);
+  });
+
+  it("reports a failing sender read", async () => {
+    const failure = new Error("stats unavailable");
+    const onSwitchError = vi.fn();
+    const r = rig({
+      screen: "h264",
+      preferred: "h264",
+      readSample: () => Promise.reject(failure),
+      onSwitchError,
+    });
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(onSwitchError).toHaveBeenCalledWith(failure);
+  });
+
+  it("reports a failing republish", async () => {
+    const failure = new Error("republish failed");
+    const onSwitchError = vi.fn();
+    const r = rig({ screen: "vp9", failWith: failure, onSwitchError });
+    r.controller.kick();
+    join();
+    await vi.advanceTimersByTimeAsync(SWITCH_DOWN_MS);
+    expect(onSwitchError).toHaveBeenCalledWith(failure);
+  });
+
+  it("keeps a camera on its pick when only the share is a software H.264 one", async () => {
+    const r = rig({
+      screen: "h264",
+      camera: "vp9",
+      preferred: "h264",
+      sample: { encoder: "OpenH264" },
+    });
+    r.camera.preferred = "vp9";
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SWITCH_UP_MIN_GAP_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("keeps the start of a wait when the same target is looked at again", async () => {
+    const r = rig({ screen: "vp9" });
+    r.controller.kick();
+    join();
+    await vi.advanceTimersByTimeAsync(1000);
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SWITCH_DOWN_MS - 1000);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("replaces a wait whose target changed instead of keeping both", () => {
+    const r = rig({ screen: "h264", preferred: "vp9" });
+    r.controller.kick();
+    const before = vi.getTimerCount();
+    join();
+    expect(vi.getTimerCount()).toBe(before);
+    r.controller.stop();
+  });
+
+  it("drops a pending switch when the share stops being live", () => {
+    const r = rig({ screen: "vp9" });
+    r.controller.kick();
+    join();
+    expect(vi.getTimerCount()).toBe(1);
+    r.screen.quality = undefined;
+    r.controller.kick();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("schedules nothing while a switch is in flight", async () => {
+    const r = rig({ screen: "vp9", delayed: true });
+    r.controller.kick();
+    join();
+    await vi.advanceTimersByTimeAsync(SWITCH_DOWN_MS);
+    expect(r.calls).toEqual(["screen:vp8"]);
+    r.controller.kick();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("starts no second switch while one is in flight", async () => {
+    const r = rig({
+      screen: "h264",
+      preferred: "h265",
+      delayed: true,
+      sample: { encoder: "OpenH264" },
+    });
+    join();
+    r.controller.kick();
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS * 2);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("retries a busy share on the busy interval, not the switch-down delay", async () => {
+    const r = rig({ screen: "vp9" });
+    r.screen.changing = true;
+    r.controller.kick();
+    join();
+    await vi.advanceTimersByTimeAsync(SWITCH_BUSY_RETRY_MS - 1);
+    r.screen.changing = false;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("does not republish when the share already carries the target by the time the wait ends", async () => {
+    const r = rig({ screen: "vp9" });
+    r.controller.kick();
+    join();
+    r.screen.published = "vp8";
+    await vi.advanceTimersByTimeAsync(SWITCH_DOWN_MS);
+    expect(r.calls).toEqual([]);
   });
 });

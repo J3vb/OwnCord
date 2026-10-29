@@ -17,6 +17,7 @@
  * fetch that resolves after the surface closed is simply not applied.
  */
 
+import { bindAnimatedImage } from "@lib/animatedStill";
 import { createElement } from "@lib/dom";
 
 /**
@@ -31,6 +32,9 @@ export interface BannerImages {
   readonly resolve: (path: string) => string;
   /** Reload `img` if its `blob:` URL was evicted from the cache. */
   readonly recover: (img: HTMLImageElement, url: string) => void;
+  /** The first frame of a fetched picture when it is animated (WP 8.7), else
+   *  null. An animated banner plays, except under reduced motion. */
+  readonly still: (objectUrl: string) => Promise<string | null>;
 }
 
 /** What a member carries: undefined/null/"" all mean "not set". */
@@ -91,15 +95,20 @@ export function paintBanner(
   holder.style.setProperty(HEIGHT_VAR, IMAGE_STRIP_HEIGHT);
   el.dataset["bannerSrc"] = path;
   const url = images.resolve(path);
-  void images.fetch(url).then((objectUrl) => {
-    // The surface closed, or the banner changed, while the file loaded.
-    if (!el.isConnected || el.dataset["bannerSrc"] !== path) return;
+  // The surface closed, or the banner changed, while the file loaded.
+  const current = (): boolean => el.isConnected && el.dataset["bannerSrc"] === path;
+  void images.fetch(url).then(async (objectUrl) => {
+    if (!current()) return;
     if (objectUrl === null) {
       holder.style.removeProperty(HEIGHT_VAR);
       return;
     }
-    const img = createElement("img", { class: "banner-img", src: objectUrl, alt: "" });
+    const still = await images.still(objectUrl);
+    if (!current()) return;
+    const img = createElement("img", { class: "banner-img", alt: "" });
     images.recover(img, url);
+    if (still === null) img.src = objectUrl;
+    else bindAnimatedImage(img, objectUrl, still, "always");
     el.replaceChildren(img);
   });
 }

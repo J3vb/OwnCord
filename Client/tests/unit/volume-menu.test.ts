@@ -341,3 +341,39 @@ describe("re-opening", () => {
     expect(setUserVolume).not.toHaveBeenCalledWith(7, 20);
   });
 });
+
+describe("moderation section with only Move to (WP 8.4b)", () => {
+  const actions = (): string[] =>
+    [...document.querySelectorAll<HTMLElement>(".user-vol-menu [data-action]")].map(
+      (el) => el.dataset.action ?? "",
+    );
+
+  it("renders only Move to when mute, deafen and disconnect are absent", () => {
+    const onMove = vi.fn();
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal, {
+      moveTargets: [{ id: 5, name: "other" }],
+      onMove,
+    });
+    expect(actions()).toContain("move-to");
+    expect(actions()).not.toContain("server-mute");
+    expect(actions()).not.toContain("server-deafen");
+    expect(actions()).not.toContain("voice-disconnect");
+    document.querySelector<HTMLElement>('[data-move-channel="5"]')?.click();
+    expect(onMove).toHaveBeenCalledWith(5);
+  });
+
+  it("renders every row when all handlers are present", () => {
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal, {
+      serverMuted: false,
+      serverDeafened: false,
+      moveTargets: [{ id: 5, name: "other" }],
+      onServerMute: vi.fn(),
+      onServerDeafen: vi.fn(),
+      onMove: vi.fn(),
+      onDisconnect: vi.fn(),
+    });
+    expect(actions()).toEqual(
+      expect.arrayContaining(["server-mute", "server-deafen", "move-to", "voice-disconnect"]),
+    );
+  });
+});

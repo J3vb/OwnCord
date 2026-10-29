@@ -40,6 +40,7 @@ import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice"
 import { voiceText as t } from "../i18n/voice";
 import { desktop } from "../platform/desktop";
 import { getEffectiveScreenShareFps, type StreamQuality } from "@lib/screenShare";
+import { SHARE_FPS_OPTIONS } from "@lib/shareFps";
 
 export interface ScreenSharePick {
   /** The host source id, "portal" on Wayland, or "os" on the web path. */
@@ -72,8 +73,6 @@ interface QualityOption {
   readonly value: StreamQuality;
   readonly label: string;
 }
-
-const FPS_OPTIONS: readonly number[] = [60, 120];
 
 /** Without a sound server to capture from, the Audio option is a note. */
 function buildAudioNote(): HTMLElement {
@@ -415,12 +414,12 @@ function openPicker(
       // native capturer cannot ask for more.
       const maxFps = opts.portal ? 60 : Infinity;
       const fpsOptions = new Map<number, HTMLOptionElement>();
-      for (const fps of FPS_OPTIONS) {
+      for (const fps of SHARE_FPS_OPTIONS) {
         const option = createElement("option", { value: String(fps) }, t("picker.fps", { fps }));
         fpsOptions.set(fps, option);
         fpsSelect.appendChild(option);
       }
-      if (!FPS_OPTIONS.includes(selectedFps)) selectedFps = 30;
+      if (!SHARE_FPS_OPTIONS.includes(selectedFps)) selectedFps = 30;
       /** The rate the user asked for; a gate lowers selectedFps but keeps this,
        *  so picking a faster screen again restores it. */
       let requestedFps = selectedFps;

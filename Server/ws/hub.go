@@ -21,17 +21,17 @@ import (
 // Hub manages all active WebSocket clients and routes messages between them.
 // All exported methods are safe to call from multiple goroutines.
 type Hub struct {
-	clients   map[int64]*Client
-	mu        syncutil.RankedRW[lockRankHub]
-	db        *db.DB
-	limiter   *auth.RateLimiter
-	broadcast chan broadcastMsg
+	// clients: user id -> live connections, one per device session (hub_conns.go).
+	clients        map[int64][]*Client
+	offlineClaimed map[int64]struct{} // users whose offline teardown is claimed
+	mu             syncutil.RankedRW[lockRankHub]
+	db             *db.DB
+	limiter        *auth.RateLimiter
+	broadcast      chan broadcastMsg
 	// clientEvents carries register AND unregister requests on one channel so
 	// a connection's Register→Unregister sequence is processed in submission
-	// order. With two separate channels, Run's select picked randomly between
-	// them when both were ready — a fast connect/disconnect could process the
-	// unregister first (a no-op for an unknown client) and then the register,
-	// admitting an already-dead client as a ghost until the stale sweep.
+	// order; two channels let a fast connect/disconnect unregister first (a
+	// no-op) then register, admitting a dead ghost until the stale sweep.
 	clientEvents chan clientEvent
 	stop         chan struct{}
 	stopOnce     sync.Once
@@ -221,7 +221,7 @@ type Hub struct {
 	settingsUpload     UploadPolicy // auth_ok's upload_policy; the lists refresh with the cache
 	settingsLastUpdate time.Time
 	uploadPolicyMu     syncutil.Ranked[lockRankSerialiser] // orders BroadcastUploadPolicy's saves (hub_settings.go)
-
+	gameActivity       gameActivityState                   // the WP 8.3e-2 game activity switch (hub_settings.go)
 	// voiceKeyHolders maps channelID → userID of the current key holder, the connected
 	// participant with the lowest userID in the channel. Protected by keyHolderMu.
 	keyHolderMu     syncutil.RankedRW[lockRankHubCache]

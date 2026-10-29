@@ -71,6 +71,34 @@ describe("createModal", () => {
     expect(container.contains(inst.overlay)).toBe(true);
   });
 
+  it("a press that starts inside and ends on the backdrop does not close", () => {
+    const onClose = vi.fn();
+    const content = document.createElement("input");
+    const inst = createModal({ content, onClose }, container);
+
+    // Drag-select past the input edge: the press lands on the input, the
+    // release on the backdrop, so the browser fires the click on the overlay.
+    content.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    inst.overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.contains(inst.overlay)).toBe(true);
+  });
+
+  it("a backdrop press after an inside drag still closes", () => {
+    const onClose = vi.fn();
+    const content = document.createElement("input");
+    const inst = createModal({ content, onClose }, container);
+
+    content.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    inst.overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    inst.overlay.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    inst.overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(container.contains(inst.overlay)).toBe(false);
+  });
+
   it("Escape key closes and calls onClose", () => {
     const onClose = vi.fn();
     const content = document.createElement("div");
@@ -79,6 +107,53 @@ describe("createModal", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape that cancels an IME candidate does not close; a plain Escape after it does", () => {
+    const onClose = vi.fn();
+    createModal({ content: document.createElement("div"), onClose }, container);
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect(onClose).not.toHaveBeenCalled();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", keyCode: 229 }));
+    expect(onClose).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("onEscape runs instead of closing, and not while an IME composes", () => {
+    const onClose = vi.fn();
+    const onEscape = vi.fn();
+    const inst = createModal(
+      { content: document.createElement("div"), onClose, onEscape },
+      container,
+    );
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect(onEscape).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onEscape).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(container.contains(inst.overlay)).toBe(true);
+    inst.destroy();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("onEscape is ignored when closeOnEscape is false", () => {
+    const onEscape = vi.fn();
+    const inst = createModal(
+      { content: document.createElement("div"), closeOnEscape: false, onEscape },
+      container,
+    );
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(onEscape).not.toHaveBeenCalled();
+    inst.destroy();
   });
 
   it("close() removes from DOM", () => {
@@ -309,6 +384,24 @@ describe("createPromptModal", () => {
     clickConfirm();
 
     expect(onSubmit).toHaveBeenCalledExactlyOnceWith("");
+  });
+
+  it("Enter that commits an IME candidate does not submit", () => {
+    const onSubmit = vi.fn();
+    createPromptModal({ title: "t", onSubmit }, container);
+
+    const input = getInput();
+    input.value = "half";
+    const ev = new KeyboardEvent("keydown", {
+      key: "Enter",
+      isComposing: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(ev);
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(ev.defaultPrevented).toBe(false);
   });
 
   it("Enter submits and prevents the default", () => {

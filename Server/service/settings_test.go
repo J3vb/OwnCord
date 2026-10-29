@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -299,5 +300,70 @@ func TestSettings_RegistrationModeTransitionsChainUnderConcurrency(t *testing.T)
 	}
 	if prev != final {
 		t.Fatalf("the chain ends at %s, the setting reads %s", prev, final)
+	}
+}
+
+func TestVoiceOwnerMovable_OwnerOnlyKeyAndDefault(t *testing.T) {
+	if !IsOwnerOnlySettingKey(VoiceOwnerMovableKey) {
+		t.Error("voice_owner_movable must be an owner-only setting key")
+	}
+	for stored, want := range map[string]bool{"": true, "true": true, "false": false, "0": false, "1": true, "junk": false} {
+		if got := VoiceOwnerMovable(stored); got != want {
+			t.Errorf("VoiceOwnerMovable(%q) = %v, want %v", stored, got, want)
+		}
+	}
+}
+
+// WP 8.3e-2: the game activity switch is the admin's (MANAGE_SERVER), not the
+// owner's, and a missing row means on.
+func TestGameActivityEnabled_BlankTrueGarbageFalse(t *testing.T) {
+	if IsOwnerOnlySettingKey(GameActivityEnabledKey) {
+		t.Error("game_activity_enabled must not be an owner-only setting key")
+	}
+	for stored, want := range map[string]bool{"": true, "  ": true, "true": true, "false": false, "0": false, "1": true, "junk": false} {
+		if got := GameActivityEnabled(stored); got != want {
+			t.Errorf("GameActivityEnabled(%q) = %v, want %v", stored, got, want)
+		}
+	}
+}
+
+func TestSettingsPatch_GameActivityEnabled_Normalizes(t *testing.T) {
+	svc, database := newSettingsService(t)
+	ctx := context.Background()
+	for in, want := range map[string]string{"FALSE": "false", "0": "false", "true": "true", "1": "true"} {
+		if _, err := svc.Patch(ctx, 1, map[string]string{GameActivityEnabledKey: in}); err != nil {
+			t.Fatalf("Patch %q: %v", in, err)
+		}
+		if got, err := database.GetSetting(ctx, GameActivityEnabledKey); err != nil || got != want {
+			t.Errorf("stored after %q = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := svc.Patch(ctx, 1, map[string]string{GameActivityEnabledKey: "maybe"}); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("Patch \"maybe\" err = %v, want ErrBadRequest", err)
+	}
+}
+
+func TestGameActivityEnabledFromRead(t *testing.T) {
+	boom := errors.New("read failed")
+	cases := []struct {
+		name        string
+		stored      string
+		err         error
+		wantEnabled bool
+		wantOK      bool
+	}{
+		{"stored false", "false", nil, false, true},
+		{"stored true", "true", nil, true, true},
+		{"blank", "", nil, true, true},
+		{"missing row", "", db.ErrNotFound, true, true},
+		{"wrapped missing row", "", fmt.Errorf("GetSetting: %w", db.ErrNotFound), true, true},
+		{"garbage", "junk", nil, false, true},
+		{"read failed", "", boom, false, false},
+	}
+	for _, tc := range cases {
+		enabled, ok, rerr := GameActivityEnabledFromRead(tc.stored, tc.err)
+		if enabled != tc.wantEnabled || ok != tc.wantOK || (rerr != nil) != !tc.wantOK || (!tc.wantOK && !errors.Is(rerr, tc.err)) {
+			t.Errorf("%s: got (%v, %v), want (%v, %v)", tc.name, enabled, ok, tc.wantEnabled, tc.wantOK)
+		}
 	}
 }

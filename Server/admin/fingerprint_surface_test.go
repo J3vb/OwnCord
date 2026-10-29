@@ -102,7 +102,7 @@ func TestSetup_FinishStepOmitsFingerprintWhenWizardChangesTLSMode(t *testing.T) 
 	rr := doRequest(t, handler, http.MethodPost, "/setup", "", map[string]any{
 		"username": "myadmin",
 		"password": "SecurePass123!",
-		"wizard":   map[string]any{"tls_mode": "manual"},
+		"wizard":   map[string]any{"tls_mode": "acme", "tls_domain": "chat.example.com"},
 	})
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("POST /setup = %d, want 201; body=%s", rr.Code, rr.Body.String())

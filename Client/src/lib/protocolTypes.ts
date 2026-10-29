@@ -56,7 +56,9 @@ export const ServerMessageType = {
   MEMBER_BAN: "member_ban",
   ROLES_UPDATE: "roles_update",
   EMOJI_UPDATE: "emoji_update",
+  STICKER_UPDATE: "sticker_update",
   UPLOAD_POLICY: "upload_policy", // the upload file-type lists after the owner saves them in the admin panel
+  GAME_ACTIVITY_POLICY: "game_activity_policy", // WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume
   SERVER_RESTART: "server_restart",
   MOD_QUEUE: "mod_queue", // B5-8: a report queue change, to connected MODERATE_MEMBERS/Administrator holders only
   MOD_ACTION: "mod_action", // B5-9: a warning or timeout applied to the live target, targeted and unsequenced -- not replayed
@@ -109,6 +111,8 @@ export const ClientMessageType = {
   MARK_READ: "mark_read",
   MARK_UNREAD: "mark_unread",
   PRESENCE_UPDATE: "presence_update",
+  ACTIVITY_UPDATE: "activity_update",
+  LISTENING_UPDATE: "listening_update",
   VOICE_JOIN: "voice_join",
   VOICE_LEAVE: "voice_leave",
   VOICE_MUTE: "voice_mute",
@@ -168,6 +172,7 @@ export const ChatMessageKind = {
   GROUP_RENAME: "group_rename", // a group DM row: the group name changed or was cleared, written only by the server
   GROUP_ICON: "group_icon", // a group DM row: the group icon changed or was removed, written only by the server
   PIN_ADD: "pin_add", // a row saying a member pinned a message; reply_to names the pinned message; written only by the server
+  MEMBER_JOIN: "member_join", // a welcome row: the author just joined the server; written only by the server into the admin-chosen welcome channel
 } as const;
 
 export type ChatMessageKindValue = (typeof ChatMessageKind)[keyof typeof ChatMessageKind];

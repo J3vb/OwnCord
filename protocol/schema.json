@@ -64,6 +64,8 @@
     { "wire": "mark_read", "go": "MsgTypeMarkRead", "ts": "MARK_READ" },
     { "wire": "mark_unread", "go": "MsgTypeMarkUnread", "ts": "MARK_UNREAD" },
     { "wire": "presence_update", "go": "MsgTypePresenceUpdate", "ts": "PRESENCE_UPDATE" },
+    { "wire": "activity_update", "go": "MsgTypeActivityUpdate", "ts": "ACTIVITY_UPDATE" },
+    { "wire": "listening_update", "go": "MsgTypeListeningUpdate", "ts": "LISTENING_UPDATE" },
     { "wire": "voice_join", "go": "MsgTypeVoiceJoin", "ts": "VOICE_JOIN" },
     { "wire": "voice_leave", "go": "MsgTypeVoiceLeave", "ts": "VOICE_LEAVE" },
     { "wire": "voice_mute", "go": "MsgTypeVoiceMute", "ts": "VOICE_MUTE" },
@@ -178,11 +180,18 @@
     { "wire": "member_ban", "go": "MsgTypeMemberBan", "ts": "MEMBER_BAN" },
     { "wire": "roles_update", "go": "MsgTypeRolesUpdate", "ts": "ROLES_UPDATE" },
     { "wire": "emoji_update", "go": "MsgTypeEmojiUpdate", "ts": "EMOJI_UPDATE" },
+    { "wire": "sticker_update", "go": "MsgTypeStickerUpdate", "ts": "STICKER_UPDATE" },
     {
       "wire": "upload_policy",
       "go": "MsgTypeUploadPolicy",
       "ts": "UPLOAD_POLICY",
       "note": "the upload file-type lists after the owner saves them in the admin panel"
+    },
+    {
+      "wire": "game_activity_policy",
+      "go": "MsgTypeGameActivityPolicy",
+      "ts": "GAME_ACTIVITY_POLICY",
+      "note": "WP 8.3e-2: whether game activity is shown on this server, unsequenced, after an admin saves the switch; auth_ok carries it on every connect and resume"
     },
     { "wire": "server_restart", "go": "MsgTypeServerRestart", "ts": "SERVER_RESTART" },
     {
@@ -356,6 +365,12 @@
           "go": "MessageKindPinAdd",
           "ts": "PIN_ADD",
           "note": "a row saying a member pinned a message; reply_to names the pinned message; written only by the server"
+        },
+        {
+          "wire": "member_join",
+          "go": "MessageKindMemberJoin",
+          "ts": "MEMBER_JOIN",
+          "note": "a welcome row: the author just joined the server; written only by the server into the admin-chosen welcome channel"
         }
       ]
     }

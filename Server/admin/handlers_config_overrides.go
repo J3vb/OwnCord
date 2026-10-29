@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -264,7 +263,10 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 			return
 		}
 		var changes map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&changes); err != nil || len(changes) == 0 {
+		if !decodeJSON(w, r, &changes) {
+			return
+		}
+		if len(changes) == 0 {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "a JSON object of config keys is required")
 			return
 		}

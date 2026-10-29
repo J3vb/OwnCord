@@ -59,7 +59,9 @@
         "frame": {
           "cseq": 7,
           "payload": {
+            "activity": null,
             "custom_status": "fixture custom status",
+            "listening": null,
             "status": "idle",
             "user_id": "<id:number>"
           },
@@ -130,7 +132,9 @@
         "frame": {
           "cseq": 5,
           "payload": {
+            "activity": null,
             "custom_status": "fixture custom status",
+            "listening": null,
             "status": "idle",
             "user_id": "<id:number>"
           },

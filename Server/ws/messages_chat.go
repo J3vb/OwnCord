@@ -54,6 +54,10 @@ type chatMessagePayload struct {
 	// a replayed frame must not roll a newer count back (clients keep the higher
 	// results.version).
 	Poll *service.PollInfo `json:"poll,omitempty"`
+	// Sticker is set only on a sticker message (WP 8.8a): the same shape as the
+	// history payload's db.MessageStickerInfo. Static, so it replays as is; a
+	// deleted sticker is read back with a null id and url by history.
+	Sticker *service.MessageStickerInfo `json:"sticker,omitempty"`
 	// Thread is the starter message's thread (WP 6.9c): the same shape as the
 	// history payload's db.ThreadInfo. A message that has just been sent has no
 	// thread yet, so no live send sets it; thread_changed carries a thread that
@@ -108,6 +112,8 @@ type chatMessageArgs struct {
 	Forward *service.ForwardInfo
 	// Poll is set only for a poll message.
 	Poll *service.PollInfo
+	// Sticker is set only for a sticker message.
+	Sticker *service.MessageStickerInfo
 }
 
 // buildChatMessage constructs a chat_message broadcast envelope.
@@ -154,6 +160,7 @@ func buildChatMessage(a chatMessageArgs) []byte {
 			GroupEvent:        a.GroupEvent,
 			Forward:           a.Forward,
 			Poll:              a.Poll,
+			Sticker:           a.Sticker,
 		},
 	})
 }

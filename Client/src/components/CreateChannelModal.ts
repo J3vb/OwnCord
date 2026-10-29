@@ -10,9 +10,10 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
 import { forumsEnabled } from "@lib/serverCapabilities";
 import type { MountableComponent } from "@lib/safe-render";
@@ -220,7 +221,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     nameInput.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+        if (e.key !== "Enter" || isImeCommit(e)) return;
         if (nameInput.value.trim() === "" || createBtn.hasAttribute("disabled")) return;
         e.preventDefault();
         void submit();
@@ -230,15 +231,16 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
 
     appendChildren(footer, cancelBtn, createBtn);
 
-    // Overlay/modal shell, dialog semantics, focus trap and focus
-    // save/restore all come from the shared factory; only the backdrop and
-    // Escape wiring stay here, since this component's onClose is decoupled
+    // Overlay/modal shell, dialog semantics, focus trap, focus save/restore and
+    // the IME-safe Escape listener come from the shared factory; only the
+    // backdrop wiring stays here, since this component's onClose is decoupled
     // from destroy() (see the caller's onClose, which calls destroy()).
     instance = createModal(
       {
         content: header,
         closeOnBackdrop: false,
-        closeOnEscape: false,
+        // Escape cancels — never creates.
+        onEscape: () => onClose(),
         overlayAttrs: { "data-testid": "create-channel-modal" },
         ariaLabelledBy: "create-channel-title",
       },
@@ -247,28 +249,7 @@ export function createCreateChannelModal(options: CreateChannelModalOptions): Mo
     appendChildren(instance.modal, body, footer);
 
     // Close on backdrop click
-    instance.overlay.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === instance?.overlay) {
-          onClose();
-        }
-      },
-      { signal: disposable.signal },
-    );
-
-    // Escape cancels — never creates. Document-level so it works wherever
-    // focus sits; guarded on the overlay still being attached because the
-    // listener lives until destroy() aborts it.
-    document.addEventListener(
-      "keydown",
-      (e: KeyboardEvent) => {
-        if (e.key === "Escape" && instance?.overlay.isConnected === true) {
-          onClose();
-        }
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(instance.overlay, () => onClose(), disposable.signal);
 
     // Focus the name input
     nameInput.focus();

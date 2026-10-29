@@ -5,9 +5,11 @@
  */
 
 import { Disposable } from "@lib/disposable";
+import { isImeCommit } from "@lib/ime";
 import { isDisplayed } from "@lib/dialogOpen";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
+import { closeOnBackdropClick } from "@lib/modalFactory";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import type { IconName } from "@lib/icons";
@@ -519,12 +521,12 @@ export function createSettingsOverlay(
       "keydown",
       (e: KeyboardEvent) => {
         // An IME composition owns its keys (Enter commits, Escape cancels).
-        if (e.isComposing || e.keyCode === 229) {
+        if (isImeCommit(e)) {
           // Keep the page's Escape-to-close from seeing the IME's key.
           e.stopPropagation();
           return;
         }
-        if (e.key === "Escape" && searchBox.value !== "") {
+        if (e.key === "Escape" && !isImeCommit(e) && searchBox.value !== "") {
           // The first Escape only clears; the next one closes the panel.
           e.preventDefault();
           e.stopPropagation();
@@ -749,7 +751,12 @@ export function createSettingsOverlay(
       "keydown",
       (e: KeyboardEvent) => {
         // The Log Out prompt owns Escape while it is open.
-        if (e.key === "Escape" && closeLogoutPrompt === null && root?.classList.contains("open")) {
+        if (
+          e.key === "Escape" &&
+          !isImeCommit(e) &&
+          closeLogoutPrompt === null &&
+          root?.classList.contains("open")
+        ) {
           requestClose();
         } else if (
           closeLogoutPrompt === null &&
@@ -777,13 +784,7 @@ export function createSettingsOverlay(
     appendChildren(panel, sidebar, contentArea, closeWrap);
 
     // Click backdrop (outside panel) to close
-    root.addEventListener(
-      "click",
-      (e: MouseEvent) => {
-        if (e.target === root) requestClose();
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(root, () => requestClose(), disposable.signal);
 
     root.appendChild(panel);
     // Don't build the active tab while the overlay is closed (DP-52): its

@@ -1,0 +1,218 @@
+[
+  { "name": "VALORANT", "exe": ["valorant-win64-shipping.exe"], "args": null, "os": ["windows"] },
+  {
+    "name": "League of Legends",
+    "exe": ["league of legends.exe"],
+    "args": null,
+    "os": ["windows"]
+  },
+  { "name": "Overwatch 2", "exe": ["overwatch.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "World of Warcraft",
+    "exe": ["wow.exe", "wow-64.exe", "wowclassic.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "Diablo IV", "exe": ["diablo iv.exe"], "args": null, "os": ["windows", "linux"] },
+  { "name": "Diablo III", "exe": ["diablo iii.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Diablo II: Resurrected",
+    "exe": ["d2r.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "Hearthstone", "exe": ["hearthstone.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "StarCraft II",
+    "exe": ["sc2.exe", "sc2_x64.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "StarCraft", "exe": ["starcraft.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Heroes of the Storm",
+    "exe": ["heroesofthestorm.exe", "heroesofthestorm_x64.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "Warcraft III", "exe": ["warcraft iii.exe"], "args": null, "os": ["windows", "linux"] },
+  { "name": "Call of Duty", "exe": ["cod.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Call of Duty: Black Ops Cold War",
+    "exe": ["blackopscoldwar.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "Destiny 2", "exe": ["destiny2.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Minecraft",
+    "exe": ["javaw.exe", "java.exe", "java"],
+    "args": "net.minecraft.client.main.Main",
+    "os": ["linux"]
+  },
+  {
+    "name": "Minecraft",
+    "exe": ["javaw.exe", "java.exe", "java"],
+    "args": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+    "os": ["linux"]
+  },
+  {
+    "name": "Minecraft",
+    "exe": ["javaw.exe", "java.exe", "java"],
+    "args": "cpw.mods.bootstraplauncher",
+    "os": ["linux"]
+  },
+  {
+    "name": "Minecraft Bedrock Edition",
+    "exe": ["minecraft.windows.exe"],
+    "args": null,
+    "os": ["windows"]
+  },
+  { "name": "osu!", "exe": ["osu!.exe"], "args": null, "os": ["windows", "linux"] },
+  { "name": "Roblox", "exe": ["robloxplayerbeta.exe"], "args": null, "os": ["windows"] },
+  {
+    "name": "Genshin Impact",
+    "exe": ["genshinimpact.exe", "yuanshen.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Honkai: Star Rail",
+    "exe": ["starrail.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Zenless Zone Zero",
+    "exe": ["zenlesszonezero.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "Honkai Impact 3rd", "exe": ["bh3.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Fortnite",
+    "exe": ["fortniteclient-win64-shipping.exe"],
+    "args": null,
+    "os": ["windows"]
+  },
+  {
+    "name": "Rocket League",
+    "exe": ["rocketleague.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "Grand Theft Auto V", "exe": ["gta5.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Red Dead Redemption 2",
+    "exe": ["rdr2.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "RuneScape", "exe": ["rs2client.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Old School RuneScape",
+    "exe": ["osclient.exe", "runelite.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Path of Exile",
+    "exe": ["pathofexile.exe", "pathofexile_x64.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "Lost Ark", "exe": ["lostark.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Warframe",
+    "exe": ["warframe.exe", "warframe.x64.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Final Fantasy XIV",
+    "exe": ["ffxiv.exe", "ffxiv_dx11.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Guild Wars 2",
+    "exe": ["gw2.exe", "gw2-64.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "EVE Online", "exe": ["exefile.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Escape from Tarkov",
+    "exe": ["escapefromtarkov.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Albion Online",
+    "exe": ["albion-online.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Black Desert",
+    "exe": ["blackdesert64.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "MapleStory", "exe": ["maplestory.exe"], "args": null, "os": ["windows", "linux"] },
+  { "name": "Star Citizen", "exe": ["starcitizen.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "World of Tanks",
+    "exe": ["worldoftanks.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "War Thunder",
+    "exe": ["win64/aces.exe", "aces.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Apex Legends",
+    "exe": ["r5apex.exe", "r5apex_dx12.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Rainbow Six Siege",
+    "exe": ["rainbowsix.exe", "rainbowsix_vulkan.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "Battlefield 2042", "exe": ["bf2042.exe"], "args": null, "os": ["windows", "linux"] },
+  { "name": "EA Sports FC 25", "exe": ["fc25.exe"], "args": null, "os": ["windows", "linux"] },
+  { "name": "The Sims 4", "exe": ["ts4_x64.exe"], "args": null, "os": ["windows", "linux"] },
+  {
+    "name": "Cyberpunk 2077",
+    "exe": ["cyberpunk2077.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "The Witcher 3: Wild Hunt",
+    "exe": ["witcher3.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  {
+    "name": "Baldur's Gate 3",
+    "exe": ["bg3.exe", "bg3_dx11.exe"],
+    "args": null,
+    "os": ["windows", "linux"]
+  },
+  { "name": "Forza Horizon 5", "exe": ["forzahorizon5.exe"], "args": null, "os": ["windows"] },
+  { "name": "Halo Infinite", "exe": ["haloinfinite.exe"], "args": null, "os": ["windows"] },
+  { "name": "Sea of Thieves", "exe": ["sotgame.exe"], "args": null, "os": ["windows"] },
+  {
+    "name": "Microsoft Flight Simulator",
+    "exe": ["flightsimulator.exe"],
+    "args": null,
+    "os": ["windows"]
+  }
+]

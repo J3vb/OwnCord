@@ -42,7 +42,11 @@ type Client struct {
 	held      *db.MemberRoles // the one held-role read of this handshake (refreshUserSnapshot)
 	roleIDs   []int64         // held role ids, top first; set by refreshUserSnapshot before registration
 	tokenHash string          // SHA-256 hex of the session token; used for periodic revalidation
-	lastSeq   uint64          // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
+	// identityKey is this device's E2EE identity public key from its auth
+	// frame ("" when none was sent). Immutable: set once in upgradeAndAuth
+	// before registerNow publishes the client, so it needs no lock.
+	identityKey string
+	lastSeq     uint64 // last_seq sent by the client during auth; 0 = fresh connection (e.g. F5 reload)
 	// authChannelID is the channel the client says it had open when it
 	// disconnected, sent alongside last_seq in the auth frame (0 = none).
 	//
@@ -58,15 +62,6 @@ type Client struct {
 	// handleReconnect and handleFreshConnect promote it to channelID only after
 	// checking it against the freshly computed allowed-channel set.
 	authChannelID int64
-	// wakeReconnect is true when the auth frame marked this connection a
-	// wake reconnect (auth payload `wake: true`, sent by a client dialling
-	// after its process was suspended). registerNow uses it to refuse
-	// displacing a DIFFERENT session's live connection — the same account on
-	// another device — so a woken laptop cannot silently steal the call. It
-	// never grants anything and is ignored unless a live client exists.
-	// Set once during the handshake, before the client is visible to any
-	// other goroutine, so no lock guards it.
-	wakeReconnect bool
 	// features is what the auth frame declared (client_features.go). Set once
 	// during the handshake, before the client is visible to any other
 	// goroutine, so no lock guards it.
@@ -112,6 +107,16 @@ type Client struct {
 	// stamp. presentableMembers and presence snapshots read it from other
 	// goroutines, hence atomic.
 	presence atomic.Pointer[livePresence]
+	// voiceExitAt is when a moderator action last took a call off this
+	// connection (unix nanos, 0 = never; ordinary leaves and moves do not stamp). SendToVoiceDevice uses it to find the device a
+	// moderator's voice_moved / voice_disconnected belongs to.
+	voiceExitAt atomic.Int64
+	// displaced is set when registerNow replaced this connection with a newer
+	// one of the same session, which then owns its voice session and presence.
+	// A connection removed any other way (a kick, the stale sweep) is not
+	// displaced even if its session has since reconnected, so its teardown
+	// parks or ends its own call instead of leaving it to the 60 s sweep.
+	displaced atomic.Bool
 }
 
 // wsConn is the subset of github.com/coder/websocket.Conn used by writePump/readPump.
@@ -171,7 +176,7 @@ func (c *Client) getChannelID() int64 {
 type livePresence struct {
 	status       string
 	customStatus *string
-	// customStatusExpiresAt is the stored expiry (db.CustomStatusExpiryLayout)
+	// customStatusExpiresAt is the stored expiry (dbtime.ISOLayout)
 	// of customStatus, "" when it has none. It is the tag the expirer's
 	// CustomStatusExpired compares: only a connection still showing the status
 	// that expired is cleared.
@@ -181,17 +186,37 @@ type livePresence struct {
 	// stays idle, across a custom-status change and its expiry, so the AFK sweep
 	// measures one unbroken idle stretch. A reconnect re-stamps it at connect.
 	idleSince time.Time
+	// setAt is when this connection last chose or stamped its status. Several
+	// connections of one user each hold a presence; the user's is the status of
+	// the most recent setter (mergeLivePresence).
+	setAt time.Time
+	// activity is the game this connection reports (WP 8.3a), nil when none.
+	// It is memory only and belongs to the connection: a replacement connection
+	// starts without one. The value is immutable; a change swaps in a new
+	// livePresence, so every writer of livePresence must carry it over.
+	activity *gameActivity
+	// listening is the song this connection reports (WP 8.10a), nil when none.
+	// Same rules as activity: memory only, owned by the connection, immutable,
+	// and carried over by every writer of livePresence.
+	listening *listeningActivity
 }
+
+// noActivity reports whether the connection shows neither a game nor a song.
+func (p livePresence) noActivity() bool { return p.activity == nil && p.listening == nil }
 
 // afkNow is the clock the idle stamp and the AFK sweep read. A var so tests
 // can move time without sleeping.
 var afkNow = time.Now
 
 // nextLivePresence is the presence that follows prev when the connection takes
-// status: it keeps prev.idleSince while the status stays idle and stamps now on
+// status: it keeps prev.activity and prev.listening, and prev.idleSince while the status stays idle and stamps now on
 // entry to idle, and leaves it zero for every other status.
 func nextLivePresence(prev *livePresence, status string, customStatus *string, expiresAt string, now time.Time) *livePresence {
-	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt}
+	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt, setAt: now}
+	if prev != nil {
+		next.activity = prev.activity
+		next.listening = prev.listening
+	}
 	if !isIdleStatus(status) {
 		return next
 	}
@@ -272,7 +297,7 @@ func (c *Client) sendPresenceMsg(msg []byte) {
 	c.mu.Unlock()
 	c.presenceStale.Store(true)
 	if c.hub != nil {
-		c.hub.presenceDropped(c.userID)
+		c.hub.presenceDropped(c.userID, c.tokenHash)
 	}
 }
 

@@ -258,24 +258,16 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 	// without sending a WS voice_leave (e.g. crash, network loss, F5 reload).
 	txn := h.begin(userID)
 	defer txn.end()
-	h.mu.RLock()
-	c, exists := h.clients[userID]
-	h.mu.RUnlock()
+	conns := h.clientsOf(userID)
 
-	if exists {
-		h.webhookLeftCleanupClient(ctx, txn, c, userID, channelID, joinToken)
+	if len(conns) > 0 {
+		h.webhookLeftCleanupClient(ctx, txn, conns, userID, channelID, joinToken)
 	} else if h.voice != nil {
 		// Client already disconnected from WS — use channel-conditional delete
 		// to avoid wiping a newer row if the user reconnected and rejoined.
 		// A grace-window entry parking this exact join dies with its row
 		// (deleteRow drops it first).
-		deleted, dbErr := txn.deleteRow(ctx, channelID, joinToken)
-		if dbErr != nil {
-			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (client gone)",
-				"error", dbErr, "user_id", userID, "channel_id", channelID)
-		} else if deleted {
-			h.broadcastVoiceEvent(ctx, channelID, userID, buildVoiceLeave(channelID, userID))
-		}
+		h.webhookLeftDeleteRow(ctx, txn, userID, channelID, joinToken, "client gone")
 	}
 }
 
@@ -283,29 +275,63 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 // handleWebhookParticipantLeft: it compare-and-clears the client's voice
 // fields for this exact join instance, then either finishes the leave or, when
 // the client has already moved on, clears the stale DB row.
-func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, c *Client, userID, channelID int64, joinToken string) {
+func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, conns []*Client, userID, channelID int64, joinToken string) {
 	// Atomic compare-and-clear of this exact join instance (channel AND
 	// token, one slot critical section): a voice_join committed on the
 	// readPump goroutine in between (a channel switch, or a same-channel
 	// rejoin with a fresh token) must not be wiped out from under the new
 	// session, dropping its VoiceTopic subscription along with it. Like every
 	// clear it resets the completed flag and unsubscribes.
-	matched := txn.clearExact(c, channelID, joinToken)
+	// Only the connection that holds the call can match; the user's other
+	// devices have an empty slot and never do.
+	matched := false
+	for _, c := range conns {
+		if txn.clearExact(c, channelID, joinToken) {
+			matched = true
+		}
+	}
 
 	if matched {
 		h.webhookLeftFinishLeave(ctx, txn, userID, channelID, joinToken)
 	} else if h.voice != nil {
 		// Client has voiceChID=0 or moved to a different channel (e.g.
 		// after F5 reload), or this webhook is for an older join instance.
-		deleted, dbErr := txn.deleteRow(ctx, channelID, joinToken)
-		if dbErr != nil {
-			slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed (stale DB row)",
-				"error", dbErr, "user_id", userID, "channel_id", channelID)
-		} else if deleted {
-			h.broadcastVoiceEvent(ctx, channelID, userID, buildVoiceLeave(channelID, userID))
-			slog.Info("livekit webhook: cleaned stale DB voice row after reconnect",
-				"user_id", userID, "channel_id", channelID)
-		}
+		h.webhookLeftDeleteRow(ctx, txn, userID, channelID, joinToken, "stale DB row")
+	}
+}
+
+// webhookLeftDeleteRow is the row-only removal of handleWebhookParticipantLeft,
+// used when no live slot matched this join instance (the socket is gone, or
+// has moved on): a channel-conditional row delete, a key-holder re-election
+// and the voice_leave broadcast. deleteRow also drops a grace entry parking
+// this exact join, so expireVoiceGrace -> finishVoiceLeave, which would have
+// re-elected, never runs for it; the election here takes its place. A parked
+// member's slot was cleared when it was parked, so it no longer counts in the
+// election scan, while the key-holder map may still name it. The election runs
+// only when this call removed membership: a row was deleted, or a grace entry
+// parking this exact join (channel AND token) was dropped, even if the delete
+// failed. A late leave for an older join instance removes neither, and must
+// not demote a holder who is merely parked. The grace entry is read before
+// deleteRow takes it, safe because the member lock is held and the expiry and
+// resume paths take entries under that same lock. txn is the caller's
+// Hub.begin(userID) handle; no hub lock is held.
+func (h *Hub) webhookLeftDeleteRow(ctx context.Context, txn *voiceTxn, userID, channelID int64, joinToken, stage string) {
+	parked := false
+	if e := h.voiceReg.voiceGrace.get(userID); e != nil {
+		parked = e.snap.chID == channelID && e.snap.joinToken == joinToken
+	}
+	deleted, dbErr := txn.deleteRow(ctx, channelID, joinToken)
+	if dbErr != nil {
+		slog.Error("livekit webhook: LeaveVoiceChannelIfMatch failed",
+			"error", dbErr, "stage", stage, "user_id", userID, "channel_id", channelID)
+	}
+	if parked || deleted {
+		h.updateKeyHolder(channelID)
+	}
+	if dbErr == nil && deleted {
+		h.broadcastVoiceEvent(ctx, channelID, userID, buildVoiceLeave(channelID, userID))
+		slog.Info("livekit webhook: cleaned stale DB voice row",
+			"stage", stage, "user_id", userID, "channel_id", channelID)
 	}
 }
 

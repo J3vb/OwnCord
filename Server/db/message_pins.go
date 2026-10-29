@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // PinEventWindow is how long a pin row suppresses another for the same
@@ -82,7 +83,7 @@ func (d *DB) SetMessagePinned(ctx context.Context, p SetPinnedParams) (*PinEvent
 		if !p.Pinned || wasPinned {
 			return nil
 		}
-		cutoff := now.Add(-PinEventWindow).Format("2006-01-02 15:04:05")
+		cutoff := now.Add(-PinEventWindow).Format(dbtime.SQLiteLayout)
 		recent, err := q.RecentPinEventExists(ctx, dbgen.RecentPinEventExistsParams{
 			ReplyTo: &p.MessageID, Timestamp: cutoff,
 		})

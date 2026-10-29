@@ -68,6 +68,10 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 			"motd":          motd,
 			"replay_source": replaySource,
 			"upload_policy": h.cachedUploadPolicy(ctx),
+			// WP 8.3e-2: the runtime game activity switch. A resume gets no
+			// ready, and the unsequenced game_activity_policy frame is not
+			// replayed, so every auth_ok restores the state.
+			"game_activity_policy": gameActivityPolicyPayload{Enabled: h.gameActivity.on.Load()},
 		},
 	})
 }
@@ -440,12 +444,15 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		retryFloorMS = h.readers.Ready.MessageDeliveryFloorMS()
 	}
 	threads := h.readyThreads(ctx, userID, visibleChannels, ackMap)
+	live := h.livePresences()
 	return &readyFields{
 		head: readyHead{
-			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil),
+			Activities:   readyActivities(live, userID),
+			Capabilities: readyCapabilities(retryFloorMS, h.threadHub.svc != nil, h.threadHub.svc != nil, h.gameActivity.on.Load()),
 			Categories:   categories,
 			Channels:     channelPayloads,
 			DMChannels:   dmChannels,
+			Listening:    readyListening(live, userID),
 
 			MemberTimeouts: timeouts.entries,
 		},
@@ -464,14 +471,6 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 }
 
 func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *Client) error {
-	// U4: refuse a wake reconnect before ANY handshake state change — most
-	// importantly before the grace take and freshConnectCleanStaleVoice below,
-	// which would end the other device's live or parked call. registerNow
-	// re-checks atomically below.
-	if h.wakeBlocked(c) {
-		refuseWake(ctx, conn, c)
-		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
-	}
 	// P5-S04: bound concurrent ready builds. Taken before any handshake state
 	// change or registration, so a waiting connect neither touches the
 	// database nor queues broadcasts it cannot drain yet.
@@ -522,24 +521,18 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	if freshConnectPreRegisterRaceHook != nil {
 		freshConnectPreRegisterRaceHook()
 	}
-	// U4: an atomic re-check under h.mu. A device connecting between the check
-	// above and here would otherwise be displaced; refuse instead.
 	txn := h.begin(c.userID)
-	refused := h.registerNow(c, allowedChannelIDs, txn)
+	h.registerNow(c, allowedChannelIDs, txn)
 	txn.end()
-	if refused {
-		refuseWake(ctx, conn, c)
-		return fmt.Errorf("handleFreshConnect: wake refused for user %d", c.userID)
-	}
 
 	// OC-0423: registerNow just above is the earliest point a revocation
 	// racing this handshake's DB work could have found this socket, so
 	// re-read the session now that c is reachable — see
-	// postRegisterSessionRecheck's doc. When it reports true it has already
+	// postRegisterSessionRecheck's doc. When it aborts it has already
 	// run the full failed-handshake teardown; only closing conn is left.
-	if h.postRegisterSessionRecheck(ctx, c) {
-		_ = conn.Close(websocket.StatusPolicyViolation, "session revoked")
-		return fmt.Errorf("handleFreshConnect: session revoked for user %d during handshake", c.userID)
+	if v := h.postRegisterSessionRecheck(ctx, c); v != postRegisterOK {
+		closeAbortedHandshake(ctx, conn, v)
+		return fmt.Errorf("handleFreshConnect: session revoked or user banned for user %d during handshake", c.userID)
 	}
 
 	// The re-read above and registerNow are not atomic: a role reassignment
@@ -596,11 +589,11 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 func (h *Hub) freshConnectSettleVoice(ctx context.Context, c *Client) {
 	txn := h.begin(c.userID)
 	defer txn.end()
-	// RT-8: a fresh connect ends any parked grace window (registerNow drops
-	// it); a replay-failure fallback may inherit one only while its row
+	// RT-8: a fresh connect ends its own session's parked grace window
+	// (registerNow drops it); a replay-failure fallback may inherit one only while its row
 	// still exists.
 	if c.lastSeq == 0 {
-		txn.takeParked(0)
+		txn.takeParkedOfSession(c.tokenHash) // another device's parked call stays parked
 	} else {
 		h.dropOrphanVoiceGrace(ctx, c.userID)
 	}
@@ -626,7 +619,16 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c 
 	// memory-without-row. Keep the row so ready stays consistent. If the
 	// old client unregisters before registerNow runs, the transfer is
 	// skipped and the next sweep reaps the then-truly-stale row.
-	if old := h.GetClient(c.userID); c.lastSeq > 0 && old != nil && old.voice.channel() == vs.ChannelID {
+	// The call belongs to another device when a live connection of a DIFFERENT
+	// session holds it, or that session parked it in the grace window. This
+	// connection is only a new device (or a reload of another one): it must not
+	// end that call. Same-session F5 falls through and cleans its own stale call.
+	if h.voiceHeldByOtherSession(c, vs.ChannelID) {
+		slog.Info("ws fresh connect: leaving another device's voice state",
+			"user_id", c.userID, "channel_id", vs.ChannelID)
+		return
+	}
+	if old := h.sessionClient(c.userID, c.tokenHash); c.lastSeq > 0 && old != nil && old.voice.channel() == vs.ChannelID {
 		slog.Info("ws fresh connect: keeping voice state for replay-failure fallback",
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
@@ -642,7 +644,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c 
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
 	}
-	txn.takeParked(0)
+	txn.takeParked(0) // same-session or unowned entry only: another session's returned above
 	slog.Info("ws fresh connect: cleaning stale voice state",
 		"user_id", c.userID, "channel_id", vs.ChannelID)
 	if _, delErr := txn.deleteRow(ctx, vs.ChannelID, vs.JoinedAt); delErr != nil {
@@ -659,7 +661,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c 
 	// sufficient regardless of whether registerNow ever runs; registerNow's
 	// own replacedVoiceChID re-election later becomes a redundant no-op
 	// (clearVoiceState finds nothing left to clear), not a conflict.
-	if old := h.GetClient(c.userID); old != nil {
+	if old := h.sessionClient(c.userID, c.tokenHash); old != nil {
 		txn.clearIfChannel(old, vs.ChannelID)
 	}
 	h.updateKeyHolder(vs.ChannelID)

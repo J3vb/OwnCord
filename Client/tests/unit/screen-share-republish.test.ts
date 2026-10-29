@@ -20,6 +20,13 @@ import {
 } from "@lib/screenShare";
 import { voiceStore } from "@stores/voice.store";
 
+const setH264GpuProfiles = vi.hoisted(() => vi.fn());
+vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/videoCodec")>()),
+  h264GpuPublish: (codec: string) => codec === "h264",
+}));
+
 vi.mock("@lib/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
   savePref: vi.fn(),
@@ -120,6 +127,29 @@ beforeEach(() => {
 });
 
 describe("republishVideo", () => {
+  beforeEach(() => setH264GpuProfiles.mockReset());
+
+  it("unmarks the track when the live switch republishes it as VP8, before the publish", async () => {
+    const r = rig();
+    const { state, video } = liveShare();
+
+    await expect(republishVideo("screen", state, r.deps, "vp8")).resolves.toBe(true);
+
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(video.mediaStreamTrack, false);
+    expect(setH264GpuProfiles.mock.invocationCallOrder[0]!).toBeLessThan(
+      r.publishTrack.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("marks the track again when it republishes as H.264", async () => {
+    const r = rig();
+    const { state, video } = liveCamera();
+
+    await expect(republishVideo("camera", state, r.deps, "h264")).resolves.toBe(true);
+
+    expect(setH264GpuProfiles).toHaveBeenCalledWith(video.mediaStreamTrack, true);
+  });
+
   it("republishes the camera on the same track: unpublish without stopping, then the same options for the new codec", async () => {
     const r = rig();
     const { state, video } = liveCamera();

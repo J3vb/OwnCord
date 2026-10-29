@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 var pollSeq int
@@ -128,7 +129,7 @@ func TestCreateMessageDelivery_PollAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("message timestamp %q: %v", saved.Message.Timestamp, err)
 	}
-	want := created.Add(24 * time.Hour).Format(db.CustomStatusExpiryLayout)
+	want := created.Add(24 * time.Hour).Format(dbtime.ISOLayout)
 	if meta.ExpiresAt != want {
 		t.Errorf("expires_at = %q, want %q", meta.ExpiresAt, want)
 	}

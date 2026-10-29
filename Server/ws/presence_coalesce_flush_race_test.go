@@ -74,7 +74,7 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 		// released presenceMu for) the queue, but before it has broadcast
 		// the stale entry.
 		go func() {
-			h.EmitEvents(context.Background(), presenceEvents(42, "dnd", nil))
+			h.EmitEvents(context.Background(), presenceEvents(42, "dnd", nil, nil, nil))
 			close(raced)
 		}()
 		// Give the goroutine room to actually run: with the bug this lets

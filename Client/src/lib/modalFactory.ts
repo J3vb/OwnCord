@@ -13,6 +13,7 @@
  */
 
 import { Disposable } from "./disposable";
+import { isImeCommit } from "./ime";
 import { createElement } from "./dom";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
 import { connectText } from "../i18n/connect";
@@ -28,6 +29,13 @@ export interface ModalOptions {
   readonly closeOnBackdrop?: boolean;
   /** Close when the Escape key is pressed. Default: true. */
   readonly closeOnEscape?: boolean;
+  /**
+   * What Escape does instead of closing: a busy guard, an unsaved-changes
+   * prompt, closing a nested picker first. Default: close. Only used when
+   * `closeOnEscape` is true. Escape that cancels an input-method candidate
+   * never reaches it.
+   */
+  readonly onEscape?: () => void;
   /** Additional CSS class on the .modal container (e.g. "dm-member-picker-modal"). */
   readonly className?: string;
   /** Additional attributes on the overlay element (e.g. data-testid). */
@@ -54,6 +62,37 @@ export interface ModalInstance {
 }
 
 /**
+ * Close `overlay` on a click on the backdrop itself. A press that starts
+ * inside the dialog and is released on the backdrop (drag-selecting an input's
+ * text past its edge) also fires a click on the overlay; only a press that
+ * started on the backdrop closes. Every dialog closes on its backdrop through
+ * this one guard (src/features/dialogBackdropDoor.test.ts).
+ */
+export function closeOnBackdropClick(
+  overlay: HTMLElement,
+  onClose: () => void,
+  signal: AbortSignal,
+): void {
+  let pressStartedInside = false;
+  overlay.addEventListener(
+    "pointerdown",
+    (e) => {
+      pressStartedInside = e.target !== overlay;
+    },
+    { capture: true, signal },
+  );
+  overlay.addEventListener(
+    "click",
+    (e) => {
+      const startedInside = pressStartedInside;
+      pressStartedInside = false;
+      if (e.target === overlay && !startedInside) onClose();
+    },
+    { signal },
+  );
+}
+
+/**
  * Create and append a modal overlay to the given container (default: document.body).
  * Returns a ModalInstance for lifecycle control.
  */
@@ -66,6 +105,7 @@ export function createModal(
     onClose,
     closeOnBackdrop = true,
     closeOnEscape = true,
+    onEscape,
     className,
     overlayAttrs,
     ariaLabel,
@@ -107,17 +147,8 @@ export function createModal(
     }
   }
 
-  // Backdrop click
   if (closeOnBackdrop) {
-    overlay.addEventListener(
-      "click",
-      (e) => {
-        if (e.target === overlay) {
-          handleClose();
-        }
-      },
-      { signal: disposable.signal },
-    );
+    closeOnBackdropClick(overlay, handleClose, disposable.signal);
   }
 
   // Escape key
@@ -125,9 +156,9 @@ export function createModal(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key === "Escape") {
-          handleClose();
-        }
+        if (e.key !== "Escape" || isImeCommit(e)) return;
+        if (onEscape !== undefined) onEscape();
+        else handleClose();
       },
       { signal: disposable.signal },
     );
@@ -316,7 +347,7 @@ export function createPromptModal(
   confirm.addEventListener("click", submit);
   cancel.addEventListener("click", () => instance.close());
   input.addEventListener("keydown", (e: KeyboardEvent) => {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !isImeCommit(e)) {
       e.preventDefault();
       submit();
     }

@@ -125,6 +125,9 @@ func requireBelowActor(actor *db.Role, target *db.Role) error {
 // an over-permissioned role impossible to wind down by anyone but an admin.
 // ADMINISTRATOR bypasses, which is what lets the owner grant anything.
 func requireGrantable(actor *db.Role, oldPerms, newPerms int64) error {
+	if err := requireOwnerGrantOnly(actor, (oldPerms^newPerms)&permissions.OwnerGrantOnly); err != nil {
+		return err
+	}
 	if permissions.HasAdmin(actor.Permissions) {
 		return nil
 	}
@@ -470,6 +473,9 @@ func (s *RoleService) deleteRoleLocked(ctx context.Context, actorID, roleID int6
 		// Fail closed: without a fallback the members would be orphaned on a
 		// role id that no longer exists.
 		return nil, nil, nil, fmt.Errorf("%w: no default role is configured", ErrInternal)
+	}
+	if err := requireOwnerGrantOnlyAssign(actor, role.Permissions|fallback.Permissions); err != nil {
+		return nil, nil, nil, err
 	}
 
 	movedUserIDs, err = s.st.DeleteRoleReassigning(ctx, role.ID, fallback.ID)

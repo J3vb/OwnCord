@@ -90,25 +90,55 @@
   background: var(--bg-secondary);
 }
 
-.video-cell video {
+/* A <video> whose picture a canvas draws (Linux, lib/videoSurface.ts) gives
+   its place to that canvas, which every rule below styles as the video. */
+video[data-surface],
+video[hidden] + .video-surface {
+  display: none;
+}
+
+.video-cell video,
+.video-cell .video-surface {
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
+/* Ctrl + wheel zoom and drag pan (lib/zoomPan.ts bindVideoZoom): the host
+   tile or pop-out carries the view, its picture shows it. The individual
+   properties apply outside `transform`, so your own camera's mirror stays. */
+.video-cell video,
+.video-cell .video-surface,
+.video-popout video,
+.video-popout .video-surface {
+  translate: var(--video-pan, none);
+  scale: var(--video-scale, none);
+}
+.video-zoomed,
+.video-zoomed .video-cell-select {
+  cursor: grab;
+}
+.video-panning,
+.video-panning .video-cell-select {
+  cursor: grabbing;
+}
 /* A camera fills its grid tile, cropped at the edges as Discord does. Focused
    or full screen it shows the whole frame again. Screen shares always do. */
 .video-cell[data-stream-type="camera"]:not(.focused):not(:fullscreen):not(.video-cell--theatre)
-  video {
+  video,
+.video-cell[data-stream-type="camera"]:not(.focused):not(:fullscreen):not(.video-cell--theatre)
+  .video-surface {
   object-fit: cover;
 }
 
 /* Your own camera is mirrored, as every call app shows it; others see it
    unmirrored. A screen share never carries this class. */
-.video-cell--self video {
+.video-cell--self video,
+.video-cell--self .video-surface {
   transform: scaleX(-1);
 }
 
-.video-cell.track-muted video {
+.video-cell.track-muted video,
+.video-cell.track-muted .video-surface {
   visibility: hidden;
 }
 
@@ -311,14 +341,17 @@
 .video-popout {
   position: fixed;
   inset: 0;
+  overflow: hidden;
   background: #000; /* intentional: letterbox bars, as on a tile */
 }
-.video-popout video {
+.video-popout video,
+.video-popout .video-surface {
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
-.video-popout video.track-muted {
+.video-popout video.track-muted,
+.video-popout video.track-muted + .video-surface {
   visibility: hidden;
 }
 .video-popout__fullscreen {
@@ -359,13 +392,15 @@
 .stream-mini--dragging {
   cursor: grabbing;
 }
-.stream-mini video {
+.stream-mini video,
+.stream-mini .video-surface {
   width: 100%;
   height: 100%;
   object-fit: contain;
   pointer-events: none;
 }
-.stream-mini video.track-muted {
+.stream-mini video.track-muted,
+.stream-mini video.track-muted + .video-surface {
   visibility: hidden;
 }
 .stream-mini .stream-mini__name {
@@ -672,7 +707,8 @@
   border: 2px solid transparent;
   border-radius: var(--radius-sm);
 }
-.video-focus-strip .video-cell video {
+.video-focus-strip .video-cell video,
+.video-focus-strip .video-cell .video-surface {
   object-fit: cover;
 }
 .video-focus-strip .video-cell:hover {

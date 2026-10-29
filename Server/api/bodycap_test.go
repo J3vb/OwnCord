@@ -32,6 +32,7 @@ func TestBodyCapExemptions_RouteEnvelopesReachable(t *testing.T) {
 		{"/api/v1/uploads", "", http.StatusOK},
 		{"/api/v1/admin/plugins/install", "", http.StatusOK},
 		{"/api/v1/users/me/avatar", "", http.StatusOK},
+		{"/api/v1/users/me/banner", "", http.StatusOK},
 		{"/api/v1/dms/12/icon", "", http.StatusOK},
 		// Everything else keeps the global cap.
 		{"/api/v1/dms/12/members", "", http.StatusRequestEntityTooLarge},

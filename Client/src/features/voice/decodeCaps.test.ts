@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
-vi.mock("./native/platform", () => ({ isLinuxDesktop: () => isLinuxDesktop() }));
+vi.mock("./native/platform", () => ({
+  isLinuxDesktop: () => isLinuxDesktop(),
+  isWindowsDesktop: () => false,
+}));
 
 const nativeVideoCodecs = vi.hoisted(() => vi.fn());
 vi.mock("./native/videoCodecs", () => ({ nativeVideoCodecs: () => nativeVideoCodecs() }));
@@ -120,6 +123,28 @@ describe("localVideoDecode", () => {
       }
     });
 
+    it("leaves no timeout armed once the probe has answered", async () => {
+      vi.useFakeTimers();
+      try {
+        nativeDecodes(["vp8", "vp9"]);
+        expect(await localVideoDecode()).toContain("vp9");
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("leaves no timeout armed once the probe has failed", async () => {
+      vi.useFakeTimers();
+      try {
+        nativeVideoCodecs.mockRejectedValue(new Error("host gone"));
+        expect(await localVideoDecode()).toEqual(BASELINE_DECODE);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("memoises the native answer", async () => {
       nativeDecodes(["vp9"]);
       await localVideoDecode();
@@ -147,6 +172,26 @@ describe("localVideoDecode", () => {
     expect(await localVideoDecode()).toEqual(["vp8"]);
     localStorage.removeItem(DEV_VP8_ONLY_KEY);
     expect(await localVideoDecode()).toContain("vp9");
+  });
+
+  it("asks the receiver about video only", async () => {
+    const getCapabilities = stubReceiver([]);
+    getCapabilities.mockImplementation((kind: string) =>
+      kind === "video" ? { codecs: [{ mimeType: "video/VP9", clockRate: 90000 }] } : { codecs: [] },
+    );
+    expect(await localVideoDecode()).toContain("vp9");
+    expect(getCapabilities).toHaveBeenCalledExactlyOnceWith("video");
+  });
+
+  it("ignores the dev VP8-only flag outside a development build", async () => {
+    stubReceiver(["video/VP9"]);
+    localStorage.setItem(DEV_VP8_ONLY_KEY, "1");
+    vi.stubEnv("DEV", false);
+    try {
+      expect(await localVideoDecode()).toContain("vp9");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("ignores a storage that throws", async () => {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
 // ─── User Operations ──────────────────────────────────────────────────────────
@@ -413,7 +414,7 @@ func (d *DB) ResetAllUserStatuses(ctx context.Context) error {
 func (d *DB) BanUser(ctx context.Context, id int64, reason string, expires *time.Time) error {
 	var expiresStr *string
 	if expires != nil {
-		s := expires.UTC().Format("2006-01-02T15:04:05Z")
+		s := expires.UTC().Format(dbtime.ISOLayout)
 		expiresStr = &s
 	}
 	reasonCopy := reason
@@ -475,7 +476,7 @@ func (d *DB) CreateFirstSession(ctx context.Context, userID int64, tokenHash, de
 // unseen marks the row as a new login the account has not acknowledged yet
 // (B4-7); a registration's first session has no other device to tell.
 func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHash, device, ip string, unseen bool) (int64, error) {
-	expiresAt := time.Now().Add(sessionTTL).UTC().Format(sessionTimeLayout)
+	expiresAt := time.Now().Add(sessionTTL).UTC().Format(dbtime.ISOLayout)
 	deviceCopy, ipCopy := device, ip
 	var unseenFlag int64
 	if unseen {
@@ -502,7 +503,7 @@ func (d *DB) GetSessionByTokenHash(ctx context.Context, tokenHash string) (*Sess
 	if err != nil {
 		return nil, fmt.Errorf("GetSessionByTokenHash: %w", err)
 	}
-	sess := sessionFromGen(s)
+	sess := sessionFromColumns(s.ID, s.UserID, s.Token, s.Device, s.IpAddress, s.CreatedAt, s.LastUsed, s.ExpiresAt, s.Unseen)
 	return &sess, nil
 }
 
@@ -628,11 +629,11 @@ func (d *DB) DeleteOtherSessions(ctx context.Context, userID, keepSessionID int6
 
 // DeleteExpiredSessions removes all sessions whose expires_at is in the past.
 // The comparison is plain text against idx_sessions_expires_at, so the cutoff
-// MUST use sessionTimeLayout — the exact stored format (migration 031
+// MUST use dbtime.ISOLayout — the exact stored format (migration 031
 // normalized legacy rows). A space-separated cutoff would compare wrong and
 // silently delete nothing (' ' sorts before 'T').
 func (d *DB) DeleteExpiredSessions(ctx context.Context) error {
-	cutoff := time.Now().UTC().Format(sessionTimeLayout)
+	cutoff := time.Now().UTC().Format(dbtime.ISOLayout)
 	if err := d.q.DeleteExpiredSessions(ctx, cutoff); err != nil {
 		return fmt.Errorf("DeleteExpiredSessions: %w", err)
 	}
@@ -655,7 +656,7 @@ func (d *DB) CreateInvite(ctx context.Context, createdBy int64, maxUses int, exp
 	}
 	var expiresStr *string
 	if expiresAt != nil {
-		s := expiresAt.UTC().Format("2006-01-02T15:04:05Z")
+		s := expiresAt.UTC().Format(dbtime.ISOLayout)
 		expiresStr = &s
 	}
 
@@ -728,19 +729,16 @@ func (d *DB) RevokeInvite(ctx context.Context, code string) error {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// MemberCreatedAtLayout is the wire layout of a member's created_at: the same
-// shape ListMembers renders with strftime('%Y-%m-%dT%H:%M:%SZ', ...).
-const MemberCreatedAtLayout = "2006-01-02T15:04:05Z"
-
 // FormatMemberCreatedAt renders a users.created_at value (SQLite's
 // datetime('now') text, "2006-01-02 15:04:05", or an RFC 3339 instant) in the
 // member wire layout, so member_join and ready.members[] agree. A value it
 // cannot parse is returned unchanged.
 func FormatMemberCreatedAt(raw string) string {
-	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339Nano} {
-		if t, err := time.Parse(layout, raw); err == nil {
-			return t.UTC().Format(MemberCreatedAtLayout)
-		}
+	if t, ok := dbtime.Parse(raw); ok {
+		return t.Format(dbtime.ISOLayout)
+	}
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t.UTC().Format(dbtime.ISOLayout)
 	}
 	return raw
 }

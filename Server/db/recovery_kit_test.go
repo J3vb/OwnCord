@@ -20,7 +20,7 @@ func TestRecoveryKit_UpsertReplacesAndUnspends(t *testing.T) {
 	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$first"); err != nil {
 		t.Fatalf("UpsertRecoveryKit: %v", err)
 	}
-	if _, err := database.RedeemRecoveryKit(ctx, uid, "newhash", "recovery_kit_used", "test"); err != nil {
+	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$first", "newhash", "recovery_kit_used", "test"); err != nil {
 		t.Fatalf("RedeemRecoveryKit: %v", err)
 	}
 	kit, _ := database.GetRecoveryKit(ctx, uid)
@@ -50,7 +50,7 @@ func TestRedeemRecoveryKit_IsOneTransaction(t *testing.T) {
 		t.Fatalf("UpsertRecoveryKit: %v", err)
 	}
 
-	revoked, err := database.RedeemRecoveryKit(ctx, uid, "newhash", "recovery_kit_used", "recovered")
+	revoked, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$v", "newhash", "recovery_kit_used", "recovered")
 	if err != nil || revoked != 2 {
 		t.Fatalf("RedeemRecoveryKit = %d, %v; want 2 sessions revoked", revoked, err)
 	}
@@ -66,12 +66,52 @@ func TestRedeemRecoveryKit_IsOneTransaction(t *testing.T) {
 		t.Errorf("audit rows = %d, %v; want 1", audits, err)
 	}
 	// Spent: a second redemption finds nothing and changes nothing.
-	if _, err := database.RedeemRecoveryKit(ctx, uid, "third", "recovery_kit_used", "again"); !errors.Is(err, db.ErrRecoveryKitSpent) {
+	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$v", "third", "recovery_kit_used", "again"); !errors.Is(err, db.ErrRecoveryKitSpent) {
 		t.Fatalf("second redeem = %v, want ErrRecoveryKitSpent", err)
 	}
 	u, _ = database.GetUserByID(ctx, uid)
 	if u.PasswordHash != "newhash" {
 		t.Errorf("a refused redeem changed the password to %q", u.PasswordHash)
+	}
+}
+
+// A redemption spends only the kit whose verifier it compared against: a kit
+// enrolled after that compare is a different secret and stays unspent, and
+// nothing else of the redeem happens.
+func TestRedeemRecoveryKit_SpendsOnlyTheComparedKit(t *testing.T) {
+	database := openMigratedMemory(t)
+	ctx := context.Background()
+	uid, _ := database.CreateUser(ctx, "rotating", "oldhash", 4)
+	if _, err := database.CreateSession(ctx, uid, "tok-live", "laptop", "10.0.0.1"); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$old"); err != nil {
+		t.Fatalf("UpsertRecoveryKit: %v", err)
+	}
+	if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$new"); err != nil {
+		t.Fatalf("UpsertRecoveryKit (rotation): %v", err)
+	}
+
+	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$old", "newhash", "recovery_kit_used", "stale"); !errors.Is(err, db.ErrRecoveryKitSpent) {
+		t.Fatalf("redeem with the replaced verifier = %v, want ErrRecoveryKitSpent", err)
+	}
+	kit, _ := database.GetRecoveryKit(ctx, uid)
+	if kit == nil || kit.Verifier != "$argon2id$new" || kit.UsedAt != nil {
+		t.Fatalf("kit = %+v, want the new one, unspent", kit)
+	}
+	u, _ := database.GetUserByID(ctx, uid)
+	if u.PasswordHash != "oldhash" {
+		t.Errorf("password hash = %q, want unchanged", u.PasswordHash)
+	}
+	if sessions, _ := database.ListUserSessions(ctx, uid); len(sessions) != 1 {
+		t.Errorf("sessions = %d, want the live one kept", len(sessions))
+	}
+
+	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$new", "newhash", "recovery_kit_used", "current"); err != nil {
+		t.Fatalf("redeem with the current verifier: %v", err)
+	}
+	if kit, _ := database.GetRecoveryKit(ctx, uid); kit == nil || kit.UsedAt == nil {
+		t.Fatalf("kit after redeem = %+v, want spent", kit)
 	}
 }
 
@@ -91,7 +131,7 @@ func TestRedeemRecoveryKit_RollsBackAsAWhole(t *testing.T) {
 		"CREATE TRIGGER fault_delete_sessions BEFORE DELETE ON sessions BEGIN SELECT RAISE(FAIL, 'injected fault'); END"); err != nil {
 		t.Fatalf("install fault: %v", err)
 	}
-	if _, err := database.RedeemRecoveryKit(ctx, uid, "newhash", "recovery_kit_used", "recovered"); err == nil {
+	if _, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$v", "newhash", "recovery_kit_used", "recovered"); err == nil {
 		t.Fatal("redeem succeeded through an injected session-delete failure")
 	}
 	kit, _ := database.GetRecoveryKit(ctx, uid)
@@ -142,7 +182,7 @@ func TestRedeemRecovery_RevokesTheAccountsAPITokens(t *testing.T) {
 			if err := database.UpsertRecoveryKit(ctx, uid, "$argon2id$v"); err != nil {
 				return err
 			}
-			_, err := database.RedeemRecoveryKit(ctx, uid, "newhash", "recovery_used", "recovered")
+			_, err := database.RedeemRecoveryKit(ctx, uid, "$argon2id$v", "newhash", "recovery_used", "recovered")
 			return err
 		}},
 		{"owner credential", func(database *db.DB, uid int64) error {

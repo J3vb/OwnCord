@@ -19,7 +19,7 @@ import type { SafetyState } from "../safety/store";
 import { resolveDisplayName } from "../../lib/avatar";
 import { shellText } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
-import { verifyPresentation } from "../voice/peerVerification";
+import { ownIdentityTitle, verifyPresentation } from "../voice/peerVerification";
 import type {
   VoiceAudioModel,
   VoiceChannelChromeModel,
@@ -33,13 +33,14 @@ export interface VoiceRowInputs {
   readonly currentChannelId: number | null;
   readonly peerVerifications: ReadonlyMap<number, PeerVerification>;
   readonly localSessionFingerprint: string | null;
+  readonly localSafetyNumber: string | null;
   /** The members now in voice, by user id. */
   readonly voiceMembers: ReadonlyMap<number, Member>;
   /** The signed-in user's id, or null when signed out. */
   readonly selfId: number | null;
   readonly connectionStatus: UiState["connectionStatus"];
   readonly timeout: SafetyState["timeout"];
-  /** Sorted ids of the voice channels whose `canModerateVoice` is true. */
+  /** Sorted ids of the voice channels whose `canModerateVoice` or `canMoveVoice` is true. */
   readonly moderatable: readonly number[];
   /** A fresh token per local-mute event: `localSilenced` answers differ after it. */
   readonly localMute: object;
@@ -103,7 +104,6 @@ export function voiceUserModel(
   // menu) keep the username and read it at event time.
   const member = inputs.voiceMembers.get(user.userId);
   const resolved = member !== undefined ? memberDisplayName(member) : user.username;
-  const fingerprint = inputs.localSessionFingerprint;
   return {
     userId: user.userId,
     name: resolved || shellText("common.unknown"),
@@ -115,10 +115,9 @@ export function voiceUserModel(
     live: user.screenshare,
     audio: audioModel(user),
     localMuted: !self && ctx.localSilenced(user.userId),
-    ownFingerprintTitle:
-      self && fingerprint !== null
-        ? shellText("channel.ownSessionFingerprint", { fingerprint })
-        : null,
+    ownFingerprintTitle: self
+      ? ownIdentityTitle(inputs.localSafetyNumber, inputs.localSessionFingerprint)
+      : null,
     verify: verifyModel(inputs.peerVerifications.get(user.userId)),
     draggable:
       ctx.moderation &&

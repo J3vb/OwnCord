@@ -18,7 +18,14 @@
  * and `notificationSounds` live in localStorage next to it.
  */
 
-import { loadPref, savePref, STORAGE_PREFIX } from "./preferences";
+import {
+  loadPref,
+  onPrefChange,
+  readStored,
+  removeStored,
+  savePref,
+  STORAGE_PREFIX,
+} from "./preferences";
 import { registerSessionReset } from "./sessionRegistry";
 
 /**
@@ -130,7 +137,7 @@ function parseMuted(raw: unknown): Map<number, number | null> {
  *  "present but happens to equal the fallback". An empty saved mute list is
  *  real data (the user unmuted everything) and must not be treated as a miss. */
 function keyExists(key: string): boolean {
-  return localStorage.getItem(STORAGE_PREFIX + key) !== null;
+  return readStored(STORAGE_PREFIX + key) !== null;
 }
 
 /** The stored entries (`null` = until turned off), expired ones included.
@@ -163,7 +170,7 @@ function readMuted(): ReadonlyMap<number, number | null> {
   if (keyExists(MUTED_KEY)) {
     const legacy = parseMuted(loadPref<unknown[]>(MUTED_KEY, []));
     writeMuted(legacy);
-    localStorage.removeItem(STORAGE_PREFIX + MUTED_KEY);
+    removeStored(STORAGE_PREFIX + MUTED_KEY);
     return legacy;
   }
 
@@ -207,9 +214,8 @@ export function invalidateMuteCache(): void {
 }
 
 if (typeof window !== "undefined") {
-  window.addEventListener("owncord:pref-change", (e) => {
-    const detail = (e as CustomEvent<{ key?: string }>).detail;
-    if (detail?.key === mutedKey()) invalidateMuteCache();
+  onPrefChange("any", (key) => {
+    if (key === mutedKey()) invalidateMuteCache();
   });
   // Cross-tab: the native storage event fires only in the *other* tab.
   window.addEventListener("storage", () => invalidateMuteCache());

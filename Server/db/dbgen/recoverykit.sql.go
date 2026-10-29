@@ -11,18 +11,20 @@ import (
 )
 
 const consumeRecoveryKit = `-- name: ConsumeRecoveryKit :execresult
-UPDATE recovery_kits SET used_at = ? WHERE user_id = ? AND used_at IS NULL
+UPDATE recovery_kits SET used_at = ? WHERE user_id = ? AND verifier = ? AND used_at IS NULL
 `
 
 type ConsumeRecoveryKitParams struct {
-	UsedAt *string `json:"usedAt"`
-	UserID int64   `json:"userId"`
+	UsedAt   *string `json:"usedAt"`
+	UserID   int64   `json:"userId"`
+	Verifier string  `json:"verifier"`
 }
 
-// The consume is conditional: only an unspent kit is spent, and the affected
-// row count is what tells two concurrent redemptions apart.
+// The consume is conditional: only the unspent kit whose verifier the caller
+// compared against is spent, so the affected row count is what tells two
+// concurrent redemptions, and a kit replaced since the compare, apart.
 func (q *Queries) ConsumeRecoveryKit(ctx context.Context, arg ConsumeRecoveryKitParams) (sql.Result, error) {
-	return q.db.ExecContext(ctx, consumeRecoveryKit, arg.UsedAt, arg.UserID)
+	return q.db.ExecContext(ctx, consumeRecoveryKit, arg.UsedAt, arg.UserID, arg.Verifier)
 }
 
 const deleteRecoveryKit = `-- name: DeleteRecoveryKit :exec

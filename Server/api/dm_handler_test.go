@@ -234,6 +234,13 @@ CREATE TABLE IF NOT EXISTS poll_votes (
     PRIMARY KEY (message_id, user_id, answer_id)
 );
 
+-- History and search reads look up the sticker block (migration 083).
+CREATE TABLE IF NOT EXISTS message_stickers (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    sticker_id INTEGER,
+    name       TEXT NOT NULL
+);
+
 -- Needed by GetMessages' permission resolution and reaction enrichment, even
 -- for a DM-only test: channelSubject/PermissionService reads channel_overrides
 -- unconditionally, and scanAndEnrichMessages always joins reactions.
@@ -275,7 +282,9 @@ CREATE TABLE IF NOT EXISTS attachments (
     size        INTEGER NOT NULL,
     uploaded_at TEXT    NOT NULL DEFAULT (datetime('now')),
     width       INTEGER,
-    height      INTEGER
+    height      INTEGER,
+    duration_ms INTEGER,
+    waveform    TEXT
 );
 
 

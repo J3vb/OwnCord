@@ -37,7 +37,11 @@ import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
 import { formatElapsed, headerStatusText, isConnecting } from "@components/voiceStatusText";
-import { verifyPresentation, openIdentityMismatchModal } from "../features/voice/peerVerification";
+import {
+  verifyPresentation,
+  openIdentityMismatchModal,
+  ownIdentityTitle,
+} from "../features/voice/peerVerification";
 import type { GridPerson, VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";
 import { dmCallText as d } from "../i18n/dmCall";
@@ -174,7 +178,8 @@ interface Person {
 interface AvatarRef {
   readonly wrap: HTMLElement;
   readonly badge: HTMLElement;
-  /** The peer's identity shield (D-09), drawn once their announce resolves. */
+  /** The peer's identity shield (D-09), drawn once their announce resolves;
+   *  on your own avatar, the shield that shows your own safety number. */
   verify: HTMLElement | null;
   verifyKey: string;
 }
@@ -1028,6 +1033,33 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     if (hadFocus) focusFallback(userId)?.focus();
   }
 
+  /** Your own shield: the safety number a peer compares with the one they
+   *  see on your shield, while you are in this call. */
+  function syncOwnShield(userId: number, ref: AvatarRef, voice: VoiceState | null): void {
+    const title =
+      voice === null
+        ? null
+        : ownIdentityTitle(voice.localSafetyNumber ?? null, voice.localSessionFingerprint ?? null);
+    const key = title ?? "";
+    if (key !== ref.verifyKey) {
+      ref.verifyKey = key;
+      ref.verify?.remove();
+      ref.verify = null;
+      if (title !== null) {
+        const el = createElement("span", {
+          class: "dcp-verify own",
+          title,
+          role: "img",
+          "aria-label": title,
+        });
+        el.style.color = "var(--text-muted, #949ba4)";
+        el.appendChild(createIcon("shield", 14));
+        ref.verify = el;
+      }
+    }
+    placeShield(userId, ref);
+  }
+
   /** A camera tile replaces the avatar tile in the grid, so the shield moves with the person. */
   function placeShield(userId: number, ref: AvatarRef): void {
     if (ref.verify === null) return;
@@ -1107,7 +1139,8 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       if (speaking && !isSelf && speaker === "") {
         speaker = resolvePerson(userId, view.dm, voice, me).name;
       }
-      if (!isSelf) syncVerify(userId, ref, voice, view.dm);
+      if (isSelf) syncOwnShield(userId, ref, inCallHere ? voice : null);
+      else syncVerify(userId, ref, voice, view.dm);
     }
     if (speakingEl !== null) {
       const text = speaker === "" ? "" : ` · ${d("speaking", { name: speaker })}`;

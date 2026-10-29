@@ -55,6 +55,12 @@ export interface Channel {
    */
   readonly canModerateVoice?: boolean | undefined;
   /**
+   * Whether the current user may move voice participants here at any rank
+   * (ReadyChannel.can_move_voice, MOVE_MEMBERS). Independent of
+   * canModerateVoice. Absent when the server never said.
+   */
+  readonly canMoveVoice?: boolean | undefined;
+  /**
    * Whether the current user may delete others' messages / pin / react here,
    * as the server computed it. Undefined when the server never said (older
    * server): callers fall back to the role's MANAGE_MESSAGES for the first two
@@ -185,6 +191,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       // which case we default permissive (no gating) rather than guessing.
       canSend: ch.can_send ?? true,
       canModerateVoice: ch.can_moderate_voice,
+      canMoveVoice: ch.can_move_voice,
       canDeleteOthers: ch.can_delete_others,
       canPin: ch.can_pin,
       canReact: ch.can_react,
@@ -278,6 +285,7 @@ export function addChannel(channel: ChannelCreatePayload): void {
       canSend: channel.can_send ?? existing?.canSend ?? true,
       // Same targeted, absent-means-unchanged rule; a new channel stays unknown.
       canModerateVoice: channel.can_moderate_voice ?? existing?.canModerateVoice,
+      canMoveVoice: channel.can_move_voice ?? existing?.canMoveVoice,
       canDeleteOthers: channel.can_delete_others ?? existing?.canDeleteOthers,
       canPin: channel.can_pin ?? existing?.canPin,
       canReact: channel.can_react ?? existing?.canReact,

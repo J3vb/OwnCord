@@ -42,6 +42,8 @@ import {
 } from "../../lib/screenShare";
 import { bumpLocalShareRev } from "../../stores/voice.store";
 import { isLinuxDesktop } from "./native/platform";
+import { setH264GpuProfiles } from "../../lib/h264Profile";
+import { h264GpuPublish } from "./videoCodec";
 import { startAppShareAudio, wantsAppAudio, type AppShareAudio } from "../../lib/appAudioShare";
 import { voiceText } from "../../i18n/voice";
 
@@ -152,6 +154,9 @@ export async function changeScreenshareSource(
     state.screenTrackEndedCleanup?.();
     // The SDK stops the old capture once the sender carries the new one.
     await live.video.replaceTrack(freshVideo.mediaStreamTrack, { userProvidedTrack: false });
+    // A reconnect republishes the share with this capture: keep its H.264
+    // profiles.
+    setH264GpuProfiles(freshVideo.mediaStreamTrack, h264GpuPublish(state.published ?? "vp8"));
     await swapBackupCodecs(live.video);
     const tracks: LocalTrack[] = [live.video];
     if (oldAudio !== undefined && freshAudio !== undefined) {

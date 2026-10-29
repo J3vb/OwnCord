@@ -2,6 +2,8 @@
 import { Room, Track } from "livekit-client";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import type { ShareSenderSample } from "../features/voice/shareSenderStats";
+import { ShareDiagnosticsRecorder, type ShareDiagnosticsSnapshot } from "./shareDiagnostics";
+import { getShareDiagnosticsEnabled, getShareMotionPolicy } from "./shareFlags";
 import type { WsClient } from "@lib/ws";
 import {
   voiceStore,
@@ -18,6 +20,7 @@ import {
 import { loadPref } from "@lib/preferences";
 import { inputMode } from "@lib/inputMode";
 import { createLogger } from "@lib/logger";
+import { Disposable } from "@lib/disposable";
 import { AudioPipeline } from "@lib/audioPipeline";
 import { AudioElements } from "@lib/audioElements";
 import { E2EEManager } from "@lib/livekitE2EE";
@@ -128,6 +131,10 @@ export class LiveKitSession {
   private _watchRetry: ReturnType<typeof setTimeout> | null = null;
   /** Your screen share's last sender sample, for the support bundle. */
   private _shareSender: ShareSenderSample | null = null;
+  /** The screen-share timeline of the current (or last) room session, and
+   *  the owner whose signal stops its polling when the session ends. */
+  private _shareDiag: ShareDiagnosticsRecorder | null = null;
+  private _shareDiagOwner: Disposable | null = null;
   // Test-visibility proxies: the callbacks live on RemoteTracks.
   private get onRemoteVideoCallback(): RemoteVideoCallback | null {
     return this._remoteTracks.onRemoteVideoCallback;
@@ -173,6 +180,7 @@ export class LiveKitSession {
     userId: number;
     publicKeyBase64: string;
     signatureBase64?: string;
+    identityKeyBase64?: string;
   }> {
     return this._e2ee.pendingAnnounces;
   }
@@ -481,7 +489,40 @@ export class LiveKitSession {
   // --- Room lifecycle (delegated to RoomLifecycle) ---
 
   private async createRoom(channelId?: number): Promise<Room> {
+    this.startShareDiagnostics();
     return this._lifecycle.createRoom(channelId);
+  }
+
+  /** One recorder per room session: a reconnect keeps it, leaveVoice stops
+   *  it, and the next join starts a fresh one. */
+  private startShareDiagnostics(): void {
+    if (this._shareDiagOwner !== null) return;
+    const recorder = new ShareDiagnosticsRecorder({
+      enabled: () => getShareDiagnosticsEnabled(),
+      policy: () => getShareMotionPolicy(),
+      shareEpoch: () => this.localScreenshareTrack(),
+      readSender: () => this._remoteTracks.getLocalScreenshareStats(),
+      watchedShares: () => this._remoteTracks.watchedScreenshares(),
+      readViewer: (id) => this._remoteTracks.getRemoteVideoStats(id, "screenshare"),
+      now: () => performance.now(),
+    });
+    const owner = new Disposable();
+    this._shareDiag = recorder;
+    this._shareDiagOwner = owner;
+    recorder.start(owner.signal);
+  }
+
+  /** Stops polling but keeps the timeline: a test usually ends by leaving
+   *  the call and then saving the support bundle. */
+  private stopShareDiagnostics(): void {
+    this._shareDiagOwner?.destroy();
+    this._shareDiagOwner = null;
+  }
+
+  /** The recorded screen-share timeline, or null when nothing was recorded. */
+  getShareDiagnostics(): ShareDiagnosticsSnapshot | null {
+    const snapshot = this._shareDiag?.snapshot();
+    return snapshot === undefined || snapshot.samples.length === 0 ? null : snapshot;
   }
 
   /** Update all extracted modules with a room reference. See RoomLifecycle. */
@@ -518,8 +559,24 @@ export class LiveKitSession {
         (channelsStore.getState().channels.has(channelId) ||
           dmStore.getState().channels.some((dm) => dm.channelId === channelId) ||
           isDmKeptForCall(channelId)),
-      serverMembership: () => {
-        if (this.ws?.getState() !== "connected") return "unknown";
+      serverMembership: async () => {
+        const ws = this.ws;
+        if (ws?.getState() !== "connected") return "unknown";
+        // The socket reads "connected" from its auth_ok, before its ready or
+        // resume replay restates the roster: a stale "held" would reconnect
+        // to a call the server already ended. The server sends both before
+        // it answers a ping, so a pong means the roster is current. A ping the
+        // server drops (2/s per user) times out as "unknown": one attempt waits.
+        // This also covers a call moved to another device while this socket was
+        // away: registerNow queues voice_disconnected ahead of the pong, which
+        // ends this session before the roster (which keeps the other device's
+        // self row) is read.
+        try {
+          await ws.ping(signal);
+        } catch {
+          return "unknown";
+        }
+        if (this.ws !== ws || ws.getState() !== "connected") return "unknown";
         const self = authStore.getState().user?.id ?? 0;
         return voiceStore.getState().voiceUsers.get(channelId)?.has(self) === true
           ? "held"
@@ -881,8 +938,16 @@ export class LiveKitSession {
     userId: number,
     publicKeyBase64: string,
     signatureBase64?: string,
+    identityKeyBase64?: string,
   ): Promise<void> {
-    return this._e2ee.handleAnnounce(userId, publicKeyBase64, signatureBase64);
+    return this._e2ee.handleAnnounce(userId, publicKeyBase64, signatureBase64, identityKeyBase64);
+  }
+
+  /** The identity key from the peer's current announce, or null when they have
+   *  announced none this call (the verify panel then falls back to the
+   *  published key). See E2EEPeerState.announcedIdentityKey. */
+  peerAnnouncedIdentityKey(userId: number): string | null {
+    return this._e2ee.peerAnnouncedIdentityKey(userId);
   }
 
   /**
@@ -913,6 +978,7 @@ export class LiveKitSession {
   private sweepPublications(room: Room): void {
     this._eventHandlers.handleConnected(room);
     this._remoteTracks.dropUnpublishedWatches();
+    this._remoteTracks.removeUnpublishedTiles();
   }
 
   /** Resolves once the room's disconnect has completed (the native room's,
@@ -932,6 +998,7 @@ export class LiveKitSession {
       }
     }
     this._media.stopCodecSwitch();
+    this.stopShareDiagnostics();
     return this._lifecycle.leaveVoice(sendWs);
   }
 
@@ -1104,9 +1171,16 @@ export class LiveKitSession {
   /** What your screen share is sending; the last sample also goes into the
    *  support bundle's voice diagnostics. */
   async getLocalScreenshareStats(): Promise<ShareSenderSample | null> {
+    const shared = this.localScreenshareTrack();
     const sample = await this._remoteTracks.getLocalScreenshareStats();
+    // A read that outlived its share says nothing about the one now live.
+    if (this.localScreenshareTrack() !== shared) return null;
     this._shareSender = sample;
     return sample;
+  }
+
+  private localScreenshareTrack(): object | undefined {
+    return this._room?.localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track;
   }
 
   /** Your screen share is publishing its audio too. */
@@ -1176,7 +1250,16 @@ export class LiveKitSession {
       );
     }
     if (!sharing) this._shareSender = null;
-    const info = { ...debug, screenShareSender: this._shareSender };
+    const timeline = this._shareDiag?.snapshot();
+    const info = {
+      ...debug,
+      screenShareSender: this._shareSender,
+      screenShareTimeline: {
+        samples: timeline?.samples.length ?? 0,
+        dropped: timeline?.dropped ?? 0,
+        policy: getShareMotionPolicy(),
+      },
+    };
     if (!isLinuxDesktop()) return info;
     // B7-11 rule 3: native resources are countable through the facade. Each
     // read asks the backend for a fresh snapshot, which the next read reports.
@@ -1219,6 +1302,7 @@ export const handleVoiceToken = session.handleVoiceToken.bind(session);
 export const handleE2EEAnnounce = session.handleE2EEAnnounce.bind(session);
 export const handleE2EEOffer = session.handleE2EEOffer.bind(session);
 export const rePinPeerIdentity = session.rePinPeerIdentity.bind(session);
+export const peerAnnouncedIdentityKey = session.peerAnnouncedIdentityKey.bind(session);
 export const handleParticipantLeft = session.handleParticipantLeft.bind(session);
 export const leaveVoice = session.leaveVoice.bind(session);
 export const failPendingRejoin = session.failPendingRejoin.bind(session);
@@ -1263,6 +1347,7 @@ export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const setRemoteVideoWatched = session.setRemoteVideoWatched.bind(session);
 export const forgetRemoteVideoWatch = session.forgetRemoteVideoWatch.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
+export const getShareDiagnostics = session.getShareDiagnostics.bind(session);
 export const getLocalMicSettings = session.getLocalMicSettings.bind(session);
 export const setScreenshareAudioVolume = session.setScreenshareAudioVolume.bind(session);
 export const getScreenshareAudioVolume = session.getScreenshareAudioVolume.bind(session);

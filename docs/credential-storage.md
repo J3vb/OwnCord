@@ -21,7 +21,9 @@ For pending messages, `owner_digest` is the lowercase hexadecimal SHA-256 digest
 of JSON `[host, userId]`. So each queue belongs to one full host (port
 included) and one signed-in user. Different accounts or server ports never
 share drafts. Saving, loading and deleting the queue use the same lock, write
-check and encrypted fallback as the other secrets.
+check and encrypted fallback as the other secrets. They only reach the host of
+the current session, or, while its connection is down, a host whose login was
+verified during this app run.
 
 ## The stored password never crosses IPC back to JavaScript
 

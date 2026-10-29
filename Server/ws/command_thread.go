@@ -68,15 +68,6 @@ type ThreadFollowCmd struct {
 func (c ThreadFollowCmd) Type() string  { return MsgTypeThreadFollow }
 func (c ThreadFollowCmd) UserID() int64 { return c.userID }
 
-// positiveID reads a required positive integer field.
-func positiveID(n json.Number, field string) (int64, error) {
-	v, err := n.Int64()
-	if err != nil || v <= 0 {
-		return 0, fmt.Errorf("%s must be a positive integer", field)
-	}
-	return v, nil
-}
-
 func parseThreadCreate(userID int64, _ string, raw json.RawMessage) (Command, error) {
 	var p struct {
 		ClientRequestID    string      `json:"client_request_id"`

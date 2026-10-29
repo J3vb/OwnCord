@@ -16,7 +16,7 @@ package ws
 // The DB round trips inside a real reconnect are too fast to reliably land a
 // concurrent goroutine inside that window (see the identical justification
 // on refreshChannelVisibilityRaceHook in hub_refresh_visibility_race_test.go),
-// so handleReconnectPreRegisterRaceHook pins it deterministically instead.
+// so handleReconnectPreSeqMuRaceHook pins it deterministically instead.
 
 import (
 	"context"
@@ -115,7 +115,7 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 	// fan-out RefreshChannelVisibility performs for a real admin edit: since c
 	// is not registered yet, the targeted channel_delete reaches nobody.
 	var hookRan bool
-	handleReconnectPreRegisterRaceHook = func() {
+	handleReconnectPreSeqMuRaceHook = func() {
 		hookRan = true
 		if overrideErr := database.UpsertChannelOverride(ctx, chID, harvestVoiceRoleID, 0, permissions.ReadMessages); overrideErr != nil {
 			t.Fatalf("UpsertChannelOverride: %v", overrideErr)
@@ -127,12 +127,12 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 		// the override write above; there is nothing to propagate.
 		h.RefreshChannelVisibility(ch)
 	}
-	defer func() { handleReconnectPreRegisterRaceHook = nil }()
+	defer func() { handleReconnectPreSeqMuRaceHook = nil }()
 
 	handled, startPumps := h.handleReconnect(ctx, conn, c, lastSeq)
 
 	if !hookRan {
-		t.Fatal("handleReconnectPreRegisterRaceHook never fired — test setup is broken, not exercising the race window")
+		t.Fatal("handleReconnectPreSeqMuRaceHook never fired — test setup is broken, not exercising the race window")
 	}
 
 	// A change that happened this deep into the handshake was never delivered
@@ -145,7 +145,7 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 	if startPumps {
 		t.Errorf("handleReconnect: startPumps=true after a visibility change landed mid-handshake, want false")
 	}
-	if live := h.GetClient(uid); live != nil {
+	if live := h.ClientForTest(uid); live != nil {
 		t.Errorf("handleReconnect registered the client with permissions computed before the mid-handshake visibility change")
 	}
 

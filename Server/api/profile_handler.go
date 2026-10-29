@@ -3,9 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -14,6 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
@@ -58,7 +56,7 @@ func toUserResponse(u *db.User) *userResponse {
 	}
 	customStatus, expiresAt := u.CustomStatus, u.CustomStatusExpiresAt
 	if expiresAt != nil {
-		if at, err := time.Parse(service.CustomStatusExpiryLayout, *expiresAt); err == nil && !time.Now().Before(at) {
+		if at, err := time.Parse(dbtime.ISOLayout, *expiresAt); err == nil && !time.Now().Before(at) {
 			customStatus = nil // expired, not yet cleared by the expirer
 		}
 	}
@@ -173,7 +171,7 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 		if store != nil {
 			r.With(MaxBodySize(avatarMaxBodySize)).
 				Post("/avatar", handleUploadAvatar(svc, store, limiter, broadcaster))
-			r.With(MaxBodySize(avatarMaxBodySize)).
+			r.With(MaxBodySize(bannerMaxBodySize)).
 				Post("/banner", handleUploadBanner(svc, store, limiter, broadcaster))
 		}
 
@@ -200,29 +198,10 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// validateIdentityKey checks that key is non-empty, at most 128 characters and
-// valid standard-alphabet base64 (padded or unpadded) — the same posture as
-// the WS voice_e2ee_announce public_key validation.
-func validateIdentityKey(key string) error {
-	if key == "" {
-		return fmt.Errorf("identity_public_key must not be empty")
-	}
-	if len(key) > 128 {
-		return fmt.Errorf("identity_public_key too large (max 128 characters)")
-	}
-	if _, err := base64.StdEncoding.DecodeString(key); err == nil {
-		return nil
-	}
-	if _, err := base64.RawStdEncoding.DecodeString(key); err != nil {
-		return fmt.Errorf("identity_public_key is not valid base64")
-	}
-	return nil
-}
-
-// allowedAvatarMIME is the set of image types an avatar may be, matched against
-// the type sniffed from the file's own bytes. GIF is absent (an animated
-// avatar in every message row is a distraction the renderer cannot opt out of)
-// and so is SVG, for the same reason emoji refuse it: it is markup with script
+// allowedAvatarMIME is the set of still image types an avatar, banner or group
+// icon may be, matched against the type sniffed from the file's own bytes.
+// GIF is added per surface (imageLimits.AllowGIF, WP 8.7) where the client
+// freezes it to its first frame until hovered. SVG is absent, for the same reason emoji refuse it: it is markup with script
 // and external-fetch capability, and an avatar is rendered inline by
 // definition.
 var allowedAvatarMIME = map[string]bool{
@@ -242,8 +221,7 @@ var allowedAvatarMIME = map[string]bool{
 // funlen limit; the field logic is unchanged.
 func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string, currentUsername string) (updateProfileRequest, bool) {
 	var req updateProfileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+	if !decodeJSON(w, r, &req) {
 		return req, false
 	}
 
@@ -347,7 +325,7 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	// all-or-nothing.
 	if req.IdentityPublicKey != nil {
 		trimmed := strings.TrimSpace(*req.IdentityPublicKey)
-		if err := validateIdentityKey(trimmed); err != nil {
+		if err := service.ValidateIdentityKey(trimmed); err != nil {
 			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
 			return req, false
 		}
@@ -441,8 +419,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 		}
 
 		var req changePasswordRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "malformed request body")
+		if !decodeJSON(w, r, &req) {
 			return
 		}
 

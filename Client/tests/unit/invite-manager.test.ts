@@ -202,6 +202,21 @@ describe("InviteManager", () => {
     mgr.destroy?.();
   });
 
+  it("Escape that cancels an IME candidate does not call onClose", () => {
+    const opts = makeOptions();
+    const mgr = createInviteManager(opts);
+    mgr.mount(container);
+
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
+    );
+    expect(opts.onClose).not.toHaveBeenCalled();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(opts.onClose).toHaveBeenCalledOnce();
+
+    mgr.destroy?.();
+  });
+
   it("clicking overlay backdrop calls onClose", () => {
     const opts = makeOptions();
     const mgr = createInviteManager(opts);
@@ -212,6 +227,17 @@ describe("InviteManager", () => {
     overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(opts.onClose).toHaveBeenCalledOnce();
 
+    mgr.destroy?.();
+  });
+
+  it("stays open when a drag-select ends on the backdrop", () => {
+    const opts = makeOptions();
+    const mgr = createInviteManager(opts);
+    mgr.mount(container);
+    const overlayEl = container.querySelector(".modal-overlay") as HTMLElement;
+    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(opts.onClose).not.toHaveBeenCalled();
     mgr.destroy?.();
   });
 

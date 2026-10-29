@@ -74,17 +74,10 @@ together as if each row were a unique defect:
 
 ## Canonical findings-ledger truth
 
-Current summary: this table tracks the live ledger, independently of dated
-baselines and scorecards.
-
-| Status    |   Count |
-| --------- | ------: |
-| Fixed     |     479 |
-| Open      |       4 |
-| Declined  |       7 |
-| Refuted   |       1 |
-| Duplicate |       1 |
-| **Total** | **492** |
+The live counts per status are in the summary at the top of the rendered
+`FINDINGS.md` (`node .superpowers/render-ledger.mjs`; CI uploads it as a build
+artifact). They are not copied here, so parallel fix PRs do not conflict on
+them; dated baselines and scorecards keep their own as-measured counts.
 
 As of 2026-09-28 the only open finding is `OC-0476`
 (low, not B9-tagged); `OC-0481` (the operational tls-off upload-phase

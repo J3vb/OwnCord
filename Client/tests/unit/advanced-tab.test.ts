@@ -518,8 +518,9 @@ describe("AdvancedTab — Toggles & Structure", () => {
       const titleTexts = Array.from(container.querySelectorAll(".settings-section-title")).map(
         (t) => t.textContent,
       );
-      expect(titleTexts).toEqual(["Storage & Cache"]);
-      expect(container.querySelectorAll(".settings-separator")).toHaveLength(1);
+      // Activity (WP 8.3) sits before the cache section on the desktop build.
+      expect(titleTexts).toEqual(["Activity", "Storage & Cache"]);
+      expect(container.querySelectorAll(".settings-separator")).toHaveLength(2);
       expect(container.textContent).not.toContain("Open DevTools");
     } finally {
       vi.unstubAllEnvs();

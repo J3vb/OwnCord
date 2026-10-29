@@ -6,6 +6,7 @@ import {
   updateVoiceState,
   updateVoiceUserProfile,
   removeVoiceUser,
+  clearChannelVoiceUsers,
   joinVoiceChannel,
   leaveVoiceChannel,
   setLocalMuted,
@@ -25,6 +26,7 @@ import {
   clearPeerVerifications,
   getPeerVerification,
   setLocalSessionFingerprint,
+  setLocalSafetyNumber,
   setPttPollingLive,
   isPttPollingLive,
   onPttPollingLiveChange,
@@ -210,6 +212,7 @@ describe("voice store", () => {
         // A full-ready reconnect (mustFullResync / replay miss) that
         // preserves a live voice session reports the moderator flags on the
         // signed-in user's own row.
+        voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
         setVoiceStates([
           { ...VOICE_STATE_1, server_muted: true, server_deafened: true },
           VOICE_STATE_2,
@@ -219,11 +222,26 @@ describe("voice store", () => {
         expect(state.localServerDeafened).toBe(true);
       });
 
+      it("leaves the local moderator flags false for a self row while this device is idle", () => {
+        authStore.setState((prev) => ({
+          ...prev,
+          user: { id: 1, username: "me", avatar: null, role: "member" },
+        }));
+        // The row is another device's call: roster only.
+        setVoiceStates([{ ...VOICE_STATE_1, server_muted: true, server_deafened: true }]);
+        const state = voiceStore.getState();
+        expect(state.localServerMuted).toBe(false);
+        expect(state.localServerDeafened).toBe(false);
+        expect(state.currentChannelId).toBeNull();
+        expect(state.voiceUsers.get(10)?.get(1)?.serverMuted).toBe(true);
+      });
+
       it("resets the local moderator flags to false when the signed-in user's row omits them", () => {
         authStore.setState((prev) => ({
           ...prev,
           user: { id: 1, username: "me", avatar: null, role: "member" },
         }));
+        voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
         // Simulate a stale localServerMuted from before the resync.
         voiceStore.setState((prev) => ({ ...prev, localServerMuted: true }));
         setVoiceStates([VOICE_STATE_1]); // no server_muted/server_deafened on this row
@@ -301,6 +319,7 @@ describe("voice store", () => {
         ...prev,
         user: { id: 5, username: "dave", avatar: null, role: "member" },
       }));
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
       updateVoiceState({
         ...FULL_VOICE_PAYLOAD,
         muted: true,
@@ -311,6 +330,18 @@ describe("voice store", () => {
       const state = voiceStore.getState();
       expect(state.localServerMuted).toBe(true);
       expect(state.localServerDeafened).toBe(true);
+      expect(state.voiceUsers.get(10)?.get(5)?.serverMuted).toBe(true);
+    });
+
+    it("keeps the local flags off for the signed-in user's row while this device is idle", () => {
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 5, username: "dave", avatar: null, role: "member" },
+      }));
+      updateVoiceState({ ...FULL_VOICE_PAYLOAD, server_muted: true, server_deafened: true });
+      const state = voiceStore.getState();
+      expect(state.localServerMuted).not.toBe(true);
+      expect(state.localServerDeafened).not.toBe(true);
       expect(state.voiceUsers.get(10)?.get(5)?.serverMuted).toBe(true);
     });
 
@@ -915,7 +946,7 @@ describe("voice store", () => {
   });
 
   describe("setVoiceStates — auto-join for current user", () => {
-    it("auto-joins current user's channel from ready payload", () => {
+    it("keeps the roster row but no channel for a self row while this device is idle", () => {
       authStore.setState(() => ({
         token: "t",
         user: { id: 1, username: "me", avatar: "", role: "member" },
@@ -923,6 +954,30 @@ describe("voice store", () => {
         motd: "",
         isAuthenticated: true,
       }));
+
+      setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
+
+      expect(voiceStore.getState().currentChannelId).toBeNull();
+      expect(voiceStore.getState().voiceUsers.get(10)?.has(1)).toBe(true);
+
+      authStore.setState(() => ({
+        token: null,
+        user: null,
+        serverName: null,
+        motd: null,
+        isAuthenticated: false,
+      }));
+    });
+
+    it("auto-joins current user's channel from ready payload when this device holds the call", () => {
+      authStore.setState(() => ({
+        token: "t",
+        user: { id: 1, username: "me", avatar: "", role: "member" },
+        serverName: "s",
+        motd: "",
+        isAuthenticated: true,
+      }));
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
 
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
 
@@ -1175,6 +1230,18 @@ describe("voice store", () => {
     });
   });
 
+  describe("setLocalSafetyNumber", () => {
+    it("publishes, clears, and skips an unchanged value", () => {
+      setLocalSafetyNumber("AB12 CD34");
+      expect(voiceStore.getState().localSafetyNumber).toBe("AB12 CD34");
+      const before = voiceStore.getState();
+      setLocalSafetyNumber("AB12 CD34");
+      expect(voiceStore.getState()).toBe(before);
+      setLocalSafetyNumber(null);
+      expect(voiceStore.getState().localSafetyNumber).toBeNull();
+    });
+  });
+
   describe("subscribe", () => {
     it("notifies on state changes", () => {
       const listener = vi.fn();
@@ -1226,5 +1293,60 @@ describe("voice store", () => {
     expect(joinRetryInMs()).toBeGreaterThan(0);
     clearAuth();
     expect(joinRetryInMs()).toBe(0);
+  });
+});
+
+describe("clearChannelVoiceUsers", () => {
+  const seed = (channelId: number, ...userIds: number[]) => {
+    for (const id of userIds) {
+      updateVoiceState({
+        channel_id: channelId,
+        user_id: id,
+        username: `u${id}`,
+        muted: false,
+        deafened: false,
+        speaking: false,
+        camera: false,
+        screenshare: false,
+      });
+    }
+    voiceStore.flush();
+  };
+  const roster = (channelId: number) => voiceStore.getState().voiceUsers.get(channelId);
+
+  beforeEach(() => {
+    resetVoiceStore();
+    voiceStore.flush();
+  });
+
+  afterEach(() => {
+    leaveVoiceChannel();
+    resetVoiceStore();
+    voiceStore.flush();
+  });
+
+  it("drops one channel's roster and leaves the others", () => {
+    seed(7, 2, 3);
+    seed(8, 4);
+    clearChannelVoiceUsers(7);
+    voiceStore.flush();
+    expect(roster(7)).toBeUndefined();
+    expect(roster(8)?.size).toBe(1);
+  });
+
+  it("leaves the roster alone while the local user is in that channel", () => {
+    seed(7, 2, 3);
+    joinVoiceChannel(7);
+    voiceStore.flush();
+    clearChannelVoiceUsers(7);
+    voiceStore.flush();
+    expect(roster(7)?.size).toBe(2);
+  });
+
+  it("is a no-op for a channel with no roster", () => {
+    const before = voiceStore.getState().voiceUsers;
+    clearChannelVoiceUsers(99);
+    voiceStore.flush();
+    expect(voiceStore.getState().voiceUsers).toBe(before);
   });
 });

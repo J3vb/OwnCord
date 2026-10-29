@@ -67,6 +67,7 @@ function inputs(over: Partial<VoiceRowInputs> = {}): VoiceRowInputs {
     currentChannelId: null,
     peerVerifications: new Map(),
     localSessionFingerprint: null,
+    localSafetyNumber: null,
     voiceMembers: new Map(),
     selfId: SELF,
     connectionStatus: "connected",
@@ -167,6 +168,19 @@ describe("voiceUserModel", () => {
     expect(peer.localMuted).toBe(true);
     expect(peer.ownFingerprintTitle).toBeNull();
     expect(peer.verify?.cls).toBe("verified");
+
+    // The own safety number leads the title, ahead of the session fingerprint.
+    const signed = voiceUserModel(
+      user(SELF),
+      10,
+      inputs({ localSafetyNumber: "AB12 CD34", localSessionFingerprint: "SELF-FP" }),
+      silenced,
+    );
+    expect(signed.ownFingerprintTitle).toMatch(/^Your safety number: AB12 CD34 · .*SELF-FP/);
+    expect(
+      voiceUserModel(user(PEER), 10, inputs({ localSafetyNumber: "AB12 CD34" }), silenced)
+        .ownFingerprintTitle,
+    ).toBeNull();
 
     // No fingerprint yet: no own badge.
     expect(voiceUserModel(user(SELF), 10, inputs(), silenced).ownFingerprintTitle).toBeNull();

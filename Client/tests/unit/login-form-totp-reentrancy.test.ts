@@ -41,6 +41,30 @@ describe("LoginForm TOTP re-entrancy guard", () => {
     container.remove();
   });
 
+  it("does not submit on an Enter that commits an IME candidate", async () => {
+    const onTotpSubmit = vi.fn(async () => {});
+    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
+    page.mount(container);
+    page.showTotp();
+
+    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    totpInput.value = "654321";
+    totpInput.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    expect(onTotpSubmit).not.toHaveBeenCalled();
+
+    totpInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await vi.waitFor(() => expect(onTotpSubmit).toHaveBeenCalledTimes(1));
+
+    page.destroy?.();
+  });
+
   it("ignores a second Enter press fired before the first verify call resolves", async () => {
     let resolveVerify: (() => void) | undefined;
     const onTotpSubmit = vi.fn(

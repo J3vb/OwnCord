@@ -27,6 +27,7 @@ vi.mock("@lib/logger", () => ({
 
 vi.mock("@lib/livekitSession", () => ({
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
+  getShareDiagnostics: vi.fn().mockReturnValue(null),
 }));
 
 const { mockGetVersion } = vi.hoisted(() => ({
@@ -54,7 +55,7 @@ const { mockExportSupportBundle } = vi.hoisted(() => ({
 }));
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
 
-import { getSessionDebugInfo } from "@lib/livekitSession";
+import { getSessionDebugInfo, getShareDiagnostics } from "@lib/livekitSession";
 import { createLogsTab } from "../../src/components/settings/LogsTab";
 import type { TabName } from "../../src/components/SettingsOverlay";
 
@@ -74,6 +75,16 @@ function makeMockEntry(level: "debug" | "info" | "warn" | "error", msg: string) 
     component: "test",
     timestamp: "2026-03-17T12:00:00.000Z",
   };
+}
+
+function buildLogsPane(signal: AbortSignal): HTMLDivElement {
+  return createLogsTab(() => "Logs" as TabName, signal).build();
+}
+function shareCard(el: HTMLElement): HTMLElement {
+  return el.querySelector<HTMLElement>("[data-testid='share-testing']")!;
+}
+function shareSelect(el: HTMLElement): HTMLSelectElement {
+  return el.querySelector<HTMLSelectElement>("[data-testid='share-motion-policy']")!;
 }
 
 describe("LogsTab", () => {
@@ -151,7 +162,8 @@ describe("LogsTab", () => {
   it("renders filter dropdown and level selector", () => {
     const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
     const el = handle.build();
-    const selects = el.querySelectorAll("select");
+    // The Screen share testing card has its own select.
+    const selects = el.querySelectorAll("select:not([data-testid='share-motion-policy'])");
     expect(selects.length).toBe(2);
   });
 
@@ -558,6 +570,72 @@ describe("LogsTab", () => {
       btn.click();
       await vi.waitFor(() => expect(status.textContent).toBe("Export failed: disk full"));
       el.remove();
+    });
+  });
+
+  describe("Screen share testing", () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("shows the card with the recording toggle and test modes in order", () => {
+      const el = buildLogsPane(controller.signal);
+      expect(shareCard(el).querySelector("h3")!.textContent).toBe("Screen share testing");
+      expect(shareCard(el).textContent).toContain("Record screen-share details");
+      expect(shareCard(el).textContent).toContain(
+        "Keeps the last 3 minutes of screen-share stats on this computer. They go into the support bundle. Nothing is uploaded.",
+      );
+      expect(shareCard(el).textContent).toContain(
+        "For testing only. Takes effect the next time you share.",
+      );
+      expect([...shareSelect(el).options].map((o) => [o.value, o.textContent])).toEqual([
+        ["legacy", "Normal (default)"],
+        ["detail-balanced", "Sharp text, smooth fallback"],
+        ["detail-framerate", "Sharp text, keep frame rate"],
+        ["motion-resolution", "Smooth motion, keep resolution"],
+        ["motion-balanced", "Smooth motion, balanced"],
+        ["motion-framerate", "Smooth motion, keep frame rate"],
+      ]);
+      expect(shareSelect(el).value).toBe("legacy");
+    });
+
+    it("persists the recording toggle", () => {
+      const el = buildLogsPane(controller.signal);
+      const toggle = shareCard(el).querySelector<HTMLElement>("[role='switch']")!;
+      expect(toggle.getAttribute("aria-checked")).toBe("false");
+      toggle.click();
+      expect(localStorage.getItem("owncord:settings:shareDiagnosticsV2")).toBe("true");
+      toggle.click();
+      expect(localStorage.getItem("owncord:settings:shareDiagnosticsV2")).toBe("false");
+      // A rebuilt pane reads the saved state back.
+      localStorage.setItem("owncord:settings:shareDiagnosticsV2", "true");
+      const again = buildLogsPane(controller.signal);
+      expect(shareCard(again).querySelector("[role='switch']")!.getAttribute("aria-checked")).toBe(
+        "true",
+      );
+    });
+
+    it("persists the test mode and reads it back", () => {
+      const el = buildLogsPane(controller.signal);
+      shareSelect(el).value = "motion-balanced";
+      shareSelect(el).dispatchEvent(new Event("change"));
+      expect(localStorage.getItem("owncord:settings:shareMotionPolicy")).toBe('"motion-balanced"');
+      expect(shareSelect(buildLogsPane(controller.signal)).value).toBe("motion-balanced");
+    });
+
+    it("shows an unknown stored mode as the default", () => {
+      localStorage.setItem("owncord:settings:shareMotionPolicy", '"sideways"');
+      expect(shareSelect(buildLogsPane(controller.signal)).value).toBe("legacy");
+    });
+
+    it("passes the recorded share timeline to the support bundle", async () => {
+      const snapshot = { policy: "legacy", samples: [] };
+      vi.mocked(getShareDiagnostics).mockReturnValue(snapshot as never);
+      mockExportSupportBundle.mockResolvedValue(true);
+      const el = buildLogsPane(controller.signal);
+      el.querySelector<HTMLButtonElement>("[data-testid='export-support-bundle']")!.click();
+      await vi.waitFor(() => expect(mockExportSupportBundle).toHaveBeenCalledTimes(1));
+      expect(mockExportSupportBundle.mock.calls[0]![2]).toBe(snapshot);
     });
   });
 

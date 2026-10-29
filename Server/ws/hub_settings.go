@@ -3,7 +3,11 @@ package ws
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/service"
+	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
 // SettingsReader is the hub's view of the settings family: one keyed read.
@@ -103,13 +107,100 @@ func (h *Hub) BroadcastUploadPolicy() {
 	h.settingsUpload.BlockedExtensions, h.settingsUpload.AllowedExtensions = p.Blocked, p.Allowed
 	h.settingsMu.Unlock()
 	msg := buildUploadPolicy(p.Blocked, p.Allowed)
-	h.mu.RLock()
-	clients := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
-		clients = append(clients, c)
-	}
-	h.mu.RUnlock()
-	for _, c := range clients {
+	for _, c := range h.clientSnapshot() {
 		c.trySendMsg(msg)
 	}
+}
+
+// gameActivityState is the per-server game activity switch (WP 8.3e-2): the
+// flag and the serialiser that orders its saves.
+type gameActivityState struct {
+	// on is written only under mu, and once when the hub is built; read
+	// lock-free by the handler, ready and auth_ok, and under presenceMu by
+	// applyActivity and the presence emitters.
+	on atomic.Bool
+	mu syncutil.Ranked[lockRankSerialiser] // orders ApplyGameActivityPolicy's saves
+}
+
+// gameActivityReadTimeout bounds the game activity switch's settings read.
+const gameActivityReadTimeout = 5 * time.Second
+
+// readGameActivitySwitch reads the stored game activity switch: a missing row
+// means on. ok is false when the read failed.
+func (h *Hub) readGameActivitySwitch(ctx context.Context) (enabled, ok bool, err error) {
+	return service.GameActivityEnabledFromRead(h.settings.Setting(ctx, service.GameActivityEnabledKey))
+}
+
+// initGameActivityPolicy sets the game activity switch from the stored
+// setting when the hub is built. An unreadable setting turns it off (fail
+// closed: the admin may have turned it off) and logs a warning.
+func (h *Hub) initGameActivityPolicy() {
+	ctx, cancel := context.WithTimeout(context.Background(), gameActivityReadTimeout)
+	defer cancel()
+	enabled, ok, err := h.readGameActivitySwitch(ctx)
+	if !ok {
+		slog.Warn("game_activity_policy: reading the setting failed", "stage", "init", "error", err)
+		enabled = false
+	}
+	h.gameActivity.on.Store(enabled)
+}
+
+// ApplyGameActivityPolicy makes the hub follow the saved game activity switch:
+// it re-reads the stored value, stores it in the flag, clears every shown game
+// when the switch is off, and sends game_activity_policy to every connected
+// client. saved is the value the admin just saved, used when the re-read
+// fails.
+//
+// Saves are serialised end to end (gameActivity.mu), and the value is
+// re-read under it, so two close together leave the hub on the database's
+// last one. The flag is stored before the sweep takes presenceMu: a set that
+// reaches applyActivity after the sweep sees false and is dropped, and one
+// that got there first is cleared by the sweep, whose frame has the higher
+// seq. The sweep sends nothing but sequenced presence; the policy frame goes
+// out after presenceMu is released, unsequenced and straight to each client
+// (like upload_policy): auth_ok carries the same value on every connect and
+// resume, so a replayed older frame could only overwrite a newer one.
+//
+// Lock order: gameActivity.mu, then the settings read, then presenceMu,
+// then Hub.mu (read), then the client leaves. The admin HubBroadcaster
+// interface carries no context, so the read runs against Background with its
+// own bound.
+func (h *Hub) ApplyGameActivityPolicy(saved bool) {
+	h.gameActivity.mu.Lock()
+	defer h.gameActivity.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), gameActivityReadTimeout)
+	defer cancel()
+	enabled, ok, err := h.readGameActivitySwitch(ctx)
+	if !ok {
+		slog.Warn("game_activity_policy: reading the setting failed", "stage", "apply", "error", err)
+		enabled = saved
+	}
+	h.gameActivity.on.Store(enabled)
+	if !enabled {
+		h.clearAllGameActivity()
+	}
+	msg := buildGameActivityPolicy(enabled)
+	for _, c := range h.clientSnapshot() {
+		c.trySendMsg(msg)
+	}
+}
+
+// clearAllGameActivity clears every connection's shown game and song (WP
+// 8.10a) through the ordinary clear path (swapActivityLocked): sequenced presence for a visible
+// user, the user's own frame only for an invisible one, and a queued connect
+// entry superseded. presenceMu is held across the whole sweep so no set or
+// older presence frame lands between two clears; nothing under it does I/O.
+func (h *Hub) clearAllGameActivity() {
+	h.presenceMu.Lock()
+	defer h.presenceMu.Unlock()
+	for _, c := range h.clientSnapshot() {
+		h.clearActivityAndListeningLocked(c)
+	}
+}
+
+// clientSnapshot lists the connected clients, taken under Hub.mu (read).
+func (h *Hub) clientSnapshot() []*Client {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.allClientsLocked()
 }
