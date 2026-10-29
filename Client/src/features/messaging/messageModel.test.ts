@@ -289,3 +289,77 @@ describe("call log rows (WP 3B-9c)", () => {
     expect("call" in plain).toBe(false);
   });
 });
+
+describe("optional fields on both mappers", () => {
+  const sticker = { id: 3, name: "wave", url: "/api/v1/stickers/3/image" };
+  const thread = {
+    id: 12,
+    parent_id: 4,
+    name: "side talk",
+    owner_id: 2,
+    starter_message_id: 7,
+    archived: false,
+    locked: false,
+    auto_archive_minutes: 1440,
+    message_count: 2,
+    last_message_at: null,
+    created_at: "2026-03-15T10:00:00Z",
+  };
+  const live: ChatMessagePayload = {
+    id: 7,
+    channel_id: 3,
+    user,
+    content: "hi",
+    reply_to: null,
+    attachments: [],
+    timestamp: "2026-03-15T10:00:00Z",
+    client_message_id: "c-1",
+    mentions: [],
+    mentions_everyone: false,
+  };
+  const history: MessageResponse = {
+    id: 7,
+    channel_id: 3,
+    user,
+    content: "hi",
+    reply_to: null,
+    attachments: [],
+    reactions: [],
+    pinned: false,
+    edited_at: null,
+    deleted: false,
+    timestamp: "2026-03-15T10:00:00Z",
+  };
+
+  it("carries role mentions, a sticker and a thread from a live broadcast", () => {
+    const message = chatPayloadToMessage({
+      ...live,
+      mention_roles: [5, 6],
+      sticker,
+      thread,
+    });
+    expect(message.mentionRoles).toEqual([5, 6]);
+    expect(message.sticker).toEqual(sticker);
+    expect(message.thread).toEqual(thread);
+  });
+
+  it("carries role mentions, a sticker and a thread from history", () => {
+    const message = messageResponseToMessage({
+      ...history,
+      mention_roles: [8],
+      sticker,
+      thread,
+    });
+    expect(message.mentionRoles).toEqual([8]);
+    expect(message.sticker).toEqual(sticker);
+    expect(message.thread).toEqual(thread);
+  });
+
+  it("leaves those fields off when the frame has none", () => {
+    for (const message of [chatPayloadToMessage(live), messageResponseToMessage(history)]) {
+      expect("mentionRoles" in message).toBe(false);
+      expect("sticker" in message).toBe(false);
+      expect("thread" in message).toBe(false);
+    }
+  });
+});

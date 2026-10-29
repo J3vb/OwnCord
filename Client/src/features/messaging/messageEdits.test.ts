@@ -73,6 +73,41 @@ describe("reduceEditMessage", () => {
     expect(list(next)[0]).toMatchObject({ kind: "call", call: ended, editedAt: null });
   });
 
+  it("a call end without a kind marks the row as a call, and a stated kind wins", () => {
+    const call = { started_at: "T0", ended_at: "T1", participants: [1] };
+    const bare = reduceEditMessage(prev, {
+      message_id: 2,
+      channel_id: 1,
+      content: "call",
+      edited_at: null,
+      call,
+    });
+    expect(list(bare)[1]?.kind).toBe("call");
+    const stated = reduceEditMessage(prev, {
+      message_id: 2,
+      channel_id: 1,
+      content: "call",
+      edited_at: null,
+      kind: "group_call",
+      call,
+    });
+    expect(list(stated)[1]?.kind).toBe("group_call");
+  });
+
+  it("an edit without a call leaves the row's kind alone", () => {
+    const withKind: MessagesState = {
+      ...INITIAL_STATE,
+      messagesByChannel: new Map([[1, [row(2, { kind: "member_join" })]]]),
+    };
+    const next = reduceEditMessage(withKind, {
+      message_id: 2,
+      channel_id: 1,
+      content: "x",
+      edited_at: "T2",
+    });
+    expect(list(next)[0]?.kind).toBe("member_join");
+  });
+
   it("an end for a call row not in the store is a no-op that creates nothing", () => {
     const next = reduceEditMessage(prev, {
       message_id: 99,

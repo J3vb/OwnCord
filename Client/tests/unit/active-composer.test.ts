@@ -83,4 +83,39 @@ describe("activeComposer", () => {
     expect(live.insertMention).toHaveBeenCalledTimes(1);
     releaseLive();
   });
+
+  it("releasing a claim twice drops nothing else", () => {
+    const a = makeComposer();
+    const b = makeComposer();
+    const releaseA = claimComposer(a);
+    const releaseB = claimComposer(b);
+    releaseA();
+    releaseA();
+
+    // b is still claimed: when a later composer leaves, b takes the slot back.
+    const c = makeComposer();
+    claimComposer(c)();
+    expect(mentionInComposer("Dave")).toBe(true);
+    expect(b.insertMention).toHaveBeenCalledWith("Dave");
+    expect(c.insertMention).not.toHaveBeenCalled();
+    releaseB();
+  });
+
+  it("releasing a composer that does not hold the slot leaves the focused one in place", () => {
+    const a = makeComposer();
+    const b = makeComposer();
+    const c = makeComposer();
+    const releaseA = claimComposer(a);
+    const releaseB = claimComposer(b);
+    const releaseC = claimComposer(c);
+    focusComposer(b);
+
+    releaseA();
+    mentionInComposer("Dave");
+    expect(b.insertMention).toHaveBeenCalledWith("Dave");
+    expect(c.insertMention).not.toHaveBeenCalled();
+
+    releaseC();
+    releaseB();
+  });
 });
