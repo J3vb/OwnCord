@@ -25,6 +25,7 @@ import {
   suggestThreadName,
 } from "../features/threads/threadCommands";
 import { threadsText } from "../i18n/threads";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /** How long to wait for the server's answer before saying so. */
 const CREATE_TIMEOUT_MS = 20_000;
@@ -52,11 +53,11 @@ export interface CreateThreadDialogOptions {
 /** The dialog's refusal line for a server error code. */
 export function createErrorText(code: string): string {
   switch (code) {
-    case "FORBIDDEN":
+    case WsErrorCode.FORBIDDEN:
       return threadsText("create.error.FORBIDDEN");
-    case "NOT_FOUND":
+    case WsErrorCode.NOT_FOUND:
       return threadsText("create.error.NOT_FOUND");
-    case "RATE_LIMITED":
+    case WsErrorCode.RATE_LIMITED:
       return threadsText("create.error.RATE_LIMITED");
     case "UNCONFIRMED":
       return threadsText("create.error.UNCONFIRMED");
@@ -202,7 +203,7 @@ export function openCreateThreadDialog(options: CreateThreadDialogOptions): void
         }),
         ws.on("error", (payload, replyId) => {
           if (replyId !== id) return;
-          if (payload.code === "THREAD_EXISTS" && payload.thread_id !== undefined) {
+          if (payload.code === WsErrorCode.THREAD_EXISTS && payload.thread_id !== undefined) {
             settle();
             modal.close();
             options.onExists(payload.thread_id);

@@ -35,6 +35,7 @@ import type {
 } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /**
  * Honor a moderator's mute/deafen locally. Mute is also enforced at the SFU,
@@ -497,7 +498,7 @@ export function handleVoiceWatching(payload: Payload<"voice_watching">): void {
  *  True when the frame was ours. */
 export function handleVoiceWatchError(payload: Payload<"error">, id: string | undefined): boolean {
   if (!takeWatchRefusal(id)) return false;
-  if (payload.code === "RATE_LIMITED") {
+  if (payload.code === WsErrorCode.RATE_LIMITED) {
     void livekitSession()
       .then(({ retryWatching }) => retryWatching())
       .catch((err: unknown) => log.debug("voice_watch retry failed", err));
@@ -576,11 +577,11 @@ export function handleVoiceError(payload: Payload<"error">, id: string | undefin
   // and a refusal it invented would be uncorrectable. So the only job here
   // is to say what happened — without this the click was a silent no-op
   // with an explanation buried in the log.
-  if (payload.code === "CHANNEL_FULL") {
+  if (payload.code === WsErrorCode.CHANNEL_FULL) {
     showToast(connectText("voice.channelFull"), "error");
     return true;
   }
-  if (payload.code === "VIDEO_LIMIT") {
+  if (payload.code === WsErrorCode.VIDEO_LIMIT) {
     showToast(connectText("voice.videoLimit"), "error");
     // max_video has no SFU-level enforcement — the server only refuses the
     // DB write. Without this rollback the already-published track keeps

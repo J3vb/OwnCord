@@ -26,6 +26,7 @@ import { noteJoinSent } from "../voice/joinRequest";
 import { livekitSession, log } from "./dispatchContext";
 import type { DispatchApi, DispatchWs, Payload, ReconnectClock } from "./dispatchContext";
 import type { ConnectionState } from "../../lib/ws";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /** A join still in flight restates itself when it connects; an error frame
  *  for a send made before then would roll that join back. */
@@ -78,7 +79,7 @@ export function handleAuthError(
 ): void {
   log.error("Auth failed", { message: payload.message });
   setTransientError(payload.message);
-  const epochRefusal = payload.code === "protocol_epoch_unsupported";
+  const epochRefusal = payload.code === WsErrorCode.protocol_epoch_unsupported;
   // Hand the refused host to the connect page so it can name which side
   // updates, and offer the client update when this build is the older one.
   if (epochRefusal) {
@@ -210,7 +211,7 @@ export function rejoinVoiceAfterRestart(
  * must stop.
  */
 export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">): boolean {
-  if (payload.code === "BANNED") {
+  if (payload.code === WsErrorCode.BANNED) {
     // Banned users must not reconnect — show error and force logout.
     // The server answers a ban with a generic `error` frame (not
     // `auth_error`), so ws.ts never sets intentionalClose for this path.
@@ -226,7 +227,10 @@ export function handleConnectionError(ws: DispatchWs, payload: Payload<"error">)
     clearAuth();
     return true;
   }
-  if (payload.code === "SESSION_REPLACED" || payload.code === "ANOTHER_DEVICE_ACTIVE") {
+  if (
+    payload.code === WsErrorCode.SESSION_REPLACED ||
+    payload.code === WsErrorCode.ANOTHER_DEVICE_ACTIVE
+  ) {
     // The same account is live on another device. SESSION_REPLACED is the
     // server closing this socket because a new device took it;
     // ANOTHER_DEVICE_ACTIVE is the server refusing this device's wake

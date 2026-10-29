@@ -119,6 +119,7 @@ import {
   handleMemberTimeouts,
   handleModQueue,
 } from "../features/moderation/wsHandlers";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /** Unsubscribe all listeners. */
 export type DispatcherCleanup = () => void;
@@ -437,9 +438,9 @@ export function wireDispatcher(
       // A REQUEST_TIMEOUT (the server's per-frame deadline, WP 4.1b) means the
       // frame was not applied, which leaves the same unaccepted value behind.
       if (
-        payload.code === "TIMED_OUT" ||
-        payload.code === "BAD_REQUEST" ||
-        payload.code === "REQUEST_TIMEOUT"
+        payload.code === WsErrorCode.TIMED_OUT ||
+        payload.code === WsErrorCode.BAD_REQUEST ||
+        payload.code === WsErrorCode.REQUEST_TIMEOUT
       ) {
         getActivePresenceSender()?.rollbackRefused(id);
       }

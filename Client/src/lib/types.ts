@@ -5,7 +5,12 @@
 // =============================================================================
 
 import { connectText } from "../i18n/connect";
-import type { ServerRestartReasonValue } from "./protocolTypes";
+import type {
+  RestErrorCodeValue,
+  ServerRestartReasonValue,
+  WsErrorCode,
+  WsErrorCodeValue,
+} from "./protocolTypes";
 
 // -----------------------------------------------------------------------------
 // Common / Shared Types
@@ -70,79 +75,13 @@ export type VoiceQuality = "low" | "medium" | "high";
 /** Reaction action direction. */
 export type ReactionAction = "add" | "remove";
 
-/** WebSocket error codes returned by the server. */
 /**
- * Error codes the server can send over the socket. Mirrors
- * `Server/ws/errors.go` — the union was missing more than half of them
- * (SLOW_MODE, CONFLICT, BAD_REQUEST…), so code that switched on it could not
- * name the cases the server actually emits.
+ * Error codes the server can send: generated from `error_codes` in
+ * protocol/schema.json, so a code the server adds reaches this union by
+ * regenerating, not by hand. Compare against the `WsErrorCode` /
+ * `RestErrorCode` constants in `@lib/protocolTypes`, never a bare string.
  */
-export type WsErrorCode =
-  | "BAD_REQUEST"
-  | "INTERNAL"
-  | "NOT_FOUND"
-  | "FORBIDDEN"
-  | "RATE_LIMITED"
-  | "ALREADY_JOINED"
-  | "CHANNEL_FULL"
-  | "VOICE_ERROR"
-  | "VIDEO_LIMIT"
-  | "BANNED"
-  | "INVALID_JSON"
-  | "UNKNOWN_TYPE"
-  | "SLOW_MODE"
-  // A write refused by an active moderator timeout: a send or edit, a
-  // reaction, a voice join, a call ring, or a custom status.
-  | "TIMED_OUT"
-  // A 1:1 call ring to someone who has not accepted the caller's message
-  // request: refused at once, the ring is never delivered (D-03).
-  | "CALL_REQUIRES_ACCEPTANCE"
-  | "CONFLICT"
-  // A files-only chat_send none of whose uploads could be attached (2A-3).
-  | "ATTACHMENTS_UNAVAILABLE"
-  // A reaction_add of a new emoji on a message that already has 20 (3A-12).
-  | "REACTION_LIMIT"
-  | "BAD_PAYLOAD"
-  // WP 6.9c: the message already has a thread (the payload names it), or the
-  // thread is locked and only a moderator may post in or change it.
-  | "THREAD_EXISTS"
-  | "THREAD_LOCKED"
-  // WP 8.8: a chat_send named a custom sticker that does not exist (any more).
-  | "STICKER_NOT_FOUND"
-  | "GAME_ACTIVITY_DISABLED"
-  | "NOT_KEY_HOLDER"
-  // The same account connected from another device and displaced this socket.
-  | "SESSION_REPLACED"
-  // A fresh connect refused while the server's ready builds are saturated;
-  // carries retry_after_ms and is handled inside ws.ts (P5-S04).
-  | "SERVER_BUSY"
-  // A command whose database work ran past the server's per-frame deadline. It
-  // was not applied, so Retry is safe. Unlike SERVER_BUSY it is an ordinary
-  // frame error and never ends the connection (WP 4.1b).
-  | "REQUEST_TIMEOUT"
-  // A wake reconnect (auth frame `wake: true`) refused because another device
-  // currently holds the account's one live socket. The client stays signed in
-  // and does not reconnect until the user chooses "Use here" (U4).
-  | "ANOTHER_DEVICE_ACTIVE"
-  // Kept for older servers / existing call sites.
-  | "INVALID_INPUT"
-  | "SERVER_ERROR";
-
-/** REST API error codes. */
-export type ApiErrorCode =
-  | "UNAUTHORIZED"
-  | "FORBIDDEN"
-  | "NOT_FOUND"
-  | "RATE_LIMITED"
-  /** The server's queue for password checks is full; retry after Retry-After. */
-  | "AUTH_BUSY"
-  | "INVALID_INPUT"
-  | "CONFLICT"
-  | "TOO_LARGE"
-  | "SERVER_ERROR"
-  /** GIF proxy is not configured on this server (no gif.api_key). */
-  | "GIF_DISABLED"
-  | "UNKNOWN";
+export type { RestErrorCodeValue, WsErrorCodeValue } from "./protocolTypes";
 
 // -----------------------------------------------------------------------------
 // Embedded Objects (used inside payloads)
@@ -477,7 +416,7 @@ export interface AuthErrorPayload {
    * (`"protocol_epoch_unsupported"`); the epochs say which side is older.
    * Absent on every other refusal.
    */
-  readonly code?: "protocol_epoch_unsupported";
+  readonly code?: typeof WsErrorCode.protocol_epoch_unsupported;
   readonly client_epoch?: number;
   readonly server_epoch?: number;
   readonly min_epoch?: number;
@@ -1486,7 +1425,7 @@ export interface ServerRestartPayload {
 }
 
 export interface ErrorPayload {
-  readonly code: WsErrorCode;
+  readonly code: WsErrorCodeValue;
   readonly message: string;
   /** SERVER_BUSY only: the least wait before redialling. */
   readonly retry_after_ms?: number;
@@ -2105,7 +2044,8 @@ export interface SearchResponse {
 
 /** REST API error response body. */
 export interface ApiError {
-  readonly error: ApiErrorCode;
+  /** UNKNOWN: the client's own fallback for a reply with no JSON error body. */
+  readonly error: RestErrorCodeValue | "UNKNOWN";
   readonly message: string;
 }
 

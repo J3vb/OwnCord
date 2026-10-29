@@ -11,11 +11,12 @@ import { ApiClientError, errorText } from "../../lib/api";
 import type { ApiClient } from "../../lib/api";
 import { channelsStore } from "../../stores/channels.store";
 import { shellText } from "../../i18n/shell";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 /** The server refused a create or rename onto a name another category holds. */
-export const CATEGORY_NAME_TAKEN = "CATEGORY_NAME_TAKEN";
+export const CATEGORY_NAME_TAKEN = RestErrorCode.CATEGORY_NAME_TAKEN;
 /** A reorder named a set of ids that is not the server's current set. */
-export const CATEGORY_LIST_STALE = "CATEGORY_LIST_STALE";
+export const CATEGORY_LIST_STALE = RestErrorCode.CATEGORY_LIST_STALE;
 
 /** What the actions need from the toast container. */
 export interface CategoryToast {

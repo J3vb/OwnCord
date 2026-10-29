@@ -55,6 +55,7 @@ import {
 } from "../../lib/pendingMessages";
 import type { DispatchApi, Payload, ReconnectClock } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /**
  * OC-0024: serverClockSkewMs (see createReconnectClock) starts at 0 and is only
@@ -532,7 +533,7 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
   // nothing, and a Retry with the same ids fails the same way. Its row goes,
   // even one already failed as unconfirmed; the channel controller puts its
   // files back into the composer.
-  if (payload.code === "ATTACHMENTS_UNAVAILABLE" && id !== undefined && hasSendRow(id)) {
+  if (payload.code === WsErrorCode.ATTACHMENTS_UNAVAILABLE && id !== undefined && hasSendRow(id)) {
     removeOptimistic(id);
     return true;
   }
@@ -545,7 +546,7 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
     // neutral "being blocked" reason; blocks.store precedence still shows
     // the explicit reason if we are the blocker. Read the channel before
     // markSendFailed clears the pending row.
-    if (payload.code === "FORBIDDEN") {
+    if (payload.code === WsErrorCode.FORBIDDEN) {
       const chId = messagesStore.getState().pendingSends.get(id);
       const dm =
         chId === undefined
@@ -565,7 +566,7 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
       .get(pendingSends.get(id) ?? 0)
       ?.find((m) => m.correlationId === id)?.clientMessageId;
     const beforeRestore =
-      payload.code === "BAD_REQUEST" &&
+      payload.code === WsErrorCode.BAD_REQUEST &&
       clientMessageId !== undefined &&
       pendingMessageBeforeRestore(clientMessageId);
     if (beforeRestore) showToast(connectText("app.sendBeforeRestore"), "error");
@@ -576,7 +577,8 @@ export function handleMessagingError(payload: Payload<"error">, id: string | und
   // feedback the spec asks for (ux/messaging §5) — no toast on top.
   if (id !== undefined && rollbackReaction(id)) {
     // 3A-12: the cap is not visible from the pill alone, so say why it reverted.
-    if (payload.code === "REACTION_LIMIT") showToast(connectText("app.reactionLimit"), "error");
+    if (payload.code === WsErrorCode.REACTION_LIMIT)
+      showToast(connectText("app.reactionLimit"), "error");
     return true;
   }
   return false;

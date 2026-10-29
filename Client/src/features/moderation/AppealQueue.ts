@@ -40,6 +40,7 @@ import { isStatus, mapAppealDetail, mapAppealRow, type AppealDetail, type Appeal
 import { dateText } from "./Evidence";
 import { actorName } from "./History";
 import { modAppealStore } from "./store";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 const FILTERS = [
   { value: "", labelKey: "appeal.filter.active", countKey: "appeal.count.active" },
@@ -70,8 +71,8 @@ const me = (): number => authStore.getState().user?.id ?? -1;
 const NO_DRAFT = (): AppealDraft & { id: string } => ({ id: "", note: "", outcome: null });
 
 function errorText(w: AppealWrite, err: unknown): string {
-  if (isStatus(err, 403, "SELF_REVIEW")) return t("appeal.selfReview");
-  if (isStatus(err, 409, "REVERSAL_FAILED")) return t("appeal.reversalFailed");
+  if (isStatus(err, 403, RestErrorCode.SELF_REVIEW)) return t("appeal.selfReview");
+  if (isStatus(err, 409, RestErrorCode.REVERSAL_FAILED)) return t("appeal.reversalFailed");
   if (isStatus(err, 409))
     return t(w.kind === "assign" ? "appeal.conflict.assign" : "appeal.conflict.decide");
   if (isStatus(err, 400)) {
@@ -378,7 +379,7 @@ export function renderAppeals(
       },
       (err: unknown) => {
         if (signal.aborted || denied) return;
-        if (isStatus(err, 403) && !isStatus(err, 403, "SELF_REVIEW")) {
+        if (isStatus(err, 403) && !isStatus(err, 403, RestErrorCode.SELF_REVIEW)) {
           deny();
           return;
         }
@@ -439,7 +440,7 @@ export function renderAppeals(
         detailReq = null;
         if (writing === "reading") writing = null;
         detailSlot.removeAttribute("aria-busy");
-        if (isStatus(err, 403, "SELF_REVIEW")) {
+        if (isStatus(err, 403, RestErrorCode.SELF_REVIEW)) {
           clearDetail(t("appeal.detail.own"));
           return;
         }

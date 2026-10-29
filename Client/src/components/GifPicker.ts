@@ -26,6 +26,7 @@ import { externalConsentText } from "../i18n/externalConsent";
 import { contentText } from "../i18n/content";
 import { messagingText } from "../i18n/messaging";
 import { gifFavoritesText } from "../i18n/gifFavorites";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -475,7 +476,7 @@ export function createGifPicker(options: GifPickerOptions): {
     } catch (err) {
       // The server has no GIF key configured — degrade calmly and tell the
       // caller so it can disable its GIF button, rather than looking broken.
-      const disabled = err instanceof ApiClientError && err.code === "GIF_DISABLED";
+      const disabled = err instanceof ApiClientError && err.code === RestErrorCode.GIF_DISABLED;
       if (disabled) {
         root.classList.add("gp-unavailable");
         searchInput.disabled = true;

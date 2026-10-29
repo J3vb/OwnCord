@@ -100,6 +100,7 @@ import {
   savePendingText,
   acknowledgePendingMessage,
 } from "@lib/pendingMessages";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("channel-ctrl");
 
@@ -1118,7 +1119,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       const refusedReply =
         draft.replyTo !== null &&
         getChannelMessages(channelId).find((m) => m.correlationId === correlationId)?.errorCode ===
-          "BAD_REQUEST";
+          WsErrorCode.BAD_REQUEST;
       draftByCorrelation.delete(correlationId);
       clearSendTimer(correlationId);
       removeOptimistic(correlationId);
@@ -1968,7 +1969,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           if (edit !== undefined) failEdits([edit], false);
           untrack(pendingDeletes, correlationId);
         }
-        if (payload.code !== "SLOW_MODE") return;
+        if (payload.code !== WsErrorCode.SLOW_MODE) return;
         if (!sentToMountedChannel(correlationId)) return;
         const ch = channelsStore.getState().channels.get(channelId);
         if (ch !== undefined) startSlowMode(ch.slowMode);
@@ -2070,7 +2071,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       if (unsent.length > 0) putBackUnsent(draft.channelId, unsent, "skipped");
     }),
     ws.on("error", (payload, correlationId) => {
-      if (payload.code !== "ATTACHMENTS_UNAVAILABLE" || !correlationId) return;
+      if (payload.code !== WsErrorCode.ATTACHMENTS_UNAVAILABLE || !correlationId) return;
       const draft = draftByCorrelation.get(correlationId);
       if (draft === undefined || draft.userId !== getCurrentUserId()) return;
       // A files-only send none of whose files could be attached: the

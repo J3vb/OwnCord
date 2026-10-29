@@ -35,6 +35,7 @@ import {
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
 import { forwardText } from "../i18n/forward";
 import { shellText } from "../i18n/shell";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 export interface ForwardPickerOptions {
   readonly ws: ForwardWs;
@@ -56,19 +57,19 @@ const labelOf = (t: ForwardTarget): string => `${t.kind === "dm" ? "@" : "#"}${t
 
 function reasonText(code: string | null): string {
   switch (code) {
-    case "FORBIDDEN":
+    case WsErrorCode.FORBIDDEN:
       return forwardText("reason.FORBIDDEN");
-    case "NOT_FOUND":
+    case WsErrorCode.NOT_FOUND:
       return forwardText("reason.NOT_FOUND");
-    case "RATE_LIMITED":
+    case WsErrorCode.RATE_LIMITED:
       return forwardText("reason.RATE_LIMITED");
-    case "SLOW_MODE":
+    case WsErrorCode.SLOW_MODE:
       return forwardText("reason.SLOW_MODE");
-    case "TIMED_OUT":
+    case WsErrorCode.TIMED_OUT:
       return forwardText("reason.TIMED_OUT");
-    case "ATTACHMENTS_UNAVAILABLE":
+    case WsErrorCode.ATTACHMENTS_UNAVAILABLE:
       return forwardText("reason.ATTACHMENTS_UNAVAILABLE");
-    case "REQUEST_TIMEOUT":
+    case WsErrorCode.REQUEST_TIMEOUT:
       return forwardText("reason.REQUEST_TIMEOUT");
     case "OFFLINE":
       return forwardText("reason.OFFLINE");

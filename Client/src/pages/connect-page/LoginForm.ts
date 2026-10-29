@@ -19,6 +19,7 @@ import {
   MAX_USERNAME_LEN,
   type LimitHint,
 } from "@lib/nameLimits";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -192,7 +193,7 @@ const AUTH_BUSY_JITTER_MS = 1_000;
 /** The server's password-check queue was full: a refusal worth retrying. A
  *  per-IP RATE_LIMITED is not — retrying only spends the window again. */
 function isAuthBusy(err: unknown): err is ApiClientError {
-  return err instanceof ApiClientError && err.code === "AUTH_BUSY";
+  return err instanceof ApiClientError && err.code === RestErrorCode.AUTH_BUSY;
 }
 
 function isBusy(state: FormState): boolean {
@@ -1293,7 +1294,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       if (
         formMode === "register" &&
         err instanceof ApiClientError &&
-        err.code === "INVALID_INPUT" &&
+        err.code === RestErrorCode.INVALID_INPUT &&
         /^username\b/i.test(err.message)
       ) {
         usernameHint.showError(message);
@@ -1344,7 +1345,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     } catch (err) {
       const message =
         err instanceof ApiClientError &&
-        err.code === "RATE_LIMITED" &&
+        err.code === RestErrorCode.RATE_LIMITED &&
         err.message === "too many failed attempts, try again later"
           ? connectText("error.totpTooManyAttempts")
           : errorText(err, connectText("totp.failed"));

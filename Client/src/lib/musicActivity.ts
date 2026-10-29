@@ -55,6 +55,7 @@ import {
 } from "./musicActivityPrefs";
 import type { MediaPrefs, MediaReading } from "../platform/contracts/mediaDetector";
 import { onPrefChange } from "./preferences";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("musicActivity");
 
@@ -64,14 +65,14 @@ export const MUSIC_ACTIVITY_POLL_MS = 10_000;
 /** The refusals after which the same frame is worth sending again. A
  *  REQUEST_TIMEOUT is the server's per-frame deadline: the frame was not applied. */
 const RETRYABLE_REFUSALS: ReadonlySet<string> = new Set([
-  "RATE_LIMITED",
-  "TIMED_OUT",
-  "REQUEST_TIMEOUT",
+  WsErrorCode.RATE_LIMITED,
+  WsErrorCode.TIMED_OUT,
+  WsErrorCode.REQUEST_TIMEOUT,
   // The switch is off but this client missed the off frame: the next poll asks
   // again, so the song shows once the switch is back on. It is not taken as
   // the policy itself, since a refusal can arrive after a newer
   // game_activity_policy true.
-  "GAME_ACTIVITY_DISABLED",
+  WsErrorCode.GAME_ACTIVITY_DISABLED,
 ]);
 
 /** The longest text the server accepts, in characters. */

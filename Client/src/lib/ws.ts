@@ -13,6 +13,7 @@ import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
 import { Disposable } from "./disposable";
 import { normalizeHostForCertCompare } from "./hostNormalize";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("ws");
 
@@ -678,7 +679,7 @@ export function createWsClient({
     // P5-S04: the server refused this connect while its ready builds are
     // saturated. Not a user-facing error: the close that follows redials no
     // sooner than the hint.
-    if (msg.type === "error" && msg.payload.code === "SERVER_BUSY") {
+    if (msg.type === "error" && msg.payload.code === WsErrorCode.SERVER_BUSY) {
       busyRetryAfterMs = msg.payload.retry_after_ms;
       log.info("Server busy, redialling later", { retryAfterMs: busyRetryAfterMs });
       for (const listener of serverBusyListeners) {

@@ -44,6 +44,7 @@ import {
 import { buildCustomEmojiNode } from "./custom-emoji";
 import { connectionLockReason } from "./message-actions";
 import { channelCanReact, reactionLockReason } from "./reactions";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /** What one poll's card remembers across row rebuilds. */
 export interface CardState {
@@ -88,15 +89,15 @@ export function pollCardState(messageId: number): CardState {
 
 function errorText(code: string): string {
   switch (code) {
-    case "NOT_FOUND":
+    case WsErrorCode.NOT_FOUND:
       return pollCardText("error.NOT_FOUND");
-    case "POLL_ENDED":
+    case WsErrorCode.POLL_ENDED:
       return pollCardText("error.POLL_ENDED");
-    case "RATE_LIMITED":
+    case WsErrorCode.RATE_LIMITED:
       return pollCardText("error.RATE_LIMITED");
-    case "FORBIDDEN":
+    case WsErrorCode.FORBIDDEN:
       return pollCardText("error.FORBIDDEN");
-    case "TIMED_OUT":
+    case WsErrorCode.TIMED_OUT:
       return pollCardText("error.TIMED_OUT");
     case "OFFLINE":
       return pollCardText("error.OFFLINE");
@@ -104,7 +105,7 @@ function errorText(code: string): string {
       return pollCardText("error.NETWORK");
     case "UNCONFIRMED":
       return pollCardText("error.UNCONFIRMED");
-    case "REQUEST_TIMEOUT":
+    case WsErrorCode.REQUEST_TIMEOUT:
       return pollCardText("error.REQUEST_TIMEOUT");
     default:
       return pollCardText("error.other");
