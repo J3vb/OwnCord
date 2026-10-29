@@ -122,17 +122,17 @@ test.describe("WP 8.8 stickers and the expression popup", () => {
     await expect(food).toBeVisible();
 
     const fit = await popup.evaluate((el) => {
-      const rail = el.querySelector(".ep-categories")!.getBoundingClientRect();
+      const railBox = el.querySelector(".ep-categories")!.getBoundingClientRect();
       const grid = el.querySelector(".ep-scroll")!.getBoundingClientRect();
       const header = el.querySelector(".ep-header")!.getBoundingClientRect();
       const buttons = [...el.querySelectorAll(".ep-category-btn")].map((b) =>
         b.getBoundingClientRect(),
       );
       return {
-        railLeftOfGrid: rail.right <= grid.left + 0.5,
-        railBelowHeader: rail.top >= header.bottom - 0.5,
-        sameHeight: Math.abs(rail.height - grid.height) < 1,
-        buttonsInsideRail: buttons.every((b) => b.left >= rail.left && b.right <= rail.right),
+        railLeftOfGrid: railBox.right <= grid.left + 0.5,
+        railBelowHeader: railBox.top >= header.bottom - 0.5,
+        sameHeight: Math.abs(railBox.height - grid.height) < 1,
+        buttonsInsideRail: buttons.every((b) => b.left >= railBox.left && b.right <= railBox.right),
       };
     });
     expect(fit).toEqual({
