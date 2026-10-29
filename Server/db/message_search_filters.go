@@ -238,7 +238,7 @@ func (d *DB) firstIDAtOrAfter(ctx context.Context, ts string) (int64, error) {
 
 // allChannelIDs lists every channel id, for the legacy unscoped SearchMessages.
 func (d *DB) allChannelIDs(ctx context.Context) ([]int64, error) {
-	rows, err := d.reader.QueryContext(ctx, `SELECT id FROM channels`)
+	rows, err := d.reader.QueryContext(ctx, `SELECT id FROM channels WHERE import_pending = 0`)
 	if err != nil {
 		return nil, fmt.Errorf("allChannelIDs: %w", err)
 	}

@@ -438,8 +438,15 @@ const (
 	RegistrationActive  = "active"
 	RegistrationPending = "pending"
 	RegistrationDenied  = "denied"
+	// RegistrationSystem marks the one hidden account that owns imported
+	// messages. It is not a person: it cannot sign in, is not listed, mentioned
+	// or messaged, and has no role.
+	RegistrationSystem = "system"
 )
 
 // PendingApproval reports an approval-mode application that no admin has
 // decided yet.
 func (u *User) PendingApproval() bool { return u.RegistrationStatus == RegistrationPending }
+
+// IsSystemAccount reports the hidden import account.
+func (u *User) IsSystemAccount() bool { return u.RegistrationStatus == RegistrationSystem }

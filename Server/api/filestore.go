@@ -71,3 +71,17 @@ func saveReserved(ctx context.Context, res *service.StorageReservation, store Fi
 	res.Landed()
 	return written, nil
 }
+
+// ReservedStore lets code outside this package write through a FileStore
+// without a second Save call site: the write is saveReserved, which demands a
+// reservation. The Discord import copies attachments through it.
+type ReservedStore struct{ Store FileStore }
+
+// SaveReserved writes r under name, handing the reservation back on failure and
+// landing it on success.
+func (s ReservedStore) SaveReserved(ctx context.Context, res *service.StorageReservation, name string, r io.Reader) (int64, error) {
+	return saveReserved(ctx, res, s.Store, name, r)
+}
+
+// Delete removes the stored file named name.
+func (s ReservedStore) Delete(name string) error { return s.Store.Delete(name) }

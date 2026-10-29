@@ -1,4 +1,7 @@
 -- name: ListChannels :many
+-- import_pending = 0 keeps a channel a Discord import is still building out of
+-- every client-facing read (here, GetChannel and GetAFKChannel): nobody can see
+-- or address it until the import finishes.
 SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        COALESCE(c.category_id, 0) AS category_id,
        COALESCE(cc.position, 0) AS category_position,
@@ -21,7 +24,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id
-WHERE c.parent_channel_id IS NULL
+WHERE c.parent_channel_id IS NULL AND c.import_pending = 0
 ORDER BY c.position ASC, c.id ASC;
 
 -- name: GetChannel :one
@@ -46,7 +49,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.forum_default_auto_archive_minutes
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
-LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ?;
+LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ? AND c.import_pending = 0;
 
 -- name: GetAFKChannel :one
 SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
@@ -70,7 +73,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.forum_default_auto_archive_minutes
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
-LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1;
+LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1 AND c.import_pending = 0;
 
 -- name: ClearAFKChannel :exec
 UPDATE channels SET afk = 0 WHERE afk = 1;

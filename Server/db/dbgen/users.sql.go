@@ -46,9 +46,10 @@ func (q *Queries) CountPendingUsers(ctx context.Context) (int64, error) {
 }
 
 const countUsers = `-- name: CountUsers :one
-SELECT COUNT(*) FROM users
+SELECT COUNT(*) FROM users WHERE registration_status <> 'system'
 `
 
+// Not the hidden import account (registration_status 'system'), as in UserCount.
 func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countUsers)
 	var count int64

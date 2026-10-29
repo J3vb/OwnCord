@@ -137,7 +137,7 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT c.id, c.name, cr.days FROM channels c
 		   LEFT JOIN channel_retention cr ON cr.channel_id = COALESCE(c.parent_channel_id, c.id)
-		  WHERE c.type <> 'dm' AND c.is_group = 0
+		  WHERE c.type <> 'dm' AND c.is_group = 0 AND c.import_pending = 0
 		  ORDER BY c.id`)
 	if err != nil {
 		return nil, fmt.Errorf("RetentionWindows: %w", err)

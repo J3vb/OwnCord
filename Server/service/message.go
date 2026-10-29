@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"strings"
 	"sync/atomic"
 	"unicode/utf8"
 
@@ -403,6 +404,24 @@ func sanitizeToFixpoint(raw string) string {
 // registration, which must canonicalize identically to how lookups treat it.
 func SanitizeText(raw string) string {
 	return sanitizeToFixpoint(raw)
+}
+
+// SanitizeImportedContent runs imported history through the sanitizer and
+// length limit a sent message gets. Text over the limit is cut and ends in an
+// ellipsis rather than refused, since an import must not drop a message.
+func SanitizeImportedContent(raw string) string {
+	// The raw-byte guard in front of the quadratic sanitizer: cut first.
+	cut := len(raw) > maxMessageLen*4
+	if cut {
+		raw = strings.ToValidUTF8(raw[:maxMessageLen*4], "")
+	}
+	content := sanitizeToFixpoint(raw)
+	if n := utf8.RuneCountInString(content); n > maxMessageLen {
+		content = string([]rune(content)[:maxMessageLen-1]) + "…"
+	} else if cut && n > 0 {
+		content = string([]rune(content)[:min(n, maxMessageLen-1)]) + "…"
+	}
+	return content
 }
 
 // sanitizeContent validates and sanitizes message content.

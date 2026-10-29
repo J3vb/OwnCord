@@ -129,7 +129,7 @@ func proposedRetentionWindows(ctx context.Context, tx *sql.Tx, p *RetentionPolic
 		overrides[change.ChannelID] = *change.Days
 	}
 	// A thread takes its parent's override, as RetentionWindows does.
-	rows, err := tx.QueryContext(ctx, `SELECT id, name, COALESCE(parent_channel_id, id) FROM channels WHERE type <> 'dm' AND is_group = 0 ORDER BY id`)
+	rows, err := tx.QueryContext(ctx, `SELECT id, name, COALESCE(parent_channel_id, id) FROM channels WHERE type <> 'dm' AND is_group = 0 AND import_pending = 0 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}

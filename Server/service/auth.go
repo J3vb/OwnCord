@@ -572,6 +572,9 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 			"banned user attempted login from "+in.IP)
 		return nil, ErrBanned
 	}
+	if err := refuseSystemAccount(user, in.IP); err != nil {
+		return nil, err
+	}
 	// An approval-mode application holds the username and the password, but
 	// is not an account until an admin says so.
 	if user.PendingApproval() {

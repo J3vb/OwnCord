@@ -14,7 +14,7 @@ import (
 // ValidateUsername checks that a (pre-trimmed) username meets naming rules:
 //   - Length 2-32 runes (after trim)
 //   - Only printable characters (no control chars, no zero-width chars)
-//   - Not inside the "[deleted-…]" / "[denied-…]" namespaces reserved for anonymised rows
+//   - Not inside the "[deleted-…]" / "[denied-…]" / "[imported…]" namespaces reserved for anonymised rows and the hidden import account
 //
 // Returns a descriptive error on failure, nil on success.
 func ValidateUsername(username string) error {
@@ -27,8 +27,10 @@ func ValidateUsername(username string) error {
 	// Erasure (db.EraseAccount) deletes the row and needs no name.
 	// "[denied-<id>]" is the same shape for a refused approval-mode
 	// application (db.DenyPendingUser), reserved for the same reason.
+	// "[imported]" (and "[imported-…]") is the hidden account that owns imported
+	// Discord history; a registration must not take its name first.
 	if lower := strings.ToLower(username); strings.HasSuffix(lower, "]") &&
-		(strings.HasPrefix(lower, "[deleted-") || strings.HasPrefix(lower, "[denied-")) {
+		(strings.HasPrefix(lower, "[deleted-") || strings.HasPrefix(lower, "[denied-") || strings.HasPrefix(lower, "[imported")) {
 		return fmt.Errorf("username is reserved")
 	}
 	n := len([]rune(username))
