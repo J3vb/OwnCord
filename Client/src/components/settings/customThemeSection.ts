@@ -191,6 +191,10 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
     const themes = loadCustomThemes();
     const id = editing ?? newCustomThemeId();
     const at = themes.findIndex((theme) => theme.id === id);
+    if (editing !== null && at === -1) {
+      setText(error, t("appearance.customThemes.gone"));
+      return;
+    }
     if (at === -1 && themes.length >= MAX_CUSTOM_THEMES) {
       setText(error, t("appearance.customThemes.full", { limit: MAX_CUSTOM_THEMES }));
       return;
@@ -215,7 +219,10 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
       confirmTestId: "custom-theme-delete-confirm",
       signal,
       onConfirm: () => {
-        saveCustomThemes(loadCustomThemes().filter((other) => other.id !== theme.id));
+        if (!saveCustomThemes(loadCustomThemes().filter((other) => other.id !== theme.id))) {
+          showToast(t("appearance.customThemes.saveFailed"), "error");
+          return;
+        }
         if (getActiveCustomThemeId() === theme.id) setActiveCustomTheme(null);
         if (editing === theme.id) closeEditor();
         render();

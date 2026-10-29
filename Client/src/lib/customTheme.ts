@@ -67,8 +67,13 @@ function decodeEscapes(text: string): string {
   });
 }
 
+/** CSS input preprocessing: CR LF, CR and FF all read as one LF. */
+function normalizeNewlines(text: string): string {
+  return text.replace(/\r\n?|\f/g, "\n");
+}
+
 function firstBlocked(text: string): string | null {
-  const lower = decodeEscapes(text).toLowerCase();
+  const lower = decodeEscapes(normalizeNewlines(text)).toLowerCase();
   for (const pattern of BLOCKED) {
     if (lower.includes(pattern)) return pattern;
   }
@@ -84,7 +89,7 @@ export function checkThemeCss(css: string): ThemeCssProblem | null {
   if (css.length > MAX_THEME_CSS_CHARS) return { kind: "tooBig" };
   const found = firstBlocked(css);
   if (found === null) return null;
-  const lines = css.split("\n");
+  const lines = normalizeNewlines(css).split("\n");
   const index = lines.findIndex((line) => firstBlocked(line) !== null);
   return { kind: "outsideLink", found, line: index === -1 ? null : index + 1 };
 }
@@ -162,12 +167,12 @@ const ROOT_SELECTORS: ReadonlySet<string> = new Set([":root", "html"]);
  * sheet, then written back as text, so a copy of the <style> (the voice
  * pop-out clones them) keeps it.
  */
-function withImportantTokens(el: HTMLStyleElement, css: string): string {
+function withImportantTokens(el: HTMLStyleElement, css: string): string | null {
   // i18n-exempt: a media query, not UI text
   el.media = "not all";
   el.textContent = css;
   const sheet = el.sheet;
-  if (sheet === null) return css;
+  if (sheet === null) return null;
   for (const rule of styleRules(sheet.cssRules)) {
     let tokens = false;
     for (const prop of Array.from(rule.style)) {
@@ -201,7 +206,7 @@ export function paintCustomTheme(css: string | null): boolean {
   document.head.append(el);
   const final = withImportantTokens(el, css);
   // The serialised text goes through the same check: it is what will apply.
-  if (checkThemeCss(final) !== null) {
+  if (final === null || checkThemeCss(final) !== null) {
     el.remove();
     old?.remove();
     reclampRoleColors();
@@ -241,7 +246,12 @@ function activate(id: string | null): boolean {
     removeStored(ACTIVE_KEY);
     return false;
   }
-  writeStored(ACTIVE_KEY, theme.id);
+  // A theme that cannot be remembered as active is not left painted, so the
+  // escape shortcut, which reads the stored id, can always turn it off.
+  if (!writeStored(ACTIVE_KEY, theme.id)) {
+    paintCustomTheme(null);
+    return false;
+  }
   return true;
 }
 
@@ -261,10 +271,11 @@ export function installCustomThemeEscape(signal: AbortSignal): void {
     "keydown",
     (e) => {
       if (e.code !== "Backspace" || !(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey) return;
-      if (getActiveCustomThemeId() === null) return;
+      if (getActiveCustomThemeId() === null && styleElement() === null) return;
       e.preventDefault();
       setActiveCustomTheme(null);
     },
-    { signal },
+    // Capture, so a field or dialog that stops the key cannot swallow the way out.
+    { signal, capture: true },
   );
 }

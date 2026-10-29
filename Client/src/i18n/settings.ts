@@ -123,6 +123,7 @@ export const settingsText = defineCatalog("settings", {
     "Line {line} uses {found}. Themes cannot load outside files.",
   "appearance.customThemes.outsideLinkNoLine":
     "The theme uses {found}. Themes cannot load outside files.",
+  "appearance.customThemes.gone": "This theme was deleted. Cancel and make a new one.",
   "appearance.customThemes.full": "You can keep up to {limit} custom themes. Delete one first.",
   "appearance.customThemes.saveFailed": "Could not save the theme: this device's storage is full.",
   "appearance.customThemes.applyFailed": "This theme could not be applied.",

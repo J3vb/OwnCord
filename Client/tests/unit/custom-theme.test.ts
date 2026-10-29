@@ -48,6 +48,11 @@ describe("checkThemeCss", () => {
     expect(checkThemeCss("a { background: \\75 rl(x.png); }")).toMatchObject({ found: "url(" });
     expect(checkThemeCss("a { background: \\000055RL(x.png); }")).toMatchObject({ found: "url(" });
     expect(checkThemeCss("\\@import 'x.css';")).toMatchObject({ found: "@import" });
+    // A hex escape swallows one newline, and CR LF, CR and FF all count as one.
+    expect(checkThemeCss("a { --x: u\\72\r\nl(x.png); }")).toMatchObject({ found: "url(" });
+    expect(checkThemeCss("a { --x: u\\72\rl(x.png); }")).toMatchObject({ found: "url(" });
+    expect(checkThemeCss("a { --x: u\\72\fl(x.png); }")).toMatchObject({ found: "url(" });
+    expect(checkThemeCss("@im\\70\r\nort 'x.css';")).toMatchObject({ found: "@import" });
   });
 
   it("checks comments too, so a comment marker inside a string cannot hide a link", () => {
@@ -201,6 +206,22 @@ describe("installCustomThemeEscape", () => {
     expect(e.defaultPrevented).toBe(true);
     expect(painted()).toBeNull();
     expect(getActiveCustomThemeId()).toBeNull();
+  });
+
+  it("works even when a focused field stops the key", () => {
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.addEventListener("keydown", (e) => e.stopPropagation());
+    field.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        code: "Backspace",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+    field.remove();
+    expect(painted()).toBeNull();
   });
 
   it("ignores Backspace without both modifiers", () => {

@@ -100,6 +100,18 @@ describe("custom theme section", () => {
     );
   });
 
+  it("will not bring back a theme deleted while it was open in the editor", () => {
+    saveCustomThemes([{ id: "a1", name: "One", css: "" }]);
+    mount();
+    buttonByText(section, "Edit").click();
+    saveCustomThemes([]);
+    q<HTMLButtonElement>(section, "[data-testid='custom-theme-save']").click();
+    expect(loadCustomThemes()).toEqual([]);
+    expect(q(section, "[data-testid='custom-theme-error']").textContent).toBe(
+      "This theme was deleted. Cancel and make a new one.",
+    );
+  });
+
   it("Use paints the theme and Turn off removes it", () => {
     saveCustomThemes([{ id: "a1", name: "One", css: ".x { color: red; }" }]);
     mount();
