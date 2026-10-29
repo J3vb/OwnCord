@@ -87,7 +87,7 @@ func (h *Hub) userActivity(c *Client) *gameActivity {
 	return mergeLivePresence(conns).activity
 }
 
-// userListening is userActivity for the song (WP 8.10a): c's own when it has
+// userListening is userActivity for the song: c's own when it has
 // one, else another connection's, so a status change on one device does not
 // blank the song another device reports.
 func (h *Hub) userListening(c *Client) *listeningActivity {

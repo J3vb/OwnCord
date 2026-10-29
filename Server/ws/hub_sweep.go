@@ -138,7 +138,7 @@ func (h *Hub) sweepStaleClients() {
 // sweepRevokedSessions iterates all connected clients and kicks any whose
 // session has been deleted, expired, or whose user has been banned. This
 // provides time-based session enforcement for idle WebSocket connections
-// that never trigger the message-count-based check (BUG-109).
+// that never trigger the message-count-based check.
 func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 	h.mu.RLock()
 	snapshot := make([]*Client, 0, len(h.clients))
@@ -256,7 +256,7 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	}
 	h.mu.RUnlock()
 
-	// RT-8: a membership parked in the grace window has no live client, so the
+	// a membership parked in the grace window has no live client, so the
 	// scan above classified it as stale — but it is deliberately held for a
 	// resuming socket. Skip exactly the parked (user, channel) pairs; the
 	// grace timer owns their teardown. Snapshot the pairs first so this holds
@@ -284,15 +284,15 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 
 // sweepStaleVoiceEntry removes one stale voice_states row under the user's
 // voice lock, so a join between its row commit and c.voice.setState cannot
-// interleave with the recheck and delete (ARCH-014). It reports whether the
+// interleave with the recheck and delete. It reports whether the
 // row was removed; the caller does the SFU removal after the lock is released.
 func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64, joinedAt string) (removed bool) {
 	txn := h.begin(userID)
 	defer txn.end()
 
-	// Re-check the live client immediately before deleting (OC-0017).
+	// Re-check the live client immediately before deleting.
 	// voice_join.go commits the row before it calls c.voice.setState
-	// (BUG-088's ordering), so a join can commit and get snapshotted as a
+	// (the row-before-slot ordering), so a join can commit and get snapshotted as a
 	// ghost above. Under the voice lock that join has finished by now; if the
 	// client's state agrees with the row, it is no longer stale.
 	for _, liveClient := range h.clientsOf(userID) {
@@ -338,7 +338,7 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 
 // sweepStaleVoiceJoinRaceHook, when non-nil, runs once per stale entry,
 // immediately before sweepStaleVoiceStates acts on it. Test-only (always nil
-// in production): it pins the BUG-088 follow-on window (OC-0017) where a
+// in production): it pins the follow-on window where a
 // voice_join's DB commit (voice_join.go's JoinVoiceChannelIfCapacity) and its
 // c.voice.setState call are not atomic — a join can commit its row, get
 // snapshotted as a ghost by the h.clients scan above (the joiner's client
@@ -414,7 +414,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		// operation — a getVoiceChID() read followed by a separate
 		// unconditional clear leaves a window where a concurrent voice_join
 		// to another channel commits in between and gets silently wiped
-		// along with its own voice-topic subscription (OC-0050). Mirrors
+		// along with its own voice-topic subscription. Mirrors
 		// sweepStaleVoiceStates' handleVoiceLeaveIfStillIn and the LiveKit
 		// webhook's clearExact.
 		for _, client := range h.clientsOf(vs.UserID) {
@@ -427,7 +427,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 
 		// Remove from LiveKit (best-effort), off this goroutine: the caller
 		// is the admin archive/delete request, and LiveKit can take seconds
-		// to answer (OC-0453). The DB row and client state above are already
+		// to answer. The DB row and client state above are already
 		// conditional on this exact join instance, and the identity carries
 		// the join token, so the removal is safe to detach exactly as
 		// finishVoiceLeave does it.
@@ -442,7 +442,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// teardown, and voice membership can outlive READ_MESSAGES.
 	//
 	// Both callers of CleanupVoiceForChannel commit archived=1 to this
-	// channel before evicting (OC-0022) — deliberately, so a concurrent
+	// channel before evicting — deliberately, so a concurrent
 	// voice_join sees the archived gate — which means plain
 	// channelReadAudience always finds the channel already archived and
 	// always returns nobody here. Use the ignoring-archived resolver so the
@@ -468,7 +468,7 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 	// registerNow, rollbackVoiceJoin, sweepStaleVoiceStates). All client
 	// voice states for this channel were cleared above, so this deletes the
 	// voiceKeyHolders entry; without it a deleted channel's entry lived for
-	// the process lifetime (OC-0012). No locks are held here, as
+	// the process lifetime. No locks are held here, as
 	// updateKeyHolder requires.
 	h.updateKeyHolder(channelID)
 }

@@ -125,7 +125,7 @@ func (h *Hub) emitPresenceOthers(_ context.Context, _ int64, ev Event) bool {
 	// must invalidate any queued coalescer entry so a stale connect-time
 	// presence can't flush after (and overwrite) this fresher user-chosen
 	// status. The drop and the broadcast run atomically under presenceMu
-	// (see dropQueuedPresenceAndBroadcast, OC-0005) so a flush racing in at
+	// (see dropQueuedPresenceAndBroadcast) so a flush racing in at
 	// the same moment can never enqueue its stale frame after this one.
 	h.dropQueuedPresenceAndBroadcast(e.excludeUserID, func() {
 		// Normal priority, excluding the owner — NOT broadcastExcludeLow.
@@ -136,7 +136,7 @@ func (h *Hub) emitPresenceOthers(_ context.Context, _ int64, ev Event) bool {
 		// per-client FIFOs with different durability (low silently drops
 		// on overflow, so no replay ever repairs the loss) and different
 		// drain order (writePump drains normal strictly before low) —
-		// exactly the hazard OC-0214 fixed for the visible case (OC-0003).
+		// exactly the hazard already fixed for the visible case.
 		h.broadcastPresenceFrame(e.excludeUserID, e.Payload())
 	})
 	return true
@@ -157,10 +157,10 @@ func (h *Hub) emitPresenceSelf(_ context.Context, _ int64, ev Event) bool {
 	// per-client FIFOs: writePump drains high strictly before normal, so a
 	// newer invisible self-frame on high could be delivered before an
 	// older visible-status frame still on normal, leaving the owner's own
-	// client on a stale status (OC-0003/OC-0214).
+	// client on a stale status.
 	//
 	// presenceMu orders the choice of payload against a game activity sweep,
-	// the way emitPresence's closure does (WP 8.3e-2).
+	// the way emitPresence's closure does.
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()
 	payload := h.presencePayloadLocked(e.TargetUserID(), e.Payload(), e.bare)
@@ -182,7 +182,7 @@ func (h *Hub) emitTypingDM(_ context.Context, _ int64, ev Event) bool {
 	// (its overflow chain disconnects the client, client.go sendHighMsg ->
 	// closeAllSendLocked) versus the most droppable one in a channel, so a
 	// busy DM typer could disconnect a backpressured recipient over a
-	// cosmetic frame (OC-0260).
+	// cosmetic frame.
 	h.SendToUserLow(e.TargetUserID(), e.Payload())
 	return true
 }
@@ -285,16 +285,16 @@ func (h *Hub) emitPresence(_ context.Context, _ int64, ev Event) bool {
 	// than those, so writePump (which drains normal strictly before low)
 	// could deliver a newer connect/disconnect frame before an older
 	// presence_update still sitting in the low queue — leaving the
-	// observer's final view stale (OC-0214).
+	// observer's final view stale.
 	// A user-chosen presence also bypasses the connect/disconnect
 	// coalescer; drop any entry still queued for this user and broadcast
-	// atomically under presenceMu (see dropQueuedPresenceAndBroadcast,
-	// OC-0005), or the pending flush (up to 300ms later) could race in
+	// atomically under presenceMu (see dropQueuedPresenceAndBroadcast),
+	// or the pending flush (up to 300ms later) could race in
 	// between and overwrite this fresher status with the stale one.
 	//
 	// The frame is chosen inside the closure, under presenceMu: a handler
 	// that snapshotted a game before a switch-off must not re-broadcast it
-	// after the sweep cleared it (WP 8.3e-2).
+	// after the sweep cleared it.
 	h.dropQueuedPresenceAndBroadcast(e.userID, func() {
 		h.broadcastPresenceFrame(0, h.presencePayloadLocked(e.userID, e.Payload(), e.bare))
 	})
@@ -311,7 +311,7 @@ func (h *Hub) emitBroadcastAll(_ context.Context, _ int64, ev Event) bool {
 }
 
 // presencePayloadLocked picks the frame for a presence event that may carry a
-// game or song the handler snapshotted earlier (WP 8.3e-2, 8.10a). bare, the
+// game or song the handler snapshotted earlier. bare, the
 // same frame with a null game and song, is sent while member activity is off,
 // and also when the user's live game and song are both already nil: a sweep
 // cleared them after the snapshot, even if the switch has been turned back on

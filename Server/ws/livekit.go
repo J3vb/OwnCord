@@ -21,14 +21,14 @@ import (
 )
 
 // tokenTTL is the validity duration for generated LiveKit access tokens.
-// Short-lived (5 min) to limit replay window (BUG-127). The client requests
+// Short-lived (5 min) to limit replay window. The client requests
 // a refresh via voice_token_refresh before expiry. Security mitigations:
 //   - Tokens are scoped to a single room
 //   - Server can revoke room access via LiveKit API on ban/kick
-//   - The RT-3 reconciler (voice_reconcile.go) removes any SFU participant
+//   - The polling reconciler (voice_reconcile.go) removes any SFU participant
 //     with no matching voice_states row once a tick; the participant_joined
 //     webhook does the same at join time where the operator configured one
-//   - CanPublishSources restricts track types per permission (BUG-128)
+//   - CanPublishSources restricts track types per permission
 const tokenTTL = 5 * time.Minute
 
 // LiveKitClient provides token generation and room management via
@@ -94,7 +94,7 @@ func participantIdentity(userID int64, voiceJoinToken string) string {
 // canPublish controls audio publishing (SpeakVoice permission).
 // canVideo and canScreenShare control which additional track sources are
 // allowed at the SFU level via CanPublishSources, preventing users from
-// bypassing OwnCord's USE_VIDEO/SHARE_SCREEN checks via raw LiveKit (BUG-128).
+// bypassing OwnCord's USE_VIDEO/SHARE_SCREEN checks via raw LiveKit.
 func (c *LiveKitClient) GenerateToken(
 	userID int64,
 	username string,
@@ -124,7 +124,7 @@ func (c *LiveKitClient) GenerateToken(
 	//
 	// SPEAK_VOICE (microphone), USE_VIDEO (camera) and SHARE_SCREEN (screen
 	// share) are independent permission bits — a channel override can deny
-	// SPEAK_VOICE while still granting USE_VIDEO/SHARE_SCREEN (OC-0016). The
+	// SPEAK_VOICE while still granting USE_VIDEO/SHARE_SCREEN. The
 	// source list is therefore built from all three independently; CanPublish
 	// is only used as a hard deny when none of them grant anything, since
 	// LiveKit's GetCanPublishSource treats CanPublish=false as an override
@@ -205,7 +205,7 @@ func (c *LiveKitClient) URL() string {
 const lkTimeout = 5 * time.Second
 
 // ListParticipants returns the identities currently in a channel's room, for
-// RT-3's polling reconciler (voice_reconcile.go). A failure is returned, never
+// the polling reconciler (voice_reconcile.go). A failure is returned, never
 // collapsed to an empty set: the reconciler must not read "the SFU did not
 // answer" as "the room is empty".
 func (c *LiveKitClient) ListParticipants(ctx context.Context, channelID int64) ([]string, error) {
@@ -225,7 +225,7 @@ func (c *LiveKitClient) ListParticipants(ctx context.Context, channelID int64) (
 }
 
 // ListRoomChannelIDs returns the channel IDs of the OwnCord rooms the SFU has
-// open, for RT-3's reconciler: a room can hold participants after its last
+// open, for the polling reconciler: a room can hold participants after its last
 // voice_states row is gone. Rooms that are not OwnCord channels are skipped.
 func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, lkTimeout)

@@ -38,23 +38,23 @@ type readyPayload struct {
 // declared in sorted key order: ready used to be json.Marshal of a map, which
 // sorts its keys, and the bytes must not change.
 type readyHead struct {
-	// Activities (WP 8.3a) lists the games connected members are playing, as
+	// Activities lists the games connected members are playing, as
 	// the viewer may see them. Always present; "activities" sorts before
 	// "capabilities", so it is the first head field and key order holds.
 	Activities   []readyActivityPayload   `json:"activities"`
 	Capabilities readyCapabilitiesPayload `json:"capabilities"`
-	// Categories (WP 6.5a) is the full category list, present only for a
+	// Categories is the full category list, present only for a
 	// MANAGE_CHANNELS/Administrator holder (a pointer so an empty list still
 	// encodes as [] for them while everyone else omits the key). "categories"
 	// sorts between "capabilities" and "channels", so key order holds.
 	Categories *[]channelCategoryPayload `json:"categories,omitempty"`
 	Channels   []map[string]any          `json:"channels"`
 	DMChannels []db.DMChannelInfo        `json:"dm_channels"`
-	// Listening (WP 8.10a) lists the songs connected members are listening
+	// Listening lists the songs connected members are listening
 	// to, as the viewer may see them. Always present; "listening" sorts
 	// between "dm_channels" and "member_timeouts", so key order holds.
 	Listening []readyListeningPayload `json:"listening"`
-	// MemberTimeouts is the viewer's member_timeouts view (WP 3C-7c); "member_timeouts"
+	// MemberTimeouts is the viewer's member_timeouts view; "member_timeouts"
 	// sorts before "members", so it is the last head field and key order holds.
 	MemberTimeouts []memberTimeoutEntry `json:"member_timeouts"`
 }
@@ -64,7 +64,7 @@ type readyTail struct {
 	Notices    []readyNoticePayload `json:"notices"`
 	Roles      []*db.Role           `json:"roles"`
 	ServerName string               `json:"server_name"`
-	// Threads (WP 6.9c) is the viewer's followed open threads, present
+	// Threads is the viewer's followed open threads, present
 	// whenever the server has the thread service (a pointer so an empty list
 	// still encodes as [] there while a server without it omits the key).
 	// "threads" sorts between "server_name" and "voice_states".

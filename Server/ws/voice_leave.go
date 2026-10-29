@@ -44,10 +44,10 @@ const (
 	// voiceLeaveReasonRevoked is the voice permission revocation sweep
 	// (sweepStaleVoiceEvictRevoked, hub_sweep.go).
 	voiceLeaveReasonRevoked = "revoked"
-	// voiceLeaveReasonReconciled is RT-3's polling reconciler removing a
+	// voiceLeaveReasonReconciled is the polling reconciler removing a
 	// membership whose SFU participant no longer exists (voice_reconcile.go).
 	voiceLeaveReasonReconciled = "reconciled"
-	// voiceLeaveReasonGraceExpired is RT-8's reconnect grace window elapsing
+	// voiceLeaveReasonGraceExpired is the reconnect grace window elapsing
 	// before a replacement socket arrived (voice_grace.go).
 	voiceLeaveReasonGraceExpired = "grace_expired"
 	// voiceLeaveReasonAFK is the AFK sweep moving a member who has been idle
@@ -143,7 +143,7 @@ func (h *Hub) finishVoiceLeaveAnnounce(ctx context.Context, txn *voiceTxn, c *Cl
 // participant that is closing its own session at the same moment (a client
 // leave does both): it answers "no response from servers" after its 3 s
 // routing timeout. Waiting on that in the read loop queued the client's next
-// voice_join behind it, so an immediate rejoin stalled 3-6 s (OC-0453).
+// voice_join behind it, so an immediate rejoin stalled 3-6 s.
 // The identity carries the join token, so a removal still in flight can never
 // hit the session a quick rejoin creates. The removal must complete even if
 // the connection drops, so it detaches from cancellation (values kept);
@@ -155,7 +155,7 @@ func (h *Hub) removeLiveKitParticipantAsync(ctx context.Context, channelID, user
 	}
 	// Runs on the hub's group so StopHub joins it: a removal still in flight
 	// when the hub stops is cancelled with the hub and waited for, and one
-	// requested after the group closed is refused (ARCH-034).
+	// requested after the group closed is refused.
 	admitted := h.background.Go(ctx, func(jobCtx context.Context) {
 		// Still matters for struct-literal test hubs, whose nil group is
 		// unowned and so never cancelled by the hub stop.
@@ -193,7 +193,7 @@ func init() { voiceLeaveRetryTimeout.Store(int64(5 * time.Second)) }
 // The first attempt is synchronous. If it fails, subsequent retries run in a
 // background goroutine with exponential backoff so the caller (readPump) is
 // not blocked by time.Sleep. The goroutine respects ctx and the hub's stop
-// channel to avoid leaking after shutdown (BUG-086).
+// channel to avoid leaking after shutdown.
 // Returns nil on first-attempt success, the first error otherwise (retries
 // continue in the background).
 func leaveVoiceChannelWithRetry(ctx context.Context, txn *voiceTxn, channelID int64, joinToken string) error {

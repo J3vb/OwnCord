@@ -46,7 +46,7 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 				"username": user.Username,
 				"avatar":   avatarVal,
 				"role":     roleName,
-				// Every held role, top first (WP 6.3c); role is the top's name.
+				// Every held role, top first; role is the top's name.
 				"role_ids": roleIDsOrEmpty(roleIDs),
 				// The signed-in user's own profile fields. Null when unset;
 				// display_name falls back to username client-side, and about
@@ -68,7 +68,7 @@ func (h *Hub) buildAuthOK(ctx context.Context, user *db.User, roleName string, r
 			"motd":          motd,
 			"replay_source": replaySource,
 			"upload_policy": h.cachedUploadPolicy(ctx),
-			// WP 8.3e-2: the runtime game activity switch. A resume gets no
+			// the runtime game activity switch. A resume gets no
 			// ready, and the unsequenced game_activity_policy frame is not
 			// replayed, so every auth_ok restores the state.
 			"game_activity_policy": gameActivityPolicyPayload{Enabled: h.gameActivity.on.Load()},
@@ -187,7 +187,7 @@ func readyAffordances(grants permissions.MemberGrants, ch *db.Channel, timedOut 
 }
 
 // channelCanSend is the ready payload's can_send verdict for a member's grants
-// and channel type; a one-line delegation to affordancesFor (S-12, OC-0434).
+// and channel type; a one-line delegation to affordancesFor.
 func channelCanSend(grants permissions.MemberGrants, chanType string, timedOut bool) bool {
 	return readyAffordances(grants, &db.Channel{Type: chanType}, timedOut).CanSend
 }
@@ -242,7 +242,7 @@ func (h *Hub) readyVisibleChannels(ctx context.Context, database ReadySnapshotRe
 	return visibleChannels, grants, nil
 }
 
-// readyThreads is ready.threads (WP 6.9c): the viewer's followed open threads
+// readyThreads is ready.threads: the viewer's followed open threads
 // whose parent is in visibleChannels (an NSFW parent only once acknowledged), newest activity first, capped at
 // service.MaxFollowedThreads. A follow row for a parent the viewer can no
 // longer read stays in the table and is simply left out here, so regaining the
@@ -298,7 +298,7 @@ func (h *Hub) readyDMChannels(ctx context.Context, database ReadySnapshotReader,
 // readyVoiceStates gathers the voice states the ready payload may expose to
 // this user. A collect failure is non-fatal, so this returns no error.
 func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader, visibleChannels []db.Channel, dmChannels []db.DMChannelInfo, userID int64) []db.VoiceState {
-	// Collect voice states, filtered to visible channels (BUG-095) plus the
+	// Collect voice states, filtered to visible channels plus the
 	// user's own open DM channels — mirroring computeAllowedChannels, which
 	// layers DM IDs onto the same checker result for reconnect replay
 	// filtering. Without this, a DM voice call's voice_state rows are
@@ -322,7 +322,7 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader
 	// mid-call, or a DM voice call after the DM was closed:
 	// CloseDM removes dm_open_state but performs no voice eviction). This
 	// mirrors liveVoiceEventsSince's rationale on the reconnect-replay tier
-	// (serve.go), which this full-ready tier had no equivalent for (OC-0028).
+	// (serve.go), which this full-ready tier had no equivalent for.
 	for i := range allVoiceStates {
 		if allVoiceStates[i].UserID == userID {
 			visibleSet[allVoiceStates[i].ChannelID] = struct{}{}
@@ -339,7 +339,7 @@ func (h *Hub) readyVoiceStates(ctx context.Context, database ReadySnapshotReader
 
 // readyNSFWAcknowledgements resolves userID's acknowledgement for every
 // LABELLED channel in visibleChannels — the ready payload's per-channel
-// nsfw_acknowledged field (B5-7). Bounded by how many labelled channels the
+// nsfw_acknowledged field. Bounded by how many labelled channels the
 // caller can see (typically zero), not by the full channel list, and skipped
 // entirely when none are labelled: an unflagged deployment pays nothing.
 func readyNSFWAcknowledgements(ctx context.Context, database VisibilityReader, userID int64, visibleChannels []db.Channel) map[int64]bool {
@@ -392,7 +392,7 @@ func (h *Hub) readReady(ctx context.Context, database ReadySnapshotReader, userI
 		return nil, fmt.Errorf("buildReady GetChannelUnreadCounts: %w", err)
 	}
 
-	// Current timeout verdict (OC-0434): readyAffordances' Subject must
+	// Current timeout verdict: readyAffordances' Subject must
 	// carry the same TimedOut refreshChannelVisibilityAffordances resolves for a
 	// live socket (via the identical subjectFor), or a just-timed-out user's
 	// fresh-connect ready payload ships can_send: true on every channel right
@@ -489,8 +489,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 
 	// c.user is the auth-time snapshot — re-read it so the ready payload and
 	// any inherited subscriptions resolve from the user's CURRENT role, not
-	// the one they held when the auth frame was evaluated (audit-2026-08-19
-	// F-2; the resume path does the same in reconnectPrecheck). Fail closed
+	// the one they held when the auth frame was evaluated (the resume path does the same in reconnectPrecheck). Fail closed
 	// like the role lookup below.
 	if err := h.refreshUserSnapshot(ctx, database, c); err != nil {
 		slog.Error("ws: user re-read failed, disconnecting", "user_id", c.userID, "err", err)
@@ -500,7 +499,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 
 	// Look up role for permission-filtered ready payload.
 	// Fail closed: if the role lookup fails, disconnect rather than serving
-	// a permissive ready payload with nil role (BUG-094).
+	// a permissive ready payload with nil role.
 	// The same read refreshUserSnapshot just made, so auth_ok.role_ids and the
 	// ready permissions come from one snapshot.
 	heldRoles := c.held
@@ -515,7 +514,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 
 	// Register BEFORE writing auth_ok + ready so broadcasts that arrive during
 	// the write window are queued in the client's send buffer instead of
-	// being lost (BUG-123). writePump hasn't started yet, so queued messages
+	// being lost. writePump hasn't started yet, so queued messages
 	// will be drained once the pumps begin.
 	allowedChannelIDs := h.gateResumeChannel(ctx, database, c)
 	if freshConnectPreRegisterRaceHook != nil {
@@ -525,7 +524,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	h.registerNow(c, allowedChannelIDs, txn)
 	txn.end()
 
-	// OC-0423: registerNow just above is the earliest point a revocation
+	// registerNow just above is the earliest point a revocation
 	// racing this handshake's DB work could have found this socket, so
 	// re-read the session now that c is reachable — see
 	// postRegisterSessionRecheck's doc. When it aborts it has already
@@ -548,7 +547,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	if c.lastSeq > 0 {
 		// Compared by the held-role SET: adding or removing a role that is not
 		// the member's top role changes what they may read without moving the
-		// users.role_id mirror (WP 6.3c).
+		// users.role_id mirror.
 		if fresh, err := database.GetMemberRoles(ctx, c.userID); err != nil || fresh == nil || !sameRoleSet(fresh.IDs, heldRoles.IDs) {
 			//nolint:contextcheck // revokeUnreadableChannels takes no context by design (admin HubBroadcaster interface).
 			h.revokeUnreadableChannels(c.userID)
@@ -589,7 +588,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 func (h *Hub) freshConnectSettleVoice(ctx context.Context, c *Client) {
 	txn := h.begin(c.userID)
 	defer txn.end()
-	// RT-8: a fresh connect ends its own session's parked grace window
+	// a fresh connect ends its own session's parked grace window
 	// (registerNow drops it); a replay-failure fallback may inherit one only while its row
 	// still exists.
 	if c.lastSeq == 0 {
@@ -633,10 +632,10 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c 
 			"user_id", c.userID, "channel_id", vs.ChannelID)
 		return
 	}
-	// RT-8: a replay-failure fallback whose previous socket parked this
+	// a replay-failure fallback whose previous socket parked this
 	// membership in the grace window keeps the row for registerNow to inherit
 	// (deleting it would leave an inherited state with no row — the ghost
-	// OC-0270 closes for the still-registered case). Any other fresh connect or
+	// closed for the still-registered case). Any other fresh connect or
 	// mismatched grace entry means the call is over: stop the window so its
 	// timer cannot later re-run finishVoiceLeave over a cleaned row.
 	if c.lastSeq > 0 && h.voiceReg.voiceGrace.has(c.userID, vs.ChannelID) {
@@ -656,8 +655,8 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c 
 	// GetRoleByID failure branches) can skip entirely. Without this, that
 	// old client's in-memory voiceChID and the E2EE key-holder election for
 	// this room survive as a memory-without-row ghost that
-	// sweepStaleVoiceStates can never see, since it iterates DB rows
-	// (OC-0252). Clearing here makes freshConnectCleanStaleVoice self
+	// sweepStaleVoiceStates can never see, since it iterates DB rows.
+	// Clearing here makes freshConnectCleanStaleVoice self
 	// sufficient regardless of whether registerNow ever runs; registerNow's
 	// own replacedVoiceChID re-election later becomes a redundant no-op
 	// (clearVoiceState finds nothing left to clear), not a conflict.
@@ -666,7 +665,7 @@ func (h *Hub) freshConnectCleanStaleVoice(ctx context.Context, txn *voiceTxn, c 
 	}
 	h.updateKeyHolder(vs.ChannelID)
 	h.broadcastVoiceEvent(ctx, vs.ChannelID, c.userID, buildVoiceLeave(vs.ChannelID, c.userID))
-	// BUG-089: pass the stale join token so the removal only hits the exact
+	// pass the stale join token so the removal only hits the exact
 	// stale participant — the identity includes joinedAt, so a quick rejoin's
 	// new session has a different identity and won't be removed.
 	h.removeLiveKitParticipantAsync(ctx, vs.ChannelID, c.userID, vs.JoinedAt, "ws fresh connect:")

@@ -2,7 +2,7 @@ package ws
 
 import "github.com/J3vb/OwnCord/Server/service"
 
-// readStatePayload is the read_state frame's payload (WP 3D-5c): targeted at
+// readStatePayload is the read_state frame's payload: targeted at
 // the caller, unsequenced, not replayed. It carries the caller's read pointer
 // for one channel (or DM) after a mark_read or mark_unread was accepted, and
 // replaces the client's pointer, unread_count and mention_count outright.

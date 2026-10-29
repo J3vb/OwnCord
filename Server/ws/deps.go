@@ -31,13 +31,13 @@ type ClientInfo struct {
 	VoiceChannelID int64  // 0 if not in a voice channel
 	VoiceJoinToken string // opaque join-instance token for the current voice session
 	// Activity is the connection's live game activity when the frame was
-	// read (WP 8.3a), nil when none. Frames of one connection run one at a
+	// read, nil when none. Frames of one connection run one at a
 	// time, so it is current for the handlers that read it: activity_update
 	// (no-op and clear checks) and presence_update (the frame it emits
 	// carries the game).
 	Activity *gameActivity
-	// Listening is the connection's live song when the frame was read (WP
-	// 8.10a), nil when none: listening_update's no-op and clear checks, and
+	// Listening is the connection's live song when the frame was read,
+	// nil when none: listening_update's no-op and clear checks, and
 	// the frame presence_update emits.
 	Listening *listeningActivity
 }
@@ -62,15 +62,15 @@ type ChatDeps struct {
 type PresenceDeps struct {
 	Limiter    *auth.RateLimiter
 	ChannelSvc *service.ChannelService
-	// MessageSvc backs the DM half of typing_start's audience: B5-6's
+	// MessageSvc backs the DM half of typing_start's audience: the
 	// message-request gate (MessageService.DMAudience) lives there, not on
 	// ChannelService. nil (a test built without it) falls back to
-	// ChannelSvc.GetDMParticipantIDs — the pre-B5-6 unfiltered list —
+	// ChannelSvc.GetDMParticipantIDs — the unfiltered list from before the message-request gate —
 	// exactly like MessageService.dmAudience's own nil-messageRequests
 	// fallback for the other DM frame paths.
 	MessageSvc *service.MessageService
-	// GameActivityEnabled reports the per-server game activity switch
-	// (WP 8.3e-2): activity_update refuses a set while it is false. nil means
+	// GameActivityEnabled reports the per-server game activity switch:
+	// activity_update refuses a set while it is false. nil means
 	// on (a test built without a hub).
 	GameActivityEnabled func() bool
 }
@@ -226,7 +226,7 @@ func hasPerm(ctx context.Context, database DispatchReader, perms *permissions.Ch
 // stay the caller's to fill in. A lookup failure is returned, not collapsed
 // (hasPerm and hasChannelAccess collapse it to a fail-closed false, the right
 // posture for every gate that sends FORBIDDEN on denial), so an error-aware
-// caller like applySetChannelID's post-Subscribe revalidation (OC-0266) can
+// caller like applySetChannelID's post-Subscribe revalidation can
 // tell a transient read failure from a denial; a missing role row is the
 // zero Subject, which every predicate refuses.
 func subjectFor(ctx context.Context, database DispatchReader, perms *permissions.Checker, permSvc *service.PermissionService, userID, channelID int64) (permissions.Subject, error) {

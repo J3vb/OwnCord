@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// role_refresh (WP 4.4b) moves the fan-out of a role change off the admin
+// role_refresh moves the fan-out of a role change off the admin
 // request goroutine. The handler commits, invalidates the permission cache and
 // makes ONE EnqueueRoleRefresh call; a hub-owned worker, modelled on the 2B-2
 // channel_activity coalescer, then refreshes each affected user in turn: held

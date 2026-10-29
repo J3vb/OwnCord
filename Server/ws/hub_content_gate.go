@@ -9,13 +9,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/stackutil"
 )
 
-// contentGateTimeout bounds one B5-7 gate read (the channel's label and its
+// contentGateTimeout bounds one NSFW content gate read (the channel's label and its
 // acknowledgement list). A read normally takes well under a millisecond; on
 // timeout the gate fails closed and the frame forces a resync, as on any
 // read error.
 const contentGateTimeout = time.Second
 
-// gateResult is one resolved B5-7 content gate: who may receive the frame
+// gateResult is one resolved NSFW content gate: who may receive the frame
 // live, whether the channel is labelled, and whether the answer stands in
 // for one the database could not give (deny-all, watermark bumped).
 type gateResult struct {
@@ -52,7 +52,7 @@ type parkedBarrier struct {
 	done   chan struct{}
 }
 
-// contentGates keeps the dispatch goroutine off the database (ARCH-019). A
+// contentGates keeps the dispatch goroutine off the database. A
 // content frame parks in its channel's lane while a resolver goroutine reads
 // the gate with a timeout, and every later frame for that channel queues
 // behind it, so order within a channel is kept; frames for other channels
@@ -181,7 +181,7 @@ func (h *Hub) issueGate(channelID int64, lane *gateLane) {
 }
 
 // resolveGateOnce reads the gate under its own timeout. A software panic
-// fails closed like a read error; a hardware fault re-panics (SRE-08).
+// fails closed like a read error; a hardware fault re-panics.
 func (h *Hub) resolveGateOnce(life context.Context, timeout time.Duration, channelID int64) (res gateResult) {
 	defer func() {
 		if r := recover(); r != nil {

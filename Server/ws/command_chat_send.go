@@ -6,7 +6,7 @@ import (
 )
 
 // parseChatSend is the chat_send entry of commandConstructors. sticker_id, when
-// present, must be a positive integer (WP 8.8a); whether the rest of the send
+// present, must be a positive integer; whether the rest of the send
 // is consistent with a sticker is the service's call.
 func parseChatSend(userID int64, reqID string, raw json.RawMessage) (Command, error) {
 	var p struct {

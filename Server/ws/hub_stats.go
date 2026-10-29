@@ -10,8 +10,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// Hub accessor and stats methods split out of hub.go (OC-0400) to keep it
-// under the B3-5 guardrail (invariants/file_sizes.go). No behavior change —
+// Hub accessor and stats methods split out of hub.go to keep it
+// under the file-size guardrail (invariants/file_sizes.go). No behavior change —
 // moved verbatim.
 
 // hubLatencyMetrics is the shipped in-process metrics surface (SRE-M1). The
@@ -26,17 +26,17 @@ type hubLatencyMetrics struct {
 	broadcast metrics.Histogram
 	// dispatchLag is enqueue→dispatch-start: how long a frame waited for the
 	// single dispatch goroutine to reach it. The direct signal for a
-	// contended dispatch loop (SRV-04).
+	// contended dispatch loop.
 	dispatchLag metrics.Histogram
 	// chatAck is a client's chat_send receipt→its chat_send_ok being queued:
 	// the round trip inside the server, which the load run compares against
 	// k6's client-side figure.
 	chatAck metrics.Histogram
 	// seqMuHold is the longest single hold of the broadcast-sequence mutex,
-	// in milliseconds. The purge's full scan (SRV-01) shows up here.
+	// in milliseconds. The purge's full scan shows up here.
 	seqMuHold metrics.MaxGauge
 	// topicSheds counts channel frames the topic limiter dropped before a
-	// seq was assigned (SRV-03). Distinct from broadcastDrops, which is the
+	// seq was assigned. Distinct from broadcastDrops, which is the
 	// hub-wide queue, and from low-priority drops, which lose nothing.
 	topicSheds atomic.Uint64
 	// voiceJoin is voice_join_ms: each phase of a completed voice join.
@@ -118,7 +118,7 @@ func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
 // with a full refill at each window boundary — sliding is stricter on
 // boundary-straddling bursts, the same sustained rate).
 //
-// A shed frame is counted (topic_sheds_total, SRE-M1). SRV-03: for a
+// A shed frame is counted (topic_sheds_total). For a
 // CONTENT-bearing frame (nsfwChannelID marks the kinds in contentBearingKinds)
 // it also ratchets the visibility watermark, so a client resuming from a seq at
 // or before this point takes the full-ready path and recovers the message from
@@ -152,8 +152,8 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	return false
 }
 
-// queueDropState records frames the full broadcast queue dropped in enqueue
-// (SRV-03): dropped counts them, applied is how many applyQueueContentDrops
+// queueDropState records frames the full broadcast queue dropped in enqueue:
+// dropped counts them, applied is how many applyQueueContentDrops
 // has settled into the resync watermark. applied is guarded by seqMu.
 type queueDropState struct {
 	dropped atomic.Uint64
@@ -169,7 +169,7 @@ type queueDropState struct {
 
 // recordQueueDrop counts a frame enqueue dropped on a full broadcast queue and
 // leaves it for applyQueueContentDrops to settle into the resync watermark
-// under seqMu (SRV-03). Every queued frame would have been sequenced and
+// under seqMu. Every queued frame would have been sequenced and
 // replayable, so any drop is a hole replay cannot fill, metadata included
 // (a lost chat_deleted leaves the message on screen). A presence snapshot
 // request is the exception: it carries no frame and flushPresenceQueue
@@ -184,7 +184,7 @@ func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 		"channel_id", bm.channelID, "msg_len", len(bm.msg))
 }
 
-// applyQueueContentDrops is SRV-03's recovery for a frame the full broadcast
+// applyQueueContentDrops is the recovery for a frame the full broadcast
 // queue dropped in enqueue. Unlike a topic shed, that frame's
 // place in the seq stream lies behind every frame still queued ahead of it, so
 // while such a drop is unsettled every call ratchets the watermark to the
@@ -207,7 +207,7 @@ func (h *Hub) applyQueueContentDrops() {
 }
 
 // mustFullResyncAtRegister is reconnectRegister's final watermark check, run
-// under seqMu. An unsettled queue drop (SRV-03) ratchets the watermark first,
+// under seqMu. An unsettled queue drop ratchets the watermark first,
 // so a resume racing the dispatch of the frames ahead of it still takes the
 // full-ready path. So does a targeted fan-out still in flight
 // (beginTargetedFanout), a loss marked for this user (markLoss) since
@@ -271,8 +271,8 @@ func (h *Hub) VoiceJoinMs() VoiceJoinPhases {
 
 // LatencyCounts holds the raw cumulative counts of every shipped latency
 // histogram, keyed by its JSON name: "ws_broadcast_ms", "ws_dispatch_lag_ms",
-// "chat_send_ack_ms" and "voice_join_ms.<phase>" (the Prometheus exposition,
-// WP 4.3b). The names are the ones WindowSources registers.
+// "chat_send_ack_ms" and "voice_join_ms.<phase>" (the Prometheus exposition).
+// The names are the ones WindowSources registers.
 type LatencyCounts map[string]metrics.Counts
 
 // LatencyCounts reads every latency histogram's raw counts. Each read is a
@@ -286,8 +286,8 @@ func (h *Hub) LatencyCounts() LatencyCounts {
 	return out
 }
 
-// WindowSources lists every figure the windowed metrics block samples (WP
-// 4.3a). The names are the JSON keys under /api/v1/metrics "windows", and the
+// WindowSources lists every figure the windowed metrics block samples.
+// The names are the JSON keys under /api/v1/metrics "windows", and the
 // voice phases are "voice_join_ms.<phase>". Every counter is an atomic load, so
 // the sampler takes no hub lock. The returned slices are fresh and point at the
 // hub's own histograms, which live as long as the hub.
@@ -375,7 +375,7 @@ func (h *Hub) PresenceDropCount() uint64 { return h.presenceRepair.drops.Load() 
 // DeliveryDropCount is the attention panel's delivery-pressure counter: hub
 // broadcast drops, topic-limiter sheds, and send-queue overflow disconnects.
 // Low-priority drops are excluded because they lose nothing and disconnect
-// nobody; a topic shed loses a sequenced frame, so it belongs here (SRV-03).
+// nobody; a topic shed loses a sequenced frame, so it belongs here.
 func (h *Hub) DeliveryDropCount() uint64 {
 	return h.broadcastDrops.Load() + h.latency.topicSheds.Load() + h.bpQueueDisconnects.Load()
 }

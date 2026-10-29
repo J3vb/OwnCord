@@ -164,7 +164,7 @@ var serveWSAdmissionRaceHook func()
 // round trips above to reliably land a concurrent goroutine in this window,
 // so tests use this hook to pin it deterministically instead — mirrors the
 // refreshChannelVisibilityRaceHook / voiceJoinPostTokenRaceHook pattern used
-// for the analogous races elsewhere in this package (OC-0206).
+// for the analogous races elsewhere in this package.
 var handleReconnectPreRegisterRaceHook func()
 
 // handleReconnectPreSeqMuRaceHook, when non-nil, runs once inside
@@ -178,8 +178,8 @@ var handleReconnectPreSeqMuRaceHook func()
 
 // handleReconnectPostCheckPreRegisterRaceHook, when non-nil, runs once
 // inside handleReconnect's h.seqMu critical section immediately AFTER the
-// mustFullResync re-check passes and immediately before registerNow (Codex
-// round 4, item A). Test-only (nil in production): unlike
+// mustFullResync re-check passes and immediately before registerNow.
+// Test-only (nil in production): unlike
 // handleReconnectPreRegisterRaceHook (which fires before that re-check),
 // this pins the exact gap a concurrent MarkVisibilityChanged call must not
 // be able to land in unnoticed — since it now also takes h.seqMu, a real
@@ -190,7 +190,7 @@ var handleReconnectPostCheckPreRegisterRaceHook func()
 // freshConnectPreRegisterRaceHook, when non-nil, runs once inside
 // handleFreshConnect after refreshUserSnapshot has re-read the user row but
 // before registerNow. Test-only (nil in production); pins the
-// role-reassignment-vs-handshake window (audit-2026-08-19 F-2)
+// role-reassignment-vs-handshake window
 // deterministically, same pattern as handleReconnectPreRegisterRaceHook.
 var freshConnectPreRegisterRaceHook func()
 
@@ -212,17 +212,17 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 	// live, fully authorized socket: both callers are already fail-closed on
 	// this function's error (handleFreshConnect closes the conn;
 	// reconnectPrecheck falls back to the full-ready path, which re-reads and
-	// hits this same guard) (OC-0272).
+	// hits this same guard).
 	if auth.IsEffectivelyBanned(user) {
 		return fmt.Errorf("refreshUserSnapshot: user %d is banned", c.userID)
 	}
 	// Read the held-role set, not just the users.role_id mirror: adding or
 	// removing a role that is not the member's top role moves their
-	// permissions without moving the mirror (WP 6.3c). Fail closed like the
+	// permissions without moving the mirror. Fail closed like the
 	// sibling lookups in upgradeAndAuth and handleFreshConnect: c.roleName is
 	// authoritative on the wire (auth_ok, member_join, every chat_message), so
 	// a lookup failure must not silently substitute "member" and pin the
-	// session to a fabricated role (OC-0299).
+	// session to a fabricated role.
 	held, roleErr := database.GetMemberRoles(ctx, c.userID)
 	if roleErr != nil || held == nil {
 		return fmt.Errorf("refreshUserSnapshot: role lookup failed for user %d role %d: %w", c.userID, user.RoleID, roleErr)
@@ -262,7 +262,7 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 		// that users.status disagrees with, and buildReady's ListMembers read
 		// of users.status (via presentableMembers, which only ever downgrades
 		// a connected user to offline, never upgrades one) would then never
-		// self-correct for the rest of this session (OC-0298). The live
+		// self-correct for the rest of this session. The live
 		// presence follows the row for the same reason.
 		text, tag := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
 		c.setLivePresence(c.user.Status, text, tag)

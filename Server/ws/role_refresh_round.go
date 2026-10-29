@@ -118,7 +118,7 @@ func (h *Hub) connectedUserIDs() []int64 {
 // timeoutView.gen first (the 3C-7c contract: the caller invalidated, then this
 // bump, so a publish that resolved earlier resolves again), and moves the
 // watermark before the slow part so a reconnect handshake's re-check sees this
-// change (OC-0206).
+// change.
 func (h *Hub) beginVisibilityRefresh() {
 	h.bumpTimeoutViewGen()
 	h.bumpVisibilityWatermark()

@@ -30,7 +30,7 @@ const (
 //     unregisterFailedHandshake teardown and closed conn themselves, so no
 //     pump may start — readPump's defer would find the client already gone
 //     (unregisterNow reporting replaced=false) and run that same teardown a
-//     second time (OC-0051): a duplicate StampDisconnect, a duplicate
+//     second time: a duplicate StampDisconnect, a duplicate
 //     offline presence broadcast, and a duplicate hub seq for it.
 func (h *Hub) handleReconnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, lastSeq uint64,
@@ -53,7 +53,7 @@ func (h *Hub) handleReconnect(
 	//
 	// old is nil on almost every ORDINARY reconnect, not just a rare race, so
 	// it is hoisted here for the liveVoiceChID == 0 fallback further down:
-	// liveVoiceEventsSinceForUser (OC-0428), whose doc explains why.
+	// liveVoiceEventsSinceForUser, whose doc explains why.
 	var liveVoiceChID int64
 	old := h.sessionClient(c.userID, c.tokenHash)
 	if old != nil {
@@ -69,7 +69,7 @@ func (h *Hub) handleReconnect(
 
 	// Register BEFORE writing replay data so broadcasts that arrive during
 	// the write window are queued in the client's send buffer instead of
-	// being lost (BUG-123). writePump hasn't started yet, so queued messages
+	// being lost. writePump hasn't started yet, so queued messages
 	// will be drained once the pumps begin.
 	//
 	// The replay set built above can go stale between being read and c
@@ -118,7 +118,7 @@ func (h *Hub) handleReconnect(
 		return false, false
 	}
 
-	// OC-0423: reconnectRegister just made c reachable via h.clients, so this
+	// reconnectRegister just made c reachable via h.clients, so this
 	// is the earliest point a revocation racing reconnectPrecheck's DB work
 	// could have found this socket — see postRegisterSessionRecheck's doc.
 	// Deliberately outside reconnectRegister's h.seqMu section: it only needs
@@ -128,12 +128,12 @@ func (h *Hub) handleReconnect(
 		// Mirrors reconnectWriteReplay's own handshake-failure path below:
 		// the teardown already ran (inside postRegisterSessionRecheck), so
 		// only the conn needs closing. startPumps=false — readPump must
-		// never start on this closed conn (OC-0051).
+		// never start on this closed conn.
 		closeAbortedHandshake(ctx, conn, v)
 		return true, false
 	}
 
-	// P1 (Codex round 2): nsfwReadableChannelIDs was snapshotted back in
+	// nsfwReadableChannelIDs was snapshotted back in
 	// reconnectPrecheck, several DB round trips and a seqMu section ago — a
 	// batch-wide recheck taken once more right here would still trust that
 	// single moment for every frame that follows, so an acknowledge, revoke
@@ -159,7 +159,7 @@ func (h *Hub) handleReconnect(
 	case liveVoiceChID != 0 && !allowedChannelIDs[liveVoiceChID]:
 		events = append(events, h.liveVoiceEventsSince(ctx, lastSeq, liveVoiceChID)...)
 	case old == nil:
-		// OC-0428: no still-registered old *Client to source the room from,
+		// no still-registered old *Client to source the room from,
 		// so scan by the resuming user's OWN id instead of by channel. A
 		// frame whose channel IS in allowedChannelIDs is skipped — the main
 		// replay above already carries it, and re-adding it would duplicate
@@ -176,7 +176,7 @@ func (h *Hub) handleReconnect(
 	// to build auth_ok, so if this ran after that write the resumed client
 	// would be told its disconnect-time status (routinely "offline", since
 	// StampDisconnect just rewrote it) instead of the status it is about
-	// to come online as and broadcast (OC-0222). Skips member_join — the user
+	// to come online as and broadcast. Skips member_join — the user
 	// was already known.
 	h.applyConnectStatus(ctx, c)
 
@@ -184,7 +184,7 @@ func (h *Hub) handleReconnect(
 		// startPumps=false: the teardown inside reconnectWriteReplay already ran
 		// in full. Starting readPump on this closed conn would hit an immediate
 		// Read error and its defer would run the identical teardown a second
-		// time (OC-0051).
+		// time.
 		return true, false
 	}
 
@@ -195,7 +195,7 @@ func (h *Hub) handleReconnect(
 
 // reconnectPrecheck runs handleReconnect's two entry guards and, when replay is
 // still on the table, returns the read-permission set replay is filtered by
-// (allowedChannelIDs — visibility) and its B5-7 narrowing (nsfwReadableChannelIDs
+// (allowedChannelIDs — visibility) and its NSFW narrowing (nsfwReadableChannelIDs
 // — visibility minus any labelled channel the user has not acknowledged).
 // ok=false means the caller must fall through to a full ready.
 func (h *Hub) reconnectPrecheck(
@@ -206,7 +206,7 @@ func (h *Hub) reconnectPrecheck(
 	// two reads below — the same posture handleFreshConnect takes.
 	database := h.readers.Visibility
 	// Replay cannot repair a missed visibility change (targeted and
-	// unsequenced), a shed content frame (SRV-03, never got a seq) or a
+	// unsequenced), a shed content frame (never got a seq) or a
 	// presence frame this user's connection dropped (P5-S03): full ready.
 	if h.mustFullResync(lastSeq) || h.presenceResyncPending(c.userID, c.tokenHash) {
 		slog.Info("ws replay skipped (resync watermark at or past last_seq, or presence dropped), sending full ready",
@@ -220,7 +220,7 @@ func (h *Hub) reconnectPrecheck(
 	// RoleID for the rest of this socket's life — revokeUnreadableChannels
 	// cannot reach a mid-handshake socket (it early-returns when the user is
 	// not yet in h.clients), and nothing revalidates handshake-time
-	// subscriptions afterwards (audit-2026-08-19 F-2). Re-read the row so
+	// subscriptions afterwards. Re-read the row so
 	// the permission set below is computed from the CURRENT role.
 	if err := h.refreshUserSnapshot(ctx, database, c); err != nil {
 		slog.Warn("ws handleReconnect: user re-read failed, falling back to full ready",
@@ -335,7 +335,7 @@ func (h *Hub) reconnectVetColdTail(
 	ctx context.Context, c *Client, es EventStore, lastSeq uint64,
 	persisted []db.PersistedEvent, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 ) ([][]byte, uint64) {
-	// B5-7: a content-bearing row for a channel that is allowed (visible) but
+	// a content-bearing row for a channel that is allowed (visible) but
 	// not readable (labelled and unacknowledged) is dropped here — the same
 	// rule EventsSinceFilteredContent applies to the ring buffer. Checked
 	// against the row's own stored EventType/ChannelID, not a JSON parse of
@@ -404,7 +404,7 @@ func (h *Hub) reconnectRegister(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
 ) (events [][]byte, ok bool) {
-	// RT-8: drop a parked grace entry whose row is gone (a DB read, before h.seqMu).
+	// drop a parked grace entry whose row is gone (a DB read, before h.seqMu).
 	txn := h.begin(c.userID)
 	defer txn.end()
 	h.dropOrphanVoiceGrace(ctx, c.userID)
@@ -456,8 +456,8 @@ func (h *Hub) reconnectRegister(
 	// visibility change that lands anywhere between the entry check above and
 	// here is missed twice: the fan-out can't reach an unregistered client,
 	// and the entry check has already passed, so nothing else catches it
-	// before this resume commits to permissions computed before the change
-	// (OC-0206). A fan-out still in flight is caught by the targetedFanouts
+	// before this resume commits to permissions computed before the change.
+	// A fan-out still in flight is caught by the targetedFanouts
 	// counter, a finished one by the watermark it bumped on the way out.
 	if h.mustFullResyncAtRegister(lastSeq, c.userID, c.tokenHash) {
 		h.observeSeqMuHold(start)
@@ -480,7 +480,7 @@ func (h *Hub) reconnectRegister(
 // reconnectWriteReplay writes the resume handshake: auth_ok followed by the
 // replayed events. A false return means a write failed, in which case the full
 // unregisterFailedHandshake teardown has already run and conn is closed, so the
-// caller must not start any pump (OC-0051).
+// caller must not start any pump.
 func (h *Hub) reconnectWriteReplay(
 	ctx context.Context, conn *websocket.Conn, c *Client, lastSeq uint64,
 	events [][]byte, replaySource string,
@@ -497,7 +497,7 @@ func (h *Hub) reconnectWriteReplay(
 	}
 	written := 0
 	for _, evt := range events {
-		// P1 (Codex round 2): re-check a content-bearing frame's readability
+		// Re-check a content-bearing frame's readability
 		// live, right here, immediately before it goes out — not from a
 		// snapshot taken once for the whole batch (see the comment above
 		// this call site in handleReconnect). Every earlier frame in this
@@ -576,8 +576,7 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 			coldCap := h.maxColdReplayLimit()
 			// Fetch one row past the cap so truncation is decided by the presence
 			// of that extra row, not by len == cap: a complete window of exactly
-			// coldCap rows is not truncated and must replay in full (Codex review
-			// on #1436). A result of at most coldCap rows is therefore complete.
+			// coldCap rows is not truncated and must replay in full. A result of at most coldCap rows is therefore complete.
 			persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, coldCap+1) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
 			if err != nil {
 				return nil
@@ -617,7 +616,7 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 // after afterSeq whose OWN payload names userID (eventNamesUser's payload.user_id
 // check), bypassing the READ-gated channel filter — used, unlike
 // liveVoiceEventsSince above, when handleReconnect has no still-registered
-// old *Client to learn the resuming user's live voice channel from (OC-0428).
+// old *Client to learn the resuming user's live voice channel from.
 // readPump's disconnect-teardown defer (unregisterNow, then handleVoiceLeave)
 // has almost always already run by the time an ordinary reconnect reaches
 // here, and that teardown's own voice_leave already has a seq and sits in the
