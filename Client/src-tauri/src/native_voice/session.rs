@@ -1833,7 +1833,7 @@ async fn forward_events(
                 _ => None,
             };
             let orphan = slot.and_then(|slot| {
-                apply_republish(&mut lock(&slot), source, previous_sid, &publication.sid())
+                apply_republish(&mut lock(slot), source, previous_sid, &publication.sid())
             });
             if let Some(sid) = orphan {
                 // The video was stopped (slot emptied) or replaced while the

@@ -616,7 +616,7 @@ impl Producer {
             Self::Desktop { capturer, slot } => {
                 // Both the X11 and the PipeWire capturer call back inside.
                 capturer.capture_frame();
-                lock(&slot).take().unwrap_or(Grab::Pending)
+                lock(slot).take().unwrap_or(Grab::Pending)
             }
             Self::Synthetic { width, height, n } => {
                 *n += 1;
