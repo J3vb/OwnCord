@@ -6,7 +6,6 @@ import type {
   VoiceSpeakersPayload,
   ReadyPayload,
   ChatMessagePayload,
-  Permission,
 } from "../../src/lib/types";
 import { Permission as P } from "../../src/lib/types";
 import { parseRegistrationMode, retentionNotice } from "../../src/lib/types";

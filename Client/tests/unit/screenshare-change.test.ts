@@ -63,6 +63,8 @@ function mst(id: string): FakeMst {
     },
     removeEventListener: (type: string, cb: EventListener) => listeners.get(type)?.delete(cb),
     fire: (type: string) => {
+      // Copy first: a listener that removes itself must not skip the next one.
+      // oxlint-disable-next-line unicorn/no-useless-spread
       for (const cb of [...(listeners.get(type) ?? [])]) cb(new Event(type));
     },
   };

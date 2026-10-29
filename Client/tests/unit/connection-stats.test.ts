@@ -15,7 +15,6 @@ import {
   formatRateCompact,
   qualityFromSignals,
   type ConnectionStatsPoller,
-  type QualityLevel,
 } from "../../src/lib/connectionStats";
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { JSDOM } from "jsdom";
 import { adminIndexHtml, adminPanelHtml } from "../helpers/admin-panel";
-import path from "node:path";
 
 const ADMIN_HTML_SOURCE = adminPanelHtml();
 
@@ -210,7 +209,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // localStorage, and every retry ended at a false "session expired".
   it("completes a two-factor sign-in through /auth/verify-totp", async () => {
     const calls: FetchCall[] = [];
-    const respond: Responder = (p, method) => {
+    const respond: Responder = (p, _method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/api/v1/auth/login")
         return { json: { requires_2fa: true, partial_token: "PARTIAL-123" } };
@@ -252,7 +251,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
   it("keeps the challenge alive after a rejected code, then clears it on Back", async () => {
     const calls: FetchCall[] = [];
-    const respond: Responder = (p, method) => {
+    const respond: Responder = (p, _method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/api/v1/auth/login")
         return { json: { requires_2fa: true, partial_token: "PARTIAL-123" } };
@@ -381,7 +380,7 @@ describe("Server/admin/static — panel behaviour", () => {
       status: "offline",
       banned: false,
     }));
-    const respond: Responder = (p, method) => {
+    const respond: Responder = (p, _method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/users?")) return { json: users };
       if (p === "/registrations") return { json: [] };
@@ -428,7 +427,7 @@ describe("Server/admin/static — panel behaviour", () => {
       status: "offline",
       banned: false,
     }));
-    const respond: Responder = (p, method) => {
+    const respond: Responder = (p, _method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/users?")) return { json: users };
       if (p === "/registrations") return { json: [] };
@@ -650,7 +649,7 @@ describe("Server/admin/static — panel behaviour", () => {
   it("keeps the active action filter in the dropdown when the page no longer contains it", async () => {
     const calls: FetchCall[] = [];
     const entries = [{ id: 1, action: "message_delete", actor_id: 1, target_type: "message" }];
-    const respond: Responder = (p, method) => {
+    const respond: Responder = (p, _method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) return { json: entries };
       return { json: {} };
