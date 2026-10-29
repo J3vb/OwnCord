@@ -101,7 +101,7 @@ func validateTokenInput(label string, lifetime time.Duration) (string, error) {
 	// A negative lifetime is refused rather than folded into "never": the
 	// caller asked for a bounded credential (a computed window that went
 	// negative, a typo'd "-1h") and would otherwise get a permanent one with
-	// a success message (OC-0340). The admin route already refused this at
+	// a success message. The admin route already refused this at
 	// its edge; the rule now lives here for both callers.
 	if lifetime < 0 {
 		return "", fmt.Errorf("token lifetime must not be negative (0 means never expires)%.0w", ErrBadRequest)
@@ -176,8 +176,8 @@ func (s *TokenService) List(ctx context.Context) ([]db.APITokenListItem, error) 
 	return tokens, nil
 }
 
-// CreateOwn is Create for a MANAGE_TOKENS holder who is not the owner (WP
-// 8.4d): the token is always bound to the actor. An empty username means the
+// CreateOwn is Create for a MANAGE_TOKENS holder who is not the owner:
+// the token is always bound to the actor. An empty username means the
 // actor, not the owner account as it does for Create; the actor's own name
 // (any case) is accepted; any other username is ErrForbidden and mints
 // nothing, so the refusal does not say whether that account exists.
@@ -195,7 +195,7 @@ func (s *TokenService) CreateOwn(ctx context.Context, actor *db.User, username, 
 	return s.mint(ctx, actor.ID, actor, label, lifetime)
 }
 
-// ListOwn is List restricted to the tokens bound to userID (WP 8.4d).
+// ListOwn is List restricted to the tokens bound to userID.
 func (s *TokenService) ListOwn(ctx context.Context, userID int64) ([]db.APITokenListItem, error) {
 	all, err := s.List(ctx)
 	if err != nil {
@@ -210,7 +210,7 @@ func (s *TokenService) ListOwn(ctx context.Context, userID int64) ([]db.APIToken
 	return own, nil
 }
 
-// RevokeOwn is Revoke restricted to the tokens bound to actorID (WP 8.4d). A
+// RevokeOwn is Revoke restricted to the tokens bound to actorID. A
 // token that belongs to someone else is ErrNotFound, the same answer as an id
 // that does not exist, so a holder cannot probe other accounts' token ids.
 func (s *TokenService) RevokeOwn(ctx context.Context, actorID, id int64) error {
@@ -225,7 +225,7 @@ func (s *TokenService) RevokeOwn(ctx context.Context, actorID, id int64) error {
 }
 
 // ListFor lists the tokens the actor may see: every token for the owner, only
-// the actor's own otherwise (WP 8.4d).
+// the actor's own otherwise.
 func (s *TokenService) ListFor(ctx context.Context, actorID int64, isOwner bool) ([]db.APITokenListItem, error) {
 	if isOwner {
 		return s.List(ctx)

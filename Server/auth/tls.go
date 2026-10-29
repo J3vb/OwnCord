@@ -271,7 +271,7 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 		// short-lived profile that golang.org/x/crypto/acme/autocert cannot
 		// request: its Manager accepts hostnames only and has no profile
 		// selection. Naming the CA sent owners to check the wrong thing.
-		// A public-IP certificate flow is B6-3, which is deferred.
+		// A public-IP certificate flow is deferred.
 		return nil, fmt.Errorf("TLS mode 'acme': domain must be a hostname, not an IP address (%s); "+
 			"this build's ACME client cannot request a certificate for an IP address. Use a hostname, "+
 			"or set tls.mode to \"manual\" with your own certificate, or stay on \"self_signed\" and "+
@@ -364,7 +364,7 @@ const certFailureLogInterval = 10 * time.Minute
 // and that comment is right — which also discarded the one error an operator
 // needs: a server whose port 80 cannot be reached from the internet logs
 // "server starting", reports healthy, and then fails every TLS handshake in
-// silence. B6-6 exists to stop a reachability limit reading as application
+// silence. The connectivity check exists to stop a reachability limit reading as application
 // success, and this is the clearest instance of it in the tree.
 //
 // It observes and returns the underlying error unchanged, so autocert's own

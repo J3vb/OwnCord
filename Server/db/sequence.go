@@ -29,7 +29,7 @@ func (d *DB) SequenceValue(ctx context.Context, table string) (int64, error) {
 // (MarkerStore.RaiseSequenceFloor) and the erasure-markers start-up stage
 // applies them before the markers are replayed, so a restore that rolled
 // sqlite_sequence back with the rest of the file cannot hand an erased
-// account's id — and with it the marker's token — to a new account (B4-10).
+// account's id — and with it the marker's token — to a new account.
 // sqlite_sequence accepts ordinary writes.
 func (d *DB) RaiseSequences(ctx context.Context, floors map[string]int64) error {
 	if len(floors) == 0 {

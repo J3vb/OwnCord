@@ -1,6 +1,6 @@
 package db
 
-// StageRestore: the request half of a staged restore (WP 5.5). The apply half
+// StageRestore: the request half of a staged restore. The apply half
 // is in staged_restore.go.
 
 import (

@@ -9,7 +9,7 @@ import (
 const wsPayloadIDsID = "ws-payload-ids"
 
 // wsPayloadIDsHelper is the one function that may read a json.Number as an
-// int64 id: positiveID in ws/ids.go (MX-12).
+// int64 id: positiveID in ws/ids.go.
 const (
 	wsPayloadIDsFile   = "ws/ids.go"
 	wsPayloadIDsSymbol = "positiveID"
@@ -22,7 +22,7 @@ var wsPayloadIntFields = map[string]map[string]bool{
 	"ws/command_poll.go": {"DurationHours": true},
 }
 
-// wsPayloadIDs enforces MX-12: a WebSocket payload id is read with
+// wsPayloadIDs enforces the payload-id rule: a WebSocket payload id is read with
 // positiveID, so every command refuses an absent, fractional, zero or negative
 // id with the same "<field> must be a positive integer" error. A zero-argument
 // .Int64() call anywhere else in ws is a hand-rolled id read that can drift

@@ -22,7 +22,7 @@ import (
 // BackupVACUUMPreExecHook runs once inside BackupToSafe when non-nil, after it
 // has checked out the connection the VACUUM runs on and before the VACUUM
 // executes. Test-only (always nil in production; exported so both proofs that
-// a write is not blocked by a backup, SRV-02/PERF-10 — the db-level
+// a write is not blocked by a backup — the db-level
 // TestBackupToSafe_ConcurrentWriteIsNotDelayed and the service-level
 // TestReserve_NotBlockedByAConcurrentBackup — park the backup on it rather
 // than sleeping): it parks the backup at a known point while it provably owns
@@ -76,7 +76,7 @@ func (d *DB) BackupTo(ctx context.Context, path string) error {
 // to a unique sibling ".tmp" file and renames it into place only after the
 // VACUUM succeeds, so a backup killed mid-copy (ENOSPC, EIO, a canceled ctx, the
 // process dying) leaves a ".tmp" file the backup listing and retention scans
-// never offer as restorable, rather than a truncated ".db" (OC-0212). The
+// never offer as restorable, rather than a truncated ".db". The
 // rename is atomic on the same filesystem, which the temp path guarantees.
 func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 	started := time.Now()

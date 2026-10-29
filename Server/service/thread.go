@@ -13,7 +13,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ─── Threads (WP 6.9c) ───────────────────────────────────────────────────────
+// ─── Threads ───────────────────────────────────────────────────────
 //
 // A thread is a channel row of type 'thread' under a text channel (migration
 // 074). It has no permission state of its own: who may see, read or post is
@@ -243,7 +243,7 @@ type UpdateThreadParams struct {
 	Archived           *bool
 	Locked             *bool
 	AutoArchiveMinutes *int
-	// TagIDs replaces a forum post's tags (WP 6.9d); BAD_REQUEST on any other
+	// TagIDs replaces a forum post's tags; BAD_REQUEST on any other
 	// thread.
 	TagIDs *[]int64
 }

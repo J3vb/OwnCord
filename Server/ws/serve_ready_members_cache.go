@@ -15,7 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// memberCache is the ready payload's shared member-list read (DP-37). A
+// memberCache is the ready payload's shared member-list read. A
 // restart herd builds hundreds of ready payloads at once, and each used to
 // run its own ListMembers: the whole roster, joined and sorted, per socket.
 //

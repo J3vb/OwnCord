@@ -8,7 +8,7 @@ import {
   setAppearance,
   textContrast,
   type AppearancePrefs,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 // ---------------------------------------------------------------------------
 // B9-11: the Moderation Center's queue and a report's evidence against the
@@ -18,7 +18,7 @@ import {
 // The server is mocked with one open and one assigned report so every state
 // the view draws is on screen for measuring. Authorization, consent and role
 // loss run against the real server in
-// tests/e2e/fullstack/b9-moderation-queue.spec.ts. Synthetic content only.
+// tests/e2e/fullstack/moderation-queue.spec.ts. Synthetic content only.
 // ---------------------------------------------------------------------------
 
 const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;

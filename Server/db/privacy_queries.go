@@ -9,8 +9,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// UserPrivacy is one user's direct message privacy choices (migration 070,
-// WP 6.8b). It is private to its owner and is never part of a member, profile
+// UserPrivacy is one user's direct message privacy choices (migration 070).
+// It is private to its owner and is never part of a member, profile
 // or DM payload.
 type UserPrivacy struct {
 	AllowMemberDMs  bool

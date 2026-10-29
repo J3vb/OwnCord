@@ -13,7 +13,7 @@ import (
 )
 
 // maxRedirectBudget is the largest hop count a policy may ask for. "A small
-// fixed number" is the C-09 contract's wording; anything past this is a
+// fixed number" is the trust-model contract's wording; anything past this is a
 // caller confusing a redirect chain with a crawl.
 const maxRedirectBudget = 10
 
@@ -25,7 +25,7 @@ const maxConcurrencyBudget = 256
 // process, so a caller cannot buy more of the server's sockets by
 // constructing more Fetchers.
 //
-// This is also where B5 decision 2's deferred aggregate byte budget goes: it
+// This is also where a deferred aggregate byte budget would go: it
 // is the one admission point every fetch already passes.
 const processConcurrency = 32
 

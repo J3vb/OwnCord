@@ -42,8 +42,8 @@ func (d *DB) CreateAttachment(ctx context.Context, id string, uploaderID int64, 
 	return d.CreateAttachmentVoice(ctx, id, uploaderID, filename, storedAs, mimeType, size, width, height, nil, nil)
 }
 
-// CreateAttachmentVoice is CreateAttachment plus the voice message fields
-// (WP 8.9): durationMs is the clip length and waveform its canonical
+// CreateAttachmentVoice is CreateAttachment plus the voice message fields:
+// durationMs is the clip length and waveform its canonical
 // base64url (unpadded) amplitude bytes. Both are nil for any other file.
 func (d *DB) CreateAttachmentVoice(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height, durationMs *int, waveform *string) error {
 	if err := d.q.CreateAttachment(ctx, dbgen.CreateAttachmentParams{
@@ -255,7 +255,7 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 // Returns the stored_as filenames of deleted records so the caller can
 // remove files.
 //
-// OC-0279: a message delete is a soft delete -- the messages row survives
+// A message delete is a soft delete -- the messages row survives
 // with deleted=1 -- so its attachments never go through message_id IS NULL
 // on their own. The second half of the query's WHERE clause is what lets
 // this sweep reclaim those files too, since serveFileResolve already treats
@@ -266,7 +266,7 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 // a caller formatting RFC3339 instead silently collapses the grace period to
 // "same date". Formatting it here is what keeps that unrepresentable.
 //
-// BUG-132: Uses DELETE ... RETURNING to make select+delete atomic,
+// Uses DELETE ... RETURNING to make select+delete atomic,
 // preventing a race where an attachment linked between SELECT and DELETE
 // would have its file deleted while the DB row survives.
 func (d *DB) DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error) {

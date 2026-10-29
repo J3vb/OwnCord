@@ -36,7 +36,7 @@ type ChatSendCmd struct {
 	// ReplyPing is true only when the client sent reply_ping=true on a reply.
 	ReplyPing   bool
 	attachments []string
-	// StickerID is the sticker a sticker message carries (WP 8.8a), 0 for an
+	// StickerID is the sticker a sticker message carries, 0 for an
 	// ordinary send.
 	StickerID int64
 }
@@ -232,7 +232,7 @@ type VoiceE2EEAnnounceCmd struct {
 	// announce payload, already validated and trimmed by the parser; "" when the
 	// client sent none or an invalid one (the connection's auth key is used then).
 	IdentityKey string
-	// VideoDecode is the sender's raw video_decode list (WP M-4). Unvalidated
+	// VideoDecode is the sender's raw video_decode list. Unvalidated
 	// here; handleVoiceE2EEAnnounceV2 runs it through sanitizeVideoDecode.
 	VideoDecode []string
 }

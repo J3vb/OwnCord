@@ -7,7 +7,7 @@ import (
 )
 
 // startTOTPKey loads (or generates, on a confirmed absence) the AES-256 key
-// that encrypts stored TOTP secrets (WP 5.6f). It was loaded inside
+// that encrypts stored TOTP secrets. It was loaded inside
 // api.NewRouter, which panicked on a malformed OWNCORD_TOTP_KEY or a corrupt
 // totp.key after the hub and LiveKit were already running; as a stage the same
 // failure surfaces as `starting totp-key: ...` before either exists. The

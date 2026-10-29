@@ -19,7 +19,7 @@ import (
 // Returns a descriptive error on failure, nil on success.
 func ValidateUsername(username string) error {
 	username = strings.TrimSpace(username)
-	// Before B4-9 account deletion anonymised the row by renaming it to
+	// Account deletion used to anonymise the row by renaming it to
 	// "[deleted-<id>]" (with randomly suffixed fallbacks on collision), and
 	// databases from that time still hold such rows; users.username is
 	// UNIQUE COLLATE NOCASE, so the whole namespace stays reserved rather

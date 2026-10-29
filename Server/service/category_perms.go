@@ -11,7 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ─── Category permission templates (WP 6.5d) ─────────────────────────────────
+// ─── Category permission templates ─────────────────────────────────
 //
 // A category carries a template of permission overrides that its synced
 // channels follow. Writing a template row writes the same row on every synced

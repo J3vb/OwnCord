@@ -1,6 +1,6 @@
 package admin
 
-// The poll expirer log messages (WP 6.9b). They live beside
+// The poll expirer log messages. They live beside
 // support_event_codes_polls.go because support_event_codes.go is at the
 // file-size ceiling; init folds them in.
 func init() {

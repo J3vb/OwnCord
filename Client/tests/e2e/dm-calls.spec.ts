@@ -11,7 +11,7 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { findUnnamedControls, focusIndicator } from "./support/b9-accessibility";
+import { findUnnamedControls, focusIndicator } from "./support/accessibility";
 import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,

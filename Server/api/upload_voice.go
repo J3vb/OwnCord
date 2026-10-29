@@ -14,7 +14,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// Voice message limits (WP 8.9). A voice message is an ordinary attachment that
+// Voice message limits. A voice message is an ordinary attachment that
 // also carries its length and a small waveform, so a client can draw the player
 // before it has downloaded the file.
 const (

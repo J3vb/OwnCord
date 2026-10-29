@@ -6,16 +6,16 @@ import (
 	"log/slog"
 )
 
-// broadcastChannelEvent is EmitEvents' ChannelEvent route (B5-7): a metadata
+// broadcastChannelEvent is EmitEvents' ChannelEvent route: a metadata
 // kind (contentBearingKinds is false) takes BroadcastToChannel's route,
 // unchanged — the ordinary topic-subscriber Publish path, at exactly its
-// pre-B5-7 cost. Both carry senderID for the per-sender topic limit. A
+// cost from before the NSFW content gate. Both carry senderID for the per-sender topic limit. A
 // content-bearing kind stays on that SAME path (still channel-scoped,
 // bm.recipients nil) but is marked with nsfwChannelID, so the hub
 // resolves the channel's label and the recipient's acknowledgement at
 // DISPATCH time (off the dispatch goroutine, hub_content_gate.go) and narrows the topic's subscribers by
 // CanReadContent's ack check there. Withheld from the plugin sink entirely
-// when the channel turns out to be labelled (decision 13: a plugin has no
+// when the channel turns out to be labelled (a plugin has no
 // acknowledgement).
 //
 // The gate used to be resolved here, at enqueue, and handed over as a
@@ -25,9 +25,9 @@ import (
 // it, and — the same defect from the other side — a frame queued while the
 // channel was still unlabelled carried no filter at all, so labelling the
 // channel before it dispatched delivered it to everyone, including a plugin
-// sink that decision 13 says must never receive a labelled channel's content
-// (OC-0449). Resolving at dispatch also moves a database round trip off every
-// emitting request handler; since ARCH-019 it runs in a resolver goroutine
+// sink that must never receive a labelled channel's content.
+// Resolving at dispatch also moves a database round trip off every
+// emitting request handler; it runs in a resolver goroutine
 // under a timeout, so it no longer stalls the one goroutine that serializes
 // broadcasts either.
 func (h *Hub) broadcastChannelEvent(ctx context.Context, senderID int64, e ChannelEvent) {
@@ -44,11 +44,11 @@ func (h *Hub) broadcastChannelEvent(ctx context.Context, senderID int64, e Chann
 	}, "channel content")
 }
 
-// resolveChannelContentGate answers B5-7's content gate for one queued
+// resolveChannelContentGate answers the NSFW content gate for one queued
 // broadcast. A zero channelID — every metadata kind and every ordinary
 // broadcast — resolves nothing and costs nothing.
 //
-// Never on the dispatch goroutine (ARCH-019): Run parks the frame in its
+// Never on the dispatch goroutine: Run parks the frame in its
 // channel's lane and a resolver goroutine calls this under
 // contentGateTimeout (hub_content_gate.go). Deliberately outside seqMu too:
 // this is a database round trip, and seqMu serializes EVERY broadcast. The
@@ -65,7 +65,7 @@ func (h *Hub) resolveChannelContentGate(ctx context.Context, channelID int64) (a
 
 // nsfwDispatchResolveRaceHook, when non-nil, runs once per content-bearing
 // channel event on the dispatch goroutine, when the event is dequeued and
-// immediately BEFORE its B5-7 gate read is issued (and before seqMu is taken).
+// immediately BEFORE its NSFW content gate read is issued (and before seqMu is taken).
 // Test-only (always nil in production): it is the deterministic barrier the
 // ordering contract needs to be pinned rather than raced for.
 //
@@ -83,7 +83,7 @@ var nsfwDispatchResolveRaceHook func(channelID int64)
 
 // contentBearingKinds classifies every server->client message type as either
 // CONTENT (carries a message body or metadata that discloses one) or
-// METADATA (everything else) for B5-7's NSFW gate. broadcastChannelEvent
+// METADATA (everything else) for the NSFW gate. broadcastChannelEvent
 // routes CONTENT kinds through channelNSFWFilter (CanReadContent's ack check
 // — withheld from an unacknowledged member of a labelled channel) and
 // everything else through the ordinary BroadcastToChannel/CanViewChannel
@@ -92,7 +92,7 @@ var nsfwDispatchResolveRaceHook func(channelID int64)
 // true = content-bearing; false = metadata, listed explicitly so a reviewer
 // can see the decision was made, not merely defaulted. Every server->client
 // type in message_types.go MUST have an entry — TestNSFW_EveryServerFrameKindIsClassified
-// fails on any that don't, so B5-8..B5-10's new frames have to choose too.
+// fails on any that don't, so any new frame has to choose too.
 var contentBearingKinds = map[string]bool{
 	// ── content: a message body, or metadata that discloses one ──
 	MsgTypeChatMessage:     true,
@@ -100,7 +100,7 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeReactionUpdate:  true,
 	MsgTypePollUpdate:      true, // names a message and carries its tallies, as reaction_update does
 	MsgTypePluginBroadcast: true, // plugin-authored content posted into a channel
-	MsgTypeThreadChanged:   true, // a thread's name, discloses what the parent's unacknowledged members may not read (WP 6.9c)
+	MsgTypeThreadChanged:   true, // a thread's name, discloses what the parent's unacknowledged members may not read
 
 	// ── metadata: no message body ──
 	MsgTypeAuthOK:            false,
@@ -157,19 +157,19 @@ var contentBearingKinds = map[string]bool{
 	MsgTypeVoiceWatching:       false,
 	MsgTypeCommandReply:        false, // ephemeral, direct to the invoking client
 	MsgTypeNSFWAck:             false, // the gate's own signal, not gated content
-	MsgTypeModQueue:            false, // a report's public id and state only (B5-8); never message content
-	MsgTypeModAction:           false, // a warning/timeout notice to its own subject (B5-9); never message content
-	MsgTypeMemberTimeouts:      false, // active-timeout ids and expiries to moderators and the target (WP 3C-7c); never message content
-	MsgTypeChannelCategories:   false, // category ids, names and positions to MANAGE_CHANNELS holders only (WP 6.5a); never message content
-	MsgTypeAppealStatus:        false, // an appeal's state to its own appellant only (B5-10); never message content
-	MsgTypeMentionCount:        false, // a channel id and this user's own mention total only (DP-27); never message content
+	MsgTypeModQueue:            false, // a report's public id and state only; never message content
+	MsgTypeModAction:           false, // a warning/timeout notice to its own subject; never message content
+	MsgTypeMemberTimeouts:      false, // active-timeout ids and expiries to moderators and the target; never message content
+	MsgTypeChannelCategories:   false, // category ids, names and positions to MANAGE_CHANNELS holders only; never message content
+	MsgTypeAppealStatus:        false, // an appeal's state to its own appellant only; never message content
+	MsgTypeMentionCount:        false, // a channel id and this user's own mention total only; never message content
 	MsgTypeReadState:           false, // a channel id and this user's own read pointer and counts only (3D-5c); never message content
 	MsgTypeChannelActivity:     false, // ids and flags only (2B-2); the author id is withheld from an unacknowledged reader of a labelled channel
 }
 
 // reconnectFrameReadableRaceHook, when non-nil, runs once per content-bearing
 // frame in reconnectWriteReplay's write loop, immediately before checking
-// that frame's live readability (Codex round 2, P1). Test-only (always nil
+// that frame's live readability. Test-only (always nil
 // in production): a single snapshot taken once per reconnect — or even once
 // per channel within a batch — still lets a revoke land between two frames
 // of the same replay and leak everything after it, so this hook lets a test
@@ -177,7 +177,7 @@ var contentBearingKinds = map[string]bool{
 // SAME channel) deterministically instead of chasing a real goroutine race.
 var reconnectFrameReadableRaceHook func(userID, channelID int64)
 
-// frameReadableNow answers B5-7's content gate live, for exactly the one
+// frameReadableNow answers the NSFW content gate live, for exactly the one
 // frame about to be written — never a batch snapshot, and never reused for
 // another frame even of the same channel: reconnectWriteReplay calls this
 // immediately before each content-bearing frame's handshakeWrite, so a
@@ -195,7 +195,7 @@ func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) (re
 	}
 	if ch == nil {
 		// A missing channel is UNKNOWN, not "not labelled" — same posture as
-		// a lookup error (round 2 P1's channelNSFWFilter fix): fail closed
+		// a lookup error (as channelNSFWFilter does): fail closed
 		// rather than trust a frame whose channel this read cannot even
 		// confirm exists any more. A deleted channel's frame is not owed.
 		slog.Warn("ws: frameReadableNow found no such channel, dropping frame", "channel_id", channelID)
@@ -215,7 +215,7 @@ func (h *Hub) frameReadableNow(ctx context.Context, userID, channelID int64) (re
 
 // payloadChannelID extracts payload.channel_id from a wrapped wire frame, or
 // 0 if absent/unparseable. thread_changed carries no channel_id: its channel
-// is the thread's parent, payload.thread.parent_id (WP 6.9c).
+// is the thread's parent, payload.thread.parent_id.
 func payloadChannelID(data []byte) int64 {
 	var frame struct {
 		Payload struct {

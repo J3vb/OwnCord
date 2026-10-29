@@ -7,7 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// checkProfileByteBounds is UpdateProfile's raw byte guard (OC-0192, see the
+// checkProfileByteBounds is UpdateProfile's raw byte guard (see the
 // comment at its call site), split out to keep UpdateProfile within funlen.
 func checkProfileByteBounds(patch ProfilePatch) error {
 	if patch.DisplayName != nil && len(*patch.DisplayName) > MaxDisplayNameLen*4 {
@@ -32,8 +32,8 @@ func derefString(p *string) string {
 	return *p
 }
 
-// checkTimedOutProfileEdit applies the self-edit rules for the shown name
-// (WP 6.4b). next is the cleaned display name patch, nil when the patch leaves
+// checkTimedOutProfileEdit applies the self-edit rules for the shown name.
+// next is the cleaned display name patch, nil when the patch leaves
 // the field alone; username is the patch's username, "" when unspecified.
 // Resending the current values is always allowed. A real change to either is
 // refused while a moderator timeout is active (read once, fail closed), so a

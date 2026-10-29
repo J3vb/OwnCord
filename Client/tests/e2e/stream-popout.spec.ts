@@ -5,7 +5,7 @@
  * Chromium here stands in for WebView2.
  *
  * The real grid is mounted through the dev server's module graph, as in
- * b9-voice-polish.spec.ts, with a canvas-capture stream (the mocked suite has
+ * voice-polish.spec.ts, with a canvas-capture stream (the mocked suite has
  * no LiveKit track). The production preview serves only the bundle, so there
  * the test skips.
  */
@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithVoice, navigateToMainPageReady } from "./helpers";
-import { findUnnamedControls, keyboardReachable } from "./support/b9-accessibility";
+import { findUnnamedControls, keyboardReachable } from "./support/accessibility";
 
 const TILE = 42;
 

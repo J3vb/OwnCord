@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// wsCommandDeadline bounds the database work behind one inbound frame (WP
-// 4.1b). It sits under the 25 s ping interval so a single stalled command
+// wsCommandDeadline bounds the database work behind one inbound frame. It
+// sits under the 25 s ping interval so a single stalled command
 // cannot by itself starve the pong. A package var, not a config key, so tests
 // can shrink it (an atomic, so a parallel test cannot race the readers);
 // nobody has measured a better value yet.

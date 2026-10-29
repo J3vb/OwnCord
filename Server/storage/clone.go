@@ -20,7 +20,7 @@ var linkFile = os.Link
 var ErrCloneExists = errors.New("storage clone destination exists")
 
 // Clone makes the stored file named dst a second name for the bytes of src,
-// for a forwarded attachment (WP 6.9a): the forward owns its own file, so
+// for a forwarded attachment: the forward owns its own file, so
 // deleting either message later never takes the other's bytes with it.
 //
 // It hard-links first, which costs no extra disk, and falls back to a

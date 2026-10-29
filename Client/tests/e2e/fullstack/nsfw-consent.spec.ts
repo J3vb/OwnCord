@@ -1,6 +1,6 @@
 /**
  * Fullstack: the B9-7 NSFW consent gate against the real Go server
- * (counterpart to the mocked `b9-nsfw-consent.spec.ts`).
+ * (counterpart to the mocked `nsfw-consent.spec.ts`).
  *
  * The label, the acknowledgement row, the nsfw_ack fan-out and the server's
  * refusal of pre-consent reads are all the real server's; the client under

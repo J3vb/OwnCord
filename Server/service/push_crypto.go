@@ -16,14 +16,14 @@ import (
 // SS4 mandates a single record per push message; 4096 is both the RFC's own
 // worked example value and the largest payload a push service is required
 // to accept (RFC 8030 SS7.2) — declaring it costs nothing even though every
-// payload dispatch sends (decision 9's fixed {"t":"activity"}) is far
+// payload dispatch sends (the fixed {"t":"activity"}) is far
 // smaller.
 const pushRecordSize = 4096
 
 // pushPaddingDelimiter is RFC 8291 SS4's required delimiter octet: appended
 // to the plaintext before encryption, with no further padding — dispatch
 // never pads beyond the delimiter because the payload's fixed, tiny size is
-// itself the anti-fingerprinting property (decision 9), not length hiding.
+// itself the anti-fingerprinting property, not length hiding.
 const pushPaddingDelimiter = 0x02
 
 // errPushInvalidReceiverKey wraps a p256dh that does not decode to a valid

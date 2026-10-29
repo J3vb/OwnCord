@@ -1,6 +1,6 @@
 package db
 
-// Staged boot-time restore (WP 5.5). The admin restore handler no longer copies
+// Staged boot-time restore. The admin restore handler no longer copies
 // over the open database. It verifies a backup, stages a copy of it beside the
 // database and writes a marker last; the next boot applies it here, under the
 // process lock and before anything opens the database.

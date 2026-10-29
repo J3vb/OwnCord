@@ -34,7 +34,7 @@ import {
   switchSettingsTab,
   emitWsMessage,
 } from "./helpers";
-import { Q1, setAppearance, textContrast } from "./support/b9-accessibility";
+import { Q1, setAppearance, textContrast } from "./support/accessibility";
 
 // ---------------------------------------------------------------------------
 // Local harness additions

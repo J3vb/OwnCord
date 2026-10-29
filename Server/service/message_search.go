@@ -107,7 +107,7 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, in Se
 
 // searchScope returns the channel ids a search may touch. An explicit
 // channelID keeps the single-channel 403/404 contract; otherwise the scope is
-// the caller's READABLE set (B5-7: the visible set minus any labelled channel
+// the caller's READABLE set (the visible set minus any labelled channel
 // the caller has not acknowledged, so a hit inside one is silently absent —
 // the leak path a gate on the single-channel branch alone leaves open). in:
 // names narrow that scope by name; they are only ever compared against

@@ -33,32 +33,32 @@ type chatMessagePayload struct {
 	// @everyone (never both). Mention fan-out (service/mentions.go,
 	// mentionEntries) skips the mention-count bump for an @here reader with no
 	// live connection when the badge is written, so a client replaying this frame during a reconnect must not
-	// raise a badge the server never counted (OC-0271).
+	// raise a badge the server never counted.
 	MentionsHere bool `json:"mentions_here"`
 	// ReferencedMessage is the reply parent's snippet (null when not a reply,
 	// or the parent is unavailable). A deleted parent is redacted to
 	// {id, deleted: true}. An older server omits the field.
 	ReferencedMessage *service.ReferencedMessage `json:"referenced_message"`
 	// Kind and Call are set only on a call log row and omitted for an
-	// ordinary message (WP 3B-9). See callBlock.
+	// ordinary message. See callBlock.
 	Kind string     `json:"kind,omitempty"`
 	Call *callBlock `json:"call,omitempty"`
-	// GroupEvent is set only on a group DM row (WP 3B-10): the same shape as
+	// GroupEvent is set only on a group DM row: the same shape as
 	// the history payload's db.GroupEventInfo.
 	GroupEvent *groupEventBlock `json:"group_event,omitempty"`
-	// Forward is set only on a forwarded message (WP 6.9a): the same shape as
+	// Forward is set only on a forwarded message: the same shape as
 	// the history payload's db.ForwardInfo, static, so it replays as is.
 	Forward *service.ForwardInfo `json:"forward,omitempty"`
-	// Poll is set only on a poll message (WP 6.9b): the same shape as the
+	// Poll is set only on a poll message: the same shape as the
 	// history payload's db.PollInfo. The counts are those at creation, zero, so
 	// a replayed frame must not roll a newer count back (clients keep the higher
 	// results.version).
 	Poll *service.PollInfo `json:"poll,omitempty"`
-	// Sticker is set only on a sticker message (WP 8.8a): the same shape as the
+	// Sticker is set only on a sticker message: the same shape as the
 	// history payload's db.MessageStickerInfo. Static, so it replays as is; a
 	// deleted sticker is read back with a null id and url by history.
 	Sticker *service.MessageStickerInfo `json:"sticker,omitempty"`
-	// Thread is the starter message's thread (WP 6.9c): the same shape as the
+	// Thread is the starter message's thread: the same shape as the
 	// history payload's db.ThreadInfo. A message that has just been sent has no
 	// thread yet, so no live send sets it; thread_changed carries a thread that
 	// appears or changes afterwards. The field exists so a frame built from a

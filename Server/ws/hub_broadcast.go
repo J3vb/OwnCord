@@ -43,12 +43,12 @@ type broadcastMsg struct {
 	enqueuedAt time.Time
 	// nsfwChannelID, when non-zero, marks this entry as a content-bearing
 	// channel event (chat_message, chat_edited, reaction_update,
-	// plugin_broadcast — see contentBearingKinds) whose B5-7 gate is resolved
+	// plugin_broadcast — see contentBearingKinds) whose NSFW content gate is resolved
 	// at DISPATCH time rather than by the caller at enqueue time. It carries
 	// the channel identity and nothing else: the label and the recipient's
 	// acknowledgement are read once the event is dequeued, off the dispatch
 	// goroutine (hub_content_gate.go), so a revocation or a relabelling that
-	// completed while it waited is honoured by the event itself (OC-0449).
+	// completed while it waited is honoured by the event itself.
 	//
 	// The alternative — resolving at enqueue and handing over a precomputed
 	// allow-list — is what this replaced, and it is unsound in both
@@ -58,7 +58,7 @@ type broadcastMsg struct {
 	// dispatched delivered it to every subscriber and to the plugin sink. A
 	// precomputed list is also stale by construction in a way a live one is
 	// not, because the enqueue happens on a request handler that can be
-	// arbitrarily far ahead of the dispatch loop (P2-4/P2-5).
+	// arbitrarily far ahead of the dispatch loop.
 	nsfwChannelID int64
 	// laneChannelID, on a global frame (channelID == 0), names the channel
 	// whose parked content it must not overtake (BroadcastChannelDelete).
@@ -96,7 +96,7 @@ func (h *Hub) BroadcastToAll(msg []byte) {
 // order at each observer: whichever enqueues onto h.broadcast first is also
 // delivered to c.send first. A caller that instead published straight to
 // pub/sub, bypassing this queue, would reintroduce exactly that kind of
-// reordering from the other direction (OC-0003).
+// reordering from the other direction.
 func (h *Hub) BroadcastToAllExcept(excludeUserID int64, msg []byte) {
 	h.enqueue(broadcastMsg{channelID: 0, excludeUserID: excludeUserID, msg: msg}, "global message")
 }
@@ -222,7 +222,7 @@ func (h *Hub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) {
 }
 
 // BroadcastMemberBan sends a member_ban message to all connected clients
-// and immediately disconnects the banned user's WebSocket connection (BUG-113).
+// and immediately disconnects the banned user's WebSocket connection.
 func (h *Hub) BroadcastMemberBan(userID int64) {
 	h.BroadcastToAll(buildMemberBan(userID))
 	h.DisconnectUser(userID)
@@ -234,7 +234,7 @@ func (h *Hub) BroadcastMemberBan(userID int64) {
 // connecting ones. Fans out the same member_join a fresh connect would
 // (clients map it to addMember — no protocol change), satisfying the admin
 // package's memberUnbanBroadcaster capability; admin's hub_wiring_test.go
-// pins that at compile time. (OC-0058)
+// pins that at compile time.
 func (h *Hub) BroadcastMemberUnban(userID int64) {
 	ctx := context.Background()
 	user, err := h.readers.Members.GetUserByID(ctx, userID)
@@ -323,7 +323,7 @@ func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
 // user. Unlike SendToUserHigh, an overflow is silently dropped rather than
 // disconnecting the client — the targeted-delivery sibling of
 // broadcastExcludeLow, for events (e.g. DM typing indicators) that need
-// direct-to-user routing but are ephemeral and safely droppable (OC-0260).
+// direct-to-user routing but are ephemeral and safely droppable.
 func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 	conns := h.clientsOf(userID)
 	for _, c := range conns {
@@ -343,7 +343,7 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 // window would silently lose the overtaken events. The high queue remains for
 // unsequenced targeted messages only.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
-	// The replay copy's JSON work happens before the lock (SV-04).
+	// The replay copy's JSON work happens before the lock.
 	rs := newReplaySplice(msg)
 	h.seqMu.Lock()
 	start := time.Now()
@@ -366,13 +366,13 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 
 // deliverGated stamps bm.msg with a monotonic sequence number, stores it in
 // the replay buffer, and sends it to the appropriate clients via pub/sub. g is
-// B5-7's content gate for the frame, already resolved off the dispatch
+// the NSFW content gate for the frame, already resolved off the dispatch
 // goroutine (hub_content_gate.go); the zero gateResult is "unfiltered", which
 // is what every non-content frame carries.
 func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	contentFilter, labelled, gateUnconfirmed := g.allow, g.labelled, g.unconfirmed
 
-	// The replay copy's JSON work happens before seqMu (SV-04). A presence
+	// The replay copy's JSON work happens before seqMu. A presence
 	// window builds its frame under the lock and never carries a reply
 	// snippet, so it has nothing to precompute.
 	var rs *replaySplice
@@ -394,7 +394,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		// allocated: a shed frame that consumed a seq would sit in the replay
 		// buffer as a number no client ever saw live, and since clients ack
 		// only max(seq), it could never be requested back. allowTopicFrame
-		// owns the shed handling (count + watermark, SRV-03).
+		// owns the shed handling (count + watermark).
 		if !h.allowTopicFrame(bm) {
 			return 0, 0, false, nil
 		}
@@ -433,7 +433,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 
 		// Plugin fan-out (Phase C Step 9) is captured here and called after
 		// seqMu is released, on this same dispatch goroutine, so sink order
-		// still equals seq order. skipPluginSink (B5-7 decision 13): a
+		// still equals seq order. skipPluginSink (a plugin has no NSFW acknowledgement): a
 		// labelled channel's content-bearing frame never reaches the sink.
 		if h.pluginSink.Load() != nil && !labelled {
 			pluginMsg = msg
@@ -452,7 +452,7 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		default:
 			// Channel-scoped broadcast — deliver to subscribers of the channel
 			// topic. The rate limiter already passed above, before the seq
-			// was allocated. contentFilter (B5-7) narrows delivery to the
+			// was allocated. contentFilter narrows delivery to the
 			// subset of THIS LIVE subscriber list it approves, resolved
 			// against the label and acknowledgements read after the frame
 			// was dequeued rather than by the caller — so a concurrent

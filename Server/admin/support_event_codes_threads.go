@@ -1,7 +1,7 @@
 package admin
 
 // support_event_codes_threads.go - the event codes for the thread feature's
-// Warn/Error literals (WP 6.9c).
+// Warn/Error literals.
 
 import "maps"
 

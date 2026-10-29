@@ -1,6 +1,6 @@
 package ws
 
-// Client features (WP 6.9d-a1): optional capabilities a client declares in its
+// Client features: optional capabilities a client declares in its
 // auth frame (`features: string[]`, additive within epoch 1, absent = none).
 // The server keeps the parsed set on the Client for the socket's life; every
 // connection sends a fresh auth, so a client that updates re-declares. The set

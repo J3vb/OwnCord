@@ -12,7 +12,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// channel_activity (WP 2B-2) is the unread hint for a readable channel the
+// channel_activity is the unread hint for a readable channel the
 // reader has not focused: their chat_message broadcasts never reach them, so
 // the sidebar would otherwise wait for the next ready. A hub-owned coalescer
 // records each committed non-DM send, and a worker flushes the pending map on
@@ -371,7 +371,7 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 
 	forumScoped := isForumScoped(ctx, vis, ch) // once per channel, not per recipient
 	audience := h.channelReadAudienceFor(ctx, chID, ch, false)
-	if ch.IsThread() && !forumScoped { // a forum's posts stay a forum-wide hint (WP 6.9d)
+	if ch.IsThread() && !forumScoped { // a forum's posts stay a forum-wide hint
 		audience = h.threadFollowersOf(ctx, chID, audience)
 	}
 	for _, uid := range audience {
@@ -386,8 +386,8 @@ func (h *Hub) resolveChannelActivity(ctx context.Context, chID int64, pc *pendin
 	}
 }
 
-// threadFollowersOf narrows a thread's read audience to its followers (WP
-// 6.9c): a hint for a thread is for the people who follow it, and the client
+// threadFollowersOf narrows a thread's read audience to its followers:
+// a hint for a thread is for the people who follow it, and the client
 // handles every thread entry it gets. audience already holds only users the
 // parent lets read, so a follower who lost the parent is not in it and a
 // follow row never widens anything. A hub without a thread service or a failed

@@ -10,7 +10,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, navigateToMainPageReady } from "./helpers";
-import { Q1, findUnnamedControls, focusIndicator } from "./support/b9-accessibility";
+import { Q1, findUnnamedControls, focusIndicator } from "./support/accessibility";
 
 /** A 1x1 transparent PNG, as the sticker image bytes. */
 const PNG_1X1 = [

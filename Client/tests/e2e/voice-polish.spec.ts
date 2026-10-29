@@ -22,7 +22,7 @@ import {
   mockTauriFullSessionWithVoice,
   navigateToMainPageReady,
 } from "./helpers";
-import { findUnnamedControls, focusIndicator, textContrast } from "./support/b9-accessibility";
+import { findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
 
 const widget = (page: Page) => page.locator("[data-testid='voice-widget']");
 

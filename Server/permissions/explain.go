@@ -3,7 +3,7 @@ package permissions
 import "fmt"
 
 // Action names one canonical predicate an administrator can ask about for a
-// member in a channel (RI-06). The explanation runs the predicate itself —
+// member in a channel. The explanation runs the predicate itself —
 // there is no second rule engine here, only a trace of the bits it consulted.
 type Action string
 

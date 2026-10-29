@@ -127,7 +127,7 @@
 //   - Hub.persistEvent under Hub.seqMu (hub_events.go:305) is a non-blocking
 //     channel send with a default (event_persister.go), so it is not I/O.
 //
-// # What the first checked run found (WP 5.6c)
+// # What the first checked run found
 //
 // The whole -tags deadlock suite, run with the checker reporting instead of
 // panicking, found one out-of-order acquire and no production one: a test

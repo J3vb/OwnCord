@@ -13,7 +13,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// Group DM membership routes (WP 3B-10b): add, remove and owner transfer. The
+// Group DM membership routes: add, remove and owner transfer. The
 // leave and rename routes live in dm_handler.go and share the fan-out below.
 
 // dmGroupRateLimitPerMinute bounds the group mutations that publish to the other

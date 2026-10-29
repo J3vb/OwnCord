@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Category permission template handlers (WP 6.5d) ─────────────────────────
+// ─── Category permission template handlers ─────────────────────────
 //
 // A category's overrides are a template its synced channels follow. These
 // adapters mirror the channel override handlers: decode, delegate to

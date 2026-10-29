@@ -17,9 +17,9 @@ type RingReopen struct {
 // OpenForRing reopens the DM for every ring target who had closed it and
 // returns each reopen with its dm_channel_open payload, so the caller can
 // announce it ahead of the call_incoming. Without it a callee who closed the
-// DM accepts a call into a channel their client does not have (D-04).
+// DM accepts a call into a channel their client does not have.
 // OpenDM is idempotent and reports a genuine (re)open, so an already-open DM
-// returns nothing — see the OC-0106 note in SendMessage.
+// returns nothing — see the note in SendMessage.
 //
 // The payload is built before the row is written: a reopen that could not be
 // announced would be persisted, and every later ring would see the DM as open

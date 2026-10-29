@@ -12,8 +12,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// LogLevelController owns the runtime log-level override for a bounded window
-// (SRE-07). An operator raises the level to debug to watch a problem live, and
+// LogLevelController owns the runtime log-level override for a bounded window.
+// An operator raises the level to debug to watch a problem live, and
 // it reverts to the base level on its own — a boost that outlived its window
 // would quietly grow disk use and log noise, and the base level is what the
 // next restart returns to anyway.

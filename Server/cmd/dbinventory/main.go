@@ -3,7 +3,7 @@
 // functions and sentinels, method calls on a *db.DB value, and the places the
 // bare handle is passed on to somebody else.
 //
-// It is the measurement behind docs/architecture/server-boundaries.md (B3-0)
+// It is the measurement behind docs/architecture/server-boundaries.md
 // and prints a Markdown table so the document can be regenerated:
 //
 //	cd Server && go run ./cmd/dbinventory
@@ -12,10 +12,10 @@
 // lives in Server/invariants so the guard and this command measure the same
 // thing: see DBHandleVars, DBHandleFields and DBHandleCalls.
 //
-// Use, not import (B6-14). The handle is stored on a struct field — Hub.db,
+// Use, not import. The handle is stored on a struct field — Hub.db,
 // App.database — so any file in those packages can call it without importing
-// db at all, and until B6-14 the walk skipped every such file and the
-// inventory said nothing about them. A file in a package that declares a
+// db at all, and a walk that looked only at imports skipped every such file and
+// the inventory said nothing about them. A file in a package that declares a
 // *db.DB field is now analysed whatever it imports, and becomes a row as soon
 // as it calls the handle or hands it on.
 package main
@@ -127,7 +127,7 @@ func inventory(root string) ([]fileUse, error) {
 
 	// Pass 2: per-file uses. A file with no import is analysed anyway when its
 	// package carries the handle on a field or opens it through a constructor
-	// of its own — that is the shape B6-14 was about — and becomes a row only
+	// of its own — that is the shape this walk was extended for — and becomes a row only
 	// if it actually uses it.
 	var rows []fileUse
 	for _, rel := range files {
@@ -312,10 +312,10 @@ func sum(m map[string]int) int {
 //
 // The classes, and what each one means:
 //
-//   - UNLISTED: the file imports db and has no row (B3-0's original).
+//   - UNLISTED: the file imports db and has no row (the original case).
 //   - UNLISTED BY USE: the file imports nothing but reaches the handle through
-//     a package field, and has no row. This is the shape B6-14 found: a call
-//     the guard could not see because there was no import to see it by.
+//     a package field, and has no row. This is the shape the walk was extended
+//     to find: a call the guard could not see because there was no import to see it by.
 //   - ADAPTER ROW USES THE HANDLE: an adapter, move or remove row that
 //     measures a call or a hand-off. Its disposition says it makes none.
 //   - CALLS DRIFTED / HANDS DRIFTED: a boundary row whose pinned multiset is

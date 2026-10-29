@@ -26,8 +26,8 @@ type boundedKey struct {
 	highToDef bool
 }
 
-// boundedKeys is the one place a bounded configuration key states its range
-// (B5-2). A new integer key with a range adds a row here — not a clamp in the
+// boundedKeys is the one place a bounded configuration key states its range.
+// A new integer key with a range adds a row here — not a clamp in the
 // package that consumes it — so the checks stay together and every warning
 // reads the same. Bounds are on the MiB values as written; the byte helpers
 // (UserQuotaBytes, MinFreeDiskBytes) shift by 20, and maxMiB keeps that shift

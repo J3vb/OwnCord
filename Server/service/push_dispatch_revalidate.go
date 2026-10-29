@@ -3,7 +3,7 @@ package service
 // push_dispatch_revalidate.go holds the two checks dispatch runs immediately
 // before every delivery attempt, including the first: they are what make a
 // saved, never-re-encrypted request and a pre-dispatch audience snapshot safe
-// to act on (OC-0450). Split out of push_dispatch.go to keep that file under
+// to act on. Split out of push_dispatch.go to keep that file under
 // its declared size ceiling; nothing here is reachable except through
 // attemptOne and stillEligible.
 
@@ -74,7 +74,7 @@ func (d *PushDispatcher) recipientBlocksAuthor(ctx context.Context, userID, auth
 
 // prune deletes a subscription a push service reported dead (404/410) and
 // counts it -- the authoritative staleness signal S7 names, separate from
-// B5-4's time-based sweep.
+// the time-based sweep.
 func (d *PushDispatcher) prune(ctx context.Context, id int64) {
 	if deleted, err := d.st.DeletePushSubscriptionByID(ctx, id); err != nil {
 		slog.Error("PushDispatcher.prune DeletePushSubscriptionByID", "err", err, "id", id)

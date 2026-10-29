@@ -23,9 +23,9 @@ const DefaultFileLimit = 500
 // FileSizeOverride classes. A row's class says why it is exempt, so a whole
 // class can be judged at once rather than one file at a time.
 const (
-	// classB3ExitTarget: a B3-5 exit target, tighter than the default. The
-	// plan set these for the ws coordination hotspots
-	// (docs/archive/plans/b3-server-architecture-guardrails-2026-08-29.md, "B3-5 exit")
+	// classB3ExitTarget: an exit target, tighter than the default. The
+	// architecture plan set these for the ws coordination hotspots
+	// (docs/archive/plans/b3-server-architecture-guardrails-2026-08-29.md, exit criteria)
 	// and recorded them met at 361/424/183. hub_broadcast.go and serve.go are
 	// no longer listed — the default covers them now; only hub.go's 400 still
 	// bites.

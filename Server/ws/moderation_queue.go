@@ -7,12 +7,12 @@ import (
 )
 
 // modQueuePayload is the mod_queue frame's payload: EITHER a report's
-// PUBLIC id (report_id) OR an appeal's PUBLIC id (appeal_id, B5-10) plus
+// PUBLIC id (report_id) OR an appeal's PUBLIC id (appeal_id) plus
 // the new state — never the reporter's/appellant's identity, never the
 // reported content, never the subject (S5, report confidentiality), and
-// never the internal sequential id (P2-9 — that would let a bit holder
+// never the internal sequential id (that would let a bit holder
 // infer a neighbouring report's or appeal's existence from a gap in the
-// ids they see). One wire type, two optional ids, so B5-8's audience
+// ids they see). One wire type, two optional ids, so the moderation queue's audience
 // helper (moderationAudience) is reused for the appeal queue rather than a
 // second one being written; exactly one of ReportID/AppealID is set on any
 // given frame.
@@ -72,7 +72,7 @@ func (h *Hub) moderationAudience(ctx context.Context, exclude ...int64) []int64 
 // report reportID (the INTERNAL id, resolved to a public id below before it
 // ever reaches the wire) changed, on create, assign and close.
 //
-// P1-1 (Codex review): a bit-holding SUBJECT or REPORTER must never receive
+// A bit-holding SUBJECT or REPORTER must never receive
 // this frame even though they satisfy CanModerate — the whole point of
 // filing confidentially is that the subject (and the reporter's identity)
 // stays unknown to them. The prior version excluded neither, which leaked a

@@ -1,6 +1,6 @@
 // Package alphasnap hands tests a private copy of the committed alpha-shaped
 // database snapshot, Server/testdata/snapshots/v1.2.0-alpha.4.sqlite — the
-// B3-7 dataset that HP-4's drills and the B4-9..B4-11 destructive tests run
+// alpha-shaped dataset that the recovery drills and the destructive tests run
 // against (docs/architecture/data-lifecycle.md, "Drill protocol").
 //
 // The tracked file is never opened for writing and never opened by SQLite

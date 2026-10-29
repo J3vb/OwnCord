@@ -48,7 +48,7 @@ var (
 	// ErrNotFound, which it refines into the STICKER_NOT_FOUND wire code.
 	ErrStickerNotFound = errors.New("sticker not found")
 	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator
-	// timeout row (B5-9) and cannot send or edit messages, add reactions,
+	// timeout row and cannot send or edit messages, add reactions,
 	// join voice, start a new DM, create or rename a group DM, ring a DM
 	// call, pin in a DM, or set a custom status.
 	ErrTimedOut = errors.New("timed out")
@@ -84,7 +84,7 @@ type EditMessageResult struct {
 	MentionsEveryone bool
 	// MentionsHere: see SendMessageResult.MentionsHere.
 	MentionsHere bool
-	// PostOpening marks the edit of a forum post's opening message (WP 6.9d).
+	// PostOpening marks the edit of a forum post's opening message.
 	PostOpening bool
 }
 
@@ -131,7 +131,7 @@ type MessageService struct {
 	// path: Web Push dispatch, and the fallback mention write used when no
 	// mention worker is running. It runs on bg, the lifecycle-owned group the
 	// composition root installs with SetBackground so shutdown joins it before
-	// the database closes (ARCH-034); a nil bg runs each job on a fresh
+	// the database closes; a nil bg runs each job on a fresh
 	// unowned group (the old `go fn()`). Tests switch to inline via
 	// RunBackgroundInlineForTest so they can read the results
 	// deterministically right after a send.
@@ -146,7 +146,7 @@ type MessageService struct {
 	mentionWorker atomic.Pointer[mentionWorker]
 	// mentionEmitMu serializes each mention_count write with the frame it emits,
 	// so frame order matches commit order across the coalesced worker flush and
-	// the removal paths (P5-O05 / DP-27 ordering). Held across the write, the
+	// the removal paths. Held across the write, the
 	// notify and the visibility check inside it; job resolution stays outside.
 	// See mentionWorker.emitMu and reverseMentionCounts.
 	mentionEmitMu syncutil.Mutex
@@ -163,48 +163,48 @@ type MessageService struct {
 	// zero value, e.g. in tests and any caller with no hub) falls back to the
 	// row.
 	liveStatus func(userID int64) string
-	// messageRequests is B5-6's first-contact gate and delivery-audience
+	// messageRequests is the first-contact gate and delivery-audience
 	// filter (service/message_request.go), wired by service.New(). nil (the
 	// zero value — every test and any caller built via NewMessageService
 	// directly instead of service.New()) disables the gate entirely: every
-	// one-to-one DM behaves exactly as it did before B5-6, which is what
+	// one-to-one DM behaves exactly as it did before the gate existed, which is what
 	// keeps the large existing body of DM tests that construct
 	// *MessageService directly green without themselves wiring it.
 	messageRequests *MessageRequestService
-	// afterFirstContactTrustCheck is a test seam (Codex review round 2,
-	// P2-8): called from dmFirstContactGate once the recipient's trust of the
+	// afterFirstContactTrustCheck is a test seam:
+	// called from dmFirstContactGate once the recipient's trust of the
 	// sender (read by GetDMDeliveryTargets) is false, before firstContact's
 	// insert — same package as its test,
 	// no exported setter, mirroring storage_quota.go's afterRecount. Nil in
 	// production.
 	afterFirstContactTrustCheck func()
-	// beforeRequestPreviewLookup is a test seam (Codex review round 2, P1):
+	// beforeRequestPreviewLookup is a test seam:
 	// called from dmFirstContactGate right before canonicalRequestPreview's
 	// DB read, with the message id about to be looked up, so a test can
 	// delete the held message in that exact window and confirm the frame's
 	// preview comes back nil rather than the deleted content. Nil in
 	// production.
 	beforeRequestPreviewLookup func(messageID int64)
-	// pushNotifier is the Web Push dispatch hook (B5-11, behind HP-5). nil
+	// pushNotifier is the Web Push dispatch hook. nil
 	// (the zero value) means dispatch is off — either push.enabled or
 	// push.dispatch_enabled is false — and SendMessage's hook call is
 	// skipped entirely. The composition root installs a *PushDispatcher
 	// here only when both keys are true.
 	pushNotifier PushNotifier
-	// mentionNotifier is the live taskbar/tray unread-badge hook (DP-27): it
+	// mentionNotifier is the live taskbar/tray unread-badge hook: it
 	// delivers one per-user mention_count frame per reader whose badge a
 	// mention actually raised. nil (the zero value — every test and any caller
-	// with no hub) means no frame is pushed, exactly the pre-DP-27 behaviour.
+	// with no hub) means no frame is pushed, exactly the behaviour before the badge hook existed.
 	// The ws layer installs the hub-backed implementation in NewHub.
 	mentionNotifier MentionCountNotifier
-	// forward backs ForwardMessage (WP 6.9a); see message_forward.go.
+	// forward backs ForwardMessage; see message_forward.go.
 	forward forwardDeps
-	// poll backs CreatePoll (WP 6.9b); see message_poll.go.
+	// poll backs CreatePoll; see message_poll.go.
 	poll pollDeps
-	// sticker reads a message's sticker block and a sticker's row (WP 8.8a);
+	// sticker reads a message's sticker block and a sticker's row;
 	// nil disables sticker sends.
 	sticker StickerStore
-	// threads reads a forum post's thread for a retry (WP 6.9d); nil disables
+	// threads reads a forum post's thread for a retry; nil disables
 	// forum posts. It is the ThreadStore slice, not a Store method.
 	threads ThreadStore
 }
@@ -275,8 +275,8 @@ func (s *MessageService) RunBackgroundInlineForTest() {
 func (s *MessageService) StartMentionWorker(ctx context.Context) func(context.Context) {
 	w := newMentionWorker(s.st)
 	// Share the write+emit lock with the removal paths so a coalesced increment
-	// flush can never be overtaken by an older decrement frame, or vice versa
-	// (DP-27 ordering). The worker's own newMentionWorker lock is discarded.
+	// flush can never be overtaken by an older decrement frame, or vice versa.
+	// The worker's own newMentionWorker lock is discarded.
 	w.emitMu = &s.mentionEmitMu
 	// The live unread-badge hook is installed by NewHub before this runs, so
 	// capturing it here is enough; a nil hook means no hub and no pushes.

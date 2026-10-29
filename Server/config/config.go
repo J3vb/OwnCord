@@ -34,8 +34,7 @@ type Config struct {
 	Attention        AttentionConfig        `yaml:"attention"`
 }
 
-// ModerationConfig holds the report queue's retention window (B5-8, plan
-// decision 7/scorecard Question 3 decision 2).
+// ModerationConfig holds the report queue's retention window.
 type ModerationConfig struct {
 	// ReportRetentionDays bounds report CONTENT — evidence, notes and the
 	// free-text detail — deleted this many days after a report closes; the
@@ -45,7 +44,7 @@ type ModerationConfig struct {
 	ReportRetentionDays int `yaml:"report_retention_days"`
 	// ActionRetentionDays retires warning rows this many days after
 	// acknowledged_at and timeout rows the same number of days after
-	// expires_at/lifted_at (B5-9, scorecard decision 5), unless an appeal
+	// expires_at/lifted_at, unless an appeal
 	// references them or one still owns a voice mute. Ban, kick and removal rows stay with the account —
 	// they are not on this clock. 0 means never retire.
 	ActionRetentionDays int `yaml:"action_retention_days"`
@@ -90,8 +89,8 @@ type GIFConfig struct {
 	APIKey string `yaml:"api_key"`
 }
 
-// PushConfig is the owner gate for Web Push subscription storage (B5-4,
-// plan decision 9) and dispatch (B5-11, HP-5 scorecard Question 6). Enabled
+// PushConfig is the owner gate for Web Push subscription storage
+// and dispatch. Enabled
 // is false by default — with it false, every route under /api/v1/push
 // answers 503 PUSH_DISABLED after authentication, and nothing is written.
 // Turning it off again later keeps existing subscription rows (nothing
@@ -108,8 +107,8 @@ type PushConfig struct {
 	// [1, 3650] in boundedKeys.
 	SubscriptionTTLDays int `yaml:"subscription_ttl_days"`
 	// DispatchEnabled is the SECOND, separate owner opt-in dispatch needs on
-	// top of Enabled (plan decision 9): storage on with dispatch off is the
-	// B5-4 state, and an operator who enabled storage before dispatch
+	// top of Enabled: storage on with dispatch off is the
+	// original storage-only state, and an operator who enabled storage before dispatch
 	// existed does not acquire it on upgrade. Turning this on makes the
 	// server open outbound HTTPS connections to the push service named in
 	// each stored subscription's endpoint — see
@@ -232,7 +231,7 @@ type ServerConfig struct {
 	AdminAllowedCIDRs []string `yaml:"admin_allowed_cidrs"`
 	WAFEnabled        bool     `yaml:"waf_enabled"` // Enable Coraza WAF (default: false)
 	// BrowserClientEnabled is the owner opt-in for hosting the browser
-	// client from this server (BG-01, 6.13). It is false by default, and off
+	// client from this server. It is false by default, and off
 	// nothing is mounted at / or /assets/*. On, the server serves the bundle
 	// embedded in its binary (Server/webclient) with its own CSP. Release
 	// builds carry the bundle; a plain `go build` without it carries only the
@@ -240,20 +239,19 @@ type ServerConfig struct {
 	// Server/api/browser_hosting_posture_test.go proves both states.
 	BrowserClientEnabled bool `yaml:"browser_client_enabled"`
 	// ReachabilityReportEnabled is the owner opt-in for the `reachability`
-	// block on GET /api/v1/diagnostics/connectivity (B6-6): the classified
+	// block on GET /api/v1/diagnostics/connectivity: the classified
 	// list of every address on every interface, the required forwarding
 	// rules, and the explicit list of what this server cannot determine
 	// about its own reachability.
 	//
-	// False by default. H-8 already restricted that endpoint to admins
+	// False by default. That endpoint is already restricted that endpoint to admins
 	// because it reveals network topology, and the interface enumeration is
 	// the most revealing part of it; an owner who wants the detail asks for
 	// it. Nothing else is gated by this key — the startup banner's address
 	// qualifier and the configuration warnings always print, so a limit is
 	// still reported to every owner whether or not they ever set this.
 	ReachabilityReportEnabled bool `yaml:"reachability_report_enabled"`
-	// MinFreeDiskMB is the one definition of "low disk" (B5-2, plan decision
-	// 11): the reserved headroom, in MiB, below which the start-up banner
+	// MinFreeDiskMB is the one definition of "low disk": the reserved headroom, in MiB, below which the start-up banner
 	// logs an error, /health reports degraded and the upload path refuses
 	// with 507. Default 256. 0 disables the floor. Three call sites, one
 	// number, so they can never disagree about what "low" means.
@@ -377,8 +375,8 @@ type UploadConfig struct {
 	MaxSizeMB  int    `yaml:"max_size_mb"`
 	StorageDir string `yaml:"storage_dir"`
 	// UserQuotaMB caps the total bytes one user may hold in upload storage —
-	// attachments and avatars, counted where the bytes are written (B5-2,
-	// plan decision 11). Custom emoji are excluded on purpose: they are
+	// attachments and avatars, counted where the bytes are written.
+	// Custom emoji are excluded on purpose: they are
 	// bounded (MaxEmojiCount files of maxEmojiFileBytes each) and still pass
 	// the disk-headroom floor, see migration 044. 0, the default, is
 	// unlimited, so no existing install changes behaviour on upgrade.
@@ -419,7 +417,7 @@ type SecurityConfig struct {
 	AuthRateLimitMultiplier float64 `yaml:"auth_rate_limit_multiplier"`
 	// ExpensiveAuthConcurrency bounds how many bcrypt computations — password
 	// checks and hashes on every auth route, recovery-code matching at the
-	// second-factor step — run at once: the B4-4 admission budget. Login,
+	// second-factor step — run at once: the admission budget. Login,
 	// registration and recovery-code checks over the budget queue for up to
 	// 10 s; an attempt refused (queue full, wait over, or a password
 	// confirmation over budget) gets 429 AUTH_BUSY, runs no bcrypt and

@@ -16,7 +16,7 @@ import (
 // maintenance is one maintenance pass's dependencies. Every sweep is a step
 // in steps(), run in that order by tick; a failing step is logged and counts
 // toward the loop's circuit breaker, and the rest of the pass still runs. A
-// new sweep is a method plus one row in steps() — B5-4 and B5-11 add theirs
+// new sweep is a method plus one row in steps() — later sweeps add theirs
 // there rather than growing tick.
 type maintenance struct {
 	log        *slog.Logger
@@ -36,8 +36,8 @@ type maintenance struct {
 	// actionRetentionDays is moderation.action_retention_days (0 = never).
 	actionRetentionDays int
 	push                *service.PushService
-	// attention records each step's outcome for the admin attention panel
-	// (RI-07); nil-safe, so partial wirings skip it.
+	// attention records each step's outcome for the admin attention panel;
+	// nil-safe, so partial wirings skip it.
 	attention *service.AttentionService
 	// erasureCtx is cancelled when the loop is told to stop, so a resumed
 	// erasure drain ends between chunks instead of outliving the shutdown
@@ -75,7 +75,7 @@ func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *
 	}
 	// Periodically purge expired sessions and orphaned attachments.
 	// files is the one upload store StartRuntime shares with the router and
-	// the erasure replay (WP 5.6g). It already holds the erasure and
+	// the erasure replay. It already holds the erasure and
 	// retention runners' file remover (wireAuth), so nothing is installed
 	// here — in particular no setter runs after the hub started.
 	if files == nil {
@@ -101,7 +101,7 @@ func startMaintenanceLoop(bgCtx context.Context, log *slog.Logger, cfg *config.C
 
 // runMaintenanceLoop is startMaintenanceLoop over an already-built pass.
 func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, m *maintenance) func() {
-	// The attention panel (RI-07) lists every job, in step order, before the
+	// The attention panel lists every job, in step order, before the
 	// loop's start-up runs record the first outcomes.
 	for _, step := range m.steps() {
 		m.attention.RegisterJob(step.job, step.failLog)
@@ -111,7 +111,7 @@ func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, m *maintenance)
 	// in-flight tick (a long VACUUM INTO, an erasure pass) BEFORE its bounded
 	// join. bgCtx is cancelled only after that join, by event persistence or
 	// the first-registered background-context step, so a stop that merely
-	// closed a channel always waited out the whole 5 s on a busy tick (ARCH-034).
+	// closed a channel always waited out the whole 5 s on a busy tick.
 	loopCtx, cancelLoop := context.WithCancel(context.WithoutCancel(bgCtx))
 	stopMaintenance := make(chan struct{})
 	maintenanceDone := make(chan struct{})
@@ -151,9 +151,9 @@ func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, m *maintenance)
 func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDone chan struct{}) {
 	defer close(maintenanceDone)
 	// Erasure jobs interrupted by the last shutdown (files journaled, not
-	// yet removed) finish now, not fifteen minutes from now (B4-9).
+	// yet removed) finish now, not fifteen minutes from now.
 	_ = m.runJob(bgCtx, "Account erasure")
-	// Deliberately NOT run here at start-up (round 5, Codex review): this
+	// Deliberately NOT run here at start-up: this
 	// runs AFTER initDatabase's ClearAllVoiceStates (database.go), which
 	// wipes every voice_states row on every restart regardless — a real
 	// voice session cannot survive the process dying anyway (the LiveKit
@@ -165,17 +165,17 @@ func (m *maintenance) loop(bgCtx context.Context, stopMaintenance, maintenanceDo
 	// 15-minute tick of it happening, same as every other tick-only sweep.
 	// Storage counters charged by a process that died between the charge
 	// and the write are settled now, so a restart is a repair point rather
-	// than fifteen minutes of a user seeing a phantom charge (B5-2).
+	// than fifteen minutes of a user seeing a phantom charge.
 	_ = m.runJob(bgCtx, "Storage recount")
 	// A VAPID key rotation takes effect on the first boot with the new key,
-	// not fifteen minutes later (B5-4): rows the rotation orphaned stop
+	// not fifteen minutes later: rows the rotation orphaned stop
 	// being listed the instant the new key is installed, but the sweep is
 	// what actually removes them.
 	_ = m.runJob(bgCtx, "Push subscriptions")
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 	// An erasure that outran its inline budget, or failed after its lock,
-	// asks for a resume now instead of at the next tick (WP 4.1a). A nil
+	// asks for a resume now instead of at the next tick. A nil
 	// channel (no erasure runner) never fires.
 	var erasureWake <-chan struct{}
 	if m.erasure != nil {
@@ -290,7 +290,7 @@ func (m *maintenance) sweepSecondFactor(ctx context.Context) error {
 }
 
 // sweepPushSubscriptions removes stale Web Push subscriptions and every
-// subscription a VAPID key rotation orphaned (B5-4, decisions 2 and 5). Nil
+// subscription a VAPID key rotation orphaned. Nil
 // push means no service layer at all (a partial wiring in tests); a no-op
 // tick is the point, not a failure.
 func (m *maintenance) sweepPushSubscriptions(ctx context.Context) error {
@@ -343,7 +343,7 @@ func (m *maintenance) sweepOrphans(ctx context.Context) error {
 	return nil
 }
 
-// sweepRetention is message retention (B4-11): one bounded sweep per tick
+// sweepRetention is message retention: one bounded sweep per tick
 // over every channel with an effective window; indefinite by default, so a
 // server without a policy does nothing here.
 func (m *maintenance) sweepRetention(ctx context.Context) error {
@@ -357,7 +357,7 @@ func (m *maintenance) sweepRetention(ctx context.Context) error {
 	return nil
 }
 
-// pruneReportContent is B5-8's retention step (moderation.report_retention_days,
+// pruneReportContent is the report-content retention step (moderation.report_retention_days,
 // default 180, 0 = never): deletes the evidence and notes and clears the
 // detail of every report closed longer ago than the window. The reports row
 // itself is kept — content is bounded, the outcome is indefinite (S5-d).
@@ -368,7 +368,7 @@ func (m *maintenance) pruneReportContent(ctx context.Context) error {
 	return m.reports.PruneClosedContent(ctx, time.Duration(m.reportRetentionDays)*24*time.Hour)
 }
 
-// retireModerationActions is B5-9's retention step (moderation.
+// retireModerationActions is the moderation-action retention step (moderation.
 // action_retention_days, default 90, 0 = never), run right after report
 // content retention (TestMaintenance_StepOrderIsPinned): warning rows retire
 // after acknowledged_at, timeout rows after expires_at/lifted_at. Ban, kick
@@ -381,7 +381,7 @@ func (m *maintenance) retireModerationActions(ctx context.Context) error {
 	return err
 }
 
-// reconcileOrphanedVoiceMutes is the round-4 (B5-10 addendum) reconcile
+// reconcileOrphanedVoiceMutes is the reconcile
 // sweep: every voice_states row whose server_muted_by now points at a
 // lifted or expired timeout gets the SAME post-commit finalize
 // (ModerationService.FinalizeTimeoutLift) a normal lift runs, with actor 0
@@ -389,8 +389,8 @@ func (m *maintenance) retireModerationActions(ctx context.Context) error {
 // audit rows) — repairing a crash between a lift's ledger commit and its
 // own finalize call, and closing the gap that otherwise left a naturally
 // EXPIRED timeout's voice mute in effect forever (nothing else ever calls
-// UnmuteForTimeout for an expiry). Tick-only, NOT at loop start (round 5,
-// Codex review): by the time this loop starts, initDatabase's
+// UnmuteForTimeout for an expiry). Tick-only, NOT at loop start:
+// by the time this loop starts, initDatabase's
 // ClearAllVoiceStates has already wiped every voice_states row this restart
 // — there is nothing left here for a start-up call to repair, and a
 // voice_states row is only ever real again once a live client re-joins
@@ -451,8 +451,8 @@ func (m *maintenance) reconcileFiles(ctx context.Context) error {
 }
 
 // recountStorage sets every per-user upload byte counter to the rows that
-// name the user's files plus what is still in flight (B5-2). It is the
-// reconciliation decision 11 puts on the maintenance sweep: the counter is a
+// name the user's files plus what is still in flight. It is the
+// reconciliation the maintenance sweep owns: the counter is a
 // cache of the rows, and this is where erasure, retention and the orphan
 // sweep return bytes.
 func (m *maintenance) recountStorage(ctx context.Context) error {

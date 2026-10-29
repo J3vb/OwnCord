@@ -8,7 +8,7 @@ import {
   setAppearance,
   textContrast,
   type AppearancePrefs,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 // ---------------------------------------------------------------------------
 // B9-10: the report form and My reports against the owner's Q1 checks —
@@ -18,7 +18,7 @@ import {
 // The server here is mocked, so every send is refused as a duplicate: that
 // keeps the dialog open in its error state for measuring. The real-server
 // journey (success, duplicate, removed target, quota, role isolation) is
-// tests/e2e/fullstack/b9-reports.spec.ts. Synthetic content only.
+// tests/e2e/fullstack/reports.spec.ts. Synthetic content only.
 // ---------------------------------------------------------------------------
 
 const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;

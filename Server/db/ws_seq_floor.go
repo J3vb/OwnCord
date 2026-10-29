@@ -25,8 +25,8 @@ const wsSeqFloorSuffix = ".ws-seq-floor"
 // persisted under; the restore paths read it from the live database.
 const WSSeqFloorSettingKey = "ws_seq_floor"
 
-// WSSeqFloorReserve is the block every boot reserves above the stored floor
-// (OC-0210). It only has to exceed what one boot could emit before its next
+// WSSeqFloorReserve is the block every boot reserves above the stored floor.
+// It only has to exceed what one boot could emit before its next
 // restart.
 const WSSeqFloorReserve = 1_000_000_000
 

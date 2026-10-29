@@ -46,7 +46,7 @@ type Services struct {
 	Settings    *SettingsService
 	Uploads     *UploadService
 	Voice       *VoiceService
-	// Stickers is the custom sticker set (WP 8.8a), gated like Emoji. Nil when
+	// Stickers is the custom sticker set, gated like Emoji. Nil when
 	// the store cannot hold stickers.
 	Stickers *StickerService
 	// ChannelPrivacy is the channel-level private flag (3D-6).
@@ -55,30 +55,30 @@ type Services struct {
 	Sessions       *SessionService
 	Setup          *SetupService
 	// Erasure runs account erasure for the self-service route and the admin
-	// route alike (B4-9); the composition root installs the upload storage
+	// route alike; the composition root installs the upload storage
 	// on it and the maintenance loop resumes its unfinished jobs.
 	Erasure *ErasureService
-	// Retention is the message-retention policy and sweep (B4-11); the
+	// Retention is the message-retention policy and sweep; the
 	// composition root installs the upload storage and the marker store.
 	Retention *RetentionService
 	// Auth is set by the composition root once the hub exists; the admin
-	// panel's owner-only recovery issuance (B4-6) shares it.
+	// panel's owner-only recovery issuance shares it.
 	Auth *AuthService
-	// Reports is the local report intake and moderator queue (B5-8).
+	// Reports is the local report intake and moderator queue.
 	Reports *ReportService
-	// Appeals is the rate-limited appeal against a moderation action (B5-10).
+	// Appeals is the rate-limited appeal against a moderation action.
 	Appeals *AppealService
-	// Push stores Web Push subscriptions (B5-4); the composition root
+	// Push stores Web Push subscriptions; the composition root
 	// installs the VAPID key and the staleness TTL on it. A pointer field
 	// so Services stays comparable (admin/services_bundle_test.go compares
 	// two *Services with `!=`).
 	Push *PushService
-	// MessageRequests is B5-6's first-contact gate and trusted-sender
+	// MessageRequests is the first-contact gate and trusted-sender
 	// bookkeeping; Messages holds a pointer to it too
 	// (MessageService.SetMessageRequests), which is where the gate actually
 	// runs (service/message_crud.go's OpenDM accumulation).
 	MessageRequests *MessageRequestService
-	// NSFW owns the per-user, per-channel acknowledgement row (B5-7); the
+	// NSFW owns the per-user, per-channel acknowledgement row; the
 	// four content read paths (REST, search, socket, attachments) resolve it
 	// through permissions.CanReadContent.
 	NSFW *NSFWService
@@ -92,13 +92,13 @@ type Services struct {
 	// when the Store does not also satisfy PrivacyStore (a test double), and
 	// the profile routes then leave the privacy routes out.
 	Privacy *PrivacyService
-	// PushDispatch is Web Push dispatch (B5-11, behind HP-5), nil unless
+	// PushDispatch is Web Push dispatch, nil unless
 	// the composition root constructed it — which it does only when both
 	// push.enabled and push.dispatch_enabled are true. Exists on Services
 	// so the metrics route can read its counters; MessageService gets it
 	// separately, through SetPushNotifier.
 	PushDispatch *PushDispatcher
-	// Attention is the admin attention panel's state (RI-07), nil until the
+	// Attention is the admin attention panel's state, nil until the
 	// composition root builds it over the hub's counters.
 	Attention *AttentionService
 	// StatusExpiry clears custom statuses at their expiry. The composition
@@ -113,13 +113,13 @@ type Services struct {
 	// CallLog writes the call log rows of DM calls from voice presence (WP
 	// 3B-9). The hub installs its sink; the composition root starts it.
 	CallLog *CallLogService
-	// Threads owns thread create, update, delete and listing (WP 6.9c). The
+	// Threads owns thread create, update, delete and listing. The
 	// archiver and the hub share it.
 	Threads *ThreadService
-	// ThreadArchiver archives idle threads (WP 6.9c). The composition root
+	// ThreadArchiver archives idle threads. The composition root
 	// installs its notifier and runs it.
 	ThreadArchiver *ThreadArchiver
-	// Welcome greets each new member in the admin-chosen channel (WP 8.6). It
+	// Welcome greets each new member in the admin-chosen channel. It
 	// is nil when the Store cannot insert the row (a test double); the
 	// composition root installs its notifier and shares it with AuthService.
 	Welcome *WelcomeService
@@ -141,7 +141,7 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	messages := NewMessageService(st, permSvc, limiter)
 	// The report-linked removal entry point (ActOnReport, kind="removal")
 	// needs MessageService's own authorization and effect — never a second
-	// copy of DeleteMessage's checks (B5-9).
+	// copy of DeleteMessage's checks.
 	moderation.messages = messages
 	// Erasure must flush any queued mention-badge increment before its own
 	// reversal, or a message the subject sent inside the worker's coalesce

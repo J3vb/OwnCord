@@ -139,7 +139,7 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 			return
 		}
 
-		// B5-2: emoji are a bounded exclusion from the per-user quota (a
+		// Emoji are a bounded exclusion from the per-user quota (a
 		// server-wide asset that changes owner on erasure, MANAGE_SERVER-gated,
 		// capped at service.MaxEmojiCount files of maxEmojiFileBytes) but not
 		// from the headroom floor: a full disk is full for everyone.

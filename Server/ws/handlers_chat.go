@@ -122,7 +122,7 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		}
 	}
 
-	// B5-6: one dm_request per recipient a first-contact request was just
+	// one dm_request per recipient a first-contact request was just
 	// created for. Skipped (not a fallback shape) when the sender lookup
 	// failed — SenderUser nil means the frame has no profile to carry, and
 	// the recipient still recovers the request from GET /api/v1/dm-requests.
@@ -143,7 +143,7 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 	return Result{Reply: reply, Events: events}
 }
 
-// handleChatForwardV2 processes a chat_forward command (WP 6.9a) via the
+// handleChatForwardV2 processes a chat_forward command via the
 // MessageService. The reply is chat_forward_ok; the events are the send path's.
 func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
@@ -166,7 +166,7 @@ func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	return sendResultEvents(d, info, fwd.ClientMessageID, fwd.ChannelID, nil, reply, result)
 }
 
-// handleForumPostCreateV2 processes a forum_post_create (WP 6.9d) via the
+// handleForumPostCreateV2 processes a forum_post_create via the
 // MessageService. The reply is forum_post_create_ok; the events are the send
 // path's, addressed to the new post's thread: its opening chat_message, and a
 // thread note that tells the forum's viewers (thread_changed, coalesced). A
@@ -309,7 +309,7 @@ func serviceErrorToResult(err error) Result {
 	case errors.Is(err, service.ErrCallNeedsAcceptance):
 		return Result{Error: ClientError{Code: ErrCodeCallRequiresAcceptance, Message: err.Error()}}
 	case errors.Is(err, permissions.ErrThreadLocked):
-		// A locked thread (WP 6.9c) refuses a post, reaction, pin or change
+		// A locked thread refuses a post, reaction, pin or change
 		// with its own code; it wraps ErrForbidden, so this precedes it.
 		return Result{Error: ClientError{Code: ErrCodeThreadLocked, Message: err.Error()}}
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):

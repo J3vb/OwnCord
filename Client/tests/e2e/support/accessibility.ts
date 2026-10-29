@@ -1,6 +1,6 @@
 /**
  * Reusable accessibility checks for B9 milestones (B9-2 UI contract,
- * docs/architecture/b9-ui-contract.md).
+ * docs/architecture/ui-contract.md).
  *
  * Everything here reads the running page, so it works the same against the
  * Vite dev server and the production bundle (`playwright.config.prod.ts`).

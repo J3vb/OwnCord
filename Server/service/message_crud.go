@@ -132,7 +132,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 			},
 		})
 	}
-	// Web Push dispatch (B5-11, behind HP-5): nil when dispatch is off. It is
+	// Web Push dispatch: nil when dispatch is off. It is
 	// independent of the mention worker, so it keeps its own background hop
 	// (the Notify call can take seconds) rather than sharing the worker's
 	// queue.
@@ -213,7 +213,7 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 // sendMessageDMSideEffects fills in the DM-specific fields of result,
 // (re)opens the DM for every trusted (or group) participant whose DM is not
 // already open, and — for a one-to-one DM whose recipient does not yet trust
-// the sender — stages a message request instead (B5-6 decision 4). It reports
+// the sender — stages a message request instead. It reports
 // false when the participant lookup failed, which is the one case where the
 // caller returns the already-saved message without the remaining side
 // effects.
@@ -228,12 +228,12 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 	// sender sees chat_send_ok and the other participant never gets the
 	// message live.
 	bgCtx := context.WithoutCancel(ctx)
-	// DP-51: one read carries the participants, the group flag, each
+	// One read carries the participants, the group flag, each
 	// participant's open state and whether they trust the sender, so the
 	// send needs no separate IsGroupDM, per-recipient trust read, OpenDM
 	// write for an already-open DM, or delivery-audience re-read.
 	//
-	// OC-0419: the group flag rides on this read, so a failure here can
+	// The group flag rides on this read, so a failure here can
 	// never misclassify a group DM as one-to-one, nor skip the first-contact
 	// gate for an untrusted 1:1 recipient. Message stays saved, the other DM
 	// side effects are skipped, and the frame goes to the sender only (as in
@@ -282,7 +282,7 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 		// that slice, and each one bumps the hub's global visibility
 		// watermark, forcing every other connected client's next reconnect
 		// onto a full resync. An already-open DM must not pay that cost on
-		// every single message (OC-0106).
+		// every single message.
 		opened, openErr := s.st.OpenDM(bgCtx, t.UserID, p.ChannelID)
 		if openErr != nil {
 			slog.Error("MessageService.SendMessage OpenDM", "err", openErr, "recipient_id", t.UserID, "channel_id", p.ChannelID)
@@ -316,7 +316,7 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 // the gate is wired, or every participant when it is not — s.messageRequests
 // == nil means every test and any caller built via NewMessageService
 // directly instead of service.New(), which keeps their behaviour exactly as
-// it was before B5-6. Exported for the ws layer's typing path
+// it was before the first-contact gate. Exported for the ws layer's typing path
 // (PresenceDeps.MessageSvc, ws/handlers_presence.go) — the one DM frame path
 // outside package service.
 func (s *MessageService) DMAudience(ctx context.Context, channelID, senderID int64) ([]int64, error) {
@@ -422,7 +422,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		participantIDs, pErr := s.DMAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.EditMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
-			// Codex P2-5: leaving ParticipantIDs nil here made
+			// Leaving ParticipantIDs nil here made
 			// dmEventOrFallback (ws/handlers_chat.go) treat the empty slice
 			// as "no explicit audience" and fall back to the plain
 			// per-channel-topic broadcast — reaching anyone subscribed to
@@ -443,7 +443,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 // uses (permissions.CanSendMessage, via channelSubject/denial) instead of a
 // second, DM-only copy of participation/block — a timed-out user must not
 // be able to broadcast new text into a channel or a DM by editing an old
-// message (P1-2, Codex review). isDM is the caller's already-computed
+// message. isDM is the caller's already-computed
 // ch.Type == "dm".
 //
 // Most of the verdict is still collapsed into one opaque "cannot edit this
@@ -487,11 +487,11 @@ func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64)
 	return s.deleteMessage(ctx, userID, msgID, nil, "")
 }
 
-// DeleteMessageForReport is DeleteMessage with a report link (B5-9's
-// report-linked removal entry point, plan item 7): same authorization and
+// DeleteMessageForReport is DeleteMessage with a report link (the
+// report-linked removal entry point): same authorization and
 // effect, plus report_id on the removal ledger row. reason is the
 // moderator's submitted reason for the removal, stored on the ledger row
-// (P2-10, Codex review: this used to be silently discarded in favor of the
+// (this used to be silently discarded in favor of the
 // fixed phrase every other delete path uses) — empty falls back to that
 // same fixed phrase.
 func (s *MessageService) DeleteMessageForReport(ctx context.Context, userID, msgID, reportID int64, reason string) (*DeleteMessageResult, error) {
@@ -516,7 +516,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	if err != nil || msg == nil {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
-	// OC-0284: GetMessage returns tombstones (so callers can broadcast the
+	// GetMessage returns tombstones (so callers can broadcast the
 	// deletion event), and every layer beneath a plain re-delete is silently
 	// idempotent. Without this guard a second chat_delete for the same
 	// message reaches DecrementMentionCounts below a second time, which has
@@ -526,7 +526,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
 	}
 	// Call and group rows are read-only for everyone, moderators included. A
-	// pin row (WP 6.12) and a welcome row (WP 8.6) delete like a message.
+	// pin row and a welcome row delete like a message.
 	if msg.Kind != db.MessageKindUser && msg.Kind != db.MessageKindPinAdd && msg.Kind != db.MessageKindMemberJoin {
 		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
@@ -562,7 +562,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	s.FlushPendingMentionCounts(context.WithoutCancel(ctx), []int64{msgID})
 
 	if err := s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, msg.UserID, reportID, reason); err != nil {
-		// db.DeleteMessage's UPDATE now excludes already-deleted rows (OC-0284),
+		// db.DeleteMessage's UPDATE now excludes already-deleted rows,
 		// so a message that raced this request to the writer between the
 		// msg.Deleted check above and this write surfaces here as
 		// db.ErrNotFound. Map it to ErrDeletedMessage rather than the generic
@@ -581,7 +581,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "message_delete", "message", msgID,
 		fmt.Sprintf("channel %d, mod_action=%v", msg.ChannelID, isMod))
 
-	// OC-0275: reverse this message's mention_count increments so a deleted
+	// Reverse this message's mention_count increments so a deleted
 	// mention does not leave a red badge on a channel with zero unread.
 	// Detached from ctx like the audit write above and the DM fan-out below —
 	// the soft-delete already committed, so a canceled request must not skip
@@ -605,7 +605,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 		participantIDs, pErr := s.DMAudience(context.WithoutCancel(ctx), msg.ChannelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.DeleteMessage DMAudience", "err", pErr, "channel_id", msg.ChannelID)
-			// Codex P2-5: see EditMessage's identical comment — an empty
+			// See EditMessage's identical comment — an empty
 			// ParticipantIDs here would make dmEventOrFallback broadcast the
 			// chat_deleted over the plain channel topic instead, reaching an
 			// untrusted recipient subscribed to it. Fail closed to the
