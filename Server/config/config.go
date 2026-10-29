@@ -204,7 +204,7 @@ type VoiceConfig struct {
 	// default stays false so existing configs keep their behaviour.
 	AutoDownloadLiveKit bool `yaml:"auto_download_livekit"`
 	// LiveKitVersion overrides the pinned livekit-server release version used
-	// by auto-download (e.g. "1.13.10"). Empty = the built-in pin.
+	// by auto-download (e.g. "1.13.11"). Empty = the built-in pin.
 	LiveKitVersion string `yaml:"livekit_version"`
 	NodeIP         string `yaml:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
 	// AdvertiseInternalIP makes LiveKit advertise internal (LAN) host candidates
@@ -624,7 +624,7 @@ voice:
   auto_download_livekit: true # download and run livekit-server automatically when
                               # no livekit_binary is set (verified against the
                               # official LiveKit release checksums; stored in data/livekit/)
-  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.10")
+  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.11")
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)
