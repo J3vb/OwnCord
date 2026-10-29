@@ -71,7 +71,7 @@ describe("syncOsMotionListener", () => {
     expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
   });
 
-  it("keeps manual reduced-motion=true while syncing with an OS that does not ask for it (B9-2, Q1)", () => {
+  it("keeps manual reduced-motion=true while syncing with an OS that does not ask for it", () => {
     // Q1: both the OS setting and the in-app toggle are honoured, so the OS
     // saying "no preference" can no longer switch off the user's own choice.
     localStorage.setItem("owncord:settings:reducedMotion", "true");

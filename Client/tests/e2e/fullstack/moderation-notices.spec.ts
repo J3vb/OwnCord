@@ -33,7 +33,7 @@ async function relogin(page: Page, server: TestServer): Promise<void> {
 const banner = (page: Page) => page.getByRole("region", { name: "Moderation notices" });
 const composer = (page: Page) => page.locator("[data-testid='message-input'] textarea");
 
-test.describe("B9-15 moderation notices (real server)", () => {
+test.describe("moderation notices (real server)", () => {
   test("a warning reaches bob live and after a missed frame, and his acknowledgement is recorded", async ({
     bob,
     bobTransport,

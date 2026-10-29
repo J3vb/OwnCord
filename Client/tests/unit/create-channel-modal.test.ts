@@ -10,7 +10,7 @@ describe("CHANNEL_TYPES", () => {
   });
 });
 
-describe("Forum in the type list (WP 6.9d)", () => {
+describe("Forum in the type list", () => {
   afterEach(() => {
     resetServerCapabilities();
     document.body.replaceChildren();

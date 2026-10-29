@@ -130,7 +130,7 @@ async function openSafety(page: Page): Promise<Locator> {
   return section;
 }
 
-test.describe("B9-10 report form and My reports (Q1)", () => {
+test.describe("report form and My reports", () => {
   test("keyboard reaches and operates every action, and focus returns", async ({ page }) => {
     await boot(page);
     const opener = await openFromKeyboard(page);

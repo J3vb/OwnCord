@@ -61,7 +61,7 @@ describe("browser platform registry", () => {
     }
   });
 
-  it("binds the server scope to the page's own host (6.13e)", () => {
+  it("binds the server scope to the page's own host", () => {
     expect(browser.serverScope).toEqual({ fixedHost: location.host });
   });
 

@@ -820,7 +820,7 @@ describe("ProfileManager", () => {
       expect(result).toBeNull();
     });
 
-    it("load salvages the valid profiles when one stored entry is malformed (OC-0060)", async () => {
+    it("load salvages the valid profiles when one stored entry is malformed", async () => {
       const storedData = {
         schemaVersion: 1,
         profiles: [
@@ -870,7 +870,7 @@ describe("ProfileManager", () => {
 
   // ── OC-0060: one bad stored profile must not evict the good ones ──
 
-  describe("OC-0060 malformed profile salvage (end-to-end)", () => {
+  describe("malformed profile salvage (end-to-end)", () => {
     beforeEach(() => {
       mockInvoke.mockReset();
     });

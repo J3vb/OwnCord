@@ -97,7 +97,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("VoiceAudioTab VP9 entry (WP M-5a)", () => {
+describe("VoiceAudioTab VP9 entry", () => {
   it("is shown where VP9 can be published", () => {
     expect(codecOptions()).toEqual(["vp8", "h264", "vp9", "auto"]);
   });

@@ -735,7 +735,7 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("keeps a partial-success warning in the form instead of the green success (OC-0314)", async () => {
+  it("keeps a partial-success warning in the form instead of the green success", async () => {
     // The server answers 200 + warning when the password changed but the
     // other sessions could not be revoked; the form must carry that
     // instruction, not clear the fields under an unqualified green

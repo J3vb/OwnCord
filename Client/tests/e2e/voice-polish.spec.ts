@@ -39,7 +39,7 @@ async function bootJoined(page: Page): Promise<void> {
   });
 }
 
-test.describe("B9-24 voice widget interaction and feedback", () => {
+test.describe("voice widget interaction and feedback", () => {
   test("the transport-stats toggle is a keyboard-operable button, not pointer-only", async ({
     page,
   }) => {
@@ -147,7 +147,7 @@ test.describe("B9-24 voice widget interaction and feedback", () => {
   });
 });
 
-test.describe("B9-24 video tile overlay keyboard parity", () => {
+test.describe("video tile overlay keyboard parity", () => {
   // The real grid component is mounted into a visible host via the dev server's
   // module graph: the mocked suite cannot create a live MediaStream track, but
   // the overlay markup and CSS are what this lane changed, so driving the

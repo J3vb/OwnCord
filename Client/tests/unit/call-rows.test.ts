@@ -45,7 +45,7 @@ function render(msg: Message, over = {}): HTMLElement {
 }
 const textOf = (el: HTMLElement): string => el.textContent?.replace(/\s+/g, " ").trim() ?? "";
 
-describe("call log row renderer (WP 3B-9c)", () => {
+describe("call log row renderer", () => {
   beforeEach(() => {
     resetGateStores();
     signInAs("member");
@@ -124,7 +124,7 @@ describe("call log row renderer (WP 3B-9c)", () => {
   });
 });
 
-describe("call log row actions (WP 3B-9c)", () => {
+describe("call log row actions", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList>;
 

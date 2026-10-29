@@ -243,7 +243,7 @@ describe("RemoteTracks", () => {
       expect(tracks.isWatched(7, "screenshare")).toBe(false);
     });
 
-    it("auto-plays a camera by default; a screen share stays opt-in (WP 1B-3)", () => {
+    it("auto-plays a camera by default; a screen share stays opt-in", () => {
       const tracks = new RemoteTracks(() => null);
       expect(tracks.isWatched(7, "camera")).toBe(true);
       expect(tracks.isWatched(7, "screenshare")).toBe(false);

@@ -79,7 +79,7 @@ function setMessages(channelId: number, messages: Message[]): void {
 // discarded row's button listener must stop firing once the render that
 // owned it has been replaced, exactly as it already does for ChannelSidebar
 // (renderAc, OC-0229) and SettingsOverlay (renderAC).
-describe("MessageList row listener lifecycle (OC-0286)", () => {
+describe("MessageList row listener lifecycle", () => {
   let container: HTMLDivElement;
   let msgList: ReturnType<typeof createMessageList>;
   let options: MessageListOptions;

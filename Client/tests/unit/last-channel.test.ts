@@ -10,7 +10,7 @@ import { focusPayload } from "@lib/last-channel";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import { channelsStore, resetChannelsStore, setChannels } from "@stores/channels.store";
 
-describe("last-channel (UX-8)", () => {
+describe("last-channel", () => {
   beforeEach(() => {
     localStorage.clear();
     setLastChannelHost(null);

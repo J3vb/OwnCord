@@ -264,7 +264,7 @@ function liveRooms(): number {
   return rooms.constructed.filter((room) => room.disconnect.mock.calls.length === 0).length;
 }
 
-describe("one live media session across a profile switch (B7-13)", () => {
+describe("one live media session across a profile switch", () => {
   beforeEach(() => {
     rooms.constructed.length = 0;
     rooms.events.length = 0;

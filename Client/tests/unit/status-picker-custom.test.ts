@@ -48,7 +48,7 @@ describe("StatusPicker", () => {
     expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("invisible");
   });
 
-  it("colors every option dot with design tokens, never a literal hex (P4-19)", () => {
+  it("colors every option dot with design tokens, never a literal hex", () => {
     picker = createStatusPicker({ currentStatus: "online", onStatusChange: vi.fn() });
     picker.mount(container);
 
@@ -185,7 +185,7 @@ describe("StatusPicker", () => {
     expect(onCustomStatusChange).not.toHaveBeenCalled();
   });
 
-  it("does not clobber in-progress typing when the input is focused (OC-0369)", () => {
+  it("does not clobber in-progress typing when the input is focused", () => {
     const onCustomStatusChange = vi.fn();
     picker = createStatusPicker({
       currentStatus: "online",

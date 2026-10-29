@@ -7,7 +7,7 @@ import {
 } from "../../src/features/threads/threadNavigation";
 import { channelsStore, resetChannelsStore, setChannels } from "../../src/stores/channels.store";
 
-describe("threadNavigation (WP 6.9c-c2)", () => {
+describe("threadNavigation", () => {
   let mounted: number | null;
   const open = vi.fn();
 

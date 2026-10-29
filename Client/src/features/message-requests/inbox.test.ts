@@ -525,7 +525,7 @@ describe("inbox view", () => {
     () => new Date(2026, 0, 15).getTimezoneOffset() === -60,
   );
   describe.skipIf(!berlinPinHonored)(
-    "[BUG-11] a request's time is the server's instant, not the viewer's",
+    "a request's time is the server's instant, not the viewer's",
     () => {
       let restore: () => void;
       beforeEach(() => {

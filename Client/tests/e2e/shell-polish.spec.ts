@@ -55,7 +55,7 @@ const DM_CHANNELS = [
   },
 ];
 
-test.describe("B9-21 shell polish", () => {
+test.describe("shell polish", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
@@ -72,7 +72,7 @@ test.describe("B9-21 shell polish", () => {
     await navigateToMainPageReady(page);
   });
 
-  test("the channel list is one Tab stop with arrow-key navigation (BPR-091)", async ({ page }) => {
+  test("the channel list is one Tab stop with arrow-key navigation", async ({ page }) => {
     const rows = page.locator(".channel-list .channel-item");
     await expect(rows.first()).toBeVisible();
 
@@ -205,7 +205,7 @@ test.describe("B9-21 shell polish", () => {
 
 // The embedded DM preview shows only where the server rail does not: at 800px
 // or less (a desktop window at 200 % zoom), inside the sidebar drawer.
-test.describe("B9-21 DM preview list", () => {
+test.describe("DM preview list", () => {
   test.use({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
 
   test.beforeEach(async ({ page }) => {

@@ -433,7 +433,7 @@ describe("enableCamera", () => {
     });
   });
 
-  it("releases the created track when publishing fails (BUG-100)", async () => {
+  it("releases the created track when publishing fails", async () => {
     const rig = fakeRoom();
     const track = fakeVideoTrack();
     createLocalVideoTrack.mockResolvedValue(track);
@@ -539,7 +539,7 @@ describe("enableCamera", () => {
     expect(voiceStore.getState().localCamera).toBe(false);
   });
 
-  it("does not clear a newer attempt's track when a superseded enable's device acquisition rejects (OC-0007)", async () => {
+  it("does not clear a newer attempt's track when a superseded enable's device acquisition rejects", async () => {
     const rig = fakeRoom();
     const deps = fakeDeps(rig.room);
     const trackB = fakeVideoTrack();
@@ -1042,7 +1042,7 @@ describe("enableScreenshare", () => {
     });
   });
 
-  it("tears down when the OS stop-sharing button ends the track (BUG-101)", async () => {
+  it("tears down when the OS stop-sharing button ends the track", async () => {
     const rig = fakeRoom();
     const video = fakeVideoTrack();
     createLocalScreenTracks.mockResolvedValue([video]);
@@ -1073,7 +1073,7 @@ describe("enableScreenshare", () => {
     expect(createLocalScreenTracks).not.toHaveBeenCalled();
   });
 
-  it("releases created tracks when publishing fails (BUG-100)", async () => {
+  it("releases created tracks when publishing fails", async () => {
     const rig = fakeRoom();
     const video = fakeVideoTrack();
     createLocalScreenTracks.mockResolvedValue([video]);
@@ -1273,7 +1273,7 @@ describe("enableScreenshare", () => {
     expect(voiceStore.getState().localScreenshare).toBe(false);
   });
 
-  it("does not tear down a newer share when a superseded enable's capture rejects (OC-0007)", async () => {
+  it("does not tear down a newer share when a superseded enable's capture rejects", async () => {
     const rig = fakeRoom();
     const deps = fakeDeps(rig.room);
     const videoB = fakeVideoTrack();
@@ -1868,7 +1868,7 @@ describe("video codec", () => {
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({ videoCodec: "vp8" });
   });
 
-  it("at 120 fps a saved VP8 follows Auto's hardware rule (M-2)", async () => {
+  it("at 120 fps a saved VP8 follows Auto's hardware rule", async () => {
     offer120.value = true;
     prefs({ videoCodec: "vp8", screenShareQuality: "high", screenShareFps: 120 });
     encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
@@ -1937,7 +1937,7 @@ describe("video codec", () => {
   });
 });
 
-describe("enableScreenshare quality step (WP 1C-2)", () => {
+describe("enableScreenshare quality step", () => {
   afterEach(() => setScreenSourcePicker(null));
 
   it("captures and publishes at the quality and fps picked before the OS picker", async () => {

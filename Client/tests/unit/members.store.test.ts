@@ -122,7 +122,7 @@ describe("members store", () => {
       });
     });
 
-    it("keeps a rejoining member's game, and adds no activity key for a new one (WP 8.3)", () => {
+    it("keeps a rejoining member's game, and adds no activity key for a new one", () => {
       addMember({
         user: { id: 12, username: "gamer", avatar: null, role: "member" },
         status: "online",
@@ -139,7 +139,7 @@ describe("members store", () => {
       });
     });
 
-    it("keeps a rejoining member's song, and adds no listening key for a new one (WP 8.10)", () => {
+    it("keeps a rejoining member's song, and adds no listening key for a new one", () => {
       addMember({
         user: { id: 13, username: "dj", avatar: null, role: "member" },
         status: "online",
@@ -396,7 +396,7 @@ describe("members store", () => {
       expect(getOnlineMembers()).toHaveLength(0);
     });
 
-    it("excludes invisible members, matching MemberList's offline grouping (OC-0348)", () => {
+    it("excludes invisible members, matching MemberList's offline grouping", () => {
       const invisibleSelf: ReadyMember = { ...MEMBER_BOB, status: "invisible" };
       setMembers([MEMBER_ALICE, invisibleSelf]);
       const online = getOnlineMembers();

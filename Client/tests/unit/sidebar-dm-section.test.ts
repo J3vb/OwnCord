@@ -890,7 +890,7 @@ describe("SidebarDmSection", () => {
       expect(container.querySelectorAll("[data-testid='dm-entry']").length).toBe(0);
     });
   });
-  describe("in-call glyph and row menu (WP 3B-3)", () => {
+  describe("in-call glyph and row menu", () => {
     afterEach(() => {
       resetVoiceStore();
       document.querySelectorAll(".context-menu").forEach((m) => m.remove());

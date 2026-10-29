@@ -51,7 +51,7 @@ async function login(page: Page, host: string): Promise<void> {
   await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
 }
 
-test.describe("Profile switch (B7-13)", () => {
+test.describe("Profile switch", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({

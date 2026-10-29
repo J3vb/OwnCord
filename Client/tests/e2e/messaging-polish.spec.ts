@@ -89,7 +89,7 @@ async function start(page: Page): Promise<void> {
 /** A message id the virtualizer has actually rendered (near the live tail). */
 const RENDERED = 1005;
 
-test.describe("B9-22 message reading", () => {
+test.describe("message reading", () => {
   test.beforeEach(async ({ page }) => {
     await start(page);
   });
@@ -154,7 +154,7 @@ test.describe("B9-22 message reading", () => {
   });
 });
 
-test.describe("B9-22 composing and overlays", () => {
+test.describe("composing and overlays", () => {
   test.beforeEach(async ({ page }) => {
     await start(page);
   });
@@ -228,7 +228,7 @@ test.describe("B9-22 composing and overlays", () => {
   });
 });
 
-test.describe("B9-22 accessibility reflow at 940x500 with 20px text", () => {
+test.describe("accessibility reflow at 940x500 with 20px text", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("message reading and composing keep every control whole and on screen", async ({
@@ -275,7 +275,7 @@ test.describe("B9-22 accessibility reflow at 940x500 with 20px text", () => {
   });
 });
 
-test.describe("B9-22 changed-area screenshots (evidence)", () => {
+test.describe("changed-area screenshots (evidence)", () => {
   test("captures the polished messaging surfaces", async ({ page }, testInfo) => {
     await start(page);
 

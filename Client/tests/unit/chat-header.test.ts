@@ -354,7 +354,7 @@ describe("updateChatHeaderForDm", () => {
     });
   });
 
-  describe("Show User Profile button (WP 3B-3)", () => {
+  describe("Show User Profile button", () => {
     it("is hidden in a channel, shown for a 1:1 DM, hidden for a group", () => {
       const { element, refs } = buildChatHeader({
         onTogglePins: vi.fn(),
@@ -375,7 +375,7 @@ describe("updateChatHeaderForDm", () => {
       expect(refs.profileBtn.style.display).toBe("none");
     });
 
-    it("the Show Member List toggle is shown only for a group DM (WP 3B-11a)", () => {
+    it("the Show Member List toggle is shown only for a group DM", () => {
       const onToggleMemberList = vi.fn();
       const { element, refs } = buildChatHeader({ onTogglePins: vi.fn(), onToggleMemberList });
       container.appendChild(element);
@@ -465,7 +465,7 @@ describe("ChatHeader channel type icon and topic modal (N21)", () => {
     expect(refs.topicEl.textContent).toBe("online");
   });
 
-  describe("call-chat toggle (WP 6.1c)", () => {
+  describe("call-chat toggle", () => {
     it("draws the speaker glyph for a voice channel", () => {
       const { refs } = buildChatHeader({ onTogglePins: vi.fn() });
       setChatHeaderChannelType(refs, "voice");

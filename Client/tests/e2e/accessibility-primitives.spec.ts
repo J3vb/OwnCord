@@ -86,7 +86,7 @@ async function apply(page: Page, prefs: AppearancePrefs): Promise<void> {
   await expect(page.locator("#host")).toBeVisible();
 }
 
-test.describe("B9-2 token matrix (Q1 thresholds, Q8 accent policy)", () => {
+test.describe("token matrix (thresholds, accent policy)", () => {
   for (const theme of THEMES) {
     test(`${theme}: qualified tokens pass in every accent and High Contrast state`, async ({
       page,
@@ -228,7 +228,7 @@ test.describe("B9 Q13 role colours as text (role clamp)", () => {
   }
 });
 
-test.describe("B9-2 shared-controls fixture", () => {
+test.describe("shared-controls fixture", () => {
   for (const theme of THEMES) {
     for (const highContrast of [false, true]) {
       test(`${theme}${highContrast ? " + High Contrast" : ""}: names, focus rings and text contrast in every state`, async ({
@@ -337,7 +337,7 @@ test.describe("B9-2 shared-controls fixture", () => {
   }
 });
 
-test.describe("B9-2 keyboard journey at large text and reduced motion", () => {
+test.describe("keyboard journey at large text and reduced motion", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("pending, error and success are announced and focus stays put, keyboard only", async ({
@@ -435,7 +435,7 @@ test.describe("B9-2 keyboard journey at large text and reduced motion", () => {
   });
 });
 
-test.describe("B9-2 reduced motion honours the OS and the app setting", () => {
+test.describe("reduced motion honours the OS and the app setting", () => {
   const modalAnimation = async (page: Page): Promise<string> => {
     const fixture = await mountSharedControls(page);
     return fixture.locator(".modal").evaluate((el) => getComputedStyle(el).animationDuration);
@@ -471,7 +471,7 @@ test.describe("B9-2 reduced motion honours the OS and the app setting", () => {
   });
 });
 
-test.describe("B9-2 reflow at the minimum window", () => {
+test.describe("reflow at the minimum window", () => {
   for (const [label, prefs, scale] of [
     ["12px text", { fontSize: 12, largeFont: false }, 1],
     ["20px text with Large Font", { fontSize: 20, largeFont: true }, 1],
@@ -505,7 +505,7 @@ test.describe("B9-2 reflow at the minimum window", () => {
   }
 });
 
-test.describe("B9-2 checks fail when the behaviour is removed (controls)", () => {
+test.describe("checks fail when the behaviour is removed (controls)", () => {
   test("an unnamed control, a removed focus ring and low-contrast text are all caught", async ({
     page,
   }) => {
