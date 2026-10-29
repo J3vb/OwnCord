@@ -8,7 +8,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Retention (B4-11) ───────────────────────────────────────────────────────
+// ─── Retention ───────────────────────────────────────────────────────
 
 // handleGetRetentionChannels lists the channels a policy can target, for a
 // MANAGE_SERVER principal that cannot read /channels (MANAGE_CHANNELS).

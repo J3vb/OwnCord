@@ -54,7 +54,7 @@ func handleTypingV2(ctx context.Context, cmd Command, info ClientInfo, deps any)
 	payload := buildTypingMsg(channelID, userID, info.Username)
 
 	if ch.Type == "dm" {
-		// B5-6: the same message-request-aware audience every other DM frame
+		// the same message-request-aware audience every other DM frame
 		// path uses (MessageService.DMAudience), so an untrusted recipient of
 		// a held first message hears no typing indicator either. Falls back
 		// to the unfiltered participant list when MessageSvc was not wired

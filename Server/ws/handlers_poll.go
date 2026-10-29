@@ -13,7 +13,7 @@ func registerPollHandlers(r *HandlerRegistry, deps ChatDeps) {
 	r.RegisterV2(MsgTypePollEnd, handlePollEndV2, deps)
 }
 
-// handlePollCreateV2 processes a poll_create command (WP 6.9b) via the
+// handlePollCreateV2 processes a poll_create command via the
 // MessageService. The reply is poll_create_ok; the events are the send path's,
 // so a poll is sequenced, replayed and counted for channel_activity exactly as
 // a message is.
@@ -89,7 +89,7 @@ func pollUpdateEvent(u service.PollUpdate) Event {
 	return channelEvt{evType: MsgTypePollUpdate, channelID: u.ChannelID, payload: payload}
 }
 
-// handlePollVoteV2 processes a poll_vote command (WP 6.9b). The reply is
+// handlePollVoteV2 processes a poll_vote command. The reply is
 // poll_vote_ok with the version and the stored selection. The poll_update is
 // emitted after the commit, and only when the selection changed.
 func handlePollVoteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
@@ -106,7 +106,7 @@ func handlePollVoteV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	return Result{Reply: reply, Events: []Event{pollUpdateEvent(*res.Update)}}
 }
 
-// handlePollEndV2 processes a poll_end command (WP 6.9b).
+// handlePollEndV2 processes a poll_end command.
 func handlePollEndV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
 	ec := cmd.(PollEndCmd)

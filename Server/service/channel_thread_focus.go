@@ -9,8 +9,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// AdmitThreadFocus is the gate for thread_focus, the second subscription slot
-// (WP 6.9c): the id must be a thread, and the caller must pass
+// AdmitThreadFocus is the gate for thread_focus, the second subscription slot:
+// the id must be a thread, and the caller must pass
 // permissions.CanAdmitSession for it. The subject resolves through the
 // thread's parent (its overrides, NSFW and archive state), so a user who
 // cannot see the parent cannot attach to its thread. It is admitReadState's

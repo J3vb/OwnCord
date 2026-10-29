@@ -31,7 +31,7 @@ func (h *Hub) channelReadAudience(ctx context.Context, channelID int64) []int64 
 }
 
 // channelReadAudienceIgnoringArchived is channelReadAudience without the
-// Archived short-circuit (OC-0022). CleanupVoiceForChannel's only two
+// Archived short-circuit. CleanupVoiceForChannel's only two
 // callers (admin/handlers_channels.go's archive and delete paths) always
 // commit archived=1 to the channel before evicting its voice participants —
 // deliberately, per admin/api_test.go's
@@ -61,7 +61,7 @@ func (h *Hub) channelReadAudienceImpl(ctx context.Context, channelID int64, igno
 				"channel_id", channelID, "err", err)
 			return []int64{}
 		}
-		// Fail closed on a missing row too (OC-0090): GetChannel returns
+		// Fail closed on a missing row too: GetChannel returns
 		// (nil, nil) for a deleted channel, and falling through would hand a
 		// channel with no override rows left to the role scan below — which
 		// resolves to every connected user with base READ_MESSAGES, leaking
@@ -128,13 +128,13 @@ func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *d
 	return audience
 }
 
-// channelNSFWFilter is deliverBroadcast's B5-7 gate for a content-bearing
+// channelNSFWFilter is deliverBroadcast's NSFW content gate for a content-bearing
 // kind (chat_message, chat_edited, reaction_update, plugin_broadcast — see
 // contentBearingKinds): who among a channel's CURRENT topic subscribers may
 // receive it. Called on the dispatch goroutine at the head of the broadcast
 // queue, immediately before seqMu is taken — not by the enqueueing caller, so
 // the label and the acknowledgements it reads are the ones in force when the
-// event is dispatched rather than when it was queued (OC-0449).
+// event is dispatched rather than when it was queued.
 //
 // Deliberately does NOT resolve a candidate list itself — unlike
 // channelReadAudienceImpl, which is used for direct-recipient delivery of
@@ -142,8 +142,8 @@ func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *d
 // ordinary topic-Publish path (PublishFiltered) so it keeps that path's
 // existing guarantees: the topic limiter runs first, and the subscriber list
 // is read fresh at delivery time, under the same seqMu section that
-// serializes against a concurrent reconnect's registration (P2-4/P2-5 —
-// a precomputed recipient list evaluated before that lock would go stale
+// serializes against a concurrent reconnect's registration (a
+// precomputed recipient list evaluated before that lock would go stale
 // exactly in the reconnect window, and would skip the limiter entirely).
 //
 // allow is nil for a CONFIRMED unlabelled channel (Publish, unfiltered —
@@ -152,7 +152,7 @@ func (h *Hub) channelReadAudienceFor(ctx context.Context, channelID int64, ch *d
 // query, taken only because the channel is actually labelled — or, on a
 // lookup failure that leaves the label unconfirmed, denies every recipient
 // rather than defaulting to nil/unfiltered. labelled also gates the plugin
-// sink (decision 13: a plugin has no acknowledgement, so it never receives a
+// sink (a plugin has no acknowledgement, so it never receives a
 // labelled channel's content). unconfirmed reports that a read failed and
 // the deny-all filter stands in for an answer: subscribers who may well
 // have been allowed get nothing live, so deliverBroadcast forces their
@@ -163,10 +163,10 @@ func (h *Hub) channelNSFWFilter(ctx context.Context, channelID int64) (allow fun
 	}
 	ch, err := h.readers.Visibility.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
-		// P2-7 / Codex round 2 P1: the label is UNKNOWN, not "not labelled".
+		// The label is UNKNOWN, not "not labelled".
 		// A nil allow means "unfiltered" to deliverBroadcast — that would
 		// leak the frame to every topic subscriber, unacknowledged or not,
-		// which is exactly the disclosure decision 13 exists to prevent when
+		// which is exactly the disclosure the plugin-sink rule exists to prevent when
 		// the label itself cannot even be confirmed off. Fail closed for
 		// BOTH the socket path (deny-all filter, not nil) and the plugin
 		// sink (labelled=true).
@@ -235,7 +235,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// reconnect that registers mid-loop is skipped by it, and its last_seq can
 	// sit above any single leading watermark bump. begin/endTargetedFanout
 	// force every reconnect during the loop onto a full ready, and the bump in
-	// endTargetedFanout covers any resume after it (OC-0206, codex-oc-1732).
+	// endTargetedFanout covers any resume after it.
 	h.beginTargetedFanout()
 	defer h.endTargetedFanout()
 
@@ -255,7 +255,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 	// PermissionService the subject comes from the per-user cache — safe
 	// because the role, channel and moderation services invalidate the
 	// affected users (InvalidateAll when that list is unreadable) before
-	// calling into the hub (WP 5.1a), so
+	// calling into the hub, so
 	// the lookups below repopulate from post-change data; the 30s TTL is only
 	// a backstop and the F6 gen-counter guard keeps a racing populate from
 	// caching stale rows. Without a service (bare test hubs) each client is
@@ -328,7 +328,7 @@ func (h *Hub) RefreshChannelVisibility(ch *db.Channel) {
 // ready payload ships per channel (affordancesFor), recomputed for one live
 // user from their CURRENT role over the one subject subjectFor resolves in
 // either the service or the bare-hub branch. A lookup error returns the zero
-// value, which fails closed (S-12).
+// value, which fails closed.
 //
 // Without this, they are only ever computed at connect time, so a role edit
 // or override edit leaves every connected client's composer, voice, delete,
@@ -465,7 +465,7 @@ func (h *Hub) computeAllowedChannels(ctx context.Context, database VisibilityRea
 
 // bumpVisibilityWatermark ratchets visibilityChangeSeq up to the current seq,
 // never down. Every writer (RefreshChannelVisibility,
-// revokeUnreadableChannels, DMChannelOpenEvent in emit.go, and SRV-03's
+// revokeUnreadableChannels, DMChannelOpenEvent in emit.go, and the
 // content-shed paths in hub_stats.go) must go through
 // this instead of a plain Store: a plain Store(Load(&h.seq)) lets a writer
 // that read an older h.seq — e.g. one that spent time in a per-topic DB loop
@@ -492,7 +492,7 @@ func (h *Hub) bumpVisibilityWatermark() {
 // the same event (emit.go DMChannelOpenEvent) already gets via
 // bumpVisibilityWatermark directly.
 //
-// Codex round 4, item A: takes h.seqMu — the SAME lock reconnectRegister
+// Takes h.seqMu — the SAME lock reconnectRegister
 // (replay.go) holds across its own check-then-register — rather than
 // bumping via the internal, lock-free bumpVisibilityWatermark other callers
 // use (RefreshChannelVisibility, revokeUnreadableChannels, emit.go's
@@ -517,7 +517,7 @@ func (h *Hub) MarkVisibilityChanged() {
 }
 
 // roleChannel is one non-DM channel and its channel-level private flag, read
-// once per round for every user (WP 4.4b's role refresh round).
+// once per round for every user (the role refresh round).
 type roleChannel struct {
 	ch      *db.Channel
 	private bool

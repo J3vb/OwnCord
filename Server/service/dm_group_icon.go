@@ -7,7 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// Group DM icon (WP 3B-10c). The upload itself is the API layer's job; this
+// Group DM icon. The upload itself is the API layer's job; this
 // is the membership gate before it and the one-transaction write after it.
 
 // AuthorizeGroupIcon is the gate an icon change starts with, run before any

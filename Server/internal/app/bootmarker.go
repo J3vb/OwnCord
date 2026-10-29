@@ -14,7 +14,7 @@ import (
 
 // bootMarkerRelPath is where the boot marker lives under the data directory.
 // It is written at start and rewritten at a clean close, so the next start
-// can tell whether the previous run ended cleanly (SRE-08).
+// can tell whether the previous run ended cleanly.
 const bootMarkerRelPath = "boot.json"
 
 // bootMarkerFile is the on-disk record. Clean is false while a run is in
@@ -143,7 +143,7 @@ func bootMarkerPath(dataDir string) string {
 	return filepath.Join(dataDir, bootMarkerRelPath)
 }
 
-// startBootMarker is the boot-marker stage (SRE-08). It runs after the
+// startBootMarker is the boot-marker stage. It runs after the
 // database stage, so only the process holding the data directory's
 // single-process lock touches the marker. It reads the previous
 // run's marker, records this run as in progress and installs the
@@ -185,8 +185,8 @@ func formatMarkerTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// recordBootStatus folds the previous run's exit into the attention panel
-// (SRE-08). StartRuntime builds the service without knowing the boot marker,
+// recordBootStatus folds the previous run's exit into the attention panel.
+// StartRuntime builds the service without knowing the boot marker,
 // which only the App's boot-marker stage read.
 func (a *App) recordBootStatus(svc *service.Services) {
 	if svc == nil || svc.Attention == nil {

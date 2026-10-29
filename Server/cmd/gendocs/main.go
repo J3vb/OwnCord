@@ -229,7 +229,7 @@ func genRoutes(w io.Writer) error {
 
 	cfg := &config.Config{
 		// BrowserClientEnabled mounts the browser client portal's GET / and
-		// /assets/* (6.13a), an owner opt-in like the other optional families.
+		// /assets/*, an owner opt-in like the other optional families.
 		Server: config.ServerConfig{Name: "gendocs", Port: 8443, DataDir: dir, BrowserClientEnabled: true},
 		Upload: config.UploadConfig{MaxSizeMB: 1, StorageDir: filepath.Join(dir, "uploads")},
 		//nolint:gosec // G101: placeholder values so the optional voice routes mount; the router is walked, never served.
@@ -258,7 +258,7 @@ func genRoutes(w io.Writer) error {
 		return errors.New("telemetry.Init left no Prometheus handler: run this tool as `go run -tags otel,wazero ./cmd/gendocs`, the build the route index is generated from")
 	}
 
-	// internal/app owns hub construction since B3-3, so the route index is
+	// internal/app owns hub construction, so the route index is
 	// generated over the same collaborators the server runs with.
 	rt, err := app.StartRuntime(cfg, database, nil, app.RuntimeInputs{Version: "gendocs", Storage: app.OpenStorage(slog.Default(), cfg)})
 	if err != nil {

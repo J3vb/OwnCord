@@ -1,7 +1,7 @@
 // Package clientip resolves the real client IP for an HTTP request, honouring
 // the operator's trusted_proxies configuration.
 //
-// SRE-11: this logic lived privately in api/middleware.go, so the WebSocket
+// This logic lived privately in api/middleware.go, so the WebSocket
 // handshake could not use it and logged/audited r.RemoteAddr — the reverse
 // proxy's address, not the client's — in the recommended reverse-proxy
 // deployment. Extracting it here gives every trust boundary one implementation
@@ -17,7 +17,7 @@ import (
 
 // ParseCIDRList parses CIDR strings into networks, skipping invalid entries —
 // a misconfigured entry must not take the server down. Call it once at
-// construction, never on the request path (W3-3a).
+// construction, never on the request path.
 func ParseCIDRList(cidrs []string) []*net.IPNet {
 	nets := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {
@@ -56,7 +56,7 @@ func InNets(ipStr string, nets []*net.IPNet) bool {
 // X-Forwarded-For wins over X-Real-IP when both are present from a trusted
 // proxy: the project's documented nginx and Caddy recipes forward X-Real-IP
 // verbatim from whatever the client sent rather than overwriting it, so it is
-// only ever a last resort (OC-0240).
+// only ever a last resort.
 func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -74,7 +74,7 @@ func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 
 	// Walk X-Forwarded-For from the RIGHT and skip entries that are themselves
 	// trusted proxies. The first non-trusted, valid address is the real client.
-	// Taking the leftmost entry (BUG-112) would trust a client-supplied value:
+	// Taking the leftmost entry would trust a client-supplied value:
 	// a client can prepend a spoofed IP (`X-Forwarded-For: <spoofed>, <real>`)
 	// that the proxy then appends to, letting it forge per-IP rate-limit and
 	// lockout keys. Every header line is joined first: a proxy that adds its

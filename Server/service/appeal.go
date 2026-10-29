@@ -13,21 +13,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// AppealService is the B5-10 rate-limited appeal against a moderation
-// action (BPR-073, plan decision 8). It owns submission, the appellant's
+// AppealService is the rate-limited appeal against a moderation
+// action. It owns submission, the appellant's
 // own status view, withdrawal, and the moderation queue's assignment and
 // decision — the deciding-moderator self-review rule in particular.
 //
 // Appeal ids returned and accepted by this type's methods are the opaque
-// public id (the Codex-review deviation from the HP-5 draft recorded in
+// public id (a deliberate deviation from the draft recorded in
 // migration 050's header): the sequential internal id is used only inside
 // this package and never reaches a response, a route parameter or the
-// mod_queue frame, for the identical reason reports adopted one (P2-9).
+// mod_queue frame, for the identical reason reports adopted one.
 type AppealService struct {
 	st    Store
 	perms *PermissionService
 	// moderation is used for requireOverturnAuthority (the outrank check and,
-	// for a ban, BAN_MEMBERS) and, since round 4/5, FinalizeTimeoutLift — the
+	// for a ban, BAN_MEMBERS) and FinalizeTimeoutLift — the
 	// overturn effects themselves (LiftTimeoutByActionID, UnbanUser's ledger
 	// half, warning acknowledged) run at the DB layer, inside DecideAppealTx's
 	// own transaction (F1 review), never through a second ModerationService
@@ -37,10 +37,10 @@ type AppealService struct {
 	notifier   AppealStatusNotifier
 	queue      AppealQueueBroadcaster
 	// unban broadcasts the member_join a lifted ban needs, exactly as the
-	// admin unban path does (OC-0058): member_ban hard-deletes the row on
+	// admin unban path does: member_ban hard-deletes the row on
 	// every connected client, so flipping users.banned back to 0 without a
-	// frame leaves those clients missing the user until a full resync
-	// (OC-0486). Optional, like the other two.
+	// frame leaves those clients missing the user until a full resync.
+	// Optional, like the other two.
 	unban AppealUnbanBroadcaster
 	locks *appealLocker
 }
@@ -56,14 +56,14 @@ type AppealService struct {
 // their notifies race each other out of commit order.
 //
 // Entries are reference-counted and evicted once nobody holds or is
-// waiting on them (round 4 review, the same shape ws/user_locks.go's
-// own round 5 took for the identical reason): every caller acquires the
+// waiting on them (the same shape ws/user_locks.go's
+// own lock table took for the identical reason): every caller acquires the
 // lock only AFTER the appeal is confirmed to exist and the caller is
 // authorized to touch it (Submit: after its own insert commits; Withdraw:
 // after resolveOwn confirms ownership; Assign/Decide: after the public id
 // resolves to a real row), so an invented public id — reachable by any
 // authenticated member calling withdraw in a loop, without ever touching
-// decision 8's submission quota — never allocates an entry at all, and a
+// the submission quota — never allocates an entry at all, and a
 // real one does not linger once its writer is done with it.
 type appealLocker struct {
 	mu    syncutil.Mutex
@@ -143,7 +143,7 @@ func (s *AppealService) notify(userID int64, publicID, state string, decisionNot
 	}
 }
 
-// notifyQueue broadcasts a mod_queue frame. round 4 review: detaches the
+// notifyQueue broadcasts a mod_queue frame. It detaches the
 // caller's context (context.WithoutCancel) the same way the old
 // handler-level broadcast did before F4 moved it here — the write already
 // committed, so a client disconnecting right after must not cancel the
@@ -169,11 +169,11 @@ const (
 	appealNoteMaxRunes = 2000
 )
 
-// appealRateLimit and AppealRateWindow are decision 8's per-user rolling
+// appealRateLimit and AppealRateWindow are the per-user rolling
 // cap: 3 submissions per 24 hours. The key is "appeal:<user id>" — a
 // dedicated prefix, never shared with "report" (Server/auth/ratelimit.go's
 // Key), so a reporter's quota is never consumed by an appellant or vice
-// versa. AppealRateWindow is exported (item 6, round 3 review) so
+// versa. AppealRateWindow is exported so
 // auth's own rate-limiter tests assert against the real production value
 // instead of a local literal that could silently drift from it.
 const (
@@ -181,7 +181,7 @@ const (
 	AppealRateWindow = 24 * time.Hour
 )
 
-// appealableKinds are the moderation-action kinds decision 8 allows an
+// appealableKinds are the moderation-action kinds that allow an
 // appeal against: warning, timeout and removal always. "kick" is excluded
 // deliberately — a force-logout persists nothing to appeal, the target
 // simply signs back in. "ban" is included, but is reachable only when the
@@ -195,17 +195,17 @@ const (
 var appealableKinds = map[string]bool{"warning": true, "timeout": true, "removal": true, "ban": true}
 
 // ErrAlreadyAppealed is a 409: an appeal against this action already
-// exists, in ANY state (decision 8 — a decided appeal cannot be
+// exists, in ANY state (a decided appeal cannot be
 // re-appealed, and the UNIQUE(action_id) constraint is the memory that
 // enforces it).
 var ErrAlreadyAppealed = fmt.Errorf("%w: an appeal against this action already exists", ErrConflict)
 
 // errAppealActionNotFound is Submit's one refusal for both an unknown
-// action id and one whose target is not the caller (P2-5's rule, applied
+// action id and one whose target is not the caller (the rule report.go's errTargetNotFound follows, applied
 // here): a distinguishable message would itself be an existence oracle.
 var errAppealActionNotFound = fmt.Errorf("%w: action not found", ErrNotFound)
 
-// Submit files an appeal against actionID. Rules, in order (decision 8):
+// Submit files an appeal against actionID. Rules, in order:
 // the caller must be the action's target (else 404, no oracle); the
 // action's kind must be appealable; the rate limit (429); no existing
 // appeal against this action in any state (409 ALREADY_APPEALED). Returns
@@ -259,7 +259,7 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 	if err != nil {
 		switch {
 		case errors.Is(err, db.ErrConflict):
-			// The UNIQUE(action_id) race-proof half of decision 8: a second
+			// The UNIQUE(action_id) race-proof half of the one-appeal-per-action rule: a second
 			// submission landed between FindAppealForAction's pre-check and
 			// this insert.
 			return "", ErrAlreadyAppealed
@@ -344,10 +344,10 @@ func (s *AppealService) resolveOwn(ctx context.Context, appellantID int64, publi
 // state. F4 review: the write and both live notifies (appeal_status,
 // mod_queue) run under this appeal's own lock, so a withdrawal racing an
 // in-flight Assign or Decide can never have its notify land out of order
-// relative to theirs. round 4 review: the lock is acquired AFTER resolveOwn
+// relative to theirs. The lock is acquired AFTER resolveOwn
 // confirms the appeal exists and belongs to the caller — locking on the raw
 // publicID first let any authenticated member pin unbounded memory by
-// calling withdraw with invented ids in a loop, never touching decision 8's
+// calling withdraw with invented ids in a loop, never touching the
 // submission quota (which only Submit enforces).
 func (s *AppealService) Withdraw(ctx context.Context, appellantID int64, publicID string) error {
 	a, err := s.resolveOwn(ctx, appellantID, publicID)
@@ -461,7 +461,7 @@ func (s *AppealService) guardAppellantSelfReview(actorID int64, appeal *db.Appea
 // assignee (the same rule ban/kick/timeout and the report queue use).
 // Claim 6 review: symmetric with Decide's self-review rule — the moderator
 // who took the appealed action may not assign it to themself either, where
-// another eligible reviewer exists. round 4 review: this eligibility test
+// another eligible reviewer exists. This eligibility test
 // now runs INSIDE both assignment transactions (plain and forced,
 // AssignAppealTx/AssignAppealForced), the same way Decide's already does —
 // it used to run once, non-transactionally, before either transaction
@@ -520,8 +520,8 @@ type assignAppealFn func(ctx context.Context, id, assigneeID, observedAssigneeID
 // write's own transaction (see forceReassignGuarded); the plain path has no
 // current assignee, or the caller re-assigning to themselves, and runs in its
 // own transaction with a fresh authority re-check — the same property
-// Decide's own transaction already has. checkSelfReview (round 4 review) runs
-// decision 8's deciding-moderator eligibility test inside that SAME
+// Decide's own transaction already has. checkSelfReview runs
+// the deciding-moderator eligibility test inside that SAME
 // transaction — it used to run once, before either assignment branch,
 // non-transactionally.
 func (s *AppealService) assignAppeal(ctx context.Context, assign assignAppealFn, appealID, actorID, observed int64, checkSelfReview bool, appellantID int64) error {
@@ -639,7 +639,7 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 // after the decision committed, via context.WithoutCancel), split out of
 // Decide itself to keep it under the cyclop budget:
 //
-//   - item 4's reversal audit row, actor 0 (a mechanical consequence of the
+//   - the reversal audit row, actor 0 (a mechanical consequence of the
 //     decision, not a second moderation action by a human — the same
 //     convention LiftTimeoutByActionID's lifted_by=0 already uses), detail
 //     naming the appeal that caused it. Written only when reversalApplied
@@ -647,7 +647,7 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 //     not itself an event worth auditing). "timeout" is excluded here — its
 //     audit row (also "user_untimeout") is FinalizeTimeoutLift's own below,
 //     so this generic write never runs twice for the same event.
-//   - B5-10 round 4/5's voice reconcile, now that B5-9's own post-commit
+//   - the appeal overturn's voice reconcile, now that the moderation service's own post-commit
 //     method (ModerationService.FinalizeTimeoutLift) exists. Called
 //     unconditionally for every overturned timeout — not gated on
 //     reversalApplied — because FinalizeTimeoutLift's own doc comment
@@ -670,7 +670,7 @@ func (s *AppealService) applyOverturnReversalEffects(ctx context.Context, appeal
 			// was banned and no newer ban superseded this action). Every
 			// connected client hard-deleted the row on the ban's own
 			// member_ban, so it must be re-added exactly as the admin unban
-			// path does (OC-0058/OC-0486), or those clients keep the user
+			// path does, or those clients keep the user
 			// missing until they reconnect onto a full ready. Detached like
 			// the audit above: the decision already committed.
 			s.broadcastUnban(action.TargetID)

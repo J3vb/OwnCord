@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Syncing a channel to its category's template (WP 6.5d) ─────────────────
+// ─── Syncing a channel to its category's template ─────────────────
 //
 // Three paths replace a channel's own override rows with its category's
 // template and mark it synced: the sync endpoint, a channel PATCH that moves

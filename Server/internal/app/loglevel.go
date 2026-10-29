@@ -8,7 +8,7 @@ import (
 )
 
 // afterHubStart runs the wiring that needs the built runtime: the admin
-// panel's runtime log-level card (SRE-07), the boot-status record, then the
+// panel's runtime log-level card, the boot-status record, then the
 // batched connection writes (installConnWrites). It
 // lives beside the controller so lifecycle.go keeps its file-size budget.
 //

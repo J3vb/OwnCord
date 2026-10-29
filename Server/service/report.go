@@ -15,16 +15,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ReportService is the local report intake and moderator queue (B5-8,
-// BPR-070, BPR-071's server half). It owns the report row, the immutable
+// ReportService is the local report intake and moderator queue.
+// It owns the report row, the immutable
 // evidence snapshot taken at file time, assignment/status/notes, and the
-// reporter's own status view. Every write is audited on the B2-6 foundation
-// with B4-10-style actor tokens (db/erasure.go's erasureUnlinkReports).
+// reporter's own status view. Every write is audited, with the same actor
+// tokens db/erasure.go's erasureUnlinkReports writes.
 //
 // Report ids returned and accepted by this type's methods are the INTERNAL
 // sequential id — used for foreign keys, audit target_id, and everywhere
-// inside the server. The externally-visible identifier is db.Report.PublicID
-// (Codex review, P2-9): every API response, route parameter and mod_queue
+// inside the server. The externally-visible identifier is db.Report.PublicID:
+// every API response, route parameter and mod_queue
 // frame carries that instead, resolved to/from the internal id at the
 // api/ws boundary (ResolveReportID, PublicIDFor) so a sequential id is never
 // exposed for a bit holder to infer a neighbouring report's existence from.
@@ -74,11 +74,11 @@ var outcomeState = map[string]string{
 }
 
 // maxDetailRunes and maxNoteRunes are the free-text bounds (S5 storage
-// exhaustion, plan item 12).
+// exhaustion).
 const (
 	maxDetailRunes = 2000
 	maxNoteRunes   = 4000
-	// reportContextWindow is decision 7/scorecard Question 3's N=5 either
+	// reportContextWindow is N=5 either
 	// side, plus the reported item itself: 11 rows, fixed in code.
 	reportContextWindow = 11
 )
@@ -96,7 +96,7 @@ func hasControlChar(s string) bool {
 
 // newPublicID mints the opaque, unguessable identifier every report is
 // known by outside this package: 16 bytes from crypto/rand, hex-encoded
-// (32 chars). Sequential ids leak order (P2-9); this does not.
+// (32 chars). Sequential ids leak order; this does not.
 func newPublicID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -117,7 +117,7 @@ type FileReportParams struct {
 // File intakes a report: rate limit, validation, visibility (the reporter
 // must be able to see the target through the same chokepoint any other
 // reader would), duplicate check, then the row, the evidence snapshot and
-// one audit row — the row and its snapshot in one transaction (P1-4), so an
+// one audit row — the row and its snapshot in one transaction, so an
 // erasure racing the intake cannot land content or an author id that
 // EraseAccount's unlink pass already ran over. The subject is derived by
 // the server from the target — the message's author, the attachment's
@@ -167,7 +167,7 @@ func (s *ReportService) File(ctx context.Context, p FileReportParams) (int64, er
 		}
 		if errors.Is(err, db.ErrNotFound) {
 			// The reporter or subject was erased between resolveTarget's read
-			// and this transaction's commit (Codex review, P1-4 widened) — the
+			// and this transaction's commit — the
 			// same refusal a target that never existed gets, no existence
 			// oracle for this vanishingly rare race either.
 			return 0, errTargetNotFound
@@ -176,8 +176,8 @@ func (s *ReportService) File(ctx context.Context, p FileReportParams) (int64, er
 	}
 
 	// The opening report_events row is written inside FileReport's own
-	// transaction (db/report_queries.go), not here — a second Codex review
-	// moved every report lifecycle event off the shared audit_log entirely
+	// transaction (db/report_queries.go), not here — report lifecycle events
+	// stay off the shared audit_log entirely
 	// (see report_events, migration 048 (12)): a VIEW_AUDIT_LOG holder who
 	// lacks MODERATE_MEMBERS could still read a system-actor report_create
 	// row's timestamp and reason there, and one who is ALSO the report's
@@ -244,7 +244,7 @@ type reportEvidenceRow struct {
 
 // evidenceAttachmentRef is the by-reference shape a snapshot's attachments
 // column carries: {id, filename, mime, size} — never bytes, never
-// stored_as (decision 7/scorecard Question 3 decision 3).
+// stored_as.
 type evidenceAttachmentRef struct {
 	ID       string `json:"id"`
 	Filename string `json:"filename"`
@@ -267,7 +267,7 @@ func marshalAttachmentRefs(refs []evidenceAttachmentRef) string {
 // in one pass so a message target's context window is read once. Every
 // refusal is ErrNotFound with the SAME message ("target not found"),
 // whether the target does not exist or the reporter cannot see it — a
-// distinguishable message would itself be an existence oracle (P2-5): an
+// distinguishable message would itself be an existence oracle: an
 // actor without visibility learns nothing that tells "cannot see it" apart
 // from "does not exist" (S5, report confidentiality's reciprocal — the same
 // rule BanUser applies to a missing user id, applied here to a missing or
@@ -285,7 +285,7 @@ func (s *ReportService) resolveTarget(ctx context.Context, p FileReportParams) (
 	}
 }
 
-// errTargetNotFound is resolveTarget's one refusal message (P2-5): every
+// errTargetNotFound is resolveTarget's one refusal message: every
 // branch of every resolve* function returns exactly this text, wrapping
 // ErrNotFound, so the response body cannot distinguish "does not exist"
 // from "exists but you may not see it".
@@ -401,8 +401,8 @@ func (s *ReportService) Mine(ctx context.Context, reporterID int64) ([]db.Report
 
 // RequireModerate is requireModerate exported for a caller that must
 // authorize BEFORE resolving anything else about the request — a route
-// handler that translates a public id to the internal one, in particular
-// (Codex review, P1): running that resolution first turns "unknown id" vs
+// handler that translates a public id to the internal one, in particular:
+// running that resolution first turns "unknown id" vs
 // "real id, no permission" into two different status codes, an existence
 // oracle through the handler's own order of operations. Call this before
 // resolveReportIDParam, not after.
@@ -444,7 +444,7 @@ func guardConfidentiality(actorID int64, report *db.Report) error {
 }
 
 // ErrSelfReview is a 403: a moderator may not act on, or read the internal
-// notes of, a report they themselves filed. Named for reuse (B5-10 appeals
+// notes of, a report they themselves filed. Named for reuse (appeals
 // hit the identical shape: the moderator who acted does not decide the
 // appeal of their own action).
 var ErrSelfReview = fmt.Errorf("%w: cannot act on your own report", ErrForbidden)
@@ -454,8 +454,8 @@ var ErrSelfReview = fmt.Errorf("%w: cannot act on your own report", ErrForbidden
 // already knows their own report exists (it is in their Mine() view), so
 // there is no existence oracle to protect against here, only the conflict
 // of interest. Exported for a caller outside this package that already holds
-// a *db.Report from another entry point (the queue's act route, from Get,
-// P2-6 Codex review) and must apply the same refusal before dispatching an
+// a *db.Report from another entry point (the queue's act route, from Get)
+// and must apply the same refusal before dispatching an
 // action: Get allows a reporter to read their own filing, but acting on it
 // is the identical conflict of interest Assign/Note/Close already refuse.
 func GuardSelfReviewFor(actorID int64, report *db.Report) error {
@@ -470,7 +470,7 @@ func GuardSelfReviewFor(actorID int64, report *db.Report) error {
 // viewer's own report as SUBJECT never surfaces its id, even from a surface
 // that already authorized the read on other grounds — a moderator who still
 // holds MODERATE_MEMBERS reading their own moderation-action ledger, in
-// particular (P1-5, Codex review: GET .../users/{id}/actions and the queue
+// particular (GET .../users/{id}/actions and the queue
 // detail's action list both render a linked report's public id with no
 // per-row check of their own). false also covers a report id that no longer
 // resolves — a lookup failure is not itself a leak, so the caller renders
@@ -516,8 +516,7 @@ func (s *ReportService) Queue(ctx context.Context, actorID int64, state string) 
 }
 
 // ReportDetail is GET .../queue/{id}'s payload: the report, its evidence,
-// its notes and its immutable history (report_events — second Codex
-// review).
+// its notes and its immutable history (report_events).
 type ReportDetail struct {
 	Report   db.Report
 	Evidence []db.ReportEvidenceRow
@@ -572,9 +571,9 @@ func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*Repo
 // Assign assigns reportID to actorID. 409 if it is already assigned to
 // someone else, unless force is set and the caller outranks the current
 // assignee (the same rule ban/kick/timeout use). The plain write is guarded
-// on the observed assignee (P2-8): a concurrent reassignment invalidates a
+// on the observed assignee: a concurrent reassignment invalidates a
 // stale verdict, so it can never be applied. The force path's outrank
-// comparison runs INSIDE the same transaction as the write (Codex review,
+// comparison runs INSIDE the same transaction as the write (see
 // AssignReportForced): reading the assignee's role and writing the new one
 // as two separate statements left a gap a role change could race; zero rows
 // (or ErrForbidden, force only) covers a state that already left
@@ -649,7 +648,7 @@ func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body 
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	if !ok {
-		// Zero rows now covers two causes (Codex review widened the guard to
+		// Zero rows now covers two causes (the guard also covers
 		// the report's state too): the moderator account was erased, or the
 		// report closed, between requirePerm's read and this write.
 		return fmt.Errorf("%w: report is closed, or the moderator account no longer exists", ErrConflict)

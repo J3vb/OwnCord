@@ -8,15 +8,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// The thread half of channel visibility (WP 6.9c). A thread has no permission
+// The thread half of channel visibility. A thread has no permission
 // state of its own, so a socket may hold a thread's topic exactly while it may
 // hold the parent's. Three paths enforce that, each from a different trigger:
 // a parent's override change (RefreshChannelVisibility), a role change
 // (revokeUnreadableChannels and the role worker), and reconnect replay. This
 // file holds their shared pieces.
 
-// computeReadableChannels narrows allowed (the visible set) to B5-7's
-// readable set: every visible channel that is either not labelled, or
+// computeReadableChannels narrows allowed (the visible set) to the NSFW
+// content readable set: every visible channel that is either not labelled, or
 // labelled and acknowledged by user. Bounded by how many labelled channels
 // sit in the visible set (typically zero), not by the full channel list.
 //

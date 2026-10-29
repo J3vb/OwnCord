@@ -12,7 +12,7 @@ import (
 )
 
 // voice_moderation_authorize.go — the shared gate behind the voice moderation
-// commands (WP 8.4a split it out of voice_moderation.go).
+// commands (split out of voice_moderation.go).
 
 // voiceModKind selects which authorization contract voiceModTarget applies.
 type voiceModKind int
@@ -125,7 +125,7 @@ func voiceModNotInVoice() *Result {
 }
 
 // voiceModNoSession answers a target with no voice session. Authorization
-// before existence (follow-up to round 4, Codex review): with no session to
+// before existence: with no session to
 // build a channel Subject from, still run the SAME canonical authorizers (no
 // second one) on a Subject built from just the actor's base role and a zero
 // channel — their DM branch and channel-override layer are both no-ops
@@ -145,11 +145,11 @@ func voiceModNoSession(ctx context.Context, d VoiceDeps, move bool, baseSub perm
 	return voiceModNotInVoice()
 }
 
-// voiceModInChannel authorizes the actor in the TARGET's channel (round 4,
-// Codex review Part C — one canonical authorizer per bit): the actor's BASE
+// voiceModInChannel authorizes the actor in the TARGET's channel (one
+// canonical authorizer per bit): the actor's BASE
 // role must hold the command's bit on its own, and the bit must be effective
 // in the target's channel too, so a role-layer or user-layer deny on that
-// channel holds (SEC-02); READ_MESSAGES so a room hidden from the actor
+// channel holds; READ_MESSAGES so a room hidden from the actor
 // cannot be moderated; and for a DM call the actor's own membership, since
 // voice_mod_kick and friends carry no channel id from the client. The DM
 // refusal keeps the exact shape of "target not in voice" so the actor learns

@@ -32,8 +32,8 @@ var (
 	ErrLastAdmin = errors.New("last admin cannot be deleted")
 
 	// ErrSelfReview indicates the acting moderator took the action under
-	// review and another eligible moderator exists (decision 8's
-	// deciding-moderator rule) — round 4 review: AssignAppealTx and
+	// review and another eligible moderator exists (the
+	// deciding-moderator rule). AssignAppealTx and
 	// forceReassignGuarded's appeal path both check this fresh, inside
 	// their own transaction, the same way DecideAppealTx's
 	// AppealWriteSelfReview already does.

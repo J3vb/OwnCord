@@ -56,7 +56,7 @@ func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
-		// H-4: Cap invite expiration to 30 days.
+		// Cap invite expiration to 30 days.
 		if req.ExpiresInHours > service.MaxInviteExpiryHours() {
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("expires_in_hours cannot exceed %d (30 days)", service.MaxInviteExpiryHours()))
 			return

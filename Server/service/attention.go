@@ -112,7 +112,7 @@ type AttentionSources struct {
 	Certificate func() (mode string, cert auth.ServedCert)
 }
 
-// BootStatus is what the previous run left in the boot marker (SRE-08):
+// BootStatus is what the previous run left in the boot marker:
 // whether the marker was readable, whether the last shutdown was clean, when
 // the previous run started and when it last recovered a panic.
 type BootStatus struct {
@@ -129,7 +129,7 @@ type BootStatus struct {
 }
 
 // RestoreOutcome is what the boot-time apply of a staged backup restore left
-// for this start to report (WP 5.5). Recorded is false when no restore was
+// for this start to report. Recorded is false when no restore was
 // pending, which adds no signal.
 type RestoreOutcome struct {
 	Recorded bool
@@ -173,7 +173,7 @@ type AttentionReport struct {
 	Warnings    []AttentionWarning `json:"warnings"`
 }
 
-// AttentionService is the admin attention panel's state (RI-07). It samples
+// AttentionService is the admin attention panel's state. It samples
 // the existing disk, writer-wait, reconnect and delivery counters, the newest
 // backup and the maintenance jobs' outcomes, and keeps deduplicated warnings
 // with hysteresis. The state is in memory and served only to the admin API;
@@ -197,7 +197,7 @@ type AttentionService struct {
 	voice       attentionLevel
 	jobs        []*attentionJob
 	// boot is the previous run's marker, set once at start-up and constant
-	// for this process (SRE-08).
+	// for this process.
 	boot BootStatus
 	// restore is the staged restore this start applied or refused, if any;
 	// like boot it is set once at start-up and constant for the process.
@@ -218,7 +218,7 @@ func WriterWaitSource(database *db.DB) func() time.Duration {
 }
 
 // PoolStatsSources returns the writer and reader pools' Stats readers, for the
-// windowed metrics sampler (WP 4.3a). It lives here so the composition root
+// windowed metrics sampler. It lives here so the composition root
 // names no raw pool.
 func PoolStatsSources(database *db.DB) (writer, reader func() sql.DBStats) {
 	return func() sql.DBStats { return database.SQLDb().Stats() },
@@ -274,8 +274,8 @@ func (s *AttentionService) job(label string) *attentionJob {
 	return nil
 }
 
-// RecordBootStatus records the previous run's marker for the attention panel
-// (SRE-08). It is set once at start-up, before Run samples.
+// RecordBootStatus records the previous run's marker for the attention panel.
+// It is set once at start-up, before Run samples.
 func (s *AttentionService) RecordBootStatus(b BootStatus) {
 	if s == nil {
 		return

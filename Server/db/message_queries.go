@@ -32,8 +32,8 @@ func messageFromGen(m dbgen.Message) *Message {
 // query injection. Letters, digits and spaces pass through unchanged; every
 // other rune is folded to a space rather than dropped.
 //
-// Folding, not dropping, is what makes punctuation searchable at all
-// (OC-0357). messages_fts uses FTS5's default unicode61 tokenizer, in which
+// Folding, not dropping, is what makes punctuation searchable at all.
+// messages_fts uses FTS5's default unicode61 tokenizer, in which
 // every non-alphanumeric rune is a token separator: "user_id" is INDEXED as
 // the two tokens `user` and `id`. Dropping the underscore asks for the single
 // term `userid`, which exists nowhere in the index, so the search returned
@@ -204,12 +204,12 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 // returns the updated row via RETURNING so callers don't re-read it.
 // Returns an error if the message does not exist or userID does not match the owner.
 //
-// OC-0358: the ownership read above is taken before the write, so a delete
+// The ownership read above is taken before the write, so a delete
 // committing in that window would otherwise have its tombstone rewritten and
 // reported as a successful edit — the caller then broadcasts chat_edited for a
 // message every client has already replaced with "message deleted". The UPDATE
 // carries `AND deleted = 0` (the guard SoftDeleteMessage and SetMessagePinned
-// were given in OC-0284), so the losing edit matches no row and surfaces here
+// carry), so the losing edit matches no row and surfaces here
 // as ErrNotFound, the same answer an already-deleted message gets.
 func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) (*Message, error) {
 	msg, err := d.GetMessage(ctx, id)
@@ -239,7 +239,7 @@ func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) 
 // DeleteMessage performs a soft delete (sets deleted=1) on the message.
 // The calling user must be the message owner or ismod must be true.
 //
-// OC-0284: the UPDATE is guarded with `AND deleted = 0` (mirroring
+// The UPDATE is guarded with `AND deleted = 0` (mirroring
 // SetMessagePinned) and RowsAffected is checked, so a message already
 // soft-deleted — by a prior call, or by one that raced this one to the
 // writer — reports ErrNotFound instead of silently succeeding a second time.
@@ -299,7 +299,7 @@ func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, 
 }
 
 // PurgeChannelMessagesWithAction is PurgeChannelMessages plus one removal
-// ledger row per purge — not one per message (B5-9, plan item 6) — in the
+// ledger row per purge — not one per message — in the
 // same transaction: a failure recording the row rolls the purge back too.
 // reportID links a report-linked removal.
 func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error) {
@@ -321,8 +321,7 @@ func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, befo
 		// The ledger row's target is the acting moderator: a purge is a
 		// bulk, channel-scoped action that can span many authors, and
 		// moderation_actions.target_id must reference exactly one user
-		// (schema FK) — see the B5-9 report's "deviation from the draft"
-		// note for the fuller rationale.
+		// (schema FK).
 		reason := fmt.Sprintf("%d messages purged", len(ids))
 		if err := recordLedgerRow(ctx, tx, "removal", actorID, actorID, reportID, reason); err != nil {
 			return nil, err
@@ -384,13 +383,13 @@ func purgeChannelMessagesTx(ctx context.Context, tx *sql.Tx, channelID, before i
 }
 
 // DeleteMessageWithRemoval is DeleteMessage plus a removal ledger row, in
-// one transaction, when the deleter is not the message's author (B5-9,
-// plan item 6): a self-delete or a non-moderator delete writes no row,
+// one transaction, when the deleter is not the message's author:
+// a self-delete or a non-moderator delete writes no row,
 // exactly as DeleteMessage always has. authorID is the message's author,
 // already resolved by the caller. reportID links a report-linked removal.
 // reason is the ledger row's text; empty falls back to the fixed phrase
-// "message removed" (every caller but the report-linked one, P2-10 Codex
-// review: a direct moderator delete carries no reason of its own to store).
+// "message removed" (every caller but the report-linked one; a direct
+// moderator delete carries no reason of its own to store).
 func (d *DB) DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error {
 	if !isMod || deleterID == authorID {
 		return d.DeleteMessage(ctx, msgID, deleterID, isMod)
@@ -695,7 +694,7 @@ func (d *DB) GetReadState(ctx context.Context, userID, channelID int64) (lastMes
 // means — the send path advancing the sender's own read state past their own
 // message (advanceAuthorReadState) — where there is no snapshot to go stale.
 //
-// OC-0323: a mark-read computed from a stale snapshot cleared mention_count
+// A mark-read computed from a stale snapshot cleared mention_count
 // while last_message_id still pointed behind a message that had just raised a
 // mention, so the badge vanished with nothing to recompute it. Both halves of
 // the pair are single-writer statements, so computing the watermark here makes
@@ -715,8 +714,8 @@ func (d *DB) MarkChannelReadAtLatest(ctx context.Context, userID, channelID int6
 // caller names, and clears its mention badge — marking a channel read consumes
 // its mentions.
 //
-// It is for a caller that already holds the exact id it means, which since
-// OC-0323 means the send path advancing the sender past their own message;
+// It is for a caller that already holds the exact id it means, which today
+// means the send path advancing the sender past their own message;
 // that path runs the statement inside its own transaction through
 // advanceAuthorReadState. A "mark this channel read" caller must use MarkChannelReadAtLatest instead:
 // the id it would pass here is a snapshot, and clearing mentions against a

@@ -35,7 +35,7 @@ type Deps struct {
 	LogBuf  *admin.RingBuffer
 	Restart *RestartCoordinator
 	// LogLevelVar is the *slog.LevelVar main's log sinks read. app.New wraps
-	// it in the admin API's log-level controller (SRE-07), with LogBaseLevel
+	// it in the admin API's log-level controller, with LogBaseLevel
 	// as the level a timed debug boost reverts to. Nil in tests that build an
 	// App without main's wiring; the endpoints then report 503.
 	LogLevelVar  *slog.LevelVar
@@ -89,8 +89,7 @@ type App struct {
 	auditWriter *db.AuditWriter
 	// background owns the request-path jobs that outlive their request (Web
 	// Push dispatch, the no-worker mention write). startHub creates it and
-	// its close step joins or abandons them before the database closes
-	// (ARCH-034).
+	// its close step joins or abandons them before the database closes.
 	background *syncutil.Group
 	// shutdown is closed at the very start of Close, before the first close
 	// step. It tells work that must not complete during a shutdown (the update
@@ -100,19 +99,19 @@ type App struct {
 	shutdown     chan struct{}
 	shutdownOnce sync.Once // Close's closed flag is not atomic; a second caller must not double-close
 	markers      *db.MarkerStore
-	// bootMarker is the current run's handle on boot.json (SRE-08); prevBoot
+	// bootMarker is the current run's handle on boot.json; prevBoot
 	// is what the previous run left there, folded into the attention panel at
 	// start-up.
 	bootMarker *bootMarker
 	prevBoot   service.BootStatus
 	// restoreOutcome is the staged backup restore this start applied or
-	// refused (WP 5.5), folded into the attention panel with prevBoot.
+	// refused, folded into the attention panel with prevBoot.
 	restoreOutcome service.RestoreOutcome
 	// pushVAPIDKey is loaded by startPushVAPIDKey and installed on svc.Push
-	// by startHub once the service layer exists (B5-4).
+	// by startHub once the service layer exists.
 	pushVAPIDKey *ecdh.PrivateKey
 	// totpKey is loaded by startTOTPKey and consumed by StartRuntime, which
-	// builds the AuthService with it (WP 5.6f/g).
+	// builds the AuthService with it.
 	totpKey []byte
 	// storage is the one upload file store, opened by startErasureMarkers
 	// (nil when it could not be) and shared through StartRuntime.
@@ -192,7 +191,7 @@ func (a *App) onCloseWithin(stage string, budget time.Duration, stop func(contex
 //   - the hub's GracefulStop runs on EVERY return from Run, including an
 //     early one, because it calls StopLiveKit, the sole caller of
 //     LiveKitProcess.Stop, and skipping it orphans the supervised
-//     livekit-server process (OC-0027).
+//     livekit-server process.
 //
 // It reports the FIRST error and runs every later step regardless: the steps
 // below a failing one are the ones that release the database handle, the
@@ -229,7 +228,7 @@ func (a *App) Close(ctx context.Context) error {
 		// Each step gets a budget of its own rather than a share of one
 		// deadline: a step that overran it (an HTTP drain held open by a
 		// long request) must not leave the hub's restart notice, the audit
-		// drain and the event flush running on an expired context (SRV-06).
+		// drain and the event flush running on an expired context.
 		budget := step.budget
 		if budget <= 0 {
 			budget = defaultBudget

@@ -28,7 +28,7 @@ import (
 type resumeHint struct {
 	LastSeq   uint64
 	ChannelID int64
-	// Features is the parsed `features` list of the auth frame (6.9d-a1). Like
+	// Features is the parsed `features` list of the auth frame. Like
 	// the rest of the hint it is UNTRUSTED, and it only narrows what the
 	// socket is sent.
 	Features clientFeatures
@@ -75,7 +75,7 @@ func (h *Hub) authenticateConn(parent context.Context, conn *websocket.Conn) (*d
 		// absent means an ordinary connect.
 		Wake bool `json:"wake"`
 		// Features declares optional client capabilities (client_features.go).
-		// Absent means none: clients before WP 6.9d predate the field.
+		// Absent means none: clients from before forums predate the field.
 		Features []string `json:"features"`
 		// IdentityPublicKey is this device's E2EE identity public key (base64).
 		// Optional and never fatal: kept raw so a wrongly typed value cannot
@@ -173,7 +173,7 @@ func authIdentityKey(userID int64, raw json.RawMessage) string {
 // mechanism for cancelling that context on client disconnect, so without this
 // wrapper ctx is never cancelled while the handler is blocked inside
 // conn.Write — a peer that stops reading (or whose receive window closes)
-// pins the write, the handler goroutine, and the socket forever (OC-0152).
+// pins the write, the handler goroutine, and the socket forever.
 // writePumpWrite (serve_pumps.go) already bounds its writes the same way;
 // this brings the handshake writes in serve.go up to the same guarantee.
 func handshakeWrite(ctx context.Context, conn *websocket.Conn, msg []byte) error {
@@ -202,7 +202,7 @@ func (h *Hub) handshakeWriteReady(ctx context.Context, conn *websocket.Conn, p *
 }
 
 func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, uint64, error) {
-	// SRE-11: resolve the real client address through trusted_proxies, so the
+	// resolve the real client address through trusted_proxies, so the
 	// handshake logs and the ws_connect audit row name the client and not the
 	// reverse proxy in the recommended deployment.
 	clientAddr := clientip.Resolve(r, h.trustedProxyNets)
@@ -218,7 +218,7 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	c.remoteAddr = clientAddr
 	// Untrusted until handleReconnect checks it against the allowed set.
 	c.authChannelID = hint.ChannelID
-	// 6.9d: what the client says it can render; forums are withheld without it.
+	// what the client says it can render; forums are withheld without it.
 	c.features = hint.Features
 	// Voice E2EE key per device: set once, before registerNow makes c
 	// reachable, and never written again, so reading it needs no lock.
@@ -228,12 +228,11 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 	}
 
 	// Look up role name for protocol-compliant payloads and cache on client.
-	// Fail closed like the sibling lookup in handleFreshConnect (BUG-094):
+	// Fail closed like the sibling lookup in handleFreshConnect:
 	// this value is authoritative on the wire — auth_ok reports it as the
 	// user's own role, a new member's presence_batch entry carries it to
 	// every other client, and every chat_message carries it — so a lookup failure must not silently
-	// substitute "member" and pin the whole session to a fabricated role
-	// (OC-0269).
+	// substitute "member" and pin the whole session to a fabricated role.
 	role, roleErr := h.readers.Visibility.GetRoleByID(r.Context(), user.RoleID)
 	if roleErr != nil || role == nil {
 		slog.Error("ws: role lookup failed during handshake, closing connection",
@@ -253,7 +252,7 @@ func (h *Hub) upgradeAndAuth(conn *websocket.Conn, r *http.Request) (*Client, ui
 // write failure. No readPump ever starts for this connection — the
 // fresh-connect callers return an error that stops ServeWS before it starts
 // the pumps, and handleReconnect's callers report startPumps=false for the
-// same reason (OC-0051) — and the old connection this one replaced already
+// same reason — and the old connection this one replaced already
 // ran its defer (skipping teardown because this client held the slot) — so
 // when no replacement remains, the standard disconnect teardown must run
 // here or the user stays online forever.
@@ -269,7 +268,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 		// A connection that inherited a transferred voice session (the
 		// replay-failure fallback in handleFreshConnect deliberately keeps
 		// the voice_states row and registerNow transfers it onto c) must have
-		// that session parked (RT-8) or torn down here too, or the row, the
+		// that session parked or torn down here too, or the row, the
 		// LiveKit participant, and a stale E2EE key-holder entry all survive
 		// this connection's death until the next sweep (up to 60s).
 		if voiceChID != 0 {
@@ -281,7 +280,7 @@ func (h *Hub) unregisterFailedHandshake(ctx context.Context, c *Client) {
 	// `replaced` snapshot alone: it was sampled before handleVoiceLeave,
 	// which can block for seconds, so a reconnect landing during that window
 	// would otherwise be invisible here and mark the live session's user
-	// offline (OC-0019, mirrored from readPump's defer in serve_pumps.go).
+	// offline (mirrored from readPump's defer in serve_pumps.go).
 	if h.shouldMarkOffline(c, replaced) {
 		cleanupCtx := context.WithoutCancel(ctx)
 		_ = h.presence.StampDisconnect(cleanupCtx, c.userID)

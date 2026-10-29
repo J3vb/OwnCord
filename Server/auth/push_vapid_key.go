@@ -9,11 +9,11 @@ import (
 const pushVAPIDKeyBytes = 32
 
 // LoadOrGeneratePushVAPIDKey returns the P-256 private key the server signs
-// Web Push VAPID JWTs with (B5-4, S7-b). It checks, in order, the
+// Web Push VAPID JWTs with. It checks, in order, the
 // OWNCORD_PUSH_VAPID_KEY environment variable (hex, 32 bytes), then
 // dataDir/push_vapid.key, and generates a key into that file only on a
-// confirmed absence — the same fail-closed rule as the TOTP and erasure keys
-// (OC-0321): a read error must not silently replace a key every stored
+// confirmed absence — the same fail-closed rule as the TOTP and erasure keys:
+// a read error must not silently replace a key every stored
 // subscription's vapid_key_id is checked against.
 //
 // Rotation is an operator action (replace the file or the env var, then

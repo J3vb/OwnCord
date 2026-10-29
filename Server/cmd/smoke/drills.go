@@ -28,7 +28,7 @@ import (
 
 // ─── the -drills run ────────────────────────────────────────────────────────
 //
-// B6-11's drills ask the questions the Go unit tests in db/ cannot: a real
+// These drills ask the questions the Go unit tests in db/ cannot: a real
 // process that really restarts itself, a real filesystem that really fills, a
 // real child process that really dies. The Go tests prove the mechanisms on a
 // copy; these phases prove the install an owner operates.
@@ -1450,7 +1450,7 @@ func (d *drill) stepRBackup(r *rState) ([]failure, error) {
 	return nil, nil
 }
 
-// stepRErase erases V through the route B4-9 added, and asserts the marker file
+// stepRErase erases V through the account erasure route, and asserts the marker file
 // recorded it: a marker that was never written is a restore that resurrects an
 // erased account, and nothing else in the run would notice.
 func (d *drill) stepRErase(r *rState) ([]failure, error) {
@@ -1792,7 +1792,7 @@ func (d *drill) stepRNoMarkerFile(r *rState) ([]failure, error) {
 }
 
 // stepRNoErasureKey is drill 2's second half: the key is gone and the marker
-// file is intact. The marker file is bound to the key by fingerprint (OC-0388),
+// file is intact. The marker file is bound to the key by fingerprint,
 // so the boot must fail closed with a named reason rather than serve with
 // markers it cannot match.
 func (d *drill) stepRNoErasureKey(r *rState) ([]failure, error) {
@@ -2386,7 +2386,7 @@ func (d *drill) dHeadroom(f filler, s *dStage) ([]failure, error) {
 }
 
 // dBackup takes a backup with the filesystem nearly full and asserts the
-// OC-0212 invariant rather than an error. The brief predicts an error; a small
+// no-partial-file invariant rather than an error. One might predict an error; a small
 // database may legitimately fit in the window above 2 MiB, so the assertion is
 // the one that matters either way: no partial file is left behind, and a 200 is
 // a file that integrity_checks. The measured status is printed.
@@ -3109,9 +3109,9 @@ func probeVoiceJoin(token string, voiceID int64, budget, pause time.Duration, do
 // that is not there and records what a join does.
 //
 // Recorded rather than asserted: the brief asks for "token minted or error",
-// and a minted token is the disguised-success shape B6-6 forbids — a finding
-// that needs a ledger row before a drill can fail on it, which R12/R13 say a
-// drill does not write. So it prints a ::warning:: that cannot be missed in CI
+// and a minted token is the disguised-success shape the connectivity check forbids — a finding
+// that needs a ledger row before a drill can fail on it, and a drill does not
+// write ledger rows. So it prints a ::warning:: that cannot be missed in CI
 // and the measurement, and the fix (one HealthCheck before the mint) stays a
 // behaviour change with its own PR.
 func (d *drill) stepSExternalAbsent() ([]failure, error) {

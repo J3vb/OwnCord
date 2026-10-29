@@ -19,7 +19,7 @@ func NewInviteService(st Store) *InviteService {
 	return &InviteService{st: st}
 }
 
-// maxInviteExpiryHoursVal caps invite expiry to 30 days (H-4 hardening).
+// maxInviteExpiryHoursVal caps invite expiry to 30 days.
 const maxInviteExpiryHoursVal = 720
 
 // MaxInviteExpiryHours returns the maximum invite expiry in hours.
@@ -61,7 +61,7 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 	if err != nil || invite == nil {
 		return nil, fmt.Errorf("%w: failed to retrieve invite: %w", ErrInternal, err)
 	}
-	// S-02: the row names the invite by id, never by code; the code is the
+	// The row names the invite by id, never by code; the code is the
 	// credential.
 	db.WriteAudit(tailCtx, s.st, createdBy, "invite_create", "invite", invite.ID,
 		fmt.Sprintf("max_uses=%d expires_in_hours=%d", maxUses, expiresInHours))

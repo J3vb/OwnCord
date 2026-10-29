@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// NicknameStore is the one write the moderator nickname route needs (WP 6.4a).
+// NicknameStore is the one write the moderator nickname route needs.
 type NicknameStore interface {
 	// SetDisplayNameAsModerator writes a member's nickname for a moderator and
 	// returns the value it replaced. It re-reads the actor's MANAGE_NICKNAMES
@@ -20,7 +20,7 @@ type NicknameStore interface {
 	SetDisplayNameAsModerator(ctx context.Context, actorID, targetID int64, name *string) (old *string, err error)
 }
 
-// setDisplayNameAsModerator is the moderator nickname write (WP 6.4a). It takes
+// setDisplayNameAsModerator is the moderator nickname write. It takes
 // the target's profile lock, the one UpdateProfile's read-merge-write holds, so
 // the two serialize and the later writer wins whole: neither can merge against
 // a row the other is about to replace. The write itself re-checks the actor's
@@ -48,7 +48,7 @@ func (s *UserService) setDisplayNameAsModerator(ctx context.Context, actorID, ta
 
 	// The write has committed: the re-read and the audit row must survive a
 	// request canceled after it, and a failed re-read must not be reported as
-	// a failed write (OC-0297), so fall back to the pre-write row with the
+	// a failed write, so fall back to the pre-write row with the
 	// one column this call changed.
 	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), targetID)
 	if err != nil || user == nil {

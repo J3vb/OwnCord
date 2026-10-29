@@ -24,7 +24,7 @@ func voiceJoinCapacity(sub permissions.Subject, maxUsers int) int {
 // case, mirroring handleVoiceModMoveV2's pre-flight (voice_moderation.go):
 // without it, voiceJoinLeaveCurrent tears the caller out of their current call
 // before voiceJoinPersist's atomic check ever runs, so a switch to a full
-// channel ends the old call for nothing (OC-0351). Same-channel re-join stays
+// channel ends the old call for nothing. Same-channel re-join stays
 // gated by ALREADY_JOINED in voiceJoinLeaveCurrent, not here — this only
 // guards the destructive leave a genuine switch would trigger. The atomic
 // JoinVoiceChannelIfCapacity check in voiceJoinPersist remains the authority

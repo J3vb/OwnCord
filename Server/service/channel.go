@@ -23,8 +23,8 @@ type ChannelService struct {
 	forum ForumStore
 	perms *PermissionService
 	batch *ConnWrites
-	// notifier re-derives channel audiences after an override change (WP
-	// 5.1a). Set once before the server serves; nil is a no-op.
+	// notifier re-derives channel audiences after an override change.
+	// Set once before the server serves; nil is a no-op.
 	notifier PermissionChangeNotifier
 	// wakeExpiry nudges the custom status expirer after a status with an
 	// expiry commits; nil when none is installed.
@@ -140,7 +140,7 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 	}
 
 	// A typing indicator announces a post, so it answers to the post policy
-	// (permissions.CanType is CanSendMessage — S-01): a read-only member, an
+	// (permissions.CanType is CanSendMessage): a read-only member, an
 	// announcement reader without MANAGE_MESSAGES, an archived channel, a
 	// blocked or non-participant DM user all emit nothing. Silent, because
 	// typing is best-effort.
@@ -150,7 +150,7 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 	}
 
 	// Per-user-per-channel rate limit. Built only now that the channel is
-	// known to exist and the caller is authorized to read it (OC-0202): doing
+	// known to exist and the caller is authorized to read it: doing
 	// this before resolution let any caller-supplied channel id — including
 	// ids that don't exist or aren't readable — pin a new entry in the
 	// shared, process-wide RateLimiter. RateLimiter.Cleanup only evicts a key
@@ -214,7 +214,7 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 
 	var cleaned *string
 	if customStatus != nil {
-		// OC-0195: bound the raw bytes before cleanText (sanitizeToFixpoint)
+		// Bound the raw bytes before cleanText (sanitizeToFixpoint)
 		// runs — see cleanTextBounded's doc comment (user.go). This path is
 		// reachable over the WS presence_update frame, whose read limit is
 		// config.MaxMessageBytes (1 MiB), far larger than any REST body that
@@ -356,10 +356,10 @@ func (s *ChannelService) markFocusedRead(ctx context.Context, userID, channelID 
 	// that snapshot is two round trips old by now, and a mention raised for a
 	// newer message in the meantime would be cleared while last_message_id
 	// still pointed behind it — a badge that vanishes with nothing to
-	// recompute it (OC-0323). latestID is only ever used for the skip
+	// recompute it. latestID is only ever used for the skip
 	// decision above, which is a read, not a write — so a failed
 	// GetLatestMessageID (or GetReadState) must fall through to this write
-	// rather than skip it (OC-0436): the write is the load-bearing half, and
+	// rather than skip it: the write is the load-bearing half, and
 	// only the optimisation above it is allowed to depend on a successful read.
 	if wErr := s.st.MarkChannelReadAtLatest(ctx, userID, channelID); wErr != nil {
 		// Self-heals on the next focus, but a persistently failing write
@@ -373,7 +373,7 @@ func (s *ChannelService) markFocusedRead(ctx context.Context, userID, channelID 
 // mark_read, mark_unread): the channel must exist, and the caller must pass
 // permissions.CanAdmitSession, which is visibility, the same predicate behind
 // ListVisibleChannels, the ready payload and reconnect replay. A socket that
-// still holds an id it can no longer see (or an archived channel, OC-0070)
+// still holds an id it can no longer see (or an archived channel)
 // cannot resubscribe to the live topic or move its read state.
 func admitReadState(ctx context.Context, st Store, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
 	ch, err := st.GetChannel(ctx, channelID)
@@ -381,7 +381,7 @@ func admitReadState(ctx context.Context, st Store, perms *PermissionService, use
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	if ch.IsThread() {
-		// A thread is never a socket's focused channel (6.9c): it rides the
+		// A thread is never a socket's focused channel: it rides the
 		// second slot (thread_focus, AdmitThreadFocus), which a parent's
 		// visibility refresh also revokes.
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
@@ -397,7 +397,7 @@ func admitReadState(ctx context.Context, st Store, perms *PermissionService, use
 }
 
 // CheckActivityAllowed reports whether userID may publish a game activity
-// name (WP 8.3a). The name is text every member sees, so a timeout refuses
+// name. The name is text every member sees, so a timeout refuses
 // it with ErrTimedOut, like a custom status line; clearing one stays allowed
 // and needs no check.
 func (s *ChannelService) CheckActivityAllowed(ctx context.Context, userID int64) error {

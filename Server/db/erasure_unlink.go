@@ -27,7 +27,7 @@ func erasureUnlinkPrincipalRows(ctx context.Context, tx *sql.Tx, userID int64, s
 	return erasureUnlinkAppeals(ctx, tx, userID, subjectToken)
 }
 
-// erasureUnlinkAudit is the unlinkable integrity history (B4-10, BPR-053):
+// erasureUnlinkAudit is the unlinkable integrity history:
 // every audit row the subject appears in — as actor, or as a user target —
 // keeps its action, time and position but loses the id and its free-text
 // detail, and carries the deletion marker's token instead (NULL when the
@@ -51,15 +51,14 @@ func erasureUnlinkAudit(ctx context.Context, tx *sql.Tx, userID int64, subjectTo
 	return nil
 }
 
-// erasureUnlinkReports is B5-8's half of decision 7 (strengthened on
-// review): a report names two principals — the reporter and the subject —
+// erasureUnlinkReports is the reports' half of erasure: a report names two principals — the reporter and the subject —
 // each with its own bare-id-plus-token column, the same two-token shape
 // erasureUnlinkAudit applies to audit_log (migrations 038/041), for the same
 // reason: one erased principal must not overwrite the other's token.
 //
 // On the SUBJECT's erasure: every evidence row of every report about them,
 // and every evidence row they authored as context in someone else's report,
-// is hard-deleted — this is the half that keeps B4-9's signed exit condition
+// is hard-deleted — this is the half that keeps the erasure exit condition
 // true, a restored backup cannot resurrect the content. The reports row
 // itself SURVIVES, rewritten to id 0 plus the token, detail and target_ref
 // cleared, and — if still open — closed as subject_erased: an unlinkable
@@ -97,7 +96,7 @@ func erasureUnlinkReports(ctx context.Context, tx *sql.Tx, userID int64, subject
 		`DELETE FROM report_evidence WHERE report_id IN (SELECT id FROM reports WHERE subject_id = ?)`, userID); err != nil {
 		return fmt.Errorf("EraseAccount unlink report evidence about subject: %w", err)
 	}
-	// HP-5 review widening: the surviving outcome row must carry no content
+	// The surviving outcome row must carry no content
 	// of any kind, and internal notes about the subject are content the
 	// subject never even saw — they do not get to keep the moderator's own
 	// account of them either.
@@ -122,7 +121,7 @@ func erasureUnlinkReports(ctx context.Context, tx *sql.Tx, userID int64, subject
 	// 22b: the reporter's own reports are not their content, EXCEPT the
 	// free-text detail they personally wrote — that is the reporter's
 	// content just as much as the evidence snapshot is the subject's, so it
-	// is cleared alongside the principal columns (HP-5 review widening).
+	// is cleared alongside the principal columns.
 	// The report and its outcome (state/outcome/closed_at) are untouched.
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE reports SET reporter_id = 0, reporter_token = ?, detail = '' WHERE reporter_id = ?`, token, userID); err != nil {
@@ -138,7 +137,7 @@ func erasureUnlinkReports(ctx context.Context, tx *sql.Tx, userID int64, subject
 		`UPDATE reports SET assignee_id = 0 WHERE assignee_id = ?`, userID); err != nil {
 		return fmt.Errorf("EraseAccount unlink report assignment: %w", err)
 	}
-	// 22f: report_events (second Codex review) is metadata, not content — an
+	// 22f: report_events is metadata, not content — an
 	// action word, a time, an actor link — so unlinking the actor is the
 	// whole job, the same shape audit_log gets, and there is no row to
 	// delete or rewrite otherwise.
@@ -149,7 +148,7 @@ func erasureUnlinkReports(ctx context.Context, tx *sql.Tx, userID int64, subject
 	return nil
 }
 
-// erasureUnlinkModerationActions is B5-9's half of erasure, beside
+// erasureUnlinkModerationActions is the moderation actions' half of erasure, beside
 // erasureUnlinkReports: the SUBJECT's own rows cascade with the users DELETE
 // below (moderation_actions.target_id is ON DELETE CASCADE — S6 says a
 // warning or timeout row is deleted, not kept, unlike a report's outcome),
@@ -176,7 +175,7 @@ func erasureUnlinkModerationActions(ctx context.Context, tx *sql.Tx, userID int6
 	return nil
 }
 
-// erasureUnlinkAppeals is B5-10's half of erasure, beside
+// erasureUnlinkAppeals is the appeals' half of erasure, beside
 // erasureUnlinkModerationActions: the APPELLANT's own appeal rows cascade
 // with the users DELETE below (appeals.appellant_id is ON DELETE CASCADE —
 // S6-d says an appeal is deleted for the appellant, not kept, unlike a

@@ -1,11 +1,11 @@
 // Package netclass classifies IP addresses by how far they can be reached
 // from, and reports what a server can and cannot determine about its own
-// reachability from inside its own network (B6-6).
+// reachability from inside its own network.
 //
 // It opens no socket and resolves no name. That is a decision, not an
 // oversight: proving inbound reachability needs a helper outside the NAT, and
 // this repository already removed a probe that merely looked like one
-// (Server/internal/app/banner.go:98-100) because BPR-055's proof must not
+// (Server/internal/app/banner.go:98-100) because the reachability proof must not
 // contain an outbound connect at every start. TestReport_MakesNoOutboundCall
 // and TestNetclassImportsNoNetworkClient pin the absence.
 package netclass
@@ -15,7 +15,7 @@ import "net/netip"
 // Kind is how reachable an address is, from whose point of view.
 //
 // It is deliberately finer-grained than net/netip's own predicates, which
-// cannot express the two distinctions B6-6 turns on: netip.Addr.IsPrivate
+// cannot express the two distinctions this classifier turns on: netip.Addr.IsPrivate
 // reports false for 100.64.0.0/10 (carrier-grade NAT), and it reports true for
 // both RFC1918 and IPv6 unique-local, which need separate names because a
 // reader has to know which one they are looking at.

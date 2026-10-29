@@ -8,33 +8,33 @@ package permissions
 const (
 	SendMessages    = int64(0x0001)     // bit 0
 	ReadMessages    = int64(0x0002)     // bit 1
-	ManageConfig    = int64(0x0004)     // bit 2 — read and change the server's config overrides and restart it (WP 8.4d); owner tier
-	ManageUpdates   = int64(0x0008)     // bit 3 — check for and apply server updates (WP 8.4d); owner tier
-	ManageTokens    = int64(0x0010)     // bit 4 — mint, list and revoke the holder's own API tokens (WP 8.4d); owner tier
+	ManageConfig    = int64(0x0004)     // bit 2 — read and change the server's config overrides and restart it; owner tier
+	ManageUpdates   = int64(0x0008)     // bit 3 — check for and apply server updates; owner tier
+	ManageTokens    = int64(0x0010)     // bit 4 — mint, list and revoke the holder's own API tokens; owner tier
 	AttachFiles     = int64(0x0020)     // bit 5
 	AddReactions    = int64(0x0040)     // bit 6
-	IssueRecovery   = int64(0x0080)     // bit 7 — issue a recovery credential to a member ranked below the holder (WP 8.4d); owner tier
-	ViewDiagnostics = int64(0x0100)     // bit 8 — server logs, log level, support bundles and the attention panel (WP 8.4d); administrator tier
+	IssueRecovery   = int64(0x0080)     // bit 7 — issue a recovery credential to a member ranked below the holder; owner tier
+	ViewDiagnostics = int64(0x0100)     // bit 8 — server logs, log level, support bundles and the attention panel; administrator tier
 	ConnectVoice    = int64(0x0200)     // bit 9
 	SpeakVoice      = int64(0x0400)     // bit 10
 	UseVideo        = int64(0x0800)     // bit 11
 	ShareScreen     = int64(0x1000)     // bit 12
-	MoveMembers     = int64(0x2000)     // bit 13 — move any member between voice channels, whatever their rank (WP 8.4a); server-wide, outside AdminPerimeter
-	ManageBackups   = int64(0x4000)     // bit 14 — create, list and download database backups (WP 8.4c); holds more than the perimeter read surface, so owner-grant-only
-	RestoreBackups  = int64(0x8000)     // bit 15 — restore, delete and download backups and the full archive (WP 8.4d); owner tier
+	MoveMembers     = int64(0x2000)     // bit 13 — move any member between voice channels, whatever their rank; server-wide, outside AdminPerimeter
+	ManageBackups   = int64(0x4000)     // bit 14 — create, list and download database backups; holds more than the perimeter read surface, so owner-grant-only
+	RestoreBackups  = int64(0x8000)     // bit 15 — restore, delete and download backups and the full archive; owner tier
 	ManageMessages  = int64(0x10000)    // bit 16
 	ManageChannels  = int64(0x20000)    // bit 17
 	KickMembers     = int64(0x40000)    // bit 18
 	BanMembers      = int64(0x80000)    // bit 19
 	MuteMembers     = int64(0x100000)   // bit 20
 	MentionEveryone = int64(0x200000)   // bit 21
-	ModerateMembers = int64(0x400000)   // bit 22 — warn and time out members, work the report queue (B5-8/B5-9)
-	ManageNicknames = int64(0x800000)   // bit 23 — set or clear another member's nickname (WP 6.4); server-wide, outside AdminPerimeter
+	ModerateMembers = int64(0x400000)   // bit 22 — warn and time out members, work the report queue
+	ManageNicknames = int64(0x800000)   // bit 23 — set or clear another member's nickname; server-wide, outside AdminPerimeter
 	ManageRoles     = int64(0x1000000)  // bit 24
 	ManageServer    = int64(0x2000000)  // bit 25
 	ManageInvites   = int64(0x4000000)  // bit 26
 	ViewAuditLog    = int64(0x8000000)  // bit 27
-	EraseAccounts   = int64(0x10000000) // bit 28 — erase a member's account, whatever the Administrator bit says (WP 8.4d); administrator tier
+	EraseAccounts   = int64(0x10000000) // bit 28 — erase a member's account, whatever the Administrator bit says; administrator tier
 	Administrator   = int64(0x40000000) // bit 30 — bypasses all permission checks
 )
 
@@ -54,23 +54,22 @@ const AllPerms = SendMessages | ReadMessages | ManageConfig | ManageUpdates | Ma
 // does have an admin-panel page (the Invites section), but that page reaches
 // the invites through the member API (/api/v1/invites, gated on the same bit),
 // so holding ManageInvites alone must not open the /admin/api perimeter.
-// ModerateMembers is deliberately excluded too (B5-8 plan, decision 6/Question
-// 5): a warning-only moderator must not inherit the perimeter's read surface
+// ModerateMembers is deliberately excluded too: a warning-only moderator must not inherit the perimeter's read surface
 // (/stats, the /users list, /me), which re-checks nothing by design — the
 // report queue lives under /api/v1, not /admin/api.
 //
-// ManageBackups is inside it (WP 8.4c) because a holder has to reach /admin/api
+// ManageBackups is inside it because a holder has to reach /admin/api
 // at all to use the backup routes. The backup itself holds far more than the
 // perimeter's read surface (every message and every password hash), which is
 // why the bit is owner-grant-only.
 //
-// The seven owner-type bits (WP 8.4d) are inside it for the same reason: a
+// The seven owner-type bits are inside it for the same reason: a
 // holder has to reach /admin/api at all to use the routes the bit opens.
 const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
 	ManageServer | ViewAuditLog | KickMembers | BanMembers | MuteMembers | ManageBackups |
 	OwnerTierBits | AdministratorTierBits
 
-// OwnerTierBits are the owner-type bits (WP 8.4d) whose actions were
+// OwnerTierBits are the owner-type bits whose actions were
 // owner-only before they were bits: restoring and deleting backups and the
 // full archive, the config overrides and restart, updates, API tokens and
 // recovery credentials. The gate is the owner or the bit held explicitly;
@@ -79,7 +78,7 @@ const AdminPerimeter = Administrator | ManageChannels | ManageRoles |
 // every default Admin the owner's powers on upgrade.
 const OwnerTierBits = RestoreBackups | ManageConfig | ManageUpdates | ManageTokens | IssueRecovery
 
-// AdministratorTierBits are the owner-type bits (WP 8.4d) whose actions an
+// AdministratorTierBits are the owner-type bits whose actions an
 // Administrator already had: server diagnostics and account erasure.
 // Administrator keeps passing them, and the bit lets a role without
 // ADMINISTRATOR do just that.
@@ -93,7 +92,7 @@ const OwnerGrantOnly = MoveMembers | ManageBackups | OwnerTierBits | Administrat
 
 // OwnerOnlyGrant is the subset of OwnerGrantOnly that only the owner may add
 // to or remove from a role or an override, or hand out by assigning a role
-// that carries it (WP 8.4d). An Administrator is not enough: otherwise an
+// that carries it. An Administrator is not enough: otherwise an
 // Administrator could create a role with an owner-tier bit and give it to
 // themself, which the owner tier's no-bypass rule exists to prevent.
 const OwnerOnlyGrant = OwnerTierBits
@@ -161,7 +160,7 @@ const OwnerRolePosition = 100
 // (OwnerRoleID) is accepted too, so a database whose positions were edited by
 // hand still recognizes the real owner. This is the one predicate for "is the
 // owner"; every call site asking the question calls it instead of comparing
-// role.ID or role.Position itself (OC-0405).
+// role.ID or role.Position itself.
 func IsOwner(roleID int64, position int) bool {
 	return roleID == OwnerRoleID || position >= OwnerRolePosition
 }

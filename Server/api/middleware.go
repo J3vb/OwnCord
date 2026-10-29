@@ -130,7 +130,7 @@ func resolvePrincipal(ctx context.Context, sessions *service.SessionService, tou
 	case errors.Is(err, auth.ErrTokenExpired):
 		// Clean up the expired login session once the response is written.
 		// With the server's batch installed this only queues the delete for
-		// the connection-writes flush, so no goroutine is spawned (ARCH-034);
+		// the connection-writes flush, so no goroutine is spawned;
 		// without one (tests, the token CLI) it deletes inline, bounded. The
 		// ctx is detached: the delete must not die with the finished request.
 		cleanup := func() {
@@ -262,7 +262,7 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 	if len(trustedProxies) > 0 {
 		proxies = trustedProxies[0]
 	}
-	proxyNets := parseCIDRList(proxies) // W3-3a: parse once at construction
+	proxyNets := parseCIDRList(proxies) // parse once at construction
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ip := clientIPWithProxies(r, proxyNets)
@@ -297,7 +297,7 @@ func clientIP(r *http.Request) string {
 }
 
 // clientIPWithProxies returns the real client IP for rate-limiting purposes.
-// Since SRE-11 the algorithm itself lives in the clientip package, because
+// The algorithm itself lives in the clientip package, because
 // the WebSocket handshake needs the identical resolution and ws cannot import
 // api. The behaviour is unchanged; api/clientip_test.go still pins it.
 func clientIPWithProxies(r *http.Request, trustedNets []*net.IPNet) string {
@@ -307,7 +307,7 @@ func clientIPWithProxies(r *http.Request, trustedNets []*net.IPNet) string {
 // parseCIDRList parses CIDR strings into networks, skipping invalid entries
 // with a warning — a misconfigured entry must not take the server down. It is
 // called once per middleware/handler at construction (startup), never on the
-// request path (W3-3a).
+// request path.
 func parseCIDRList(cidrs []string) []*net.IPNet {
 	for _, c := range cidrs {
 		if _, _, err := net.ParseCIDR(c); err != nil {
@@ -331,9 +331,9 @@ func ipInNets(ipStr string, nets []*net.IPNet) bool {
 //
 // trustedProxyCIDRs specifies which connecting IPs are trusted reverse proxies.
 // When the connecting IP matches a trusted proxy, the real client IP is read
-// from X-Real-IP or X-Forwarded-For headers (BUG-116).
+// from X-Real-IP or X-Forwarded-For headers.
 //
-// Both lists are parsed once at construction (W3-3a); invalid entries are
+// Both lists are parsed once at construction; invalid entries are
 // skipped with a warning. A non-empty allowedCIDRs list whose entries are all
 // invalid yields zero networks — nothing matches, so access is denied (fail
 // closed), same as before the hoist.

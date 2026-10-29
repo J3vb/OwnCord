@@ -224,7 +224,7 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 
 // patchUserApplyRole commits the role half of the PATCH; ModerationService
 // invalidates the target's cached permissions and fans the change out to
-// connected clients (WP 5.1a). A request without role_id is a no-op. It reports
+// connected clients. A request without role_id is a no-op. It reports
 // whether the handler may continue; on false it has already written the error
 // response.
 func patchUserApplyRole(w http.ResponseWriter, r *http.Request, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
@@ -268,8 +268,8 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *servic
 		// if that role change was then refused (missing MANAGE_ROLES, or the
 		// new role outranks the actor), the handler reported the whole
 		// request as failed while the target was in fact banned, audited,
-		// and already dropped from every connected client's member list
-		// (OC-0215). Running every ChangeUserRole precondition up front,
+		// and already dropped from every connected client's member list.
+		// Running every ChangeUserRole precondition up front,
 		// before either mutation lands, keeps the PATCH all-or-nothing from
 		// the caller's perspective.
 		if !patchUserAuthorizeRole(w, r, mod, actor, id, req) {
@@ -360,7 +360,7 @@ func writeMemberRoleErr(w http.ResponseWriter, err error) {
 }
 
 // handleMemberRole serves PUT and DELETE {base}/{id}/roles/{roleId}: add or
-// remove one role of a member without touching the others (WP 6.3c). The route
+// remove one role of a member without touching the others. The route
 // is perimeter-level like PATCH; ModerationService enforces MANAGE_ROLES, the
 // actor-outranks-target rule and the assign-below-own-rank rule, owns the
 // cache invalidation and live fan-out, and writes the role_add/role_remove
@@ -395,7 +395,7 @@ func handleMemberRole(mod *service.ModerationService, add bool) http.HandlerFunc
 	}
 }
 
-// handleDeleteUser erases the target account (B4-9). The route is gated on
+// handleDeleteUser erases the target account. The route is gated on
 // ADMINISTRATOR; ModerationService additionally enforces the
 // actor-outranks-target hierarchy, refuses the last admin-class account and
 // writes the audit row. On success every connected client gets the same

@@ -11,8 +11,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// The per-user upload byte counter and the reserved-headroom floor (B5-2,
-// plan decision 11, SEC-04). The rows in `attachments` are the truth; the
+// The per-user upload byte counter and the reserved-headroom floor.
+// The rows in `attachments` are the truth; the
 // `user_storage` counter is the cached aggregate the upload path admits
 // against. Its safety under concurrency and restart rests on three rules:
 //
@@ -117,7 +117,7 @@ func (s *UploadService) MaxUploadBytes() int64 {
 // under-counts what the volume holds and over-admits. A statfs is
 // microseconds, and the DB charge has to be inside anyway (see reserve). A
 // backup no longer queues that charge: it runs on the reader pool, not the
-// writer (SRV-02, which is what satisfies PERF-10). No floor or a failed
+// writer. No floor or a failed
 // probe is "unknown", never "full", and fits.
 //
 // Addition only: free is unsigned and a subtraction wraps exactly when the

@@ -39,11 +39,11 @@ type RetentionStore interface {
 	ListChannels(ctx context.Context) ([]db.Channel, error)
 }
 
-// RetentionMinDays is the smallest window the policy accepts (owner
-// decision 4). RetentionMaxDays mirrors db.RetentionMaxDays — one source,
+// RetentionMinDays is the smallest window the policy accepts.
+// RetentionMaxDays mirrors db.RetentionMaxDays — one source,
 // since the db package's read paths (ServerRetentionDays, RetentionWindows)
 // must fail closed on the identical ceiling this write-side check enforces,
-// and a copy here could drift from it silently (OC-0393).
+// and a copy here could drift from it silently.
 const RetentionMinDays = 1
 
 const RetentionMaxDays = db.RetentionMaxDays
@@ -57,7 +57,7 @@ const (
 )
 
 // ErrRetentionDMChannel is returned for a policy on a DM channel: DMs are
-// never in scope (owner decision 4).
+// never in scope.
 var ErrRetentionDMChannel = errors.New("retention does not apply to direct messages")
 
 // RetentionHub is what the sweep needs from the WebSocket hub: the replay
@@ -66,15 +66,15 @@ type RetentionHub interface {
 	PurgeMessagesFromReplay(ctx context.Context, ids []int64) error
 }
 
-// RetentionService is the message-retention policy and its sweep (B4-11,
-// BPR-054): indefinite by default, a server-wide window in settings, a
+// RetentionService is the message-retention policy and its sweep:
+// indefinite by default, a server-wide window in settings, a
 // per-channel override in either direction, pinned messages exempt, DMs
-// never in scope, no hold mechanism (owner decision 5). Each sweep
+// never in scope, no hold mechanism. Each sweep
 // hard-deletes past-window messages with the erasure's mechanics (mention
 // reversal, FTS via trigger, attachment rows), journals the files in
 // retention_runs and removes them after commit, and records a
 // messages-scoped deletion marker per channel so a restored backup is
-// swept again to the same cutoff (HP-4 decision 6).
+// swept again to the same cutoff.
 type RetentionService struct {
 	previewKey [32]byte
 	mu         syncutil.Mutex
@@ -194,7 +194,7 @@ type RetentionPreview struct {
 }
 
 // Preview reports, per channel with an effective window, how many messages
-// the next sweep would remove — the owner-facing "would delete N" (BG-12).
+// the next sweep would remove — the owner-facing "would delete N".
 func (s *RetentionService) Preview(ctx context.Context) ([]RetentionPreview, error) {
 	windows, err := s.st.RetentionWindows(ctx)
 	if err != nil {
@@ -304,7 +304,7 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 // sweepRun is the mutable state one retention run accumulates as Tick or a
 // marker-replay pass sweeps channels into it in batches: the budget left,
 // the run's row (runID is 0 until something needs journaling — a pass that
-// removes nothing never opens one, OC-0396's no-op-boot half), the totals
+// removes nothing never opens one), the totals
 // and file names journaled so far, and any replay purges a failed purge
 // left pending for the next tick.
 type sweepRun struct {
@@ -477,8 +477,8 @@ func (s *RetentionService) resumeRuns(ctx context.Context) error {
 	return firstErr
 }
 
-// ReplayMarkers re-applies the messages-scoped deletion markers at start-up
-// (HP-4 decision 6): a restored backup holding messages older than a
+// ReplayMarkers re-applies the messages-scoped deletion markers at start-up:
+// a restored backup holding messages older than a
 // channel's recorded cutoff loses them again, files included. Returns the
 // number of messages removed.
 func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
@@ -507,7 +507,7 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 			// and finished before the next pass opens. However large the
 			// backlog behind the marker, the whole thing is still removed by
 			// the time this loop returns — only one pass' worth of ids and
-			// file names is ever held in memory at a time (OC-0396).
+			// file names is ever held in memory at a time.
 			run := &sweepRun{budget: RetentionTickBudget}
 			removed, exhausted, sweepErr := s.sweepChannel(ctx, run, channelID, t)
 			total += removed

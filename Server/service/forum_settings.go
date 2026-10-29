@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Forum settings and tags (WP 6.9d-a1) ───────────────────────────────────
+// ─── Forum settings and tags ───────────────────────────────────
 //
 // A forum's settings are the require-tag flag, the default auto-archive period
 // its posts start with, and its tag list. They are written as one whole value

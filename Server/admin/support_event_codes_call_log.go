@@ -1,7 +1,7 @@
 package admin
 
 func init() {
-	// DM call log worker (WP 3B-9).
+	// DM call log worker.
 	supportEventCodes["call log: list open calls"] = "call_log_list_open_calls"
 	supportEventCodes["call log: reconcile"] = "call_log_reconcile"
 	supportEventCodes["call log: delivery targets"] = "call_log_delivery_targets"

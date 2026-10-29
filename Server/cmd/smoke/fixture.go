@@ -20,7 +20,7 @@ import (
 
 // The fixture turns a bare server into an install an owner would recognise —
 // an owner account, an uploaded attachment, a database backup — because
-// "the new binary boots" is not the question B6-8 asks. The question is
+// "the new binary boots" is not the question an upgrade check asks. The question is
 // whether an upgrade preserves what was already there, and nothing that a
 // cold boot creates by itself can answer it.
 

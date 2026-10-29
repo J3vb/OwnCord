@@ -17,8 +17,8 @@ import (
 //
 // seedHubReplayState runs unconditionally (whenever hub is non-nil), NOT
 // gated on cfg.EventPersistence.Enabled: it seeds the hub's seq counter from
-// a persisted floor even in ring-buffer-only mode, which is what closes
-// OC-0210 — see its doc comment.
+// a persisted floor even in ring-buffer-only mode, which closes the
+// restarted-sequence problem — see its doc comment.
 func startEventPersister(bgCtx context.Context, log *slog.Logger, cfg *config.Config, hub *ws.Hub, database *db.DB) (*ws.EventPersister, <-chan struct{}) {
 	if hub == nil {
 		return nil, nil
@@ -97,7 +97,7 @@ func stopAuditWriter(ctx context.Context, auditWriter *db.AuditWriter) {
 const wsSeqFloorSettingKey = db.WSSeqFloorSettingKey
 
 // wsSeqFloorReserve is the block seedHubSeqFloor reserves above the persisted
-// floor on every single boot (OC-0210). It only has to exceed the number of
+// floor on every single boot. It only has to exceed the number of
 // hub-sequenced broadcasts any one boot could plausibly emit before its own
 // next restart — comfortably true at 1e9 for a self-hosted chat server — so
 // this leaves an enormous safety margin while uint64's range still allows
@@ -111,8 +111,8 @@ const wsSeqFloorReserve = db.WSSeqFloorReserve
 //
 //  1. seedHubSeqFloor (below) reserves and persists a fresh block of seq
 //     space on every boot, regardless of whether event persistence is
-//     enabled. This is what closes OC-0210: previously this function did
-//     nothing at all when event_persistence.enabled is false (the
+//     enabled. This is what closes the restarted-sequence problem: previously
+//     this function did nothing at all when event_persistence.enabled is false (the
 //     documented "ring-buffer-only behaviour", config.go's
 //     EventPersistenceConfig.Enabled), so every boot's h.seq — and
 //     therefore its ring buffer's first entries — started back at 0/1. A
@@ -162,7 +162,7 @@ func seedHubReplayState(ctx context.Context, hub *ws.Hub, database *db.DB, log *
 }
 
 // seedHubSeqFloor reserves and persists a fresh block of the hub's sequence
-// space on every boot, independent of event persistence (OC-0210) — see
+// space on every boot, independent of event persistence — see
 // seedHubReplayState's doc for why this is what actually closes the bug. A
 // read or write failure against the settings table is logged rather than
 // fatal: the sidecar beside the database still carries the floor, and when

@@ -38,7 +38,7 @@ type ChannelPrivacySnapshot struct {
 }
 
 // PrivateOf reports whether the channel row is private in this snapshot. A
-// thread has no override of its own (WP 6.9c), so it is judged on its parent's.
+// thread has no override of its own, so it is judged on its parent's.
 // It is the only exported verdict: the snapshot keys overrides by parent and
 // ordinary channel ids, so a bare id could be a thread and be judged public.
 func (s ChannelPrivacySnapshot) PrivateOf(ch *db.Channel) bool {

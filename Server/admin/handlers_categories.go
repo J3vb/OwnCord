@@ -8,7 +8,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Channel category handlers (WP 6.5a) ─────────────────────────────────────
+// ─── Channel category handlers ─────────────────────────────────────
 //
 // Thin adapters over service.ChannelService's category operations, mounted by
 // mountChannelActionRoutes behind MANAGE_CHANNELS on both channel mounts. A

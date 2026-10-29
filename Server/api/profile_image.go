@@ -15,7 +15,7 @@ type imageLimits struct {
 	MaxBytes int64
 	MaxW     int
 	MaxH     int
-	// AllowGIF admits image/gif next to PNG, JPEG and WebP (WP 8.7). The
+	// AllowGIF admits image/gif next to PNG, JPEG and WebP. The
 	// client shows an animated picture as its first frame until hovered, so
 	// only the surfaces that do that accept one.
 	AllowGIF bool
@@ -28,7 +28,7 @@ var avatarImageLimits = imageLimits{Label: "avatar", MaxBytes: maxAvatarFileByte
 // still-only and the pre-8.7 byte cap.
 var groupIconImageLimits = imageLimits{Label: "avatar", MaxBytes: maxGroupIconFileBytes, MaxW: maxAvatarDimension, MaxH: maxAvatarDimension}
 
-// bannerImageLimits are the profile banner limits (WP 6.11b, 8.7).
+// bannerImageLimits are the profile banner limits.
 var bannerImageLimits = imageLimits{Label: "banner", MaxBytes: maxBannerFileBytes, MaxW: maxBannerWidth, MaxH: maxBannerHeight, AllowGIF: true}
 
 // allows reports whether mimeType (sniffed) is a type lim accepts.

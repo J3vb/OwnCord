@@ -45,7 +45,7 @@ type ConnWrites struct {
 	stamps  map[int64]bool      // user ID -> connected; the latest stamp wins
 	// apiTouches are API-token hashes used since the last touch flush, and
 	// discards are expired-session hashes whose row the REST middleware wants
-	// deleted (ARCH-034). Both are queued from request goroutines, so no
+	// deleted. Both are queued from request goroutines, so no
 	// request spawns a goroutine or issues a write of its own; a hash queued
 	// a thousand times is written once per flush.
 	apiTouches map[string]struct{}

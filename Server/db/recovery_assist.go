@@ -12,7 +12,7 @@ import (
 )
 
 // RecoveryAssist is the server's whole knowledge of an owner-issued recovery
-// credential (B4-6): an argon2id verifier, who issued it, the fixed wording
+// credential: an argon2id verifier, who issued it, the fixed wording
 // of how the person was verified, and when it expires.
 type RecoveryAssist struct {
 	UserID       int64

@@ -1,11 +1,11 @@
 package ws
 
-// voice_grace.go — RT-8: the reconnect grace window.
+// voice_grace.go — the reconnect grace window.
 //
 // A clean close ends the read loop before a replacement socket arrives: a
 // Wi-Fi roam, a VPN reconnect or a NAT rebind resets the TCP path and the
 // server observes the close, while the LiveKit media path — an independent
-// UDP flow — was never interrupted. The pre-RT-8 teardown ran
+// UDP flow — was never interrupted. The teardown before the grace window ran
 // handleVoiceLeave on that close unless a replacement had ALREADY registered
 // (serve_pumps.go), so a blip shorter than the reconnect race dropped the
 // call and forced a manual rejoin plus a fresh key exchange for the room.
@@ -19,7 +19,7 @@ package ws
 // finishVoiceLeave the immediate path used, so the invariant is unchanged.
 //
 // Only a completed join is parked: an incomplete one (a join committed to the
-// DB but still racing its own supersession guards, OC-0270) has no delivered
+// DB but still racing its own supersession guards) has no delivered
 // membership to preserve, so it is left immediately.
 
 import (
@@ -31,7 +31,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// voiceGraceWindow is RT-8's reconnect grace (see the file comment). 15 s
+// voiceGraceWindow is the reconnect grace (see the file comment). 15 s
 // covers a typical roam and stays well under the 60 s stale sweep, so the
 // sweep's backstop still reaps a membership whose client never returns. A var
 // so tests can shrink it (the staleClientTimeout / pingInterval pattern).
@@ -333,7 +333,7 @@ func (h *Hub) dropOrphanVoiceGrace(ctx context.Context, userID int64) {
 	}
 }
 
-// inherit is registerNow's RT-8 step: a resuming socket (lastSeq > 0)
+// inherit is registerNow's grace-window step: a resuming socket (lastSeq > 0)
 // inherits the voice membership its previous socket parked in the grace window
 // when it dropped, so a short network blip keeps the call instead of ending it.
 // The parked snap carries the completed join's token and E2EE key; adopting it

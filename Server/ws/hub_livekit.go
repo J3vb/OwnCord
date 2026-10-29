@@ -50,6 +50,6 @@ func (h *Hub) LiveKitManaged() bool {
 	return h.lkProcess != nil
 }
 
-// The LiveKit process manager arrives via HubOptions.LiveKitProcess (B3-4);
+// The LiveKit process manager arrives via HubOptions.LiveKitProcess;
 // its only hub consumer is the voice_join guard reading IsRunning to fail
 // closed while the supervised SFU is down.

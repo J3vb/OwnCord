@@ -175,7 +175,7 @@ func (ps *PubSub) Publish(topic Topic, msg []byte, excludeUserID int64) int {
 	return ps.publishWithPriority(topic, msg, excludeUserID, PriorityNormal, nil)
 }
 
-// PublishFiltered is Publish narrowed to subscribers allow approves (B5-7's
+// PublishFiltered is Publish narrowed to subscribers allow approves (the
 // NSFW gate): the subscriber list is read fresh, right here, under whatever
 // lock the caller already holds — never a list resolved earlier and handed
 // in, which is exactly what would go stale across a concurrent reconnect.
