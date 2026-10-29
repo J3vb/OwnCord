@@ -56,7 +56,7 @@ pub struct HttpProxyState {
     /// Hosts already reported as pinned this app session. Every fresh upstream
     /// connection re-runs the TOFU check, so a trusted outcome would otherwise
     /// emit a `cert-tofu` event (and the webview a log line) once per
-    /// connection. CLI-04(a): emit the trusted event for a host once
+    /// connection: emit the trusted event for a host once
     /// until a `first_use` or `mismatch` is emitted for it, which clears the
     /// claim. Those actionable statuses are never gated — the first-use ceremony
     /// must be able to prompt again after the user dismisses it.
@@ -335,7 +335,7 @@ async fn handle_connection<R: Runtime>(
 /// precise signal the websocket path uses (`ws_proxy::is_tls_failure`). A
 /// handshake timeout, a reset, or a clean EOF means the host may simply be
 /// unreachable, so it keeps the generic offline path rather than telling the
-/// user its certificate could not be verified (DP-54 follow-up).
+/// user its certificate could not be verified.
 fn is_tls_handshake_failure(error: &(dyn std::error::Error + 'static)) -> bool {
     error
         .downcast_ref::<std::io::Error>()
@@ -411,7 +411,7 @@ async fn connect_verified<R: Runtime>(
     match outcome {
         // A routine public-CA renewal was re-pinned by evaluate: as trusted.
         TofuOutcome::Trusted | TofuOutcome::Renewed { .. } => {
-            // CLI-04(a): one trusted event per host until its status changes.
+            // One trusted event per host until its status changes.
             // Each fresh connection re-runs this check, so without the gate a
             // busy server emits (and the webview logs) one line per new
             // connection. Unmanaged state (a test harness) reports every time.
@@ -591,7 +591,7 @@ mod tests {
         );
     }
 
-    // DP-54 follow-up: a rustls rejection (bad certificate, protocol error)
+    // A rustls rejection (bad certificate, protocol error)
     // reaches here as an `io::Error` of kind `InvalidData` and must be a
     // certificate failure, but a handshake timeout, a reset or a clean EOF
     // means the host may simply be unreachable, so it keeps the generic
@@ -747,10 +747,10 @@ mod tests {
         );
     }
 
-    // OC-0218 note: the copy_with_deadline stall test lives in
+    // The copy_with_deadline stall test lives in
     // proxy_common.rs now, next to the shared helper.
 
-    // CLI-04(a): the trusted `cert-tofu` report is one per host until a
+    // The trusted `cert-tofu` report is one per host until a
     // first_use or mismatch for that host clears the claim.
     // A busy server's every REST call re-runs the TOFU check on its own tunnel
     // connection, and a report per call is the log noise the item named.

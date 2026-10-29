@@ -135,7 +135,7 @@ function navigableChannelIds(unreadOnly: boolean): number[] {
 }
 
 /**
- * DP-35: Alt+↑/↓ moves to the previous or next channel, Alt+Shift+↑/↓ to the
+ * Alt+↑/↓ moves to the previous or next channel, Alt+Shift+↑/↓ to the
  * previous or next unread channel. `direction` is 1 (down/next) or -1
  * (up/previous); the steps wrap at the ends, matching Discord.
  *

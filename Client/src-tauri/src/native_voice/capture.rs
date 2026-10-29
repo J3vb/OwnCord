@@ -1061,7 +1061,7 @@ mod tests {
         assert!(out.iter().any(|s| s.abs() > 0.01), "the audio is present");
     }
 
-    /// DP-30: push-to-talk's gate keeps the capture and its processing
+    /// Push-to-talk's gate keeps the capture and its processing
     /// running but sends exact silence while closed, so a press needs no
     /// device reopen and nothing of the room leaks while the key is up.
     #[test]

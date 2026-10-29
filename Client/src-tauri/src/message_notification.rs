@@ -29,7 +29,7 @@
 //! notification with no target) stays on the plugin.
 //!
 //! A ringing call's notification is tagged by its channel, and
-//! `clear_call_notification` removes it when the ring ends (D-13): from Action
+//! `clear_call_notification` removes it when the ring ends: from Action
 //! Center on Windows, from the notification server on Linux. On macOS that
 //! command is a no-op.
 
@@ -116,7 +116,7 @@ pub fn notify_message<R: Runtime>(
 }
 
 /// Withdraw the ringing call notification for `channel_id` once the ring has
-/// ended, so Action Center does not keep offering a call that is over (D-13).
+/// ended, so Action Center does not keep offering a call that is over.
 #[tauri::command(async)]
 pub fn clear_call_notification<R: Runtime>(
     app: AppHandle<R>,
@@ -533,7 +533,7 @@ mod tests {
 
     #[test]
     fn a_ringing_call_toast_carries_a_tag_derived_from_the_channel() {
-        // D-13: the tag is what lets the toast be withdrawn from Action Center
+        // The tag is what lets the toast be withdrawn from Action Center
         // once the ring ends (`clear_call_notification` removes the same tag).
         let call = MessageTarget {
             host: "h".into(),

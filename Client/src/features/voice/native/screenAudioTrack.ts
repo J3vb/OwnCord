@@ -7,7 +7,7 @@
 // `stop()` releases the host side, and `mediaStreamTrack` is only the key the
 // shared `unpublishManualTrack` passes to `NativeRoom.unpublishTrack`.
 //
-// Lifecycle (B7-11): the shared screen-share state owns the track and stops it
+// Lifecycle: the shared screen-share state owns the track and stops it
 // on disable/leave; `NativeRoom` also stops it when the share's capture ends
 // and when it disconnects. stop() is idempotent and calls `onStop` once.
 

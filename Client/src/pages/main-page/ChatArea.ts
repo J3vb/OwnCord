@@ -69,7 +69,7 @@ export interface ChatAreaResult {
   readonly closePinnedPanel: () => void;
   /** Open the pinned-messages panel; a no-op when it is already open. */
   readonly openPinnedPanel: () => Promise<void>;
-  /** Where a thread's side panel mounts, beside the chat area (WP 6.9c). */
+  /** Where a thread's side panel mounts, beside the chat area. */
   readonly threadSlot: HTMLDivElement;
   /** Slot for the DM profile sidebar (right panel, sibling of chat area). */
   readonly dmProfileSlot: HTMLDivElement;
@@ -138,8 +138,8 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     searchCtrl.cleanup();
   });
 
-  // A channel that becomes gated takes its content out of the overlays
-  // (B9-7), mounted or not: the pins panel outlives a channel switch and a
+  // A channel that becomes gated takes its content out of the overlays,
+  // mounted or not: the pins panel outlives a channel switch and a
   // server-wide search spans every channel.
   let knownChannels = channelsStore.getState().channels;
   unsubscribers.push(
@@ -209,7 +209,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   });
 
   // --- Video grid ---
-  // The grid's code loads on first use (O-6c); the proxy answers until then.
+  // The grid's code loads on first use; the proxy answers until then.
   const videoGrid = createLazyVideoGrid();
   videoGrid.mount(videoGridSlot);
   children.push(videoGrid);

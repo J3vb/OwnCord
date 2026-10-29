@@ -1,9 +1,9 @@
 // Voice E2EE peer state and verification — extracted from livekitE2EE.ts.
 // Owns what this client knows about each peer: the ECDH public keys, the
 // per-peer membership generations that invalidate work for a departed peer,
-// the retired keys that block announce replay (OC-0011), the announces queued
-// before our keypair was ready and the ones blocked on a TOFU mismatch
-// (OC-0212), and the F3 TOFU verification that decides whether an announce is
+// the retired keys that block announce replay, the announces queued
+// before our keypair was ready and the ones blocked on a TOFU mismatch,
+// and the TOFU verification that decides whether an announce is
 // accepted and which status the voice panel shows. The session generation
 // stays owned by E2EEManager; this module reads it through E2EEPeerStateDeps.
 import {
@@ -48,7 +48,7 @@ export class E2EEPeerState {
    *  (base64), indexed by userId. A signed announce carries no channel/epoch/
    *  nonce (F3), so a validly-signed announce replays cleanly — this blocks a
    *  replay of a key we already moved a peer off of from overwriting their
-   *  current live key (OC-0011). */
+   *  current live key. */
   private _retiredPeerKeys: Map<number, Set<string>> = new Map();
   /** Announces that arrived before our ECDH keypair was ready. Drained after keypair init. */
   private _pendingAnnounces: PendingAnnounce[] = [];
@@ -61,8 +61,8 @@ export class E2EEPeerState {
   private _stagedChannelId: number | null = null;
   /** Announce that verifyPeerAnnounce rejected as a TOFU pin mismatch, keyed
    *  by userId — buffered so a subsequent successful rePinPeerIdentity can
-   *  replay it instead of leaving the recovery a no-op for the live call
-   *  (OC-0212): a mid-call peer never re-announces on its own, so nothing
+   *  replay it instead of leaving the recovery a no-op for the live call:
+   *  a mid-call peer never re-announces on its own, so nothing
    *  else would re-run verification against the freshly-stored pin. At most
    *  one entry per peer; a later mismatch (or a later legitimate announce)
    *  simply overwrites the previous one. Cleared in clearState(). */
@@ -239,7 +239,7 @@ export class E2EEPeerState {
       : ({ status: "unpinned" } as const);
     if (!isCurrent()) return false;
 
-    // Fail closed when the pin store could not be read (DC-08): with the pin
+    // Fail closed when the pin store could not be read: with the pin
     // unknown, this peer might be pinned to a different key — proceeding down
     // the first-sight path would verify against, and then RE-PIN, whatever key
     // the server delivered. Reject the announce and surface the distinct
@@ -263,7 +263,7 @@ export class E2EEPeerState {
     // Pinned peer whose delivered key the server stopped sending. There is no
     // key to verify against or re-pin, so block until the user re-pins.
     if (pin !== null && !publishedIdentity) {
-      // Buffer this announce (OC-0212) so a successful rePinPeerIdentity can
+      // Buffer this announce so a successful rePinPeerIdentity can
       // replay it: a mid-call peer never re-announces on its own, so without
       // this, re-pinning writes a new pin that nothing ever verifies the
       // peer's key against, leaving them un-keyed for the rest of the call.
@@ -289,7 +289,7 @@ export class E2EEPeerState {
     // user notified once.
     const keyChanged = pin !== null && !!publishedIdentity && !trusted.includes(publishedIdentity);
 
-    // Fingerprint of the ephemeral key this announce carries (OC-0003). Every
+    // Fingerprint of the ephemeral key this announce carries. Every
     // accepted peer gets one — for an unverified peer it is the only value
     // that can be compared out of band, since there is no identity key.
     const sessionFingerprint = await computeRawKeyFingerprint(rawFromBase64(publicKeyBase64));
@@ -319,7 +319,7 @@ export class E2EEPeerState {
     if (!ok) {
       // Fail closed: peer has an identity key but no valid signature (MITM).
       // Buffered like the missing-key block so a re-pin replays and
-      // re-verifies it rather than clearing the badge (OC-0212).
+      // re-verifies it rather than clearing the badge.
       if (isCurrent())
         this._blockedAnnounces.set(userId, {
           publicKeyBase64,

@@ -33,7 +33,7 @@ export interface ReadyCapabilityFlags {
 let caps: ReadyCapabilityFlags | null = null;
 
 /**
- * The game activity switch the server last stated (WP 8.3e-2), from
+ * The game activity switch the server last stated, from
  * `auth_ok.game_activity_policy` or the `game_activity_policy` frame; null
  * until it states one (an older server never does). It outranks
  * `caps.game_activity`, which only says what the server understood at the last
@@ -61,7 +61,7 @@ export function hasReceivedReady(): boolean {
 }
 
 /**
- * Whether the server keeps a read pointer (WP 3D-5): focus without marking
+ * Whether the server keeps a read pointer: focus without marking
  * read, `mark_read` by message id, `mark_unread` and `read_state`. False keeps
  * today's behaviour: mark on focus and on switch, a count-based NEW line.
  */
@@ -70,7 +70,7 @@ export function readPointerEnabled(): boolean {
 }
 
 /**
- * Whether the server keeps private profile notes (WP 6.11a): `GET` and `PUT`
+ * Whether the server keeps private profile notes: `GET` and `PUT`
  * `/users/me/notes/{userId}`. False keeps today's behaviour: the note lives in
  * `localStorage` on this device only.
  */
@@ -79,7 +79,7 @@ export function userNotesEnabled(): boolean {
 }
 
 /**
- * Whether the server keeps a profile banner (WP 6.11b): an uploaded image
+ * Whether the server keeps a profile banner: an uploaded image
  * and/or a colour. False hides every banner control. True does not promise the
  * upload route exists: a server with attachment storage off advertises it too
  * and answers the upload with 404.
@@ -89,7 +89,7 @@ export function profileBannersEnabled(): boolean {
 }
 
 /**
- * Whether the server stores the two direct message privacy settings (WP 6.8b):
+ * Whether the server stores the two direct message privacy settings:
  * `GET` and `PUT` `/users/me/privacy`. False hides Settings > Safety > Direct
  * messages.
  */
@@ -98,7 +98,7 @@ export function dmPrivacyEnabled(): boolean {
 }
 
 /**
- * Whether the server understands polls (WP 6.9b): `poll_create`, `poll_vote`
+ * Whether the server understands polls: `poll_create`, `poll_vote`
  * and `poll_end`, and the `poll_update` it sends. False hides the composer's
  * Poll button; a poll message that still arrives is drawn as its fallback text
  * only by a client that predates this, and as a card by this one.
@@ -108,7 +108,7 @@ export function pollsEnabled(): boolean {
 }
 
 /**
- * Whether the server has custom stickers (WP 8.8): `sticker_id` on `chat_send`,
+ * Whether the server has custom stickers: `sticker_id` on `chat_send`,
  * `sticker` on messages, `sticker_update` and `/api/v1/stickers`. False hides
  * the composer's sticker button and the Stickers tab; nothing is fetched.
  */
@@ -117,7 +117,7 @@ export function stickersEnabled(): boolean {
 }
 
 /**
- * Whether the server supports threads (WP 6.9c): the `thread_*` frames and `GET
+ * Whether the server supports threads: the `thread_*` frames and `GET
  * /channels/{id}/threads`. False hides Create Thread, the header's Threads
  * button and the chip.
  */
@@ -126,7 +126,7 @@ export function threadsEnabled(): boolean {
 }
 
 /**
- * Whether the server supports forum channels (WP 6.9d): `forum_post_create` and
+ * Whether the server supports forum channels: `forum_post_create` and
  * a forum's posts. False hides the Forum option in Create Channel.
  */
 export function forumsEnabled(): boolean {
@@ -134,7 +134,7 @@ export function forumsEnabled(): boolean {
 }
 
 /**
- * Whether a member can hold several roles (WP 6.3c): `role_ids` on members, a
+ * Whether a member can hold several roles: `role_ids` on members, a
  * `hoist` flag on roles and the add/remove role routes. False keeps today's
  * single-role picker and per-role member-list groups.
  */
@@ -143,7 +143,7 @@ export function multiRoleEnabled(): boolean {
 }
 
 /**
- * Whether the server lets a moderator set another member's nickname (WP 6.4):
+ * Whether the server lets a moderator set another member's nickname:
  * `PUT /moderation/users/{id}/nickname`. An older server can still hold the
  * MANAGE_NICKNAMES bit in an Admin mask without the route, so the menu item
  * needs this flag as well as the bit.
@@ -153,7 +153,7 @@ export function manageNicknamesEnabled(): boolean {
 }
 
 /**
- * Whether the server resolves `<@id>` and `<@&id>` mention tokens (WP 6.3f):
+ * Whether the server resolves `<@id>` and `<@&id>` mention tokens:
  * the composer then sends the mentions the user picked as tokens, and offers
  * roles. False keeps today's plain `@name` text and a user-only popup.
  */
@@ -162,7 +162,7 @@ export function idMentionsEnabled(): boolean {
 }
 
 /**
- * Whether the server lets a member follow a thread (WP 6.9c): `thread_follow`,
+ * Whether the server lets a member follow a thread: `thread_follow`,
  * `thread_follow_update` and `ready.threads`. False hides the panel's Follow
  * toggle and the sidebar's thread rows.
  */
@@ -172,17 +172,17 @@ export function threadFollowsEnabled(): boolean {
 
 /**
  * Whether the server keeps a voice message's length and waveform on the upload
- * and its attachment (WP 8.9). False hides the composer's mic button.
+ * and its attachment. False hides the composer's mic button.
  */
 export function voiceMessagesEnabled(): boolean {
   return caps?.voice_messages === true;
 }
 
 /**
- * Whether the server carries a member's game (WP 8.3): `activity_update`, and
+ * Whether the server carries a member's game: `activity_update`, and
  * `activity` on `presence`, `presence_batch` and `ready.activities`. False
  * sends no `activity_update` and shows no game. The server's stated switch
- * (WP 8.3e-2) wins over the `ready` flag, but nothing is trusted before a full
+ * wins over the `ready` flag, but nothing is trusted before a full
  * `ready` has arrived, like every other capability.
  */
 export function serverSupportsGameActivity(): boolean {
@@ -191,7 +191,7 @@ export function serverSupportsGameActivity(): boolean {
 }
 
 /**
- * Whether the server carries a member's song (WP 8.10): `listening_update`, and
+ * Whether the server carries a member's song: `listening_update`, and
  * `listening` on `presence`, `presence_batch` and `ready.listening`. The one
  * admin switch covers games and music, so the stated policy decides while it
  * is known; a server that never listed the flag (older) never supports it.
@@ -201,7 +201,7 @@ export function serverSupportsListeningActivity(): boolean {
   return (gameActivityPolicy ?? caps.listening_activity) === true;
 }
 
-/** Whether the server has stated that game activity is off (WP 8.3e-2). */
+/** Whether the server has stated that game activity is off. */
 export function gameActivityPolicyIsOff(): boolean {
   return gameActivityPolicy === false;
 }

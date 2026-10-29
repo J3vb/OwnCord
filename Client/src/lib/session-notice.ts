@@ -1,6 +1,5 @@
 /**
- * session-notice — tell the user about a sign-in they have not reviewed yet
- * (B7-14).
+ * session-notice — tell the user about a sign-in they have not reviewed yet.
  *
  * The server flags every new session `unseen`, and listing the sessions from
  * one device acknowledges every row but that device's own. So the list is

@@ -99,7 +99,7 @@ export class LiveKitSession {
   /** Single source of truth for all connection-lifecycle state. */
   private _state: SessionState = { type: "idle" };
 
-  /** BUG-142 fix: the ONLY source of join generations. Must never be
+  /** The ONLY source of join generations. Must never be
    *  re-derived from `_state` — a transition through "idle" (e.g. leaveVoice()
    *  during an in-flight connect) would reset a derived counter back to the
    *  same value a still-running stale attempt is holding, letting the two
@@ -110,7 +110,7 @@ export class LiveKitSession {
   private _joinGenerationCounter = 0;
 
   /** P2-T5: the latest token and when it arrived, so a long reconnect knows
-   *  when it needs a fresh one (server TTL 5 minutes, OC-0014). */
+   *  when it needs a fresh one (server TTL 5 minutes). */
   private _stampedToken: string | null = null;
   private _tokenReceivedAt = 0;
   /** The reconnect attempt waiting for a voice_token_refresh reply. */
@@ -193,9 +193,9 @@ export class LiveKitSession {
 
   private _tokenManager = new VoiceTokenManager({
     getWs: () => this.ws,
-    // P2-T5: a long auto-reconnect refreshes its token too (OC-0014).
+    // P2-T5: a long auto-reconnect refreshes its token too.
     hasVoiceSession: () => this._room !== null || this._state.type === "reconnecting",
-    // OC-0429: retry at the rate-limit cadence, not the full periodic one —
+    // Retry at the rate-limit cadence, not the full periodic one —
     // see VoiceTokenManager.startRetryTimer.
     onRefreshTimeout: () => this._tokenManager.startRetryTimer(),
   });
@@ -235,11 +235,11 @@ export class LiveKitSession {
    *  voice_config has arrived for it yet (LiveKit's own audio default then
    *  applies, because the caller omits audioPreset entirely).
    *
-   *  OC-0438: the server computes an audio bitrate from the channel's voice
+   *  The server computes an audio bitrate from the channel's voice
    *  quality and delivers it via voice_config (setVoiceConfig ->
    *  voiceStore.voiceConfigs).
    *
-   *  OC-0441: createRoom folds this into publishDefaults, but it runs
+   *  createRoom folds this into publishDefaults, but it runs
    *  synchronously from the voice_token handler and the server sends
    *  voice_config only afterwards — an ordering frozen by the epoch-1 golden
    *  transcripts, so it cannot be swapped on the wire. On a channel's first
@@ -450,7 +450,7 @@ export class LiveKitSession {
             this.ws.send({ type: "voice_screenshare", payload: { enabled: false } });
           }
         }
-        // OC-0080: bump first, mirroring doDisableCamera/doDisableScreenshare
+        // Bump first, mirroring doDisableCamera/doDisableScreenshare
         // — a concurrent enableCamera()/enableScreenshare() still awaiting
         // device acquisition (getUserMedia/getDisplayMedia/publishTrack) when
         // an unexpected disconnect fires must detect it was superseded and
@@ -459,7 +459,7 @@ export class LiveKitSession {
         bumpGeneration(this._cameraState);
         bumpGeneration(this._screenState);
         this._media.stopCodecSwitch();
-        // BUG-098: Stop leaked camera/screen tracks before room is nulled.
+        // Stop leaked camera/screen tracks before room is nulled.
         stopManualCameraTrack(this._cameraState, this._room);
         stopManualScreenTracks(this._screenState, this._room);
         setLocalCamera(false);
@@ -819,7 +819,7 @@ export class LiveKitSession {
       }
     }
 
-    // OC-0008: setMicrophoneEnabled above can block for seconds on the
+    // setMicrophoneEnabled above can block for seconds on the
     // browser's mic-permission prompt. If a newer session claimed `_room`
     // while this call was suspended there (the user switched channels, or an
     // auto-reconnect installed a fresh room), the writes below re-read
@@ -1198,7 +1198,7 @@ export class LiveKitSession {
     return this._remoteTracks.getRemoteVideoStats(userId, type);
   }
 
-  /** Ask for only what a remote video tile shows (P3-07). */
+  /** Ask for only what a remote video tile shows. */
   setRemoteVideoView(userId: number, type: "camera" | "screenshare", view: VideoView): void {
     this._remoteTracks.setRemoteVideoView(userId, type, view);
   }
@@ -1220,7 +1220,7 @@ export class LiveKitSession {
   /** True while a join/connect attempt is in flight OR a room is live —
    *  i.e. `_state.type !== "idle"`. Unlike `getRoom() !== null`, this also
    *  covers "connecting" (no Room object exists yet) and "reconnecting" (the
-   *  `_room` getter reads null there too) — see OC-0249: a caller that only
+   *  `_room` getter reads null there too): a caller that only
    *  wants to know "should we tear anything down" must not miss those. */
   hasActiveSession(): boolean {
     return this._state.type !== "idle";
@@ -1239,7 +1239,7 @@ export class LiveKitSession {
       audioPipeline: this._audioPipeline,
       audioElements: this._audioElements,
     });
-    // Your share's sender stats (M-1), as the share's own tile last read them
+    // Your share's sender stats, as the share's own tile last read them
     // (it polls while you share); each read also asks for a fresh sample.
     // Nothing from a share that has ended.
     const sharing =
@@ -1261,7 +1261,7 @@ export class LiveKitSession {
       },
     };
     if (!isLinuxDesktop()) return info;
-    // B7-11 rule 3: native resources are countable through the facade. Each
+    // Native resources are countable through the facade. Each
     // read asks the backend for a fresh snapshot, which the next read reports.
     desktop.nativeVoice.debugInfo().then(
       (resources) => {
@@ -1356,7 +1356,7 @@ export const getScreenshareAudioMuted = session.getScreenshareAudioMuted.bind(se
 
 /** True while a join is in flight ("connecting"/"reconnecting") OR a room is
  *  live ("connected") — i.e. there is something for leaveVoice() to tear
- *  down. OC-0249: a Room-existence check alone reads false for the entire
+ *  down. A Room-existence check alone reads false for the entire
  *  "connecting" state (no Room object exists yet), so a caller deciding
  *  whether to abort an in-flight join must ask this instead. */
 export function isVoiceSessionActive(): boolean {

@@ -55,7 +55,7 @@ export function showActionToast(
  * server answers those with 204 on full success and with 200 plus a
  * `warning` when the change committed but the other sessions could not be
  * revoked — a partial success the user has to act on, which an unqualified
- * green toast used to hide (OC-0314). The warning wins whenever it is
+ * green toast used to hide. The warning wins whenever it is
  * present.
  */
 export function showChangeOutcomeToast(

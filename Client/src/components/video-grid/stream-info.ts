@@ -55,7 +55,7 @@ function limitationText(reason: string | undefined): string | undefined {
   }
 }
 
-/** Your own share's second line (M-1): the capture rate (measured, or "set
+/** Your own share's second line: the capture rate (measured, or "set
  *  to" where the browser only reports what the capture was opened at), what holds the
  *  encoder back, and which codec and encoder, e.g. "Capture 120 fps · Limited
  *  by CPU · VP8 · libvpx". Empty before anything is known; a note where the

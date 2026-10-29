@@ -31,7 +31,7 @@ import { voiceText } from "../i18n/voice";
 
 const log = createLogger("roomEventHandlers");
 
-/** OC-0452: how long a remote sender's decrypt failures may last before they
+/** How long a remote sender's decrypt failures may last before they
  *  count as a real E2EE failure. A streak starts fresh only after a room key
  *  install: a quiet gap alone is no evidence the peer's frames decrypt again,
  *  while every rotation race comes with its own install. */
@@ -69,7 +69,7 @@ function canBeSpeaking(room: Room, speaker: Participant): boolean {
   return mic !== undefined && !mic.isMuted;
 }
 
-/** RT-9: the status a room that has just finished joining reports. The key
+/** The status a room that has just finished joining reports. The key
  *  can arrive over WS after the SFU dropped and livekit-client is already
  *  retrying on its own; that room reads "reconnecting" until
  *  RoomEvent.Reconnected clears it (handleSdkReconnected). */
@@ -173,7 +173,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   // "Unsecured" and nothing ever cleared it until the next join/leave. A
   // quiet gap past the room's quiet window means the peer's frames decrypt
   // again — clear only what THIS path degraded, leaving a persistent
-  // worker-death/MissingKey degradation visible (OC-0002).
+  // worker-death/MissingKey degradation visible.
   // "other" latches: once anything else degrades the call, a quiet gap
   // must not clear it.
   let degradedBy: "decrypt" | "other" | null = null;
@@ -537,7 +537,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     }, SIGNAL_RESUME_BUDGET_MS);
   }
 
-  /** RT-9: livekit-client (and the native room) retry a dropped signal socket
+  /** livekit-client (and the native room) retry a dropped signal socket
    *  on their own — RoomEvent.SignalReconnecting / Reconnecting — before they
    *  give up with Disconnected, and an SFU restart spends most of its window
    *  there. Only the connected session room moves the badge, and only between
@@ -559,7 +559,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     if (voiceStore.getState().voiceStatus === "reconnecting") setVoiceStatus("connected");
   };
 
-  /** OC-0002: livekit-client's E2eeManager emits RoomEvent.EncryptionError
+  /** livekit-client's E2eeManager emits RoomEvent.EncryptionError
    *  when the per-room E2EE worker dies (onWorkerError — CSP blocking a
    *  lazily-loaded chunk, WASM load failure, WebView2 quirk) or when an
    *  encrypted track arrives on a room without encryption enabled. Either
@@ -568,7 +568,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
    *  encoder itself is not actually protecting frames, so it must reach the
    *  store the Secured badge reads rather than staying invisible.
    *
-   *  OC-0452: the one exception is a remote sender's `InvalidKey` — the
+   *  The one exception is a remote sender's `InvalidKey` — the
    *  worker raises it only from decryptFrame, when AES-GCM fails with a key
    *  present. Every rotation installs the new key at index 0 before the peer
    *  has it, so a short streak of these is expected; the frames are dropped,

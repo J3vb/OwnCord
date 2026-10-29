@@ -1,8 +1,8 @@
-// The browser platform implementation (WP 6.13b): every `Platform` member.
-// Transport, storage and identity are real browser adapters (6.13c), one file
+// The browser platform implementation: every `Platform` member.
+// Transport, storage and identity are real browser adapters, one file
 // each, used only in a secure context: on a page that is not one, they stay
 // inert, so the app reaches no host and stores nothing rather than half-work.
-// The rest is 6.13d: notifications (Web Notification API, also secure-context
+// The rest: notifications (Web Notification API, also secure-context
 // only), file save (a download), logs (a memory ring), invite deep links
 // (`?invite=`), external content (refused) and the URL opener (a new tab) are
 // browser adapters, one file each; every other member either refuses (a rejected promise, or the typed
@@ -167,7 +167,7 @@ const pushToTalk: PushToTalk = {
   supported: async () => false,
 };
 
-// The web build is only ever served by one server's portal (6.13a), so the page
+// The web build is only ever served by one server's portal, so the page
 // is bound to its own host. `location.host` is already canonical (lower case,
 // no default port), the form every credential and profile key takes.
 const serverScope: ServerScope = { fixedHost: globalThis.location.host };

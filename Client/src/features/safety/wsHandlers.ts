@@ -1,4 +1,4 @@
-// Safety handler bodies (B9-15), called only from lib/dispatcher.ts.
+// Safety handler bodies, called only from lib/dispatcher.ts.
 import { showToast } from "../../lib/toast";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
@@ -57,7 +57,7 @@ export function handleTimedOutRefusal(api: SafetyApi, payload: Payload<"error">)
   refresh(api);
 }
 
-/** The caller's own appeal changed (B9-16): show it now, then re-read (an overturn lifts or acknowledges). */
+/** The caller's own appeal changed: show it now, then re-read (an overturn lifts or acknowledges). */
 export function handleAppealStatus(api: SafetyApi, payload: Payload<"appeal_status">): void {
   applyAppealStatus(payload);
   refresh(api);

@@ -1,5 +1,5 @@
-// The browser external-content broker (6.13d): there is none. The native broker
-// exists so a renderer never fetches a URL a message author named (C-09,
+// The browser external-content broker: there is none. The native broker
+// exists so a renderer never fetches a URL a message author named (see
 // docs/trust-model.md); a page's own `fetch` has none of its address
 // classification, redirect, size or type bounds, so every request is refused
 // as `unavailable` and nothing is fetched at all.

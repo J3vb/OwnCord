@@ -42,8 +42,8 @@ export function effectiveFontSize(): number {
  * The single writer of that property, deliberately. The Appearance slider and
  * the Accessibility "Large Font" toggle both want a say, and an inline style
  * always beats a class rule on the same element — so `.large-font` in app.css
- * could never take effect and the toggle was inert (OC-0319). Same shape as
- * reducedMotion's sideEffect (OC-0232): one function re-derives, rather than
+ * could never take effect and the toggle was inert. Same shape as
+ * reducedMotion's sideEffect: one function re-derives, rather than
  * two writers fighting over one property.
  *
  * Large Font raises the *floor* to 18px and never lowers what the slider

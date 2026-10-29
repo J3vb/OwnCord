@@ -1,4 +1,4 @@
-//! App-level audio device hot-plug watcher (Linux, WP LP-6a).
+//! App-level audio device hot-plug watcher (Linux).
 //!
 //! The session watchers in `capture.rs`/`playout.rs` follow a moved default
 //! only inside a call and never tell the webview. This watcher polls the

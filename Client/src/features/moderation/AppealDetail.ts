@@ -1,5 +1,5 @@
 /**
- * One appeal in the Moderation Center (B9-17): the appealed action, the
+ * One appeal in the Moderation Center: the appealed action, the
  * appellant's statement, and the take/decide controls or the recorded result.
  *
  * Only what the server returned is shown, and nothing from the report queue:
@@ -7,7 +7,7 @@
  * server returned its id for this reader, and opens in Reports, where its own
  * read is authorized again.
  *
- * Controls mirror B9-12: take the appeal first, and only its holder decides
+ * Controls mirror a report's review: take the appeal first, and only its holder decides
  * it; another moderator's appeal is never taken over (assignment is never
  * forced). The moderator who issued the action is offered the same controls
  * with the server's rule stated: it refuses them (SELF_REVIEW) while another

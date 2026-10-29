@@ -1,4 +1,4 @@
-// Group DM system rows (WP 3B-11a): "A added B to the group", "A left the group",
+// Group DM system rows: "A added B to the group", "A left the group",
 // and the rename / icon lines. The wording is built from `kind` + `groupEvent`
 // alone, never from `content` (the server's English fallback sentence), and the
 // names come from live stores so a rename of a member shows up on re-render.

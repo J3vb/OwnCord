@@ -5,7 +5,7 @@
 //
 // Historically this lived as a private closure inside createApiClient
 // (api.ts) and ServerPanel's Add Server modal carried its own, narrower
-// regex that never grew IPv6 support when api.ts's did (OC-0187) — an IPv6
+// regex that never grew IPv6 support when api.ts's did — an IPv6
 // server could be logged into via the login form but never saved as a
 // profile. Keeping one implementation here means every caller accepts (and
 // rejects) the same set of addresses.

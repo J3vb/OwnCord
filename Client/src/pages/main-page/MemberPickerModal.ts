@@ -48,7 +48,7 @@ export interface MemberPickerOptions {
   /** Called when the modal is dismissed (cancel or overlay click). */
   readonly onClose: () => void;
   /**
-   * Add mode (WP 3B-11a): pick people to add to an existing group. Setting
+   * Add mode: pick people to add to an existing group. Setting
    * `onAdd` makes the picker multi-select with an "Add" button and no group
    * name; `onSelect` and `onSelectGroup` are not called. `onAdd` resolves to
    * null on success (the picker closes) or the error text to show in the

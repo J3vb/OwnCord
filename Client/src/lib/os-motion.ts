@@ -11,7 +11,7 @@ let owner: Disposable | null = null;
 
 /**
  * "Sync with OS" is on unless the user turns it off: the owner's Q1 decision
- * (B9-2) is that reduced motion is honoured from BOTH the OS setting and the
+ * is that reduced motion is honoured from BOTH the OS setting and the
  * in-app toggle, so a fresh install must follow the OS.
  */
 export const SYNC_OS_MOTION_DEFAULT = true;

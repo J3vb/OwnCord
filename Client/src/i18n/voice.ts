@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Voice, video and media copy (B9-20): the voice widget and video grid
+ * Voice, video and media copy: the voice widget and video grid
  * controls, the per-user volume menu, the incoming-call banner, the Linux
  * screen picker, the push-to-talk key names and the connection-stats
  * formatters. Loads with the main page and lazy voice chunks, so none of it is

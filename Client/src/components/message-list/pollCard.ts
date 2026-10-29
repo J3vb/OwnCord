@@ -1,5 +1,5 @@
 /**
- * The poll card (WP 6.9b): a poll message's question, answers and footer,
+ * The poll card: a poll message's question, answers and footer,
  * drawn in place of its text. Open and not yet voted it is a form (radios for a
  * single-choice poll, checkboxes for a multiple-choice one) with Vote and Show
  * results; after a vote, or once the poll is over, every answer shows its

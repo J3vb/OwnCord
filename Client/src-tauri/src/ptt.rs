@@ -35,7 +35,7 @@ const VK_BACKTICK: i32 = 0xC0;
 
 /// Returns true if a VK code may be bound as the PTT key.
 ///
-/// Security hardening (BUG-136): only non-text keys qualify. Capture
+/// Security hardening: only non-text keys qualify. Capture
 /// (`ptt_listen_for_key`) and `ptt_set_key` both enforce this one list, so the
 /// poller never watches a key outside it.
 fn is_allowed_ptt_vk(vk: i32) -> bool {
@@ -48,7 +48,7 @@ fn is_allowed_ptt_vk(vk: i32) -> bool {
     // backtick key. The Windows/Meta key stays out. Escape is excluded: it's
     // also the Settings overlay's close key, so a capture in progress races the
     // panel tearing down and can bind PTT to Escape with no visible
-    // confirmation (OC-0334).
+    // confirmation.
     matches!(
         vk,
         0x10 | // Shift
@@ -849,7 +849,7 @@ mod tests {
             assert!(!is_allowed_ptt_vk(vk), "side modifier {vk:#04x}");
         }
         // Escape also closes the Settings overlay the capture UI lives in, so
-        // it must never be capturable as a PTT key (OC-0334).
+        // it must never be capturable as a PTT key.
         assert!(!is_allowed_ptt_vk(0x1B)); // Escape
     }
 

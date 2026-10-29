@@ -970,7 +970,7 @@ function buildVoiceAudioTabInner(
     },
     { signal },
   );
-  // Linux (M-3): the Wayland portal negotiates 60 fps at most; the picker
+  // Linux: the Wayland portal negotiates 60 fps at most; the picker
   // greys 120 out there, so say it here as well.
   const fpsGroup = isLinuxDesktop()
     ? [
@@ -1039,7 +1039,7 @@ function buildVoiceAudioTabInner(
   cameraCard.append(...cameraQualityGroup, ...screenQualityGroup, ...fpsGroup);
   // The codec choice. Off Linux the webview's own encoders decide what is
   // offered; on Linux the native engine offers VP8, Auto (VP8), and H.264 and
-  // VP9 only when its probe says it can encode them (WP LP-7c, M-11b).
+  // VP9 only when its probe says it can encode them.
   const codecGroup = (h264Available: boolean, vp9Native = false): HTMLElement[] => {
     const linux = isLinuxDesktop();
     const offerVp9 = linux ? vp9Native : vp9Offered();
@@ -1099,7 +1099,7 @@ function buildVoiceAudioTabInner(
    * with the panel open removes it from the list instead of leaving a dead
    * entry the user can select. A saved microphone or speaker that has vanished
    * stays the selection as a disabled "(disconnected)" entry: the voice
-   * session keeps it too and switches back to it when it returns (DP-31). A
+   * session keeps it too and switches back to it when it returns. A
    * vanished camera reads as "Default".
    */
   async function populateDevices(): Promise<void> {
@@ -1203,7 +1203,7 @@ function buildVoiceAudioTabInner(
   // On Linux the host's hot-plug watch is the trigger (null elsewhere); it
   // also starts the watch, so the lists stay live outside a call.
   // Released through cleanupMic (a rebuild or the overlay closing), not an
-  // "abort" listener: build() runs again on every rebuild (OC-0125).
+  // "abort" listener: build() runs again on every rebuild.
   const stopNative = onNativeDevicesChanged(onDeviceChange);
   if (stopNative !== null) registerNativeDevices(stopNative);
 

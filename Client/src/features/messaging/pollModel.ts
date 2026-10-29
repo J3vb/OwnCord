@@ -1,4 +1,4 @@
-// Poll rules that need no DOM (WP 6.9b): the composer draft's caps, the
+// Poll rules that need no DOM: the composer draft's caps, the
 // percent and winner rules, whether a poll is over, who may end it, and when
 // its countdown label next changes. Pure, so the dialog and the card cannot
 // disagree about any of them. The caps mirror Server/service/message_poll.go,

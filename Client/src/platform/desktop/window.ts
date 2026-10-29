@@ -1,5 +1,5 @@
 // The native window operations `lib/window-state.ts`'s off-screen guard needs.
-// Lifted verbatim (B7-5); the guard itself is behaviour and stays there.
+// Lifted verbatim; the guard itself is behaviour and stays there.
 //
 // The window API stays a dynamic `import()`: it is its own lazy chunk today,
 // and this registry is statically reachable from the entry.

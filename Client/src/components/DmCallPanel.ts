@@ -178,7 +178,7 @@ interface Person {
 interface AvatarRef {
   readonly wrap: HTMLElement;
   readonly badge: HTMLElement;
-  /** The peer's identity shield (D-09), drawn once their announce resolves;
+  /** The peer's identity shield, drawn once their announce resolves;
    *  on your own avatar, the shield that shows your own safety number. */
   verify: HTMLElement | null;
   verifyKey: string;
@@ -258,7 +258,7 @@ function caption(main: string, sub: string): HTMLElement[] {
   ];
 }
 
-// DP-24: the OS call notification, urgent attention request and missed-call
+// The OS call notification, urgent attention request and missed-call
 // notice. Re-exported here so they ride in this panel's lazy chunk (the page
 // imports the panel at mount) instead of a second dynamic chunk in MainPage,
 // which would push its bundle budget over.
@@ -342,11 +342,11 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
   let timerInterval: ReturnType<typeof setInterval> | null = null;
 
   /** The call room someone else has been in since you joined, to tell "bob
-   *  left" from "nobody has come yet" (D-11). */
+   *  left" from "nobody has come yet". */
   let peerRoom: number | null = null;
   /** When someone else was first in that room with you: the call's start, so
-   *  both sides time the same call rather than their own time in the room
-   *  (D-10). shortcut: a later joiner of a group call still counts from their
+   *  both sides time the same call rather than their own time in the room.
+   *  shortcut: a later joiner of a group call still counts from their
    *  own join; matching them needs per-member join times from the server. */
   let answeredAt: number | null = null;
 
@@ -1014,7 +1014,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     return el;
   }
 
-  /** A peer's identity shield, as in the channel roster (D-09): redrawn only
+  /** A peer's identity shield, as in the channel roster: redrawn only
    *  when their verification changes. A blocked peer's is a button that opens
    *  the re-trust prompt, since nothing else says why they cannot be heard. */
   function syncVerify(userId: number, ref: AvatarRef, voice: VoiceState, dm: DmChannel): void {
@@ -1164,7 +1164,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     // the socket returns); a moderator mute is not ours to lift.
     const frozen = uiStore.getState().connectionStatus !== "connected";
     const reason = frozen ? t("status.notConnected") : "";
-    // No room to attach a camera or screen to until the join has connected (D-08).
+    // No room to attach a camera or screen to until the join has connected.
     const connecting = isConnecting(voice.voiceStatus);
     const { mute, deafen, camera, share } = controls;
     if (mute !== null) {

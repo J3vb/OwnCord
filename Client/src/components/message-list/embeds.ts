@@ -37,7 +37,7 @@ export interface OgMeta {
 
 /** A typed preview view state: the meta when the broker answered, or the
  *  refusal class that replaced it. Nothing collapses a refusal into an empty
- *  success (B9-9). */
+ *  success. */
 type OgLoad =
   | { readonly ok: true; readonly meta: OgMeta }
   | { readonly ok: false; readonly failure: ExternalContentFailure };
@@ -94,7 +94,7 @@ function nonBlank(text: string | null): string | null {
  *  redirects, time/byte/type ceilings) and parses the page natively — the
  *  renderer never sees the body. Concurrent requests for the same URL share
  *  the same in-flight promise. A refusal is kept as its failure class, never
- *  flattened into an empty success (B9-9). */
+ *  flattened into an empty success. */
 function fetchOgMeta(url: string): Promise<OgLoad> {
   const generation = embedCacheGeneration;
   const cached = lruGet(ogCache, url);
@@ -167,7 +167,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   const content = createElement("div", { class: "msg-embed-link-content" });
 
   // Filled once the metadata settles; a host shown while the fetch is pending
-  // would make the row grow twice (DP-44).
+  // would make the row grow twice.
   const hostEl = createElement("div", { class: "msg-embed-host" });
   content.appendChild(hostEl);
 
@@ -190,7 +190,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   wrap.appendChild(imageWrap);
 
   // The failure line + bounded retry live outside the description element so a
-  // refusal never reads as a loaded description (B9-9).
+  // refusal never reads as a loaded description.
   const statusEl = createElement("div", { class: "msg-embed-status", role: "status" });
   statusEl.hidden = true;
   const retryEl = createElement("button", {
@@ -204,7 +204,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
   content.appendChild(retryEl);
 
   /** Zero-height until the card has something to show, so the row grows once,
-   *  when the preview (and its image) lands, instead of twice (DP-44). Not
+   *  when the preview (and its image) lands, instead of twice. Not
    *  `hidden`: an awaiting card that gets consented must stay focusable for its
    *  hand-off. */
   wrap.classList.add("msg-embed-link-pending");
@@ -219,7 +219,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
     delete wrap.dataset.embedFailure;
     retryEl.removeAttribute("aria-disabled");
     // A refusal is not retryable by policy or type; only a transient
-    // "unavailable" answer is worth re-asking (B9-9). A retry that goes away
+    // "unavailable" answer is worth re-asking. A retry that goes away
     // while focused hands focus to the card's link, never to <body>.
     const retryable = !load.ok && load.failure === "unavailable";
     if (!retryable && document.activeElement === retryEl) titleEl.focus();
@@ -227,7 +227,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
     if (load.ok) {
       const { meta } = load;
       // No title, description or image: an empty card with nothing in it, so
-      // render none at all (DP-44). siteName alone still names the host.
+      // render none at all. siteName alone still names the host.
       if (meta.title === null && meta.description === null && meta.image === null) {
         wrap.dataset.embedState = "empty";
         const hadFocus = wrap.contains(document.activeElement);
@@ -258,7 +258,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
     wrap.dataset.embedState = "failed";
     wrap.dataset.embedFailure = load.failure;
     // The host names the failed card once, as the link itself; the separate
-    // host element would repeat it (DP-44).
+    // host element would repeat it.
     setText(titleEl, displayHost);
     setText(hostEl, "");
     hostEl.hidden = true;

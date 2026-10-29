@@ -4,7 +4,7 @@
 // Files: {appLogDir}/client-logs/YYYY-MM-DD.jsonl
 // Rotation: keeps the most recent MAX_LOG_FILES days of logs.
 //
-// Lifted from `lib/logPersistence.ts` (B7-4), verbatim save for the addition
+// Lifted from `lib/logPersistence.ts`, verbatim save for the addition
 // of `clearAll`, which was the private `clearLogFiles` in
 // `settings/AdvancedTab.ts`. The module-level state is the persistence
 // session: this module owns it, and `lib/logPersistence.ts` only re-exports
@@ -20,7 +20,7 @@ const LOG_SUBDIR = "client-logs";
 // The Rust log the tauri-plugin-log writes: `owncord-client.log` in the app
 // log directory itself, with `owncord-client_<date>.log` kept beside it
 // (rotation_strategy KeepSome(2) in src-tauri/src/lib.rs). Read for the
-// support bundle's native half (CLI-03). Each file is tail-capped so three
+// support bundle's native half. Each file is tail-capped so three
 // ~10 MB files never balloon the store-only zip.
 const NATIVE_LOG_PREFIX = "owncord-client";
 const NATIVE_LOG_TAIL_BYTES = 2 << 20; // 2 MB

@@ -1,5 +1,5 @@
 /**
- * The live codec switch (WP M-5b): keeps a published camera or screen share on
+ * The live codec switch: keeps a published camera or screen share on
  * a codec every viewer decodes.
  *
  * Voice E2EE leaves no backup codec and the SFU does not transcode, so when a

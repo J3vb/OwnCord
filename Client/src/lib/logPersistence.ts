@@ -1,5 +1,5 @@
 // Log persistence — the app-side names for the on-disk log writer. The
-// persistence session itself lives in `platform/desktop/logFiles.ts` (B7-4);
+// persistence session itself lives in `platform/desktop/logFiles.ts`;
 // these exports stay where their callers already import them.
 
 import { desktop } from "../platform/desktop";

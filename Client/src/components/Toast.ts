@@ -210,7 +210,7 @@ export function createToastContainer(): ToastContainer {
   }
 
   function mount(container: Element): void {
-    // One polite live region for all toasts (DC-13): screen readers announce
+    // One polite live region for all toasts: screen readers announce
     // each toast as it is appended without interrupting current speech.
     // aria-atomic="false" so only the newly added toast is read, not the stack.
     root = createElement("div", {

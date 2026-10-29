@@ -3,7 +3,7 @@
  * PTT key is NOT consumed/hijacked. Other apps and chat input continue
  * to receive the key normally. Works even when OwnCord is unfocused.
  *
- * Lifted from `lib/ptt.ts` (B7-5): the `PushToTalk` suite binds `init()` to
+ * Lifted from `lib/ptt.ts`: the `PushToTalk` suite binds `init()` to
  * the persisted key and `stop()`/`updateKey()` to the binding's polling
  * state, so the binding/generation bookkeeping moves with the native calls.
  * `vkName` is a pure display helper and stays in `lib/ptt.ts`. The native
@@ -225,7 +225,7 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
             setPttGated(!pressed);
             log.debug(pressed ? "PTT pressed — gate open" : "PTT released — gate closed");
           };
-          // A release keeps transmitting for the saved delay (DP-30), so the
+          // A release keeps transmitting for the saved delay, so the
           // tail of a word is not cut; a press opens at once.
           const delay = pressed ? 0 : pttReleaseDelayMs();
           if (delay > 0) releaseTimer = setTimeout(apply, delay);

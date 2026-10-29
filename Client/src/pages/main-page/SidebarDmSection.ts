@@ -42,7 +42,7 @@ export interface SidebarDmSectionOptions {
   readonly onSelectDm: (dmChannel: DmChannel) => void;
   /** Called when the user clicks the "+" button to create a new DM. */
   readonly onNewDm: () => void;
-  /** Pending Message Requests (B9-4, Q2). Badged apart from unread, never added to it. */
+  /** Pending Message Requests. Badged apart from unread, never added to it. */
   readonly pendingRequests?: CountSource;
   /**
    * Open the Message Requests inbox. With it, pending requests also get their
@@ -111,7 +111,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // The header contains its own buttons (the "+" and the requests badge), so it
   // stays a plain div with a mouse click handler; the arrow is the keyboard
   // collapse control, a real <button> named by the heading, as on the channel
-  // categories (B9-21).
+  // categories.
   const dmHeader = createElement("div", { class: "category" });
   const dmLabelEl = createElement(
     "span",
@@ -223,7 +223,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     const dmItem = createElement("div", {
       class: muted ? "channel-item muted" : "channel-item",
       "data-testid": "dm-entry",
-      // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+      // Roving list item: reachable by Tab once, then arrow-stepped.
       role: "button",
       tabindex: "-1",
     });
@@ -249,7 +249,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     const preview = createElement("span", { class: "dm-preview" }, dmPreviewText(dm));
     const body = createElement("div", { class: "dm-item-body" });
     // A 1:1 partner's game, else their music, between the name and the last
-    // line (WP 8.3, 8.10).
+    // line.
     const shown = dm.isGroup ? null : rowActivity(dm.recipient.activity, dm.recipient.listening);
     if (shown !== null) {
       const activity = createElement("span", {
@@ -393,7 +393,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   dmSection.appendChild(viewAllBtn);
 
   // One Tab stop for the preview list; ArrowUp/Down step through the rows and
-  // Enter/Space open one (B9-21: nothing is hover-only). The listener lives on
+  // Enter/Space open one (nothing is hover-only). The listener lives on
   // the list, which survives every keyed re-render.
   enableRovingNavigation(dmList, "[data-testid='dm-entry']", listLifecycle.signal, "vertical");
   // A row's time is "3:04 PM" today and "Sep 29" after midnight.

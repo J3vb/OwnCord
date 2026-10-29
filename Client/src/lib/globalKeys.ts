@@ -1,5 +1,5 @@
 /**
- * Helpers for the Wayland portal global-keys setup (LP-9): the preference that
+ * Helpers for the Wayland portal global-keys setup: the preference that
  * remembers an earlier successful bind, the function-key capture the portal
  * path restricts push to talk to, and reading a bind rejection's code.
  *

@@ -719,7 +719,7 @@ function wrapResolvedMentions(text: string, info?: MentionInfo): DocumentFragmen
  * Re-resolve the @mention spans already rendered under `root` against the live
  * member store, and wrap plain @tokens inside it that now resolve. Called when
  * a membership/role/profile change bumps roleRevision, so the pills track a
- * rename without re-parsing or rebuilding the row (P4-02) — in both directions:
+ * rename without re-parsing or rebuilding the row — in both directions:
  * a token that stopped resolving is unwrapped to plain text, one that started
  * resolving becomes a pill. Scoped to the two regions mentions are rendered
  * into (.msg-text and .sm-text), so an author's display name or a reply

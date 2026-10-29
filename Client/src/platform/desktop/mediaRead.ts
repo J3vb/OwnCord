@@ -1,4 +1,4 @@
-// The host call behind `mediaDetector` (WP 8.10): `detect_media` and the check
+// The host call behind `mediaDetector`: `detect_media` and the check
 // of its answer. Loaded on the first read, not at startup.
 import { invoke } from "@tauri-apps/api/core";
 import type { MediaPrefs, MediaReading } from "../contracts/mediaDetector";

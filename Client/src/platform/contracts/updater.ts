@@ -4,7 +4,7 @@
  * functions in `lib/updater.ts` already, so each contract method below has
  * that function's exact signature (progress is still delivered through a
  * subscribed listener, not a return value). Both halves live in
- * `platform/desktop` since B7-5 (`updater.ts`, `autostart.ts`); the
+ * `platform/desktop` since the platform seam (`updater.ts`, `autostart.ts`); the
  * `lib/updater.ts` names stay as their callers' imports. `Autostart` was
  * inline in the private `buildAutostartRow` (`settings/AdvancedTab.ts`), which
  * keeps the toggle's read-back race guard. The updater's relaunch after an

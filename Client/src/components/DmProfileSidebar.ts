@@ -52,13 +52,13 @@ export interface DmProfileData {
   readonly displayName?: string | null;
   readonly avatar: string | null;
   readonly status: UserStatus;
-  /** The game being played (WP 8.3): "Playing <game> · for N min" under the status. */
+  /** The game being played: "Playing <game> · for N min" under the status. */
   readonly activity?: { readonly name: string; readonly startedAt: number } | null;
-  /** The song being listened to (WP 8.10), with a progress bar that ticks while open. */
+  /** The song being listened to, with a progress bar that ticks while open. */
   readonly listening?: ListeningSong | null;
   readonly about?: string | null;
   readonly joinDate?: string | null;
-  /** Banner image path and colour; absent or null = no strip (WP 6.11d). */
+  /** Banner image path and colour; absent or null = no strip. */
   readonly banner?: string | null;
   readonly banner_color?: string | null;
 }
@@ -66,7 +66,7 @@ export interface DmProfileData {
 export interface DmProfileSidebarOptions {
   readonly user: DmProfileData;
   readonly onClose: () => void;
-  /** Block (`block` true) or Unblock this user (WP 3B-2). The owner confirms a
+  /** Block (`block` true) or Unblock this user. The owner confirms a
    *  Block; the label follows `blocksStore`. Omitted: no button. */
   readonly onToggleBlock?: (userId: number, block: boolean) => void;
   /**

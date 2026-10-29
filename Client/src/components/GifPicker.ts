@@ -176,7 +176,7 @@ export function createGifPicker(options: GifPickerOptions): {
   root.appendChild(header);
 
   // Grid area (scrollable). Announced as a flat listbox of GIF options with
-  // roving tabindex (DC-13); the inner .gp-grid is layout only.
+  // roving tabindex; the inner .gp-grid is layout only.
   const gridArea = createElement("div", {
     class: "gp-grid-area",
     role: "listbox",
@@ -413,7 +413,7 @@ export function createGifPicker(options: GifPickerOptions): {
     gridArea.appendChild(loadingEl);
   }
 
-  // B9-8: the picker is one external item. Until the viewer consents, not
+  // The picker is one external item. Until the viewer consents, not
   // even the query reaches the server's GIF proxy.
   let consentBtn: HTMLButtonElement | null = null;
   function showConsent(): void {
@@ -490,7 +490,7 @@ export function createGifPicker(options: GifPickerOptions): {
           gridArea.appendChild(errEl);
         } else {
           // A transient provider/network failure keeps the query and offers a
-          // bounded retry; it never turns into the empty-results state (B9-9).
+          // bounded retry; it never turns into the empty-results state.
           showLoadError(contentText("gif.failed"), () => {
             // The retry is replaced by the loading line, so keyboard focus
             // moves to the search field rather than falling to <body>.

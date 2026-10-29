@@ -1,6 +1,6 @@
 import { loadPref } from "./preferences";
 
-/** The device-local setting "Share the game you are playing" (WP 8.3). */
+/** The device-local setting "Share the game you are playing". */
 export const GAME_ACTIVITY_PREF_KEY = "shareGameActivity";
 
 /** Whether this device shares the game being played. On unless turned off. */
@@ -9,8 +9,8 @@ export function isGameActivityShared(): boolean {
 }
 
 /**
- * The seam between the dispatcher's `error` chain and the game activity loop
- * (WP 8.3), and the one place the sharing setting is read.
+ * The seam between the dispatcher's `error` chain and the game activity loop,
+ * and the one place the sharing setting is read.
  *
  * The loop is loaded lazily, after the dispatcher, so the dispatcher cannot
  * import it. The loop registers a handler here while it runs; the dispatcher
@@ -20,7 +20,7 @@ export function isGameActivityShared(): boolean {
  * limit the user did not cause is not theirs to read about. No handler
  * registered (browser build, setting never started) claims nothing.
  *
- * The music loop (WP 8.10) has its own slot: both loops run side by side, and
+ * The music loop has its own slot: both loops run side by side, and
  * each claims only the envelope ids of its own frames.
  */
 

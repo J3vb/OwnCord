@@ -1,6 +1,6 @@
 /**
  * Which video codecs this client decodes, and the pure rule that picks the one
- * codec every viewer in a channel can decode (WP M-4).
+ * codec every viewer in a channel can decode.
  *
  * Voice E2EE publishes no backup codec and the SFU cannot transcode, so a
  * sharer must publish a codec every channel peer decodes or that peer sees a

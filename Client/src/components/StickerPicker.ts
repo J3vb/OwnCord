@@ -1,4 +1,4 @@
-// StickerPicker — the Stickers tab of the expression popup (WP 8.8): a search
+// StickerPicker — the Stickers tab of the expression popup: a search
 // box, a Recent row and a grid of the server's custom stickers. Clicking one
 // picks it; the owner sends it at once. Uses @lib/dom helpers exclusively and
 // never sets innerHTML.

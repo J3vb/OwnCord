@@ -4,7 +4,7 @@
  * Mounted only for actors holding MANAGE_CHANNELS; the server enforces the same
  * bit on the PATCH behind it.
  *
- * Category is a <select> of the known categories and "No category" (WP 6.5b):
+ * Category is a <select> of the known categories and "No category":
  * moving a channel between groups is an edit, not a recreate, and no category
  * is special (a voice channel groups under whatever it carries).
  *
@@ -289,7 +289,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     );
     appendChildren(slowGroup, slowLabel, slowSelect, slowHint);
 
-    // NSFW flag. The hint says what the label does (B5-7/B9-7): the server
+    // NSFW flag. The hint says what the label does: the server
     // withholds the channel's content from each member until they agree.
     const nsfwGroup = createElement("div", { class: "form-group" });
     const nsfwLabelRow = createElement("label", { class: "form-check" });

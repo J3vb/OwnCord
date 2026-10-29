@@ -1,5 +1,5 @@
 /**
- * Message Request decisions (B9-6): accept, ignore, delete or block one
+ * Message Request decisions: accept, ignore, delete or block one
  * pending request, and what the inbox does with the server's answer.
  *
  * Only the server's 200 decides anything. It is applied to the store at once,

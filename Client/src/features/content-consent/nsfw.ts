@@ -1,5 +1,5 @@
 /**
- * NSFW consent (B9-7): the client half of B5-7's server-enforced label.
+ * NSFW consent: the client half of the server-enforced label.
  *
  * The authority is the server's per-account acknowledgement row, never local
  * state: `ready` carries it per channel, a 204 from the acknowledgement route

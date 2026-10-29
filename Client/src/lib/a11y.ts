@@ -1,5 +1,5 @@
 /**
- * Shared dialog accessibility helpers (DC-13).
+ * Shared dialog accessibility helpers.
  *
  * Generalizes the pattern UserProfilePopup pioneered — dialog semantics, a
  * Tab-cycling focus trap, and focus save/restore — so every modal applies the
@@ -124,7 +124,7 @@ export function setRovingTabindex(container: HTMLElement, cellSelector: string):
  *
  * `orientation` picks the stepping axis: the horizontal default (the picker
  * grids) keeps ArrowLeft/Right; `"vertical"` is for a stacked navigation list
- * (the B9-21 shell sidebars) and uses ArrowUp/ArrowDown instead. `"grid"`
+ * (the shell sidebars) and uses ArrowUp/ArrowDown instead. `"grid"`
  * treats each cell's parent element as rows of `gridColumns` (the emoji
  * picker's eight-column category grids): Up/Down step a whole row within that
  * parent and stay put at its top/bottom edge, while Left/Right still step by

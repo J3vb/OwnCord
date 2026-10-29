@@ -82,7 +82,7 @@ export function findDirectDm(userId: number): DmChannel | undefined {
 /**
  * Create a DM with a user via the API and switch to it. `onReady` runs after
  * the new conversation is selected, so a caller that needs to act on it (e.g.
- * start a call, BUG-05) sees it as the active channel.
+ * start a call) sees it as the active channel.
  */
 export async function handleCreateDm(
   recipientId: number,
@@ -187,7 +187,7 @@ function timedMute(channelId: number): { mutedUntil?: number } {
   return until === null ? {} : { mutedUntil: until };
 }
 
-/** A 1:1 partner's second line: their game, else their music (WP 8.3, 8.10). */
+/** A 1:1 partner's second line: their game, else their music. */
 function dmActivityFields(dm: DmChannel): Pick<DmConversation, "activity" | "activityIcon"> {
   const shown = dm.isGroup ? null : rowActivity(dm.recipient.activity, dm.recipient.listening);
   return shown === null ? {} : { activity: shown.text, activityIcon: shown.icon };

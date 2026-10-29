@@ -74,7 +74,7 @@ const KEEPALIVE_PROBES: u32 = 3;
 /// the TOFU check rejected a first-use or changed certificate, or the TLS
 /// handshake failed. It is a 502 carrying a small JSON body with the distinct
 /// `TLS_CERT_UNVERIFIED` code, so the webview can tell a certificate failure
-/// apart from an unreachable server (DP-54 follow-up). The TOFU decision flow
+/// apart from an unreachable server. The TOFU decision flow
 /// itself (what prompts, what is pinned) is unchanged — only the refusal's
 /// shape.
 pub(crate) fn cert_error_response() -> Vec<u8> {
@@ -1033,7 +1033,7 @@ mod tests {
         );
     }
 
-    // DP-54 follow-up: a tunnel that refuses a certificate must say so with a
+    // A tunnel that refuses a certificate must say so with a
     // distinct code, not an empty 502, so the webview can show the certificate
     // message instead of the generic unreachable copy. The TOFU decision flow
     // is unchanged — only the refusal's body.
