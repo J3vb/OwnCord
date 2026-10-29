@@ -642,6 +642,18 @@ describe("renderAttachment — server thumbnails", () => {
     expect(document.querySelector(".image-lightbox img")).not.toBeNull();
   });
 
+  it("an image whose bytes do not decode becomes a download card", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    host.appendChild(renderAttachment(att));
+    await vi.waitFor(() => expect(host.querySelector("img")).not.toBeNull());
+    host.querySelector("img")!.dispatchEvent(new Event("error"));
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.querySelector(".msg-file-download")).not.toBeNull();
+    expect(host.querySelector(".msg-file-note")?.textContent).not.toBe("");
+    host.remove();
+  });
+
   // WP 8.12: a HEIC or TIFF is no image to a webview; the server's JPEG
   // preview at /thumb stands in for it everywhere, and Download keeps the file.
   describe.each([
