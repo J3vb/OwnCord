@@ -28,7 +28,7 @@ import (
 
 // maxPushSubscriptionsPerUser bounds how many devices one account may keep
 // subscribed at once; the 11th subscription evicts the oldest by
-// last_seen_at (B5-4, plan decision 4).
+// last_seen_at.
 //
 // ponytail: constant; make it a bounded key when an operator asks.
 const maxPushSubscriptionsPerUser = 10
@@ -61,8 +61,8 @@ type PushSubscribeInput struct {
 	DeviceName string
 }
 
-// PushService stores Web Push subscriptions (migration 045, B5-4). Nothing
-// here dispatches a push — that is B5-11, behind HP-5. Rotation is an
+// PushService stores Web Push subscriptions (migration 045). Nothing
+// here dispatches a push — that is PushDispatcher's job. Rotation is an
 // operator action (replace the VAPID key file or env var, then restart),
 // not a method on this service: SetVAPIDKey is called once, at start-up.
 type PushService struct {
@@ -113,7 +113,7 @@ func (s *PushService) SetSubscriptionTTL(d time.Duration) {
 	s.ttl = d
 }
 
-// SetContact installs push.contact (B5-11), the mailto address VAPID JWTs
+// SetContact installs push.contact, the mailto address VAPID JWTs
 // carry as their "sub" claim. Empty (the default) means the claim is
 // omitted entirely, not sent as "mailto:" — an empty sub is not a valid
 // contact and a push service is entitled to reject it.
@@ -161,7 +161,7 @@ func (s *PushService) Subscribe(ctx context.Context, userID int64, in PushSubscr
 }
 
 // List returns userID's subscriptions under the running VAPID key. A row
-// written under a since-rotated key is invisible here (decision 2) — the
+// written under a since-rotated key is invisible here — the
 // sweep is what removes it.
 func (s *PushService) List(ctx context.Context, userID int64) ([]db.PushSubscription, error) {
 	rows, err := s.st.ListPushSubscriptions(ctx, userID, s.currentKeyID())
@@ -199,12 +199,12 @@ func (s *PushService) Sweep(ctx context.Context) (int64, error) {
 }
 
 // ErrPushNotConfigured is returned by vapidAuthorization before any VAPID
-// key has been installed — SetVAPIDKey runs unconditionally at start-up
-// (B5-4), so in production this only fires in the instant before that stage
+// key has been installed — SetVAPIDKey runs unconditionally at start-up,
+// so in production this only fires in the instant before that stage
 // runs.
 var ErrPushNotConfigured = errors.New("push: no VAPID key installed")
 
-// vapidTokenTTL is the RFC 8292 JWT lifetime (plan decision 9: 12h). RFC
+// vapidTokenTTL is the RFC 8292 JWT lifetime (12h). RFC
 // 8292 recommends staying well under 24h so a leaked token cannot be
 // replayed indefinitely.
 const vapidTokenTTL = 12 * time.Hour

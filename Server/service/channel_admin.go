@@ -11,7 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── S-03: the channel metadata contract ─────────────────────────────────────
+// ─── The channel metadata contract ─────────────────────────────────────
 //
 // One explicit rune/normalization contract for channel name, topic and
 // category, shared by every writer (the admin CRUD here; group DM names
@@ -19,7 +19,7 @@ import (
 // cap). Bounds count runes on the cleaned value, never bytes; values are
 // sanitized and trimmed by cleanTextBounded exactly like every other
 // sidebar-rendered free-text field, with its raw-byte pre-check in front of
-// the quadratic sanitizer (OC-0192/OC-0195 lineage).
+// the quadratic sanitizer.
 
 const (
 	// MaxChannelNameLen bounds channels.name. 100 is the cap
@@ -38,7 +38,7 @@ const (
 // validChannelTypes is the set of channel types a create may name. A
 // channel's CATEGORY deliberately constrains nothing: grouping is a display
 // concern, so the server validates the type alone (see the admin handler's
-// original rationale, kept verbatim through the B3-8 move).
+// original rationale, kept verbatim through the move).
 var validChannelTypes = []string{"text", "voice", "announcement", "forum"}
 
 // ChannelMeta is the cleaned, validated name/topic/category triple every
@@ -49,7 +49,7 @@ type ChannelMeta struct {
 	Category string
 }
 
-// cleanChannelMeta applies the S-03 contract: sanitize + trim each field,
+// cleanChannelMeta applies the channel metadata contract: sanitize + trim each field,
 // bound by runes, and require a non-empty name. Every violation is
 // ErrBadRequest with the field's own message.
 func cleanChannelMeta(name, topic, category string) (ChannelMeta, error) {
@@ -84,7 +84,7 @@ func cleanChannelField(v string, maxRunes int, field string) (string, error) {
 	return cleaned, nil
 }
 
-// ─── S-04: the one non-DM resolution policy ──────────────────────────────────
+// ─── The one non-DM resolution policy ──────────────────────────────────
 
 // ResolveGuildChannel is the single admin-surface channel lookup: a missing
 // channel and a DM channel both answer ErrNotFound, indistinguishably. DMs
@@ -92,7 +92,7 @@ func cleanChannelField(v string, maxRunes int, field string) (string, error) {
 // to their participants, not to MANAGE_CHANNELS holders — and answering a DM
 // id with anything but "not found" confirms which ids are private
 // conversations (A-2026-08-02). Every sibling lookup goes through here so no
-// path can grow its own policy again (S-04). A thread answers ErrBadRequest
+// path can grow its own policy again. A thread answers ErrBadRequest
 // (errThreadNotAdminChannel).
 func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db.Channel, error) {
 	if id <= 0 {
@@ -111,8 +111,8 @@ func (s *ChannelService) ResolveGuildChannel(ctx context.Context, id int64) (*db
 	return ch, nil
 }
 
-// errThreadNotAdminChannel refuses a thread id on the admin channel surface
-// (6.9c). A thread takes its permissions, NSFW, archive and retention from
+// errThreadNotAdminChannel refuses a thread id on the admin channel surface.
+// A thread takes its permissions, NSFW, archive and retention from
 // its parent, so an override, edit or delete keyed by a thread id would
 // either be ignored or bypass the thread rules; the parent is the channel to
 // manage.
@@ -121,7 +121,7 @@ var errThreadNotAdminChannel = fmt.Errorf("a thread is managed through its paren
 // ─── Admin channel CRUD ──────────────────────────────────────────────────────
 
 // AdminChannelCreate carries a create request's raw fields; the service
-// cleans and validates them (S-03) before anything persists.
+// cleans and validates them before anything persists.
 type AdminChannelCreate struct {
 	Name string
 	Type string
@@ -153,10 +153,10 @@ func (s *ChannelService) AdminListChannels(ctx context.Context) ([]db.Channel, e
 	return guildChannels, nil
 }
 
-// AdminCreateChannel validates per S-03, persists, audits, and returns the
+// AdminCreateChannel validates per the channel metadata contract, persists, audits, and returns the
 // committed row. The re-read runs on an uncancellable tail: once the row has
 // committed, a caller disconnect must not leave a durably created channel
-// unread and unbroadcast (OC-0158) — the caller fans out from the returned
+// unread and unbroadcast — the caller fans out from the returned
 // row.
 //
 // The second result is the full category list, non-nil only when this create
@@ -276,7 +276,7 @@ func (s *ChannelService) requireChannelNameFree(ctx context.Context, name, chTyp
 
 // AdminChannelUpdate carries a full update — the handler pre-fills it from
 // the existing row so a partial PATCH body is safe — with the raw text
-// fields cleaned here per S-03.
+// fields cleaned here per the channel metadata contract.
 type AdminChannelUpdate struct {
 	Name  string
 	Topic string
@@ -301,7 +301,7 @@ type AdminChannelUpdate struct {
 	VoiceMaxVideo int
 	// SyncPermissions replaces the channel's role and member overrides with the
 	// template of the category it ends up in and marks it synced, in the same
-	// transaction as the update (WP 6.5d). It needs an existing category
+	// transaction as the update. It needs an existing category
 	// (ErrBadRequest otherwise) and ActorRole, and is refused (ErrForbidden)
 	// when the actor could not have written the rows it removes or writes.
 	// Without it a move keeps the channel's overrides and unsyncs it.
@@ -309,9 +309,9 @@ type AdminChannelUpdate struct {
 	ActorRole       *db.Role
 }
 
-// AdminUpdateChannel validates (S-03 text contract + numeric bounds),
+// AdminUpdateChannel validates (the metadata text contract + numeric bounds),
 // persists, audits, and returns the committed row read on the uncancellable
-// tail (OC-0158). The caller fans out visibility changes from the returned
+// tail. The caller fans out visibility changes from the returned
 // before/after pair. The second result is the full category list, non-nil
 // only when the update created a category through the legacy category string
 // (audited here; the handler broadcasts it to managers).
@@ -362,12 +362,12 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	if err := s.prepareUpdateSync(ctx, req, existing.ID, target.id, &update, &refused); err != nil {
 		return nil, nil, err
 	}
-	// B5-7 decision 13: clearing the flag deletes the channel's standing
+	// Clearing the flag deletes the channel's standing
 	// acknowledgements in the SAME transaction as the flag write, so a later
 	// re-label re-prompts everyone rather than trusting consent given for a
 	// different warning. Flipping the flag ON writes nothing extra.
 	//
-	// P2-3: gated on the RESULTING flag (req.NSFW == false), not a 1→0
+	// Gated on the RESULTING flag (req.NSFW == false), not a 1→0
 	// transition read from the stale `existing` snapshot this handler was
 	// dispatched with. Two concurrent edits — this one, which read
 	// existing.NSFW == false, and another that labelled the channel and was
@@ -423,13 +423,13 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 //     once, so a voice_join racing the delete could otherwise pass the
 //     archived gate and insert a voice_states row after the snapshot but
 //     before the cascade — orphaning that joiner's hub state and LiveKit
-//     session with no DB row left for any sweep (OC-0035). Persisting
+//     session with no DB row left for any sweep. Persisting
 //     archived=1 first makes voice_join's archived check refuse the race.
 //   - Evict BEFORE deleting: the voice_states FK cascade wipes the rows the
 //     cleanup reads.
 //   - Delete on the tail: the archive (and eviction) already committed, so a
 //     caller disconnect must not leave the channel silently archived,
-//     unbroadcast and unaudited (OC-0010).
+//     unbroadcast and unaudited.
 //
 // evictVoice is the hub's CleanupVoiceForChannel (nil in hub-less tests).
 // When the delete itself fails after the archive committed, the archived row

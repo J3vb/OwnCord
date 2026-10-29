@@ -21,7 +21,7 @@ type UserService struct {
 	// (P5-S07). nil writes each at once, which is what tests and the admin
 	// panel's own instance get.
 	batch *ConnWrites
-	// welcome greets an approved applicant (WP 8.6); nil greets nobody.
+	// welcome greets an approved applicant; nil greets nobody.
 	welcome *WelcomeService
 }
 
@@ -122,10 +122,10 @@ func cleanText(v string) string {
 	return strings.TrimSpace(sanitizeToFixpoint(v))
 }
 
-// cleanTextBounded is cleanText plus the raw-byte guard OC-0192 established
+// cleanTextBounded is cleanText plus the raw-byte guard
 // for UpdateProfile's DisplayName/About fields, generalized for every other
 // free-text field that runs through cleanText: SetCustomStatus,
-// HandlePresenceUpdate's custom_status, and group DM names (OC-0195).
+// HandlePresenceUpdate's custom_status, and group DM names.
 //
 // cleanText's sanitizeToFixpoint pass is quadratic in input length, so a
 // bound applied only to its *output* (a plain rune-count check on the
@@ -167,7 +167,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	)
 	defer done()
 
-	// OC-0192: bound the raw bytes before either reaches cleanText
+	// Bound the raw bytes before either reaches cleanText
 	// (sanitizeToFixpoint) below — its cost is quadratic in input length,
 	// and an adversarial nested-entity payload can sanitize down to
 	// something well under the rune-count bound while still costing seconds
@@ -254,7 +254,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	// stale profile indefinitely even though the DB already has the new one.
 	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
-		// OC-0297: the write above already committed, so this re-read failing
+		// The write above already committed, so this re-read failing
 		// (SQLITE_BUSY, an I/O error, pool exhaustion — anything short of the
 		// context cancellation the comment above already covers) must not be
 		// reported as ErrInternal. A caller that treats any UpdateProfile
@@ -372,7 +372,7 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 	return res, nil
 }
 
-// ListPendingRegistrations is the approval queue (B4-1), oldest first.
+// ListPendingRegistrations is the approval queue, oldest first.
 func (s *UserService) ListPendingRegistrations(ctx context.Context, limit, offset int) ([]db.PendingUser, error) {
 	pending, err := s.st.ListPendingUsers(ctx, limit, offset)
 	if err != nil {
@@ -422,7 +422,7 @@ func (s *UserService) ListSessions(ctx context.Context, userID int64) ([]db.Sess
 }
 
 // MarkSessionsSeen acknowledges the account's unseen logins from the
-// caller's session (B4-7's new-login signal, BG-08 server half): every other
+// caller's session (the new-login signal): every other
 // session's flag clears; the caller's own stays, so the device that just
 // signed in never acknowledges itself. An API-token principal passes 0 and
 // acknowledges them all. Nothing security-sensitive changes, so no audit
@@ -448,7 +448,7 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 	return nil
 }
 
-// RevokeAllSessions is sign-out-everywhere (B4-7, BG-08): every session of
+// RevokeAllSessions is sign-out-everywhere: every session of
 // the user goes, the caller's own included, and so does every API token, so
 // a stolen credential anywhere stops working now and the caller
 // re-authenticates. Returns how many sessions were revoked.
@@ -458,8 +458,8 @@ func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int6
 		return 0, fmt.Errorf("%w: failed to revoke sessions: %w", ErrInternal, err)
 	}
 	if n == 0 && tokens == 0 {
-		// Nothing changed, so there is nothing to audit (Codex P2 on PR
-		// #1500): a repeated call cannot grow the audit log.
+		// Nothing changed, so there is nothing to audit:
+		// a repeated call cannot grow the audit log.
 		slog.Debug("sign-out-everywhere found nothing to revoke", "user_id", userID)
 		return 0, nil
 	}
@@ -471,7 +471,7 @@ func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int6
 	return n, nil
 }
 
-// ─── Admin-panel reads (B3-8 user family) ────────────────────────────────────
+// ─── Admin-panel reads ────────────────────────────────────
 //
 // The admin panel's user section reads through these rather than the handle:
 // the server-stats tile, the paginated member table, and the single-user
@@ -535,7 +535,7 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 	return user, roleName, nil
 }
 
-// ── Connection lifecycle stamps (B3-8 connection family) ────────────────────
+// ── Connection lifecycle stamps ────────────────────
 //
 // The two writes a WebSocket session makes about itself: the status it comes
 // online as, and the offline stamp when its last pump exits. They are a pair

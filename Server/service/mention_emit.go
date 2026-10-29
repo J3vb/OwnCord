@@ -8,13 +8,13 @@ import (
 )
 
 // MentionCountNotifier delivers a live mention_count frame to one reader whose
-// read_states.mention_count changed (DP-27). channelID names the channel and
+// read_states.mention_count changed. channelID names the channel and
 // count is the reader's total after the bump.
 type MentionCountNotifier interface {
 	NotifyMentionCount(userID, channelID, count int64)
 }
 
-// SetMentionNotifier installs the live unread-badge hook (DP-27). The ws layer
+// SetMentionNotifier installs the live unread-badge hook. The ws layer
 // calls this once, in NewHub, with the hub's implementation; passing nil (or
 // never calling it) leaves the hook off.
 func (s *MessageService) SetMentionNotifier(n MentionCountNotifier) {
@@ -34,7 +34,7 @@ func (s *MessageService) notifyMentionBumped(channelID int64, bumped map[int64]i
 // reverseMentionCounts lowers the mention_count bumps msgIDs made and pushes
 // each admitted reader their new total, holding the shared mentionEmitMu lock
 // across both the write and the frame. That lock is what makes the badge frames
-// ordered (DP-27 ordering): the mention worker's coalesced increment holds the
+// ordered: the mention worker's coalesced increment holds the
 // same lock across its write and frame, so a reader's last frame always carries
 // the latest committed total, and a delete inside the coalesce window can never
 // be overtaken by an older increment total. A failed reversal emits nothing, so

@@ -20,7 +20,7 @@ import (
 //
 // This is the CACHED pre-check half. The rank re-check is repeated live
 // inside DecideAppealTx's own transaction (see its outrank re-read), the
-// parity the direct LiftTimeout path already has (P2-8), so a decider
+// parity the direct LiftTimeout path already has, so a decider
 // demoted between this call and the decision commits nothing.
 func (s *AppealService) requireOverturnAuthority(ctx context.Context, actorID int64, action *db.ModerationAction) error {
 	switch action.Kind {

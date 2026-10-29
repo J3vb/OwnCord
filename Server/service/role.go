@@ -24,7 +24,7 @@ import (
 type RoleService struct {
 	st    Store
 	perms *PermissionService
-	// notifier receives each committed mutation's fan-out (WP 5.1a). Set once
+	// notifier receives each committed mutation's fan-out. Set once
 	// before the server serves; nil is a no-op. Always called outside mu.
 	notifier PermissionChangeNotifier
 	// mu serializes the read-check-write mutations: position uniqueness and
@@ -312,7 +312,7 @@ type RoleUpdateResult struct {
 	// caller re-keys them with one member_update each.
 	Renamed bool
 	// ResyncedMembers lists the members holding the role next to another one
-	// whose top role was re-derived because the position moved (WP 6.3c): their
+	// whose top role was re-derived because the position moved: their
 	// displayed role and role order may have changed.
 	ResyncedMembers []int64
 }
@@ -547,8 +547,7 @@ func (s *RoleService) reorderRolesLocked(ctx context.Context, actorID int64, ord
 	// takes the highest free slot below the actor, and an N…1 block leaves
 	// none: one reorder used to wedge role creation permanently for every
 	// manager below the owner, and the refusal it produced told the admin to
-	// "reorder existing roles first", which re-compacted to the same block
-	// (OC-0374).
+	// "reorder existing roles first", which re-compacted to the same block.
 	//
 	// Each role takes its proportional share of the range — the k-th from the
 	// bottom lands at k/(N+1) of the actor's position — rather than a fixed

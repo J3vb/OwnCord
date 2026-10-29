@@ -58,7 +58,7 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 	return ids, nil
 }
 
-// ReadableChannelIDs is GetAccessibleChannelIDs narrowed to CONTENT (B5-7):
+// ReadableChannelIDs is GetAccessibleChannelIDs narrowed to CONTENT:
 // the visible set minus any labelled channel the user has not acknowledged.
 // Backs SearchMessages' global branch, so a hit inside an unacknowledged
 // labelled channel is silently absent from results rather than returned —
@@ -120,7 +120,7 @@ func (s *MessageService) CanPost(ctx context.Context, userID, channelID int64) e
 }
 
 // ChannelIsDM reports whether channelID is a DM channel. Used by the plugin
-// broadcast path (ws/handlers_command.go, Codex B5-6 P1-2) to pick between a
+// broadcast path (ws/handlers_command.go) to pick between a
 // plain topic-based ChannelEvent and the sender-aware DM audience — a plugin
 // slash command's broadcast is a DM interaction like any other and must not
 // bypass the first-contact gate via unrestricted channel fan-out.
@@ -139,7 +139,7 @@ func (s *MessageService) ChannelIsDM(ctx context.Context, channelID int64) (bool
 // READ|SEND in the channel, MANAGE_MESSAGES on top for announcement channels,
 // never into an archive; DM membership and no block. Every caller —
 // SendMessage, EditMessage, CanPost, and typing via ChannelService — asks that
-// one predicate, so none can drift (S-01, S-12).
+// one predicate, so none can drift.
 func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, ch *db.Channel) error {
 	if err := s.checkSendVerdict(ctx, userID, ch); err != nil {
 		return err
@@ -170,8 +170,8 @@ func (s *MessageService) checkSendVerdict(ctx context.Context, userID int64, ch 
 // role bits and both override layers from the permission cache, the
 // channel's flags, and for a DM its membership and, when withBlock is set,
 // the two-party block state. A perms.Subject failure (which now includes the
-// timeout lookup, B5-9) is PROPAGATED rather than
-// collapsed into a permissive zero-bit Subject (P2-11, Codex review): a
+// timeout lookup) is PROPAGATED rather than
+// collapsed into a permissive zero-bit Subject: a
 // zero Subject fails closed for a non-DM channel (no SEND_MESSAGES bit,
 // TimedOut also defaults false) but a DM's CanSendMessage/CanAddReaction
 // consult DMParticipant/DMBlocked/TimedOut, not RolePerms, so silently

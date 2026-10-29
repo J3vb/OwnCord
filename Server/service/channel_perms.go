@@ -9,12 +9,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ─── Channel permission overrides (B3-8 channel family, part 2) ─────────────
+// ─── Channel permission overrides ─────────────
 //
 // The override policy the admin handlers used to hold: escalation and
 // hierarchy guards, mask clamping, the write/clear/audit sequence, and who
 // must be invalidated afterwards. Handlers decode and respond; every
-// permission decision, and the invalidation and fan-out after it (WP 5.1a),
+// permission decision, and the invalidation and fan-out after it,
 // lives here.
 
 // requireGrantableChannelOverride refuses an override whose allow or deny
@@ -33,7 +33,7 @@ func requireGrantableChannelOverride(actorRole *db.Role, allow, deny int64) erro
 	// An owner-grant-only bit (MOVE_MEMBERS) may not be added to or removed
 	// from an override's allow or deny by anyone but the owner or an
 	// Administrator; the union below also covers clearing an existing one.
-	// An owner-tier bit (WP 8.4d) needs the owner alone.
+	// An owner-tier bit needs the owner alone.
 	changed := (allow | deny) & permissions.OwnerGrantOnly
 	if ownerTier := changed & permissions.OwnerOnlyGrant; ownerTier != 0 &&
 		!permissions.CanChangeOwnerOnlyGrant(actorRole.ID, actorRole.Position) {

@@ -80,7 +80,7 @@ func (s *MessageService) MoveReadPointer(ctx context.Context, userID, channelID 
 
 	// Read-at-latest fires on every refocus and "Mark as Read" click, and a
 	// transaction occupies the single writer even when it changes nothing.
-	// Same skip as HandleChannelFocus (OC-0436): when the reader pool already
+	// Same skip as HandleChannelFocus: when the reader pool already
 	// shows the pointer at the newest live message and no mentions, answer
 	// from those reads without a transaction. A failed read falls through to
 	// the write, which is the load-bearing half. The check runs under
@@ -131,7 +131,7 @@ func (s *MessageService) readAtLatestIsCurrent(ctx context.Context, userID, chan
 // admitReadPointer is admitReadState for the commands that move a read pointer
 // without focusing (mark_read, mark_unread). Those never touch the socket's
 // focus slot, so a thread is admitted through its parent like thread_focus
-// does (WP 6.9c): the thread panel and the sidebar row mark a thread read.
+// does: the thread panel and the sidebar row mark a thread read.
 func admitReadPointer(ctx context.Context, st Store, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
 	ch, err := st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {

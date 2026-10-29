@@ -15,7 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// The recovery kit (B4-5, BPR-044; owner decision 2): a secret the account
+// The recovery kit: a secret the account
 // holder keeps offline. The server stores only an argon2id verifier; using
 // the kit means "I lost my devices", so it signs the user in without the
 // second factor, replaces the password, revokes every session and API token
@@ -39,7 +39,7 @@ var (
 	ErrRecoveryKitFailed    = &authError{ErrInternal, "failed to issue the recovery kit"}
 )
 
-// The owner-issued recovery credential (B4-6, BPR-045; owner decision 3):
+// The owner-issued recovery credential:
 // short-lived, single-use, issued by the server owner only after verifying
 // the person out of band. It is redeemed through the same public route as
 // the kit and told apart by shape.
@@ -53,7 +53,7 @@ const (
 
 // RecoveryVerifications is the fixed wording an issuance must record: how
 // the owner verified the person. Nothing free-form is accepted, so nothing
-// content-bearing can reach the audit log (BPR-045's safe audit record).
+// content-bearing can reach the audit log.
 var RecoveryVerifications = []string{"in_person", "voice_call", "video_call", "trusted_contact"}
 
 var (
@@ -130,7 +130,7 @@ func (s *AuthService) EnrolRecoveryKit(ctx context.Context, p Principal, passwor
 	}
 
 	// The verifier is argon2id: expensive on purpose, so it takes an
-	// admission slot like every bcrypt site (B4-4).
+	// admission slot like every bcrypt site.
 	release, admitted := s.limiter.Admission().TryAcquire()
 	if !admitted {
 		return nil, ErrAuthBusy
@@ -173,8 +173,8 @@ func (s *AuthService) RecoveryKitStatus(ctx context.Context, p Principal) (*Reco
 
 // RecoverWithKit redeems a kit: on success the password is replaced, every
 // session and API token revoked, the kit spent and the audit row written in
-// one transaction, and a fresh session is issued without the second factor
-// (owner decision 2). Every failure — unknown account, no kit, spent kit,
+// one transaction, and a fresh session is issued without the second factor.
+// Every failure — unknown account, no kit, spent kit,
 // wrong secret — is the same refusal, costs the same argon2id compare, and
 // counts towards the per-address and per-account lockouts.
 // recoveryAttempt names the limiter keys one recovery attempt touches: the
@@ -203,7 +203,7 @@ type recoveryTarget struct {
 }
 
 // RecoverWithKit redeems a recovery secret from the public route — the
-// account's kit (B4-5) or an owner-issued credential (B4-6), told apart by
+// account's kit or an owner-issued credential, told apart by
 // shape — and signs the holder in without the second factor.
 func (s *AuthService) RecoverWithKit(ctx context.Context, in RecoverInput) (*AuthResult, error) {
 	at := newRecoveryAttempt(in)
@@ -216,7 +216,7 @@ func (s *AuthService) RecoverWithKit(ctx context.Context, in RecoverInput) (*Aut
 	}
 
 	// The expensive work — the argon2id compare and, on a match, the bcrypt
-	// hash of the new password — runs under one admission slot (B4-4), taken
+	// hash of the new password — runs under one admission slot, taken
 	// before the attempt is charged: a refusal for load costs the caller
 	// nothing, so a busy server cannot lock an honest holder out.
 	release, admitted := s.limiter.Admission().TryAcquire()
@@ -237,7 +237,7 @@ func (s *AuthService) RecoverWithKit(ctx context.Context, in RecoverInput) (*Aut
 func (s *AuthService) recoverAdmitted(ctx context.Context, in RecoverInput, target recoveryTarget, at recoveryAttempt) (auth.RecoverySecretKind, string, error) {
 	// Reserve the attempt before the compare, as login does (F3), so a
 	// concurrent burst is capped at the same budget a sequential one gets;
-	// the fifth failure trips the lockout (owner decision 2).
+	// the fifth failure trips the lockout.
 	if !s.limiter.Allow(at.ipFail, recoveryKitFailureThreshold, recoveryKitFailureWindow) ||
 		!s.limiter.Allow(at.userFail, recoveryKitFailureThreshold, recoveryKitFailureWindow) {
 		s.recoveryLockout(ctx, in, target.user, at)
@@ -356,9 +356,9 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 
 	// The revoked sessions are gone; drop the socket(s) they authenticated
 	// now rather than at the hub's next 30-second sweep — the same gap
-	// handleRevokeAllSessions closes for sign-out-everywhere (Codex P1 on
-	// PR #1500), and recovery is precisely the takeover case it matters
-	// most for (OC-0394).
+	// handleRevokeAllSessions closes for sign-out-everywhere,
+	// and recovery is precisely the takeover case it matters
+	// most for.
 	if revoked > 0 {
 		if d, ok := s.broadcaster.(SessionDisconnector); ok {
 			d.DisconnectRevokedUser(user.ID)
@@ -382,7 +382,7 @@ func (s *AuthService) completeRecovery(ctx context.Context, in RecoverInput, tar
 
 // recoveryLockout records a failed attempt's consequences: when either
 // budget is exhausted the matching lockout starts, and the per-account one
-// is audited (owner decision 2) — content-free, the account id only.
+// is audited — content-free, the account id only.
 func (s *AuthService) recoveryLockout(ctx context.Context, in RecoverInput, user *db.User, at recoveryAttempt) {
 	if !s.limiter.Check(at.ipFail, recoveryKitFailureThreshold, recoveryKitFailureWindow) {
 		s.limiter.Lockout(ctx, at.ipLock, recoveryKitLockoutDuration)
@@ -397,7 +397,7 @@ func (s *AuthService) recoveryLockout(ctx context.Context, in RecoverInput, user
 	}
 }
 
-// IssueRecoveryAssist is the owner-only half of BPR-045 (owner decision 3):
+// IssueRecoveryAssist is the owner-only half of the owner-issued recovery credential:
 // after verifying the person out of band — recorded as one of
 // RecoveryVerifications, fixed wording so nothing content-bearing exists to
 // leak — the server owner receives a 15-minute, single-use credential for
@@ -442,7 +442,7 @@ func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID
 	if target.ID == actor.ID || auth.IsEffectivelyBanned(target) || target.PendingApproval() || strings.HasPrefix(target.Username, "[") {
 		return nil, ErrRecoveryAssistUnusable
 	}
-	// The argon2id hash of the credential takes an admission slot (B4-4),
+	// The argon2id hash of the credential takes an admission slot,
 	// taken before the issuance budgets are spent: a refusal for load
 	// charges nothing.
 	release, admitted := s.limiter.Admission().TryAcquire()

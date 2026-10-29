@@ -27,10 +27,10 @@ type UploadService struct {
 	// a slice interface and not part of Store (the Store method ratchet); nil
 	// means no banner is ever readable through the grant, which fails closed.
 	banners BannerFileStore
-	// quota is the per-user byte counter's in-process half (B5-2); see
+	// quota is the per-user byte counter's in-process half; see
 	// storage_quota.go.
 	quota storageQuota
-	// cloner is the storage a forward clones files in (WP 6.9a); guarded by
+	// cloner is the storage a forward clones files in; guarded by
 	// quota.mu. nil until the composition root installs it.
 	cloner FileCloner
 }
@@ -66,7 +66,7 @@ type AttachmentRecord struct {
 	Size int64
 	// Width and Height are the image dimensions, nil for a non-image.
 	Width, Height *int
-	// DurationMs and Waveform are set only for a voice message (WP 8.9): the
+	// DurationMs and Waveform are set only for a voice message: the
 	// clip length in milliseconds and the canonical base64url (unpadded)
 	// encoding of its amplitude bytes. Both nil, or both set.
 	DurationMs *int
@@ -77,7 +77,7 @@ type AttachmentRecord struct {
 // (message_id NULL) until a message claims it, which is what makes it private
 // to its uploader in the meantime (see Authorize).
 //
-// res is the reservation the bytes were written under (B5-2). The row insert
+// res is the reservation the bytes were written under. The row insert
 // and the reservation's commit share one critical section, so a recount can
 // never see the file both in the rows and in flight and double-count it;
 // on failure the reservation is left for the caller's Settle to release.
@@ -178,13 +178,13 @@ func (s *UploadService) Resolve(ctx context.Context, fileID string) (*db.Attachm
 //   - A linked attachment in a guild channel needs READ_MESSAGES there, which
 //     an administrator is exempt from.
 //   - An unlinked attachment is private to its uploader, administrators
-//     included (decision 13: once its message or channel is deleted there is
+//     included (once its message or channel is deleted there is
 //     no label left to check consent against), except while some
 //     user's avatar column points at exactly its URL: an avatar has to be
 //     visible to the people who see the messages it sits next to, and the check
 //     being by exact URL is what makes the file stop being public the instant
 //     the avatar is replaced. A legacy row with no uploader (NULL uploader_id)
-//     is denied rather than served to any authenticated caller (M-2).
+//     is denied rather than served to any authenticated caller.
 //   - A labelled channel's attachment needs the caller's own NSFW
 //     acknowledgement, administrators included (checkNSFWConsent).
 //
@@ -209,14 +209,14 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 
 	isAdmin := role != nil && permissions.HasAdmin(role.Permissions)
 
-	// P2-6: ordinary channel visibility runs BEFORE the NSFW consent check
+	// Ordinary channel visibility runs BEFORE the NSFW consent check
 	// (previously reversed). A non-viewer without READ_MESSAGES must get the
 	// exact same refusal (FORBIDDEN, via errFileForbidden) whether or not the
 	// channel happens to be labelled — checking consent first would answer a
 	// non-viewer with a DIFFERENT code (NSFW_ACKNOWLEDGEMENT_REQUIRED) only
 	// for a labelled channel, disclosing the label's existence to someone who
 	// cannot see the channel at all. Same admin exemption this gate always
-	// had; decision 13's admin-refusing consent check still runs next.
+	// had; the admin-refusing consent check still runs next.
 	if aa.ChannelID != nil && aa.ChannelType != "dm" && !isAdmin {
 		if actor == nil || !s.perms.HasChannelPerm(ctx, actor.ID, *aa.ChannelID, permissions.ReadMessages) {
 			return errFileForbidden()
@@ -229,7 +229,7 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 	return s.checkNSFWConsent(ctx, aa, actor)
 }
 
-// checkNSFWConsent is Authorize's B5-7 decision 13 gate: an administrator
+// checkNSFWConsent is Authorize's NSFW consent gate: an administrator
 // without a row is refused exactly like anyone else — no bit and no admin
 // bypass skips this. DMs cannot be labelled, so this only ever applies to a
 // non-DM linked channel.

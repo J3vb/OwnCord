@@ -31,7 +31,7 @@ type Privacy struct {
 }
 
 // PrivacyService keeps each user's direct message privacy choices (migration
-// 070, WP 6.8b). Every call is keyed by the session user.
+// 070). Every call is keyed by the session user.
 type PrivacyService struct {
 	st PrivacyStore
 }

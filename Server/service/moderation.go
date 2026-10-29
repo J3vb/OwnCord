@@ -17,7 +17,7 @@ import (
 type ModerationService struct {
 	st    Store
 	perms *PermissionService
-	// erasure runs the administrator's account erasure (B4-9); nil fails
+	// erasure runs the administrator's account erasure; nil fails
 	// EraseUser closed.
 	erasure *ErasureService
 	// messages is used only by the report-linked removal entry point
@@ -27,20 +27,20 @@ type ModerationService struct {
 	// users performs the moderator nickname write under the target's profile
 	// lock (SetNickname). Wired by New; nil fails SetNickname closed.
 	users *UserService
-	// notifier delivers a live mod_action frame to a connected target
-	// (B5-9): warning issued, timeout applied, or timeout lifted. *ws.Hub
+	// notifier delivers a live mod_action frame to a connected target:
+	// warning issued, timeout applied, or timeout lifted. *ws.Hub
 	// implements it; wired via SetNotifier from the composition root,
 	// mirroring ErasureService.SetHub. Nil is a normal no-op — a
 	// disconnected target still gets the ledger row and sees a warning on
 	// next connect (ready's notices) or a timeout on their next attempted
 	// send (the predicates).
 	notifier ModActionNotifier
-	// permNotifier receives a committed role assignment's live fan-out (WP
-	// 5.1a); a separate port from the mod_action notifier. Nil is a no-op.
+	// permNotifier receives a committed role assignment's live fan-out;
+	// a separate port from the mod_action notifier. Nil is a no-op.
 	permNotifier PermissionChangeNotifier
 	// voiceMuter applies or lifts the voice half of a timeout on a
 	// currently-connected target, through the exact SFU mechanism
-	// voice_mod_mute uses (decision 6: timeout's voice half defers to
+	// voice_mod_mute uses (timeout's voice half defers to
 	// MUTE_MEMBERS rather than adding a second path to the same effect).
 	// Nil is a normal no-op — Timeout still lands for text and reactions.
 	voiceMuter TimeoutVoiceMuter
@@ -63,8 +63,8 @@ type ModActionNotifier interface {
 // TimeoutVoiceMuter is the minimal voice-hub surface Timeout/LiftTimeout use
 // to apply or lift the voice half of a timeout, reusing voice_mod_mute's own
 // SFU mechanism rather than reimplementing it. Muted with no live voice
-// connection is a silent no-op. *ws.Hub implements it (round 4, Codex
-// review Part A/B: split from round 3's single ApplyTimeoutMute — mute
+// connection is a silent no-op. *ws.Hub implements it (split from the
+// earlier single ApplyTimeoutMute — mute
 // needs the EXACT authorized session, unmute needs the ownership chain,
 // and cramming both into one signature no longer fits once unmute stopped
 // needing a channel/session at all).
@@ -72,22 +72,22 @@ type TimeoutVoiceMuter interface {
 	// MuteForTimeout mutes userID in channelID/joinedAt — the EXACT session
 	// actorCanModerateVoiceFor already resolved and authorized, not a fresh
 	// re-read that could resolve a different (unauthorized) one by the time
-	// this runs (P1-3 PARTIAL) — stamping actionID as owner atomically with
+	// this runs — stamping actionID as owner atomically with
 	// the DB write, under a per-user lock shared with the manual voice-mute
-	// endpoint (round 4, Codex 12/14).
+	// endpoint.
 	//
 	// Reports applied — false covers every no-op path (no voice store, no
 	// live connection, a channel-switch race, or an SFU failure that rolls
-	// the DB transition back: P3-14 PARTIAL) — so the caller's
+	// the DB transition back) — so the caller's
 	// "voice": "applied"/"skipped" outcome reflects what really happened.
 	// owned is true only when THIS call caused the unmuted->muted
 	// transition; false means the target was already server-muted by
-	// someone/something else (P1-4 PARTIAL) — the caller has no further use
+	// someone/something else — the caller has no further use
 	// for it (ownership bookkeeping is now entirely internal to the DB/lock
 	// layer), kept only because "did I just take ownership" is meaningful
 	// information for a caller that wants it.
 	//
-	// supersededIDs (round 5, Codex review P2) transfers ownership from
+	// supersededIDs transfers ownership from
 	// those just-superseded ledger ids onto actionID INSIDE the same
 	// per-user lock this call already takes for its own DB write and SFU
 	// pair — TimeoutUser no longer transfers ownership itself, because
@@ -97,9 +97,9 @@ type TimeoutVoiceMuter interface {
 	MuteForTimeout(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (applied, owned bool)
 	// UnmuteForTimeout clears the mute currently owned by any of actionIDs
 	// (a lift's own id, or its whole supersede chain) — session-bound for
-	// free (round 4, fixing Codex 13): an ended or restarted session cannot
+	// free: an ended or restarted session cannot
 	// be cleared by a stale id, so no separate eligibility re-check is
-	// needed on this side the way round 3's design required. Reports
+	// needed on this side the way the earlier design required. Reports
 	// whether anything was actually cleared.
 	UnmuteForTimeout(ctx context.Context, userID int64, actionIDs []int64) bool
 }
@@ -129,8 +129,8 @@ func (s *ModerationService) ErasureBroadcastsMemberBan() bool {
 	return s.erasure != nil && s.erasure.BroadcastsMemberBan()
 }
 
-// EraseUser is the administrator-initiated account erasure (B4-9): the same
-// implementation as self-deletion, gated on ERASE_ACCOUNTS (ADMINISTRATOR implies it, WP 8.4d) plus the
+// EraseUser is the administrator-initiated account erasure: the same
+// implementation as self-deletion, gated on ERASE_ACCOUNTS (ADMINISTRATOR implies it) plus the
 // actor-outranks-target hierarchy. An actor cannot erase itself here — that
 // is the password-confirmed self-service route. The last admin-class
 // account cannot be erased (Forbidden). Writes the account_deleted audit
@@ -182,7 +182,7 @@ func (s *ModerationService) EraseUser(ctx context.Context, actorID, targetID int
 	}
 
 	// Audit rows must survive a request canceled after the erasure committed.
-	// The actor stays; the target is the marker's token, never the id (B4-10).
+	// The actor stays; the target is the marker's token, never the id.
 	db.WriteAuditEntry(context.WithoutCancel(ctx), s.st, db.AuditEntry{
 		ActorID: actorID, Action: "account_deleted", TargetType: "user", Detail: "account erased by administrator",
 		SubjectToken: s.erasure.SubjectToken(targetID),
@@ -256,7 +256,7 @@ func (s *ModerationService) requireOutranksRole(ctx context.Context, actorRole *
 	return nil
 }
 
-// Warn issues a warning (decision 6): MODERATE_MEMBERS, target exists, not
+// Warn issues a warning: MODERATE_MEMBERS, target exists, not
 // self, requireOutranks, then the ledger row — its entire effect — then the
 // audit row. The audit detail is a fixed phrase, never the reason text: the
 // reason is shown to the target (ready's notices), the audit log is a
@@ -307,15 +307,15 @@ func (s *ModerationService) Warn(ctx context.Context, actorID, targetID int64, r
 }
 
 // TimeoutResult is Timeout's outcome: the ledger row id, and whether the
-// voice half was skipped because the actor lacked MUTE_MEMBERS (decision 6
-// — timeout defers to it rather than granting a mute a MUTE_MEMBERS-less
-// moderator could not perform on their own).
+// voice half was skipped because the actor lacked MUTE_MEMBERS —
+// timeout defers to it rather than granting a mute a MUTE_MEMBERS-less
+// moderator could not perform on their own.
 type TimeoutResult struct {
 	ID           int64
 	VoiceSkipped bool
 }
 
-// Timeout time-boxes a restriction on targetID (decision 6): same order as
+// Timeout time-boxes a restriction on targetID: same order as
 // Warn, duration bounded 1 minute..28 days, the ledger row with expires_at
 // — its effect, read back through the predicates (Subject.TimedOut) rather
 // than a scattered per-handler check. The voice half applies the existing
@@ -376,10 +376,10 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 
 // applyTimeoutVoiceHalf is Timeout's voice half, split out to keep Timeout
 // itself readable (cyclop): eligibility is the actor's CanModerateVoice
-// standing in the TARGET's CURRENT voice channel (P1-3, Codex review) — not
+// standing in the TARGET's CURRENT voice channel — not
 // a bare server-wide MUTE_MEMBERS bit, which bypassed a channel-level deny,
 // room visibility and DM membership entirely. Reports "applied" requires the
-// voice muter to report success (P3-14): a target not currently in voice, a
+// voice muter to report success: a target not currently in voice, a
 // channel-switch race, or an SFU failure must not be reported as applied
 // just because the actor was eligible.
 func (s *ModerationService) applyTimeoutVoiceHalf(ctx context.Context, actorID, targetID, actionID int64, supersededIDs []int64) bool {
@@ -400,8 +400,7 @@ func (s *ModerationService) applyTimeoutVoiceHalf(ctx context.Context, actorID, 
 // joinedAt (the join-instance token JoinVoiceChannel mints), bound together
 // so the voice muter's eventual mute/unmute call is scoped to the EXACT
 // session this authorized, not a fresh, separately-resolved one that could
-// answer differently if the target moved on in between (P1-3 PARTIAL, Codex
-// review round 3).
+// answer differently if the target moved on in between.
 type voiceAuthorization struct {
 	channelID int64
 	joinedAt  string
@@ -409,15 +408,15 @@ type voiceAuthorization struct {
 
 // timeoutPreMuteHook, when non-nil, runs after actorCanModerateVoiceFor
 // authorizes a session and before MuteForTimeout is called against it.
-// Test-only (nil in production): P1-3 PARTIAL's race test (Codex review
-// round 3) uses it to move the target to a different session in the exact
+// Test-only (nil in production): the race test
+// uses it to move the target to a different session in the exact
 // gap between authorization and the mute, proving the two are bound to the
 // SAME session rather than the mute silently re-resolving a new one.
 var timeoutPreMuteHook func()
 
 // actorCanModerateVoiceFor reports whether actorID may run the voice half of
-// a timeout or lift against targetID's CURRENT voice channel (P1-3, Codex
-// review): permissions.CanModerateVoice over the actor's Subject in that
+// a timeout or lift against targetID's CURRENT voice channel:
+// permissions.CanModerateVoice over the actor's Subject in that
 // channel, so a channel-level deny, a room the actor cannot see, or (for a
 // DM call) the actor not being a participant all refuse it exactly as
 // voice_mod_mute's own gate does — never a server-wide bit alone. ok=false
@@ -438,10 +437,10 @@ func (s *ModerationService) actorCanModerateVoiceFor(ctx context.Context, actorI
 	if err != nil {
 		return voiceAuthorization{}, false
 	}
-	// permissions.AuthorizeVoiceModerator (round 4, Codex review Part C) —
+	// permissions.AuthorizeVoiceModerator —
 	// the same canonical authorizer ws.voiceModTarget calls, replacing this
-	// function's own duplicate of the base-bit-plus-CanModerateVoice pair
-	// (NEW P1, Codex review round 3): the actor's BASE role must hold
+	// function's own duplicate of the base-bit-plus-CanModerateVoice pair:
+	// the actor's BASE role must hold
 	// MUTE_MEMBERS on its own, not merely a channel-scoped allow override,
 	// which CanModerateVoice's own Has() check alone would accept.
 	if permissions.AuthorizeVoiceModerator(sub) != nil {
@@ -450,7 +449,7 @@ func (s *ModerationService) actorCanModerateVoiceFor(ctx context.Context, actorI
 	return voiceAuthorization{channelID: state.ChannelID, joinedAt: state.JoinedAt}, true
 }
 
-// LiftTimeout ends targetID's active timeout early (decision 6): same
+// LiftTimeout ends targetID's active timeout early: same
 // permission and hierarchy as Timeout, then the guarded UPDATE, then the
 // voice half (if ever applied) is lifted through the same mechanism. A
 // live target gets a mod_action frame with a nil expires_at. ErrNotFound
@@ -493,9 +492,9 @@ func (s *ModerationService) LiftTimeout(ctx context.Context, actorID, targetID i
 }
 
 // FinalizeTimeoutLift is the post-commit half of lifting a timeout's voice
-// mute (round 4, B5-10 addendum): clears whichever voice_states row (if
+// mute: clears whichever voice_states row (if
 // any) is currently owned by one of liftedActionIDs — session-bound
-// ownership is the whole of this decision (Codex review Part A): a mute a
+// ownership is the whole of this decision: a mute a
 // DIFFERENT moderator set through voice_mod_mute (server_muted_by NULL) or
 // one belonging to a still-active, non-superseded timeout can never match
 // liftedActionIDs in the first place, so no separate CanModerateVoice
@@ -505,7 +504,7 @@ func (s *ModerationService) LiftTimeout(ctx context.Context, actorID, targetID i
 //
 // Exported and taking the ledger's OWN ids (not re-deriving them) so a
 // caller that lifts a timeout inside ITS OWN transaction — an appeal
-// overturn (B5-10), which lifts by the appeal's specific action id via
+// overturn, which lifts by the appeal's specific action id via
 // db.LiftTimeoutActionsByID rather than LiftTimeout's own "every active row
 // for target" resolution — runs this SAME sequence after its own commit,
 // instead of reimplementing it. actorID is the human moderator responsible,
@@ -514,7 +513,7 @@ func (s *ModerationService) LiftTimeout(ctx context.Context, actorID, targetID i
 // with nobody having run this method yet).
 //
 // The idempotent repair (the voice clear above) and the notification below
-// are deliberately separate (round 5, Codex review P2): a STALE finalize —
+// are deliberately separate: a STALE finalize —
 // this call's liftedActionIDs lost the race to a NEWER timeout that has
 // since superseded them and is still active — must still run its repair
 // (clearing what it owns is always safe: session-bound ownership means it
@@ -543,8 +542,8 @@ func (s *ModerationService) FinalizeTimeoutLift(ctx context.Context, targetID in
 	s.notifyModAction(targetID, 0, "timeout", "", nil)
 }
 
-// ActOnReportParams is the report-linked queue action's input (plan item 7,
-// POST /api/v1/moderation/queue/{public_id}/act). TargetID and MessageID
+// ActOnReportParams is the report-linked queue action's input for
+// POST /api/v1/moderation/queue/{public_id}/act. TargetID and MessageID
 // are resolved by the caller (the handler, through ReportService) from the
 // report's subject and target: ModerationService itself needs no
 // ReportService dependency to dispatch across the five kinds.
@@ -560,7 +559,7 @@ type ActOnReportParams struct {
 
 // ActOnReportResult is ActOnReport's outcome: enough for the queue's act
 // route to dispatch the SAME transport broadcasts the direct routes send
-// after their own commit (P2-7, Codex review) without a parallel
+// after their own commit without a parallel
 // implementation of what each kind's effect actually was.
 type ActOnReportResult struct {
 	Kind string
@@ -568,7 +567,7 @@ type ActOnReportResult struct {
 	// removal, which has no single target (see recordLedgerRow's doc
 	// comment on why removal's ledger target is the actor, not the author).
 	TargetID int64
-	// Voice is timeout's voice outcome, "applied" or "skipped" (P1-3/P3-14);
+	// Voice is timeout's voice outcome, "applied" or "skipped";
 	// empty for every other kind.
 	Voice string
 	// ChannelID/MessageID are removal's transport needs (a chat_bulk_deleted
@@ -584,8 +583,8 @@ type ActOnReportResult struct {
 // sets report_id on the ledger row and calls the exact same service method
 // (Warn/Timeout/forceLogout/banUser/DeleteMessageForReport) its direct-route
 // sibling calls — no parallel implementation of any kind's effect.
-// validateActionReason runs once here, up front, for every kind (P2-10,
-// Codex review): Warn/Timeout/banUser already validate their own reason
+// validateActionReason runs once here, up front, for every kind:
+// Warn/Timeout/banUser already validate their own reason
 // internally, but kick and removal did not before this boundary existed.
 func (s *ModerationService) ActOnReport(ctx context.Context, p ActOnReportParams) (*ActOnReportResult, error) {
 	if err := validateActionReason(p.Reason); err != nil {
@@ -658,7 +657,7 @@ func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64
 	if actorID == targetID {
 		return fmt.Errorf("%w: cannot ban yourself", ErrBadRequest)
 	}
-	// Ban never validated its reason before this (P2-10, Codex review) —
+	// Ban never validated its reason before this —
 	// Warn and Timeout always have, via this same helper.
 	if err := validateActionReason(reason); err != nil {
 		return err
@@ -685,7 +684,7 @@ func (s *ModerationService) banUser(ctx context.Context, actorID, targetID int64
 	}
 
 	// Audit rows must survive a request canceled after the ban committed.
-	// The detail is a fixed phrase, never the reason text (B5-9 review):
+	// The detail is a fixed phrase, never the reason text:
 	// the reason is already durable on users.ban_reason for any
 	// AdminPerimeter holder to read, so the audit trail does not need a
 	// second, unbounded copy of free text that could quote a message.
@@ -779,7 +778,7 @@ func (s *ModerationService) ForceLogout(ctx context.Context, actorID, targetID i
 }
 
 // forceLogout's reason is the ledger row's text; empty falls back to the
-// fixed phrase "all sessions terminated" (P2-10, Codex review: this used to
+// fixed phrase "all sessions terminated" (this used to
 // be the ONLY phrase, discarding whatever ActOnReport's caller submitted).
 func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID int64, reason string, reportID *int64) error {
 	if err := requireHumanActor(actorID); err != nil {
@@ -817,9 +816,9 @@ func (s *ModerationService) forceLogout(ctx context.Context, actorID, targetID i
 
 	// The revoked sessions are gone; drop the socket now rather than at the
 	// hub's next 30-second sweep — the same gap closed for self sign-out-
-	// everywhere (profile_handler.go) and account recovery (recovery.go,
-	// OC-0394). Kick is the one action whose entire purpose is immediate
-	// ejection, so it must not be left on the sweep alone (OC-0431). A
+	// everywhere (profile_handler.go) and account recovery (recovery.go).
+	// Kick is the one action whose entire purpose is immediate
+	// ejection, so it must not be left on the sweep alone. A
 	// notifier that doesn't implement this (tests, nil) is a silent no-op.
 	if d, ok := s.notifier.(SessionDisconnector); ok {
 		d.DisconnectRevokedUser(targetID)
@@ -876,8 +875,8 @@ func (s *ModerationService) ListActionsForTarget(ctx context.Context, actorID, t
 	return rows, nil
 }
 
-// ListActionsForReport is the queue detail's "actions taken" list (plan
-// item 7). No permission check of its own — the caller
+// ListActionsForReport is the queue detail's "actions taken" list.
+// No permission check of its own — the caller
 // (ReportService.Get) has already gated the read with requireModerate,
 // guardConfidentiality and GuardSelfReviewFor.
 func (s *ModerationService) ListActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error) {

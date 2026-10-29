@@ -18,9 +18,9 @@ const (
 	msgReqBlocked  = "blocked"
 )
 
-// MessageRequestService is B5-6's first-contact gate and trusted-sender
+// MessageRequestService is the first-contact gate and trusted-sender
 // bookkeeping: staging a message_requests row instead of opening a DM for a
-// one-to-one sender the recipient does not yet trust (decision 4), and the
+// one-to-one sender the recipient does not yet trust, and the
 // recipient-only transitions between its states. See
 // docs/architecture/community-services.md section S1 for the abuse cases and
 // data-ownership rules this backs, and docs/protocol.md's dm_request section
@@ -87,7 +87,7 @@ func (s *MessageRequestService) Delete(ctx context.Context, userID, id int64) (*
 //
 // blockedSenderID is req.SenderID whenever BlockUser itself committed,
 // regardless of what happens to the transition afterward — the caller
-// (api/dm_request_handler.go, Codex P1-3) needs it to run the same voice
+// (api/dm_request_handler.go) needs it to run the same voice
 // eviction PUT /api/v1/blocks/{id} does even when the transition below
 // loses a race and err is non-nil: the block already committed, and an
 // already-blocked user must not keep a live voice session in the pair's DM
@@ -142,14 +142,14 @@ func (s *MessageRequestService) raceOrNotFound(ctx context.Context, userID, id i
 // for the pair in ANY state, and marks senderID as a trusted sender of
 // recipientID (source "sent_first") — senderID initiated, so recipientID's
 // eventual reply is a reply, not a first-contact request back. Both writes
-// run in ONE transaction (db.DB.CreateMessageRequest, Codex P2-6): a
+// run in ONE transaction (db.DB.CreateMessageRequest): a
 // request insert that committed with no trust write to follow would leave
 // a pending row nothing could ever repair, since a resend just finds the
-// row already there (decision 5's "one row per pair, ever" silence) and
+// row already there ("one row per pair, ever" silence) and
 // retries nothing.
 //
 // messageID is the send's own message — reused verbatim as
-// first_message_id (Codex P1-4/P2-6), so the row this call creates and the
+// first_message_id, so the row this call creates and the
 // dm_request frame the caller builds from its own result name the same
 // message even under a concurrent race, and the REST inbox's preview can
 // never drift from the live frame's.
@@ -158,8 +158,7 @@ func (s *MessageRequestService) raceOrNotFound(ctx context.Context, userID, id i
 // (resend while pending/ignored/deleted/blocked, or the loser of a race) —
 // nil is not an error, it just means no new dm_request frame is owed. When
 // the recipient has message requests off, the outcome reports AutoAccepted
-// and the row is nil: the caller delivers the message and sends no frame
-// (WP 6.8e).
+// and the row is nil: the caller delivers the message and sends no frame.
 func (s *MessageRequestService) firstContact(ctx context.Context, senderID, recipientID, channelID, messageID int64) (*db.MessageRequest, db.MessageRequestOutcome, error) {
 	out, err := s.st.CreateMessageRequest(ctx, senderID, recipientID, channelID, messageID)
 	if err != nil {
@@ -179,7 +178,7 @@ func (s *MessageRequestService) firstContact(ctx context.Context, senderID, reci
 // senderID's action in channelID just produced (a chat message, edit,
 // delete, reaction, or typing indicator): senderID themselves, plus every
 // other participant who trusts senderID for a one-to-one DM, or every
-// participant for a group DM (B5-6 decision 4 — group DMs are untouched).
+// participant for a group DM (group DMs are untouched).
 // An untrusted recipient of a pending/ignored/deleted/blocked request is
 // never in the returned set; their only frame from this channel is
 // dm_request.
