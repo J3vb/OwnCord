@@ -33,6 +33,7 @@ use serde::Serialize;
 use tokio::sync::{oneshot, watch};
 
 use super::screen::{Preview, Started};
+use crate::sync::lock;
 
 /// Capture threads alive, for the debug surface: it drops to zero only once
 /// every camera pipeline has been torn down.
@@ -320,32 +321,19 @@ impl CameraCapture {
     }
 
     pub fn preview(&self) -> Arc<Preview> {
-        self.shared
-            .preview
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
+        lock(&self.shared.preview).clone()
     }
 
     pub fn set_source(&self, source: Option<NativeVideoSource>) {
-        *self.shared.source.lock().unwrap_or_else(|p| p.into_inner()) = source;
+        *lock(&self.shared.source) = source;
     }
 
     /// Carry `from`'s published source and preview over to this capture, so
     /// the publication and the preview socket keep going on this capture's
     /// frames once `from` is dropped (a camera change).
     pub fn take_over(&self, from: &CameraCapture) {
-        *self
-            .shared
-            .preview
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = from.preview();
-        let source = from
-            .shared
-            .source
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .take();
+        *lock(&self.shared.preview) = from.preview();
+        let source = lock(&from.shared.source).take();
         self.set_source(source);
     }
 }
@@ -876,19 +864,11 @@ fn deliver(shared: &Shared, buffer: I420Buffer, started: Instant) {
         frame_metadata: None,
         buffer,
     };
-    let source = shared
-        .source
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone();
+    let source = lock(&shared.source).clone();
     if let Some(source) = source {
         source.capture_frame(&frame);
     }
-    let preview = shared
-        .preview
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone();
+    let preview = lock(&shared.preview).clone();
     if preview.receiver_count() > 0 {
         preview.send_replace(Some(Arc::new(frame.buffer)));
     }
@@ -1025,7 +1005,7 @@ mod tests {
     /// `NativeVideoSource`, and releases the thread and pipeline on drop.
     #[test]
     fn a_synthetic_camera_starts_previews_and_stops_cleanly() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
@@ -1086,7 +1066,7 @@ mod tests {
     /// at the new size, once the old capture is gone.
     #[test]
     fn take_over_moves_preview_and_source_to_the_new_capture() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -1107,18 +1087,8 @@ mod tests {
         let (new, new_started) = synthetic(320, 240);
         assert_eq!(rt.block_on(new_started).unwrap(), Ok((320, 240)));
         new.take_over(&old);
-        assert!(old
-            .shared
-            .source
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_none());
-        assert!(new
-            .shared
-            .source
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_some());
+        assert!(lock(&old.shared.source).is_none());
+        assert!(lock(&new.shared.source).is_some());
         drop(old);
         // Frames the old capture sent before the swap may still be queued;
         // wait for one at the new size.
@@ -1142,7 +1112,7 @@ mod tests {
     /// capture's preview running, untouched.
     #[test]
     fn a_dropped_pending_capture_leaves_the_live_preview_running() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();

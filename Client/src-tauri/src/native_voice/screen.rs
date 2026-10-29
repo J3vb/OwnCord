@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::sync::lock;
 use base64::Engine;
 use livekit::webrtc::desktop_capturer::{
     CaptureError, CaptureSource, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
@@ -369,11 +370,11 @@ fn thumbnail(ty: DesktopCaptureSourceType, source: CaptureSource) -> Option<Stri
     // X11 capturers call back synchronously inside `capture_frame`.
     capturer.start_capture(Some(source), move |result| {
         if let Ok(frame) = result {
-            *out.lock().unwrap_or_else(|p| p.into_inner()) = thumbnail_url(&frame);
+            *lock(&out) = thumbnail_url(&frame);
         }
     });
     capturer.capture_frame();
-    let url = slot.lock().unwrap_or_else(|p| p.into_inner()).take();
+    let url = lock(&slot).take();
     url
 }
 
@@ -513,11 +514,7 @@ impl ScreenCapture {
     }
 
     pub fn preview(&self) -> Arc<Preview> {
-        self.shared
-            .preview
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
+        lock(&self.shared.preview).clone()
     }
 
     /// Re-pace and re-cap the running capture. The size applies from the
@@ -526,34 +523,21 @@ impl ScreenCapture {
     /// frames will have (`fit` of the latest raw frame, or that frame's own
     /// size), `None` before the first frame.
     pub fn set_options(&self, options: CaptureOptions) -> Option<(u32, u32)> {
-        *self
-            .shared
-            .options
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = options;
-        let raw = (*self.shared.raw.lock().unwrap_or_else(|p| p.into_inner()))?;
+        *lock(&self.shared.options) = options;
+        let raw = (*lock(&self.shared.raw))?;
         Some(sized(raw, options))
     }
 
     pub fn set_source(&self, source: Option<NativeVideoSource>) {
-        *self.shared.source.lock().unwrap_or_else(|p| p.into_inner()) = source;
+        *lock(&self.shared.source) = source;
     }
 
     /// Carry `from`'s published source and preview over to this capture, so
     /// the publication and the preview socket keep going on this capture's
     /// frames once `from` is dropped (a Change source).
     pub fn take_over(&self, from: &ScreenCapture) {
-        *self
-            .shared
-            .preview
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = from.preview();
-        let source = from
-            .shared
-            .source
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .take();
+        *lock(&self.shared.preview) = from.preview();
+        let source = lock(&from.shared.source).take();
         self.set_source(source);
     }
 }
@@ -622,7 +606,7 @@ impl Producer {
                 Err(CaptureError::Temporary) => Grab::Pending,
                 Err(CaptureError::Permanent) => Grab::Failed,
             };
-            *out.lock().unwrap_or_else(|p| p.into_inner()) = Some(grab);
+            *lock(&out) = Some(grab);
         });
         Ok(Self::Desktop { capturer, slot })
     }
@@ -632,10 +616,7 @@ impl Producer {
             Self::Desktop { capturer, slot } => {
                 // Both the X11 and the PipeWire capturer call back inside.
                 capturer.capture_frame();
-                slot.lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .take()
-                    .unwrap_or(Grab::Pending)
+                lock(&slot).take().unwrap_or(Grab::Pending)
             }
             Self::Synthetic { width, height, n } => {
                 *n += 1;
@@ -740,7 +721,7 @@ fn run_loop(
     let mut due = started;
     let mut last_fps = f64::NAN;
     loop {
-        let options = *shared.options.lock().unwrap_or_else(|p| p.into_inner());
+        let options = *lock(&shared.options);
         // A rate change re-anchors the grid, so frames are not owed (or
         // withheld) against the old rate.
         if options.fps != last_fps {
@@ -762,7 +743,7 @@ fn run_loop(
         match grab() {
             Grab::Frame(mut buffer) => {
                 let raw = (buffer.width(), buffer.height());
-                *shared.raw.lock().unwrap_or_else(|p| p.into_inner()) = Some(raw);
+                *lock(&shared.raw) = Some(raw);
                 let (w, h) = sized(raw, options);
                 if (w, h) != raw {
                     buffer = buffer.scale(w as i32, h as i32);
@@ -803,19 +784,11 @@ fn deliver(shared: &Shared, buffer: I420Buffer, started: Instant) {
         frame_metadata: None,
         buffer,
     };
-    let source = shared
-        .source
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone();
+    let source = lock(&shared.source).clone();
     if let Some(source) = source {
         source.capture_frame(&frame);
     }
-    let preview = shared
-        .preview
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone();
+    let preview = lock(&shared.preview).clone();
     if preview.receiver_count() > 0 {
         preview.send_replace(Some(Arc::new(frame.buffer)));
     }
@@ -1037,7 +1010,7 @@ mod tests {
 
     #[test]
     fn a_synthetic_capture_starts_previews_and_stops_cleanly() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
@@ -1094,7 +1067,7 @@ mod tests {
         };
         assert_eq!(capture.set_options(options), None);
         // The loop still picks the options up on its first tick.
-        let held = *capture.shared.options.lock().unwrap();
+        let held = *lock(&capture.shared.options);
         assert_eq!(
             (held.fps, held.max_width, held.max_height),
             (15.0, 1280, 720)
@@ -1104,7 +1077,7 @@ mod tests {
     #[test]
     fn set_options_sizes_the_latest_raw_frame_under_the_new_cap() {
         let capture = idle_capture();
-        *capture.shared.raw.lock().unwrap() = Some((1920, 1080));
+        *lock(&capture.shared.raw) = Some((1920, 1080));
         let capped = |w, h| CaptureOptions {
             fps: 30.0,
             max_width: w,
@@ -1118,7 +1091,7 @@ mod tests {
 
     #[test]
     fn set_options_changes_size_and_pace_of_a_running_capture() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -1178,7 +1151,7 @@ mod tests {
 
     #[test]
     fn a_taken_over_preview_keeps_playing_the_new_capture() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
@@ -1226,7 +1199,7 @@ mod tests {
     #[test]
     #[ignore = "needs an X display"]
     fn x11_lists_sources_with_thumbnails_and_captures_one() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let fds = || std::fs::read_dir("/proc/self/fd").unwrap().count();
         let before = fds();
         let sources = list_sources();
@@ -1273,7 +1246,7 @@ mod tests {
 
     #[test]
     fn a_capture_that_cannot_start_reports_why() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();

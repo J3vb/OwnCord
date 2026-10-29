@@ -40,6 +40,7 @@ use tokio_tungstenite::tungstenite::http::StatusCode;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::screen::Preview;
+use crate::sync::lock;
 
 /// State the connection tasks share with the session.
 #[derive(Default)]
@@ -90,11 +91,11 @@ impl FrameServer {
     }
 
     pub fn set_camera(&self, preview: Option<Arc<Preview>>) {
-        *self.shared.camera.lock().unwrap_or_else(|p| p.into_inner()) = preview;
+        *lock(&self.shared.camera) = preview;
     }
 
     pub fn set_screen(&self, preview: Option<Arc<Preview>>) {
-        *self.shared.screen.lock().unwrap_or_else(|p| p.into_inner()) = preview;
+        *lock(&self.shared.screen) = preview;
     }
 
     pub fn sockets(&self) -> usize {
@@ -115,7 +116,7 @@ pub struct Observer(Arc<Shared>);
 impl Observer {
     /// Track the room's remote video subscriptions.
     pub fn observe(&self, event: &RoomEvent) {
-        let mut remote = self.0.remote.lock().unwrap_or_else(|p| p.into_inner());
+        let mut remote = lock(&self.0.remote);
         match event {
             RoomEvent::TrackSubscribed {
                 track: RemoteTrack::Video(track),
@@ -219,36 +220,21 @@ async fn serve(stream: tokio::net::TcpStream, token: String, shared: Arc<Shared>
     let _counted = Counted(shared.clone());
     match route {
         Route::Remote(sid) => {
-            let track = shared
-                .remote
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .get(&sid)
-                .cloned();
+            let track = lock(&shared.remote).get(&sid).cloned();
             match track {
                 Some(track) => send_remote(ws, track).await,
                 None => log::debug!("[native_voice] frame socket: no subscribed video {sid}"),
             }
         }
         Route::Camera => {
-            let preview = shared
-                .camera
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .as_ref()
-                .map(|p| p.subscribe());
+            let preview = lock(&shared.camera).as_ref().map(|p| p.subscribe());
             match preview {
                 Some(preview) => send_preview(ws, preview).await,
                 None => log::debug!("[native_voice] frame socket: no camera capture"),
             }
         }
         Route::Screen => {
-            let preview = shared
-                .screen
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .as_ref()
-                .map(|p| p.subscribe());
+            let preview = lock(&shared.screen).as_ref().map(|p| p.subscribe());
             match preview {
                 Some(preview) => send_preview(ws, preview).await,
                 None => log::debug!("[native_voice] frame socket: no screen capture"),

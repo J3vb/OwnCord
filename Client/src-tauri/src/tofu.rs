@@ -169,7 +169,7 @@ impl rustls::client::danger::ServerCertVerifier for CaptureVerifier {
                 v.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
                     .is_ok()
             });
-        if let Ok(mut guard) = self.captured.lock() {
+        if let Ok(mut guard) = crate::sync::lock_checked(&self.captured) {
             *guard = Some(Observed {
                 fingerprint: fingerprint_hex(end_entity.as_ref()),
                 web_pki_valid,
@@ -768,9 +768,7 @@ mod tests {
         // Accepts unconditionally — the TOFU gate happens after the handshake.
         assert!(result.is_ok());
         assert_eq!(
-            captured
-                .lock()
-                .unwrap()
+            crate::sync::lock(&captured)
                 .as_ref()
                 .map(|o| o.fingerprint.clone()),
             Some(fingerprint_hex(b"leaf-cert"))
@@ -795,7 +793,7 @@ mod tests {
         // The web-PKI verdict is recorded, never enforced: the handshake is
         // accepted either way and the TOFU gate decides afterwards.
         assert!(result.is_ok());
-        let observed = captured.lock().unwrap().clone();
+        let observed = crate::sync::lock(&captured).clone();
         observed
     }
 
@@ -830,7 +828,7 @@ mod tests {
         assert!(verifier
             .verify_server_cert(&leaf, &[], &name, &[], now)
             .is_ok());
-        assert!(!captured.lock().unwrap().as_ref().unwrap().web_pki_valid);
+        assert!(!crate::sync::lock(&captured).as_ref().unwrap().web_pki_valid);
     }
 
     // ── HostScopedVerifier ──────────────────────────────────────────────────

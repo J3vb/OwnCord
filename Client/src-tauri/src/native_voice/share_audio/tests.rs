@@ -197,7 +197,7 @@ struct Fake {
 }
 
 fn at<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|p| p.into_inner())
+    crate::sync::lock(m)
 }
 
 fn serve(

@@ -82,20 +82,14 @@ impl HttpProxyState {
     /// reported. A poisoned lock is not fatal — the worst case is one repeated
     /// log line, never a trust decision — so recover the guard.
     fn claim_trusted_report(&self, host: &str) -> bool {
-        let mut reported = self
-            .trusted_reported
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut reported = crate::sync::lock(&self.trusted_reported);
         reported.insert(host.to_string())
     }
 
     /// Clear this host's trusted claim after a `first_use` or `mismatch`, so the
     /// next trusted outcome (a re-accepted or re-pinned cert) is reported again.
     fn clear_trusted_report(&self, host: &str) {
-        self.trusted_reported
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(host);
+        crate::sync::lock(&self.trusted_reported).remove(host);
     }
 
     /// Remove the `remote_host` entry, but only if it still points at `port`.
@@ -393,8 +387,7 @@ async fn connect_verified<R: Runtime>(
         }
     };
 
-    let observed = match captured_fp
-        .lock()
+    let observed = match crate::sync::lock_checked(&captured_fp)
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
         .clone()
         .filter(|o| !o.fingerprint.is_empty())

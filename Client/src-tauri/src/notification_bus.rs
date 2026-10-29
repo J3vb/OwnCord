@@ -20,6 +20,7 @@ use dbus::message::MatchRule;
 use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::message_notification::{focus_main_window_with, MessageTarget};
+use crate::sync::lock;
 use crate::text;
 
 const BUS_NAME: &str = "org.freedesktop.Notifications";
@@ -320,10 +321,6 @@ type OnClick = dyn Fn(MessageTarget, Option<String>) + Send + Sync;
 fn take_token(slot: &mut Option<(u32, String)>, id: u32) -> Option<String> {
     slot.take()
         .and_then(|(token_id, token)| (token_id == id).then_some(token))
-}
-
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// `suppress-sound`: the app plays its own chime (`lib/notificationSound.ts`),

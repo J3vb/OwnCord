@@ -425,10 +425,11 @@ mod tests {
 
     impl PrivilegedRunner for FixedRunner {
         fn run(&self, file: &Path, sha256: &str) -> std::io::Result<RunOutput> {
-            self.seen
-                .lock()
-                .unwrap()
-                .push((file.to_path_buf(), sha256.to_string(), file.exists()));
+            crate::sync::lock(&self.seen).push((
+                file.to_path_buf(),
+                sha256.to_string(),
+                file.exists(),
+            ));
             Ok(RunOutput {
                 code: self.code,
                 stderr_tail: vec!["helper said something".into()],
@@ -441,13 +442,13 @@ mod tests {
 
     impl InstallHooks for RecordingHooks {
         fn installing(&self) {
-            self.0.lock().unwrap().push("installing");
+            crate::sync::lock(&self.0).push("installing");
         }
         fn failed(&self) {
-            self.0.lock().unwrap().push("failed");
+            crate::sync::lock(&self.0).push("failed");
         }
         fn succeeded(&self) {
-            self.0.lock().unwrap().push("succeeded");
+            crate::sync::lock(&self.0).push("succeeded");
         }
     }
 
@@ -472,8 +473,8 @@ mod tests {
         .await;
 
         assert_eq!(result, Ok(()));
-        assert_eq!(*hooks.0.lock().unwrap(), ["installing", "succeeded"]);
-        let calls = seen.lock().unwrap();
+        assert_eq!(*crate::sync::lock(&hooks.0), ["installing", "succeeded"]);
+        let calls = crate::sync::lock(&seen);
         assert_eq!(calls.len(), 1);
         assert!(calls[0].2, "the staged file existed while pkexec ran");
         assert!(!calls[0].0.exists(), "and is removed afterwards");
@@ -506,7 +507,7 @@ mod tests {
             result,
             Err("download/install failed: package check failed (12)".into())
         );
-        assert_eq!(*hooks.0.lock().unwrap(), ["installing", "failed"]);
+        assert_eq!(*crate::sync::lock(&hooks.0), ["installing", "failed"]);
         assert!(InstallGuard::acquire(&ACTIVE).is_ok(), "a retry is allowed");
         std::fs::remove_dir_all(&cache).ok();
     }
@@ -520,7 +521,7 @@ mod tests {
     impl PrivilegedRunner for BlockingRunner {
         fn run(&self, _file: &Path, _sha256: &str) -> std::io::Result<RunOutput> {
             self.started.send(()).ok();
-            let code = self.release.lock().unwrap().recv().unwrap_or(1);
+            let code = crate::sync::lock(&self.release).recv().unwrap_or(1);
             Ok(RunOutput {
                 code: Some(code),
                 stderr_tail: Vec::new(),

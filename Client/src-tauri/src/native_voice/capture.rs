@@ -30,11 +30,7 @@ use super::playout::{
 };
 use super::session::{resolve_device, AudioOptions, DeviceInfo};
 use super::stream_format::{pick_config, typed};
-
-/// A lock helper mirroring playout's, for the shared input-stream slot.
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|p| p.into_inner())
-}
+use crate::sync::lock;
 
 pub const SAMPLE_RATE: u32 = 48_000;
 /// One 10 ms frame: the APM's unit and RNNoise's (`nnnoiseless::FRAME_SIZE`).
@@ -108,7 +104,7 @@ impl Apm {
     }
 
     fn lock(&self) -> MutexGuard<'_, AudioProcessingModule> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner())
+        lock(&self.0)
     }
 }
 
@@ -916,7 +912,7 @@ where
     device.build_input_stream::<T, _, _>(
         config,
         move |data, _| {
-            let mut guard = state.lock().unwrap_or_else(|p| p.into_inner());
+            let mut guard = lock(&state);
             let (processor, sink) = &mut *guard;
             processor.push(to_mono(data, width), |frame| sink.deliver(frame));
         },
