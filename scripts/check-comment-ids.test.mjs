@@ -64,6 +64,11 @@ test("a bare roadmap item counts once, and versions do not", () => {
   assert.deepEqual(ids(src, "ts"), ["WP 6.9c", "5.4c-2", "6.13d"]);
 });
 
+test("phase-letter work packages count whole, and a UI action named Owner call does not", () => {
+  const src = "// WP 3B-11a and WP 1B-5; the owner's call; the Make Owner call button";
+  assert.deepEqual(ids(src, "ts"), ["WP 3B-11a", "WP 1B-5", "owner's call"]);
+});
+
 test("technical names that look like ids are not counted", () => {
   const src =
     "// UTF-8, SHA-256, AES-128, P-256, RFC-6455 and HTTP-2 are not plan ids; #fff is a colour";

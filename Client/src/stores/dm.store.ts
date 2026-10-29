@@ -48,11 +48,11 @@ export interface DmChannel {
   readonly isGroup: boolean;
   /**
    * The group's owner (user id). Present only for a group on a server with
-   * member management (WP 3B-10); its absence is the feature-detection signal
+   * member management; its absence is the feature-detection signal
    * that hides Add People, Remove and Make Group Owner.
    */
   readonly ownerId?: number;
-  /** The group's icon file path; "" or absent for none (WP 3B-11b). */
+  /** The group's icon file path; "" or absent for none. */
   readonly icon?: string;
   readonly lastMessageId: number | null;
   /**
