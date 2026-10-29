@@ -312,6 +312,39 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 	return voiceStateBroadcast(ctx, d, c.TargetID)
 }
 
+// voiceModMoveDestinationOpen is the last pre-flight of a move: the
+// destination must have room for the target and, when it has a password, the
+// target is granted it.
+//
+// The capacity check is advisory, with JoinVoiceChannelIfCapacity's semantics.
+// The atomic one still runs on the re-join; this one keeps the common case from
+// dropping the target into a channel that is already full. The cap is the one
+// the target's own re-join is held to, so a target who moderates voice there is
+// not refused a move their join would be admitted to.
+//
+// The re-join this move hands off to would ask a password-protected
+// destination for its password. A move never does, so the grant is stored
+// before anyone is evicted.
+func voiceModMoveDestinationOpen(ctx context.Context, d VoiceDeps, destID int64, maxUsers int, protected bool, targetSub permissions.Subject, targetID int64) *Result {
+	if destCap := voiceJoinCapacity(targetSub, maxUsers); destCap > 0 {
+		count, cErr := d.Voice.CountInChannel(ctx, destID)
+		if cErr != nil {
+			slog.Error("ws handleVoiceModMoveV2 CountInChannel", "err", cErr, "channel_id", destID)
+			return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check channel capacity"}}
+		}
+		if count >= destCap {
+			return &Result{Error: ClientError{Code: ErrCodeChannelFull, Message: "voice channel is full"}}
+		}
+	}
+	if protected {
+		if gErr := grantPasswordForMove(ctx, d.Reader, destID, targetID); gErr != nil {
+			slog.Error("ws voice_mod_move: granting the destination password failed", "err", gErr, "channel_id", destID)
+			return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check destination access"}}
+		}
+	}
+	return nil
+}
+
 // handleVoiceModMoveV2 processes a voice_mod_move command.
 //
 // The move is a server-driven leave followed by a client-driven re-join: the
@@ -370,20 +403,8 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 			Message: "user cannot connect to that voice channel",
 		}}
 	}
-	// Advisory capacity check with JoinVoiceChannelIfCapacity's semantics. The
-	// atomic one still runs on the re-join; this one keeps the common case from
-	// dropping the target into a channel that is already full. The cap is the
-	// one the target's own re-join is held to, so a target who moderates voice
-	// there is not refused a move their join would be admitted to.
-	if destCap := voiceJoinCapacity(targetSub, dest.VoiceMaxUsers); destCap > 0 {
-		count, cErr := d.Voice.CountInChannel(ctx, c.ToChannelID)
-		if cErr != nil {
-			slog.Error("ws handleVoiceModMoveV2 CountInChannel", "err", cErr, "channel_id", c.ToChannelID)
-			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check channel capacity"}}
-		}
-		if count >= destCap {
-			return Result{Error: ClientError{Code: ErrCodeChannelFull, Message: "voice channel is full"}}
-		}
+	if r := voiceModMoveDestinationOpen(ctx, d, dest.ID, dest.VoiceMaxUsers, dest.PasswordProtected, targetSub, c.TargetID); r != nil {
+		return *r
 	}
 
 	if d.Mod == nil {

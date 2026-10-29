@@ -158,6 +158,13 @@ const (
 	ErrCodeRateLimited   = "RATE_LIMITED"
 	ErrCodeAlreadyJoined = "ALREADY_JOINED"
 	ErrCodeChannelFull   = "CHANNEL_FULL"
+	// Refines FORBIDDEN: a voice_join into a password-protected channel the
+	// caller has not unlocked, sent without a password. Nothing was joined.
+	ErrCodePasswordRequired = "PASSWORD_REQUIRED"
+	// Refines FORBIDDEN: a voice_join into a password-protected channel with a
+	// password that does not match (or that changed while the join ran). Nothing
+	// was joined.
+	ErrCodeWrongPassword = "WRONG_PASSWORD"
 	ErrCodeVoiceError    = "VOICE_ERROR"
 	ErrCodeVideoLimit    = "VIDEO_LIMIT"
 	ErrCodeBanned        = "BANNED"

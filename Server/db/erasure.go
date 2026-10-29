@@ -202,6 +202,11 @@ var erasureStatements = []struct {
 	// The users delete below would cascade them, but this is the explicit
 	// statement the inventory's zero is proved against.
 	{"thread_members", `DELETE FROM thread_members WHERE user_id = ?`},
+	// Voice channel password grants (migration 086, class 18e): which channels
+	// the subject has entered the password of. The users delete below would
+	// cascade them, but this is the explicit statement the inventory's zero is
+	// proved against.
+	{"channel_password_grants", `DELETE FROM channel_password_grants WHERE user_id = ?`},
 	// Message requests and trusted senders (migration 046, classes 14c
 	// and 14d): both tables name a sender and a recipient, so an erasure of
 	// either party needs both columns — the users delete below would cascade

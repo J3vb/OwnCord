@@ -2,7 +2,10 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -92,6 +95,35 @@ func ValidatePasswordStrength(password string) error {
 	}
 	if len(password) > maxPassLen {
 		return ErrPasswordTooLong
+	}
+	return nil
+}
+
+// MaxChannelPasswordLen bounds a voice channel password, in characters.
+const MaxChannelPasswordLen = 64
+
+// ErrChannelPasswordInvalid is wrapped by ValidateChannelPassword; its text is
+// safe to show the admin who typed the password.
+var ErrChannelPasswordInvalid = errors.New("invalid channel password")
+
+// ValidateChannelPassword checks a voice channel password: 1 to
+// MaxChannelPasswordLen characters, no control characters, and short enough
+// for bcrypt (72 bytes). Unlike an account password it has no minimum
+// strength, since it is a shared room key.
+func ValidateChannelPassword(password string) error {
+	n := utf8.RuneCountInString(password)
+	switch {
+	case n < 1:
+		return fmt.Errorf("password must not be empty%.0w", ErrChannelPasswordInvalid)
+	case n > MaxChannelPasswordLen:
+		return fmt.Errorf("password must be at most %d characters%.0w", MaxChannelPasswordLen, ErrChannelPasswordInvalid)
+	case len(password) > maxPassLen:
+		return fmt.Errorf("password must be at most %d bytes%.0w", maxPassLen, ErrChannelPasswordInvalid)
+	}
+	for _, r := range password {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("password must not contain control characters%.0w", ErrChannelPasswordInvalid)
+		}
 	}
 	return nil
 }

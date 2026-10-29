@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// channelFields carries the 20 columns shared by GetChannelRow,
+// channelFields carries the 21 columns shared by GetChannelRow,
 // ListChannelsRow and GetAFKChannelRow; the generated row types are
 // structurally identical, so a single mapper narrows any of them to the
 // domain Channel model.
@@ -42,6 +42,9 @@ type channelFields struct {
 	// settings columns (migration 075), meaningful on a type 'forum' row.
 	ForumRequireTag                int64
 	ForumDefaultAutoArchiveMinutes int64
+	// PasswordProtected is whether the channel has a password (migration 086).
+	// Only that fact is read here: the hash stays in the database.
+	PasswordProtected int64
 }
 
 func channelFromFields(f channelFields) Channel {
@@ -68,7 +71,8 @@ func channelFromFields(f channelFields) Channel {
 			Archived: f.ThreadArchived != 0,
 			Locked:   f.ThreadLocked != 0,
 		},
-		Forum: forumFromFields(f),
+		Forum:             forumFromFields(f),
+		PasswordProtected: f.PasswordProtected != 0,
 	}
 }
 

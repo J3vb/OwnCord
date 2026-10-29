@@ -307,6 +307,10 @@ type AdminChannelUpdate struct {
 	// Without it a move keeps the channel's overrides and unsyncs it.
 	SyncPermissions bool
 	ActorRole       *db.Role
+	// Password sets, changes or removes a voice channel's password: nil leaves
+	// it alone, "" removes it, anything else is the new password. Any value on
+	// a channel that is not a voice channel is refused (ErrBadRequest).
+	Password *string
 }
 
 // AdminUpdateChannel validates (the metadata text contract + numeric bounds),
@@ -328,7 +332,8 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := validateChannelBounds(req); err != nil {
+	pwChange, err := validateChannelUpdate(existing, req)
+	if err != nil {
 		return nil, nil, err
 	}
 	// Only a rename or a move is checked, so rows that already share a name
@@ -343,6 +348,7 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	var refused error
 	var syncPlan db.ChannelSyncPlan
 	update := db.ChannelUpdate{
+		Password:     pwChange,
 		Name:         meta.Name,
 		Topic:        meta.Topic,
 		CategoryID:   target.id,
@@ -403,7 +409,8 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	syncEffect := s.afterUpdateSync(tail, actorID, existing, req, syncPlan)
 	slog.Info("channel updated", "actor_id", actorID, "channel_id", existing.ID, "name", meta.Name, "nsfw", req.NSFW)
 	db.WriteAudit(tail, s.st, actorID, "channel_update", "channel", existing.ID,
-		fmt.Sprintf("updated #%s%s", meta.Name, nsfwAuditSuffix(existing.NSFW, req.NSFW)))
+		fmt.Sprintf("updated #%s%s%s", meta.Name, nsfwAuditSuffix(existing.NSFW, req.NSFW),
+			passwordAuditSuffix(existing.PasswordProtected, pwChange)))
 
 	updated, err := s.st.GetChannel(tail, existing.ID)
 	if err != nil || updated == nil {

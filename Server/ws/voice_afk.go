@@ -217,6 +217,12 @@ func (h *Hub) afkMoveAllowed(ctx context.Context, afk *db.Channel, cand afkCandi
 // lock_order.go is unchanged. No audit row: the move is the server's, not a
 // moderator's.
 func (h *Hub) EvictForAFKMove(ctx context.Context, c *Client, fromCh int64, idleSince time.Time, afkID int64) bool {
+	// The member's re-join of a password-protected AFK channel must not ask
+	// for the password: the move grants it first.
+	if gErr := grantPasswordForMove(ctx, h.readers.Dispatch, afkID, c.userID); gErr != nil {
+		slog.Warn("voice afk: granting the AFK channel password failed, member left in place", "user_id", c.userID, "err", gErr)
+		return false
+	}
 	if !h.afkEvict(ctx, c, fromCh, idleSince) {
 		return false
 	}

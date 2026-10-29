@@ -97,6 +97,13 @@ type DispatchReader interface {
 	// GetAFKChannel backs the AFK sweep (voice_afk.go): the one channel
 	// flagged AFK, nil when there is none.
 	GetAFKChannel(ctx context.Context) (*db.Channel, error)
+	// The voice channel password check (voice_join_password.go): the hash and
+	// version, whether the member already entered the current password, and
+	// the grant write that happens only if the version is still the one
+	// checked. The hash goes no further than the comparison.
+	ChannelPasswordState(ctx context.Context, channelID int64) (hash string, version int64, found bool, err error)
+	HasChannelPasswordGrant(ctx context.Context, channelID, userID int64) (bool, error)
+	GrantChannelPassword(ctx context.Context, channelID, userID, version int64) (bool, error)
 	// The four reads service.RequireDMReachable makes through this seam.
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)
