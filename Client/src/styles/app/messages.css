@@ -943,7 +943,10 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-width: 260px;
+  /* Size to the text, not the narrow pill this sits in, so names wrap only
+     between words and only once they reach the max width. */
+  width: max-content;
+  max-width: 280px;
   padding: 6px 10px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
@@ -954,9 +957,9 @@
 }
 .reaction-tooltip-names {
   font-size: var(--font-size-sm);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-normal);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .reaction-tooltip-emoji {
   font-size: 11px;
