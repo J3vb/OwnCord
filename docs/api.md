@@ -284,8 +284,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 
 ## Standard Error Response
 
-Error responses use this JSON envelope (one exception: the plugin admin
-endpoints return plain-text errors — see their section):
+Error responses use this JSON envelope:
 
 ```json
 {
@@ -306,7 +305,8 @@ endpoints return plain-text errors — see their section):
 | `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                                                                                                                                                                                                                                                    |
 | `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                                                                                                                                                                                                                                                     |
 | `INVALID_INPUT` / `BAD_REQUEST` | 400         | Missing required fields, invalid query params, a non-positive or non-numeric id in a path (emoji and sticker image routes answer 404 instead), or a file over the upload size limit. A JSON body that does not decode (an empty one included where the body is required) is always `400 INVALID_INPUT` "malformed request body" on the `/api/v1` routes and `400 BAD_REQUEST` "malformed request body" under `/admin/api` and `/api/v1/moderation/members` and `/channels` |
-| `PAYLOAD_TOO_LARGE`             | 413         | A JSON body past its route's size cap (every route that reads JSON, `/admin/api` included), or an upload body padded past its cap. The plugin-install endpoint answers its own plain-text 413                                                                                                                                                                                                                                                                              |
+| `PAYLOAD_TOO_LARGE`             | 413         | A JSON body past its route's size cap (every route that reads JSON, `/admin/api` included), or an upload body padded past its cap, the plugin-install upload included                                                                                                                                                                                                                                                                                                      |
+| `UNSUPPORTED_MEDIA_TYPE`        | 415         | A plugin upload whose file part is labelled as something other than a `.zip`                                                                                                                                                                                                                                                                                                                                                                                               |
 | `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                                                                                                                                                                                                                                                       |
 | `ALREADY_DELETED`               | 409         | The target of a removal was already soft-deleted, e.g. the author deleted the reported message first (B9-14)                                                                                                                                                                                                                                                                                                                                                               |
@@ -319,7 +319,9 @@ endpoints return plain-text errors — see their section):
 | `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `PLUGINS_DISABLED`              | 503         | A plugin install, enable, disable or uninstall on a server whose plugin runtime is off                                                                                                                                                                                                                                                                                                                                                                                     |
 | `SERVICE_UNAVAILABLE`           | 503         | The request ran past the server's 15 s request deadline and failed (`Retry-After: 2`; see Request deadline below), or the auth store was unavailable while resolving a token                                                                                                                                                                                                                                                                                               |
+| `UPDATE_CHECK_FAILED`           | 502         | The release lookup or its signature fetch failed (client-update route and admin update check)                                                                                                                                                                                                                                                                                                                                                                              |
 | `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                                                                                                                                                                                                                                                       |
 | `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                                                                                                                                                                                                                                                         |
 | `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                                                                                                                                                                                                                                                      |
@@ -6182,12 +6184,13 @@ not open them).
 Plugin execution additionally requires a server built with `-tags wazero`
 and `plugins.enabled: true` in config.
 
-Unlike the rest of the API, these endpoints answer errors as **plain text**
-(`http.Error`), not the standard JSON envelope — the one envelope exception is
-install's `400 INSTALL_FAILED`. When the runtime is unavailable, mutating
-endpoints answer `503` `plugin runtime disabled`; other plain-text statuses
-are `400` (bad multipart/zip), `415` (not a `.zip`), `413` (`plugin upload
-too large`), and `500`. `GET /api/v1/admin/plugins`
+Errors use the standard JSON envelope. When the runtime is unavailable,
+mutating endpoints answer `503 PLUGINS_DISABLED`. Install answers
+`400 INVALID_INPUT` for a bad multipart body, a missing `plugin` part or bytes
+that are not a zip, `415 UNSUPPORTED_MEDIA_TYPE` for a part not labelled as a
+zip, `413 PAYLOAD_TOO_LARGE` past 16 MiB, and `400 INSTALL_FAILED` when the
+package does not install. A path id below 1 is `400 BAD_REQUEST`, an unknown
+id on uninstall `404 NOT_FOUND`, and a store failure `500 INTERNAL_ERROR`. `GET /api/v1/admin/plugins`
 always answers `200` and reports the runtime state in an `X-Plugin-Runtime`
 response header instead.
 
@@ -6230,7 +6233,7 @@ These endpoints are only registered when LiveKit voice is configured.
 
 ### POST /api/v1/livekit/webhook
 
-LiveKit webhook receiver. Uses LiveKit JWT verification. IP-restricted via `server.livekit_webhook_allowed_cidrs` (falls back to `server.admin_allowed_cidrs` when unset). Called by the LiveKit server, not by clients.
+LiveKit webhook receiver. Uses LiveKit JWT verification. IP-restricted via `server.livekit_webhook_allowed_cidrs` (falls back to `server.admin_allowed_cidrs` when unset). Called by the LiveKit server, not by clients. A missing or bad signature answers `401 UNAUTHORIZED`; a `participant_joined` that cannot be reconciled answers `503 SERVICE_UNAVAILABLE` so LiveKit retries it. Both use the standard JSON error envelope.
 
 ### GET /api/v1/livekit/health
 

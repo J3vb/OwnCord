@@ -704,7 +704,7 @@ async function revokeToken(id){
 /* ═══ Plugins ═══ */
 /* The plugin lifecycle API lives under /api/v1/admin/plugins (same admin auth
    and IP gate, different prefix), so it needs its own fetch helper rather than
-   api(). Errors come back as plain text from http.Error, not JSON. */
+   api(). Errors use the standard {error,message} JSON envelope. */
 async function pluginApi(method,path,opts){
   const init={method,headers:{'Authorization':'Bearer '+state.token}};
   if(opts&&opts.body!==undefined)init.body=opts.body;

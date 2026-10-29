@@ -448,11 +448,7 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 	ticket := r.URL.Query().Get("ticket")
 	entry, ok := logTickets.redeem(ticket)
 	if ticket == "" || !ok {
-		errResp, _ := json.Marshal(map[string]string{
-			"error":   "UNAUTHORIZED",
-			"message": "invalid or expired ticket",
-		})
-		http.Error(w, string(errResp), http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired ticket")
 		return nil, false
 	}
 	// Stream lifetime == request lifetime, so all principal re-checks below
@@ -463,11 +459,7 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 	ctx := r.Context()
 	user, role, _, err := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
 	if err != nil || user == nil || role == nil {
-		errResp, _ := json.Marshal(map[string]string{
-			"error":   "UNAUTHORIZED",
-			"message": "invalid or expired session",
-		})
-		http.Error(w, string(errResp), http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
 		return nil, false
 	}
 	principalStillAuthorized := func() bool {
@@ -483,11 +475,7 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 		return permissions.CanViewDiagnostics(currentRole.Permissions)
 	}
 	if !principalStillAuthorized() {
-		errResp, _ := json.Marshal(map[string]string{
-			"error":   "FORBIDDEN",
-			"message": "VIEW_DIAGNOSTICS permission required",
-		})
-		http.Error(w, string(errResp), http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, "FORBIDDEN", "VIEW_DIAGNOSTICS permission required")
 		return nil, false
 	}
 	return principalStillAuthorized, true
@@ -507,7 +495,7 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		// Check that we can flush (required for SSE).
 		flusher, ok := w.(http.Flusher)
 		if !ok {
-			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "streaming not supported")
 			return
 		}
 

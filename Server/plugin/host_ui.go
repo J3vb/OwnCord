@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
 // RegisterUI binds inst's declared tabs into the registry. Called from the
@@ -81,7 +83,7 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if dirErr != nil {
-			http.Error(w, "plugin asset root unavailable", http.StatusInternalServerError)
+			httperr.Write(w, http.StatusInternalServerError, "INTERNAL_ERROR", "plugin asset root unavailable")
 			return
 		}
 		rel := strings.TrimPrefix(req.URL.Path, "/")
@@ -100,11 +102,11 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 			return
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			httperr.Write(w, http.StatusForbidden, "FORBIDDEN", "forbidden")
 			return
 		}
 		if !info.Mode().IsRegular() {
-			http.Error(w, "forbidden", http.StatusForbidden)
+			httperr.Write(w, http.StatusForbidden, "FORBIDDEN", "forbidden")
 			return
 		}
 		f, openErr := os.Open(full) //nolint:gosec // not user input: full comes from the construction-time allowlist
