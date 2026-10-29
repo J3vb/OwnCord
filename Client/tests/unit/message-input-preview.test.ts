@@ -103,4 +103,42 @@ describe("MessageInput attachment preview", () => {
     expect(container.querySelector('[data-testid="attachment-remove"]')).not.toBeNull();
     comp.destroy?.();
   });
+
+  it("keeps a picture's preview when its draft is restored", async () => {
+    const { comp } = setup(container);
+    const file = new File(["x"], "cat.png", { type: "image/png" });
+    comp.restoreDraft({
+      content: "",
+      replyTo: null,
+      attachments: [{ id: "srv-9", filename: "cat.png", uploadedAt: Date.now(), file }],
+    });
+    await vi.waitFor(() =>
+      expect(container.querySelector<HTMLImageElement>(".attachment-preview-img")?.src).toMatch(
+        /^data:image\/png/,
+      ),
+    );
+    comp.destroy?.();
+  });
+
+  it("restores a HEIC or a chip without its file as the file chip", () => {
+    const { comp } = setup(container);
+    comp.restoreDraft({
+      content: "",
+      replyTo: null,
+      attachments: [
+        {
+          id: "srv-1",
+          filename: "IMG_1.heic",
+          uploadedAt: Date.now(),
+          file: new File(["x"], "IMG_1.heic", { type: "image/heic" }),
+        },
+        { id: "srv-2", filename: "dog.png", uploadedAt: Date.now() },
+      ],
+    });
+    expect(container.querySelector(".attachment-preview-img")).toBeNull();
+    expect(
+      [...container.querySelectorAll(".attachment-preview-name")].map((e) => e.textContent),
+    ).toEqual(["IMG_1.heic", "dog.png"]);
+    comp.destroy?.();
+  });
 });
