@@ -199,10 +199,11 @@ export interface ChannelSidebarOptions {
  *  the server gave no verdict to a role that holds MUTE_MEMBERS or
  *  MOVE_MEMBERS. A channel whose can_moderate_voice is false but whose
  *  can_move_voice is true (a Move Members-only role, WP 8.4b) gets a section
- *  with only Move to: mute, deafen and disconnect are left out. Read when the
+ *  with only Move to: mute, deafen and disconnect are left out. Move to needs
+ *  can_move_voice: can_moderate_voice alone gets no move targets. Read when the
  *  menu opens, so a role or override change since the last render counts. Move
- *  targets are the other voice channels; the server re-checks rank, timeouts
- *  and that the TARGET may connect to the one picked. */
+ *  targets are the other voice channels; the server re-checks timeouts and
+ *  that the TARGET may connect to the one picked. */
 export function buildVoiceModOptions(
   channelId: number,
   user: VoiceUser,
@@ -222,9 +223,13 @@ export function buildVoiceModOptions(
     }
     return undefined;
   }
-  const moveTargets = Array.from(channelsStore.getState().channels.values())
-    .filter((ch) => ch.type === "voice" && ch.id !== channelId)
-    .map((ch) => ({ id: ch.id, name: ch.name }));
+  // Only MOVE_MEMBERS opens a move: a mute-only verdict gets no "Move to".
+  const moveTargets =
+    moveVerdict === true
+      ? Array.from(channelsStore.getState().channels.values())
+          .filter((ch) => ch.type === "voice" && ch.id !== channelId)
+          .map((ch) => ({ id: ch.id, name: ch.name }))
+      : [];
   // Greyed with a reason rather than hidden while the socket is down: the
   // actions are server commands, and a click would be dropped silently.
   const connectionStatus = uiStore.getState().connectionStatus;
@@ -278,10 +283,10 @@ function projectVoiceInputs(
       if (member !== undefined) voiceMembers.set(uid, member);
     }
   }
-  const moderatable: number[] = [];
+  const movable: number[] = [];
   for (const ch of channels.channels.values()) {
-    if (ch.type === "voice" && (ch.canModerateVoice === true || ch.canMoveVoice === true)) {
-      moderatable.push(ch.id);
+    if (ch.type === "voice" && ch.canMoveVoice === true) {
+      movable.push(ch.id);
     }
   }
   return {
@@ -294,14 +299,14 @@ function projectVoiceInputs(
     selfId: auth.user?.id ?? null,
     connectionStatus: ui.connectionStatus,
     timeout: safety.timeout,
-    moderatable: moderatable.toSorted((a, b) => a - b),
+    movable: movable.toSorted((a, b) => a - b),
     localMute,
   };
 }
 
 /** `===` per field, except the two the projection builds fresh: the members
  *  in voice (equal when every entry is the same object, so presence churn of
- *  anyone else never reaches the voice rows) and the moderatable ids. */
+ *  anyone else never reaches the voice rows) and the movable ids. */
 function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
   if (
     a.voiceUsers !== b.voiceUsers ||
@@ -320,10 +325,7 @@ function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
   for (const [uid, member] of a.voiceMembers) {
     if (b.voiceMembers.get(uid) !== member) return false;
   }
-  return (
-    a.moderatable.length === b.moderatable.length &&
-    a.moderatable.every((id, i) => b.moderatable[i] === id)
-  );
+  return a.movable.length === b.movable.length && a.movable.every((id, i) => b.movable[i] === id);
 }
 
 /** The voice channels with at least one participant, as one comparable key. */

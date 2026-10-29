@@ -18,7 +18,8 @@ import (
 // the actor must strictly outrank the target by role position (mirroring
 // ModerationService.requireOutranks), and the target must currently be in a
 // voice channel. Move has its own bit: MOVE_MEMBERS (WP 8.4a) lets the actor
-// move a member of any rank, with no rank rule; the owner is skipped while the
+// move a member of any rank, with no rank rule, and is the only way to move
+// (MUTE_MEMBERS and Administrator do not open one); the owner is skipped while the
 // owner-only voice_owner_movable setting is off. Effects that reach past the acting connection — the SFU and
 // the target's own socket — go through VoiceDeps.Mod.
 
