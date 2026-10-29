@@ -7,7 +7,7 @@
 # toolchain cross-compiles both targets natively via GOARCH below.
 # The tag is for humans; the digest is what actually builds. Dependabot's
 # `docker` block moves both together, so the tag and the digest cannot drift.
-FROM --platform=$BUILDPLATFORM golang:1.27-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9 AS builder
 
 ARG VERSION=dev
 # Supplied by BuildKit per target platform ("amd64", "arm64"). Left empty by a
@@ -23,9 +23,9 @@ ARG TARGETARCH
 # with ws.DefaultLiveKitVersion and the livekit image in docker-compose.yml
 # (digests: the release's checksums.txt; TestDockerfileBundlesPinnedLiveKit
 # pins the version match).
-ARG LIVEKIT_VERSION=1.13.10
-ARG LIVEKIT_SHA256_AMD64=c25a3e45fb922e9a93c6443d10c0ed041ba64342097e38632331736630283165
-ARG LIVEKIT_SHA256_ARM64=ff60607e1931ff078576882fa11c087aa5821d635ac0c47f56ff77e203e32006
+ARG LIVEKIT_VERSION=1.13.11
+ARG LIVEKIT_SHA256_AMD64=1e9ee90ca301e1842b2887fc77cb122759756a9c8aeb4334ee91de3325ec43fb
+ARG LIVEKIT_SHA256_ARM64=2af6ce091d6b3c79d1677f8ff1bbb91a8007f40b2325c059b52d38383c0830b6
 RUN set -eu; \
     case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
       amd64) sha="${LIVEKIT_SHA256_AMD64}" ;; \

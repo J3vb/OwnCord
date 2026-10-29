@@ -206,16 +206,15 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # rfd rides into the tree on tauri-plugin-dialog, which pins ^0.16, and we
-      # declare it directly only for the fatal-startup dialog in lib.rs (there is
-      # no AppHandle yet, so the plugin API is unusable at that point). Cargo
-      # unifies features only within a semver-compatible group, so bumping our
-      # direct dep to 0.17 forks rfd in two: the plugin keeps 0.16 with its
-      # backend features, ours gets 0.17 with none, and rfd 0.17's build.rs then
-      # aborts the Linux build demanding `gtk3` or `xdg-portal` (PR #1405). Even
-      # where it links, it just builds rfd twice. Our version must track the
-      # plugin's -- drop this entry once tauri-plugin-dialog moves to 0.17.
-      # Patch updates within 0.16.x still flow through.
+      # rfd rides into the tree on tauri-plugin-dialog (^0.17 since 2.8.4), and
+      # we declare it directly only for the fatal-startup dialog in lib.rs
+      # (there is no AppHandle yet, so the plugin API is unusable at that
+      # point). Cargo unifies features only within a semver-compatible group,
+      # so a minor bump of our direct dep alone forks rfd in two: the plugin
+      # keeps its copy with the backend features, ours gets none, and rfd's
+      # build.rs then aborts the Linux build demanding `gtk3` or `xdg-portal`
+      # (PR #1405). Move ours by hand when the plugin moves. Patch updates
+      # still flow through.
       - dependency-name: "rfd"
         update-types: ["version-update:semver-minor"]
       # Held at =2.7.0 with its npm half (see the @tauri-apps/plugin-http entry in
