@@ -9,11 +9,14 @@ vi.mock("../../src/stores/threads.store", async (importOriginal) => {
 
 describe("threadsLoader when the chunk fails to load", () => {
   it("keeps a queued delete, which still runs before a later change", async () => {
-    const { withThreadsStore } = await import("../../src/stores/threadsLoader");
+    const { withThreadsStore, threadsStoreInUse } = await import("../../src/stores/threadsLoader");
     const order: string[] = [];
+    expect(threadsStoreInUse()).toBe(false);
     withThreadsStore(() => order.push("deleted"));
     await vi.dynamicImportSettled();
     expect(order).toEqual([]);
+    // The failed load is over, but the queued work is still waiting on one.
+    expect(threadsStoreInUse()).toBe(true);
 
     state.fail = false;
     withThreadsStore(() => order.push("changed"));
