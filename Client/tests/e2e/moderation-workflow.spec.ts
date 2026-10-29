@@ -8,7 +8,7 @@ import {
   setAppearance,
   textContrast,
   type AppearancePrefs,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 // ---------------------------------------------------------------------------
 // B9-12: a report's review controls, internal notes and history against the
@@ -19,7 +19,7 @@ import {
 // signed-in moderator (testuser, id 1), with a note, events and a moderator
 // action, so every part of the review is on screen for measuring. Conflicts,
 // refusals and role loss run against the real server in
-// tests/e2e/fullstack/b9-moderation-workflow.spec.ts. Synthetic content only.
+// tests/e2e/fullstack/moderation-workflow.spec.ts. Synthetic content only.
 // ---------------------------------------------------------------------------
 
 const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;

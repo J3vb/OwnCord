@@ -4,7 +4,7 @@
  */
 import { test, expect } from "./fixtures";
 import { mockTauriFullSessionWithMessagesAndEcho, navigateToMainPage } from "./helpers";
-import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/b9-accessibility";
+import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
 
 test.describe("Message Edit Flow", () => {
   test.beforeEach(async ({ page }) => {

@@ -16,7 +16,7 @@ import {
   MOCK_VOICE_STATE,
   voiceWsHandlers,
 } from "./helpers";
-import { Q1, findUnnamedControls, textContrast } from "./support/b9-accessibility";
+import { Q1, findUnnamedControls, textContrast } from "./support/accessibility";
 
 interface CaptureWindow {
   __TAURI_INTERNALS__: { invoke: (cmd: string, args?: unknown) => Promise<unknown> };

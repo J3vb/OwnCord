@@ -5,8 +5,8 @@ import {
   openSettings,
   switchSettingsTab,
 } from "./helpers";
-import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/b9-accessibility";
-import { ZOOM_VIEWPORT, expectScreenReflows } from "./support/b9-zoom";
+import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
+import { ZOOM_VIEWPORT, expectScreenReflows } from "./support/zoom-reflow";
 
 // ---------------------------------------------------------------------------
 // Tests: Settings Overlay — structure

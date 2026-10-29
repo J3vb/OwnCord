@@ -25,7 +25,7 @@ import {
   navigateToMainPageReady,
   openDmRow,
 } from "./helpers";
-import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/b9-accessibility";
+import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/accessibility";
 
 /** A long channel list in two categories, to exercise scroll and roving. */
 const LONG_CHANNELS = Array.from({ length: 40 }, (_, i) => ({

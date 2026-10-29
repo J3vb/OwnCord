@@ -26,7 +26,7 @@ import {
   focusIndicator,
   setAppearance,
   textContrast,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 const LINK = "https://news.example/story";
 const IMAGE = "https://cdn.example/cat.png";
