@@ -20,18 +20,6 @@
 id = "GO-2026-5932"
 reason = "golang.org/x/crypto, module-level only: govulncheck reports it unreachable from our code"
 
-# --- npm: dev-only. Same class as the brace-expansion note in ci.yml's npm
-# audit step: these reach us only through stryker tooling, ship in no
-# artifact, and `npm audit --omit=dev --audit-level=high` already gates the
-# shipped tree. The fix is a devDependency bump for a dependency-owning PR.
-[[IgnoredVulns]]
-id = "GHSA-4mjr-xmp4-gh2g"
-reason = "qs dev-only via stryker's typed-rest-client; not shipped"
-
-[[IgnoredVulns]]
-id = "GHSA-x5fp-wj9c-mxmx"
-reason = "qs dev-only via stryker's typed-rest-client; not shipped"
-
 # --- Rust: the accepted advisories cargo-deny carries in
 # Client/src-tauri/deny.toml (the authoritative list with the reachability
 # argument), kept in step with it, plus glib's unsound advisory, which
@@ -88,6 +76,15 @@ reason = "zip: Windows updater extracts only signature-verified archives; build-
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0369"
 reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
+
+# zip header-mismatch advisory (no RUSTSEC id yet, so not in deny.toml). It needs
+# an archive written to disk by ZipStreamReader; both dependents read through
+# ZipArchive only (tauri-plugin-updater updater.rs, webrtc-sys-build lib.rs),
+# and the same signature/bypass argument as the three above applies. Fixed in
+# zip 9.0.5; drop with them once both dependents resolve zip >= 9.
+[[IgnoredVulns]]
+id = "GHSA-m665-v7pm-7grj"
+reason = "zip: dependents read via ZipArchive only, not ZipStreamReader; signed Windows update archive / bypassed build-time path (see deny.toml)"
 
 # block-buffer 0.10.4 comes in through digest 0.10 (sha2 for tauri-codegen, wry
 # and the secret-service crates; sha1 for tungstenite and zbus 4; md-5; hkdf).
