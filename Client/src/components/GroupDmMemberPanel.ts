@@ -18,7 +18,7 @@ import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { showContextMenu, openMenuOnKeyboard } from "@lib/context-menu";
-import { createModal } from "@lib/modalFactory";
+import { createConfirmModal } from "../features/dialogs/confirmModal";
 import type { MountableComponent } from "@lib/safe-render";
 import type { UserStatus } from "@lib/types";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
@@ -110,48 +110,22 @@ function confirmOwnerAction(
   stillValid: () => boolean,
   onConfirm: () => void,
 ): void {
-  const owner = new Disposable();
-  const titleId = `${spec.testId}-title`;
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, spec.title));
-  const body = createElement("div", { class: "modal-body" });
-  body.appendChild(createElement("p", {}, spec.body));
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": `${spec.testId}-cancel` },
-    groupDmText("cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    {
-      class: spec.danger ? "btn-danger" : "btn-primary",
-      type: "button",
-      "data-testid": `${spec.testId}-confirm`,
-    },
-    spec.confirmLabel,
-  );
-  const footer = createElement("div", { class: "modal-footer" });
-  appendChildren(footer, cancel, confirm);
-  const content = createElement("div");
-  appendChildren(content, header, body, footer);
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": spec.testId },
-    onClose: () => owner.destroy(),
-  });
-  cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
-  confirm.addEventListener(
-    "click",
-    () => {
-      modal.close();
+  createConfirmModal({
+    title: spec.title,
+    titleId: `${spec.testId}-title`,
+    body: createElement("p", {}, spec.body),
+    confirmLabel: spec.confirmLabel,
+    cancelLabel: groupDmText("cancel"),
+    tone: spec.danger ? "danger" : "primary",
+    testId: spec.testId,
+    confirmTestId: `${spec.testId}-confirm`,
+    cancelTestId: `${spec.testId}-cancel`,
+    onConfirm: () => {
       // The group may have changed while the dialog was open: send nothing
       // unless you still own it and the target is still in it.
       if (stillValid()) onConfirm();
     },
-    { signal: owner.signal },
-  );
-  cancel.focus();
+  });
 }
 
 export function createGroupDmMemberPanel(

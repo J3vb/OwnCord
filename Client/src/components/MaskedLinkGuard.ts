@@ -6,9 +6,8 @@
  * Cancel and Enter acts on whichever button has focus.
  */
 
-import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement } from "@lib/dom";
-import { createModal } from "@lib/modalFactory";
+import { createConfirmModal } from "../features/dialogs/confirmModal";
 import { isDomainTrusted, linkDomain, trustDomain } from "@lib/trustedDomains";
 import { messagingText } from "../i18n/messaging";
 import { shellText } from "../i18n/shell";
@@ -30,13 +29,6 @@ export function guardMaskedLink(href: string, open: (url: string) => void): void
   // A double-click must not stack two dialogs.
   if (dialogShown) return;
   dialogShown = true;
-  const owner = new Disposable();
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(
-    createElement("h3", { id: "masked-link-title" }, messagingText("maskedLink.title")),
-  );
-
-  const body = createElement("div", { class: "modal-body" });
   const urlEl = createElement("div", {
     class: "masked-link-url",
     "data-testid": "masked-link-url",
@@ -52,55 +44,29 @@ export function guardMaskedLink(href: string, open: (url: string) => void): void
     trustBox,
     createElement("span", {}, messagingText("maskedLink.trust", { domain })),
   );
-  appendChildren(
-    body,
-    createElement("p", { id: "masked-link-body" }, messagingText("maskedLink.body")),
-    urlEl,
-    trustRow,
-  );
 
-  const footer = createElement("div", { class: "modal-footer" });
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": "masked-link-cancel" },
-    shellText("common.cancel"),
-  );
-  const go = createElement(
-    "button",
-    { class: "btn-modal-save", type: "button", "data-testid": "masked-link-go" },
-    messagingText("maskedLink.go"),
-  );
-  appendChildren(footer, cancel, go);
-  const content = createElement("div");
-  appendChildren(content, header, body, footer);
-
-  const modal = createModal({
-    content,
-    ariaLabelledBy: "masked-link-title",
-    overlayAttrs: { "data-testid": "masked-link-dialog" },
+  // Focus starts on Cancel, so a stray Enter cancels rather than confirms.
+  createConfirmModal({
+    title: messagingText("maskedLink.title"),
+    titleId: "masked-link-title",
+    body: [
+      createElement("p", { id: "masked-link-body" }, messagingText("maskedLink.body")),
+      urlEl,
+      trustRow,
+    ],
+    confirmLabel: messagingText("maskedLink.go"),
+    cancelLabel: shellText("common.cancel"),
+    tone: "primary",
+    testId: "masked-link-dialog",
+    confirmTestId: "masked-link-go",
+    cancelTestId: "masked-link-cancel",
+    describedBy: "masked-link-body",
+    onConfirm: () => {
+      if (trustBox.checked) trustDomain(domain);
+      open(href);
+    },
     onClose: () => {
       dialogShown = false;
-      owner.destroy();
     },
   });
-  modal.modal.setAttribute("aria-describedby", "masked-link-body");
-
-  const confirm = (): void => {
-    if (trustBox.checked) trustDomain(domain);
-    modal.close();
-    open(href);
-  };
-  cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
-  go.addEventListener("click", confirm, { signal: owner.signal });
-
-  // Focus starts on Cancel, so a stray Enter cancels rather than confirms. A
-  // held Enter would auto-repeat into the focused button: ignore the repeats.
-  cancel.focus();
-  modal.modal.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.repeat) e.preventDefault();
-    },
-    { signal: owner.signal },
-  );
 }
