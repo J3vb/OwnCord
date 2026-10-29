@@ -12,8 +12,8 @@ import (
 // It is a plain struct rather than a *config.Config so this package stays a
 // leaf with no dependency on config, and so a test can state a topology
 // without constructing a server. It also has nowhere to put an http.Client or
-// a context.Context, which is how Decision 1 — no outbound reachability helper
-// — is enforced by the signature rather than by a comment.
+// a context.Context, which is how the rule of no outbound reachability helper
+// is enforced by the signature rather than by a comment.
 type Params struct {
 	ListenPort   int
 	TLSMode      string
@@ -43,7 +43,7 @@ type RequiredPort struct {
 // reachability, why it cannot, and the check the owner runs instead.
 //
 // This is the milestone's actual deliverable. A diagnostic that reports only
-// what it can measure reads as a clean bill of health; the failures B6-6 is
+// what it can measure reads as a clean bill of health; the failures this report is
 // about — a blocked port, carrier NAT, a router that will not hairpin — are
 // all invisible from in here, and saying so is the honest answer.
 type Unknown struct {
@@ -65,8 +65,8 @@ type Report struct {
 	VoiceNodeIPKind    Kind           `json:"voice_node_ip_kind,omitempty"`
 	TLSMode            string         `json:"tls_mode"`
 
-	// PublicIPHTTPSSupported is false in every build that ships today: B6-3
-	// is deferred and loadACME rejects an IP for tls.domain. It is a field
+	// PublicIPHTTPSSupported is false in every build that ships today: a
+	// public-IP certificate flow is deferred and loadACME rejects an IP for tls.domain. It is a field
 	// rather than a constant string so the day a certificate flow exists,
 	// the report changes with it instead of continuing to say "no".
 	PublicIPHTTPSSupported bool   `json:"public_ip_https_supported"`

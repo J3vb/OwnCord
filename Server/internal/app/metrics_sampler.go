@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// Windowed metrics (WP 4.3a): a 10 s sampler over a 15 minute horizon. The two
+// Windowed metrics: a 10 s sampler over a 15 minute horizon. The two
 // windows the endpoint reports (1m, 15m) are cut from this one ring. The ring
 // holds horizon/tick + 2 = 92 samples, about 120 KB allocated once.
 const (

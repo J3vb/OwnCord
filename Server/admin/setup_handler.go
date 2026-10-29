@@ -66,7 +66,7 @@ type setupResponse struct {
 	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
 	// RecoveryKitSecret is the owner's recovery kit, present unless the
 	// wizard turned it off or it could not be issued. Shown once, on the finish step;
-	// the server stores only its verifier (B11-8).
+	// the server stores only its verifier.
 	RecoveryKitSecret string `json:"recovery_kit_secret,omitempty"`
 }
 
@@ -135,7 +135,7 @@ func setupStatusSettingDefaults(r *http.Request, settings *service.SettingsServi
 // restarts the server if startup-only values changed. It only works when no
 // users exist in the database, preventing abuse after initial setup.
 func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowedOrigins []string, hub HubBroadcaster, opts SetupOptions) http.HandlerFunc {
-	// Resolve the trusted-proxy CIDRs once at construction (W3-3a), never per
+	// Resolve the trusted-proxy CIDRs once at construction, never per
 	// request. opts.RunningCfg is nil in the legacy/test construction path
 	// (no SetupOptions passed to NewAdminAPI), which yields an empty list —
 	// clientip.Resolve then always falls back to raw RemoteAddr, preserving
@@ -219,11 +219,11 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 // clientip.RateKey) as the rate-limit bucket; proxyNets (parsed once by
 // the caller from config.Server.TrustedProxies) makes both honour
 // trusted_proxies the same way every other session-creating path does
-// (OC-0274) instead of trusting the raw, possibly-a-proxy RemoteAddr.
+// instead of trusting the raw, possibly-a-proxy RemoteAddr.
 func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter, allowedOrigins []string, proxyNets []*net.IPNet, setupToken string, running *config.Config) (setupRequest, string, bool) {
 	var req setupRequest
 
-	// CSRF protection: reject cross-origin requests (BUG-097).
+	// CSRF protection: reject cross-origin requests.
 	// A request is accepted when it is same-origin, or when its Origin is
 	// explicitly allowlisted. Absent Origin = non-browser client (allow).
 	if origin := r.Header.Get("Origin"); origin != "" {

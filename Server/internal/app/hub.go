@@ -20,15 +20,15 @@ import (
 )
 
 // StartRuntime builds the collaborators the hub and the router share,
-// constructs the hub with everything it must hold before Run (B3-4:
-// HubOptions replaced the pre-Run setters), and starts the dispatch
+// constructs the hub with everything it must hold before Run
+// (HubOptions replaced the pre-Run setters), and starts the dispatch
 // goroutine.
 //
-// Before B3-3 this lived inside api.NewRouter, while main.go set the event
+// This used to live inside api.NewRouter, while main.go set the event
 // persister and store after NewRouter returned — two owners of one hub, with
 // nothing checking that the required collaborators were present before Run
-// started. B3-3 collapsed the owners to one; B3-4 moved the pre-Run wiring
-// into ws.NewHub itself, which now refuses to construct without its required
+// started. Now there is one owner, and the pre-Run wiring moved
+// into ws.NewHub itself, which refuses to construct without its required
 // collaborators, so an incomplete hub is a startup error here rather than a
 // later panic.
 //
@@ -37,7 +37,7 @@ import (
 // lockouts and the service layer holds the permission cache the hub
 // invalidates, so a second copy of either would silently split that state.
 //
-// WP 5.6g: it also builds the AuthService (over the hub, which is its
+// It also builds the AuthService (over the hub, which is its
 // AuthBroadcaster, and the totp-key stage's key) and the Updater, takes the one
 // storage.Storage the maintenance loop and the erasure replay share, and runs
 // wireAuth — every service setter that needs the hub or the store — before
@@ -50,7 +50,7 @@ import (
 func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Registry, in RuntimeInputs) (api.Runtime, error) {
 	// Lockouts are persisted to the database so they survive restarts (M2).
 	limiter := auth.NewPersistentRateLimiter(database)
-	// B4-4: the one admission budget for expensive authentication work lives
+	// The one admission budget for expensive authentication work lives
 	// in the limiter, so sizing it here covers every route and the hub alike.
 	limiter.SetAdmissionBudget(cfg.Security.ExpensiveAuthConcurrency)
 	// Service layer — centralises business logic for REST and WS handlers.
@@ -83,15 +83,15 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		ReplayRingSize:  cfg.EventPersistence.ReplayRingSize,
 		ReplayColdLimit: cfg.EventPersistence.ReplayColdLimit,
 		// voice_join's fallback for a channel with no per-channel
-		// voice_quality override (OC-0439). Startup-only, like the rest of
+		// voice_quality override. Startup-only, like the rest of
 		// this options struct: the setup wizard already treats voice.quality
 		// as requiring a restart to take effect.
 		VoiceQuality: cfg.Voice.Quality,
-		// auth_ok's upload_policy: the composer's pre-check (P1-09).
+		// auth_ok's upload_policy: the composer's pre-check.
 		UploadPolicy:    ws.UploadPolicy{MaxUploadBytes: int64(cfg.Upload.MaxSizeMB) << 20, Thumbnails: true},
 		UploadFileTypes: svc.Uploads,
 		// server.trusted_proxies: the handshake log and the ws_connect audit
-		// row resolve the client address through it (SRE-11).
+		// row resolve the client address through it.
 		TrustedProxies: cfg.Server.TrustedProxies,
 	})
 	if err != nil {
@@ -115,8 +115,8 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		return api.Runtime{}, err
 	}
 
-	// Start the supervised LiveKit process only once the hub holds it
-	// (OC-0019): the voice_join guard must be able to fail closed via
+	// Start the supervised LiveKit process only once the hub holds it:
+	// the voice_join guard must be able to fail closed via
 	// IsRunning() == false the moment Start fails, never see a half-wired
 	// hub with a running process it does not know about.
 	if proc != nil {
@@ -148,7 +148,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	}, nil
 }
 
-// storageLimits is B5-2's two bounds on the upload service: the per-user
+// storageLimits is the two bounds on the upload service: the per-user
 // quota (upload.user_quota_mb, 0 = unlimited) and the headroom floor
 // (server.min_free_disk_mb) probed on the upload volume, which may not be the
 // data volume /health watches; and config.yaml's file-type lists.
@@ -179,7 +179,7 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 	// Optionally build a companion LiveKit process — either from a
 	// configured binary or via checksum-verified auto-download (the
 	// download happens in the background inside Start). The hub keeps the
-	// process even if Start() later fails (OC-0019): its only hub consumer
+	// process even if Start() later fails: its only hub consumer
 	// is the voice_join guard (`h.lkProcess != nil && !h.lkProcess.IsRunning()`),
 	// which reads a nil process as "LiveKit is externally managed, don't
 	// check". OwnCord being told to manage LiveKit and failing to launch it
@@ -200,7 +200,7 @@ func buildVoice(cfg *config.Config) (*ws.LiveKitClient, *ws.LiveKitProcess, bool
 	return lk, nil, true
 }
 
-// newAttention builds the admin attention panel (RI-07) over counters the
+// newAttention builds the admin attention panel over counters the
 // server already keeps: the data volume's free space, the writer pool's
 // cumulative wait, the reconnect tiers, the hub's broadcast drops and
 // send-queue overflow disconnects, and the newest backup file.
@@ -272,8 +272,8 @@ func stopHub(ctx context.Context, hub dispatchHub, reason ws.RestartReason) erro
 	}
 	// The hub's own background jobs (a voice leave's LiveKit removal and
 	// delete retries) get a short grace to finish, then are cancelled and
-	// joined, inside the step's budget and before the database closes
-	// (ARCH-034). Not in the dispatch goroutine's exit: a job may need a lock
+	// joined, inside the step's budget and before the database closes.
+	// Not in the dispatch goroutine's exit: a job may need a lock
 	// Run would be holding. After a dispatch timeout ctx is already spent, so
 	// the jobs are cancelled and counted, not waited for.
 	if n := hub.JoinBackground(ctx); n > 0 {

@@ -232,7 +232,7 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 	}
 
 	// Coalesce concurrent misses: when the cache TTL expires under load, every
-	// caller would otherwise issue its own outbound GitHub fetch (OC-0146).
+	// caller would otherwise issue its own outbound GitHub fetch.
 	// One flight runs and the rest wait on its result, exactly like
 	// FetchTextAssetCached's textAssetSF.
 	//

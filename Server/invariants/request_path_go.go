@@ -18,7 +18,7 @@ type GoEntry struct {
 }
 
 // GoAllow is the inventory of every go statement in api, admin, service and
-// ws (ARCH-034, WP 4.5). A file not listed here may hold none; a listed file
+// ws. A file not listed here may hold none; a listed file
 // with more go statements than Count fails; and a listed file with fewer
 // fails too, so a row that no longer describes the code is deleted rather
 // than left to excuse the next goroutine added there (TestGoAllowIsLive also
@@ -40,7 +40,7 @@ var GoAllow = map[string]GoEntry{
 	"ws/focus_defer.go":                  {1, "connection-scoped deferred focus drain (residual class, as in ws/serve.go)"},
 }
 
-// requestPathGo enforces WP 4.5a: a go statement in a handler, service or hub
+// requestPathGo enforces the request-path goroutine rule: a go statement in a handler, service or hub
 // file is a goroutine no shutdown step joins. Every one must be inventoried in
 // GoAllow with its reason; anything that outlives its caller runs on
 // syncutil.Group.Go instead.

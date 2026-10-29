@@ -225,7 +225,7 @@ func (u *Updater) VerifyChecksum(filePath, expectedHash string) error {
 // were verified through that same handle. Because the hash check and Commit's
 // same-file check use one open file, a swap of the on-disk path between
 // verification and rename is detected instead of silently executed (the
-// update TOCTOU window, W3-3).
+// update TOCTOU window).
 type StagedBinary struct {
 	f      *os.File
 	closed bool

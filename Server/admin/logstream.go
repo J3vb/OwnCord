@@ -123,7 +123,7 @@ type RingBuffer struct {
 	all logRing
 	// warn holds the last supportEventsMax WARN-and-above entries, so an
 	// INFO/DEBUG burst longer than all cannot evict a failure from the
-	// support bundle (SRE-03).
+	// support bundle.
 	warn        logRing
 	subscribers map[*chan LogEntry]struct{}
 	streamsEnd  chan struct{} // closed by EndStreams
@@ -143,7 +143,7 @@ func NewRingBuffer(capacity int) *RingBuffer {
 // EndStreams ends every open log stream, and any opened after it, for good.
 // The server registers it with http.Server.RegisterOnShutdown: a stream never
 // returns on its own, and Shutdown waits for every active handler, so an open
-// admin Logs tab would otherwise hold the drain for its whole budget (SRV-06).
+// admin Logs tab would otherwise hold the drain for its whole budget.
 // Safe to call more than once.
 func (rb *RingBuffer) EndStreams() {
 	rb.endOnce.Do(func() { close(rb.streamsEnd) })

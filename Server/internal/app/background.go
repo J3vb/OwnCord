@@ -17,7 +17,7 @@ const backgroundJobsGrace = 5 * time.Second
 // startBackgroundJobs creates the group request-path jobs run on and
 // registers its close step. startHub calls it after the mention-worker step.
 func (a *App) startBackgroundJobs(rt api.Runtime) {
-	// Request-path background jobs (ARCH-034): push dispatch and the no-worker
+	// Request-path background jobs: push dispatch and the no-worker
 	// mention write run on this group so shutdown can join them. Registered
 	// after the mention worker, so the reverse walk runs it first, and before
 	// the database closes. The group is rooted at WithoutCancel(bgCtx): the

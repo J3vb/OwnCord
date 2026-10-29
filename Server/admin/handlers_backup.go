@@ -22,7 +22,7 @@ import (
 
 // handleBackup takes a manual backup. Only one runs at a time on this API: a
 // second POST while one is in flight is a 409 BACKUP_RUNNING that starts no
-// second VACUUM and leaves no partial file (WP 8.4c). The scheduled
+// second VACUUM and leaves no partial file. The scheduled
 // maintenance backup is a separate path and does not take this guard: its
 // files have their own names and BackupToSafe publishes by atomic rename, so
 // the two cannot collide.
@@ -184,7 +184,7 @@ func verifyRestoreSource(w http.ResponseWriter, r *http.Request, name, target st
 		return false
 	}
 
-	// Refuse a backup a NEWER server wrote (REL-02): restoring it would put
+	// Refuse a backup a NEWER server wrote: restoring it would put
 	// this older binary on a schema it has never seen, and it would then
 	// boot silently on it.
 	ahead, err := db.CheckBackupSchemaAhead(context.WithoutCancel(r.Context()), target)

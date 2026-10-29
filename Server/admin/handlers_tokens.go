@@ -15,7 +15,7 @@ import (
 // (token_cli.go). Both are thin adapters over service.TokenService, which is
 // what keeps them in sync — they used to wrap the same db.*APIToken calls
 // twice and had already drifted apart. All three routes sit behind the
-// owner-or-MANAGE_TOKENS gate in api.go (WP 8.4d): minting a long-lived bearer
+// owner-or-MANAGE_TOKENS gate in api.go: minting a long-lived bearer
 // credential over the network is the one admin action that, via a hijacked
 // session, would outlive a password change or an admin force-logout (API
 // tokens deliberately live outside the session table; only sign-out-everywhere
@@ -26,7 +26,7 @@ import (
 func handleListAPITokens(tokens *service.TokenService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// A MANAGE_TOKENS holder who is not the owner sees only the tokens
-		// bound to them (WP 8.4d).
+		// bound to them.
 		list, err := tokens.ListFor(r.Context(), actorFromContext(r), isOwnerFromContext(r))
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list tokens")
@@ -70,8 +70,8 @@ func handleCreateAPIToken(tokens *service.TokenService) http.HandlerFunc {
 			return
 		}
 
-		// A MANAGE_TOKENS holder who is not the owner mints for themself only
-		// (WP 8.4d); another username is a 403.
+		// A MANAGE_TOKENS holder who is not the owner mints for themself only;
+		// another username is a 403.
 		minted, err := tokens.CreateFor(r.Context(), actorUserFromContext(r), isOwnerFromContext(r),
 			req.Username, req.Label, time.Duration(req.ExpiresHours)*time.Hour)
 		switch {
@@ -106,7 +106,7 @@ func handleRevokeAPIToken(tokens *service.TokenService) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid token id")
 			return
 		}
-		// A holder who is not the owner revokes only their own (WP 8.4d).
+		// A holder who is not the owner revokes only their own.
 		switch err := tokens.RevokeFor(r.Context(), actorFromContext(r), id, isOwnerFromContext(r)); {
 		case errors.Is(err, service.ErrNotFound):
 			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "no active token with that id")

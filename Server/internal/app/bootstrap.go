@@ -58,7 +58,7 @@ func removeOldBinaryAt(exePath string, log *slog.Logger) {
 // the coordinator after Run returns.
 //
 // It also returns the boot log level, which app.New hands the admin API as
-// the level the timed debug toggle reverts to (SRE-07).
+// the level the timed debug toggle reverts to.
 func LoadConfig(log *slog.Logger, levelVar *slog.LevelVar, rc *RestartCoordinator) (*config.Config, slog.Level, error) {
 	cfg, err := config.Load(config.DefaultPath)
 	if err != nil {
@@ -101,7 +101,7 @@ func prepareDataDir(log *slog.Logger, cfg *config.Config) error {
 	if cfg.Backup.Dir != "" && cfg.Backup.Dir != filepath.Join(cfg.Server.DataDir, "backups") {
 		warnLowDisk(log, "backup dir", cfg.Backup.Dir, critical)
 	}
-	// The upload path refuses at this floor on ITS volume (B5-2), so an
+	// The upload path refuses at this floor on ITS volume, so an
 	// operator who mounted upload.storage_dir elsewhere hears about that
 	// volume at boot rather than from users getting 507s.
 	if cfg.Upload.StorageDir != "" && cfg.Upload.StorageDir != filepath.Join(cfg.Server.DataDir, "uploads") {

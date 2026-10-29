@@ -28,7 +28,7 @@ type EventSink struct {
 	// DispatchCount counts every Dispatch call, delivered or not (subs is
 	// empty in every build today — see Dispatch's doc). Lets a test assert
 	// the hub actually withheld a call for a labelled channel's content
-	// (B5-7 decision 13) rather than only checking the gate's own verdict.
+	// rather than only checking the gate's own verdict.
 	DispatchCount atomic.Int64
 }
 

@@ -175,7 +175,7 @@ func (r *Registry) LoadAll(ctx context.Context) error {
 	// plugin subdirectory failed to parse, but it still returns every
 	// plugin that scanned cleanly in `manifests`. Log-and-continue here
 	// rather than aborting: one malformed plugin directory must not take
-	// every other, otherwise-valid plugin down with it (OC-0165).
+	// every other, otherwise-valid plugin down with it.
 	manifests, err := scanPluginDirectory(r.cfg.Directory)
 	if err != nil {
 		slog.Warn("plugin: some plugin directories failed to scan and were skipped", "dir", r.cfg.Directory, "err", err)
@@ -596,7 +596,7 @@ func (r *Registry) activate(ctx context.Context, inst *Instance) error {
 // enablePluginActivate is EnablePlugin's activation call, indirected through
 // a package variable so tests can deterministically simulate a concurrent
 // DisablePlugin/UninstallPlugin winning the race inside activate's unlocked
-// compile/instantiate window (OC-0243) without needing a real wazero runtime
+// compile/instantiate window without needing a real wazero runtime
 // and its own timing. Production never reassigns it.
 var enablePluginActivate = (*Registry).activate
 

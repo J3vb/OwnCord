@@ -14,9 +14,9 @@ type blockedPrefix struct {
 }
 
 // blockedPrefixes is the whole non-global set: everything
-// Server/plugin/host_http.go's ipAllowed refused before B5-1, plus the
+// Server/plugin/host_http.go's ipAllowed refused before the dialing moved here, plus the
 // documentation, benchmarking and remaining reserved blocks it missed
-// (docs/trust-model.md, "Desktop preview destination policy (C-09)", clause 3).
+// (docs/trust-model.md, the desktop preview destination policy, clause 3).
 //
 // It is a denylist of the IANA special-purpose address registries rather than
 // an allowlist of global unicast, because a new global allocation must not
@@ -76,7 +76,7 @@ var blockedPrefixes = []blockedPrefix{
 // refuses: 64:ff9b::a9fe:a9fe is 169.254.169.254 and the cloud metadata
 // service with it. So it is unwrapped and the embedded address classified.
 //
-// Known limit, and it is the C-09 contract's limit too: an operator-chosen
+// Known limit, and it is the trust-model contract's limit too: an operator-chosen
 // network-specific prefix (RFC 6052 §2.2) is indistinguishable from any other
 // global address, so a NAT64 deployment that uses one is invisible here.
 var nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")

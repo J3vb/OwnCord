@@ -93,7 +93,7 @@ func (s *archiveLinks) redeem(token string) (archiveLink, bool) {
 // handleArchiveLink issues POST /admin/api/archive/link: a short-lived
 // single-use token the panel opens as a plain browser link, so the archive is
 // streamed to disk by the browser instead of being buffered in the page. It is
-// for the owner or a RESTORE_BACKUPS holder (WP 8.4d; the archive holds
+// for the owner or a RESTORE_BACKUPS holder (the archive holds
 // password hashes and the key files), and the issue is audited as
 // archive_link.
 func handleArchiveLink(database *db.DB) http.HandlerFunc {
@@ -151,7 +151,7 @@ func linkCredentialHash(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 // linkRestoreStillValid re-resolves the credential a link was issued to: it
 // must still be a live session or token of a non-banned principal who is the
-// Owner or whose roles still hold RESTORE_BACKUPS (WP 8.4d), judged on the
+// Owner or whose roles still hold RESTORE_BACKUPS, judged on the
 // effective permissions at redemption. A holder who lost the bit, was banned
 // or was signed out since the link was issued gets nothing; an Administrator
 // without the bit never did. The full archive's redemption uses it.
@@ -161,8 +161,8 @@ func linkRestoreStillValid(r *http.Request, database *db.DB, link archiveLink) b
 	})
 }
 
-// linkBackupStillValid is linkRestoreStillValid for a single backup's link
-// (WP 8.4c): the credential must still be a live session or token of a
+// linkBackupStillValid is linkRestoreStillValid for a single backup's link:
+// the credential must still be a live session or token of a
 // non-banned principal who is the Owner or whose roles still hold
 // MANAGE_BACKUPS. The role ResolveTokenHash returns carries the OR of every
 // held role's permissions, the same resolution the admin perimeter uses, so a

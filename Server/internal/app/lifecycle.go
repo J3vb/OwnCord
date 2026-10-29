@@ -3,7 +3,7 @@
 // persistence, the audit writer, the maintenance workers, ACME and the
 // listener, serves until a shutdown or restart signal, and tears every stage
 // back down through one composite close. main keeps only the CLI dispatch,
-// the log sinks and the restart handoff (B3-3).
+// the log sinks and the restart handoff.
 package app
 
 import (
@@ -47,7 +47,7 @@ const teardownBudget = 50 * time.Second
 // shutdown or restart signal arrives, and then closes every started stage in
 // the reverse order. Close runs on EVERY return path — a failed start, a
 // serve error and a clean shutdown alike — which is what keeps a supervised
-// LiveKit process from being orphaned by an early return (OC-0027).
+// LiveKit process from being orphaned by an early return.
 //
 // A start or serve error is what Run reports; a teardown error surfaces only
 // when there is no earlier one to report.
@@ -105,8 +105,8 @@ func (a *App) start() error {
 	// used to be the FIRST act of start(), before the data-dir, TLS, database,
 	// migrate and later stages — so a migration error (or any other start
 	// failure) left an operator with no chatserver.old-* to roll back to, and
-	// under systemd Restart=always the unit has nothing local to fall back on
-	// (REL-01). Deferring it past the stages preserves the documented rollback
+	// under systemd Restart=always the unit has nothing local to fall back on.
+	// Deferring it past the stages preserves the documented rollback
 	// copy through every start-up refusal; the schema-ahead check in
 	// db.MigrateFS stops that copy from then booting on a newer schema.
 	removeOldBinaryFn(a.log)
@@ -159,7 +159,7 @@ func (a *App) startDatabase() error {
 	}
 	a.database = database
 	a.onClose("database", func(context.Context) error { return database.Close() })
-	// Periodic PRAGMA optimize (SV-06). Registered after the database close, so
+	// Periodic PRAGMA optimize. Registered after the database close, so
 	// the reverse walk stops and joins it first.
 	optCtx, optCancel := context.WithCancel(a.bgCtx)
 	optDone := database.StartOptimizer(optCtx, 0)
@@ -185,10 +185,10 @@ func (a *App) startMigrate() error {
 }
 
 // startErasureMarkers opens the deletion-marker file and replays it against
-// the migrated database before anything can serve (B4-10): what a restored
+// the migrated database before anything can serve: what a restored
 // backup brought back is erased again here. Its close releases the file.
 func (a *App) startErasureMarkers() error {
-	// The one upload store (WP 5.6g): opened here because the replay below
+	// The one upload store: opened here because the replay below
 	// removes erased accounts' files, and handed on to StartRuntime so the
 	// router and the maintenance loop share the instance.
 	a.storage = OpenStorage(a.log, a.cfg)
@@ -202,7 +202,7 @@ func (a *App) startErasureMarkers() error {
 }
 
 // startPushVAPIDKey loads (or generates, on a confirmed absence) the Web
-// Push VAPID key beside totp.key and erasure.key, unconditionally — B5-4:
+// Push VAPID key beside totp.key and erasure.key, unconditionally:
 // regardless of push.enabled, because the file is cheap and the maintenance
 // sweep needs the key id to recognise (and remove) rows a rotation orphaned
 // even while the feature is off. A load failure is fatal at start-up, same
@@ -242,9 +242,8 @@ func (a *App) startPlugins() error {
 
 // pushDispatchEnabled is the one gate the composition root checks before
 // constructing a PushDispatcher and installing it on MessageService: BOTH
-// push.enabled and push.dispatch_enabled must be true (plan decision 9,
-// HP-5 scorecard Question 6, item 1). Storage on with dispatch off — the
-// B5-4 state, and what an upgraded install starts in — must never dispatch,
+// push.enabled and push.dispatch_enabled must be true. Storage on with dispatch off — the
+// storage-only state, and what an upgraded install starts in — must never dispatch,
 // which is why this is a named function rather than an inline condition:
 // TestPushDispatchGate_RequiresBothKeys pins the "&&", not just its effect.
 func pushDispatchEnabled(cfg *config.Config) bool {
@@ -252,17 +251,16 @@ func pushDispatchEnabled(cfg *config.Config) bool {
 }
 
 // startHub builds the hub and the collaborators it shares with the router
-// and starts the dispatch goroutine — B3-3 moved all of that out of
-// api.NewRouter so the hub has exactly one owner, and B3-4 moved the pre-Run
-// wiring into ws.HubOptions, so an incomplete hub fails this start step
+// and starts the dispatch goroutine — all of that lives here, not in
+// api.NewRouter, so the hub has exactly one owner, and the pre-Run
+// wiring is in ws.HubOptions, so an incomplete hub fails this start step
 // instead of panicking later.
 //
 // Its close step is stopHub: GracefulStopContext, which calls StopLiveKit,
 // the sole caller of LiveKitProcess.Stop, then a join on the dispatch
 // goroutine. gracefulOnce makes it idempotent alongside the stop the
 // hub-notice step performs on the normal path, so it is reached on every
-// return from Run and a supervised livekit-server process is never orphaned
-// (OC-0027).
+// return from Run and a supervised livekit-server process is never orphaned.
 func (a *App) startHub() error {
 	rt, err := StartRuntime(a.cfg, a.database, a.plugins,
 		RuntimeInputs{Version: a.deps.Version, TOTPKey: a.totpKey, Storage: a.storage})
@@ -284,7 +282,7 @@ func (a *App) startHub() error {
 		rt.Services.Retention.SetMarkers(a.markers)
 	}
 	// The VAPID key startPushVAPIDKey loaded earlier, installed once the
-	// service layer exists (B5-4). SetSubscriptionTTL(0) falls back to the
+	// service layer exists. SetSubscriptionTTL(0) falls back to the
 	// PushService default, so a partial wiring with no push-vapid-key stage
 	// (a direct StartRuntime call in a test) still leaves a usable default.
 	if rt.Services != nil && rt.Services.Push != nil {
@@ -292,9 +290,9 @@ func (a *App) startHub() error {
 		rt.Services.Push.SetSubscriptionTTL(time.Duration(a.cfg.Push.SubscriptionTTLDays) * 24 * time.Hour)
 		rt.Services.Push.SetContact(a.cfg.Push.Contact)
 	}
-	// Web Push dispatch (B5-11, behind HP-5): its own second opt-in on top
-	// of push.enabled (plan decision 9) — an operator who enabled storage
-	// in the B5-4 era does not acquire dispatch by upgrade. Installed on
+	// Web Push dispatch: its own second opt-in on top
+	// of push.enabled — an operator who enabled storage
+	// before dispatch existed does not acquire dispatch by upgrade. Installed on
 	// MessageService only when both keys are true; SetPushNotifier is never
 	// called otherwise, so the hook stays the nil PushNotifier it defaults
 	// to (TestPushDispatch_OffByDefaultSendsNothing).
@@ -307,7 +305,7 @@ func (a *App) startHub() error {
 	a.onClose("hub", func(ctx context.Context) error {
 		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())
 	})
-	// Windowed metrics sampler (WP 4.3a). Registered right after "hub", so the
+	// Windowed metrics sampler. Registered right after "hub", so the
 	// reverse walk joins it BEFORE the hub stops and the database closes: it
 	// reads hub atomics and both pools' Stats(), and must not outlive either.
 	// It runs on bgCtx and exits on ctx.Done().
@@ -336,8 +334,7 @@ func (a *App) startHub() error {
 }
 
 // startRouter mounts the HTTP handler over the already-built collaborators.
-// It owns no goroutine (the limiter cleanup is startLimiterCleanup's, WP
-// 5.6g), but keeps its close step for NewRouter's cleanup hook; the hub it
+// It owns no goroutine (the limiter cleanup is startLimiterCleanup's), but keeps its close step for NewRouter's cleanup hook; the hub it
 // serves is stopped by the step above.
 func (a *App) startRouter() error {
 	a.runtime.SetupToken = rand.Text()
@@ -434,7 +431,7 @@ func (a *App) startHTTP() error {
 	// The hub stops right after the drain — it notifies clients, closes
 	// every socket once the notice window ends and then stops LiveKit — as a
 	// step of its own, so its notice window keeps its budget however long the
-	// drain took (SRV-06). The later "hub" step then only joins the dispatch
+	// drain took. The later "hub" step then only joins the dispatch
 	// loop. The notice names the restart's intent, so clients hear "update"
 	// rather than "shutdown".
 	a.onClose("hub-notice", func(ctx context.Context) error {
@@ -450,7 +447,7 @@ func (a *App) startHTTP() error {
 		a.srv.RegisterOnShutdown(a.deps.LogBuf.EndStreams)
 	}
 	// Bind here, not in serve(): a port that cannot be bound must fail start()
-	// before the previous binary is removed (REL-01).
+	// before the previous binary is removed.
 	return serveWithBindRetry(a.log, "server", func() (err error) {
 		a.ln, err = net.Listen("tcp", a.addr)
 		return err

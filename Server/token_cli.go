@@ -166,7 +166,7 @@ func tokenRevoke(ctx context.Context, tokens *service.TokenService, args []strin
 
 	// An argument that parses as an integer is tried as an id first; when no
 	// active token carries that id it is tried as a label, because labels are
-	// free text and an all-digit one is legal (OC-0341). Anything else is a
+	// free text and an all-digit one is legal. Anything else is a
 	// label. Revoking by label is the CLI's own form — an operator recovering
 	// a compromised credential knows what they typed, not the row id — and
 	// the id keeps precedence, as the usage text says.

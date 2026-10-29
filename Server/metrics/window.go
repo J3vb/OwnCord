@@ -10,7 +10,7 @@ import (
 )
 
 // Windows turns the cumulative figures above into "the last minute" and "the
-// last fifteen minutes" (WP 4.3a). A sampler ticks every WindowSpec.Tick and
+// last fifteen minutes". A sampler ticks every WindowSpec.Tick and
 // copies each source into a preallocated ring: a histogram's raw bucket
 // counts, the largest value seen since the previous sample, and each counter's
 // cumulative value. A window is then the newest sample minus an older one.
