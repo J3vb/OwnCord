@@ -271,7 +271,7 @@ jobs:
             "$RUNNER_TEMP/db-$1.test" -test.run '^$' -test.bench 'SearchCommonWord|HistoryPage|UnreadCounts' \
               -test.benchtime 1s -test.benchmem >> "$RUNNER_TEMP/bench-$1.txt"
           }
-          for round in 1 2 3 4; do
+          for _ in 1 2 3 4; do
             bench cur; bench ref
             bench ref; bench cur
           done
