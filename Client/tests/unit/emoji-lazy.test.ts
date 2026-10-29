@@ -55,8 +55,8 @@ describe("lazy emoji data", () => {
 
     expect(picker.element.querySelector(".ep-loading")).toBeNull();
     expect(labels()).toEqual(expect.arrayContaining(["Smileys", "Travel", "Flags"]));
-    const buttons = Array.from(picker.element.querySelectorAll(".ep-category-btn")).map(
-      (b) => b.textContent,
+    const buttons = Array.from(picker.element.querySelectorAll(".ep-category-btn")).map((b) =>
+      b.getAttribute("aria-label"),
     );
     expect(buttons).toContain("Flags");
 
