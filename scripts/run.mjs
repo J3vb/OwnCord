@@ -218,6 +218,10 @@ const CHECK_DOCS = [
   // `optional`: it is Node, and this file is Node.
   step("node", ["--test", "scripts/check-migrations.test.mjs"], "."),
   step("node", ["scripts/check-migrations.mjs"], "."),
+  // Plan and ticket ids in code comments only go down: see docs/code-style.md,
+  // "Comments". Node with no dependencies, so it sits with the other matchers.
+  step("node", ["--test", "scripts/check-comment-ids.test.mjs"], "."),
+  step("node", ["scripts/check-comment-ids.mjs"], "."),
   ...LEDGER_VERIFY,
 ];
 

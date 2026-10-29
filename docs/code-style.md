@@ -172,6 +172,8 @@ Tauri commands are marked `#[tauri::command]`; ones that must run off the main t
 
 Go doc comments are lint-enforced by staticcheck: every non-`main` package has a `// Package <name> …` comment (ST1000), and a doc comment on an exported function, type, var or const starts with its name (ST1020–ST1022). There is no other written comment guide. In practice, comments explain _why_, not _what_: the Go invariant files (`Server/invariants/*.go`) and the ESLint rules (`Client/eslint-rules.js`) document the invariant a check encodes, the historical defect that motivated it, and where exceptions are recorded, rather than restating the code.
 
+A comment says the reason in plain words. It never cites a plan, work package, ledger id, pull request or review round (`WP 7.4b`, `B7-15c`, `OC-0395`, `#2805`, "Codex review round 2"): a reader of the code does not have those documents. When the history matters, link the doc path. `scripts/check-comment-ids.mjs` counts such ids per file in production TypeScript, Go and Rust and holds them in `scripts/comment-id-baseline.json` as a shrink-only ratchet: a file may not gain one, and a file that lost some has its row lowered with `node scripts/check-comment-ids.mjs --update` (then lower `TOTAL_CAP` to the total it prints). `--list` prints every hit with its line.
+
 ## Commits and PRs
 
 - Branch from `dev`; `dev` is the integration branch and all contributions target it; `main` carries releases only. Branch names: `feature/<name>`, `fix/<name>`, `docs/<name>`.
