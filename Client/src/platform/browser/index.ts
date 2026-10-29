@@ -4,8 +4,8 @@
 // inert, so the app reaches no host and stores nothing rather than half-work.
 // The rest is 6.13d: notifications (Web Notification API, also secure-context
 // only), file save (a download), logs (a memory ring), invite deep links
-// (`?invite=`) and external content (refused) are browser adapters, one file
-// each; every other member either refuses (a rejected promise, or the typed
+// (`?invite=`), external content (refused) and the URL opener (a new tab) are
+// browser adapters, one file each; every other member either refuses (a rejected promise, or the typed
 // "unavailable" answer its contract defines) or does nothing, exactly as its
 // contract allows, and the four contracts a Settings control sits on say so
 // through `available: false`. Push-to-talk stays unsupported: an in-tab key
@@ -38,7 +38,6 @@ import type {
   SocketTransport,
   SystemIdle,
   TrayStatus,
-  UrlOpener,
   WindowControl,
   WindowPrefs,
 } from "../contracts";
@@ -57,6 +56,7 @@ import { pendingMessages as browserPendingMessages } from "./pendingMessages";
 import { settings as browserSettings } from "./settings";
 import { socket as browserSocket } from "./socket";
 import { inertUnsubscribe, refuse, UnsupportedKeysError } from "./unavailable";
+import { urlOpener } from "./urlOpener";
 
 const appAudio: AppAudio = {
   available: async () => false,
@@ -257,10 +257,6 @@ const updater: AppUpdater = {
   }),
   downloadAndInstallUpdate: () => refuse(),
   subscribeToInstall: inertUnsubscribe,
-};
-
-const urlOpener: UrlOpener = {
-  open: () => refuse(),
 };
 
 const windowControl: WindowControl = {
