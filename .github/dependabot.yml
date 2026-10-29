@@ -93,9 +93,9 @@ updates:
   # separate ecosystem from `docker`, so the pinned base-image digests above and
   # the LiveKit tag below are bumped by two different blocks — both are needed,
   # and neither subsumes the other.
-  # Server/docker-compose.otel.yml's `:latest` sidecars (jaegertracing, prometheus)
-  # are deliberately left alone: they are dev-only tracing services that never
-  # ship, so a floating tag there is intended.
+  # deploy/docker/docker-compose.otel.yml's `:latest` sidecars (jaegertracing,
+  # prometheus) sit outside this directory and are deliberately left alone: they
+  # are dev-only tracing services that never ship, so a floating tag is intended.
   - package-ecosystem: docker-compose
     directory: /Server
     target-branch: dev

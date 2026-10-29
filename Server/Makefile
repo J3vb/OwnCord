@@ -140,7 +140,7 @@ docs-verify:
 # Prometheus UI:  http://localhost:9090
 # Run the server with: go build -tags otel . && ./owncord-server
 otel-up:
-	docker compose -f docker-compose.otel.yml up -d
+	docker compose -f ../deploy/docker/docker-compose.otel.yml up -d
 
 otel-down:
-	docker compose -f docker-compose.otel.yml down
+	docker compose -f ../deploy/docker/docker-compose.otel.yml down
