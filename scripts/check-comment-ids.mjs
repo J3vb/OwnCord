@@ -20,7 +20,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const BASELINE_PATH = path.join(ROOT, "scripts/comment-id-baseline.json");
 
 /** Ids that may remain in total. Lower it in every change that removes ids; it never rises. */
-export const TOTAL_CAP = 3261;
+export const TOTAL_CAP = 3343;
 
 /** Each pattern names a kind of id. All are matched inside comment text only. */
 export const ID_PATTERNS = [
@@ -29,6 +29,8 @@ export const ID_PATTERNS = [
     "plan item",
     /\b(?!(?:OC|UTF|SHA|AES|HTTP|FNV|ISO|CRC|ALPN|RFC|CVE|GHSA|IEEE|ECMA|ES|P|X|A|V)-)[A-Z]{1,5}\d{0,2}-\d+[a-z]?\b/g,
   ],
+  // A bare roadmap item, "(6.13c)" or "5.4d-2", without the WP prefix.
+  ["roadmap item", /(?<![\w.]|WP[ -])\d{1,2}\.\d{1,2}[a-h]\d?(?:-\d+)?(?![\w.])/g],
   ["ledger id", /\bOC-\d{3,5}\b/g],
   ["pull request", /(?<![\w&/])#[1-9]\d{2,4}\b/g],
   ["review bot", /\bCodex\b/g],

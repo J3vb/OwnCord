@@ -59,6 +59,11 @@ test("Rust lifetimes, chars, raw strings and nested block comments", () => {
   assert.deepEqual(ids(src, "rs"), ["OC-0001", "B9-14", "RT-12", "LP-7"]);
 });
 
+test("a bare roadmap item counts once, and versions do not", () => {
+  const src = "// sidebar rows (5.4c-2, 6.13d); WP 6.9c; v2.5.0, 1.5x faster, 0.5 s";
+  assert.deepEqual(ids(src, "ts"), ["WP 6.9c", "5.4c-2", "6.13d"]);
+});
+
 test("technical names that look like ids are not counted", () => {
   const src =
     "// UTF-8, SHA-256, AES-128, P-256, RFC-6455 and HTTP-2 are not plan ids; #fff is a colour";
