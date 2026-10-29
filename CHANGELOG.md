@@ -56,6 +56,12 @@ and only when it changes something a contributor or fork holder must do
 
 - Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
 
+### Fixed
+
+**Messages & files**
+
+- A HEIC or TIFF photo waiting to send showed a broken-image icon in the composer; it now shows the file chip with its name, as does any picture the app cannot draw.
+
 ### Under the hood
 
 - Every error code the server can send is now listed once in the protocol schema and generated into server constants and a client type. A fork that adds a code adds it there and regenerates.

@@ -320,11 +320,25 @@ function markGifUnavailable(gifBtn: HTMLButtonElement, reason: string): void {
 }
 
 /** File-icon + filename label for a non-image attachment chip. */
-function appendFileLabel(item: HTMLDivElement, filename: string): void {
+function fileLabel(filename: string): [HTMLDivElement, HTMLSpanElement] {
   const icon = createElement("div", { class: "attachment-preview-file" });
   icon.appendChild(createIcon("file-text", 16));
   const nameEl = createElement("span", { class: "attachment-preview-name" }, filename);
-  appendChildren(item, icon, nameEl);
+  return [icon, nameEl];
+}
+
+function appendFileLabel(item: HTMLDivElement, filename: string): void {
+  appendChildren(item, ...fileLabel(filename));
+}
+
+/** Image types the webview cannot draw. Chat shows them through the server's
+ *  JPEG preview once sent; before that the composer has only the file. */
+const UNDRAWABLE_IMAGE_MIMES = new Set(["image/heic", "image/heif", "image/tiff"]);
+
+/** Whether the composer can preview `file` from its own bytes. */
+function isPreviewableImage(file: File): boolean {
+  const base = file.type.split(";")[0]!.trim().toLowerCase();
+  return base.startsWith("image/") && !UNDRAWABLE_IMAGE_MIMES.has(base);
 }
 
 /** Rename a chip's visible labels after its file was renamed. */
@@ -1365,7 +1379,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     const tempId = `pending-${++previewCounter}`;
-    const isImage = file.type.startsWith("image/");
+    const isImage = isPreviewableImage(file);
 
     // A valid attachment is the user acting on any earlier refusal.
     clearUploadError();
@@ -1380,17 +1394,19 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         alt: file.name,
       });
       item.appendChild(img);
+      // A type the webview cannot decode (a camera RAW, PSD, ...) would leave
+      // a broken-image icon; the file chip is the honest preview for it.
+      const showFileChip = (): void => {
+        if (signal.aborted || !img.isConnected) return;
+        img.replaceWith(...fileLabel(img.alt));
+      };
+      img.addEventListener("error", showFileChip, { once: true, signal });
       readFileAsDataUrl(file)
         .then((dataUrl) => {
           if (signal.aborted) return;
           img.src = dataUrl;
         })
-        .catch(() => {
-          if (signal.aborted) return;
-          // Fallback: show filename
-          const nameEl = createElement("span", { class: "attachment-preview-name" }, file.name);
-          img.replaceWith(nameEl);
-        });
+        .catch(showFileChip);
     } else {
       appendFileLabel(item, file.name);
     }
