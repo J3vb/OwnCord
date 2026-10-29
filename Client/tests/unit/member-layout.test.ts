@@ -49,5 +49,9 @@ describe("memberLayout", () => {
     expect(clampMemberWidth(Number.NEGATIVE_INFINITY)).toBe(200);
     expect(clampMemberWidth(Number.NaN)).toBe(240);
     expect(clampMemberWidth(250.4)).toBe(250);
+    // Not a number at all: the default, never a coerced guess.
+    expect(clampMemberWidth("300" as unknown as number)).toBe(240);
+    expect(clampMemberWidth("wide" as unknown as number)).toBe(240);
+    expect(clampMemberWidth(undefined as unknown as number)).toBe(240);
   });
 });

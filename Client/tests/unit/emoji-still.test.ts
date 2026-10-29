@@ -37,6 +37,18 @@ function loaded(img: HTMLImageElement, w = 32, h = 32): void {
   Object.defineProperty(img, "naturalHeight", { value: h, configurable: true });
 }
 
+const still = (url: string): boolean => {
+  const probe = document.createElement("img");
+  showStillFrame(probe, url);
+  return probe.getAttribute("src") === STILL;
+};
+const capture = (url: string): void => {
+  const img = document.createElement("img");
+  showStillFrame(img, url);
+  loaded(img);
+  img.dispatchEvent(new Event("load"));
+};
+
 describe("Animate emoji", () => {
   let drawImage: ReturnType<typeof vi.fn>;
   let toDataURL: Mock<(type?: string, quality?: number) => string>;
@@ -119,6 +131,68 @@ describe("Animate emoji", () => {
     loaded(img);
     img.dispatchEvent(new Event("load"));
     expect(img.getAttribute("src")).toBe("blob:animated");
+  });
+
+  it("captureStill gives null when only one side has no size", () => {
+    for (const [w, h] of [
+      [0, 32],
+      [32, 0],
+    ] as const) {
+      const img = document.createElement("img");
+      loaded(img, w, h);
+      expect(captureStill(img)).toBeNull();
+    }
+    expect(drawImage).not.toHaveBeenCalled();
+  });
+
+  it("captureStill draws the whole image and encodes it as a PNG", () => {
+    const img = document.createElement("img");
+    loaded(img, 48, 20);
+    expect(captureStill(img)).toBe(STILL);
+    expect(drawImage).toHaveBeenCalledExactlyOnceWith(img, 0, 0, 48, 20);
+    expect(toDataURL).toHaveBeenCalledExactlyOnceWith("image/png");
+  });
+
+  it("off: a frame equal to the current source is not remembered", () => {
+    toDataURL.mockImplementation(() => "blob:animated");
+    const first = document.createElement("img");
+    showStillFrame(first, "blob:animated");
+    loaded(first);
+    first.dispatchEvent(new Event("load"));
+    expect(drawImage).toHaveBeenCalledTimes(1);
+    const second = document.createElement("img");
+    showStillFrame(second, "blob:animated");
+    loaded(second);
+    second.dispatchEvent(new Event("load"));
+    expect(drawImage).toHaveBeenCalledTimes(2);
+  });
+
+  describe("the captured frames are bounded", () => {
+    it("keeps 256 frames and then forgets the oldest first", () => {
+      for (let i = 0; i < 256; i++) capture(`blob:e${i}`);
+      expect(still("blob:e0")).toBe(true);
+      expect(still("blob:e255")).toBe(true);
+      capture("blob:e256");
+      expect(still("blob:e0")).toBe(false);
+      expect(still("blob:e1")).toBe(true);
+      expect(still("blob:e256")).toBe(true);
+    });
+
+    // Edge case: two emoji with one source finish loading one after the other.
+    it("counts a frame captured twice as the newest, not the oldest", () => {
+      const a = document.createElement("img");
+      const b = document.createElement("img");
+      showStillFrame(a, "blob:e0");
+      showStillFrame(b, "blob:e0");
+      loaded(a);
+      a.dispatchEvent(new Event("load"));
+      for (let i = 1; i < 256; i++) capture(`blob:e${i}`);
+      loaded(b);
+      b.dispatchEvent(new Event("load"));
+      capture("blob:e256");
+      expect(still("blob:e0")).toBe(true);
+      expect(still("blob:e1")).toBe(false);
+    });
   });
 
   it("captureStill gives null for an image with no size or no 2d context", () => {

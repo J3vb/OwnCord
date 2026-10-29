@@ -7,7 +7,7 @@ import type { ReadyChannel } from "@lib/types";
 import { resetChannelsStore, setChannels, setNsfwAcknowledged } from "@stores/channels.store";
 import { setMembers } from "@stores/members.store";
 import { mapDetail, mapQueueRow, parseAttachments, type QueueItem } from "./api";
-import { buildReportDetail } from "./Evidence";
+import { buildReportDetail, dateText } from "./Evidence";
 
 const SPICY = 7;
 const PLAIN = 8;
@@ -254,5 +254,164 @@ describe("buildReportDetail", () => {
       "Unknown account",
       "date unavailable",
     ]);
+  });
+});
+
+describe("dateText", () => {
+  it("reads a missing, empty or unreadable time as unavailable", () => {
+    expect(dateText(null)).toBe("date unavailable");
+    expect(dateText("")).toBe("date unavailable");
+    expect(dateText("not a time")).toBe("date unavailable");
+  });
+
+  it("formats a readable time", () => {
+    const text = dateText("2026-09-05T10:00:00Z");
+    expect(text).not.toBe("date unavailable");
+    expect(text).toMatch(/2026/);
+  });
+});
+
+const sectionOf = (over: Partial<ModerationReportDetail> = {}, gate = vi.fn()): HTMLElement =>
+  buildReportDetail(item, mapDetail(wire(over)), gate).element;
+
+const plainRow = (seq: number, over: Record<string, unknown> = {}) => ({
+  seq,
+  author_id: 2,
+  content: `row ${seq}`,
+  attachments: "[]",
+  captured_at: "2026-09-05T10:00:00Z",
+  ...over,
+});
+
+const reportNumber = (id: string): number => Number(id.replace("mod-report-", ""));
+
+const statusLines = (el: HTMLElement): string[] =>
+  [...el.querySelectorAll("p.mod-evidence-status")].map((p) => p.textContent ?? "");
+
+const factLabels = (el: HTMLElement): string[] =>
+  [...el.querySelectorAll("dt")].map((d) => d.textContent ?? "");
+
+describe("buildReportDetail markup", () => {
+  it("numbers each heading apart and labels the section by it", () => {
+    const first = buildReportDetail(item, mapDetail(wire()), vi.fn());
+    const second = buildReportDetail(item, mapDetail(wire()), vi.fn());
+    expect(first.heading.id).toMatch(/^mod-report-\d+$/);
+    expect(reportNumber(first.heading.id)).toBeGreaterThanOrEqual(1);
+    expect(reportNumber(second.heading.id)).toBe(reportNumber(first.heading.id) + 1);
+    expect(first.heading.tabIndex).toBe(-1);
+    expect(first.element.className).toBe("mod-report");
+    expect(first.element.dataset["testid"]).toBe("mod-report");
+  });
+
+  it("marks only the reported message, and only it gets the marker", () => {
+    const el = sectionOf({ evidence: [plainRow(-1), plainRow(0), plainRow(1)] });
+    const rows = [...el.querySelectorAll(".mod-evidence-item")];
+    expect(rows.map((r) => r.classList.contains("mod-evidence-reported"))).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    expect(rows.map((r) => r.querySelectorAll(".mod-evidence-marker").length)).toEqual([0, 1, 0]);
+    expect(rows[1]!.querySelector(".mod-evidence-head > .mod-evidence-marker")?.textContent).toBe(
+      "Reported message",
+    );
+    expect(rows[1]!.querySelector(".mod-evidence-head > .mod-evidence-author")).not.toBeNull();
+  });
+
+  it("styles a message without text as empty and one with text as plain", () => {
+    const el = sectionOf({ evidence: [plainRow(0, { content: "" }), plainRow(1)] });
+    const texts = [...el.querySelectorAll("p.mod-evidence-text")];
+    expect(texts.map((p) => p.className)).toEqual([
+      "mod-evidence-text mod-evidence-empty",
+      "mod-evidence-text",
+    ]);
+    expect(texts.map((p) => p.textContent)).toEqual(["No text", "row 1"]);
+  });
+
+  it("lists attachments only for rows that carry some, with an unknown type spelled out", () => {
+    const files = JSON.stringify([
+      { filename: "a.bin", mime: "", size: 1024 },
+      { filename: "b.png", mime: "image/png", size: 1536 },
+    ]);
+    const el = sectionOf({ evidence: [plainRow(0, { attachments: files }), plainRow(1)] });
+    const rows = [...el.querySelectorAll(".mod-evidence-item")];
+    expect(rows[1]!.querySelector(".mod-evidence-files")).toBeNull();
+    expect(
+      [...rows[0]!.querySelectorAll(".mod-evidence-files > li")].map((li) => li.textContent),
+    ).toEqual(["a.bin (Unknown account, 1.0 KB)", "b.png (image/png, 1.5 KB)"]);
+  });
+
+  it("notes that attachments are by reference only when some row has one", () => {
+    const withFile = JSON.stringify([{ filename: "a.txt", mime: "text/plain", size: 1 }]);
+    const none = sectionOf({ evidence: [plainRow(0), plainRow(1)] });
+    expect(none.textContent).not.toContain("Attachments are kept by reference only.");
+    const some = sectionOf({ evidence: [plainRow(0), plainRow(1, { attachments: withFile })] });
+    const notes = [...some.querySelectorAll("p.mod-evidence-status")].filter((p) =>
+      (p.textContent ?? "").includes("Attachments are kept by reference only."),
+    );
+    expect(notes).toHaveLength(1);
+  });
+
+  it("introduces the snapshot with when it was captured, above an ordered list", () => {
+    const el = sectionOf({ evidence: [plainRow(0)] });
+    const captured = el.querySelector("p.mod-evidence-status")!;
+    expect(captured.textContent).toContain(dateText("2026-09-05T10:00:00Z"));
+    const list = el.querySelector("ol.mod-evidence")!;
+    expect(list.querySelectorAll(":scope > li.mod-evidence-item")).toHaveLength(1);
+    expect(el.querySelector("h4:last-of-type")).not.toBeNull();
+  });
+
+  it("says in a status line why evidence is missing", () => {
+    expect(statusLines(sectionOf({ evidence: [] }))).toEqual([
+      "No messages were captured with this report.",
+    ]);
+    expect(
+      statusLines(sectionOf({ evidence: [], evidence_withheld: "SOURCE_CHANNEL_UNAVAILABLE" })),
+    ).toEqual([expect.stringContaining("can no longer be checked")]);
+  });
+
+  it("hands the consent gate its own slot beneath a status line", () => {
+    const gate = vi.fn();
+    const el = sectionOf(
+      { channel_id: SPICY, evidence: [], evidence_withheld: "NSFW_ACKNOWLEDGEMENT_REQUIRED" },
+      gate,
+    );
+    const slot = gate.mock.calls[0]![0] as HTMLElement;
+    expect(slot.className).toBe("mod-evidence-gate");
+    expect(el.contains(slot)).toBe(true);
+    expect(slot.previousElementSibling?.className).toBe("mod-evidence-status");
+    expect(slot.previousElementSibling?.textContent).toContain("age-restricted channel");
+  });
+
+  it("shows the reporter's own words only when there are some", () => {
+    const quiet = sectionOf({ detail: "" });
+    expect(quiet.querySelector(".mod-report-note")).toBeNull();
+    expect(quiet.textContent).not.toContain("Reporter's details");
+    const loud = sectionOf({ detail: "they keep following me" });
+    expect(loud.querySelector("p.mod-report-note")?.textContent).toBe("they keep following me");
+    expect([...loud.querySelectorAll("h4")].map((h) => h.textContent)).toEqual([
+      "Reporter's details",
+      "Evidence",
+    ]);
+  });
+
+  it("lists when a report was closed only once it is", () => {
+    expect(factLabels(sectionOf())).not.toContain("Closed");
+    const closed = sectionOf({
+      state: "closed",
+      outcome: "actioned",
+      closed_at: "2026-09-06T10:00:00Z",
+    });
+    expect(factLabels(closed)).toEqual([
+      "About",
+      "Reported by",
+      "Status",
+      "Assigned to",
+      "Sent",
+      "Closed",
+    ]);
+    expect([...closed.querySelectorAll("dd")].pop()?.textContent).toBe(
+      dateText("2026-09-06T10:00:00Z"),
+    );
   });
 });
