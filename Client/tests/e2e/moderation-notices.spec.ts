@@ -2,7 +2,7 @@
  * B9-15: moderation notices in the real shell (owner decision Q4), against
  * the mocked transport. The real server's side of the same journey (live
  * frames, reconnect, the recorded acknowledgement, recipient privacy) is in
- * fullstack/b9-moderation-notices.spec.ts.
+ * fullstack/moderation-notices.spec.ts.
  *
  * Accessibility evidence for the journey (Q1): accessible names, keyboard
  * operation, focus indicator and its stable location through the async
@@ -28,7 +28,7 @@ import {
   setAppearance,
   textContrast,
   type AppearancePrefs,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 const NOTICES = [
   { id: 12, kind: "warning", reason: "Second: keep it civil", created_at: "2026-09-21T09:00:00Z" },

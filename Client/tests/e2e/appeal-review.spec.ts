@@ -8,7 +8,7 @@ import {
   setAppearance,
   textContrast,
   type AppearancePrefs,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 
 // ---------------------------------------------------------------------------
 // B9-17: the Moderation Center's Appeals tab against the owner's Q1 checks —
@@ -19,7 +19,7 @@ import {
 // the signed-in moderator (testuser, id 1) with its decision form on screen,
 // and one already overturned. Refusals, races, role loss and the appellant's
 // own view run against the real server in
-// tests/e2e/fullstack/b9-appeal-review.spec.ts. Synthetic content only.
+// tests/e2e/fullstack/appeal-review.spec.ts. Synthetic content only.
 // ---------------------------------------------------------------------------
 
 const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;

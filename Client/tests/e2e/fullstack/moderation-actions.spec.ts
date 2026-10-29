@@ -8,7 +8,7 @@
  * dave is the subject, an ordinary member who is later ranked as bob's peer,
  * his superior and a mute-only role. No LiveKit runs here, so every timeout's
  * voice half is skipped, and the client must say so; the applied case is the
- * mocked tests/e2e/b9-moderation-actions.spec.ts. Every outcome is read back
+ * mocked tests/e2e/moderation-actions.spec.ts. Every outcome is read back
  * from the server's own ledger. Synthetic accounts and content only.
  *
  * The second test is B9-14's removal, kick and ban (described there).

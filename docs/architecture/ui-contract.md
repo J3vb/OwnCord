@@ -8,12 +8,12 @@ Neon), in
 **Evidence:** [b9-shared-a11y-evidence-2026-09-23.md](../archive/plans/b9-shared-a11y-evidence-2026-09-23.md).
 
 Every B9 feature PR builds its screens from the tokens and patterns below and
-runs the shared checks in `Client/tests/e2e/support/b9-accessibility.ts`
+runs the shared checks in `Client/tests/e2e/support/accessibility.ts`
 against its own journey. The bar is Q1's WCAG 2.2 AA-oriented checklist, not a
 certification claim. Automated checks supplement the owner's review; the owner
 **declined the native NVDA/Orca recordings on 2026-09-24**, and the manual OS
 200 % zoom owner check was **replaced by the automated reflow evidence** in
-`Client/tests/e2e/b9-zoom.spec.ts` on 2026-09-25 (see
+`Client/tests/e2e/zoom-reflow.spec.ts` on 2026-09-25 (see
 [Checks for a feature PR](#checks-for-a-feature-pr)). The automated evidence is
 the acceptance record and no lane is blocked by the absent recordings or the
 retired manual zoom check.
@@ -52,7 +52,7 @@ reachable: the header's menu button opens the existing `.unified-sidebar` as
 an overlay drawer, which closes on Escape, on an outside click and after
 choosing a destination, moves focus into the drawer on open and back to the
 button on close, and exposes `aria-expanded`. Above 800px nothing changes.
-`Client/tests/e2e/b9-responsive-nav.spec.ts` pins the keyboard and pointer
+`Client/tests/e2e/responsive-nav.spec.ts` pins the keyboard and pointer
 paths at the 640×400 zoom viewport.
 
 ## Colour tokens
@@ -206,7 +206,7 @@ the signal aborts. The lifecycle rules are in `Client/CLAUDE.md` (B7-11).
 
 ## Checks for a feature PR
 
-From `Client/tests/e2e/support/b9-accessibility.ts`:
+From `Client/tests/e2e/support/accessibility.ts`:
 
 | Helper                            | What it checks                                                                                                    |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -218,18 +218,18 @@ From `Client/tests/e2e/support/b9-accessibility.ts`:
 | `tokenContrasts(page, pairs)`     | token pairs as the page resolves them                                                                             |
 | `mountSharedControls(page)`       | the shared-controls fixture, including its pending, error and success states                                      |
 
-`Client/tests/e2e/b9-primitives.spec.ts` shows each one in use, including
+`Client/tests/e2e/accessibility-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is
 removed.
 
 The OS 200 % zoom/reflow check is automated in
-`Client/tests/e2e/support/b9-zoom.ts` (`ZOOM_VIEWPORT`, `auditReflow`,
+`Client/tests/e2e/support/zoom-reflow.ts` (`ZOOM_VIEWPORT`, `auditReflow`,
 `expectScreenReflows`): each screen is rendered at a 640×400 CSS viewport — the
 layout a 1280×800 window shows at 200 % page zoom — and asserted to have no
 horizontal page scroll, no vertical scroll area that also scrolls sideways, no
 text or control clipped without an intended scroll area, no control painted
 over, and every primary action reachable, with one screenshot per screen.
-`Client/tests/e2e/b9-zoom.spec.ts` opens every screen through the entry point a
+`Client/tests/e2e/zoom-reflow.spec.ts` opens every screen through the entry point a
 zoomed user actually has, after zooming.
 
 Screens that pass at 200 %: the connect page (B9-18), the shell's message
@@ -249,6 +249,6 @@ the Message Requests inbox and its Block confirm (B9-5, 6), My reports (the
 second half of B9-10), the Moderation Center queue, review, actions and ban
 confirm (B9-11, 12, 13, 14), the appeal review (B9-17), the signed-in Account
 pane (B9-20, 23; the user-bar Settings button), and the sidebar navigation half
-of B9-18 and B9-21. `b9-zoom.spec.ts` reaches each of those screens through
+of B9-18 and B9-21. `zoom-reflow.spec.ts` reaches each of those screens through
 the drawer and runs the reflow audit on it, like every other screen, and
-`Client/tests/e2e/b9-responsive-nav.spec.ts` pins the drawer journey itself.
+`Client/tests/e2e/responsive-nav.spec.ts` pins the drawer journey itself.

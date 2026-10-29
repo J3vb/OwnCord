@@ -54,9 +54,9 @@ export default defineConfig({
     // catalog text seam, the voice grid, the logger) and therefore always skip
     // in the production run. They only ever execute here, so leaving them off
     // this list made "16 skipped" a permanent blind spot for silent a11y rot.
-    "b9-text-expansion.spec.ts",
-    "b9-voice-polish.spec.ts",
-    "b9-zoom.spec.ts",
+    "text-expansion.spec.ts",
+    "voice-polish.spec.ts",
+    "zoom-reflow.spec.ts",
     // The same holds for these media specs (they reach the voice and stream
     // modules), so they too run only here.
     "reconnect-media-notice.spec.ts",
