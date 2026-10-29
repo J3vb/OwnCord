@@ -11,9 +11,10 @@
 
 import { channelsStore } from "../../stores/channels.store";
 import type { Channel } from "../../stores/channels.store";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 /** Error code the server answers a pre-consent content request with (docs/api.md). */
-export const NSFW_ACKNOWLEDGEMENT_REQUIRED = "NSFW_ACKNOWLEDGEMENT_REQUIRED";
+export const NSFW_ACKNOWLEDGEMENT_REQUIRED = RestErrorCode.NSFW_ACKNOWLEDGEMENT_REQUIRED;
 
 /** Whether `channel` is labelled and its content not yet consented to. */
 export function nsfwConsentRequired(

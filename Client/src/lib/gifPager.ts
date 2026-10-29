@@ -11,6 +11,7 @@
 
 import { ApiClientError } from "./api";
 import type { GifPage, GifResult } from "./gifProvider";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 /** Most pages (the first included) one query will ever load. */
 export const MAX_PAGES = 10;
@@ -21,7 +22,7 @@ export const RETRY_COOLDOWN_MAX_MS = 30_000;
 /** A failure a retry cannot fix: a client error other than 429, or GIFs disabled. */
 function isPermanent(err: unknown): boolean {
   if (!(err instanceof ApiClientError)) return false;
-  if (err.code === "GIF_DISABLED") return true;
+  if (err.code === RestErrorCode.GIF_DISABLED) return true;
   return err.status >= 400 && err.status < 500 && err.status !== 429;
 }
 

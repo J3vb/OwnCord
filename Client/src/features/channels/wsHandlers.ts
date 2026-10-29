@@ -81,6 +81,7 @@ import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
 import { registerSessionReset } from "../../lib/sessionRegistry";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
@@ -274,9 +275,9 @@ export function handleReadState(payload: Payload<"read_state">): void {
 export function handleMarkUnreadError(payload: Payload<"error">, id: string | undefined): boolean {
   // Any refusal of this frame ends the request; only two have copy of their own.
   const notice =
-    payload.code === "RATE_LIMITED"
+    payload.code === WsErrorCode.RATE_LIMITED
       ? "rateLimited"
-      : payload.code === "NOT_FOUND"
+      : payload.code === WsErrorCode.NOT_FOUND
         ? "notFound"
         : "failed";
   return failMarkUnread(id, notice);

@@ -77,6 +77,7 @@ import {
   type LightboxGallery,
 } from "./attachments";
 import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /** What a row render reads beyond the list's own options. */
 export interface MessageRenderOptions extends MessageListOptions {
@@ -491,13 +492,13 @@ function renderWelcomeRow(
 /** Map a send-failure error code to a short, user-facing reason. */
 function sendErrorReason(code: string | null): string {
   switch (code) {
-    case "SLOW_MODE":
+    case WsErrorCode.SLOW_MODE:
       return messagingText("send.slowMode");
-    case "RATE_LIMITED":
+    case WsErrorCode.RATE_LIMITED:
       return messagingText("send.rateLimited");
-    case "FORBIDDEN":
+    case WsErrorCode.FORBIDDEN:
       return messagingText("send.forbidden");
-    case "REQUEST_TIMEOUT":
+    case WsErrorCode.REQUEST_TIMEOUT:
       return messageStatusText("send.requestTimeout");
     case "OFFLINE":
       return messagingText("send.disconnected");
@@ -509,9 +510,9 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.unconfirmed");
     case "RECOVERED":
       return messagingText("send.recovered");
-    case "BAD_REQUEST":
+    case WsErrorCode.BAD_REQUEST:
       return messagingText("send.rejected");
-    case "STICKER_NOT_FOUND":
+    case WsErrorCode.STICKER_NOT_FOUND:
       return stickersText("send.notFound");
     case "UPLOAD_FAILED":
       return messagingText("send.uploadFailed");

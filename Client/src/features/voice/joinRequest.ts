@@ -1,3 +1,4 @@
+import { WsErrorCode } from "@lib/protocolTypes";
 // Which error frame answers the voice_join in flight. Servers echo the join's
 // envelope id on every refusal, so an error for any other command (a refused
 // chat_edit, a rate-limited typing frame) must not cancel the join. Older
@@ -7,15 +8,15 @@
 /** Codes an older server's voice_join refusal can carry without an id. */
 export const OLD_SERVER_JOIN_CODES: ReadonlySet<string> = Object.freeze(
   new Set([
-    "CHANNEL_FULL",
-    "VOICE_ERROR",
-    "FORBIDDEN",
-    "NOT_FOUND",
-    "BAD_REQUEST",
-    "RATE_LIMITED",
-    "ALREADY_JOINED",
-    "INTERNAL",
-    "TIMED_OUT",
+    WsErrorCode.CHANNEL_FULL,
+    WsErrorCode.VOICE_ERROR,
+    WsErrorCode.FORBIDDEN,
+    WsErrorCode.NOT_FOUND,
+    WsErrorCode.BAD_REQUEST,
+    WsErrorCode.RATE_LIMITED,
+    WsErrorCode.ALREADY_JOINED,
+    WsErrorCode.INTERNAL,
+    WsErrorCode.TIMED_OUT,
   ]),
 );
 

@@ -23,6 +23,7 @@ import { getChannelMute, isChannelMuted } from "@lib/channel-mutes";
 import { markdownToPlainText } from "@lib/markdown";
 import { connectText } from "../../i18n/connect";
 import { rowActivity } from "../../features/members/listeningLine";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -120,7 +121,7 @@ export async function handleCreateDm(
     // A FORBIDDEN 403 is a block or the other member's DM setting; both read the same,
     // in the app's own words, so the toast never says which.
     const msg =
-      err instanceof ApiClientError && err.status === 403 && err.code === "FORBIDDEN"
+      err instanceof ApiClientError && err.status === 403 && err.code === RestErrorCode.FORBIDDEN
         ? connectText("blocks.blockedByThem")
         : errorText(err, connectText("app.dmCreateFailed"));
     deps.getToast()?.show(msg, "error");

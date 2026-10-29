@@ -25,6 +25,7 @@ import { appealsText as at } from "../../i18n/appeals";
 import { formatWhen, safetyText as t } from "../../i18n/safety";
 import { refreshOwnModeration, safetyStore } from "./store";
 import { createDisclosure } from "../settings/status";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 export type AppealsApi = Pick<ApiClient, "fileAppeal" | "withdrawAppeal">;
 
@@ -407,7 +408,7 @@ export function createAppealsSection(api: AppealsApi | null, signal: AbortSignal
 
 function fileError(err: unknown): string {
   if (!(err instanceof ApiClientError)) return at("form.failed");
-  if (err.code === "ALREADY_APPEALED") return at("form.alreadyAppealed");
+  if (err.code === RestErrorCode.ALREADY_APPEALED) return at("form.alreadyAppealed");
   if (err.status === 429) return at("form.rateLimited");
   if (err.status === 404 || err.status === 403) return at("form.gone");
   if (err.status === 400) {

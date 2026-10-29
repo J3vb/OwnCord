@@ -31,6 +31,7 @@ import { showToast } from "@lib/toast";
 import { claimForwardRequest, releaseForwardRequest } from "../messaging/forwardRequests";
 import { forumsText } from "../../i18n/forums";
 import { MAX_POST_TAGS, POST_TITLE_MAX, cleanPostTitle } from "./forumModel";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("forum-new-post");
 
@@ -56,15 +57,15 @@ export interface NewPostDialogOptions {
 /** The dialog's refusal line for a server error code. */
 export function postErrorText(code: string): string {
   switch (code) {
-    case "FORBIDDEN":
+    case WsErrorCode.FORBIDDEN:
       return forumsText("error.FORBIDDEN");
-    case "NOT_FOUND":
+    case WsErrorCode.NOT_FOUND:
       return forumsText("error.NOT_FOUND");
-    case "RATE_LIMITED":
+    case WsErrorCode.RATE_LIMITED:
       return forumsText("error.RATE_LIMITED");
-    case "SLOW_MODE":
+    case WsErrorCode.SLOW_MODE:
       return forumsText("error.SLOW_MODE");
-    case "CONFLICT":
+    case WsErrorCode.CONFLICT:
       return forumsText("error.CONFLICT");
     case "UNCONFIRMED":
       return forumsText("error.UNCONFIRMED");

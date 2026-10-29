@@ -51,6 +51,7 @@ import {
   MAX_DISPLAY_NAME_LEN,
   MAX_USERNAME_LEN,
 } from "@lib/nameLimits";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("AccountTab");
 
@@ -1109,7 +1110,8 @@ function buildTotpDisableView(
           onDisabled();
         })
         .catch((err: unknown) => {
-          const requiredByServer = err instanceof ApiClientError && err.code === "FORBIDDEN";
+          const requiredByServer =
+            err instanceof ApiClientError && err.code === RestErrorCode.FORBIDDEN;
           setText(
             errorEl,
             requiredByServer ? t("totp.requiredByServer") : errorText(err, t("totp.disableFailed")),

@@ -742,3 +742,39 @@ No existing assertion was changed.
 ### Verdict
 
 Kept so far. A misspelt or unlisted code is now a compile error or an invariant failure instead of a reply the client silently ignores. Part 2 (the client comparing codes through the generated union) follows in its own PR. No saving in time or tokens is claimed.
+
+## MX-16 part 2: the client compares generated error codes (2026-10-29)
+
+### Counts
+
+Counted on `dev` `8adfc19a` with a TypeScript compiler API scan of non-test files in `Client/src` (the i18n catalogs and the generated `protocolTypes.ts` left out).
+
+| Measure                                                                 | Before | After |
+| ----------------------------------------------------------------------- | ------ | ----- |
+| String literals equal to a server error code (comparisons, cases, sets) | 120    | 0     |
+| Files holding them                                                      | 33     | 0     |
+| Hand-kept code unions in `lib/types.ts` (`WsErrorCode`, `ApiErrorCode`) | 2      | 0     |
+
+The scout counted 34 because it only looked at `=== "CODE"` comparisons; `case` labels and code sets (`OLD_SERVER_JOIN_CODES`, `AMBIGUOUS`) are the same thing spelt differently.
+
+### What changed
+
+- Every server code in `Client/src` is `RestErrorCode.X` or `WsErrorCode.X` from `@lib/protocolTypes`. A code both lists share (`FORBIDDEN`, `RATE_LIMITED`) takes the list of the reply it reads: REST for `ApiClientError`, WS for an error frame.
+- `ErrorPayload.code` is `WsErrorCodeValue`, `ApiError.error` is `RestErrorCodeValue` (plus the client's own `UNKNOWN` fallback), and `AuthErrorPayload.code` is the generated epoch code. The two hand unions had drifted: `WsErrorCode` lacked `POLL_ENDED`, `ALREADY_DELETED`, `SERVER_MUTED`, `SERVER_DEAFENED` and still listed `INVALID_INPUT` and `SERVER_ERROR`, which the socket never sends.
+- Client-local outcome codes (`OFFLINE`, `NETWORK`, `UNCONFIRMED`, `NOT_JSON`, `UNKNOWN`) are not server codes and stay as they are.
+- New structural test `tests/unit/error-code-literals.test.ts` holds the count at 0.
+- Startup closure budget raised one 500 B step, 103300 B to 103800 B: the two generated code tables (94 codes) are now in the startup bundle, 103762 B measured.
+
+### Checks
+
+| Check                                                       | Before       | After |
+| ----------------------------------------------------------- | ------------ | ----- |
+| `error-code-literals.test.ts` on the tree                   | 120 literals | 0     |
+| Its fixture (comparison, case, set flagged; i18n key clean) | new          | pass  |
+| `npm run check:client`                                      | pass         | pass  |
+
+No existing assertion was changed.
+
+### Verdict
+
+Kept. A server code the client checks for can no longer be misspelt or fall out of the server's list unnoticed, and the two drifted hand unions are gone. No saving in time or tokens is claimed.

@@ -90,6 +90,7 @@ import {
 import { buildHistory } from "./History";
 import { modQueueStore } from "./store";
 import { buildWorkflow, type WorkflowWrite } from "./Workflow";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 const FILTERS = [
   { value: "", labelKey: "filter.active", countKey: "count.active" },
@@ -207,7 +208,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
 }
 
 function actionErrorText(w: ActionWrite, err: unknown): string {
-  if (isStatus(err, 403, "SELF_REVIEW")) return t("write.selfReview");
+  if (isStatus(err, 403, RestErrorCode.SELF_REVIEW)) return t("write.selfReview");
   if (isStatus(err, 403)) {
     // Kick and ban each have their own bit, which a role change can take
     // while MODERATE_MEMBERS stays, so a refusal is not only about rank.
@@ -218,7 +219,7 @@ function actionErrorText(w: ActionWrite, err: unknown): string {
   if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
   // 409 ALREADY_DELETED (B9-14's removal of an already-removed message): a
   // known end state, not the uncertain "may still have been recorded" answer.
-  if (isStatus(err, 409, "ALREADY_DELETED")) return t("act.alreadyDeleted");
+  if (isStatus(err, 409, RestErrorCode.ALREADY_DELETED)) return t("act.alreadyDeleted");
   if (isStatus(err, 400)) {
     const message = err instanceof ApiClientError ? serverErrorText(err.code, err.message, "") : "";
     if (message !== "") return t("act.invalid", { message });
@@ -680,7 +681,7 @@ function renderReports(
           offList = null;
           setText(detailStatus, "");
         }
-        if (isStatus(err, 403) && !isStatus(err, 403, "SELF_REVIEW") && !isAction(w)) {
+        if (isStatus(err, 403) && !isStatus(err, 403, RestErrorCode.SELF_REVIEW) && !isAction(w)) {
           deny();
           return;
         }

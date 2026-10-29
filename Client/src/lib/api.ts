@@ -47,6 +47,7 @@ import type {
   GifFavoritesResponse,
   PartialSuccessResponse,
 } from "./types";
+import { RestErrorCode, WsErrorCode } from "@lib/protocolTypes";
 
 /** Configuration for the API client. */
 export interface ApiClientConfig {
@@ -223,40 +224,40 @@ export function serverErrorCopy(code: string, message: string): string | null {
     // rather than a bare 502, so the two failure classes stay distinguishable.
     case TLS_CERT_CODE:
       return connectText("error.tlsFailed");
-    case "RATE_LIMITED":
+    case RestErrorCode.RATE_LIMITED:
       return authSliceCopy(message) ?? connectText("error.rateLimited");
-    case "AUTH_BUSY":
+    case RestErrorCode.AUTH_BUSY:
       return connectText("error.authBusy");
-    case "INTERNAL":
-    case "INTERNAL_ERROR":
+    case WsErrorCode.INTERNAL:
+    case RestErrorCode.INTERNAL_ERROR:
       return authSliceCopy(message);
-    case "UNAUTHORIZED":
+    case RestErrorCode.UNAUTHORIZED:
       if (message === "invalid credentials") return connectText("error.invalidCredentials");
       return isSessionExpired(message) ? connectText("error.unauthorized") : null;
-    case "FORBIDDEN":
+    case RestErrorCode.FORBIDDEN:
       if (message === "your account has been suspended") return connectText("error.banned");
       return PERMISSION_REFUSAL.test(message) ? connectText("error.forbidden") : null;
-    case "NOT_FOUND":
+    case RestErrorCode.NOT_FOUND:
       return connectText("error.notFound");
     // The server's per-frame deadline (WP 4.1b); nothing was applied.
-    case "REQUEST_TIMEOUT":
+    case WsErrorCode.REQUEST_TIMEOUT:
       return messageStatusText("send.requestTimeout");
-    case "BANNED":
+    case WsErrorCode.BANNED:
       return connectText("error.banned");
-    case "SERVICE_UNAVAILABLE":
-    case "BAD_GATEWAY":
+    case RestErrorCode.SERVICE_UNAVAILABLE:
+    case RestErrorCode.BAD_GATEWAY:
       return connectText("error.unavailable");
-    case "STORAGE_QUOTA_EXCEEDED":
+    case RestErrorCode.STORAGE_QUOTA_EXCEEDED:
       return connectText("error.storageQuota");
-    case "STORAGE_LOW_DISK":
+    case RestErrorCode.STORAGE_LOW_DISK:
       return connectText("error.storageLowDisk");
-    case "STORAGE_ERROR":
+    case RestErrorCode.STORAGE_ERROR:
       return connectText("error.storageError");
-    case "GIF_DISABLED":
+    case RestErrorCode.GIF_DISABLED:
       return connectText("error.gifDisabled");
-    case "LAST_ROLE":
+    case RestErrorCode.LAST_ROLE:
       return connectText("error.lastRole");
-    case "PUSH_DISABLED":
+    case RestErrorCode.PUSH_DISABLED:
       return connectText("error.pushDisabled");
     default:
       return null;
@@ -282,7 +283,7 @@ function capitalise(message: string): string {
 export function serverErrorText(code: string, message: string, fallback: string): string {
   const copy = serverErrorCopy(code, message);
   if (copy !== null) return copy;
-  if (code === "INTERNAL" || code === "INTERNAL_ERROR") return fallback;
+  if (code === WsErrorCode.INTERNAL || code === RestErrorCode.INTERNAL_ERROR) return fallback;
   return message ? capitalise(message) : fallback;
 }
 

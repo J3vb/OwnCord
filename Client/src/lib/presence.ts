@@ -31,6 +31,7 @@ import {
   type StatusOrigin,
 } from "./userStatus";
 import { ServerMessageType as S } from "./protocolTypes";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 export interface PresenceSender {
   /**
@@ -234,7 +235,7 @@ export function createPresenceSender(ws: WsClient, limiter: RateLimiter): Presen
   // by this sender), so the write it eventually causes stays out of the
   // ws.on callback itself (local/no-store-write-in-ws-on).
   const unsubError = ws.on(S.ERROR, (payload, id) => {
-    if (payload.code !== "RATE_LIMITED") return;
+    if (payload.code !== WsErrorCode.RATE_LIMITED) return;
     // A newer change already queued its own retry, which carries the latest
     // status — do not clobber it, and do not double-send.
     if (retry !== null) return;

@@ -10,6 +10,7 @@ import {
   setActiveTimeout,
   setReadyNotices,
 } from "./store";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 type SafetyApi = DispatchApi | undefined;
 
@@ -51,7 +52,7 @@ export function handleModAction(api: SafetyApi, payload: Payload<"mod_action">):
 
 /** The server refused an action with TIMED_OUT: learn or revalidate the expiry. */
 export function handleTimedOutRefusal(api: SafetyApi, payload: Payload<"error">): void {
-  if (payload.code !== "TIMED_OUT") return;
+  if (payload.code !== WsErrorCode.TIMED_OUT) return;
   confirmTimeout(null);
   refresh(api);
 }

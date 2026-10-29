@@ -23,6 +23,7 @@ import type { GroupDmMemberPanelComponent } from "@components/GroupDmMemberPanel
 import type * as GroupMembers from "../../features/direct-messages/groupMembers";
 import { createMemberPickerModal } from "./MemberPickerModal";
 import type { MountableComponent } from "@lib/safe-render";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 /** Saved preference: the group member panel opens with the conversation. */
 export const GROUP_MEMBERS_PREF = "dmMembersOpen";
@@ -63,7 +64,7 @@ function membershipKey(dm: DmChannel | undefined): string {
 
 /** The error the server would answer a full group with. */
 function fullError(): ApiClientError {
-  return new ApiClientError(409, "GROUP_DM_FULL", "full");
+  return new ApiClientError(409, RestErrorCode.GROUP_DM_FULL, "full");
 }
 
 function activeGroupId(): number | null {
