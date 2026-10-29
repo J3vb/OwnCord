@@ -60,6 +60,31 @@ interface EmojiCategory {
   readonly emoji: readonly string[];
 }
 
+/** The glyph each category shows in the side rail; Server uses its first emoji. */
+const CATEGORY_ICONS: Readonly<Record<Exclude<EmojiCategoryKey, typeof SERVER_CATEGORY>, string>> =
+  {
+    "emoji.category.recent": "🕒",
+    "emoji.category.smileys": "😀",
+    "emoji.category.people": "👋",
+    "emoji.category.nature": "🌿",
+    "emoji.category.food": "🍔",
+    "emoji.category.travel": "🚗",
+    "emoji.category.activities": "⚽",
+    "emoji.category.objects": "💡",
+    "emoji.category.symbols": "💟",
+    "emoji.category.flags": "🏁",
+  };
+
+function buildCategoryIcon(cat: EmojiCategory): Node {
+  if (cat.name === SERVER_CATEGORY) {
+    const first = cat.emoji[0];
+    const image = first === undefined ? null : buildCustomEmojiNode(first);
+    if (image !== null) return image;
+    return document.createTextNode("⭐");
+  }
+  return document.createTextNode(CATEGORY_ICONS[cat.name]);
+}
+
 // ---------------------------------------------------------------------------
 // EmojiPicker
 // ---------------------------------------------------------------------------
@@ -124,17 +149,22 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   header.appendChild(toneSelect);
   root.appendChild(header);
 
-  // Category bar: one button per category jumps its heading into view, as a
-  // single roving Tab stop (Left/Right between buttons). Built
-  // once from the unfiltered set and rebuilt only on mount, so the targets
-  // stay put while a search filters the grids underneath.
+  // Body: a side rail of category icons next to the scrolling grid.
+  const body = createElement("div", { class: "ep-body" });
+  root.appendChild(body);
+
+  // Category rail: one icon button per category jumps its heading into view,
+  // as a single roving Tab stop (Up/Down between buttons). Built once from the
+  // unfiltered set and rebuilt only on mount, so the targets stay put while a
+  // search filters the grids underneath.
   const categoryBar = createElement("div", {
     class: "ep-categories",
     role: "toolbar",
+    "aria-orientation": "vertical",
     "aria-label": messagingText("emoji.categoriesLabel"),
   });
-  root.appendChild(categoryBar);
-  enableRovingNavigation(categoryBar, ".ep-category-btn", signal);
+  body.appendChild(categoryBar);
+  enableRovingNavigation(categoryBar, ".ep-category-btn", signal, "vertical");
 
   // The picker grid is `.ep-grid { grid-template-columns: repeat(8, 1fr) }`,
   // so roving navigation is a grid with eight columns (ArrowDown = one row
@@ -145,11 +175,11 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   // single flat listbox — the category grids are visual grouping only, and
   // roving tabindex (DC-13) treats every .ep-emoji cell as one list.
   const scrollArea = createElement("div", {
-    style: "overflow-y: auto; max-height: 320px;",
+    class: "ep-scroll",
     role: "listbox",
     "aria-label": messagingText("emoji.listLabel"),
   });
-  root.appendChild(scrollArea);
+  body.appendChild(scrollArea);
   enableRovingNavigation(scrollArea, ".ep-emoji", signal, "grid", GRID_COLUMNS);
 
   // Single delegated listener for the whole grid, registered once at mount
@@ -177,11 +207,15 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     clearChildren(categoryBar);
     for (const cat of categories) {
       if (cat.emoji.length === 0) continue;
-      const btn = createElement(
-        "button",
-        { class: "ep-category-btn", type: "button", "data-category": cat.name },
-        messagingText(cat.name),
-      );
+      const label = messagingText(cat.name);
+      const btn = createElement("button", {
+        class: "ep-category-btn",
+        type: "button",
+        title: label,
+        "aria-label": label,
+        "data-category": cat.name,
+      });
+      btn.appendChild(buildCategoryIcon(cat));
       btn.addEventListener(
         "click",
         () => {
@@ -194,7 +228,23 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
       categoryBar.appendChild(btn);
     }
     setRovingTabindex(categoryBar, ".ep-category-btn");
+    syncActiveCategory();
   }
+
+  // The rail highlights the category whose heading was last scrolled past.
+  function syncActiveCategory(): void {
+    const labels = scrollArea.querySelectorAll<HTMLElement>(".ep-category-label");
+    let current: string | undefined = labels[0]?.dataset.category;
+    const top = scrollArea.scrollTop + 1;
+    for (const label of labels) {
+      if (label.offsetTop > top) break;
+      current = label.dataset.category;
+    }
+    for (const btn of categoryBar.querySelectorAll<HTMLElement>(".ep-category-btn")) {
+      btn.classList.toggle("active", btn.dataset.category === current);
+    }
+  }
+  scrollArea.addEventListener("scroll", syncActiveCategory, { signal, passive: true });
 
   // Build categories with recent + custom, then the Unicode set once loaded.
   function getAllCategories(): readonly EmojiCategory[] {
@@ -328,6 +378,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
     // Every render rebuilds the cell set, so the single Tab stop must be
     // re-established or filtering would leave zero tabbable cells.
     setRovingTabindex(scrollArea, ".ep-emoji");
+    syncActiveCategory();
   }
 
   function renderAll(): void {

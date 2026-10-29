@@ -52,7 +52,7 @@
     "note": "No emitted JS chunk may contain the base64 WASM magic. Generalises decision 10's forbidWasmInStartup: the RNNoise barrel regression (C-07) embeds 1.9 MB of sync WASM in whatever chunk pulls it, which is exactly this marker."
   },
   "css": {
-    "budget": 38500,
+    "budget": 39000,
     "note": "Total gzip of every emitted stylesheet, deduplicated by file (D5, 2026-09-28): its own ratchet, so a CSS-only change does not move the startup JS budget."
   }
 }

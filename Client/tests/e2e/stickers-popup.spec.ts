@@ -111,25 +111,41 @@ test.describe("WP 8.8 stickers and the expression popup", () => {
     );
   });
 
-  test("the emoji tab shows every category button, unclipped", async ({ page }) => {
+  test("the emoji tab's category rail sits beside the grid and follows the scroll", async ({
+    page,
+  }) => {
     await page.locator("[data-testid='sticker-btn']").click();
     await page.locator("[data-testid='xp-tab-emoji']").click();
-    const bar = page.locator("[data-testid='expression-popup'] .ep-categories");
-    await expect(bar.locator(".ep-category-btn").first()).toBeVisible();
+    const popup = page.locator("[data-testid='expression-popup']");
+    const rail = popup.locator(".ep-categories");
+    const food = rail.locator(".ep-category-btn[aria-label='Food']");
+    await expect(food).toBeVisible();
 
-    const fit = await bar.evaluate((el) => {
-      const box = el.getBoundingClientRect();
+    const fit = await popup.evaluate((el) => {
+      const rail = el.querySelector(".ep-categories")!.getBoundingClientRect();
+      const grid = el.querySelector(".ep-scroll")!.getBoundingClientRect();
+      const header = el.querySelector(".ep-header")!.getBoundingClientRect();
       const buttons = [...el.querySelectorAll(".ep-category-btn")].map((b) =>
         b.getBoundingClientRect(),
       );
       return {
-        scrollsSideways: el.scrollWidth > el.clientWidth,
-        clippedButtons: buttons.filter(
-          (b) => b.top < box.top || b.bottom > box.bottom || b.right > box.right,
-        ).length,
+        railLeftOfGrid: rail.right <= grid.left + 0.5,
+        railBelowHeader: rail.top >= header.bottom - 0.5,
+        sameHeight: Math.abs(rail.height - grid.height) < 1,
+        buttonsInsideRail: buttons.every((b) => b.left >= rail.left && b.right <= rail.right),
       };
     });
-    expect(fit).toEqual({ scrollsSideways: false, clippedButtons: 0 });
+    expect(fit).toEqual({
+      railLeftOfGrid: true,
+      railBelowHeader: true,
+      sameHeight: true,
+      buttonsInsideRail: true,
+    });
+
+    await expect(rail.locator(".ep-category-btn").first()).toHaveClass(/\bactive\b/);
+    await food.click();
+    await expect(food).toHaveClass(/\bactive\b/);
+    await expect(rail.locator(".ep-category-btn.active")).toHaveCount(1);
   });
 
   test("the open popup meets the shared accessibility checks", async ({ page }) => {
