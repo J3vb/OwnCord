@@ -79,7 +79,7 @@ async function mountSettings(bridge: Bridge, doc: Document): Promise<void> {
   content.innerHTML = await bridge.renderSettings();
 }
 
-describe("Server/admin/static — Welcome messages card (WP 8.6)", () => {
+describe("Server/admin/static — Welcome messages card", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();

@@ -102,7 +102,7 @@ describe("dmStore", () => {
       setDmActivityLookup(() => undefined);
     });
 
-    it("seeds a new DM's partner with the song presence already gave them (WP 8.10)", () => {
+    it("seeds a new DM's partner with the song presence already gave them", () => {
       const song = { title: "T", artist: "A", player: "Spotify", startedAt: 1, durationMs: 0 };
       setDmListeningLookup((id) => (id === 1 ? song : undefined));
       addDmChannel(makeDm());
@@ -112,7 +112,7 @@ describe("dmStore", () => {
       setDmListeningLookup(() => undefined);
     });
 
-    it("keeps the song a re-sent DM already showed (WP 8.10)", () => {
+    it("keeps the song a re-sent DM already showed", () => {
       const quiet = { id: 1, username: "alice", avatar: "", status: "online", listening: null };
       addDmChannel(makeDm({ recipient: quiet, participants: [quiet] }));
       addDmChannel(makeDm());

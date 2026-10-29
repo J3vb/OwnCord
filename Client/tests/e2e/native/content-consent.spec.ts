@@ -47,7 +47,7 @@ const brokerUrls = (page: Page): Promise<string[]> =>
   page.evaluate(() => [...(window.__brokerUrls ?? [])]);
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
-test("external content reaches the native broker only after consent (B9-8)", async ({}, info) => {
+test("external content reaches the native broker only after consent", async ({}, info) => {
   const server = await startTestServer({ tls: true });
   let app: Awaited<ReturnType<typeof startNativeApp>> | undefined;
   try {

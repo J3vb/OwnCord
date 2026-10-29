@@ -213,7 +213,7 @@ const CANARIES: readonly Canary[] = [
   },
 ];
 
-describe("custom lint-rule canaries (ARCH-06)", () => {
+describe("custom lint-rule canaries", () => {
   for (const canary of CANARIES) {
     const shape = canary.shape === undefined ? "" : ` (${canary.shape})`;
     it(`${canary.rule}${shape} is enabled at ${canary.filePath} and fires on its canary shape`, async () => {
@@ -270,7 +270,7 @@ describe("custom lint-rule canaries (ARCH-06)", () => {
 
 // 5.4e: a *.view.ts draws from a row model and imports no store. These are
 // core rules, so they are checked through the real config, not a flat Linter.
-describe("view-file store ban (5.4e)", () => {
+describe("view-file store ban", () => {
   const VIEW = "src/features/members/memberRow.view.ts";
   const NON_VIEW = "src/features/members/memberRowModel.ts";
 
@@ -322,7 +322,7 @@ describe("view-file store ban (5.4e)", () => {
 // 6.13b: the browser platform must stay free of native imports. The ban in
 // eslint.config.js exempts only src/platform/desktop, so it already covers
 // src/platform/browser; these cases fail if that exemption ever widens.
-describe("browser platform native-import ban (6.13b)", () => {
+describe("browser platform native-import ban", () => {
   const BROWSER = "src/platform/browser/index.ts";
   const DESKTOP = "src/platform/desktop/appMetadata.ts";
 

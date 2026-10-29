@@ -88,7 +88,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("RI-05 reconnect spreading", () => {
+describe("reconnect spreading", () => {
   it("spreads 256 clients across a shared outage and recovery, including at the cap", async () => {
     const clock = fakeClock();
     const random = seededRandom(5);

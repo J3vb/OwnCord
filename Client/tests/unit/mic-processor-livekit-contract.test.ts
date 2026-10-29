@@ -114,7 +114,7 @@ describe("mic processor on livekit-client's LocalAudioTrack", () => {
     expect(contextOf(track)).toBe(ctx);
   });
 
-  it("restarts without an audioContext, as the SDK's restart call site sends none (OC-0277)", async () => {
+  it("restarts without an audioContext, as the SDK's restart call site sends none", async () => {
     const processor = createMicProcessor();
     await processor.init({
       kind: Track.Kind.Audio,

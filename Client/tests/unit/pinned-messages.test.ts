@@ -114,7 +114,7 @@ describe("PinnedMessages", () => {
     panel.destroy?.();
   });
 
-  it("formats a bare SQLite timestamp (no timezone) the same as its Z-suffixed equivalent (OC-0326)", () => {
+  it("formats a bare SQLite timestamp (no timezone) the same as its Z-suffixed equivalent", () => {
     // GetPinnedMessages returns the raw "YYYY-MM-DD HH:MM:SS" column, i.e.
     // UTC with no zone designator. `new Date(iso)` would read that as local
     // wall-clock, mislabelling the date near the UTC day boundary.

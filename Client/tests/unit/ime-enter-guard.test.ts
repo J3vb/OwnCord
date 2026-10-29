@@ -124,7 +124,7 @@ function unguardedEnterHandlers(): string[] {
   return out.toSorted();
 }
 
-describe("Enter handlers respect IME composition (MX-5)", () => {
+describe("Enter handlers respect IME composition", () => {
   const found = unguardedEnterHandlers();
   const exempt = new Set(EXEMPT.map((e) => `${e.file} :: ${e.fn}`));
 

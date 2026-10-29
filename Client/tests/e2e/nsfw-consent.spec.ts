@@ -75,7 +75,7 @@ async function contentTraffic(page: Page): Promise<string[]> {
 
 const gate = (page: Page) => page.locator("[data-testid='nsfw-gate']");
 
-test.describe("B9-7 NSFW consent gate", () => {
+test.describe("NSFW consent gate", () => {
   test("nothing from the channel is requested until the server confirms consent", async ({
     page,
   }) => {
@@ -159,7 +159,7 @@ test.describe("B9-7 NSFW consent gate", () => {
   });
 });
 
-test.describe("B9-7 NSFW consent gate — Q1 accessibility", () => {
+test.describe("NSFW consent gate — accessibility", () => {
   for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
     for (const highContrast of [false, true]) {
       test(`${theme}${highContrast ? " + High Contrast" : ""}: names, focus and contrast`, async ({

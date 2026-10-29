@@ -100,7 +100,7 @@ function unload(dom: JSDOM): Event {
   return event;
 }
 
-describe("Server/admin/static — dialog dirty guard (UX-10)", () => {
+describe("Server/admin/static — dialog dirty guard", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();
@@ -333,7 +333,7 @@ describe("Server/admin/static — dialog dirty guard (UX-10)", () => {
   });
 });
 
-describe("Server/admin/static — channel-access drawer unsaved-edit paths (UX-10)", () => {
+describe("Server/admin/static — channel-access drawer unsaved-edit paths", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();
@@ -463,7 +463,7 @@ describe("Server/admin/static — channel-access drawer unsaved-edit paths (UX-1
   });
 });
 
-describe("Server/admin/static — beforeunload guard (UX-10)", () => {
+describe("Server/admin/static — beforeunload guard", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();

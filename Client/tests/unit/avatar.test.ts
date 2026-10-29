@@ -311,7 +311,7 @@ describe("createAvatarElement with deferUntilVisible", () => {
   });
 });
 
-describe("createAvatarElement with an animated picture (WP 8.7)", () => {
+describe("createAvatarElement with an animated picture", () => {
   /** Two 1x1 frames: enough for the frame scan to call it animated. */
   const twoFrameGif = (): Uint8Array => {
     const frame = [0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0x02, 0x02, 0x44, 0x01, 0x00];

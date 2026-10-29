@@ -105,7 +105,7 @@ describe("global keybinds", () => {
     expect(upload.defaultPrevented).toBe(true);
   });
 
-  describe("from the thread panel's composer (WP 6.9c)", () => {
+  describe("from the thread panel's composer", () => {
     function panelComposer(): HTMLTextAreaElement {
       const panel = document.createElement("div");
       panel.className = "thread-panel";

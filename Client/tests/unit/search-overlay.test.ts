@@ -173,7 +173,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("renders a bare SQLite timestamp (no timezone) the same as its Z-suffixed equivalent (OC-0325)", async () => {
+  it("renders a bare SQLite timestamp (no timezone) the same as its Z-suffixed equivalent", async () => {
     // The server's SearchMessages returns the raw "YYYY-MM-DD HH:MM:SS" column,
     // i.e. UTC with no zone designator. `new Date(ts)` would read that as
     // local wall-clock, disagreeing with the message list's parseTimestamp()
@@ -218,7 +218,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("labels a DM result with the DM display name instead of a bare '#' (OC-0262)", async () => {
+  it("labels a DM result with the DM display name instead of a bare '#'", async () => {
     // A 1:1 DM channel row has channels.name === "" server-side, so a search
     // hit inside a DM comes back with channel_name: "". Rendering it as
     // `#${r.channel_name}` collapses to a bare "#" with no way to tell which
@@ -352,7 +352,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("closes on Escape after clicking a result moves focus off the input (DP-20)", async () => {
+  it("closes on Escape after clicking a result moves focus off the input", async () => {
     const result = makeResult({ message_id: 7 });
     const onSearch = vi.fn().mockResolvedValue({ results: [result] });
     const onSelectResult = vi.fn();
@@ -377,7 +377,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("closes on Escape from the scope radiogroup, not just the input (DP-20)", () => {
+  it("closes on Escape from the scope radiogroup, not just the input", () => {
     const opts = makeOptions({ currentChannelId: 99 });
     const overlay = createSearchOverlay(opts);
     overlay.mount(container);
@@ -392,7 +392,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("wires the input as a combobox over the results listbox (B9-22)", async () => {
+  it("wires the input as a combobox over the results listbox", async () => {
     const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
     const onSearch = vi.fn().mockResolvedValue({ results });
     const overlay = createSearchOverlay(makeOptions({ onSearch }));
@@ -421,7 +421,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("announces its status through a polite live region (B9-22)", async () => {
+  it("announces its status through a polite live region", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
     const overlay = createSearchOverlay(makeOptions({ onSearch }));
     overlay.mount(container);
@@ -541,7 +541,7 @@ describe("createSearchOverlay", () => {
       overlay.destroy?.();
     });
 
-    it("Enter selects active result and keeps the panel open (DP-20)", async () => {
+    it("Enter selects active result and keeps the panel open", async () => {
       const result = makeResult({ message_id: 5 });
       const onSearch = vi.fn().mockResolvedValue({ results: [result] });
       const onSelectResult = vi.fn();
@@ -565,7 +565,7 @@ describe("createSearchOverlay", () => {
     });
   });
 
-  it("clicking a result calls onSelectResult and keeps the panel open (DP-20)", async () => {
+  it("clicking a result calls onSelectResult and keeps the panel open", async () => {
     const result = makeResult({ message_id: 7 });
     const onSearch = vi.fn().mockResolvedValue({ results: [result] });
     const onSelectResult = vi.fn();
@@ -614,7 +614,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("does not attach a new click listener to each row on every re-render (OC-0147)", async () => {
+  it("does not attach a new click listener to each row on every re-render", async () => {
     // Per-row click listeners registered on the component-lifetime AbortSignal
     // never get cleaned up when a row is discarded by a re-render — only
     // destroy() aborts that signal. Re-renders triggered by ArrowDown/ArrowUp
@@ -791,7 +791,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("does not offer a scope toggle behind the NSFW gate (B9-7)", () => {
+  it("does not offer a scope toggle behind the NSFW gate", () => {
     const overlay = createSearchOverlay(makeOptions());
     overlay.mount(container);
 
@@ -845,7 +845,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("shows 'Load more' when a page returns a cursor and pages with it (DP-20)", async () => {
+  it("shows 'Load more' when a page returns a cursor and pages with it", async () => {
     const first = makeResult({ message_id: 30 });
     const second = makeResult({ message_id: 20 });
     const onSearch = vi
@@ -879,7 +879,7 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("pages the query that produced the shown results, not an edited box (DP-20)", async () => {
+  it("pages the query that produced the shown results, not an edited box", async () => {
     const first = makeResult({ message_id: 30 });
     const second = makeResult({ message_id: 20 });
     const onSearch = vi

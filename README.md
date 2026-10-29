@@ -159,7 +159,9 @@ remembers it. If the certificate changes later, the app warns you.
 ## How it is built
 
 Most of the code is written with AI tools. Quality comes from automated checks
-(CI, tests and linting) and from me and my friends using it every day. This
+(CI, tests and linting) and from me and my friends using it every day.
+[docs/ai-workflow.md](docs/ai-workflow.md) says who does what and which checks
+catch what. This
 keeps changes fast, but it also means behaviour can change quickly between
 releases.
 

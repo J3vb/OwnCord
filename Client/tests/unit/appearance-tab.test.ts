@@ -423,7 +423,7 @@ describe("AppearanceTab — Accessibility", () => {
 
   // --- Renders all 10 accent swatches ---
 
-  it("names the custom accent input and describes the Q8 readability fallback (B9-2)", () => {
+  it("names the custom accent input and describes the Q8 readability fallback", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 

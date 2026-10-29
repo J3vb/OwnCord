@@ -126,7 +126,7 @@ const view = (page: Page) => page.getByRole("region", { name: "Message Requests"
 const entry = (page: Page) => page.locator("[data-testid='dm-requests-entry']");
 const items = (page: Page) => page.locator("[data-testid='request-item']");
 
-test.describe("B9-5 Message Requests inbox", () => {
+test.describe("Message Requests inbox", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(mockScript());
     await page.goto("/");
@@ -286,7 +286,7 @@ test.describe("B9-5 Message Requests inbox", () => {
   });
 });
 
-test.describe("B9-5 DM header badge at narrow width", () => {
+test.describe("DM header badge at narrow width", () => {
   // The embedded DM header shows where the server rail does not: at 800px or
   // less (a desktop window at 200 % zoom), inside the sidebar drawer.
   test.use({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
@@ -305,7 +305,7 @@ test.describe("B9-5 DM header badge at narrow width", () => {
   });
 });
 
-test.describe("B9-5 inbox at the minimum window with 20px Large Font", () => {
+test.describe("inbox at the minimum window with 20px Large Font", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("keeps every request reachable, wrapped and still", async ({ page }, testInfo) => {
@@ -361,7 +361,7 @@ test.describe("B9-5 inbox at the minimum window with 20px Large Font", () => {
   });
 });
 
-test.describe("B9-6 Message Request decisions", () => {
+test.describe("Message Request decisions", () => {
   const outcome = (page: Page) => page.locator("[data-testid='requests-outcome']");
 
   test("decide by keyboard: named, ringed controls; the confirm holds focus and Escape cancels only it", async ({

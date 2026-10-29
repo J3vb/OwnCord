@@ -138,7 +138,7 @@ describe("createUserUpdateCredentialSaver", () => {
     }));
   });
 
-  it("does not save when the session declined to remember the password (BUG-135)", async () => {
+  it("does not save when the session declined to remember the password", async () => {
     const listener = createUserUpdateCredentialSaver("h.example", false);
 
     listener({ user_id: 1, username: "alice2" });

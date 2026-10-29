@@ -34,7 +34,7 @@ function inCall(channelId: number | null, users: readonly number[]): void {
   }));
 }
 
-describe("createTileMenuActions (WP 1B-5)", () => {
+describe("createTileMenuActions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     channelsStore.setState((prev) => ({

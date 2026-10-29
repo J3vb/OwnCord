@@ -22,6 +22,10 @@ import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
 import { applyStoredAppearance } from "@lib/appearance";
+import {
+  applyStoredCustomTheme,
+  installCustomThemeEscape,
+} from "./features/custom-themes/customTheme";
 import { startZoom } from "./features/zoom/zoomKeys";
 import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/inputMode";
 import { configureSession, installLogoutTeardown, voiceSessionLeave } from "./app/session";
@@ -64,8 +68,12 @@ void initLogPersistence();
 
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
+// After the built-in theme and accent: a custom theme paints on top of them.
+applyStoredCustomTheme();
 // Native webview zoom: the stored level now, and the zoom keys everywhere.
 startZoom(() => import("./features/zoom").then((m) => m.appZoom), new Disposable().signal);
+// Ctrl+Shift+Backspace turns a custom CSS theme off, even one that hides the settings.
+installCustomThemeEscape(new Disposable().signal);
 
 // A profile from before automatic sensitivity keeps a tuned slider.
 migrateAutoInputSensitivity();

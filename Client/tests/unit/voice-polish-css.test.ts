@@ -30,7 +30,7 @@ function varToken(d: ReturnType<typeof cascadedDeclaration>): string | undefined
   return t.type === "var" ? t.value.name.ident : undefined;
 }
 
-describe("B9-24 voice/media polish CSS", () => {
+describe("voice/media polish CSS", () => {
   it("reveals the tile audio overlay on focus-within, not just hover", () => {
     expect(
       keyword(cascadedDeclaration(".video-cell:focus-within .video-tile-overlay", "opacity")),

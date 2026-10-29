@@ -105,7 +105,7 @@ function openWithUnread(unread: number): void {
 const ids = (): number[] => getChannelMessages(CH).map((m) => m.id);
 const limitAsked = (): number | undefined => getMessages.mock.calls.at(-1)?.[1]?.limit;
 
-describe("revisit keeps and revalidates older loaded history (P4-01 R3)", () => {
+describe("revisit keeps and revalidates older loaded history", () => {
   beforeEach(() => {
     resetMessagesStore();
     getMessages.mockClear();

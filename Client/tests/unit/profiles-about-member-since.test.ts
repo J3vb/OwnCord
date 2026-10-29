@@ -82,7 +82,7 @@ describe("about and created_at on members (3C-7a)", () => {
   });
 });
 
-describe("banner on user_update (6.11d)", () => {
+describe("banner on user_update", () => {
   beforeEach(() => {
     setMembers([{ ...BOB, banner: "/api/v1/files/5", banner_color: "#123456" }]);
     authStore.setState((p) => ({

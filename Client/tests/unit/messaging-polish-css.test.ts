@@ -31,7 +31,7 @@ function varToken(d: ReturnType<typeof cascadedDeclaration>): string | undefined
   return t.type === "var" ? t.value.name.ident : undefined;
 }
 
-describe("B9-22 messaging hover/focus parity and target size", () => {
+describe("messaging hover/focus parity and target size", () => {
   // pointerEvents is what the reveal must restore where the base rule sets
   // `pointer-events: none`; undefined where the base never disables it.
   it.each([

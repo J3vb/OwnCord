@@ -79,7 +79,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("cameras auto-play (WP 1B-3)", () => {
+describe("cameras auto-play", () => {
   it("subscribes a published camera and hands the grid a real stream, no Watch card", () => {
     const h = build([Track.Source.Camera]);
 

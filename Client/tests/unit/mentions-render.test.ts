@@ -154,7 +154,7 @@ describe("@mention rendering", () => {
     expect(el.querySelector(".mention")?.getAttribute("data-user-id")).toBe("20");
   });
 
-  it("does not fall back to the member list when the server sent a mentions list that omits the token (OC-0228)", () => {
+  it("does not fall back to the member list when the server sent a mentions list that omits the token", () => {
     // The server resolved this message's mentions to [10] (alice) only, not
     // the signed-in user (id 12, username "me"). The inline pill must agree
     // with the row-level gate and stay unresolved for "@me" here — a token
@@ -535,7 +535,7 @@ describe("invite link chip (P29)", () => {
   });
 });
 
-describe("id mention rendering (WP 6.3e)", () => {
+describe("id mention rendering", () => {
   function seedRoles(): void {
     setRoles([
       { id: 5, name: "Mods", color: "#ff8800", permissions: 0 },

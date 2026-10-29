@@ -425,7 +425,7 @@ describe("QuickSwitcher", () => {
     expect(input.hasAttribute("aria-activedescendant")).toBe(false);
   });
 
-  it("aborts a discarded row's click listener on a full rebuild instead of retaining it for the overlay's lifetime (OC-0307)", () => {
+  it("aborts a discarded row's click listener on a full rebuild instead of retaining it for the overlay's lifetime", () => {
     switcher.mount(container);
     const staleFirstItem = container.querySelector(".quick-switcher__item") as HTMLDivElement;
 

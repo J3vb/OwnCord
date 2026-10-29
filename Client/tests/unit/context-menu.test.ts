@@ -377,7 +377,7 @@ describe("showContextMenu", () => {
     expect(menu).not.toBeNull();
   });
 
-  describe("OC-0057: abort-listener teardown on the caller signal", () => {
+  describe("abort-listener teardown on the caller signal", () => {
     it("does not re-invoke menu cleanup off the caller signal after the menu was already dismissed", () => {
       showContextMenu({
         x: 0,

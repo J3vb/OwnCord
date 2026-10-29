@@ -61,7 +61,7 @@ async function appealIdFor(server: TestServer, reason: string): Promise<string> 
   return queue.find((a) => a.action_id === action.id)!.id;
 }
 
-test.describe("B9-16 personal appeals (real server)", () => {
+test.describe("personal appeals (real server)", () => {
   test("bob appeals a warning, survives a failed send, and sees review and decision across a reconnect", async ({
     bob,
     bobTransport,

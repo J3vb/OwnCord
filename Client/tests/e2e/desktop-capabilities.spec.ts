@@ -77,7 +77,7 @@ function wsConnectCount(page: Page): Promise<number> {
   );
 }
 
-test.describe("B9-25 network limitations are actionable", () => {
+test.describe("network limitations are actionable", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSession(page);
     await withLosableServer(page);
@@ -186,7 +186,7 @@ test.describe("B9-25 network limitations are actionable", () => {
   });
 });
 
-test.describe("B9-25 notification limitations are actionable", () => {
+test.describe("notification limitations are actionable", () => {
   test("the desktop build says it cannot read the system setting, with no false grant", async ({
     page,
   }) => {
@@ -220,7 +220,7 @@ test.describe("B9-25 notification limitations are actionable", () => {
   });
 });
 
-test.describe("B9-25 update limitations are actionable", () => {
+test.describe("update limitations are actionable", () => {
   /** Layer an updater mock over the base session. */
   async function mockUpdater(page: Page, available: boolean, version = "1.2.0"): Promise<void> {
     await mockTauriFullSession(page);

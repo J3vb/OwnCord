@@ -316,7 +316,7 @@ export function readableRoleColor(color: string): string {
 }
 
 /** Re-clamp every rendered role colour against the theme now applied. */
-function reclampRoleColors(): void {
+export function reclampRoleColors(): void {
   roleTextCache.clear();
   for (const el of document.querySelectorAll<HTMLElement>("[data-role-color]")) {
     el.style.color = readableRoleColor(el.dataset["roleColor"] ?? "");

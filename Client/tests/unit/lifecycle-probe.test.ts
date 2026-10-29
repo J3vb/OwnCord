@@ -132,7 +132,7 @@ describe("lifecycle soak pass bars", () => {
     expect(bar(evaluateBars(worse, { listeners: 0.2 }), "listeners").pass).toBe(false);
   });
 
-  it("fails a leak confined to one page (B7-11c's within-page pair)", () => {
+  it("fails a leak confined to one page (the within-page pair)", () => {
     // Every page grows the same way and the re-login releases it, so each
     // phase series is flat; only the page-6/9 pair sees it.
     const perPage = [

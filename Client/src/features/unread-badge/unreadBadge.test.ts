@@ -265,7 +265,7 @@ describe("unread badge", () => {
     stop();
   });
 
-  describe("followed threads (WP 6.9c)", () => {
+  describe("followed threads", () => {
     afterEach(() => resetThreadsStore());
 
     it("counts a followed thread's mentions with the channels' and DMs'", () => {

@@ -122,7 +122,7 @@ function backfillEntry(i: number) {
   };
 }
 
-describe("Server/admin/static — log stream (re)connect (OC-0435)", () => {
+describe("Server/admin/static — log stream (re)connect", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {

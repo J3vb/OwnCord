@@ -74,7 +74,7 @@ function createErrorableWs(): {
   };
 }
 
-describe("createPresenceSender — last requested status always reaches the server (OC-0451)", () => {
+describe("createPresenceSender — last requested status always reaches the server", () => {
   beforeEach(() => {
     localStorage.clear();
     authStore.setState(() => ({
@@ -347,7 +347,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
   });
 });
 
-describe("createPresenceSender — custom_status survival across supersession (OC-0156)", () => {
+describe("createPresenceSender — custom_status survival across supersession", () => {
   beforeEach(() => {
     localStorage.clear();
     authStore.setState(() => ({

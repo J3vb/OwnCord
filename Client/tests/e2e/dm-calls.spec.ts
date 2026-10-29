@@ -553,7 +553,7 @@ test.describe("DM calls — call panel", () => {
     );
   });
 
-  test("[F-11] your own avatar in the call shows your own safety number", async ({ page }) => {
+  test("your own avatar in the call shows your own safety number", async ({ page }) => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();

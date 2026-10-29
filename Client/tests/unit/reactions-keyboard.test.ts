@@ -57,7 +57,7 @@ function fireKey(el: Element, key: string): void {
   el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 }
 
-describe("reaction pill keyboard activation (OC-0186)", () => {
+describe("reaction pill keyboard activation", () => {
   it("toggles the reaction on Enter when the pill is focused", () => {
     const opts = reactionOptions();
     const el = renderReactions(makeMessage(), opts, new AbortController().signal);

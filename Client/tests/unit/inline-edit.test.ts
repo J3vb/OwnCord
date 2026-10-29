@@ -66,7 +66,7 @@ const theirs = (id: number, over: Partial<Message> = {}): Message =>
     ...over,
   });
 
-describe("inline message editor (WP 3A-8)", () => {
+describe("inline message editor", () => {
   beforeAll(async () => {
     // Shortcodes only convert once the emoji catalog has loaded.
     await loadEmojiCatalog();

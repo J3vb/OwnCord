@@ -197,7 +197,7 @@ describe("auth frame: active_channel_id", () => {
   });
 });
 
-describe("auth frame: features (WP 6.9d)", () => {
+describe("auth frame: features", () => {
   it("declares the forums feature on every auth, so the server sends forum channels", async () => {
     vi.useFakeTimers();
     mockInvoke.mockReset();

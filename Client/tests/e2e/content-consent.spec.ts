@@ -82,7 +82,7 @@ const runningMotion = (root: Locator): Promise<number> =>
 const dialog = (page: Page) =>
   page.getByRole("dialog", { name: "Load external content on this server?" });
 
-test.describe("B9-8 external-content consent", () => {
+test.describe("external-content consent", () => {
   test("nothing reaches the broker before consent; 'Ask each time' admits one item", async ({
     page,
   }) => {
@@ -163,7 +163,7 @@ test.describe("B9-8 external-content consent", () => {
   });
 });
 
-test.describe("B9-8 external-content consent — Q1 accessibility", () => {
+test.describe("external-content consent — accessibility", () => {
   for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
     for (const highContrast of [false, true]) {
       test(`${theme}${highContrast ? " + High Contrast" : ""}: names, focus and contrast`, async ({

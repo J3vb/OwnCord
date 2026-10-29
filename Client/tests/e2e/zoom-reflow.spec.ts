@@ -211,7 +211,7 @@ async function openSettingsTab(page: Page, name: string): Promise<void> {
 }
 
 test.describe("B9 OS 200 % zoom reflow", () => {
-  test.describe("B9-18 connect page", () => {
+  test.describe("connect page", () => {
     test("the connect form fits and stays usable at 200 % zoom", async ({ page }, testInfo) => {
       await page.addInitScript(
         buildTauriMockScript({ httpRoutes: [HEALTH], simulateWsFlow: false }),
@@ -230,7 +230,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
   });
 
-  test.describe("B9-3 / B9-18 / B9-19 / B9-21 / B9-22 shell, message list and composer", () => {
+  test.describe("shell, message list and composer", () => {
     test("the message surface, its history and composer fit at 200 % zoom", async ({
       page,
     }, testInfo) => {
@@ -294,7 +294,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
   });
 
-  test.describe("B9-5 / B9-6 message requests", () => {
+  test.describe("message requests", () => {
     async function openInbox(page: Page): Promise<void> {
       await openDrawer(page);
       await page.locator("[data-testid='dm-entry']").first().click();
@@ -357,7 +357,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
   });
 
-  test.describe("B9-10 reports and My reports", () => {
+  test.describe("reports and My reports", () => {
     test("the report dialog fits at 200 % zoom", async ({ page }, testInfo) => {
       await boot(page, [
         { pattern: "/messages", status: 200, body: REPORT_MESSAGES },
@@ -399,7 +399,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
   });
 
-  test.describe("B9-11 / B9-12 / B9-13 / B9-14 Moderation Center", () => {
+  test.describe("Moderation Center", () => {
     const QUEUE = [modRow(MINE, "assigned", 1, "harassment", "message")];
 
     async function openReport(page: Page): Promise<Locator> {
@@ -496,7 +496,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
   });
 
-  test.describe("B9-17 appeal review", () => {
+  test.describe("appeal review", () => {
     test("the appeal decision form fits at 200 % zoom", async ({ page }, testInfo) => {
       await boot(page, [
         { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
@@ -524,7 +524,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
   });
 
-  test.describe("B9-20 / B9-23 account settings", () => {
+  test.describe("account settings", () => {
     test("the account pane fits at 200 % zoom", async ({ page }, testInfo) => {
       await boot(page, [{ pattern: "/messages", status: 200, body: MOCK_MESSAGES }]);
       await openDrawer(page);
