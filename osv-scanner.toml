@@ -89,6 +89,12 @@ reason = "zip: Windows updater extracts only signature-verified archives; build-
 id = "RUSTSEC-2026-0369"
 reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
 
+# Same two zip copies as above; fixed only in zip 9.0.5, which no dependent
+# accepts yet. Drop with the three above.
+[[IgnoredVulns]]
+id = "GHSA-m665-v7pm-7grj"
+reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
+
 # block-buffer 0.10.4 comes in through digest 0.10 (sha2 for tauri-codegen, wry
 # and the secret-service crates; sha1 for tungstenite and zbus 4; md-5; hkdf).
 # Moving to the fixed 0.12.1 needs the digest 0.11 stack in every one of those,
