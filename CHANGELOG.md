@@ -52,6 +52,7 @@ and only when it changes something a contributor or fork holder must do
 **Server (operators)**
 
 - Every error the server answers is now in the standard JSON shape (`{"error": "...", "message": "..."}`); the plugin admin API, the client update check, the admin log stream, plugin asset files, the LiveKit webhook and the WebSocket "server full" refusal used plain text. The "server full" refusal is `503 SERVER_BUSY`. A plugin upload over 16 MiB now answers `413 PAYLOAD_TOO_LARGE` even when the size cap trips mid-upload.
+- The bundled LiveKit voice server moves from 1.13.10 to 1.13.11 (a patch release, no configuration change). Its new options for retransmit caps and upstream FlexFEC stay off unless you turn them on in your own `livekit.yaml`.
   **Desktop UI**
 
 - Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
