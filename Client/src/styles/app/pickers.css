@@ -89,6 +89,7 @@
   gap: 8px;
   padding: 12px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .ep-search {
   flex: 1;
@@ -141,13 +142,17 @@
 .ep-retry:hover {
   background: var(--bg-hover);
 }
+/* Wraps instead of scrolling sideways: inside the 400px expression panel the
+   bar is a flex item, and a scrolling bar would be squeezed under its own
+   scrollbar to make room for the grid. */
 .ep-categories {
   display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
   align-items: center;
   gap: 2px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
 }
 .ep-category-btn {
   flex: 0 0 auto;

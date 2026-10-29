@@ -111,6 +111,27 @@ test.describe("WP 8.8 stickers and the expression popup", () => {
     );
   });
 
+  test("the emoji tab shows every category button, unclipped", async ({ page }) => {
+    await page.locator("[data-testid='sticker-btn']").click();
+    await page.locator("[data-testid='xp-tab-emoji']").click();
+    const bar = page.locator("[data-testid='expression-popup'] .ep-categories");
+    await expect(bar.locator(".ep-category-btn").first()).toBeVisible();
+
+    const fit = await bar.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const buttons = [...el.querySelectorAll(".ep-category-btn")].map((b) =>
+        b.getBoundingClientRect(),
+      );
+      return {
+        scrollsSideways: el.scrollWidth > el.clientWidth,
+        clippedButtons: buttons.filter(
+          (b) => b.top < box.top || b.bottom > box.bottom || b.right > box.right,
+        ).length,
+      };
+    });
+    expect(fit).toEqual({ scrollsSideways: false, clippedButtons: 0 });
+  });
+
   test("the open popup meets the shared accessibility checks", async ({ page }) => {
     await page.locator("[data-testid='sticker-btn']").click();
     const popup = page.locator("[data-testid='expression-popup']");

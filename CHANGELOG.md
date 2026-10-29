@@ -55,6 +55,7 @@ and only when it changes something a contributor or fork holder must do
   **Desktop UI**
 
 - Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
+- The emoji tab of the GIFs/Stickers/Emoji popup showed its category buttons (Recent, Smileys, People...) squashed under a sideways scrollbar; they now wrap onto extra rows and are all fully visible.
 
 ### Under the hood
 
