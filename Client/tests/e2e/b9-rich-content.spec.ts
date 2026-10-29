@@ -97,7 +97,7 @@ const runningMotion = (root: Locator): Promise<number> =>
 
 test.beforeEach(({ page }) => grantExternalConsent(page));
 
-test.describe("B9-9 rich-content states", () => {
+test.describe("rich-content states", () => {
   test("a successful preview loads, and a refused one shows a typed failed state", async ({
     page,
   }) => {

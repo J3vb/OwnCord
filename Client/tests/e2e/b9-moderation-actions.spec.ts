@@ -127,7 +127,7 @@ async function openActions(page: Page): Promise<{ center: Locator; acts: Locator
   return { center, acts: center.getByTestId("mod-act") };
 }
 
-test.describe("B9-13 moderation actions accessibility (Q1)", () => {
+test.describe("moderation actions accessibility", () => {
   test("keyboard: warn, time out and lift in order, each outcome announced after the answer", async ({
     page,
   }) => {
@@ -285,7 +285,7 @@ test.describe("B9-13 moderation actions accessibility (Q1)", () => {
   });
 });
 
-test.describe("B9-14 removal, kick and ban accessibility (Q1)", () => {
+test.describe("removal, kick and ban accessibility", () => {
   const ACTIONS = ["Remove reported message", "Log out of every session", "Ban member"];
 
   test("keyboard: the three actions follow lift, each confirmed in a dialog that returns focus", async ({

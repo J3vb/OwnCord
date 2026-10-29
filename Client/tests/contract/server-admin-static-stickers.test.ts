@@ -116,7 +116,7 @@ function pickFile(
 }
 const toast = (doc: Document): string => doc.getElementById("toast")?.textContent ?? "";
 
-describe("Server/admin/static — Stickers (WP 8.8)", () => {
+describe("Server/admin/static — Stickers", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();

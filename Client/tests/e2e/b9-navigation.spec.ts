@@ -51,7 +51,7 @@ async function expectNoView(page: Page): Promise<void> {
   await expect(page.locator("[data-testid='chat-area']")).toBeVisible();
 }
 
-test.describe("B9-4 shared navigation", () => {
+test.describe("shared navigation", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
@@ -161,7 +161,7 @@ test.describe("B9-4 shared navigation", () => {
     await expect(page.getByRole("dialog", { name: "Server Invites" })).toBeVisible();
   });
 
-  test("Alt+ArrowDown / Alt+ArrowUp step the channel list (DP-35)", async ({ page }) => {
+  test("Alt+ArrowDown / Alt+ArrowUp step the channel list", async ({ page }) => {
     const header = page.locator("[data-testid='chat-header-name']");
     await expect(header).toHaveText("general");
 

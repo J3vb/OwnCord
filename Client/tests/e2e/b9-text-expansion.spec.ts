@@ -67,7 +67,7 @@ async function openAccessibility(page: Page, expanded: boolean): Promise<void> {
 
 const pane = (page: Page) => page.locator("[data-testid='settings-overlay'] .settings-pane.active");
 
-test.describe("B9-3 Accessibility tab text", () => {
+test.describe("Accessibility tab text", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("reads the catalog's English copy and names each switch with it", async ({ page }) => {
@@ -191,7 +191,7 @@ async function expectWhole(el: ReturnType<Page["locator"]>): Promise<void> {
   expect(clippedBy).toBeNull();
 }
 
-test.describe("B9-18 connect and shell text", () => {
+test.describe("connect and shell text", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("reads the catalogs' English copy on the connect page and in the shell", async ({
@@ -472,7 +472,7 @@ test.describe("B9-18 connect and shell text", () => {
 // the search overlay resolve through the expanded catalog.
 // ---------------------------------------------------------------------------
 
-test.describe("B9-19 messaging text", () => {
+test.describe("messaging text", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("reads the messaging catalogs' English copy", async ({ page }) => {
@@ -571,7 +571,7 @@ test.describe("B9-19 messaging text", () => {
 // voice widget are built after the seam switch, so their labels are expanded.
 // ---------------------------------------------------------------------------
 
-test.describe("B9-20 settings, account and voice text", () => {
+test.describe("settings, account and voice text", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("reads the settings catalogs' English copy across the tabs", async ({ page }) => {

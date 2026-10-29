@@ -71,7 +71,7 @@ async function start(page: Page, theme: (typeof THEMES)[number]): Promise<void> 
 }
 
 for (const theme of THEMES) {
-  test.describe(`WP 8.10c music activity (${theme})`, () => {
+  test.describe(`music activity (${theme})`, () => {
     test("settings rows: detected song, players, switches", async ({ page }) => {
       await start(page, theme);
       await openSettings(page);

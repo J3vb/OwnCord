@@ -39,7 +39,7 @@ const appealRow = (pane: Locator, reason: string) =>
 
 type AppealState = { state: string; assignee_id: number; decision_note: string };
 
-test.describe("B9-17 appeal review (real server)", () => {
+test.describe("appeal review (real server)", () => {
   test("take, refuse, decide and race appeals; the appellant sees only the outcome", async ({
     page,
     aliceTransport,

@@ -115,7 +115,7 @@ async function ackPosts(page: Page): Promise<string[]> {
 const banner = (page: Page) => page.getByRole("region", { name: "Moderation notices" });
 const notice = (page: Page, id: number) => page.locator(`[data-testid='moderation-notice-${id}']`);
 
-test.describe("B9-15 moderation notices", () => {
+test.describe("moderation notices", () => {
   test("ready warnings show oldest first, persist across navigation and leave only through Acknowledge", async ({
     page,
   }) => {

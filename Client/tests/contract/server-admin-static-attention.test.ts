@@ -117,7 +117,7 @@ const REPORT = {
   ],
 };
 
-describe("Server/admin/static — attention panel (RI-07)", () => {
+describe("Server/admin/static — attention panel", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();

@@ -208,7 +208,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // {partial_token, requires_2fa:true} and NO token. Before the fix the
   // handler assigned d.token (undefined), wrote the string "undefined" into
   // localStorage, and every retry ended at a false "session expired".
-  it("completes a two-factor sign-in through /auth/verify-totp (OC-0350)", async () => {
+  it("completes a two-factor sign-in through /auth/verify-totp", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
@@ -250,7 +250,7 @@ describe("Server/admin/static — panel behaviour", () => {
     expect(booted.bridge.state.partialToken).toBe("");
   });
 
-  it("keeps the challenge alive after a rejected code, then clears it on Back (OC-0350)", async () => {
+  it("keeps the challenge alive after a rejected code, then clears it on Back", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
@@ -283,7 +283,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
   // OC-0331. SQLite datetime('now') is naive UTC; new Date() reads that
   // non-ISO form as local time.
-  it("parses a naive SQLite timestamp as UTC, and leaves a zoned one alone (OC-0331)", async () => {
+  it("parses a naive SQLite timestamp as UTC, and leaves a zoned one alone", async () => {
     const booted = await boot([], defaultRespond);
     dom = booted.dom;
     const { utcDate } = booted.bridge;
@@ -295,7 +295,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
   // OC-0331. The API Tokens table renders naive-UTC created_at / last_used
   // through fmtLocal: local text, the UTC instant in the tooltip.
-  it("renders token timestamps as UTC instants (OC-0331)", async () => {
+  it("renders token timestamps as UTC instants", async () => {
     const respond: Responder = (p) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/tokens")
@@ -358,7 +358,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
   // OC-0364. Nothing clears users.banned when a temporary ban lapses; expiry
   // is decided lazily everywhere else.
-  it("treats a lapsed temporary ban as not banned (OC-0364)", async () => {
+  it("treats a lapsed temporary ban as not banned", async () => {
     const booted = await boot([], defaultRespond);
     dom = booted.dom;
     const { effectiveBan } = booted.bridge;
@@ -372,7 +372,7 @@ describe("Server/admin/static — panel behaviour", () => {
   });
 
   // OC-0361 and OC-0390 and OC-0364, over one rendered Users page.
-  it("does not offer a next page for an exactly-full page, and offers erasure apart from force-logout (OC-0361, OC-0390)", async () => {
+  it("does not offer a next page for an exactly-full page, and offers erasure apart from force-logout", async () => {
     const calls: FetchCall[] = [];
     const users = Array.from({ length: 50 }, (_, i) => ({
       id: i + 2,
@@ -419,7 +419,7 @@ describe("Server/admin/static — panel behaviour", () => {
     );
   });
 
-  it("offers a next page when an overflow row comes back (OC-0361)", async () => {
+  it("offers a next page when an overflow row comes back", async () => {
     const calls: FetchCall[] = [];
     const users = Array.from({ length: 51 }, (_, i) => ({
       id: i + 2,
@@ -647,7 +647,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // OC-0373. The option set is rebuilt from the fetched page while the filter
   // is global, so a filter whose action left the page used to vanish from the
   // control while still filtering the table.
-  it("keeps the active action filter in the dropdown when the page no longer contains it (OC-0373)", async () => {
+  it("keeps the active action filter in the dropdown when the page no longer contains it", async () => {
     const calls: FetchCall[] = [];
     const entries = [{ id: 1, action: "message_delete", actor_id: 1, target_type: "message" }];
     const respond: Responder = (p, method) => {
@@ -819,7 +819,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // 50 only, so an older match was unreachable. They are now GET /audit-log
   // q and action parameters, and a keystroke refetches without re-rendering
   // the search box out from under the operator.
-  it("searches the audit log on the server and keeps the search box focused (AO-7)", async () => {
+  it("searches the audit log on the server and keeps the search box focused", async () => {
     const calls: FetchCall[] = [];
     const row = (id: number, action: string, detail: string) => ({
       id,
@@ -1002,7 +1002,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // A failed page turn used to advance state.auditPage while the old rows
   // stayed on screen, so the next ">" skipped a page. A failure now replaces
   // the rows with the error and a Retry for the page that failed.
-  it("shows a failed audit page turn as an error with Retry (AO-7)", async () => {
+  it("shows a failed audit page turn as an error with Retry", async () => {
     const calls: FetchCall[] = [];
     let fail = false;
     const respond: Responder = (p) => {
@@ -1043,7 +1043,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // A failed search used to leave the old query's rows on screen; and a page
   // turn has to use the query the controls show, even while a search is
   // still pending.
-  it("keeps the audit rows and pager on the query the controls show (AO-7)", async () => {
+  it("keeps the audit rows and pager on the query the controls show", async () => {
     const calls: FetchCall[] = [];
     let fail = false;
     const respond: Responder = (p) => {
@@ -1101,7 +1101,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
   // OC-0367. CreateRole refuses an explicitly requested position that is
   // taken, and the slot below the actor is the one the previous new role got.
-  it("prefills Create Role with the highest free position below the actor (OC-0367)", async () => {
+  it("prefills Create Role with the highest free position below the actor", async () => {
     const booted = await boot([], defaultRespond);
     dom = booted.dom;
     const doc = booted.dom.window.document;
@@ -1209,7 +1209,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
   // OC-0355. The hotkey used to preventDefault whenever a .filter-search
   // existed, including while the caret sat inside that very field.
-  it('lets "/" be typed into a text field and still jumps there from outside (OC-0355)', async () => {
+  it('lets "/" be typed into a text field and still jumps there from outside', async () => {
     const booted = await boot([], defaultRespond);
     dom = booted.dom;
     const { window } = booted.dom;
@@ -1242,7 +1242,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // no caller at all, so a policy that continuously and irreversibly deletes
   // message history could be neither set, inspected, overridden nor
   // previewed.
-  it("preserves the saved-policy preview and confirms all retention writes (OC-0389, RI-08)", async () => {
+  it("preserves the saved-policy preview and confirms all retention writes", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p, method) => {
       if (p === "/setup/status") return { json: { needs_setup: false } };
@@ -1518,7 +1518,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // AO-3. The shell groups the same #hash routes, shows who and where in a
   // top bar, badges the nav from the routes that own the counts, and below
   // 900px turns the sidebar into a drawer that takes focus and gives it back.
-  it("renders the grouped nav, top bar, badges and drawer (AO-3)", async () => {
+  it("renders the grouped nav, top bar, badges and drawer", async () => {
     const calls: FetchCall[] = [];
     let pending = [{ id: 1 }, { id: 2 }];
     const respond: Responder = (p) => {
@@ -1628,7 +1628,7 @@ describe("Server/admin/static — panel behaviour", () => {
   // while the operator was away stayed unseen until a re-login. Coming back
   // to the tab refreshes every source — the open section's included — and a
   // signed-out panel fetches nothing.
-  it("refreshes the nav badges when the tab comes back into view (UX-12(b))", async () => {
+  it("refreshes the nav badges when the tab comes back into view", async () => {
     const calls: FetchCall[] = [];
     let warnings = [{ id: "a" }];
     const respond: Responder = (p) => {

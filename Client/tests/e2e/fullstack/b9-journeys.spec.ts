@@ -227,7 +227,7 @@ async function recordTraffic(page: Page): Promise<void> {
 const traffic = (page: Page): Promise<string[]> =>
   page.evaluate(() => (window as unknown as { __traffic: string[] }).__traffic);
 
-test.describe("B9-26 moderation journey (real server)", () => {
+test.describe("moderation journey (real server)", () => {
   test("report → warn → notice → appeal → decision, end to end in the client", async ({
     alice,
     bob,
@@ -353,7 +353,7 @@ test.describe("B9-26 moderation journey (real server)", () => {
   });
 });
 
-test.describe("B9-26 lifecycle journey (real server)", () => {
+test.describe("lifecycle journey (real server)", () => {
   test("a reported and appealed subject is erased; retention is disclosed and the report outcome survives", async ({
     alice,
     bob,
@@ -476,7 +476,7 @@ test.describe("B9-26 lifecycle journey (real server)", () => {
   });
 });
 
-test.describe("B9-26 first-contact journey (real server)", () => {
+test.describe("first-contact journey (real server)", () => {
   test("a stranger's request is text-only, accepts into a conversation, and a block gates the composer", async ({
     bob,
     bobTransport,
@@ -597,7 +597,7 @@ test.describe("B9-26 first-contact journey (real server)", () => {
   });
 });
 
-test.describe("B9-26 several-devices journey (real server)", () => {
+test.describe("several-devices journey (real server)", () => {
   test("a sign-in on a second device leaves the first connected and receiving", async ({
     browser,
     bob,
@@ -633,7 +633,7 @@ test.describe("B9-26 several-devices journey (real server)", () => {
   });
 });
 
-test.describe("B9-26 recovery lifecycle journey (real server)", () => {
+test.describe("recovery lifecycle journey (real server)", () => {
   test("bob enrols a recovery kit, logs out, and recovers the account from the connect page", async ({
     bob,
     server,
@@ -694,7 +694,7 @@ test.describe("B9-26 recovery lifecycle journey (real server)", () => {
   });
 });
 
-test.describe("B9-26 network-loss journey (real server)", () => {
+test.describe("network-loss journey (real server)", () => {
   test("a transport cut shows the actionable notice, recovers, and keeps session state", async ({
     bob,
     bobTransport,
@@ -738,7 +738,7 @@ test.describe("B9-26 network-loss journey (real server)", () => {
   });
 });
 
-test.describe("B9-26 refused-role journey (real server)", () => {
+test.describe("refused-role journey (real server)", () => {
   test("a member is refused the moderation queue and another account's appeal in the UI and by the server", async ({
     alice,
     bob,
@@ -807,7 +807,7 @@ test.describe("B9-26 refused-role journey (real server)", () => {
   });
 });
 
-test.describe("B9-26 integrated accessibility matrix (real server)", () => {
+test.describe("integrated accessibility matrix (real server)", () => {
   // The plan's Task 3 matrix, run on the JOINED surfaces the journeys above
   // produce. Each surface's exhaustive Q1 pass (keyboard, names, focus,
   // contrast in every theme and High Contrast, reduced motion, 940×500 with
@@ -903,7 +903,7 @@ test.describe("B9-26 integrated accessibility matrix (real server)", () => {
   });
 });
 
-test.describe("B9-26 consent-to-evidence journey (real server)", () => {
+test.describe("consent-to-evidence journey (real server)", () => {
   test("labelled evidence waits for the moderator's own acknowledgement, and revoking it takes the evidence away", async ({
     alice,
     bob,

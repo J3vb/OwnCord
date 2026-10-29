@@ -18,7 +18,7 @@ const source = (id: string, at: number, frames: number, extra = {}): Entry => [
   { type: "media-source", kind: "video", timestamp: at, frames, ...extra },
 ];
 
-describe("shareSenderStats (M-1)", () => {
+describe("shareSenderStats", () => {
   it("summarises the top sending layer, never a faster lower one", () => {
     const sample = senderSample(
       [

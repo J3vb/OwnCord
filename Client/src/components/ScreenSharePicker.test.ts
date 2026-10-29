@@ -441,7 +441,7 @@ describe("showScreenSharePicker", () => {
     await expect(picking).resolves.toEqual({ source: "os", quality: "source", fps: 60 });
   });
 
-  it("on Windows says what 120 fps needs, only while 120 is chosen (M-2)", async () => {
+  it("on Windows says what 120 fps needs, only while 120 is chosen", async () => {
     const picking = showScreenSharePicker({
       sources: [],
       portal: false,

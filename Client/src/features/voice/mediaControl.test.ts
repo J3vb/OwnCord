@@ -277,7 +277,7 @@ describe("microphonePublishingAllowed", () => {
   });
 });
 
-describe("syncShareGrant (WP 1C-3)", () => {
+describe("syncShareGrant", () => {
   it("marks share denied only when the grant leaves screen share out", () => {
     syncShareGrant(fakeRoom());
     expect(setShareDenied).toHaveBeenLastCalledWith(false);

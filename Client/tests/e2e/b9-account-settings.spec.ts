@@ -79,7 +79,7 @@ const accountPane = (page: Page) =>
 // Connect form: field-linked validation (BPR-091)
 // ---------------------------------------------------------------------------
 
-test.describe("B9-23 connect form validation is field-linked", () => {
+test.describe("connect form validation is field-linked", () => {
   test("the host error marks the host input invalid and focuses it", async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
@@ -190,7 +190,7 @@ test.describe("B9-23 connect form validation is field-linked", () => {
 // Account: feedback, disclosure, reflow
 // ---------------------------------------------------------------------------
 
-test.describe("B9-23 account settings feedback and disclosure", () => {
+test.describe("account settings feedback and disclosure", () => {
   test("a failed password change is announced on the qualified error class", async ({ page }) => {
     await bootAccount(page, [
       {
@@ -329,7 +329,7 @@ test.describe("B9-23 account settings feedback and disclosure", () => {
 // Reflow and naming at the minimum window with the largest text
 // ---------------------------------------------------------------------------
 
-test.describe("B9-23 account reflow", () => {
+test.describe("account reflow", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("the account pane keeps every control whole, named and on screen at 20px text", async ({

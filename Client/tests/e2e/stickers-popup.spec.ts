@@ -73,7 +73,7 @@ async function start(page: Page): Promise<void> {
   await navigateToMainPageReady(page);
 }
 
-test.describe("WP 8.8 stickers and the expression popup", () => {
+test.describe("stickers and the expression popup", () => {
   test.beforeEach(async ({ page }) => {
     await start(page);
   });

@@ -80,7 +80,7 @@ const channelItem = (page: Page, name: string) =>
 const gate = (page: Page) => page.getByTestId("nsfw-gate");
 const bar = (page: Page) => page.getByTestId("nsfw-consent-bar");
 
-test.describe("B9-7 NSFW consent gate (real server)", () => {
+test.describe("NSFW consent gate (real server)", () => {
   test("label, decline, failed acknowledgement, accept, second device, revoke, reconnect, unlabel", async ({
     browser,
     alice,
@@ -259,7 +259,7 @@ test.describe("B9-7 NSFW consent gate (real server)", () => {
   });
 });
 
-test.describe("B9-7 NSFW remote regate focus (real server)", () => {
+test.describe("NSFW remote regate focus (real server)", () => {
   test("a remote regate moves focus from the replaced composer to the gate, never out of an open dialog", async ({
     bob,
     server,

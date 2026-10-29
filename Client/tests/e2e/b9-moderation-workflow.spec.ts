@@ -136,7 +136,7 @@ async function openReport(page: Page, index = 0): Promise<Locator> {
   return center;
 }
 
-test.describe("B9-12 moderation review accessibility (Q1)", () => {
+test.describe("moderation review accessibility", () => {
   test("keyboard: note, outcome and close are reachable and operable in order", async ({
     page,
   }) => {

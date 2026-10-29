@@ -116,7 +116,7 @@ async function openAppeal(
   return { center, appeal, work: center.getByTestId("mod-appeal-work") };
 }
 
-test.describe("B9-17 appeal review accessibility (Q1)", () => {
+test.describe("appeal review accessibility", () => {
   test("keyboard: tabs, the appeal, the decision; outcome announced after the answer", async ({
     page,
   }) => {

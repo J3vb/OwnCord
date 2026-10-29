@@ -134,7 +134,7 @@ const appealButton = (page: Page) =>
   page.getByRole("button", { name: "Appeal Timeout, Sep 21, 2026", exact: false });
 const panel = (page: Page) => page.getByRole("group", { name: /^Appeal: Timeout/ });
 
-test.describe("B9-16 personal appeals", () => {
+test.describe("personal appeals", () => {
   test("files an appeal by keyboard; the result is announced and focus lands on Appeals", async ({
     page,
   }) => {

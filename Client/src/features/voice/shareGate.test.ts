@@ -41,7 +41,7 @@ function setLimit(voiceMaxVideo: number): void {
   }));
 }
 
-describe("shareBlockReason (WP 1C-3)", () => {
+describe("shareBlockReason", () => {
   beforeEach(() => setLimit(0));
 
   it("blocks nothing outside a call or while you share", () => {

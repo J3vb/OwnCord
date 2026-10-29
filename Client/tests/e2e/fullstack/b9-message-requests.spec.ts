@@ -146,7 +146,7 @@ async function openInbox(page: Page, count: number): Promise<void> {
   await expect(inbox(page)).toBeVisible();
 }
 
-test.describe("B9-6 Message Request decisions (real server)", () => {
+test.describe("Message Request decisions (real server)", () => {
   test("bob accepts one request and ignores, deletes and blocks others; Ignore and Delete stay silent", async ({
     bob,
     server,
