@@ -791,6 +791,7 @@ fn share_audio_real() {
             move |pcm| at(&f).push(pcm.to_vec()),
             s,
             Arc::default(),
+            Arc::default(),
         )
     });
     wait_for("captured tone", || {

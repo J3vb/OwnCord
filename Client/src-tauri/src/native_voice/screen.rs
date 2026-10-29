@@ -1149,6 +1149,7 @@ mod tests {
 
     fn idle_capture() -> ScreenCapture {
         ScreenCapture {
+            target: Target::Screen(0),
             shared: Arc::new(Shared {
                 options: Mutex::new(CaptureOptions {
                     fps: 30.0,
