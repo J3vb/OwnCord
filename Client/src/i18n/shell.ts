@@ -2,7 +2,7 @@ import type { UserStatus } from "@lib/types";
 import { defineCatalog } from "./format";
 
 /**
- * Shell and navigation copy (B9-18): the sidebar (server header, channels,
+ * Shell and navigation copy: the sidebar (server header, channels,
  * direct messages, members), channel management dialogs and menus, the member
  * context menu, invites, the user bar and status picker, quick switching,
  * the connection banner, the identity-key prompt and the

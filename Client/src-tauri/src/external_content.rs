@@ -1,4 +1,4 @@
-// The desktop external-content broker (B7-16) — docs/trust-model.md, C-09.
+// The desktop external-content broker — docs/trust-model.md, "Desktop preview destination policy".
 //
 // Every automatic fetch of content a message author (or a fetched page) named
 // comes through here: link previews, oEmbed titles, OG images, inline images,
@@ -41,8 +41,7 @@ use url::{Host, Url};
 // --- Policy constants --------------------------------------------------------
 
 /// A known-crawler User-Agent: some sites serve Open Graph tags only to
-/// crawlers they recognise, and preview coverage is the priority (B7-16
-/// Decision 2, the owner's ruling). It must never carry an OwnCord version —
+/// crawlers they recognise, and preview coverage is the priority. It must never carry an OwnCord version —
 /// every preview goes from the viewer's machine to a host the message author
 /// chose, and a version string would pair each viewer's IP with their build.
 /// The bare product token is what sites match on; the crawler's "+URL"
@@ -66,7 +65,7 @@ struct Limits {
     json_bytes: usize,
     /// An image larger than this is refused.
     image_bytes: usize,
-    /// Bytes all in-flight fetches may hold at once (B5 decision 2's
+    /// Bytes all in-flight fetches may hold at once (the
     /// aggregate cross-caller budget).
     in_flight_bytes: usize,
     /// Bytes the result cache may hold; eviction is byte-weighted LRU.
@@ -362,7 +361,7 @@ impl reqwest::dns::Resolve for VettedResolver {
     }
 }
 
-// --- Budgets and cache (clause 6, B5 decision 2) ------------------------------
+// --- Budgets and cache (clause 6) ------------------------------
 
 /// A process-wide byte budget shared by every in-flight fetch: a reader
 /// reserves each chunk before keeping it, and a read that would take the
@@ -1615,7 +1614,7 @@ mod tests {
         assert!(inner.cache.entries.is_empty());
     }
 
-    // --- The User-Agent (Decision 2) ---------------------------------------------
+    // --- The User-Agent ---------------------------------------------
 
     #[test]
     fn the_user_agent_is_a_crawler_token_with_no_owncord_version() {

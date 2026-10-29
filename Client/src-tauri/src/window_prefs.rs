@@ -1,4 +1,4 @@
-//! Close to tray and Start minimised (WP 2B-3).
+//! Close to tray and Start minimised.
 //!
 //! The two preferences live in the Rust-side settings store, not the webview's
 //! localStorage, because Rust needs them before the webview exists: whether to

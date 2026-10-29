@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Account recovery copy (B9-18). Only the lazily loaded recovery overlay reads
+ * Account recovery copy. Only the lazily loaded recovery overlay reads
  * it, so it stays out of connect.ts and the startup chunk.
  */
 export const recoverText = defineCatalog("recover", {

@@ -1,4 +1,4 @@
-//! Windows per-app share audio (WP 6.7a): capture one application's sound with
+//! Windows per-app share audio: capture one application's sound with
 //! WASAPI process loopback and stream it to the webview.
 //!
 //! WebView2 gives a shared *window* no sound (only a whole screen has system
@@ -112,7 +112,7 @@ impl ResolveError {
     }
 }
 
-/// The process whose sound a shared window carries (design decision 1).
+/// The process whose sound a shared window carries.
 ///
 /// 1. A `window:<n>:<m>` label names HWND `n`: if `hwnd_pid(n)` finds a live
 ///    window, that is the answer, even when it turns out to be our own.
@@ -784,7 +784,7 @@ mod windows_impl {
         }
     }
 
-    /// The process to capture for a shared window's label (decision 1).
+    /// The process to capture for a shared window's label.
     pub fn resolve_pid(label: &str) -> Result<u32, String> {
         let parents = parent_map()?;
         let me = std::process::id();
@@ -911,7 +911,7 @@ mod windows_impl {
     }
 
     /// Activate the process loopback client for `pid`'s process tree and
-    /// start it (decision 2). Must run on an MTA thread.
+    /// start it. Must run on an MTA thread.
     fn open_client(pid: u32) -> Result<Client, String> {
         let done = Arc::new(OwnedEvent::new()?);
         let handler: IActivateCompletion = CompletionHandler {

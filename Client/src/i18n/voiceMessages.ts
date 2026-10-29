@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** Copy for voice messages (WP 8.9): the composer's recorder and the player. */
+/** Copy for voice messages: the composer's recorder and the player. */
 export const voiceMessagesText = defineCatalog("voiceMessages", {
   "mic.label": "Record voice message",
 

@@ -125,7 +125,7 @@ export function createMessageJumper(opts: MessageJumpOptions): MessageJumper {
       if (opts.getChannelCtrl()?.currentChannelId !== channelId) return false;
       setAroundMessages(channelId, resp.messages, resp.has_more_before, resp.has_more_after);
     } catch (err) {
-      // The channel's NSFW gate is showing and says why (B9-7).
+      // The channel's NSFW gate is showing and says why.
       if (err instanceof ApiClientError && err.code === NSFW_ACKNOWLEDGEMENT_REQUIRED) return false;
       if (err instanceof ApiClientError && err.status === 404) {
         showToast(messagingText("jump.gone"), "info");

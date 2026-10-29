@@ -39,7 +39,7 @@ use super::share_audio::ShareAudio;
 use super::video::{FrameServer, Observer};
 
 /// The only key index OwnCord ever uses. livekit-client's
-/// `ExternalE2EEKeyProvider.setKey(key)` writes index 0, and rust-sdks #1280
+/// `ExternalE2EEKeyProvider.setKey(key)` writes index 0, and https://github.com/livekit/rust-sdks/issues/1280
 /// aborts the process on an out-of-range index, so this is a constant, not a
 /// parameter.
 pub const KEY_INDEX: i32 = 0;
@@ -98,7 +98,7 @@ pub fn video_quality(name: &str) -> Result<VideoQuality, String> {
     }
 }
 
-/// Layer control for one remote video (P3-07, the web path's
+/// Layer control for one remote video (the web path's
 /// `setEnabled`/`setVideoQuality`): a stream no one sees stops, a shown one
 /// comes at `quality`. The webview maps a tile's size to a quality
 /// (`video_quality`) by choice; livekit 0.9.5's `update_video_dimensions` is
@@ -424,7 +424,7 @@ pub(super) fn processing_change(
     }
 }
 
-/// Rust-side resource counts for the facade's debug surface (B7-11: the
+/// Rust-side resource counts for the facade's debug surface (the
 /// long-session soak cannot see native memory, so it reads these instead).
 #[derive(Debug, Clone, Copy, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -444,7 +444,7 @@ pub struct Resources {
     /// Native camera capture threads alive (each holding a GStreamer
     /// pipeline and the device): zero once the camera is off.
     pub camera_captures: usize,
-    /// Process thread count, the observable for rust-sdks #1408 (a leaked
+    /// Process thread count, the observable for https://github.com/livekit/rust-sdks/issues/1408 (a leaked
     /// FrameCryptor thread per cryptor) across repeated joins.
     pub threads: usize,
 }
@@ -511,10 +511,10 @@ impl DeviceKind {
     }
 }
 
-/// The video codec a publish asks for (WP LP-7c). VP8 is the default and what
+/// The video codec a publish asks for. VP8 is the default and what
 /// a webview that sends no `codec` gets; H.264 is sent only when
-/// `native_voice_video_codecs` says the engine can encode it; so is VP9 (WP
-/// M-11b), which goes out as one SVC layer and never simulcast.
+/// `native_voice_video_codecs` says the engine can encode it; so is VP9,
+/// which goes out as one SVC layer and never simulcast.
 #[derive(Debug, Clone, Copy, Default, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum PublishCodec {
@@ -661,7 +661,7 @@ pub fn process_threads() -> usize {
 /// (`musicHighQualityStereo`) and no RED, which livekit-client leaves off for
 /// a stereo track and the Rust SDK forces off under E2EE anyway.
 ///
-/// `stereo` (LP-8d) is the flag of the vendored livekit crate
+/// `stereo` is the flag of the vendored livekit crate
 /// (`vendor/livekit/OWNCORD-PATCH.md`): it makes the SFU's publisher answer
 /// carry `stereo=1`, so the encoder is built with two channels instead of
 /// downmixing the share to mono. The mic, camera and screen video options
@@ -890,7 +890,7 @@ impl NativeSession {
             .await
             .map_err(|e| e.to_string())?;
         room.e2ee_manager().set_enabled(true);
-        // LP-8d: the share audio's stereo comes from the publish options (the
+        // The share audio's stereo comes from the publish options (the
         // server's answer), not from this mode; the log records which mode the
         // server granted, which decides whether a native viewer decodes it.
         log::info!(
@@ -1048,7 +1048,7 @@ impl NativeSession {
 
     /// Enable or disable the microphone. The first enable publishes; after
     /// that the publication stays and is muted in place (no renegotiation, no
-    /// new frame cryptor — rust-sdks #1408), and the OS capture is stopped
+    /// new frame cryptor — https://github.com/livekit/rust-sdks/issues/1408), and the OS capture is stopped
     /// while muted so the system's in-use indicator goes out — the same
     /// contract as `stopMicTrackOnMute` on the web path.
     pub async fn set_microphone(
@@ -1106,7 +1106,7 @@ impl NativeSession {
     }
 
     /// Close or open push-to-talk's gate: the capture and the publication
-    /// stay as they are, and a closed gate sends silence (DP-30).
+    /// stay as they are, and a closed gate sends silence.
     pub fn set_ptt_gated(&self, gated: bool) {
         self.capture.set_ptt_gated(gated);
     }
@@ -1467,7 +1467,7 @@ impl NativeSession {
 
     /// The opus codec the published screen-share audio `sid` was negotiated
     /// with, as the sender's stats report it: `(channels, sdp_fmtp_line)`.
-    /// The LP-8d interop example prints it to prove the publisher is stereo.
+    /// The interop example prints it to prove the publisher is stereo.
     pub async fn screen_audio_codec(&self, sid: &str) -> Result<(u32, String), String> {
         let publication = self
             .room

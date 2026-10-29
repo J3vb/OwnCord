@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Settings copy (B9-3 Accessibility tab; B9-20 extends it): tab labels,
+ * Settings copy (including the Accessibility tab): tab labels,
  * Appearance, Notifications, Text & Images, Voice & Video, Keybinds,
  * Advanced, Logs and the connection-diagnostics panel. Loads with the lazily
  * loaded settings overlay, so none of it is in the startup chunk.

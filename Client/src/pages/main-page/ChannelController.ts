@@ -129,7 +129,7 @@ export interface ChannelControllerOptions {
     readonly messagesSlot: HTMLDivElement;
     readonly typingSlot: HTMLDivElement;
     readonly inputSlot: HTMLDivElement;
-    /** Where a thread's side panel mounts, beside the chat column (WP 6.9c). */
+    /** Where a thread's side panel mounts, beside the chat column. */
     readonly threadSlot?: HTMLDivElement;
   };
   readonly chatHeaderName: HTMLSpanElement | null;
@@ -140,9 +140,9 @@ export interface ChannelControllerOptions {
   /** Move focus somewhere reachable after the NSFW gate that held it is
    *  removed (accepted, declined or dismissed with Escape). */
   readonly focusFallback?: () => void;
-  /** Join the DM call a live call log row stands for (WP 3B-9c). */
+  /** Join the DM call a live call log row stands for. */
   readonly onJoinCall?: (channelId: number) => void;
-  /** Open the pinned-messages panel (the "pinned messages" link of a pin row, WP 6.12). */
+  /** Open the pinned-messages panel (the "pinned messages" link of a pin row). */
   readonly onOpenPins?: () => void;
 }
 
@@ -158,7 +158,7 @@ export interface ChannelController {
   readonly currentChannelId: number | null;
   /** Currently mounted message list (for scroll-to-message). */
   readonly messageList: MessageListComponent | null;
-  /** Open a thread in the side panel beside the channel (WP 6.9c). */
+  /** Open a thread in the side panel beside the channel. */
   openThread(thread: ThreadInfo): void;
   /** The thread the side panel has open, or null. */
   readonly openThreadId: number | null;
@@ -274,7 +274,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     focusFallback,
   } = opts;
 
-  // The thread side panel beside the chat column (WP 6.9c). It belongs to the
+  // The thread side panel beside the chat column. It belongs to the
   // mounted channel: a channel switch closes it, and `thread_focus` goes null.
   const threadHost: ThreadPanelHost | null =
     slots.threadSlot === undefined
@@ -303,7 +303,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   // Store/ws subscriptions that keep the composer's disabled state in sync.
   let composerGatingUnsubs: (() => void)[] = [];
 
-  // UX-1: unsent composer state per channel, so switching away and back keeps
+  // Unsent composer state per channel, so switching away and back keeps
   // the text, the reply target, the staged upload ids and any upload still in
   // flight (it keeps running in the draft until restored). Controller-scoped
   // (not per-mount) because the whole point is to outlive a channel switch.
@@ -415,14 +415,14 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       // 3A-12: the reply's @ON/@OFF, part of the retry fingerprint, so a
       // retry resends the same value.
       replyPing?: boolean;
-      // WP 8.8: a sticker send, kept so a retry posts the same sticker.
+      // A sticker send, kept so a retry posts the same sticker.
       sticker?: { readonly id: number; readonly name: string };
       // Each file with its name (and picked File, when there is one), so a
       // file the server did not attach can go back into the composer (2A-3).
       attachments: readonly SentAttachment[];
       // Which channel this cid was actually sent to. chat_send_ok and the
       // SLOW_MODE error are global ws.on subscriptions with no channel_id of
-      // their own (OC-0059) — a late frame for a send made in a channel the
+      // their own — a late frame for a send made in a channel the
       // user has since left must not be attributed to whatever channel is
       // mounted when it arrives.
       channelId: number;
@@ -434,7 +434,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       sentAt: number;
     }
   >();
-  // OC-0433: performSend has two dispatch paths — a plain text send with a
+  // performSend has two dispatch paths — a plain text send with a
   // client_message_id awaits savePendingText's persistence IPC before it
   // reaches the socket, while a send with a reply or attachment dispatches
   // synchronously. Left unordered, a second send submitted while the first
@@ -464,7 +464,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
   const queuedSends = new Map<string, QueuedSend>();
   let sendQueueMod: SendQueueModule | null = null;
 
-  // CLI-08: chat_edit and chat_delete are fire-and-forget — no ack carries
+  // chat_edit and chat_delete are fire-and-forget — no ack carries
   // their envelope id back, so before this they were toasted "success" on
   // send and silently dropped by a closed or half-open socket. Track each
   // frame by the id ws.send returns (the same correlation scheme reactions
@@ -626,7 +626,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     }
     if (messageInput !== null) {
       saveMountedDraft();
-      // UX-1: stash the unsent state before the composer is torn down. Empty
+      // Stash the unsent state before the composer is torn down. Empty
       // drafts are not stored, so switching away from a channel with nothing
       // typed leaves no entry behind.
       if (currentChannelId !== null) {
@@ -657,7 +657,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // switch), so invalidating here — rather than only in mountChannel's
     // previousChannelId branch — covers all of them: without it, a bare
     // destroyChannel() leaves the torn-down channel's "loaded" flag set and
-    // the next visit renders its pre-teardown snapshot as current (OC-0247).
+    // the next visit renders its pre-teardown snapshot as current.
     // Idempotent (no-ops once the flag is already gone), so this is safe
     // alongside mountChannel's existing invalidate of previousChannelId.
     if (currentChannelId !== null) invalidateChannelMessageWindow(currentChannelId);
@@ -700,7 +700,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     log.info("Switching channel", { channelId, channelName });
 
-    // UX-8: the channel is actually on screen now, so this is where its
+    // The channel is actually on screen now, so this is where its
     // badge is cleared and it is recorded as the last channel (the ready-time
     // auto-select only selected it), alongside the channel_focus.
     viewChannel(channelId, channelType, ws);
@@ -757,7 +757,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     /** Mirrors onJumpToPresent — reattach clears "loaded" so the tail is refetched. */
     function jumpToPresentForSend(): void {
       reattachToPresent(channelId);
-      // OC-0204: while detached, this (already-active) channel could have
+      // While detached, this (already-active) channel could have
       // picked up an unread/mention badge for messages that arrived below
       // the gap (dispatcher.ts's evenIfActive path) — nothing else clears
       // it, since incrementUnread's usual "active channel" skip is exactly
@@ -1055,7 +1055,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }, 20_000);
         sendTimers.set(cid, { timer, release: session?.addCleanup(() => clearSendTimer(cid)) });
       };
-      // OC-0433: both branches go through the single controller-scoped
+      // Both branches go through the single controller-scoped
       // sendChain so a synchronous reply/attachment send can never jump a
       // plain-text send whose persistPendingText IPC is still in flight — and
       // vice versa. Without this, only guarding the branch a given finding
@@ -1278,7 +1278,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       setText(chatHeaderName, channelName);
     }
 
-    // NSFW consent gates composition, not just display (B9-7): until the
+    // NSFW consent gates composition, not just display: until the
     // server has confirmed this account's acknowledgement, the channel's
     // content is neither mounted nor fetched, and any rows left from before
     // consent was withdrawn are dropped. Any change that crosses the gate —
@@ -1344,7 +1344,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     }
 
     // A forum shows its post list in place of the message list, and has no
-    // typing row or composer (WP 6.9d). A post opens in the thread panel.
+    // typing row or composer. A post opens in the thread panel.
     if ((storedChannel?.type ?? channelType) === "forum") {
       const forum = NAVIGATION_DESTINATIONS.forum;
       if (forum === undefined) return;
@@ -1381,7 +1381,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
 
     void msgCtrl.loadMessages(channelId, signal);
 
-    /** Send the delete frame. CLI-08: a destructive menu action is gated on
+    /** Send the delete frame. A destructive menu action is gated on
      *  the connection; a closed or half-open socket would drop the frame and
      *  leave the moderator thinking the message was deleted. */
     function sendDelete(msgId: number): void {
@@ -1396,7 +1396,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       track(pendingDeletes, id, { channelId, messageId: msgId });
     }
 
-    /** P4-12: the destructive delete confirm, on the shared confirm preset
+    /** The destructive delete confirm, on the shared confirm preset
      *  (features/dialogs/confirmModal.ts): Cancel first and focused, Escape and the backdrop
      *  cancel, focus returns to the opener. Tied to the mounted channel's
      *  signal, so a switch or destroy closes it. */
@@ -1476,7 +1476,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         // Dropping the detached flag also clears "loaded", so loadMessages
         // refetches the live tail instead of short-circuiting.
         reattachToPresent(channelId);
-        // OC-0204: see performSend's identical call above — a detached
+        // See performSend's identical call above — a detached
         // active channel's badge (from dispatcher.ts's evenIfActive path)
         // must be cleared here too, or it lingers after the user has jumped
         // back to present and is looking straight at the live tail.
@@ -1485,7 +1485,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           void msgCtrl.loadMessages(channelId, channelAbort.signal);
         }
       },
-      // The Wave button of a welcome row (WP 8.6): an ordinary 👋 message sent as
+      // The Wave button of a welcome row: an ordinary 👋 message sent as
       // a reply to the join row through the normal send path.
       onWave: (msgId: number): boolean => {
         const target = liveReplyTo(msgId);
@@ -1511,7 +1511,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         if (original !== undefined && original.content === content) {
           return true;
         }
-        // CLI-08: same connection gate as delete. A dropped edit frame must
+        // Same connection gate as delete. A dropped edit frame must
         // not look saved — the row would keep its old text, and the user
         // would never know to try again. The editor stays open with the text.
         if (uiStore.getState().connectionStatus !== "connected") {
@@ -1539,8 +1539,8 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       },
       onEditEnd: () => messageInput?.focus(),
       onDeleteClick: (msgId: number, shiftKey: boolean) => {
-        // Shift-click skips the prompt, as Discord's delete confirm does
-        // (P4-12). A plain click opens a confirm.
+        // Shift-click skips the prompt, as Discord's delete confirm does.
+        // A plain click opens a confirm.
         if (!shiftKey) {
           openDeleteConfirm(msgId, { clicked: true });
           return;
@@ -1618,7 +1618,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         );
       },
       // Voting and ending are plain requests on this channel's socket; the counts
-      // come back as poll_update through the dispatcher (WP 6.9b).
+      // come back as poll_update through the dispatcher.
       onPollVote: (messageId, answerIds) => votePoll(ws, messageId, answerIds, signal),
       onPollEnd: (messageId) => endPoll(ws, messageId, signal),
       ...(threadHost !== null && {
@@ -1724,7 +1724,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     });
     messageInput.mount(slots.inputSlot);
 
-    // UX-1: restore this channel's stashed draft, if any — its text, reply
+    // Restore this channel's stashed draft, if any — its text, reply
     // target and staged upload ids — so a switch away and back is lossless.
     // A reply whose target is gone (deleted while away) is dropped, not
     // restored onto a message the server would refuse the reply to.
@@ -1837,7 +1837,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
     // correlation id ties a frame back to the send that produced it. A send
     // made in a channel the user has since left can still be in flight when
     // its ack/refusal arrives, and by then this listener belongs to whatever
-    // channel is newly mounted (OC-0059). Absent/empty correlation ids never
+    // channel is newly mounted. Absent/empty correlation ids never
     // happen over the real transport, so fall back to attributing to the
     // mounted channel rather than silently dropping every ack.
     const sentToMountedChannel = (correlationId: string | undefined): boolean =>
@@ -1905,7 +1905,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
         }
       }),
     );
-    // CLI-08: the server's edit/delete echoes carry no envelope id, so a
+    // The server's edit/delete echoes carry no envelope id, so a
     // tracked frame is resolved by its channel + message (the same
     // content-match reactions use). Only the server echo proves delivery.
     composerGatingUnsubs.push(
@@ -2037,7 +2037,7 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
           // acks it, so editing it would send chat_edit for a message that
           // does not exist yet.
           // A server-written row (a DM call log) is never editable, nor is a
-          // sticker message (WP 8.8): it has no text and the server refuses it.
+          // sticker message: it has no text and the server refuses it.
           if (
             m.user.id === myId &&
             !m.deleted &&

@@ -149,7 +149,7 @@ pub(crate) fn close_unless_upgrade(request: &str) -> String {
 /// parameter and drop the header.
 ///
 /// The LiveKit Rust SDK (the Linux client's native voice) sends its join token
-/// only as a bearer header, and servers before the RT-1 fix drop every header
+/// only as a bearer header, and older servers drop every header
 /// when re-dialling LiveKit, so the join fails with 401. The query string
 /// survives on every server version — it is how the JS SDK sends the token —
 /// so the tunnel rewrites the request into that shape. A request with no bearer
@@ -360,7 +360,7 @@ async fn handle_connection(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // ── 1. Read HTTP request headers (up to \r\n\r\n) ────────────────────
     // Guarded by a 10-second timeout so a slow or stalled client cannot
-    // hold the Tokio task open indefinitely (BUG-151).
+    // hold the Tokio task open indefinitely.
     let raw = read_request_headers(&mut local).await?;
     let Some(buf) = strip_tunnel_token(&raw, token) else {
         let _ = local.write_all(FORBIDDEN_RESPONSE).await;

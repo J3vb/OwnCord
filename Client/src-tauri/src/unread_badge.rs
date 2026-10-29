@@ -1,4 +1,4 @@
-//! The taskbar and tray unread badge (DP-27). The renderer computes the count
+//! The taskbar and tray unread badge. The renderer computes the count
 //! (`src/features/unread-badge/unreadBadge.ts`) and pushes it when it changes,
 //! and again when the window is shown or focused (Windows drops the overlay
 //! when the taskbar button is recreated); this draws it:

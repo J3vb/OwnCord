@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Messaging copy that loads with the main page (B9-19): the message list, the
+ * Messaging copy that loads with the main page: the message list, the
  * composer, the message renderers and their status toasts, the search and
  * pinned panels, the emoji/GIF pickers, the mention autocomplete and the
  * message-jump toasts. The slice a startup-reachable module reads lives in

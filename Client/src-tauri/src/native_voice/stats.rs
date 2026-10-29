@@ -1,4 +1,4 @@
-//! Connection stats for the webview (WP LP-5): ping, quality bars, the tile
+//! Connection stats for the webview: ping, quality bars, the tile
 //! chip and the Go Live readout.
 //!
 //! libwebrtc's stats reports are large (about 60 fields per entry, plus

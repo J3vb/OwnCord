@@ -1,4 +1,4 @@
-//! Which game is running, for the "Playing <game>" status (WP 8.3b).
+//! Which game is running, for the "Playing <game>" status.
 //!
 //! The scanner lists the user's own processes, matches them against the games
 //! installed through Steam, Epic, Heroic (Epic and GOG), GOG Galaxy,

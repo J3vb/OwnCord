@@ -1,4 +1,4 @@
-// The web portal's page for a browser context that is not secure (WP 6.13e):
+// The web portal's page for a browser context that is not secure:
 // one notice, no form. The browser platform keeps its credential, network and
 // storage adapters inert there, so nothing on this page may reach them.
 

@@ -1,4 +1,4 @@
-//! System-wide input idle time, for the client's auto-idle (DP-33).
+//! System-wide input idle time, for the client's auto-idle.
 //!
 //! The webview only sees input aimed at its own window, so on its own it
 //! turns someone Idle while they work in another app. This asks the OS how

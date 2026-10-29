@@ -1,4 +1,4 @@
-//! In-app update of a Linux .deb install (WP LP-14b).
+//! In-app update of a Linux .deb install.
 //!
 //! The download and signature checks are the shared ones in
 //! `update_commands.rs`. This module is the install step: it writes the

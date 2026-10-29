@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** Message Requests inbox copy (B9-5) and its decisions (B9-6). */
+/** Message Requests inbox copy and its decisions. */
 export const messageRequestsText = defineCatalog("messageRequests", {
   intro:
     "First messages from people you haven't accepted yet. They are shown as plain text: links, images and attachments are not loaded.",

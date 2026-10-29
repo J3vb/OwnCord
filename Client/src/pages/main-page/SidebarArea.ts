@@ -127,14 +127,14 @@ export interface SidebarAreaOptions {
   /** MainPage's single shared presence sender — threaded to UserBar so its
    *  status picker shares the same limiter budget and retry as auto-idle
    *  and the settings Account tab instead of sending straight through `ws`
-   *  (OC-0210; see @lib/presence). */
+   *  (see @lib/presence). */
   readonly presenceSender: PresenceSender;
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;
   readonly onWatchStream?: (userId: number) => void;
   /** Open the call view for the voice channel the user is in. */
   readonly onOpenCall?: () => void;
-  /** B9-4: the destinations this build ships. An absent one gets no entry. */
+  /** The destinations this build ships. An absent one gets no entry. */
   readonly destinations?: NavigationDestinations;
   /** Open a content view; `opener` gets focus back when it closes. */
   readonly onOpenView?: (id: ContentViewId, opener: HTMLElement) => void;
@@ -166,7 +166,7 @@ export interface SidebarAreaResult {
   readonly rememberChannel: () => void;
   /** Drop the remembered channel. */
   readonly forgetChannel: () => void;
-  /** The Q2 back path: leave DM mode for the channel the user came from. */
+  /** The back path: leave DM mode for the channel the user came from. */
   readonly returnToChannel: () => void;
   /** Open (or start) the 1:1 DM with a user, as the member list's Message. */
   readonly messageUser: (userId: number) => void;
@@ -396,7 +396,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   };
   auditBtn.addEventListener("click", () => openAdmin("audit"));
 
-  // The Moderation Center entry (B9-4, Q2): beside Audit Log, only with
+  // The Moderation Center entry: beside Audit Log, only with
   // MODERATE_MEMBERS, and only once the Moderation Center ships.
   let moderationBtn: HTMLButtonElement | null = null;
   if (opts.destinations?.moderation !== undefined) {
@@ -463,7 +463,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
   // defaults to "OwnCord Server" on every unmodified install, so keying on
   // it would collapse two different servers' saved state onto one entry.
   loadCollapsedCategories(api.getConfig().host);
-  // Collapsed state saved under a category NAME (before 6.5b) moves to the id
+  // Collapsed state saved under a category NAME (the older key) moves to the id
   // key once the channel list says which name is which id. Done at once when
   // the list is already here, else on the first channels write that fills it.
   if (!migrateCollapsedToCategoryIds()) {
@@ -664,7 +664,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         // on mouseup). Aggregate the per-channel PATCHes and surface a single
         // failure toast — same try/catch+toast contract as onSave/onDelete
         // above. A drop into another category sends the moved channel's
-        // `category_id` with its position (WP 6.5c). A rejected PATCH is rolled
+        // `category_id` with its position. A rejected PATCH is rolled
         // back to its previous position, and previous category, only
         // if no channel_update broadcast arrived for that channel since the
         // request started (the server broadcasts before it answers, so a
@@ -842,7 +842,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
    * be a second place to get it wrong. Locally, both mean "drop it from the
    * list" — the row is removed optimistically so the sidebar reacts at once.
    *
-   * If the server refuses, the row comes back (DP-34): the DmChannel and its
+   * If the server refuses, the row comes back: the DmChannel and its
    * index are kept from just before the removal and it is re-inserted at that
    * index, so the list's recency order is unchanged. The failure toast still
    * fires so the user knows why.
@@ -944,7 +944,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   /**
    * Leave DM mode for the channel the user came from. The DM sidebar's back
-   * arrow and a content view's Close/Escape (B9-4, Q2) both take this path.
+   * arrow and a content view's Close/Escape both take this path.
    */
   function returnToChannel(): void {
     setSidebarMode("channels");
@@ -1055,7 +1055,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     });
   }
 
-  /** Call a user: open the DM first, then start the call in it (BUG-05). An
+  /** Call a user: open the DM first, then start the call in it. An
    *  existing DM is selected at once; a new one starts the call in
    *  `handleCreateDm`'s onReady, once it is the active channel `startCall`
    *  reads. */
@@ -1170,7 +1170,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
       // --- Member list (below channels), only in the "left" layout ---
       syncMemberSection();
     } else {
-      // "Message Requests (N)" at the top of DM mode (B9-4, Q2). N is the
+      // "Message Requests (N)" at the top of DM mode. N is the
       // pending-request count and is never folded into unread.
       const requests = opts.destinations?.requests;
       if (requests !== undefined) {
@@ -1212,7 +1212,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
        * DM partner's presence flip or a new message reaches it too. The sidebar
        * updates its rows in place (keyed on the DM channel), so the "Find a
        * conversation" filter text/focus and the list scroll position all
-       * survive an unrelated update (B9-21, replacing OC-0280's capture/restore
+       * survive an unrelated update (replacing a capture/restore
        * of a full destroy+recreate).
        */
       function refreshDmSidebar(): void {
