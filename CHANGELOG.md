@@ -56,6 +56,12 @@ and only when it changes something a contributor or fork holder must do
 
 - Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
 
+### Fixed
+
+**Messages & files**
+
+- Hovering a reaction squeezed the names into a narrow box and split them mid-word ("LordJ / ebus"); the box now fits the names on one line and wraps only between words.
+
 ### Under the hood
 
 - Every error code the server can send is now listed once in the protocol schema and generated into server constants and a client type. A fork that adds a code adds it there and regenerates.
