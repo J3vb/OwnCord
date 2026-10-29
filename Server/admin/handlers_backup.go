@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -28,7 +29,7 @@ import (
 func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !gate.running.CompareAndSwap(false, true) {
-			writeErr(w, http.StatusConflict, "BACKUP_RUNNING", "A backup is already being taken. Try again when it finishes.")
+			writeErr(w, http.StatusConflict, httperr.CodeBackupRunning, "A backup is already being taken. Try again when it finishes.")
 			return
 		}
 		defer gate.running.Store(false)
@@ -37,14 +38,14 @@ func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Han
 		}
 		backupDir := paths.dir
 		if err := os.MkdirAll(backupDir, 0o750); err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create backup directory")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to create backup directory")
 			return
 		}
 
 		timestamp := time.Now().UTC().Format("20060102_150405")
 		backupPath, err := freeBackupPath(backupDir, "chatserver_"+timestamp)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to choose a backup name")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to choose a backup name")
 			return
 		}
 
@@ -55,7 +56,7 @@ func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Han
 		// It is rooted at the configured backup dir (SetupOptions.BackupDir), not
 		// the historical hardcoded default.
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), backupPath, backupDir); err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "backup failed")
 			return
 		}
 
@@ -64,7 +65,7 @@ func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Han
 		if err := db.CheckBackupIntegrity(context.WithoutCancel(r.Context()), backupPath); err != nil {
 			slog.Error("backup failed integrity check — removing", "path", backupPath, "err", err)
 			_ = os.Remove(backupPath)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "backup failed verification")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "backup failed verification")
 			return
 		}
 
@@ -97,7 +98,7 @@ func handleListBackups(paths backupPaths) http.HandlerFunc {
 				writeJSON(w, http.StatusOK, []backupEntry{})
 				return
 			}
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list backups")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list backups")
 			return
 		}
 
@@ -133,12 +134,12 @@ func handleListBackups(paths backupPaths) http.HandlerFunc {
 func resolveBackupName(w http.ResponseWriter, r *http.Request, backupDir string) (string, string, bool) {
 	name := chi.URLParam(r, "name")
 	if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid backup name")
 		return "", "", false
 	}
 	target := filepath.Join(backupDir, name)
 	if !strings.HasPrefix(target, backupDir+string(filepath.Separator)) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid backup name")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid backup name")
 		return "", "", false
 	}
 	return name, target, true
@@ -152,12 +153,12 @@ func handleDeleteBackup(database *db.DB, paths backupPaths) http.Handler {
 		}
 
 		if _, err := os.Stat(target); os.IsNotExist(err) { //nolint:gosec // G703: path sanitized by HasPrefix check above
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "backup not found")
 			return
 		}
 
 		if err := os.Remove(target); err != nil { //nolint:gosec // G703: path sanitized by HasPrefix check above
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete backup")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to delete backup")
 			return
 		}
 
@@ -179,7 +180,7 @@ func verifyRestoreSource(w http.ResponseWriter, r *http.Request, name, target st
 	// succeeded" followed by a broken server is still the worst UX here.
 	if err := db.CheckBackupIntegrity(context.WithoutCancel(r.Context()), target); err != nil {
 		slog.Error("restore refused: backup failed integrity check", "backup", name, "err", err)
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "backup file failed integrity verification")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "backup file failed integrity verification")
 		return false
 	}
 
@@ -189,12 +190,12 @@ func verifyRestoreSource(w http.ResponseWriter, r *http.Request, name, target st
 	ahead, err := db.CheckBackupSchemaAhead(context.WithoutCancel(r.Context()), target)
 	if err != nil {
 		slog.Error("restore refused: could not read backup schema version", "backup", name, "err", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not verify the backup's schema version")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not verify the backup's schema version")
 		return false
 	}
 	if len(ahead) > 0 {
 		slog.Warn("restore refused: backup schema is newer than this server", "backup", name, "unknown_migrations", strings.Join(ahead, ","))
-		writeErr(w, http.StatusConflict, "SCHEMA_TOO_NEW",
+		writeErr(w, http.StatusConflict, httperr.CodeSchemaTooNew,
 			"backup was written by a newer server version; upgrade this server before restoring it")
 		return false
 	}
@@ -227,7 +228,7 @@ func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 		defer abortRestartSensitiveOp()
 
 		if _, err := os.Stat(target); os.IsNotExist(err) { //nolint:gosec // G703: path sanitized by HasPrefix check above
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "backup not found")
 			return
 		}
 
@@ -257,7 +258,7 @@ func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 			// be created"; proceeding without one takes away the safety net the
 			// operator was shown, exactly when they need it.
 			slog.Error("pre-restore backup failed — aborting restore", "err", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError,
 				"could not create the pre-restore safety backup — restore aborted, database untouched")
 			return
 		}
@@ -281,7 +282,7 @@ func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 		if errors.Is(err, db.ErrWSSeqFloorNotStored) {
 			slog.Error("restore refused: could not preserve the event sequence floor", "err", err)
 			dropSafetyCopy()
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError,
 				"could not preserve the event sequence floor — restore refused, database untouched")
 			return
 		}
@@ -298,7 +299,7 @@ func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 		if err := db.StageRestore(ctx, dbPath, target, marker); err != nil {
 			slog.Error("restore refused: could not stage the backup", "backup", name, "err", err)
 			dropSafetyCopy()
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR",
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError,
 				"could not stage the backup — database untouched")
 			return
 		}

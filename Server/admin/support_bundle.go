@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
@@ -136,14 +137,14 @@ func (s *supportBundles) preview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	session, ok := supportSession(r)
 	if !ok {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "requires the View Diagnostics permission or an administrator account")
+		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "requires the View Diagnostics permission or an administrator account")
 		return
 	}
 	if !supportJSON(w, r, &struct{}{}) {
 		return
 	}
 	if !s.reserve() {
-		writeErr(w, http.StatusTooManyRequests, "BUSY", "a diagnostic preview is being prepared; try again shortly")
+		writeErr(w, http.StatusTooManyRequests, httperr.CodeBusy, "a diagnostic preview is being prepared; try again shortly")
 		return
 	}
 	defer s.release()
@@ -151,12 +152,12 @@ func (s *supportBundles) preview(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	snapshot, err := s.collect(ctx)
 	if err != nil {
-		writeErr(w, http.StatusServiceUnavailable, "UNAVAILABLE", "could not collect diagnostics within the time and size limits")
+		writeErr(w, http.StatusServiceUnavailable, httperr.CodeUnavailable, "could not collect diagnostics within the time and size limits")
 		return
 	}
 	snapshot.actor, snapshot.session = actorFromContext(r), session
 	if !s.save(snapshot) {
-		writeErr(w, http.StatusTooManyRequests, "BUSY", "diagnostic preview capacity reached; try again after five minutes")
+		writeErr(w, http.StatusTooManyRequests, httperr.CodeBusy, "diagnostic preview capacity reached; try again after five minutes")
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot.preview)
@@ -166,7 +167,7 @@ func (s *supportBundles) download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	session, ok := supportSession(r)
 	if !ok {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "requires the View Diagnostics permission or an administrator account")
+		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "requires the View Diagnostics permission or an administrator account")
 		return
 	}
 	var req struct {
@@ -182,18 +183,18 @@ func (s *supportBundles) download(w http.ResponseWriter, r *http.Request) {
 	case s.downloads <- struct{}{}:
 		defer func() { <-s.downloads }()
 	default:
-		writeErr(w, http.StatusTooManyRequests, "BUSY", "diagnostic downloads are busy; try again shortly")
+		writeErr(w, http.StatusTooManyRequests, httperr.CodeBusy, "diagnostic downloads are busy; try again shortly")
 		return
 	}
 	v, ok := s.take(req.ID, req.SHA256, session, actorFromContext(r))
 	if !ok {
-		writeErr(w, http.StatusGone, "PREVIEW_EXPIRED", "preview unavailable; create and review a new preview")
+		writeErr(w, http.StatusGone, httperr.CodePreviewExpired, "preview unavailable; create and review a new preview")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	if err := s.service.RecordBundle(ctx, v.actor); err != nil {
-		writeErr(w, http.StatusServiceUnavailable, "UNAVAILABLE", "could not record the export; create a new preview")
+		writeErr(w, http.StatusServiceUnavailable, httperr.CodeUnavailable, "could not record the export; create a new preview")
 		return
 	}
 	w.Header().Set("Content-Type", "application/zip")

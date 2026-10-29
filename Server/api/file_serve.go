@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
@@ -286,11 +287,11 @@ func writeFileAccessError(w http.ResponseWriter, r *http.Request, fileID string,
 	case errors.Is(err, permissions.ErrNSFWUnacknowledged):
 		// B5-7: the response carries the code and nothing else — no detail
 		// that could distinguish it from any other refusal on this route.
-		writeErr(w, http.StatusForbidden, "NSFW_ACKNOWLEDGEMENT_REQUIRED", "")
+		writeErr(w, http.StatusForbidden, httperr.CodeNSFWAcknowledgementRequired, "")
 	case errors.Is(err, service.ErrForbidden):
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "you do not have access to this file")
+		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "you do not have access to this file")
 	default:
 		slog.Error("failed to resolve attachment", "id", fileID, "error", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal server error")
 	}
 }

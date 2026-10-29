@@ -24,6 +24,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/safefetch"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -138,7 +139,7 @@ func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *aut
 func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if apiKey == "" {
-			writeErr(w, http.StatusServiceUnavailable, "GIF_DISABLED", "GIF search is not configured on this server")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeGIFDisabled, "GIF search is not configured on this server")
 			return
 		}
 
@@ -149,7 +150,7 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 
 		limit, ok := parseGIFLimit(r.URL.Query().Get("limit"))
 		if !ok {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "limit must be an integer between 1 and "+strconv.Itoa(gifMaxLimit))
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "limit must be an integer between 1 and "+strconv.Itoa(gifMaxLimit))
 			return
 		}
 		params.Set("limit", strconv.Itoa(limit))
@@ -157,11 +158,11 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 		if requireQuery {
 			q := strings.TrimSpace(r.URL.Query().Get("q"))
 			if q == "" {
-				writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "q is required")
+				writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "q is required")
 				return
 			}
 			if len(q) > gifMaxQueryLen {
-				writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "q must be at most "+strconv.Itoa(gifMaxQueryLen)+" characters")
+				writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "q must be at most "+strconv.Itoa(gifMaxQueryLen)+" characters")
 				return
 			}
 			params.Set("q", q)
@@ -169,7 +170,7 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 
 		if pos := strings.TrimSpace(r.URL.Query().Get("pos")); pos != "" {
 			if !validGIFPos(pos) {
-				writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "pos must be 1 to "+strconv.Itoa(gifMaxPosLen)+" characters from A-Z a-z 0-9 . _ : = + / % ~ -")
+				writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "pos must be 1 to "+strconv.Itoa(gifMaxPosLen)+" characters from A-Z a-z 0-9 . _ : = + / % ~ -")
 				return
 			}
 			params.Set("pos", pos)
@@ -177,7 +178,7 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 
 		page, err := fetchGIFs(r, gifAPIBase+upstreamPath+"?"+params.Encode(), apiKey, limit)
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, "BAD_GATEWAY", "GIF provider is unavailable")
+			writeErr(w, http.StatusBadGateway, httperr.CodeBadGateway, "GIF provider is unavailable")
 			return
 		}
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
@@ -88,14 +89,14 @@ func handleLogTicket(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		hash, ok := r.Context().Value(adminTokenHashKey).(string)
 		if !ok || hash == "" {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired session")
 			return
 		}
 
 		ticket, err := logTickets.issue(hash)
 		if err != nil {
 			slog.Error("failed to issue log stream ticket", "err", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate ticket")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to generate ticket")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"ticket": ticket})
@@ -448,7 +449,7 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 	ticket := r.URL.Query().Get("ticket")
 	entry, ok := logTickets.redeem(ticket)
 	if ticket == "" || !ok {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired ticket")
+		writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired ticket")
 		return nil, false
 	}
 	// Stream lifetime == request lifetime, so all principal re-checks below
@@ -459,7 +460,7 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 	ctx := r.Context()
 	user, role, _, err := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
 	if err != nil || user == nil || role == nil {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+		writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired session")
 		return nil, false
 	}
 	principalStillAuthorized := func() bool {
@@ -475,7 +476,7 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 		return permissions.CanViewDiagnostics(currentRole.Permissions)
 	}
 	if !principalStillAuthorized() {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", "VIEW_DIAGNOSTICS permission required")
+		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "VIEW_DIAGNOSTICS permission required")
 		return nil, false
 	}
 	return principalStillAuthorized, true
@@ -495,7 +496,7 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		// Check that we can flush (required for SSE).
 		flusher, ok := w.(http.Flusher)
 		if !ok {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "streaming not supported")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "streaming not supported")
 			return
 		}
 

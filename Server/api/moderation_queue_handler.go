@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -169,7 +170,7 @@ func handleModerationQueueList(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		rows, err := svc.Reports.Queue(r.Context(), actorID, r.URL.Query().Get("state"))
@@ -195,7 +196,7 @@ func handleModerationQueueGet(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -246,7 +247,7 @@ func handleModerationQueueAssign(svc *service.Services, hub ModQueueBroadcaster)
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -272,7 +273,7 @@ func handleModerationQueueNote(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -299,7 +300,7 @@ func handleModerationQueueClose(svc *service.Services, hub ModQueueBroadcaster) 
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -335,7 +336,7 @@ func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) ht
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		if !requireModerateOrWrite(w, r, svc, actorID) {
@@ -375,7 +376,7 @@ func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) ht
 			}
 			msgID, perr := strconv.ParseInt(msgIDStr, 10, 64)
 			if perr != nil || msgID <= 0 {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "message_id is required for removal")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "message_id is required for removal")
 				return
 			}
 			params.MessageID = msgID

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -84,7 +85,7 @@ func MountStickerRoutes(r chi.Router, svc *service.Services, store FileStore, li
 func stickerIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid sticker id")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid sticker id")
 		return 0, false
 	}
 	return id, true
@@ -119,13 +120,13 @@ func handleCreateSticker(svc *service.Services, store FileStore, limiter *auth.R
 			return
 		}
 		if limiter != nil && !limiter.Allow(auth.Key("sticker_upload", user.ID), stickerUploadRateLimitPerMinute, time.Minute) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "sticker upload rate limit exceeded, try again later")
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "sticker upload rate limit exceeded, try again later")
 			return
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, stickerMaxBodySize)
 		if err := r.ParseMultipartForm(stickerMultipartMemoryLimit); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 			return
 		}
 
@@ -186,7 +187,7 @@ func handleCreateSticker(svc *service.Services, store FileStore, limiter *auth.R
 func readStickerUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
 		return nil, "", false
 	}
 	defer file.Close() //nolint:errcheck
@@ -195,27 +196,27 @@ func readStickerUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, 
 	// "one byte over" is caught, without buffering an unbounded body.
 	raw, err := io.ReadAll(io.LimitReader(file, maxStickerFileBytes+1))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "failed to read uploaded file")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "failed to read uploaded file")
 		return nil, "", false
 	}
 	if int64(len(raw)) > maxStickerFileBytes {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("sticker must be at most %d KB", maxStickerFileBytes>>10))
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("sticker must be at most %d KB", maxStickerFileBytes>>10))
 		return nil, "", false
 	}
 
 	mimeType := http.DetectContentType(raw)
 	if !allowedStickerMIME[mimeType] {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "sticker must be a PNG, GIF or WebP image")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "sticker must be a PNG, GIF or WebP image")
 		return nil, "", false
 	}
 
 	width, height, err := imageDimensions(raw, mimeType)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "could not read image dimensions")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "could not read image dimensions")
 		return nil, "", false
 	}
 	if width > maxStickerDimension || height > maxStickerDimension {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("sticker must be at most %dx%d pixels (got %dx%d)", maxStickerDimension, maxStickerDimension, width, height))
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("sticker must be at most %dx%d pixels (got %dx%d)", maxStickerDimension, maxStickerDimension, width, height))
 		return nil, "", false
 	}
 	return raw, mimeType, true

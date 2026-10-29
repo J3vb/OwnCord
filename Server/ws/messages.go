@@ -407,10 +407,6 @@ func buildAuthError(message string) []byte {
 // actually wanted.
 const minClientEpoch = 0
 
-// ErrCodeProtocolEpoch is the auth_error code for a client whose wire epoch
-// this server does not speak.
-const ErrCodeProtocolEpoch = "protocol_epoch_unsupported"
-
 // buildProtocolEpochError is the auth_error for an epoch outside
 // [minClientEpoch, ProtocolEpoch]. The message names which side to update;
 // the numbers let a client decide for itself.

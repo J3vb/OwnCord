@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -58,7 +59,7 @@ func pushDisabledMiddleware(enabled bool) func(http.Handler) http.Handler {
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			writeErr(w, http.StatusServiceUnavailable, "PUSH_DISABLED", "Web Push is not enabled on this server")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodePushDisabled, "Web Push is not enabled on this server")
 		})
 	}
 }
@@ -76,7 +77,7 @@ func handlePushVAPID(push *service.PushService) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		pub, keyID, ok := push.PublicKey()
 		if !ok {
-			writeErr(w, http.StatusServiceUnavailable, "PUSH_DISABLED", "no VAPID key is installed")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodePushDisabled, "no VAPID key is installed")
 			return
 		}
 		writeJSON(w, http.StatusOK, pushVAPIDResponse{PublicKey: pub, KeyID: keyID})
@@ -101,7 +102,7 @@ func handleListPushSubscriptions(push *service.PushService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		rows, err := push.List(r.Context(), user.ID)
@@ -155,7 +156,7 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		var req pushSubscribeRequest
@@ -170,7 +171,7 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidSubscription) {
-				writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+				writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 				return
 			}
 			writeServiceError(r.Context(), w, err)
@@ -184,7 +185,7 @@ func handleRevokePushSubscription(push *service.PushService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		id, ok := parseIDParam(w, r, "id")

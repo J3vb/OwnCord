@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -38,7 +39,7 @@ func handleListThreads(svc *service.Services) http.HandlerFunc {
 		case "1":
 			archived = true
 		default:
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "archived must be 0 or 1")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "archived must be 0 or 1")
 			return
 		}
 		params := service.ThreadListParams{Archived: archived, Sort: q.Get("sort")}
@@ -46,27 +47,27 @@ func handleListThreads(svc *service.Services) http.HandlerFunc {
 		case "":
 		case service.ThreadSortActivity, service.ThreadSortCreated:
 		default:
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "sort must be activity or created")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "sort must be activity or created")
 			return
 		}
 		for _, raw := range q["tag"] {
 			id, perr := strconv.ParseInt(raw, 10, 64)
 			if perr != nil || id < 1 {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "tag must be a positive tag id")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "tag must be a positive tag id")
 				return
 			}
 			params.TagIDs = append(params.TagIDs, id)
 		}
 		after, err := service.ParseThreadCursorFor(params.Sort, q.Get("before"))
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "before must be a next_before value from a previous page")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "before must be a next_before value from a previous page")
 			return
 		}
 		limit := service.ThreadListDefaultLimit
 		if raw := q.Get("limit"); raw != "" {
 			v, err := strconv.Atoi(raw)
 			if err != nil || v < 1 {
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "limit must be a positive integer")
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "limit must be a positive integer")
 				return
 			}
 			limit = min(v, service.ThreadListMaxLimit)

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -59,12 +60,12 @@ func handleGetChannelPermissions(channels *service.ChannelService) http.HandlerF
 		}
 		overrides, userOverrides, err := channels.ChannelPermissions(r.Context(), ch.ID)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channel permissions")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list channel permissions")
 			return
 		}
 		synced, err := channels.ChannelPermissionsSynced(r.Context(), ch.ID)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channel permissions")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list channel permissions")
 			return
 		}
 		writeJSON(w, http.StatusOK, channelPermissionsResponse{
@@ -94,7 +95,7 @@ func overrideMutationSetup(channels *service.ChannelService, w http.ResponseWrit
 	}
 	targetID, err := pathInt64(r, param)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", invalidMsg)
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, invalidMsg)
 		return nil, 0, nil, false
 	}
 	if req != nil {
@@ -104,7 +105,7 @@ func overrideMutationSetup(channels *service.ChannelService, w http.ResponseWrit
 	}
 	actorRole = actorRoleFromContext(r)
 	if actorRole == nil {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 		return nil, 0, nil, false
 	}
 	return ch, targetID, actorRole, true

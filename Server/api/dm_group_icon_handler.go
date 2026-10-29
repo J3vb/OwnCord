@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -29,7 +30,7 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 			return
 		}
 		if limiter != nil && !limiter.Allow(auth.Key("dm_icon_upload", user.ID), avatarUploadRateLimitPerMinute, time.Minute) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "icon upload rate limit exceeded, try again later")
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "icon upload rate limit exceeded, try again later")
 			return
 		}
 		// Membership, group-ness and timeout are decided before any byte is
@@ -41,12 +42,12 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 
 		r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBodySize)
 		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 			return
 		}
 		file, header, err := r.FormFile("file")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
 			return
 		}
 		defer file.Close() //nolint:errcheck

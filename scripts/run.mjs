@@ -74,7 +74,13 @@ const PROTOCOL_VERIFY = [
   step("go", ["run", "./cmd/genprotocol"], "Server"),
   step(
     "git",
-    ["diff", "--exit-code", "ws/message_types.go", "../Client/src/lib/protocolTypes.ts"],
+    [
+      "diff",
+      "--exit-code",
+      "ws/message_types.go",
+      "httperr/codes.go",
+      "../Client/src/lib/protocolTypes.ts",
+    ],
     "Server",
   ),
 ];

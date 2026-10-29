@@ -40,18 +40,29 @@ type enum struct {
 	Values []message `json:"values"`
 }
 
+// errorCodes lists every code an error reply can carry. REST codes become
+// the typed httperr.Code, so a handler cannot answer with a code the schema
+// does not know; WebSocket codes keep their ws.ErrCode* names.
+type errorCodes struct {
+	Comment string    `json:"$comment"`
+	REST    []message `json:"rest"`
+	WS      []message `json:"ws"`
+}
+
 type schema struct {
-	Comment        string    `json:"$comment"`
-	Version        int       `json:"version"`
-	ProtocolEpoch  int       `json:"protocol_epoch"`
-	ClientToServer []message `json:"client_to_server"`
-	ServerToClient []message `json:"server_to_client"`
-	Enums          []enum    `json:"enums"`
+	Comment        string     `json:"$comment"`
+	Version        int        `json:"version"`
+	ProtocolEpoch  int        `json:"protocol_epoch"`
+	ClientToServer []message  `json:"client_to_server"`
+	ServerToClient []message  `json:"server_to_client"`
+	Enums          []enum     `json:"enums"`
+	ErrorCodes     errorCodes `json:"error_codes"`
 }
 
 func main() {
 	schemaPath := flag.String("schema", "../protocol/schema.json", "path to the protocol schema")
 	goOut := flag.String("go-out", "ws/message_types.go", "path to the generated Go file")
+	codesOut := flag.String("codes-out", "httperr/codes.go", "path to the generated REST error code file")
 	tsOut := flag.String("ts-out", "../Client/src/lib/protocolTypes.ts", "path to the generated TypeScript file")
 	flag.Parse()
 
@@ -76,11 +87,19 @@ func main() {
 	if err := os.WriteFile(*goOut, goSrc, 0o644); err != nil {
 		log.Fatalf("write %s: %v", *goOut, err)
 	}
+	codesSrc, err := renderCodes(s)
+	if err != nil {
+		log.Fatalf("render REST error codes: %v", err)
+	}
+	if err := os.WriteFile(*codesOut, codesSrc, 0o644); err != nil {
+		log.Fatalf("write %s: %v", *codesOut, err)
+	}
 	if err := os.WriteFile(*tsOut, []byte(renderTS(s)), 0o644); err != nil {
 		log.Fatalf("write %s: %v", *tsOut, err)
 	}
-	fmt.Printf("generated %s (%d client→server, %d server→client, %d enums) and %s\n",
-		*goOut, len(s.ClientToServer), len(s.ServerToClient), len(s.Enums), *tsOut)
+	fmt.Printf("generated %s (%d client→server, %d server→client, %d enums, %d WS error codes), %s (%d REST error codes) and %s\n",
+		*goOut, len(s.ClientToServer), len(s.ServerToClient), len(s.Enums), len(s.ErrorCodes.WS),
+		*codesOut, len(s.ErrorCodes.REST), *tsOut)
 }
 
 // validate rejects duplicate identifiers and empty fields early so a bad
@@ -111,7 +130,59 @@ func validate(s schema) error {
 			return err
 		}
 	}
+	if err := validateCodes("ws", s.ErrorCodes.WS, goNames); err != nil {
+		return err
+	}
+	// REST codes live in their own package, so their Go names only need to
+	// be unique among themselves.
+	return validateCodes("rest", s.ErrorCodes.REST, map[string]bool{})
+}
+
+// validateCodes checks one error code list: every field set, no Go name,
+// TS key or wire value twice, and the TS key equal to the wire value, so a
+// client constant reads the same as the code it matches.
+func validateCodes(list string, codes []message, goNames map[string]bool) error {
+	if len(codes) == 0 {
+		return fmt.Errorf("error_codes.%s: at least one code is required", list)
+	}
+	wires := map[string]bool{}
+	for _, c := range codes {
+		if c.Wire == "" || c.Go == "" || c.TS == "" {
+			return fmt.Errorf("error_codes.%s entry %+v: wire, go, and ts are all required", list, c)
+		}
+		if c.TS != c.Wire {
+			return fmt.Errorf("error_codes.%s %q: ts must equal wire, got %q", list, c.Wire, c.TS)
+		}
+		if goNames[c.Go] {
+			return fmt.Errorf("duplicate Go identifier %q", c.Go)
+		}
+		goNames[c.Go] = true
+		if wires[c.Wire] {
+			return fmt.Errorf("error_codes.%s: duplicate code %q", list, c.Wire)
+		}
+		wires[c.Wire] = true
+	}
 	return nil
+}
+
+// writeNote writes note as a // comment block above a declaration, wrapped
+// at about 76 columns after indent.
+func writeNote(b *strings.Builder, indent, note string) {
+	if note == "" {
+		return
+	}
+	line := ""
+	for word := range strings.FieldsSeq(note) {
+		if line != "" && len(line)+1+len(word) > 76-len(indent) {
+			b.WriteString(indent + "// " + line + "\n")
+			line = ""
+		}
+		if line != "" {
+			line += " "
+		}
+		line += word
+	}
+	b.WriteString(indent + "// " + line + "\n")
 }
 
 // validateEnum checks one enum, recording its Go identifiers in goNames so
@@ -187,6 +258,31 @@ func renderGo(s schema) ([]byte, error) {
 		b.WriteString(")\n")
 	}
 
+	b.WriteString("\n// WebSocket error codes: the code field of an error frame (buildErrorMsg).\nconst (\n")
+	for _, c := range s.ErrorCodes.WS {
+		writeNote(&b, "\t", c.Note)
+		fmt.Fprintf(&b, "\t%s = %q\n", c.Go, c.Wire)
+	}
+	b.WriteString(")\n")
+
+	return format.Source([]byte(b.String()))
+}
+
+// renderCodes writes the REST error codes as the typed httperr.Code.
+func renderCodes(s schema) ([]byte, error) {
+	var b strings.Builder
+	b.WriteString(header("//\n// REST error codes — single source of truth for both Server (Go) and\n" +
+		"// Client (TypeScript). Edit error_codes in protocol/schema.json and run\n" +
+		"// `make protocol-generate` (see Server/Makefile)."))
+	b.WriteString("\npackage httperr\n\n")
+	b.WriteString("// Code is the error field of a JSON error reply. Every value is a constant\n")
+	b.WriteString("// below; the reply-helpers invariant refuses a code spelt as a literal.\n")
+	b.WriteString("type Code string\n\nconst (\n")
+	for _, c := range s.ErrorCodes.REST {
+		writeNote(&b, "\t", c.Note)
+		fmt.Fprintf(&b, "\t%s Code = %q\n", c.Go, c.Wire)
+	}
+	b.WriteString(")\n")
 	return format.Source([]byte(b.String()))
 }
 
@@ -241,5 +337,20 @@ func renderTS(s schema) string {
 		b.WriteString("} as const;\n\n")
 		b.WriteString("export type " + e.TS + "Value = (typeof " + e.TS + ")[keyof typeof " + e.TS + "];\n")
 	}
+
+	writeCodes := func(title, name string, codes []message) {
+		b.WriteString("\n// " + strings.Repeat("-", 75) + "\n")
+		b.WriteString("// " + title + "\n")
+		b.WriteString("// " + strings.Repeat("-", 75) + "\n\n")
+		b.WriteString("export const " + name + " = {\n")
+		for _, c := range codes {
+			writeNote(&b, "  ", c.Note)
+			b.WriteString("  " + c.TS + ": " + fmt.Sprintf("%q", c.Wire) + ",\n")
+		}
+		b.WriteString("} as const;\n\n")
+		b.WriteString("export type " + name + "Value = (typeof " + name + ")[keyof typeof " + name + "];\n")
+	}
+	writeCodes("REST error codes — the error field of a JSON error reply", "RestErrorCode", s.ErrorCodes.REST)
+	writeCodes("WebSocket error codes — the code field of an error frame", "WsErrorCode", s.ErrorCodes.WS)
 	return b.String()
 }

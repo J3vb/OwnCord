@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -31,8 +32,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-func writeErr(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, errorResponse{Error: code, Message: msg})
+func writeErr(w http.ResponseWriter, status int, code httperr.Code, msg string) {
+	writeJSON(w, status, errorResponse{Error: string(code), Message: msg})
 }
 
 // writeSvcErr maps a service-layer sentinel error onto an admin API response.
@@ -41,16 +42,16 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 // is the 500 body text for anything else, including ErrForbidden's absence —
 // every mapper answers ErrForbidden with 403 (previously two call sites
 // (channel, retention) fell through to 500 instead).
-func writeSvcErr(w http.ResponseWriter, err error, notFound, badReqCode, fallback string) {
+func writeSvcErr(w http.ResponseWriter, err error, notFound string, badReqCode httperr.Code, fallback string) {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
-		writeErr(w, http.StatusForbidden, "FORBIDDEN", err.Error())
+		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, err.Error())
 	case errors.Is(err, service.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", cmp.Or(notFound, err.Error()))
+		writeErr(w, http.StatusNotFound, httperr.CodeNotFound, cmp.Or(notFound, err.Error()))
 	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, cmp.Or(badReqCode, "BAD_REQUEST"), err.Error())
+		writeErr(w, http.StatusBadRequest, cmp.Or(badReqCode, httperr.CodeBadRequest), err.Error())
 	default:
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", fallback)
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, fallback)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/diskutil"
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
 // archiveName is the download's fixed name. The snapshot inside is a real
@@ -49,7 +50,7 @@ func handleArchive(database *db.DB, opts SetupOptions, paths backupPaths) http.H
 var archiveBusy atomic.Bool
 
 func writeArchiveBusy(w http.ResponseWriter) {
-	writeErr(w, http.StatusConflict, "ARCHIVE_IN_PROGRESS", "An archive is already being prepared. Try again when it finishes.")
+	writeErr(w, http.StatusConflict, httperr.CodeArchiveInProgress, "An archive is already being prepared. Try again when it finishes.")
 }
 
 // serveArchive builds and streams the archive. actor is who the download is
@@ -57,7 +58,7 @@ func writeArchiveBusy(w http.ResponseWriter) {
 // request (the owner-only route, or a redeemed single-use link).
 func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts SetupOptions, paths backupPaths, actor int64) {
 	if opts.RunningCfg == nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "server configuration unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "server configuration unavailable")
 		return
 	}
 	// One archive at a time, for the whole build and transfer: two builds
@@ -75,36 +76,36 @@ func serveArchive(w http.ResponseWriter, r *http.Request, database *db.DB, opts 
 	// The work dir lives under backup.dir: the snapshot is a VACUUM INTO
 	// target, and that directory is already the one backups write to.
 	if err := os.MkdirAll(paths.dir, 0o750); err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not prepare the archive")
 		return
 	}
 	work, err := os.MkdirTemp(paths.dir, archiveWorkPrefix)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not prepare the archive")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not prepare the archive")
 		return
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 
 	zipPath, err := buildArchive(ctx, database, opts, paths, work)
 	if errors.Is(err, errArchiveNoSpace) {
-		writeErr(w, http.StatusInsufficientStorage, "STORAGE_LOW_DISK", err.Error())
+		writeErr(w, http.StatusInsufficientStorage, httperr.CodeStorageLowDisk, err.Error())
 		return
 	}
 	if err != nil {
 		slog.Error("backup archive build failed", "err", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not build the archive")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not build the archive")
 		return
 	}
 
 	f, err := os.Open(zipPath) //nolint:gosec // G304: path is our own temp file
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not build the archive")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not build the archive")
 		return
 	}
 	defer f.Close() //nolint:errcheck
 	info, err := f.Stat()
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not build the archive")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not build the archive")
 		return
 	}
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -37,7 +38,7 @@ func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) ht
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := auth.ExtractBearerToken(r)
 			if !ok {
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid authorization header")
+				writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "missing or invalid authorization header")
 				return
 			}
 
@@ -50,13 +51,13 @@ func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) ht
 			if err != nil {
 				switch {
 				case errors.Is(err, auth.ErrTokenExpired):
-					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "session has expired")
+					writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "session has expired")
 				case errors.Is(err, auth.ErrUserNotFound):
-					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "user not found")
+					writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "user not found")
 				case errors.Is(err, auth.ErrRoleNotFound):
-					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "role not found")
+					writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "role not found")
 				case errors.Is(err, auth.ErrTokenNotFound):
-					writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+					writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired session")
 				default:
 					// A wrapped DB error, not one of the sentinels above (mirrors
 					// api.AuthMiddleware). A DB outage is not a bad token:
@@ -66,7 +67,7 @@ func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) ht
 					// a session that was never revoked. Log it and report the
 					// failure as a server-side fault instead.
 					slog.ErrorContext(r.Context(), "admin: token resolution failed", "error", err)
-					writeErr(w, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authentication service temporarily unavailable")
+					writeErr(w, http.StatusServiceUnavailable, httperr.CodeServiceUnavailable, "authentication service temporarily unavailable")
 				}
 				return
 			}
@@ -78,12 +79,12 @@ func adminAuthMiddleware(sessions *service.SessionService) func(http.Handler) ht
 			// commit introduces; gating only the session branch would let a
 			// banned administrator keep working through a bot token.
 			if auth.IsEffectivelyBanned(user) {
-				writeErr(w, http.StatusForbidden, "FORBIDDEN", "your account has been suspended")
+				writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "your account has been suspended")
 				return
 			}
 
 			if !permissions.HasAnyPerm(role.Permissions, permissions.AdminPerimeter) {
-				writeErr(w, http.StatusForbidden, "FORBIDDEN", "moderation permission required")
+				writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "moderation permission required")
 				return
 			}
 
@@ -104,11 +105,11 @@ func requirePerm(perm int64) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			role, ok := r.Context().Value(adminRoleKey).(*db.Role)
 			if !ok || role == nil {
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+				writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 				return
 			}
 			if !permissions.HasServerPerm(role.Permissions, perm) {
-				writeErr(w, http.StatusForbidden, "FORBIDDEN",
+				writeErr(w, http.StatusForbidden, httperr.CodeForbidden,
 					permissions.Name(perm)+" permission required")
 				return
 			}
@@ -129,12 +130,12 @@ func ownerOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		role, ok := r.Context().Value(adminRoleKey).(*db.Role)
 		if !ok || role == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 
 		if !permissions.IsOwner(role.ID, role.Position) {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "owner role required")
+			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "owner role required")
 			return
 		}
 
@@ -149,11 +150,11 @@ func gateMiddleware(g routeGate, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		role, ok := r.Context().Value(adminRoleKey).(*db.Role)
 		if !ok || role == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		if !g.allow(role.Permissions, role.ID, role.Position) {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", g.msg)
+			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, g.msg)
 			return
 		}
 		next.ServeHTTP(w, r)

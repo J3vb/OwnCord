@@ -13,6 +13,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/updater"
 )
@@ -168,20 +169,20 @@ func guardDatabasePath(ctx context.Context, w http.ResponseWriter, g guardContex
 	}
 	info, err := os.Stat(g.next.Database.Path)
 	if err != nil || info.IsDir() {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path must name an existing database file")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "database.path must name an existing database file")
 		return false
 	}
 	if err := db.CheckBackupIntegrity(ctx, g.next.Database.Path); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path is not a readable OwnCord database")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "database.path is not a readable OwnCord database")
 		return false
 	}
 	ahead, err := db.CheckBackupSchemaAhead(ctx, g.next.Database.Path)
 	if err != nil || len(ahead) > 0 {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path holds a database a newer server wrote")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "database.path holds a database a newer server wrote")
 		return false
 	}
 	if !dirWritable(filepath.Dir(g.next.Database.Path)) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "database.path: the directory is not writable (SQLite needs its WAL beside the file)")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "database.path: the directory is not writable (SQLite needs its WAL beside the file)")
 		return false
 	}
 	return true
@@ -221,12 +222,12 @@ func handleGetConfigOverrides(opts SetupOptions, pending *atomic.Bool) http.Hand
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := opts.RunningCfg
 		if cfg == nil {
-			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeConfigUnavailable, "running configuration unavailable")
 			return
 		}
 		overrides, err := config.ReadOverrides(config.OverridesPath(cfg.Server.DataDir))
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not read configuration overrides")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not read configuration overrides")
 			return
 		}
 		writeJSON(w, http.StatusOK, buildConfigSettings(cfg, fallbackConfig(opts.ConfigPath, config.OverridesPath(cfg.Server.DataDir), overrides), overrides, pending.Load()))
@@ -259,7 +260,7 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := opts.RunningCfg
 		if cfg == nil {
-			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeConfigUnavailable, "running configuration unavailable")
 			return
 		}
 		var changes map[string]any
@@ -267,24 +268,24 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 			return
 		}
 		if len(changes) == 0 {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "a JSON object of config keys is required")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "a JSON object of config keys is required")
 			return
 		}
 		// The environment applies last, so a saved value would lose at the
 		// next boot; refuse the whole request rather than accept it silently.
 		for key := range changes {
 			if config.EnvOverridden(key) {
-				writeErr(w, http.StatusConflict, "ENV_OVERRIDDEN",
+				writeErr(w, http.StatusConflict, httperr.CodeEnvOverridden,
 					"config key "+key+" is set by the environment and cannot be changed here")
 				return
 			}
 		}
 		if err := config.ValidateOverrides(changes); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return
 		}
 		if missing := unconfirmedKeys(changes, r.Header.Get(confirmHeader)); len(missing) > 0 {
-			writeErr(w, http.StatusPreconditionRequired, "CONFIRMATION_REQUIRED",
+			writeErr(w, http.StatusPreconditionRequired, httperr.CodeConfirmationRequired,
 				"these keys need a typed confirmation: "+strings.Join(missing, ","))
 			return
 		}
@@ -294,7 +295,7 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 		defer patchMu.Unlock()
 		next, err := config.Preview(opts.ConfigPath, path, changes)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return
 		}
 		if !runConfigGuards(context.WithoutCancel(r.Context()), w, r, opts, next, changes) {
@@ -303,9 +304,9 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 		if err := config.SaveOverrides(path, changes); err != nil {
 			switch {
 			case errors.Is(err, config.ErrNotEditable), errors.Is(err, config.ErrInvalidValue):
-				writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			default:
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not save configuration")
+				writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not save configuration")
 			}
 			return
 		}
@@ -318,7 +319,7 @@ func handlePatchConfigOverrides(database *db.DB, opts SetupOptions, pending *ato
 
 		overrides, err := config.ReadOverrides(path)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not read configuration overrides")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not read configuration overrides")
 			return
 		}
 		writeJSON(w, http.StatusOK, buildConfigSettings(cfg, fallbackConfig(opts.ConfigPath, path, overrides), overrides, pending.Load()))

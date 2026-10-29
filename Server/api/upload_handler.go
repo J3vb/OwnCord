@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/go-chi/chi/v5"
@@ -160,21 +161,21 @@ func writeStorageSaveError(w http.ResponseWriter, saveErr error, what string) {
 	// filesystem failure; none of the three bodies carries a path.
 	if errors.Is(saveErr, service.ErrQuotaExceeded) {
 		slog.Info(what+" refused: user storage quota", "error", saveErr)
-		writeErr(w, http.StatusInsufficientStorage, "STORAGE_QUOTA_EXCEEDED", "upload rejected: your storage quota is full")
+		writeErr(w, http.StatusInsufficientStorage, httperr.CodeStorageQuotaExceeded, "upload rejected: your storage quota is full")
 		return
 	}
 	if errors.Is(saveErr, service.ErrLowDisk) {
 		slog.Warn("upload refused: server storage below its reserved headroom", "upload", what, "error", saveErr)
-		writeErr(w, http.StatusInsufficientStorage, "STORAGE_LOW_DISK", "upload rejected: the server is low on disk space")
+		writeErr(w, http.StatusInsufficientStorage, httperr.CodeStorageLowDisk, "upload rejected: the server is low on disk space")
 		return
 	}
 	if errors.Is(saveErr, storage.ErrIO) {
 		slog.Error("upload failed: server storage error", "upload", what, "error", saveErr)
-		writeErr(w, http.StatusInsufficientStorage, "STORAGE_ERROR", "upload failed: server storage error")
+		writeErr(w, http.StatusInsufficientStorage, httperr.CodeStorageError, "upload failed: server storage error")
 		return
 	}
 	slog.Warn("upload rejected", "upload", what, "error", saveErr)
-	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", safeStorageErrorMessage(saveErr))
+	writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, safeStorageErrorMessage(saveErr))
 }
 
 // MountUploadRoutes registers upload and file-serving endpoints.
@@ -217,7 +218,7 @@ func handleDiscardUpload(uploads *service.UploadService, store FileStore) http.H
 		fileID := chi.URLParam(r, "id")
 		storedAs, err := uploads.Discard(r.Context(), fileID, user.ID)
 		if errors.Is(err, service.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "upload not found")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "upload not found")
 			return
 		}
 		if storedAs != "" {
@@ -242,11 +243,11 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		}
 		// BUG-131: Per-user upload rate limit to prevent disk exhaustion.
 		if !limiter.Allow(auth.Key("upload", user.ID), uploadRateLimitPerMinute, time.Minute) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "upload rate limit exceeded, try again later")
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "upload rate limit exceeded, try again later")
 			return
 		}
 		if !slots.acquire(user.ID) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many uploads in progress, wait for one to finish")
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many uploads in progress, wait for one to finish")
 			return
 		}
 		defer slots.release(user.ID)
@@ -280,7 +281,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 		// part is read until the bytes it could cost are admitted below.
 		mr, err := r.MultipartReader()
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 			return
 		}
 
@@ -352,7 +353,7 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 				slog.Error("failed to clean up orphaned upload file", "stored_as", stored.id, "error", delErr)
 			}
 			slog.Error("failed to create attachment record", "error", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to save attachment")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to save attachment")
 			return
 		}
 
@@ -414,14 +415,14 @@ func drainMultipartTail(mr *multipart.Reader) error {
 // ParseMultipartForm gave for any structural failure.
 func writeUploadPartError(w http.ResponseWriter, err error) {
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		writeErr(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body exceeds the upload size limit")
+		writeErr(w, http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, "request body exceeds the upload size limit")
 		return
 	}
 	if errors.Is(err, io.EOF) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
 		return
 	}
-	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
+	writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 }
 
 // storedUpload is what the bytes stage of an upload produces: the id the file
@@ -456,7 +457,7 @@ func uploadStoreFile(ctx context.Context, w http.ResponseWriter, file io.Reader,
 	var sniffBuf [512]byte
 	n, readErr := io.ReadFull(file, sniffBuf[:])
 	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "failed to read uploaded file")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "failed to read uploaded file")
 		return storedUpload{}, false
 	}
 	mime := sniffMIME(sniffBuf[:n])

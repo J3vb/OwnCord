@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -14,12 +15,12 @@ import (
 func handleGetRetentionChannels(retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if retention == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "retention service unavailable")
 			return
 		}
 		channels, err := retention.Channels(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list channels")
 			return
 		}
 		writeJSON(w, http.StatusOK, channels)
@@ -31,12 +32,12 @@ func handleGetRetentionChannels(retention *service.RetentionService) http.Handle
 func handleGetRetention(retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if retention == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "retention service unavailable")
 			return
 		}
 		policy, err := retention.Policy(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to read retention policy")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to read retention policy")
 			return
 		}
 		writeJSON(w, http.StatusOK, policy)
@@ -48,12 +49,12 @@ func handleGetRetention(retention *service.RetentionService) http.HandlerFunc {
 func handleGetRetentionPreview(retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if retention == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "retention service unavailable")
 			return
 		}
 		preview, err := retention.Preview(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to preview retention")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to preview retention")
 			return
 		}
 		writeJSON(w, http.StatusOK, preview)
@@ -70,7 +71,7 @@ type putChannelRetentionRequest struct {
 
 func writeRetentionErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrConflict) {
-		writeErr(w, http.StatusConflict, "STALE_RETENTION_POLICY", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeStaleRetentionPolicy, err.Error())
 		return
 	}
 	writeSvcErr(w, err, "", "", "retention change failed")
@@ -81,7 +82,7 @@ func handlePutChannelRetention(retention *service.RetentionService) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid channel id")
 			return
 		}
 		var req putChannelRetentionRequest
@@ -89,7 +90,7 @@ func handlePutChannelRetention(retention *service.RetentionService) http.Handler
 			return
 		}
 		if retention == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "retention service unavailable")
 			return
 		}
 		err = retention.ApplyChange(r.Context(), actorFromContext(r), service.RetentionChange{Scope: "channel", ChannelID: id, Days: &req.Days}, r.Header.Get("X-Retention-Preview"))
@@ -111,11 +112,11 @@ func handleDeleteChannelRetention(retention *service.RetentionService) http.Hand
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid channel id")
 			return
 		}
 		if retention == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "retention service unavailable")
 			return
 		}
 		if err := retention.ApplyChange(r.Context(), actorFromContext(r), service.RetentionChange{Scope: "channel", ChannelID: id}, r.Header.Get("X-Retention-Preview")); err != nil {
@@ -130,7 +131,7 @@ func handleDeleteChannelRetention(retention *service.RetentionService) http.Hand
 func handlePostRetentionPreview(retention *service.RetentionService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if retention == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "retention service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "retention service unavailable")
 			return
 		}
 		var req struct {

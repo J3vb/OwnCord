@@ -17,6 +17,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/go-chi/chi/v5"
@@ -142,7 +143,7 @@ func handleArchiveDownload(database *db.DB, opts SetupOptions, paths backupPaths
 func linkCredentialHash(w http.ResponseWriter, r *http.Request) (string, bool) {
 	hash, ok := r.Context().Value(adminTokenHashKey).(string)
 	if !ok || hash == "" {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+		writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired session")
 		return "", false
 	}
 	return hash, true
@@ -183,7 +184,7 @@ func linkPrincipalStillValid(r *http.Request, database *db.DB, link archiveLink,
 // writeLinkInvalid is the one refusal every failed redemption answers, so a
 // probe cannot tell unknown from expired from consumed from revoked.
 func writeLinkInvalid(w http.ResponseWriter) {
-	writeErr(w, http.StatusForbidden, "FORBIDDEN", "this download link is no longer valid")
+	writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "this download link is no longer valid")
 }
 
 // handleBackupLink issues POST /admin/api/backups/{name}/link: a single-use
@@ -203,7 +204,7 @@ func handleBackupLink(database *db.DB, paths backupPaths) http.HandlerFunc {
 			return
 		}
 		if info, err := os.Stat(target); err != nil || !info.Mode().IsRegular() || filepath.Ext(name) != ".db" { //nolint:gosec // G703: path sanitized by resolveBackupName
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "backup not found")
 			return
 		}
 		actor := actorFromContext(r)
@@ -232,13 +233,13 @@ func handleBackupDownload(database *db.DB, paths backupPaths) http.HandlerFunc {
 		}
 		f, err := openBackupEntry(paths.dir, link.target)
 		if err != nil {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "backup not found")
 			return
 		}
 		defer f.Close() //nolint:errcheck
 		info, err := f.Stat()
 		if err != nil || !info.Mode().IsRegular() {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "backup not found")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "backup not found")
 			return
 		}
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/dbtime"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -49,11 +50,11 @@ func patchUserValidatePurge(w http.ResponseWriter, req patchUserRequest) (int, b
 	}
 	secs := *req.DeleteMessageSeconds
 	if secs < 0 || secs > maxDeleteMessageSeconds {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "delete_message_seconds must be between 0 and 604800")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "delete_message_seconds must be between 0 and 604800")
 		return 0, false
 	}
 	if secs != 0 && (req.Banned == nil || !*req.Banned) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "delete_message_seconds requires banned to be true")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "delete_message_seconds requires banned to be true")
 		return 0, false
 	}
 	return secs, true
@@ -71,7 +72,7 @@ func patchUserValidateBan(w http.ResponseWriter, req patchUserRequest) (*time.Ti
 	if req.BanDurationHours != nil && *req.BanDurationHours != 0 {
 		hours := *req.BanDurationHours
 		if hours < 0 || hours > maxBanDurationHours {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "ban_duration_hours must be between 1 and 8760")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "ban_duration_hours must be between 1 and 8760")
 			return nil, false
 		}
 		t := time.Now().Add(time.Duration(hours) * time.Hour)
@@ -93,12 +94,12 @@ func patchUserValidateBan(w http.ResponseWriter, req patchUserRequest) (*time.Ti
 func patchUserAuthorizePurge(w http.ResponseWriter, r *http.Request, mod *service.ModerationService, actor, id int64) bool {
 	if mod == nil {
 		// Fail closed rather than ban without the purge's checks.
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 		return false
 	}
 	if err := mod.AuthorizeBanPurge(r.Context(), actor, id); err != nil {
 		if errors.Is(err, service.ErrRateLimited) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, err.Error())
 			return false
 		}
 		writeModerationErr(w, err)

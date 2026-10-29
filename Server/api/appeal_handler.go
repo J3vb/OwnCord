@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -162,7 +163,7 @@ func handleAppealQueueList(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		rows, err := svc.Appeals.Queue(r.Context(), actorID, r.URL.Query().Get("state"))
@@ -187,7 +188,7 @@ func handleAppealQueueGet(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		publicID := chi.URLParam(r, "id")
@@ -219,7 +220,7 @@ func handleAppealQueueAssign(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		publicID := chi.URLParam(r, "id")
@@ -239,7 +240,7 @@ func handleAppealQueueDecide(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		publicID := chi.URLParam(r, "id")
@@ -264,13 +265,13 @@ func handleAppealQueueDecide(svc *service.Services) http.HandlerFunc {
 func writeAppealServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrAlreadyAppealed):
-		writeErr(w, http.StatusConflict, "ALREADY_APPEALED", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeAlreadyAppealed, err.Error())
 	case errors.Is(err, service.ErrSelfReview):
-		writeErr(w, http.StatusForbidden, "SELF_REVIEW", err.Error())
+		writeErr(w, http.StatusForbidden, httperr.CodeSelfReview, err.Error())
 	case errors.Is(err, service.ErrReversalFailed):
 		// F1 review: the decision's effect could not be applied, so neither
 		// it nor the decision itself committed.
-		writeErr(w, http.StatusConflict, "REVERSAL_FAILED", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeReversalFailed, err.Error())
 	default:
 		writeServiceError(ctx, w, err)
 	}

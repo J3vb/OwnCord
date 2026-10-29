@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -57,7 +58,7 @@ func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 
 		// H-4: Cap invite expiration to 30 days.
 		if req.ExpiresInHours > service.MaxInviteExpiryHours() {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("expires_in_hours cannot exceed %d (30 days)", service.MaxInviteExpiryHours()))
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("expires_in_hours cannot exceed %d (30 days)", service.MaxInviteExpiryHours()))
 			return
 		}
 

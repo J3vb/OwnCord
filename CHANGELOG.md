@@ -56,6 +56,10 @@ and only when it changes something a contributor or fork holder must do
 
 - Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
 
+### Under the hood
+
+- Every error code the server can send is now listed once in the protocol schema and generated into server constants and a client type. A fork that adds a code adds it there and regenerates.
+
 ## v2.5.0
 
 **OwnCord 2.5** (the sixth public beta) brings voice messages, stickers, animated avatars, videos that play straight from the chat and iPhone photos that show as pictures. You can now stay signed in on several devices at once, and members can see the game or music someone is playing. Roles get new permissions (Move Members, Manage Backups and more) and presets. Under the surface, dialogs, menus and Japanese, Chinese and Korean typing behave the same everywhere.

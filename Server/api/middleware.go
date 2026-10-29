@@ -16,6 +16,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
@@ -107,7 +108,7 @@ var backgroundWriteTimeout = 5 * time.Second
 // in the form both perimeters answer with.
 type authFailure struct {
 	status  int
-	code    string
+	code    httperr.Code
 	message string
 	// after, when set, is work the caller runs once the response is written
 	// (the expired-session cleanup).
@@ -139,13 +140,13 @@ func resolvePrincipal(ctx context.Context, sessions *service.SessionService, tou
 				slog.WarnContext(cleanupCtx, "expired session cleanup failed", "error", err)
 			}
 		}
-		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "session has expired", cleanup}
+		return nil, &authFailure{http.StatusUnauthorized, httperr.CodeUnauthorized, "session has expired", cleanup}
 	case errors.Is(err, auth.ErrUserNotFound):
-		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "user not found", nil}
+		return nil, &authFailure{http.StatusUnauthorized, httperr.CodeUnauthorized, "user not found", nil}
 	case errors.Is(err, auth.ErrRoleNotFound):
-		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "role not found", nil}
+		return nil, &authFailure{http.StatusUnauthorized, httperr.CodeUnauthorized, "role not found", nil}
 	case errors.Is(err, auth.ErrTokenNotFound):
-		return nil, &authFailure{http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session", nil}
+		return nil, &authFailure{http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired session", nil}
 	case err != nil:
 		// A wrapped DB error, not one of the sentinels above. A DB outage
 		// is not a bad token: answering 401 here would make the client
@@ -153,12 +154,12 @@ func resolvePrincipal(ctx context.Context, sessions *service.SessionService, tou
 		// disconnects the WS, and deletes the stored credential. Log it
 		// and report the failure as a server-side fault instead.
 		slog.ErrorContext(ctx, "auth: token resolution failed", "error", err)
-		return nil, &authFailure{http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "authentication service temporarily unavailable", nil}
+		return nil, &authFailure{http.StatusServiceUnavailable, httperr.CodeServiceUnavailable, "authentication service temporarily unavailable", nil}
 	}
 
 	// Reject effectively-banned users before any further processing.
 	if auth.IsEffectivelyBanned(user) {
-		return nil, &authFailure{http.StatusForbidden, "FORBIDDEN", "your account has been suspended", nil}
+		return nil, &authFailure{http.StatusForbidden, httperr.CodeForbidden, "your account has been suspended", nil}
 	}
 
 	// Touch last-used — non-fatal. A login session is touched inline but
@@ -197,7 +198,7 @@ func AuthMiddleware(sessions *service.SessionService) func(http.Handler) http.Ha
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := auth.ExtractBearerToken(r)
 			if !ok {
-				writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid authorization header")
+				writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "missing or invalid authorization header")
 				return
 			}
 			ctx, fail := resolvePrincipal(r.Context(), sessions, touches, auth.HashToken(token))
@@ -232,12 +233,12 @@ func RequirePermission(perm int64) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			role, ok := r.Context().Value(RoleKey).(*db.Role)
 			if !ok || role == nil {
-				writeErr(w, http.StatusForbidden, "FORBIDDEN", "insufficient permissions")
+				writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "insufficient permissions")
 				return
 			}
 
 			if !permissions.HasServerPerm(role.Permissions, perm) {
-				writeErr(w, http.StatusForbidden, "FORBIDDEN", "insufficient permissions")
+				writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "insufficient permissions")
 				return
 			}
 
@@ -276,7 +277,7 @@ func RateLimitMiddleware(limiter *auth.RateLimiter, prefix string, limit int, wi
 				// tell the client to retry fractionally early).
 				secs := max(int(math.Ceil(retry.Seconds())), 1)
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", secs))
-				writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many requests, please slow down")
+				writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many requests, please slow down")
 				return
 			}
 
@@ -356,7 +357,7 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 				// address or reach the panel over an SSH tunnel. The reply
 				// deliberately says nothing about which IP was seen or which
 				// CIDRs are configured (no topology disclosure).
-				writeErr(w, http.StatusForbidden, "FORBIDDEN",
+				writeErr(w, http.StatusForbidden, httperr.CodeForbidden,
 					"access denied by "+settingName+" — this address is not in its allowlist")
 				return
 			}
@@ -459,6 +460,6 @@ type errorResponse struct {
 	Message string `json:"message"`
 }
 
-func writeErr(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, errorResponse{Error: code, Message: msg})
+func writeErr(w http.ResponseWriter, status int, code httperr.Code, msg string) {
+	writeJSON(w, status, errorResponse{Error: string(code), Message: msg})
 }

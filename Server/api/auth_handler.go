@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
@@ -163,7 +164,7 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 	// username — mirroring sanitizeContent's raw-length bound in
 	// service/message.go and loginReadRequest's username bound below.
 	if len(req.Username) > maxLoginUsernameLen*4 {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is too long")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is too long")
 		return req, false
 	}
 
@@ -179,19 +180,19 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 	// Whether an invite is needed depends on the registration mode (B4-1),
 	// which the service decides; only the credentials are required here.
 	if req.Username == "" || req.Password == "" {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username and password are required")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username and password are required")
 		return req, false
 	}
 
 	// Validate username format (strict rules for a name being chosen).
 	if err := auth.ValidateNewUsername(req.Username); err != nil {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 		return req, false
 	}
 
 	// Validate password strength before anything else.
 	if err := auth.ValidatePasswordStrength(req.Password); err != nil {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 		return req, false
 	}
 	return req, true
@@ -233,7 +234,7 @@ func loginReadRequest(w http.ResponseWriter, r *http.Request) (loginRequest, boo
 	// leading/trailing whitespace. Bcrypt handles arbitrary bytes.
 
 	if req.Username == "" || req.Password == "" {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username and password are required")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username and password are required")
 		return req, false
 	}
 
@@ -246,7 +247,7 @@ func loginReadRequest(w http.ResponseWriter, r *http.Request) (loginRequest, boo
 	// hours). Mirrors the same 32-rune cap auth.ValidateUsername enforces at
 	// registration.
 	if utf8.RuneCountInString(req.Username) > maxLoginUsernameLen {
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "username is too long")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is too long")
 		return req, false
 	}
 	return req, true
@@ -329,7 +330,7 @@ func authResponse(res *service.AuthResult) authSuccessResponse {
 // writeNotAuthenticated is the refusal for a route mounted behind
 // AuthMiddleware that still finds no usable principal on the request.
 func writeNotAuthenticated(w http.ResponseWriter) {
-	writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+	writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 }
 
 // writeAuthError encodes a service.Err* refusal from the auth slice. Each
@@ -339,29 +340,29 @@ func writeNotAuthenticated(w http.ResponseWriter) {
 // answered as a generic 500 so no cause leaks to the client.
 func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 	var status int
-	var code string
+	var code httperr.Code
 	switch {
 	case errors.Is(err, service.ErrRegistrationRejected):
-		status, code = http.StatusBadRequest, "INVALID_CREDENTIALS"
+		status, code = http.StatusBadRequest, httperr.CodeInvalidCredentials
 	case errors.Is(err, service.ErrTOTPAlreadyEnabled):
-		status, code = http.StatusConflict, "TOTP_ALREADY_ENABLED"
+		status, code = http.StatusConflict, httperr.CodeTOTPAlreadyEnabled
 	case errors.Is(err, service.ErrConflict):
-		status, code = http.StatusConflict, "CONFLICT"
+		status, code = http.StatusConflict, httperr.CodeConflict
 	case errors.Is(err, service.ErrAuthBusy):
 		writeAuthBusy(w, err)
 		return
 	case errors.Is(err, service.ErrRateLimited):
-		status, code = http.StatusTooManyRequests, "RATE_LIMITED"
+		status, code = http.StatusTooManyRequests, httperr.CodeRateLimited
 	case errors.Is(err, service.ErrUnauthorized):
-		status, code = http.StatusUnauthorized, "UNAUTHORIZED"
+		status, code = http.StatusUnauthorized, httperr.CodeUnauthorized
 	case errors.Is(err, service.ErrForbidden):
-		status, code = http.StatusForbidden, "FORBIDDEN"
+		status, code = http.StatusForbidden, httperr.CodeForbidden
 	case errors.Is(err, service.ErrInvalidInput):
-		status, code = http.StatusBadRequest, "INVALID_INPUT"
+		status, code = http.StatusBadRequest, httperr.CodeInvalidInput
 	case errors.Is(err, service.ErrBadRequest):
-		status, code = http.StatusBadRequest, "BAD_REQUEST"
+		status, code = http.StatusBadRequest, httperr.CodeBadRequest
 	case errors.Is(err, service.ErrInternal):
-		status, code = http.StatusInternalServerError, "INTERNAL_ERROR"
+		status, code = http.StatusInternalServerError, httperr.CodeInternalError
 		if _, bare := err.(interface{ Is(error) bool }); !bare {
 			slog.ErrorContext(ctx, "auth service returned a non-refusal error", "error", err)
 			writeErr(w, status, code, "internal error")
@@ -369,7 +370,7 @@ func writeAuthError(ctx context.Context, w http.ResponseWriter, err error) {
 		}
 	default:
 		slog.ErrorContext(ctx, "auth service returned a non-refusal error", "error", err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal error")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal error")
 		return
 	}
 	writeErr(w, status, code, err.Error())
@@ -385,7 +386,7 @@ func writeAuthBusy(w http.ResponseWriter, err error) {
 		secs := int((hinted.RetryAfter() + time.Second - 1) / time.Second)
 		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
 	}
-	writeErr(w, http.StatusTooManyRequests, "AUTH_BUSY", service.ErrAuthBusy.Error())
+	writeErr(w, http.StatusTooManyRequests, httperr.CodeAuthBusy, service.ErrAuthBusy.Error())
 }
 
 // truncateDevice truncates the User-Agent to prevent oversized session records.

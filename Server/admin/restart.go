@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
 // The admin panel has three actions that end in a process restart: applying a
@@ -102,10 +104,10 @@ func tryDirectRestartPending() bool {
 // "the process is about to be replaced".
 func writeRestartConflict(w http.ResponseWriter) {
 	if restartState.Load() == restartStatePending {
-		writeErr(w, http.StatusConflict, "RESTART_PENDING",
+		writeErr(w, http.StatusConflict, httperr.CodeRestartPending,
 			"the server is restarting — retry after it comes back")
 		return
 	}
-	writeErr(w, http.StatusConflict, "UPDATE_IN_PROGRESS",
+	writeErr(w, http.StatusConflict, httperr.CodeUpdateInProgress,
 		"another update or restore is already in progress")
 }

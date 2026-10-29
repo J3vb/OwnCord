@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
 // imageLimits is what readProfileImage holds an upload to: the byte cap, the
@@ -56,24 +58,24 @@ func readProfileImage(w http.ResponseWriter, file io.Reader, lim imageLimits) (r
 	// byte over" is caught, without buffering an unbounded body.
 	raw, err := io.ReadAll(io.LimitReader(file, lim.MaxBytes+1))
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "failed to read uploaded file")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "failed to read uploaded file")
 		return nil, "", 0, 0, false
 	}
 	if int64(len(raw)) > lim.MaxBytes {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("%s must be at most %d KB", lim.Label, lim.MaxBytes>>10))
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("%s must be at most %d KB", lim.Label, lim.MaxBytes>>10))
 		return nil, "", 0, 0, false
 	}
 
 	// Never trust the client's Content-Type — sniff the bytes.
 	mimeType = http.DetectContentType(raw)
 	if !lim.allows(mimeType) {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", lim.typeRefusal())
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, lim.typeRefusal())
 		return nil, "", 0, 0, false
 	}
 
 	width, height, err = imageDimensions(raw, mimeType)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "could not read image dimensions")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "could not read image dimensions")
 		return nil, "", 0, 0, false
 	}
 	// Measured from the sniffed image, not from anything the client said.
@@ -81,7 +83,7 @@ func readProfileImage(w http.ResponseWriter, file io.Reader, lim imageLimits) (r
 	// would mean decoding and re-compressing every upload to change nothing
 	// the renderer does not already do), it just refuses a picture too big.
 	if width <= 0 || height <= 0 || width > lim.MaxW || height > lim.MaxH {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("%s must be at most %dx%d pixels (got %dx%d)", lim.Label, lim.MaxW, lim.MaxH, width, height))
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("%s must be at most %dx%d pixels (got %dx%d)", lim.Label, lim.MaxW, lim.MaxH, width, height))
 		return nil, "", 0, 0, false
 	}
 

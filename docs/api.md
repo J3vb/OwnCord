@@ -295,6 +295,12 @@ Error responses use this JSON envelope:
 
 ### Error Codes
 
+Every code a reply can carry is listed in `error_codes.rest` of
+`protocol/schema.json`. The server spells each one as its generated constant
+(`httperr.Code`, in `Server/httperr/codes.go`) and the client gets the same
+list as `RestErrorCode` in `Client/src/lib/protocolTypes.ts`. A code is never
+renamed once shipped, because clients compare it. The common ones:
+
 | Code                            | HTTP Status | When It Occurs                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `UNAUTHORIZED`                  | 401         | Missing/invalid/expired session token                                                                                                                                                                                                                                                                                                                                                                                                                                      |

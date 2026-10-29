@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/J3vb/OwnCord/Server/ws"
 	"github.com/go-chi/chi/v5"
@@ -47,7 +48,7 @@ func handleClientUpdate(u *updater.Updater) http.HandlerFunc {
 		currentVersion := chi.URLParam(r, "current_version")
 
 		if target == "" || currentVersion == "" {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "missing target or current_version")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "missing target or current_version")
 			return
 		}
 
@@ -63,7 +64,7 @@ func handleClientUpdate(u *updater.Updater) http.HandlerFunc {
 
 		info, err := u.CheckForUpdate(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to check for updates")
+			writeErr(w, http.StatusBadGateway, httperr.CodeUpdateCheckFailed, "failed to check for updates")
 			return
 		}
 
@@ -106,7 +107,7 @@ func handleClientUpdate(u *updater.Updater) http.HandlerFunc {
 		// perform an outbound fetch on every request (DoS hardening).
 		sigContent, err := u.FetchTextAssetCached(r.Context(), sigURL)
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, "UPDATE_CHECK_FAILED", "failed to fetch signature")
+			writeErr(w, http.StatusBadGateway, httperr.CodeUpdateCheckFailed, "failed to fetch signature")
 			return
 		}
 

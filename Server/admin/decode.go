@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
 // decodeJSON reads one JSON value from r.Body into v, so the same bad body
@@ -51,8 +53,8 @@ func decodeBody(w http.ResponseWriter, dec *json.Decoder, v any, optional bool) 
 // error, or nil when a second JSON value followed the first.
 func writeBodyErr(w http.ResponseWriter, err error) {
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		writeErr(w, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "request body is too large")
+		writeErr(w, http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, "request body is too large")
 		return
 	}
-	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "malformed request body")
+	writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "malformed request body")
 }

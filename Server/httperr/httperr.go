@@ -16,11 +16,11 @@ type body struct {
 }
 
 // Write answers status with the JSON error envelope.
-func Write(w http.ResponseWriter, status int, code, msg string) {
+func Write(w http.ResponseWriter, status int, code Code, msg string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(body{Error: code, Message: msg}); err != nil {
+	if err := json.NewEncoder(w).Encode(body{Error: string(code), Message: msg}); err != nil {
 		slog.Error("httperr: failed to encode error reply", "error", err)
 	}
 }

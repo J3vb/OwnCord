@@ -1,5 +1,5 @@
 {
-  "$comment": "Single source of truth for WebSocket protocol message-type constants. Server/ws/message_types.go and Client/src/lib/protocolTypes.ts are generated from this file — edit here, then run `npm run generate` from the repository root (or `make protocol-generate` in Server/). CI runs `make protocol-verify` to reject drift.",
+  "$comment": "Single source of truth for WebSocket protocol message-type constants and error codes. Server/ws/message_types.go, Server/httperr/codes.go and Client/src/lib/protocolTypes.ts are generated from this file — edit here, then run `npm run generate` from the repository root (or `make protocol-generate` in Server/). CI runs `make protocol-verify` to reject drift.",
   "version": 1,
   "protocol_epoch": 1,
   "client_to_server": [
@@ -374,5 +374,267 @@
         }
       ]
     }
-  ]
+  ],
+  "error_codes": {
+    "$comment": "Every code an error reply can carry: rest is the \"error\" field of a REST (and other HTTP) JSON error body, ws the \"code\" of a WebSocket error (or auth_error) frame. Add a code here before sending it. Wire values never change once shipped: clients compare them.",
+    "rest": [
+      { "wire": "ALREADY_APPEALED", "go": "CodeAlreadyAppealed", "ts": "ALREADY_APPEALED" },
+      { "wire": "ALREADY_DELETED", "go": "CodeAlreadyDeleted", "ts": "ALREADY_DELETED" },
+      { "wire": "ARCHIVE_IN_PROGRESS", "go": "CodeArchiveInProgress", "ts": "ARCHIVE_IN_PROGRESS" },
+      {
+        "wire": "AUTH_BUSY",
+        "go": "CodeAuthBusy",
+        "ts": "AUTH_BUSY",
+        "note": "The bounded queue for password checks is full, or the request gave up waiting in it."
+      },
+      { "wire": "BACKUP_RUNNING", "go": "CodeBackupRunning", "ts": "BACKUP_RUNNING" },
+      { "wire": "BAD_GATEWAY", "go": "CodeBadGateway", "ts": "BAD_GATEWAY" },
+      { "wire": "BAD_REQUEST", "go": "CodeBadRequest", "ts": "BAD_REQUEST" },
+      {
+        "wire": "BUSY",
+        "go": "CodeBusy",
+        "ts": "BUSY",
+        "note": "The diagnostics preview or download slots are full; try again shortly. AUTH_BUSY is the password-check twin."
+      },
+      { "wire": "CATEGORY_LIST_STALE", "go": "CodeCategoryListStale", "ts": "CATEGORY_LIST_STALE" },
+      { "wire": "CATEGORY_NAME_TAKEN", "go": "CodeCategoryNameTaken", "ts": "CATEGORY_NAME_TAKEN" },
+      { "wire": "CHANNEL_NAME_TAKEN", "go": "CodeChannelNameTaken", "ts": "CHANNEL_NAME_TAKEN" },
+      { "wire": "CONFIG_UNAVAILABLE", "go": "CodeConfigUnavailable", "ts": "CONFIG_UNAVAILABLE" },
+      {
+        "wire": "CONFIRMATION_REQUIRED",
+        "go": "CodeConfirmationRequired",
+        "ts": "CONFIRMATION_REQUIRED"
+      },
+      { "wire": "CONFLICT", "go": "CodeConflict", "ts": "CONFLICT" },
+      {
+        "wire": "CONTAINER_DEPLOYMENT",
+        "go": "CodeContainerDeployment",
+        "ts": "CONTAINER_DEPLOYMENT"
+      },
+      { "wire": "DOWNLOAD_FAILED", "go": "CodeDownloadFailed", "ts": "DOWNLOAD_FAILED" },
+      { "wire": "DUPLICATE_REPORT", "go": "CodeDuplicateReport", "ts": "DUPLICATE_REPORT" },
+      { "wire": "ENV_OVERRIDDEN", "go": "CodeEnvOverridden", "ts": "ENV_OVERRIDDEN" },
+      { "wire": "FORBIDDEN", "go": "CodeForbidden", "ts": "FORBIDDEN" },
+      { "wire": "GIF_DISABLED", "go": "CodeGIFDisabled", "ts": "GIF_DISABLED" },
+      { "wire": "GIF_FAVORITES_FULL", "go": "CodeGIFFavoritesFull", "ts": "GIF_FAVORITES_FULL" },
+      { "wire": "GROUP_DM_FULL", "go": "CodeGroupDMFull", "ts": "GROUP_DM_FULL" },
+      { "wire": "INSTALL_FAILED", "go": "CodeInstallFailed", "ts": "INSTALL_FAILED" },
+      { "wire": "INSTALL_READ_ONLY", "go": "CodeInstallReadOnly", "ts": "INSTALL_READ_ONLY" },
+      {
+        "wire": "INTERNAL_ERROR",
+        "go": "CodeInternalError",
+        "ts": "INTERNAL_ERROR",
+        "note": "REST form of an internal failure; the WebSocket sends INTERNAL for the same thing."
+      },
+      {
+        "wire": "INVALID_CREDENTIALS",
+        "go": "CodeInvalidCredentials",
+        "ts": "INVALID_CREDENTIALS"
+      },
+      { "wire": "INVALID_INPUT", "go": "CodeInvalidInput", "ts": "INVALID_INPUT" },
+      { "wire": "LAST_ROLE", "go": "CodeLastRole", "ts": "LAST_ROLE" },
+      { "wire": "LOCKOUT", "go": "CodeLockout", "ts": "LOCKOUT" },
+      { "wire": "MISSING_ASSETS", "go": "CodeMissingAssets", "ts": "MISSING_ASSETS" },
+      { "wire": "NOT_FOUND", "go": "CodeNotFound", "ts": "NOT_FOUND" },
+      { "wire": "NOT_NSFW", "go": "CodeNotNSFW", "ts": "NOT_NSFW" },
+      { "wire": "NO_UPDATE", "go": "CodeNoUpdate", "ts": "NO_UPDATE" },
+      {
+        "wire": "NSFW_ACKNOWLEDGEMENT_REQUIRED",
+        "go": "CodeNSFWAcknowledgementRequired",
+        "ts": "NSFW_ACKNOWLEDGEMENT_REQUIRED"
+      },
+      { "wire": "PAYLOAD_TOO_LARGE", "go": "CodePayloadTooLarge", "ts": "PAYLOAD_TOO_LARGE" },
+      {
+        "wire": "PERMISSIONS_CHANGED",
+        "go": "CodePermissionsChanged",
+        "ts": "PERMISSIONS_CHANGED"
+      },
+      { "wire": "PLUGINS_DISABLED", "go": "CodePluginsDisabled", "ts": "PLUGINS_DISABLED" },
+      { "wire": "PREVIEW_EXPIRED", "go": "CodePreviewExpired", "ts": "PREVIEW_EXPIRED" },
+      { "wire": "PUSH_DISABLED", "go": "CodePushDisabled", "ts": "PUSH_DISABLED" },
+      { "wire": "RATE_LIMITED", "go": "CodeRateLimited", "ts": "RATE_LIMITED" },
+      { "wire": "RESTART_PENDING", "go": "CodeRestartPending", "ts": "RESTART_PENDING" },
+      { "wire": "REVERSAL_FAILED", "go": "CodeReversalFailed", "ts": "REVERSAL_FAILED" },
+      { "wire": "ROLE_CONFLICT", "go": "CodeRoleConflict", "ts": "ROLE_CONFLICT" },
+      { "wire": "SCHEMA_TOO_NEW", "go": "CodeSchemaTooNew", "ts": "SCHEMA_TOO_NEW" },
+      { "wire": "SELF_REVIEW", "go": "CodeSelfReview", "ts": "SELF_REVIEW" },
+      {
+        "wire": "SERVER_BUSY",
+        "go": "CodeServerBusy",
+        "ts": "SERVER_BUSY",
+        "note": "The WebSocket upgrade was refused at connection capacity. Same wire value as the WS error code."
+      },
+      {
+        "wire": "SERVER_SHUTTING_DOWN",
+        "go": "CodeServerShuttingDown",
+        "ts": "SERVER_SHUTTING_DOWN",
+        "note": "An update apply cut short because the server began shutting down. Same meaning as SHUTTING_DOWN; both stay for wire compatibility."
+      },
+      {
+        "wire": "SERVICE_UNAVAILABLE",
+        "go": "CodeServiceUnavailable",
+        "ts": "SERVICE_UNAVAILABLE",
+        "note": "A dependency the route needs (session lookup, file link signing, voice reconciliation) is temporarily unavailable."
+      },
+      {
+        "wire": "SHUTTING_DOWN",
+        "go": "CodeShuttingDown",
+        "ts": "SHUTTING_DOWN",
+        "note": "An update apply refused because shutdown had already started. Same meaning as SERVER_SHUTTING_DOWN; both stay for wire compatibility."
+      },
+      {
+        "wire": "STALE_RETENTION_POLICY",
+        "go": "CodeStaleRetentionPolicy",
+        "ts": "STALE_RETENTION_POLICY"
+      },
+      { "wire": "STORAGE_ERROR", "go": "CodeStorageError", "ts": "STORAGE_ERROR" },
+      { "wire": "STORAGE_LOW_DISK", "go": "CodeStorageLowDisk", "ts": "STORAGE_LOW_DISK" },
+      {
+        "wire": "STORAGE_QUOTA_EXCEEDED",
+        "go": "CodeStorageQuotaExceeded",
+        "ts": "STORAGE_QUOTA_EXCEEDED"
+      },
+      { "wire": "TIMED_OUT", "go": "CodeTimedOut", "ts": "TIMED_OUT" },
+      {
+        "wire": "TOTP_ALREADY_ENABLED",
+        "go": "CodeTOTPAlreadyEnabled",
+        "ts": "TOTP_ALREADY_ENABLED"
+      },
+      { "wire": "UNAUTHORIZED", "go": "CodeUnauthorized", "ts": "UNAUTHORIZED" },
+      {
+        "wire": "UNAVAILABLE",
+        "go": "CodeUnavailable",
+        "ts": "UNAVAILABLE",
+        "note": "Diagnostics could not be collected, or the export could not be recorded. SERVICE_UNAVAILABLE is the general form."
+      },
+      {
+        "wire": "UNSUPPORTED_MEDIA_TYPE",
+        "go": "CodeUnsupportedMediaType",
+        "ts": "UNSUPPORTED_MEDIA_TYPE"
+      },
+      { "wire": "UPDATE_CHECK_FAILED", "go": "CodeUpdateCheckFailed", "ts": "UPDATE_CHECK_FAILED" },
+      { "wire": "UPDATE_IN_PROGRESS", "go": "CodeUpdateInProgress", "ts": "UPDATE_IN_PROGRESS" },
+      { "wire": "UPDATE_UNAVAILABLE", "go": "CodeUpdateUnavailable", "ts": "UPDATE_UNAVAILABLE" }
+    ],
+    "ws": [
+      { "wire": "BAD_REQUEST", "go": "ErrCodeBadRequest", "ts": "BAD_REQUEST" },
+      { "wire": "INTERNAL", "go": "ErrCodeInternal", "ts": "INTERNAL" },
+      { "wire": "NOT_FOUND", "go": "ErrCodeNotFound", "ts": "NOT_FOUND" },
+      { "wire": "FORBIDDEN", "go": "ErrCodeForbidden", "ts": "FORBIDDEN" },
+      { "wire": "RATE_LIMITED", "go": "ErrCodeRateLimited", "ts": "RATE_LIMITED" },
+      { "wire": "ALREADY_JOINED", "go": "ErrCodeAlreadyJoined", "ts": "ALREADY_JOINED" },
+      { "wire": "CHANNEL_FULL", "go": "ErrCodeChannelFull", "ts": "CHANNEL_FULL" },
+      { "wire": "VOICE_ERROR", "go": "ErrCodeVoiceError", "ts": "VOICE_ERROR" },
+      { "wire": "VIDEO_LIMIT", "go": "ErrCodeVideoLimit", "ts": "VIDEO_LIMIT" },
+      { "wire": "BANNED", "go": "ErrCodeBanned", "ts": "BANNED" },
+      { "wire": "INVALID_JSON", "go": "ErrCodeInvalidJSON", "ts": "INVALID_JSON" },
+      { "wire": "UNKNOWN_TYPE", "go": "ErrCodeUnknownType", "ts": "UNKNOWN_TYPE" },
+      { "wire": "SLOW_MODE", "go": "ErrCodeSlowMode", "ts": "SLOW_MODE" },
+      { "wire": "CONFLICT", "go": "ErrCodeConflict", "ts": "CONFLICT" },
+      {
+        "wire": "ATTACHMENTS_UNAVAILABLE",
+        "go": "ErrCodeAttachmentsUnavailable",
+        "ts": "ATTACHMENTS_UNAVAILABLE",
+        "note": "Refines BAD_REQUEST: a send with no text whose every attachment was skipped. Nothing was stored."
+      },
+      {
+        "wire": "REACTION_LIMIT",
+        "go": "ErrCodeReactionLimit",
+        "ts": "REACTION_LIMIT",
+        "note": "Refines BAD_REQUEST: a new emoji on a message that already holds 20 different ones. No reaction_update is sent."
+      },
+      {
+        "wire": "POLL_ENDED",
+        "go": "ErrCodePollEnded",
+        "ts": "POLL_ENDED",
+        "note": "Refines BAD_REQUEST: a poll_vote or poll_end on a poll that was already ended or whose time ran out. Nothing was written and no poll_update is sent for the refused command."
+      },
+      {
+        "wire": "STICKER_NOT_FOUND",
+        "go": "ErrCodeStickerNotFound",
+        "ts": "STICKER_NOT_FOUND",
+        "note": "Refines NOT_FOUND: a chat_send named a sticker that does not exist, or was deleted. Nothing was stored, and the client refreshes its picker from sticker_update."
+      },
+      {
+        "wire": "ALREADY_DELETED",
+        "go": "ErrCodeAlreadyDeleted",
+        "ts": "ALREADY_DELETED",
+        "note": "The WS twin of REST's 409 ALREADY_DELETED: the same \"already in the requested end state\" refusal, so a client sees one code for the state rather than FORBIDDEN over WS and ALREADY_DELETED over REST (F23)."
+      },
+      { "wire": "BAD_PAYLOAD", "go": "ErrCodeBadPayload", "ts": "BAD_PAYLOAD" },
+      { "wire": "NOT_KEY_HOLDER", "go": "ErrCodeNotKeyHolder", "ts": "NOT_KEY_HOLDER" },
+      {
+        "wire": "SERVER_MUTED",
+        "go": "ErrCodeServerMuted",
+        "ts": "SERVER_MUTED",
+        "note": "Returned when a user tries to lift a moderator-imposed voice mute."
+      },
+      {
+        "wire": "SERVER_DEAFENED",
+        "go": "ErrCodeServerDeafened",
+        "ts": "SERVER_DEAFENED",
+        "note": "Returned when a user tries to lift a moderator-imposed voice deafen."
+      },
+      {
+        "wire": "TIMED_OUT",
+        "go": "ErrCodeTimedOut",
+        "ts": "TIMED_OUT",
+        "note": "Returned for a send, edit, reaction, voice join, call ring or custom status refused by an active moderator timeout (B5-9)."
+      },
+      {
+        "wire": "CALL_REQUIRES_ACCEPTANCE",
+        "go": "ErrCodeCallRequiresAcceptance",
+        "ts": "CALL_REQUIRES_ACCEPTANCE",
+        "note": "Answers a 1:1 call_ring whose recipient has not accepted the caller's message request. One code for every untrusted state, so it reveals nothing the caller's own request does not; the ring is never delivered (DM call review D-03)."
+      },
+      {
+        "wire": "SESSION_REPLACED",
+        "go": "ErrCodeSessionReplaced",
+        "ts": "SESSION_REPLACED",
+        "note": "Sent to a connection the hub displaces because the same device session reconnected (F5, network drop, wake), or because the account is over its per-user connection cap. The client stops reconnecting on it; without it the displaced device cannot tell the close from a network drop and the two devices trade the socket forever."
+      },
+      {
+        "wire": "ANOTHER_DEVICE_ACTIVE",
+        "go": "ErrCodeAnotherDeviceActive",
+        "ts": "ANOTHER_DEVICE_ACTIVE",
+        "note": "Kept for wire compatibility only: the server no longer sends it, because several device sessions of one account now stay connected at once. Older servers sent it to a wake reconnect refused while another session held the connection, and clients still handle it."
+      },
+      {
+        "wire": "SERVER_BUSY",
+        "go": "ErrCodeServerBusy",
+        "ts": "SERVER_BUSY",
+        "note": "Refuses a fresh connect that waited readyAdmissionWait for a ready-build permit (P5-S04). It carries retry_after_ms, and the socket closes 1013 right after; the client redials no sooner."
+      },
+      {
+        "wire": "REQUEST_TIMEOUT",
+        "go": "ErrCodeRequestTimeout",
+        "ts": "REQUEST_TIMEOUT",
+        "note": "Answers a command whose database work ran past the per-frame deadline (command_deadline.go, WP 4.1b). It means \"not applied\": the command was cut short before its commit, so a retry is safe. It is not SERVER_BUSY, which the client treats as a refused connect and redials on."
+      },
+      {
+        "wire": "THREAD_EXISTS",
+        "go": "ErrCodeThreadExists",
+        "ts": "THREAD_EXISTS",
+        "note": "Answers a thread_create for a message that already has a thread (WP 6.9c). The payload carries thread_id, the existing thread, so the client opens it instead of failing."
+      },
+      {
+        "wire": "THREAD_LOCKED",
+        "go": "ErrCodeThreadLocked",
+        "ts": "THREAD_LOCKED",
+        "note": "Refines FORBIDDEN: the thread is locked and only a moderator (MANAGE_MESSAGES) may post, react, pin or change it."
+      },
+      {
+        "wire": "GAME_ACTIVITY_DISABLED",
+        "go": "ErrCodeGameActivityDisabled",
+        "ts": "GAME_ACTIVITY_DISABLED",
+        "note": "Answers an activity_update that sets a game while an admin has turned game activity off for the server (WP 8.3e-2). A clear is never refused. The client claims it without a toast and does not resend until the game changes."
+      },
+      {
+        "wire": "protocol_epoch_unsupported",
+        "go": "ErrCodeProtocolEpoch",
+        "ts": "protocol_epoch_unsupported",
+        "note": "The auth_error code (not an error frame) for a client whose wire epoch this server does not speak. Lower case, unlike the rest, because it shipped that way."
+      }
+    ]
+  }
 }

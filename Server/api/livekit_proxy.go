@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/coder/websocket"
+
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
 // NewLiveKitProxy creates a reverse proxy handler that forwards both HTTP
@@ -65,7 +67,7 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		// Block sensitive LiveKit endpoints (exact segment match).
 		for seg := range strings.SplitSeq(strings.ToLower(r.URL.Path), "/") {
 			if blockedSegments[seg] {
-				writeErr(w, http.StatusForbidden, "FORBIDDEN", "access denied")
+				writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "access denied")
 				return
 			}
 		}
@@ -75,7 +77,7 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		if !isOriginAllowed(r, allowedOrigins) {
 			slog.Warn("livekit proxy: origin rejected",
 				"origin", r.Header.Get("Origin"), "path", r.URL.Path, "remote", r.RemoteAddr)
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "access denied")
+			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "access denied")
 			return
 		}
 
@@ -217,7 +219,7 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		_, bearer, _ := strings.Cut(authz, " ")
 		safeErr = redactKey(safeErr, strings.TrimSpace(bearer))
 		slog.Warn("livekit proxy: backend dial failed", "host", backendURL.Host, "path", backendURL.Path, "err", safeErr)
-		writeErr(w, http.StatusBadGateway, "BAD_GATEWAY", "backend unavailable")
+		writeErr(w, http.StatusBadGateway, httperr.CodeBadGateway, "backend unavailable")
 		return
 	}
 	defer backConn.Close(websocket.StatusNormalClosure, "") //nolint:errcheck // best-effort close on defer
