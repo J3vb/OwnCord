@@ -64,8 +64,13 @@ const appAudio: AppAudio = {
   stop: async () => undefined,
 };
 
+// The version is the one the bundle was built from: the server embeds the
+// bundle of its own release, so it is also the server's.
 const appMetadata: AppMetadata = {
-  getVersion: () => refuse(),
+  getVersion: () => {
+    const version = import.meta.env.OWNCORD_APP_VERSION;
+    return version === undefined || version === "" ? refuse() : Promise.resolve(version);
+  },
 };
 
 const appProcess: AppProcess = {
