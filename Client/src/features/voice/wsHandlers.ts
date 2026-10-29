@@ -566,9 +566,13 @@ export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | 
     clearAfkMove();
     // A refused join (often before any voice token) is a failed join: back
     // off the next one, or every click re-sends voice_join. A password refusal
-    // is the exception: the dialog it opens is the retry, and a backoff would
-    // turn the user's next try away.
-    if (!isPasswordCode(payload.code) && !refusalWasPasswordRetry(id)) noteJoinFailed();
+    // (and the rate limit on a password try) is the exception: the dialog it
+    // opens is the retry, and a backoff would turn the user's next try away.
+    // Any other refusal of a retry backs off as usual.
+    const passwordRefusal =
+      isPasswordCode(payload.code) ||
+      (payload.code === WsErrorCode.RATE_LIMITED && refusalWasPasswordRetry(id));
+    if (!passwordRefusal) noteJoinFailed();
     void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
       failPendingRejoin();
       if (isVoiceSessionActive()) void leaveVoice(true);
@@ -601,9 +605,15 @@ export function handleVoicePasswordRefusal(
   else if (payload.code === WsErrorCode.RATE_LIMITED && refused.passwordRetry)
     problem = "rateLimited";
   else if (payload.code !== WsErrorCode.PASSWORD_REQUIRED) return false;
-  // Only this refusal needs the dialog, so it loads on demand.
+  // Only this refusal needs the dialog, so it loads on demand. The prompt
+  // registers its sign-out reset only once loaded, so a session that ended
+  // while the chunk was loading must not get a dialog from it.
+  const owner = authStore.getState().user?.id;
   void import("./passwordPrompt").then(
-    ({ promptForChannelPassword }) => promptForChannelPassword(ws, channelId, problem),
+    ({ promptForChannelPassword }) => {
+      if (owner === undefined || authStore.getState().user?.id !== owner) return;
+      promptForChannelPassword(ws, channelId, problem);
+    },
     (err: unknown) => log.error("Password prompt failed to load", err),
   );
   return true;

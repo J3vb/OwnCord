@@ -54,7 +54,11 @@ and only when it changes something a contributor or fork holder must do
 - Custom themes: Settings > Appearance > Custom Themes keeps a list of your own CSS themes, painted on top of the built-in theme. Write one, import or export a `.css` file, copy it to share. A theme cannot load anything from outside (`url()`, `@import`, fonts are refused), and Ctrl+Shift+Backspace turns a custom theme off.
 **Voice**
 
-- A voice channel can have a password. Members enter it once the first time they join, and are asked again only if an admin changes it. Administrators and people who manage channels join without it. (Server side; the apps get the prompt in a later release.)
+- A voice channel can have a password. Members enter it once the first time they join, and are asked again only if an admin changes it. Administrators and people who manage channels join without it. The desktop app asks for the password the first time you join; other apps get the prompt in a later release.
+
+**Desktop UI**
+
+- Voice channels with a password show a lock in the sidebar, and joining one for the first time asks for the password in a small dialog (a wrong password or too many tries says so). Admins who manage channels can set, change or remove the password in Edit Channel; it is never shown back.
 
 ### Changed
 

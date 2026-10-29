@@ -32,11 +32,23 @@ interface Refusal {
 }
 let refusal: Refusal | null = null;
 
+let nonRetryJoinListener: (() => void) | null = null;
+
+/**
+ * Runs whenever a join other than a typed-password retry starts: whatever that
+ * join is for, a password dialog still open is about an older attempt. The one
+ * listener is the lazily loaded password prompt, which sets it as it loads.
+ */
+export function onNonRetryJoin(listener: () => void): void {
+  nonRetryJoinListener = listener;
+}
+
 /**
  * Records the envelope id of the voice_join just sent; a newer join replaces an
  * older one. `passwordRetry` marks the user's retry with a typed password.
  */
 export function noteJoinSent(id: string | undefined, passwordRetry = false): void {
+  if (!passwordRetry) nonRetryJoinListener?.();
   pendingId = id ?? null;
   pendingPasswordRetry = id !== undefined && passwordRetry;
   refusal = null;

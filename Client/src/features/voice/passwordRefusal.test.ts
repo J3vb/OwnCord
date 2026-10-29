@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { handleVoiceJoinRollback, handleVoicePasswordRefusal } from "./wsHandlers";
-import { closePasswordPrompt } from "./passwordPrompt";
+import { closePasswordPrompt, promptForChannelPassword, sendPasswordJoin } from "./passwordPrompt";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 import { voiceStore, resetVoiceStore, joinVoiceChannel } from "../../stores/voice.store";
 import { channelsStore, setChannels } from "../../stores/channels.store";
 import { setConnectionStatus } from "../../stores/ui.store";
+import { authStore } from "../../stores/auth.store";
 import { showToast } from "../../lib/toast";
 import type { DispatchWs, Payload } from "../connection/dispatchContext";
 
@@ -49,6 +50,13 @@ async function typeAndSubmit(password: string): Promise<void> {
   press("channel-password-submit");
 }
 
+async function openDialog(): Promise<void> {
+  joinVoiceChannel(4);
+  noteJoinSent("join-0");
+  refuse("PASSWORD_REQUIRED", "join-0");
+  await vi.waitFor(() => expect(dialog()).not.toBeNull());
+}
+
 describe("password dialog on a refused voice_join", () => {
   beforeEach(() => {
     sent = [];
@@ -58,6 +66,7 @@ describe("password dialog on a refused voice_join", () => {
     resetVoiceStore();
     noteJoinSucceeded();
     setConnectionStatus("connected");
+    authStore.setState((prev) => ({ ...prev, user: { id: 1, username: "me" } as never }));
     setChannels([
       {
         id: 4,
@@ -74,6 +83,7 @@ describe("password dialog on a refused voice_join", () => {
     closePasswordPrompt();
     document.body.replaceChildren();
     channelsStore.setState((prev) => ({ ...prev, channels: new Map() }));
+    authStore.setState((prev) => ({ ...prev, user: null }));
   });
 
   it("rolls the join back, then opens the dialog for that channel", async () => {
@@ -223,5 +233,67 @@ describe("password dialog on a refused voice_join", () => {
     expect(sent).toHaveLength(0);
     expect(voiceStore.getState().currentChannelId).toBeNull();
     expect(joinRetryInMs()).toBe(0);
+  });
+
+  it("a sign-out while the prompt chunk loads leaves no dialog behind", async () => {
+    joinVoiceChannel(4);
+    noteJoinSent("join-0");
+    refuse("PASSWORD_REQUIRED", "join-0");
+    // Signed out before the lazy import resolves.
+    authStore.setState((prev) => ({ ...prev, user: null }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(dialog()).toBeNull();
+  });
+
+  it("does not open while the socket is down", () => {
+    setConnectionStatus("disconnected");
+    promptForChannelPassword(ws, 4, null);
+    expect(dialog()).toBeNull();
+  });
+
+  it("closes when the user starts a join of another channel, and sends nothing", async () => {
+    await openDialog();
+    setChannels([
+      {
+        id: 4,
+        name: "vault",
+        type: "voice",
+        category: null,
+        position: 0,
+        password_protected: true,
+      },
+      { id: 5, name: "lounge", type: "voice", category: null, position: 1 },
+    ]);
+
+    joinVoiceChannel(5);
+    noteJoinSent("join-other");
+
+    expect(dialog()).toBeNull();
+    expect(sent).toHaveLength(0);
+    // A late submit for the old channel is refused too.
+    sendPasswordJoin(ws, 4, "late");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("closes when its channel is deleted", async () => {
+    await openDialog();
+    channelsStore.setState((prev) => ({ ...prev, channels: new Map() }));
+    channelsStore.flush();
+    expect(dialog()).toBeNull();
+    sendPasswordJoin(ws, 4, "late");
+    expect(sent).toHaveLength(0);
+  });
+
+  it("backs off after a non-password refusal of a retry, and the next retry honours it", async () => {
+    await openDialog();
+    await typeAndSubmit("pw");
+
+    handleVoiceJoinRollback(error("FORBIDDEN"), "join-1");
+    handleVoicePasswordRefusal(ws, error("FORBIDDEN"), "join-1");
+
+    expect(joinRetryInMs()).toBeGreaterThan(0);
+    sendPasswordJoin(ws, 4, "again");
+    expect(sent).toHaveLength(1);
+    expect(showToast).toHaveBeenCalled();
   });
 });

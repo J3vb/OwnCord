@@ -351,9 +351,25 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       passwordMode = mode;
       if (mode !== "change") passwordInput.value = "";
       renderPassword();
-      if (mode === "change") passwordInput.focus();
+      // The control that was clicked is gone: land on the one that replaced it.
+      const next =
+        mode === "change"
+          ? passwordInput
+          : passwordGroup.querySelector<HTMLElement>(
+              mode === "remove"
+                ? "[data-testid='edit-channel-password-keep']"
+                : "[data-testid='edit-channel-password-change']",
+            );
+      next?.focus();
     }
     function renderPassword(): void {
+      // Redrawing detaches the input, which drops focus a remote update would
+      // otherwise take from someone typing.
+      const hadFocus = document.activeElement === passwordInput;
+      drawPassword();
+      if (hadFocus && passwordInput.isConnected) passwordInput.focus();
+    }
+    function drawPassword(): void {
       const label = createElement(
         "label",
         { class: "form-label", for: "edit-channel-password" },
@@ -562,7 +578,9 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
         const nowSet = ch.passwordProtected === true;
         if (isVoice && nowSet !== passwordSet) {
           passwordSet = nowSet;
-          if (!nowSet) passwordMode = "keep";
+          // A flip to protected must not carry a half-typed value into "change".
+          if (nowSet) passwordInput.value = "";
+          else passwordMode = "keep";
           renderPassword();
         }
         for (const f of fields) {

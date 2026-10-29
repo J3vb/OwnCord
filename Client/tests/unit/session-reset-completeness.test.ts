@@ -62,6 +62,7 @@ import {
   collapseCategories,
   loadCollapsedCategories,
   setActiveDmUser,
+  setConnectionStatus,
   setSidebarMode,
   uiStore,
 } from "../../src/stores/ui.store";
@@ -478,8 +479,16 @@ const PROBES: readonly Probe[] = [
   {
     name: "voice:passwordPrompt",
     mutate: async () => {
+      const priorStatus = uiStore.getState().connectionStatus;
+      // The prompt needs a live socket and a known channel to open.
+      setConnectionStatus("connected");
+      channelsStore.setState((s) => ({
+        ...s,
+        channels: new Map([[5, { id: 5, name: "vault", type: "voice" } as Channel]]),
+      }));
       promptForChannelPassword({ send: vi.fn(), disconnect: vi.fn() }, 5, null);
       await vi.waitFor(() => expect(passwordDialog()).not.toBeNull());
+      setConnectionStatus(priorStatus);
     },
     isInitial: () => passwordDialog() === null,
   },
